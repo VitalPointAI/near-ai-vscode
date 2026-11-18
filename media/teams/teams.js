@@ -879,7 +879,7 @@
 
   function sectionPurpose(root) {
     const draft = work.draft;
-    const nameInput = input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' });
+    const nameInput = input(draft.name, (value) => { draft.name = value.replace(/[\r\n]+/g, ' '); renderHeaderName(); renderWizardIcon(); changed(false); }, { id: 'f-name', maxlength: '80', autocomplete: 'off' });
     const nameField = field('Team name', nameInput, work.mode === 'editor' ? 'Renaming keeps the file and its /team: command.' : isClone() ? 'Shown in the library and when the team runs. A copy needs a name no other team has.' : 'Shown in the library and when the team runs.');
     root.append(nameField);
     // The team's own name problems, under the field (a name another team has, or none): the host's words, from its review.
@@ -892,7 +892,7 @@
     root.append(privateToggle(draft));
     if (work.mode === 'editor') root.append(iconField());
     if (work.mode !== 'wizard') return;
-    if (isClone()) root.append(el('p', 'hint', 'Icon: the new team starts with the default icon (its initials on a colour), not the icon of the team you copied. After you save it, upload a picture or generate one on its Purpose tab.'));
+    root.append(wizardIconField());
     const where = el('fieldset', 'choices');
     where.append(el('legend', '', 'Save it as'));
     [['project', 'This project\'s team', 'Saved in .planning/.near-ai/team.md; run with /team:project.'], ['user', 'One of my teams', 'Reusable in any project; run with /team:<name>.']].forEach(([value, label, hint]) => {
@@ -905,6 +905,38 @@
     });
     root.append(where);
     if ((work.startingPoint || '').startsWith('type:')) root.append(el('p', 'hint', 'Saving this as the project team also writes this project type\'s guidance to AGENTS.md (plan, execute, red team, verify, audit, release).'));
+  }
+
+  /**
+   * The new team's icon in the builder: always the default (its initials on a colour), never the icon of a team it was cloned from. Upload and Generate
+   * are on the saved team's Purpose tab, so this is only the preview and a line saying so. The preview follows the name as it is typed.
+   */
+  function wizardIconField() {
+    const wrap = el('div', 'field icon-field');
+    const heading = el('span', 'field-label', 'Team icon'); heading.id = 'icon-label';
+    const row = el('div', 'icon-row');
+    const slot = el('span', 'icon-slot'); slot.id = 'icon-preview-slot';
+    const hint = el('p', 'hint', isClone()
+      ? 'The new team starts with the default icon (its initials on a colour), not the icon of the team you copied. After you save it, upload a picture or generate one on its Purpose tab.'
+      : 'The new team starts with the default icon (its initials on a colour). After you save it, upload a picture or generate one on its Purpose tab.');
+    hint.id = 'icon-preview-hint';
+    row.append(slot, hint);
+    wrap.append(heading, row);
+    fillWizardIcon(slot);
+    return wrap;
+  }
+  function fillWizardIcon(slot) {
+    const preview = teamIcon(work.draft.name || 'this team', null, true, 'large');
+    preview.id = 'icon-preview';
+    preview.setAttribute('aria-describedby', 'icon-preview-hint');
+    slot.replaceChildren();
+    slot.append(preview);
+  }
+  /** Typing the name repaints only the preview, as renderHeaderName does for the breadcrumb, so the name field keeps its focus and caret. */
+  function renderWizardIcon() {
+    if (!work || work.mode !== 'wizard') return;
+    const slot = $('icon-preview-slot');
+    if (slot) fillWizardIcon(slot);
   }
 
   /**

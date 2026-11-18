@@ -127,6 +127,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--vscode-button-
 .choice-label .team-icon { width: 20px; height: 20px; border-radius: 5px; margin-right: 6px; vertical-align: -5px; }
 .choice-label { display: inline-flex; align-items: center; min-width: 0; overflow-wrap: anywhere; }
 .icon-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.icon-slot { display: inline-flex; flex: none; }
+.icon-row > .hint { flex: 1 1 14em; min-width: 0; margin: 0; }
 .field-label { display: block; font-weight: 600; margin: 0 0 4px; }
 .editor-title .team-icon { align-self: center; }
 .icon-history .team-icon { width: 24px; height: 24px; border-radius: 5px; }

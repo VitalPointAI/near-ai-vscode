@@ -28,6 +28,7 @@ proved about it: Verified private model; Model verified, connection not proven; 
   failed answer from long ago in the chat can still lift the stop (and says when only a new chat
   can); and Set Label no longer says the chat keeps its label when the new label is as high as the
   chat's.
+- When you make a new team, its Purpose step now shows the team's icon: the default icon, with the team's initials on a colour, which changes as you type the name. A cloned team shows this default icon, not the icon of the team you copied. You can upload or generate an icon on the team's Purpose tab after you save it.
 
 ## 0.4.32
 
