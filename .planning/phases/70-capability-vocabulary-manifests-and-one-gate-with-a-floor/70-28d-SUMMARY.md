@@ -71,6 +71,19 @@ No gate failed or was rerun. The e2e launch accepted `NODE_OPTIONS`.
 
 Written to the session's scratchpad as `pr-4d-body.md`, outside the repository, with the title on its first line: `feat(gate): attested-cloud only over a proven connection, checked after each answer (Phase 70, part 4d)`. It quotes the "NEAR AI Cloud connection binding" finding and says plainly that attested-cloud levels can reach NEAR AI Cloud from this release, but only over a proven connection; describes the CLAS-05 amplification as built, D-36's after-answer check with its 10-minute report cache, D-55's stop and Check again; proxies; that the routing meanings are still cheap to change until a release ships; the live comparison left for a person; the D-48 release blocker; the owner's question; the review fixes; the test totals; the size; and the rollback (D-50). Task 3's push, CI watch and agent review are left to the coordinator.
 
+## Review round 1 (PR #89: 1 major, 4 minor, and the owner's UX finding)
+
+All fixed in `b5acd7b4`, each with a test:
+
+1. **[Major]** `pinnedFetch` also checks the live socket's peer certificate (DER SPKI, hashed as the pin) before writing anything, so a layer that replaces the agent and drops the request's TLS options cannot carry the request to another server. Tested by patching `https.request` to reroute to a second local TLS server; it receives nothing. The test fails with the check switched off.
+2. **[Minor]** `AnswerCheckResult` declares every field the chat keeps; the cast in agentSession is gone.
+3. **[Minor]** Check again clears the stop only when no failed answer of the chat is unchecked, counted per chat apart from the newest-50 list.
+4. **[Minor]** The page places a Verify signature row only under its own run's answer, waiting for it if needed; no fallback.
+5. **[Minor]** A refused raise the bound drops is recorded as a denied `label.set`.
+6. **[Owner, UX]** The chat's label chip is a button that runs Lower This Chat's Label for that chat; every refusal naming the command shows a button; lowering a file's label while the chat in view holds it says the chat keeps its label, with the button. README, SECURITY.md and CHANGELOG updated.
+
+Gate after the round: `npm run lint && npm test` exit 0, 3794 tests, 3785 pass, 0 fail, 9 skipped; e2e exit 0; both scenarios passed, 21 tests (5 plain, 16 project), 0 failed; range secret scan clean, 9 commits; `package-lock.json` unchanged; PR diff 295,652 bytes (39 files).
+
 ## Deviations from Plan
 
 1. **[Coordinator] No push, no PR, no CI watch.** The coordinator opens the PR from the body file.
