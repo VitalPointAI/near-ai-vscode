@@ -424,6 +424,8 @@ test('a Chat view thread reopens in the NEAR AI panel of another editor with its
     assert.deepEqual(seen[0].slice(1).map((message) => `${message.role}:${message.content}`), ['user:First question', 'assistant:First answer', 'user:Second question', 'assistant:Half an ans', 'user:Third question'], 'the notices are not sent to the model');
     const main = (await storeFor(root).lines(threadId)).main;
     assert.deepEqual(main.slice(-2).map(textOf), ['Third question', 'Carrying on.'], 'the panel continues the same thread');
+    // Nothing of the conversation is still being written when the folder goes (PR #95 CI: the answer's badge record raced this cleanup).
+    await reopened.close();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

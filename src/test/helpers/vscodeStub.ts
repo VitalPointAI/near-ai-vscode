@@ -173,7 +173,12 @@ export function createVscodeStub(): VscodeStub {
         contentProviders.set(scheme, provider);
         return { dispose: (): void => { if (contentProviders.get(scheme) === provider) contentProviders.delete(scheme); } };
       },
-      openTextDocument: async (uri: { scheme: string; toString(): string }) => {
+      openTextDocument: async (uri: { scheme: string; toString(): string } | { language?: string; content?: string }) => {
+        // An untitled document made from text: it has no file, so opening it writes nothing anywhere.
+        if (!('scheme' in uri)) {
+          const text = uri.content ?? '';
+          return { uri: { scheme: 'untitled', toString: (): string => 'untitled:Untitled-1' }, languageId: uri.language ?? 'plaintext', getText: (): string => text };
+        }
         const provider = contentProviders.get(uri.scheme);
         const text = provider === undefined ? '' : await provider.provideTextDocumentContent(uri);
         return { uri, getText: (): string => text };

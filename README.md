@@ -1200,9 +1200,18 @@ copy of Open-GSD to a project that doesn't already have one.
   credentials and private-file paths are held back (you can send a message once
   anyway), personal data asks first, and `tee-only` mode blocks models NEAR
   forwards to other providers.
-- **Verify signature** on an answer from a private model checks NEAR's
-  signature over the exact request and response, and that a genuine, fresh
-  Intel TDX quote binds the signing key. See [what it does and doesn't check](SECURITY.md#checking-a-responses-signature).
+- A **trust badge** under each cloud answer of the lead agent says **Verified private model**,
+  **Model verified, connection not proven** or **Not verified**. It is set only
+  from checks that ran: NEAR's signature over the exact request and response, a
+  genuine, fresh Intel TDX quote that binds the signing key, and whether the
+  connection was proven to end inside the private enclave. It is on the lead
+  agent's answers only; a helper agent's answer has none. A request to NEAR AI
+  Cloud goes over a connection held to its attested key whenever a fresh proof
+  exists. At a level that needs an attested cloud a mismatch refuses the
+  request; at other levels it is sent without the key held and the badge says
+  so. Click it for the
+  reasons, Check again and the full attestation. See
+  [what it does and doesn't check](SECURITY.md#the-trust-badge-on-each-answer).
 - The chat view only receives display data; credentials and raw context stay
   in the extension host.
 - The extension never reads `~/.near-credentials` or other local wallet files.
@@ -1257,12 +1266,12 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Good to know
 
-- **Privacy labels come from NEAR's model catalog.** You can check a single
-  answer from a private model with **Verify signature**, which checks NEAR's
-  signature and a fresh Intel TDX quote in the editor; it does not check TCB
-  status, enclave measurements or NVIDIA's verdict, and only a run's final
-  answer is offered (see
-  [what it does and doesn't check](SECURITY.md#checking-a-responses-signature)).
+- **Privacy labels come from NEAR's model catalog.** Each cloud answer of the
+  lead agent has a **trust badge** (Verified private model; Model verified,
+  connection not proven; Not verified), checked once in the background from
+  NEAR's signature and a fresh Intel TDX quote in the editor; it does not check
+  TCB status, enclave measurements or NVIDIA's verdict (see
+  [what it does and doesn't check](SECURITY.md#the-trust-badge-on-each-answer)).
 - **No wallet, staking, or NEAR account sign-in yet.** They wait for a
   documented NEAR AI contract; sign-in uses API keys.
 

@@ -256,7 +256,9 @@ async function nearWith(binding: ConnectionBindingSource, load = true): Promise<
 
 const ask = (client: NearAiClient) => client.completeOnce('tee-model', [{ role: 'user', content: 'hello' }], { maxTokens: 32 });
 
-test('with a bound fact a Confidential request goes over the pinned connection, a Public one over the normal fetch, and the record holds no fingerprint', async () => {
+// The owner's decision of 2026-11-18 (PR #95): a Public request to NEAR AI Cloud also goes over the pinned connection while a fresh proof exists. Before it,
+// this test asserted that Public went over the normal fetch; it now asserts the pinned one, and the tests below cover the fallback.
+test('with a bound fact a Confidential request and a Public one both go over the pinned connection, and the record holds no fingerprint', async () => {
   const fingerprint = SERVER_PRINT;
   const binding = new HandSource({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint }, async () => completion());
   const near = await nearWith(binding);
@@ -265,8 +267,8 @@ test('with a bound fact a Confidential request goes over the pinned connection, 
   assert.equal(binding.pinnedCalls.length, 1);
   assert.equal(near.content.length, 0, 'the normal fetch was not used for the attested request');
   assert.equal((await withSessionRoute(routeAt([label('org', 'Public')]), () => ask(near.client))).text, 'ok');
-  assert.equal(near.content.length, 1, 'any-cloud is unchanged');
-  assert.equal(binding.pinnedCalls.length, 1);
+  assert.equal(near.content.length, 0, 'any-cloud with a fresh proof is pinned too');
+  assert.equal(binding.pinnedCalls.length, 2);
   const record = records.find((entry) => entry.authorizations[0]?.policy.name === 'route.attested-cloud');
   assert.ok(record !== undefined);
   assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(record))).ok, 'the record of a bound request validates');
@@ -381,5 +383,101 @@ test('when a layer replaces the agent and ignores the request\'s TLS options, th
     other.closeAllConnections();
     await new Promise<void>((resolve) => other.close(() => resolve()));
     await pinnedServer.close();
+  }
+});
+
+// ---- The owner's decision of 2026-11-18 (PR #95): Public requests over the pinned connection, with an unpinned fallback on a mismatch ----
+
+const PUBLIC_MARK: Mark = [label('org', 'Public')];
+const inferRecords = (records: DecisionRecord[]) => records.filter((entry) => (entry.unmapped.nearAi.capability as { verb?: string }).verb === 'infer');
+async function badgeFor(near: NearAiClient, usage: import('../services/nearAiClient').UsageMetadata) {
+  const { answerFactsOf } = await import('../services/agentSession');
+  const { trustBadgeFor } = await import('../domain/gate/trustBadge');
+  const facts = answerFactsOf({ client: near, model: 'tee-model', privacy: 'Private · runs in NEAR TEE', modelCatalog: undefined }, { ...usage, evidence: { chatId: 'c', requestHash: 'a', responseHash: 'b' } });
+  return trustBadgeFor({ ...facts, verification: 'signed', earlierCheckFailed: false })!;
+}
+
+test('a Public request with a fresh proof goes over the pinned connection, is recorded as before, and its signed answer can show Verified private model', async () => {
+  const binding = new HandSource({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: SERVER_PRINT }, async () => completion());
+  const near = await nearWith(binding);
+  const records: DecisionRecord[] = [];
+  const answer = await withSessionRoute(routeAt(PUBLIC_MARK, records), () => ask(near.client));
+  assert.equal(binding.pinnedCalls.length, 1, 'pinned');
+  assert.equal(near.content.length, 0, 'the normal fetch was not used');
+  assert.equal(answer.usage.connectionPinned, true);
+  const infer = inferRecords(records);
+  assert.equal(infer.length, 1, 'one record for the request');
+  assert.equal(infer[0]!.unmapped.nearAi.connectionFallback, undefined);
+  assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(infer[0]))).ok);
+  assert.equal((await badgeFor(near.client, answer.usage)).state, 'verified-private');
+});
+
+test('a Public request whose pinned connection meets another key is sent unpinned instead, recorded as a fallback naming no content, and its badge is Model verified, connection not proven', async () => {
+  const binding = new HandSource({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: SERVER_PRINT }, async () => { throw new ConnectionNotBoundError(); });
+  const near = await nearWith(binding);
+  const records: DecisionRecord[] = [];
+  const answer = await withSessionRoute(routeAt(PUBLIC_MARK, records), () => ask(near.client));
+  assert.equal(answer.text, 'ok', 'sent, not refused');
+  assert.equal(binding.pinnedCalls.length, 1, 'the pinned connection was tried first and refused before writing');
+  assert.equal(near.content.length, 1, 'then the same request went over the normal fetch, once');
+  assert.equal(binding.marked.length, 1, 'the host is no longer bound');
+  assert.equal(answer.usage.connectionPinned, undefined);
+  assert.equal(answer.usage.connection?.state, 'not-bound');
+  // PR #95 review round 3: the request's record is written at the decision, before anything is sent; a second record for it says it fell back.
+  const infer = inferRecords(records);
+  assert.equal(infer.length, 2, 'the decision record, then the fallback record');
+  assert.equal(infer[0]!.unmapped.nearAi.connectionFallback, undefined);
+  assert.equal(infer[1]!.unmapped.nearAi.connectionFallback, 'unpinned');
+  for (const entry of infer) assert.equal(entry.authorizations[0]?.policy.name, 'route.any-cloud');
+  assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(infer[1]))).ok);
+  const text = JSON.stringify(infer[1]);
+  assert.ok(!text.includes(SERVER_PRINT) && !text.includes('cloud-api.near.ai') && !text.includes('hello'), 'no fingerprint, host or content');
+  const badge = await badgeFor(near.client, answer.usage);
+  assert.equal(badge.state, 'model-verified');
+  assert.ok(badge.reasons.some((reason) => reason.includes('did not match')), JSON.stringify(badge.reasons));
+  // The next Public request has no fresh proof (the host is not bound): sent as before, unpinned, with no fallback to record.
+  await withSessionRoute(routeAt(PUBLIC_MARK, records), () => ask(near.client));
+  assert.equal(binding.pinnedCalls.length, 1);
+  assert.equal(near.content.length, 2);
+  assert.equal(inferRecords(records)[2]!.unmapped.nearAi.connectionFallback, undefined);
+});
+
+test('PR 95 review round 3: an optionally pinned Public request is recorded at the decision, so a host that dies mid-request still leaves its record', async () => {
+  const binding = new HandSource({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: SERVER_PRINT }, async () => { throw new TypeError('socket hang up'); });
+  const near = await nearWith(binding);
+  const records: DecisionRecord[] = [];
+  let recordedBeforeSend = false;
+  await withSessionRoute(routeAt(PUBLIC_MARK, records), async () => {
+    const sent = ask(near.client);
+    recordedBeforeSend = inferRecords(records).length === 1;
+    await assert.rejects(sent);
+  });
+  assert.ok(recordedBeforeSend, 'the record was written before anything was sent');
+  assert.equal(binding.pinnedCalls.length, 1, 'it went over the pinned connection');
+  assert.equal(inferRecords(records).length, 1, 'one record, and no fallback record (the key did not mismatch)');
+  assert.equal(inferRecords(records)[0]!.unmapped.nearAi.connectionFallback, undefined);
+});
+
+test('at Confidential a mismatch on the pinned connection still refuses: nothing goes over the normal fetch and nothing falls back', async () => {
+  const binding = new HandSource({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: SERVER_PRINT }, async () => { throw new ConnectionNotBoundError(); });
+  const near = await nearWith(binding);
+  const records: DecisionRecord[] = [];
+  await assert.rejects(() => withSessionRoute(routeAt([label('org', 'Confidential')], records), () => ask(near.client)), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.connection-not-bound');
+  assert.equal(near.content.length, 0, 'never sent unpinned');
+  assert.ok(!records.some((entry) => entry.unmapped.nearAi.connectionFallback !== undefined));
+});
+
+test('with no fresh proof a Public request is sent as today: the normal fetch, no pin, a record written before sending, no fallback field', async () => {
+  for (const fact of [undefined, { state: 'unknown' as const, host: NEAR }, { state: 'not-bound' as const, host: NEAR, checkedAt: Date.now() }, { state: 'bound' as const, host: NEAR, checkedAt: Date.now() - 11 * 60_000, fingerprint: SERVER_PRINT }, { state: 'bound' as const, host: 'https://other.example/v1', checkedAt: Date.now(), fingerprint: SERVER_PRINT }]) {
+    const binding = new HandSource(fact, async () => completion());
+    const near = await nearWith(binding);
+    const records: DecisionRecord[] = [];
+    let recordedBeforeSend = false;
+    const route = routeAt(PUBLIC_MARK, records);
+    await withSessionRoute(route, async () => { const sent = ask(near.client); recordedBeforeSend = inferRecords(records).length === 1; await sent; });
+    assert.equal(binding.pinnedCalls.length, 0, JSON.stringify(fact));
+    assert.equal(near.content.length, 1, JSON.stringify(fact));
+    assert.ok(recordedBeforeSend, 'recorded at the decision, as before');
+    assert.equal(inferRecords(records)[0]!.unmapped.nearAi.connectionFallback, undefined);
   }
 });

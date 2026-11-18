@@ -96,6 +96,11 @@ export interface DecisionRecordInput {
   /** Which refusal of label.outbound-match this is (match, earlier, unchecked, pending, full, unreadable, reads-and-sends). Optional: record version 1. */
   readonly outboundCause?: string;
   /**
+   * Set on a model request at any-cloud that was to go over the connection pinned to NEAR AI Cloud's attested key, met another key, and was sent unpinned
+   * instead (owner, 2026-11-18). Names no content, host or key. Optional: record version 1.
+   */
+  readonly connectionFallback?: 'unpinned';
+  /**
    * The short form of a routine record (D-52, owner decision after PR 4a's measurement): nothing is written twice. The resource list is empty because the
    * capability names what was used, and the policy entry carries no uid because `unmapped.nearAi.bundleHash` holds the policy's hash. Every field the record
    * check needs is still there, so the record stays version 1.
@@ -175,6 +180,7 @@ export interface DecisionRecord {
       readonly attestation?: 'verified' | 'failed' | 'unavailable';
       readonly connection?: ConnectionBindingState;
       readonly outboundCause?: string;
+      readonly connectionFallback?: 'unpinned';
     };
   };
 }
@@ -301,7 +307,8 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.from === undefined ? {} : { from: input.from.map(copyLabel) }),
         ...(input.attestation === undefined ? {} : { attestation: input.attestation }),
         ...(input.connection === undefined ? {} : { connection: input.connection }),
-        ...(input.outboundCause === undefined ? {} : { outboundCause: input.outboundCause })
+        ...(input.outboundCause === undefined ? {} : { outboundCause: input.outboundCause }),
+        ...(input.connectionFallback === undefined ? {} : { connectionFallback: input.connectionFallback })
       }
     }
   };

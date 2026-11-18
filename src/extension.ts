@@ -27,6 +27,7 @@ import { registerTeamLive } from './services/teamLiveView';
 import { registerRunReport } from './services/runReportCommand';
 import { registerResearchVerifiers } from './services/researchProfileCommand';
 import { registerUsageExport } from './services/usageExport';
+import { closeAllConversations } from './services/agentSession';
 import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
@@ -446,6 +447,8 @@ async function showStatus(auth: AuthService): Promise<void> {
 }
 
 export async function deactivate(): Promise<void> {
+  // Every chat still open is closed first and its last badge record written (at most one second), so the push below carries it (PR #95 review round 3).
+  await closeAllConversations();
   // One push, cut off after three seconds and never relied on: the run-end and idle syncs are the reliable path (D-17).
   await flushSyncOnClose();
 }

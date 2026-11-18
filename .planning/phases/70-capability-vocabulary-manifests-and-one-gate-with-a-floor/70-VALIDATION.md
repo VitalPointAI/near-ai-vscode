@@ -65,20 +65,20 @@ created: "2026-11-16"
 
 ## Part 4 delivery map (replanned 2026-11-17, D-49)
 
-Each of the ten requirements part 4 touches, the PR and plan that complete it, and the test files that prove it. The full map of every part is in COVERAGE.md ("Part 4 requirement map"); 70-28e fills in the merged PR numbers and the test files the plans actually created.
+Each of the ten requirements part 4 touches, the PR and plan that complete it, and the test files that prove it. The full map of every part, with the merged PR numbers (4a #81, 4b #85, 4c #87, 4d #89, 4e this PR), is in COVERAGE.md ("Part 4 requirement map"). The test files below are the ones the plans actually created or extended, from their SUMMARYs (brought up to date by 70-28e on 2026-11-18).
 
 | Req ID | Completed in (PR, plan) | Earlier parts (PR, plan) | Test files | Gate before the PR opens |
 |--------|-------------------------|--------------------------|------------|--------------------------|
-| CLAS-01 | 4c, 23 | 4b, 20; 4c, 22 | `gateLabelStore`, `gateMark`, `gateChatLabel` | 70-28c full gate |
-| CLAS-02 | 4c, 24 | PR 1, 02 and 03; 4b, 20 and 21 | `gateLabels`, `gateLabelStore`, `gateLabelCommands`, `gateDocs` | 70-28c full gate |
-| CLAS-03 | 4b, 21 | 4b, 20 | `gateDominance`, `gateLabelReads`, `gateLabelCommands` | 70-28b full gate |
-| CLAS-04 | 4c, 23 | 4c, 22 | `gateMark`, `gateChatLabel`, `teamSignedPayload` | 70-28c full gate |
-| CLAS-05 | 4d, 25 | 4a, 19; 4b, 21 | `gateRouting`, `gateRouteTiers`, `gateConnectionBinding` | 70-28d full gate |
-| CLAS-06 | 4c, 24 | 4a, 19; 4b, 21; 4c, 22 | `gateRouteGuard`, `gateRouteTiers`, `gateMark` | 70-28c full gate |
-| CLAS-07 | 4e, 27 | 4b, 20 and 21; 4c, 24; 4d, 25 | `gateDocs`, `gateCommands`, `gateLabelCommands` | 70-28e full gate |
-| CLAS-08 | 4e, 27 | 4e, 26 | `gateTrustBadge`, `gateDocs`, e2e badge test | 70-28e full gate with e2e |
-| GATE-07 | 4d, 25 | 4a, 19; 4b, 20 and 21; 4c, 22 and 23 | `gateRecordIds`, `gateRecords`, `gateRouteGuard`, `gateLabelStore`, `gateChatLabel`, `gateRouteTiers` | 70-28d full gate |
-| OFFL-01 | 4e, 26 | 4a, 19; 4d, 25 | `gateOffline`, `gateRouteGuard`, `gateConnectionBinding`, `gateTrustBadge` | 70-28e full gate |
+| CLAS-01 | 4c, 23 (#87) | 4b, 20 (#85); 4c, 22 (#87) | `gateLabelStore`, `gateLabelReads`, `gateMark`, `gateChatLabel` | 70-28c full gate |
+| CLAS-02 | 4c, 24 (#87) | PR 1, 02 and 03 (#66); 4b, 20 and 21 (#85) | `gateLabels`, `gateLabelStore`, `gateLabelCommands`, `gateDocs` | 70-28c full gate |
+| CLAS-03 | 4b, 21 (#85) | 4b, 20 (#85) | `gateDominance`, `gateLabelReads`, `gateLabelCommands` | 70-28b full gate |
+| CLAS-04 | 4c, 23 (#87) | 4c, 22 (#87) | `gateMark`, `gateOutbound`, `gateChatLabel`, `teamSignedPayload` | 70-28c full gate |
+| CLAS-05 | 4d, 25 (#89) | 4a, 19 (#81); 4b, 21 (#85) | `gateRouting`, `gateRouteTiers`, `gateConnectionBinding` | 70-28d full gate |
+| CLAS-06 | 4c, 24 (#87) | 4a, 19 (#81); 4b, 21 (#85); 4c, 22 (#87) | `gateRouteGuard`, `gateRouteTiers`, `gateMark` | 70-28c full gate |
+| CLAS-07 | 4e, 27 (this PR) | 4b, 20 and 21 (#85); 4c, 24 (#87); 4d, 25 (#89) | `gateDocs`, `gateCommands`, `gateLabelCommands` | 70-28e full gate |
+| CLAS-08 | 4e, 27 (this PR) | 4e, 26 (this PR) | `gateTrustBadge` (created by plan 26, extended by plan 27), `gateDocs`, `gateRouteTiers`, the e2e test "the trust badge renders under a cloud answer in the real chat page" | 70-28e full gate with e2e |
+| GATE-07 | 4d, 25 (#89) | 4a, 19 (#81); 4b, 20 and 21 (#85); 4c, 22 and 23 (#87) | `gateRecordIds`, `gateRecords`, `gateRouteGuard`, `gateLabelStore`, `gateChatLabel`, `gateRouteTiers`, `gateTrustBadge` (unchecked attested answers recorded) | 70-28d full gate |
+| OFFL-01 | 4e, 26 (this PR) | 4a, 19 (#81); 4d, 25 (#89) | `gateOffline`, `gateRouteGuard`, `gateConnectionBinding`, `gateTrustBadge` | 70-28e full gate |
 
 ---
 
@@ -103,11 +103,11 @@ Filled from the plans: every task's `<automated>` command runs one of the test f
 
 | Behavior | Requirement | When (part 4 PR) | Why Manual | Test Instructions |
 |----------|-------------|------------------|------------|-------------------|
-| Your organization's security officer confirms the NATO list and the two Canadian scales | CLAS-02 | after 4b ships (Set Label first offers the scales) | Sources are secondary; a person must confirm before relying on them | Read the presets in the bundle and SECURITY.md; record the confirmation |
-| Fresh install on code-server signs its first bundle and the extension stays usable | OFFL-02 | before publishing every release that carries PR 2 or later, so each of 4a to 4e is a release blocker (D-48) | Secrets live in the browser on code-server; covered by unit tests with stubs, confirmed by the owner on a real host BEFORE publishing | Install the 0.4.x to be released on a clean code-server profile, open a project, run a chat and one edit |
-| The status bar and refusal texts read plainly | OFFL-02, CLAS-06 | after 4b (clearance refusals) and 4c (route refusals, the chat's label) | Wording judgement | Unplug the network, break the bundle, label a file above your clearance and read the texts; read a Restricted file in a chat with no local model and read the refusal |
-| What NEAR AI Cloud's attestation exposes about the connection key is confirmed against the live service | CLAS-05 | 4d | Plan 25's research step records the finding and its sources; a live comparison needs the network and a key | Read the "NEAR AI Cloud connection binding" finding in 70-25-SUMMARY.md and the 4d PR body; if the live comparison was not made there, run one Confidential chat on NEAR AI Cloud and read the answer's Verify signature result |
-| The trust badge reads plainly in light, dark and high contrast themes | CLAS-08 | 4e | Visual judgement; the CSS test only proves theme variables and a high-contrast border | Switch between a light, a dark and a high contrast theme with a chat that has each badge state, click each badge and read its details |
+| Your organization's security officer confirms the NATO list and the two Canadian scales | CLAS-02 | after 4b ships (Set Label first offers the scales) | Sources are secondary; a person must confirm before relying on them | Read the presets in the bundle and SECURITY.md; record the confirmation. **Status (2026-11-18): open; your organization's security officer does it.** |
+| Fresh install on code-server signs its first bundle and the extension stays usable | OFFL-02 | before publishing every release that carries PR 2 or later, so each of 4a to 4e is a release blocker (D-48) | Secrets live in the browser on code-server; covered by unit tests with stubs, confirmed by the owner on a real host BEFORE publishing | Install the 0.4.x to be released on a clean code-server profile, open a project, run a chat and one edit. **Status (2026-11-18): open for the release that carries 4e; the owner does it before publishing.** |
+| The status bar and refusal texts read plainly | OFFL-02, CLAS-06 | after 4b (clearance refusals) and 4c (route refusals, the chat's label) | Wording judgement | Unplug the network, break the bundle, label a file above your clearance and read the texts; read a Restricted file in a chat with no local model and read the refusal. **Status (2026-11-18): open; the owner does it.** |
+| What NEAR AI Cloud's attestation exposes about the connection key is confirmed against the live service | CLAS-05 | 4d | Plan 25's research step records the finding and its sources; a live comparison needs the network and a key | Read the "NEAR AI Cloud connection binding" finding in 70-25-SUMMARY.md and the 4d PR body; the live comparison was not made there (no key in the session), so run one Confidential chat on NEAR AI Cloud and read the answer's trust badge: Verified private model means the attested key matched the served one. **Status (2026-11-18): open; the owner does it with a NEAR AI key.** |
+| The trust badge reads plainly in light, dark and high contrast themes | CLAS-08 | 4e | Visual judgement; the CSS test only proves theme variables and a high-contrast border | Switch between a light, a dark and a high contrast theme with a chat that has each badge state, click each badge and read its details. **Status (2026-11-18): open; the owner does it on PR 4e.** |
 
 ---
 

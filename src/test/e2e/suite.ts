@@ -299,6 +299,46 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.equal(reply.feedback, 'Warmer light, please.');
       await postToPage('chat', { type: 'prompt-closed', id, outcome: 'cancelled' });
     }],
+    ['the trust badge renders under a cloud answer in the real chat page, not under a local one, and comes back after the view reloads (CLAS-08)', async () => {
+      // The local profile's answers so far carry no badge.
+      assert.deepEqual((await probe('chat')).trustBadges ?? [], [], 'no badge under a local answer');
+      const url = `http://127.0.0.1:${(server!.address() as AddressInfo).port}/v1`;
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { ProfileStore } = require(path.join(extension.extensionPath, 'dist/services/profileStore')) as typeof import('../../services/profileStore');
+      const { clearProviderCache } = require(path.join(extension.extensionPath, 'dist/services/providerCache')) as typeof import('../../services/providerCache');
+      const profiles = new ProfileStore(workspace, api.auth);
+      // A cloud-kind profile on the fake server: its answers come through a NEAR client, which is not NEAR AI Cloud's own endpoint, so the badge is Not verified.
+      const cloud = await profiles.configure({ profileId: 'profile-e2e-cloud', displayName: 'E2E (cloud)', organization: 'E2E', baseUrl: url, authMode: 'apiKey', provider: 'near-ai' }, 'e2e-key');
+      try {
+        assert.equal(cloud.validation.status, 'valid', cloud.validation.error);
+        clearProviderCache();
+        const before = observer.toView.length;
+        await api.sidebar.refresh();
+        await observer.next('toView', (message) => message.type === 'models' && JSON.stringify(message.models).includes('fake-coder'), before);
+        const sent = observer.toView.length;
+        await api.sidebar.request({ type: 'send', text: 'Say hi', model: 'fake-coder' });
+        const done = await observer.next('toView', (message) => message.type === 'assistant-done', sent);
+        const badge = await observer.next('toView', (message) => message.type === 'trust-badge' && message.runId === done.runId, sent);
+        assert.equal((badge.badge as { state: string }).state, 'not-verified');
+        const shown = await settled('chat');
+        assert.deepEqual(shown.trustBadges, [{ state: 'not-verified', title: 'Not verified' }], 'one badge, reading Not verified');
+        assert.deepEqual(shown.clipped, [], 'nothing clipped');
+        assert.deepEqual(shown.offenders, [], 'nothing past the panel\'s edge');
+        // The view reloads; the host replays the conversation when the page says it is ready, and the badge is drawn again.
+        const ready = observer.fromView.length;
+        await vscode.commands.executeCommand('workbench.action.webview.reloadWebviewAction');
+        await vscode.commands.executeCommand('nearAiChatView.focus');
+        await observer.next('fromView', (message) => message.type === 'chat-ready', ready, 30_000);
+        let again = await probe('chat');
+        for (let attempt = 0; attempt < 20 && (again.trustBadges ?? []).length === 0; attempt += 1) { await pause(250); again = await probe('chat'); }
+        assert.deepEqual(again.trustBadges, [{ state: 'not-verified', title: 'Not verified' }], 'the badge is shown again after the reload');
+      } finally {
+        // Every later test runs on the local profile, as before.
+        await profiles.select('profile-e2e-local');
+        clearProviderCache();
+        await api.sidebar.refresh();
+      }
+    }],
     ['a file write asks for approval, applies on approval, and Revert removes it', async () => {
       const before = observer.toView.length;
       await api.sidebar.request({ type: 'send', text: 'write notes', model: 'fake-coder' });

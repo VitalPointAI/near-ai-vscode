@@ -21,6 +21,7 @@ import type { Label } from '../domain/gate/labels';
 import { raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { chatProjectMark, judgeLowering, reportLowering } from '../domain/gate/lowerings';
+import { mergeTrustRecords, newestTrustRecords, weakerTrustRecord, type TrustRecord } from '../domain/gate/trustBadge';
 import type { LoweringVerdict } from '../domain/gate/lowerings';
 export { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
 export type { LabelLoweringJudge, LoweringContext, LoweringOutcomeListener, LoweringVerdict } from '../domain/gate/lowerings';
@@ -63,6 +64,11 @@ export interface ThreadMeta {
    * Read through chatLabelOf only: a value in a shape this version cannot read is kept as it is and opens the chat at the highest org level.
    */
   label?: ChatLabelState;
+  /**
+   * The trust badge each cloud answer of the chat settled on (CLAS-08), so a reopened chat shows it again. Validated on read (a record this version cannot
+   * read is dropped) and merged weaker-wins by answer, beside the label's own rule.
+   */
+  trust?: TrustRecord[];
 }
 
 /** A chat's label as kept in its meta. */
@@ -211,9 +217,11 @@ function assertThreadId(id: string): void {
  */
 export function mergeMeta(a: ThreadMeta, b: ThreadMeta): ThreadMeta {
   const label = a.label === undefined && b.label === undefined ? undefined : mergeChatLabel(a, b);
+  // The badges (CLAS-08): every answer of both copies, the weaker state for an answer both hold, whichever copy is newer.
+  const trust = a.trust === undefined && b.trust === undefined ? undefined : mergeTrustRecords(a.trust, b.trust);
   const withLabel = (meta: ThreadMeta): ThreadMeta => {
-    const { label: _drop, ...rest } = meta;
-    return label === undefined ? rest : { ...rest, label };
+    const { label: _drop, trust: _dropTrust, ...rest } = meta;
+    return { ...rest, ...(label === undefined ? {} : { label }), ...(trust === undefined || trust.length === 0 ? {} : { trust }) };
   };
   // A placeholder's title ("Conversation") and empty model never replace a real meta's, however new its times look; the times still combine.
   if (Boolean(a.placeholder) !== Boolean(b.placeholder)) {
@@ -231,7 +239,10 @@ export function validMeta(value: unknown, id: string): ThreadMeta | undefined {
   const strings = [meta.title, meta.model, meta.createdAt, meta.lastUsedAt, meta.tip];
   const numbers = [meta.turns, meta.entries, meta.bytes];
   if (strings.some((text) => typeof text !== 'string') || numbers.some((count) => typeof count !== 'number' || !Number.isFinite(count))) return undefined;
-  return { ...(meta as ThreadMeta), origin: meta.origin === 'chat-view' ? 'chat-view' : 'panel' };
+  const { trust: storedTrust, ...rest } = meta as ThreadMeta;
+  // Only records this version can read are kept: one with an unknown state or a field of the wrong type is dropped, so that answer shows no badge.
+  const trust = Array.isArray(storedTrust) ? mergeTrustRecords(storedTrust, []) : [];
+  return { ...rest, origin: meta.origin === 'chat-view' ? 'chat-view' : 'panel', ...(trust.length > 0 ? { trust } : {}) };
 }
 
 /** A thread entry read from a file: only a complete one that belongs to this thread. */
@@ -527,6 +538,26 @@ export class ThreadStore implements ConversationStore {
     });
   }
 
+  /**
+   * Saves one answer's settled badge in the chat's meta (CLAS-08). `replace` (a newer result of the same answer's own check) replaces the stored record of
+   * that key; otherwise the weaker of the two is kept, so an answer with the same text from another run never makes a stored badge stronger. Writing a
+   * badge does not count as using the chat: its last use is unchanged.
+   */
+  public async recordTrust(id: string, record: TrustRecord, mode: 'replace' | 'weaker' = 'weaker'): Promise<void> {
+    assertThreadId(id);
+    await this.enqueue(async () => {
+      const material = await this.writeMaterial();
+      const existing = await this.readMeta(id, material);
+      if (existing === undefined) return;
+      const held = (existing.trust ?? []).find((entry) => entry.key === record.key);
+      const kept = held === undefined || mode === 'replace' ? record : weakerTrustRecord(held, record);
+      if (held !== undefined && JSON.stringify(held) === JSON.stringify(kept)) return;
+      const trust = newestTrustRecords([...(existing.trust ?? []).filter((entry) => entry.key !== record.key), kept]);
+      const meta = await this.updateMeta(id, material, { trust }, { keepLastUsed: true });
+      await this.indexThread(material, meta);
+    });
+  }
+
   /** The chat's stored mark, read through chatLabelOf; undefined when none is stored or it cannot be read. */
   public async storedChatMark(id: string): Promise<Mark | undefined> {
     assertThreadId(id);
@@ -542,14 +573,15 @@ export class ThreadStore implements ConversationStore {
     }
   }
 
-  private async updateMeta(id: string, material: Material, patch: Partial<ThreadMeta>): Promise<ThreadMeta> {
+  private async updateMeta(id: string, material: Material, patch: Partial<ThreadMeta>, options: { keepLastUsed?: boolean } = {}): Promise<ThreadMeta> {
     const existing = await this.readMeta(id, material);
     const at = this.now().toISOString();
     const base: ThreadMeta = existing ?? { id, title: 'Conversation', model: '', origin: 'panel', createdAt: at, lastUsedAt: at, turns: 0, entries: 0, bytes: 0, tip: '' };
     const defined = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as Partial<ThreadMeta>;
     // A title saved here makes a placeholder meta a real one.
     if (defined.title !== undefined) delete base.placeholder;
-    const next: ThreadMeta = { ...base, ...defined, id, lastUsedAt: patch.lastUsedAt && patch.lastUsedAt > base.lastUsedAt ? patch.lastUsedAt : at > base.lastUsedAt ? at : base.lastUsedAt };
+    const lastUsedAt = options.keepLastUsed === true ? base.lastUsedAt : patch.lastUsedAt && patch.lastUsedAt > base.lastUsedAt ? patch.lastUsedAt : at > base.lastUsedAt ? at : base.lastUsedAt;
+    const next: ThreadMeta = { ...base, ...defined, id, lastUsedAt };
     await this.home.ensureFolder(this.dirOf(id));
     await writeFileAtomic(this.metaPath(id), this.sealJson(material, 'thread-meta', id, next));
     return next;

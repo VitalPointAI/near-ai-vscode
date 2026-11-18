@@ -52,10 +52,62 @@ and on every reply:
 The label reflects NEAR's catalog. Set `nearAi.privacyMode` to `tee-only` to
 block every model NEAR forwards elsewhere.
 
-### Checking a response's signature
+### The trust badge on each answer
 
-Answers from a private model have a **Verify signature** action. It follows
-NEAR's reference verifier (`nearai/nearai-cloud-verifier`) and checks that:
+Every answer of the lead agent that comes from a cloud model has a trust badge
+under it, in one of three states. An answer from a model on this computer has
+none.
+
+- **Verified private model**: This answer's signature and NEAR AI Cloud's
+  attestation were checked, and the connection that carried your request was
+  proven to end inside NEAR AI Cloud's private enclave.
+- **Model verified, connection not proven**: This answer's signature and NEAR AI
+  Cloud's attestation were checked, so a private model on NEAR AI Cloud sent it.
+  The connection that carried your request was not proven to end inside the
+  private enclave.
+- **Not verified**: NEAR AI could not show that a private model on NEAR AI Cloud
+  sent this answer. The reasons below say why.
+
+The badge is chosen only from checks that ran, and it never says more than they
+proved. A check that is still running, did not finish in time, could not be
+made or failed shows **Not verified**, and so does every later badge of a chat
+in which an earlier check failed, until **Check again** on that answer passes.
+**Verified private model** needs all of these: the model runs in a TEE on NEAR
+AI Cloud's own endpoint, NEAR AI returned a signature id for the answer, the
+answer's check passed, and your request went over a connection held to the key
+NEAR AI Cloud's attestation names. At a level that needs an attested cloud (see
+[Classification labels and routing](#classification-labels-and-routing)) every
+request is held to that key, and refused if the server presents another. At
+other levels a request to NEAR AI Cloud is held to that key while a fresh proof
+of the connection exists. If the server then presents another key, for example
+behind a proxy that inspects encrypted traffic, the request is sent without the
+key held instead of being refused, a second model request record for it says it
+fell back (and nothing about its content), and the answer's badge shows **Model
+verified, connection not proven**. With no fresh proof the request is sent as before, and
+the best its answer shows is the same.
+
+**When it is checked.** Each cloud answer from a TEE model is checked once,
+automatically, in the background, after it arrives. That costs one signature
+request per answer; an attestation report NEAR AI has already verified for the
+same signing key is reused for up to ten minutes. While the check runs the badge
+shows **Not verified** with "Checking now." A check that has not finished after
+20 seconds shows **Not verified**, saying it could not be checked in time, so a
+badge never waits forever, for example offline; if the check finishes later,
+the badge changes. An answer from a model NEAR AI forwards to another provider is
+never checked, and its badge says where it is forwarded.
+
+**Lead answers only.** The badge is on the lead agent's answers only. A helper
+agent's answer is not shown to you as an answer, so it has no badge; each
+badge's details say that helper agents in the run may have used other models,
+each request routed by the chat's label and recorded. At a level that needs an
+attested cloud, every answer NEAR AI Cloud sends, tool-call turns and helper
+agents' answers included, is checked this way too, and a failed check stops
+those levels for the chat (see
+[Classification labels and routing](#classification-labels-and-routing)); the
+badge reuses that check, so it makes no second request.
+
+**What the check covers.** It follows NEAR's reference verifier
+(`nearai/nearai-cloud-verifier`) and checks that:
 
 1. NEAR's signature (`/v1/signature/{chat_id}`) covers SHA-256 hashes equal to
    the exact request this editor sent and the raw response it received. The
@@ -73,9 +125,25 @@ The result names which key signed. **NEAR AI's gateway key** (seen for
 tool-calling responses) proves the exchange passed unaltered through NEAR's
 attested gateway. It does not by itself prove which enclave ran the model,
 since the model's TEE is attested separately in the same report. **The model's
-key** is signed inside the model's own TEE.
+key** is signed inside the model's own TEE. Whether the connection was proven
+comes from the connection check described under
+[Classification labels and routing](#classification-labels-and-routing): NEAR AI
+Cloud's attestation must name the certificate the server presents, and the
+connection that carries your request must present it.
 
-What is **not** checked in the editor, and the result says so:
+**Check again and Show full attestation.** Click the badge, or press Enter or
+Space on it, to read why it shows its state and what was checked. **Check
+again** checks the answer again with a fresh report, never a reused one. On an
+answer whose failed check stopped the levels that need an attested cloud for
+the chat, it lifts that stop when the answer now checks out. **Show full
+attestation** opens the details in an editor tab as an untitled, read-only JSON
+document: the signed text and signature, the signing address and which
+component holds the key, every check result, the connection fact with its
+fingerprint, and the attestation report the check used. Nothing is written to
+your project or to a decision record. The full attestation is kept for the last
+20 answers of the window that checked them.
+
+What is **not** checked in the editor, and the details say so:
 
 - the platform's TCB status and certificate revocation, which need Intel's
   collateral;
@@ -84,19 +152,15 @@ What is **not** checked in the editor, and the result says so:
 - NVIDIA's GPU attestation verdict.
 
 For those, use [cloud.near.ai/verify](https://cloud.near.ai/verify) or NEAR's
-verifier. Only the final answer of a run is offered for verification. Tool-call
-turns are signed the same way; they are checked only at a level that needs an
-attested cloud, as below.
+verifier.
 
-At a level that needs an attested cloud (see
-[Classification labels and routing](#classification-labels-and-routing)), every
-answer NEAR AI Cloud sends, tool-call turns and helper agents' answers included,
-is checked this way automatically, in the background, after it arrives. The
-final answer's result shows under it, and a failed check of any answer of the
-run shows there too. For these automatic checks a report NEAR AI has already
-verified for the same signing key is reused for up to ten minutes. A failed
-check shows **Check again**, which checks the failed answers again with a fresh
-report.
+**A reopened chat.** A chat reopened after a reload or a restart shows each
+answer's badge in the state its checks reached when the answer arrived, and
+says so; it has neither Check again nor Show full attestation. Answers saved
+before this version have no badge. The kept badges hold a state, plain reasons
+and a time, never a fingerprint, a signing address or the answer's text, and
+they sync with the chat; when two copies disagree about an answer, the weaker
+state is kept.
 
 ### What the agent can do without asking
 
@@ -338,7 +402,10 @@ is what that file and the records beside it do in this version.
   provider, the routing tier, the rule that allowed it and the policy's hash,
   each once; a refused request's record also holds the plain reason and the
   label that decided it, which is the policy's default label when nothing
-  raised the label. A request whose route cannot be worked out is refused with
+  raised the label. Every record is written when the route is decided, before
+  anything is sent. A request at any-cloud that was to go over the connection
+  held to NEAR AI Cloud's attested key, met another key and was sent without it
+  gets a second record holding `connectionFallback: "unpinned"`. A request whose route cannot be worked out is refused with
   a fixed reason and no label. A record of a model request names never the
   content, the endpoint's address or a file path.
 - **Labels and clearances in this version.** **NEAR AI: Set Label** labels a
@@ -441,7 +508,7 @@ AI Cloud model again, whenever that check passes. NEAR AI makes the check in
 the background, never while a request waits, and repeats it every few minutes;
 a check older than ten minutes no longer counts. After each such answer, NEAR AI
 also checks the answer's signature and NEAR AI Cloud's attestation (see
-[Checking a response's signature](#checking-a-responses-signature)). If that
+[The trust badge on each answer](#the-trust-badge-on-each-answer)). If that
 check fails, nothing more at these levels is sent to NEAR AI Cloud from that
 chat until **Check again** under that answer passes; a new chat or a window
 reload also starts without the stop, and the failure stays in the decision log.
@@ -1021,7 +1088,7 @@ messages.
 
 | Limitation | Plan |
 | --- | --- |
-| Verify signature does not check TCB status or revocation, enclave measurements, or NVIDIA's verdict | Use cloud.near.ai/verify or NEAR's verifier for a full check |
+| The trust badge's checks do not check TCB status or revocation, enclave measurements, or NVIDIA's verdict | Use cloud.near.ai/verify or NEAR's verifier for a full check |
 | Open-GSD's Claude Code hooks (statusline, context monitor) are not run | The runner provides its own context thresholds, compaction, and handoff instead |
 | Open-GSD's `Workflow` tool and MCP servers (for example context7) are not available | Workflows that need them report the tool as unavailable and fall back to their other paths |
 | Scanned PDFs (no text layer), old binary Office files (.doc, .ppt, .xls), and video can't be attached; video can't be generated | The chat says so when a file can't be read; export with OCR or re-save in the current format |
