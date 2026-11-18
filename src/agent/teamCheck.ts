@@ -5,12 +5,21 @@ import { DEFAULT_TOOLS, reportsToKey, resolveMemberTools } from './teams';
 // The free, local team check (0.4.27): no model call. It looks at a team draft the way a careful reviewer would and reports what is likely to go wrong
 // in a run: instructions that ask for something the member's tools cannot do, a member with no clear deliverable or a generic role, two members doing
 // the same work, a large team with no one coordinating, a reports-to line that names nobody or goes round in a circle, something that looks like a key,
-// and instructions too long to follow. It runs on every edit (as warnings beside the studio's own), and first in Improve with AI. It is quiet on the
+// instructions too long to follow, and (as advice) a team whose members own no separate areas or that has no one to bring their parts together. It runs on every edit (as warnings beside the studio's own), and first in Improve with AI. It is quiet on the
 // studio's built-in roles, which the tests hold it to.
 
-export type CheckId = 'tool-missing' | 'tool-unneeded-write' | 'no-deliverable' | 'generic-role' | 'no-role' | 'overlap' | 'no-lead' | 'reports-to-missing' | 'reports-to-cycle' | 'secret' | 'too-long';
+export type CheckId = 'tool-missing' | 'tool-unneeded-write' | 'no-deliverable' | 'generic-role' | 'no-role' | 'overlap' | 'no-lead' | 'reports-to-missing' | 'reports-to-cycle' | 'secret' | 'too-long' | 'no-separate-areas' | 'no-integration';
 
-/** `block`: Improve with AI will not send the team while it is there. `warning`: shown while editing. `advice`: shown only in the Improve panel. */
+/**
+ * The parallel-work notes (owner, 2026-11-18: "keeping work separated and then bring together to merge and sort out conflicts"). They are advice, so a team
+ * without them still shows Ready, but unlike other advice they also show while the team is edited (checkNotes), since that is where a person fixes them.
+ */
+export const PARALLEL_NOTE_IDS: readonly CheckId[] = ['no-separate-areas', 'no-integration'];
+
+/**
+ * `block`: Improve with AI will not send the team while it is there. `warning`: shown while editing. `advice`: shown in the Improve panel, and never makes a
+ * team need attention; the parallel-work advice (PARALLEL_NOTE_IDS) also shows as notes while editing.
+ */
 export type CheckSeverity = 'block' | 'warning' | 'advice';
 
 export interface TeamFinding {
@@ -42,6 +51,10 @@ const NEGATED = /\b(?:do not|don't|never|must not|does not|without|no need to|in
 const DELIVERABLE = /\b(?:report|reports|return|returns|write|writes|produce|produces|record|records|deliver|delivers|hand (?:back|over)|output|summari[sz]e|save|draft|list|answer|say (?:whether|which|what|where|how)|ends? (?:in|with)|finish with|design|build|break (?:it|them|the [a-z ]{1,30}?|[a-z]+) into|prepare|compile|propose|create|into (?:one|a|an) (?:[a-z-]+ ){0,2}(?:summary|report|plan|list|table|brief|document|memo))\b/i;
 const GENERIC_ROLES = new Set(['helper', 'agent', 'assistant', 'member', 'worker', 'general', 'generalist', 'custom', 'ai', 'bot', 'misc', 'other', 'team member', 'everything']);
 const LEAD_ROLES = /\b(?:lead|leader|planner|coordinator|manager|orchestrator|director|chief|head|captain|editor-in-chief|gsd-planner)\b/i;
+/** Instructions that give a member its own area of the work, or say what it must leave alone. */
+export const SEPARATE_AREA = /\b(?:own (?:area|part|parts|section|sections|files?|modules?|worktree|branch|notes|report|draft|output file|test report)|owns?\b|owned by|your area|its area|area (?:it|you) (?:is|are) given|outside (?:your|its|that|their) (?:area|part|section|files?|modules?)|(?:must not|do not|don't|never) touch|worktree|leaves? (?:the |everything |all )[^.\n]{0,80}? to (?:its|their|the)\b)/i;
+/** Instructions (or a description) that say who brings the members' parts together: merges them, settles conflicts, and checks the whole. */
+export const INTEGRATION_STEP = /\b(?:merg(?:e|es|ed|ing)|integrat(?:e|es|ed|ing|ion|or)|assembl(?:e|es|ed|ing|y)|combin(?:e|es|ed|ing)|brings? (?:the (?:work|parts) |it |them )?together|brought together|checks? the whole|resolv(?:e|es|ed|ing) (?:the )?conflicts?)\b/i;
 /** More words than this and a member is unlikely to follow all of its instructions (Copilot Studio: keep them short and simple). */
 export const MAX_INSTRUCTION_WORDS = 1200;
 
@@ -132,7 +145,21 @@ export function checkTeam(draft: TeamDraft, options: CheckOptions = {}): TeamFin
   if (draft.members.length > 3 && !hierarchy && !draft.members.some((member) => LEAD_ROLES.test(member.role) || LEAD_ROLES.test(member.name))) {
     findings.push({ id: 'no-lead', severity: 'advice', field: 'members', message: `This team has ${draft.members.length} members and no one who plans or coordinates. The run's lead agent does that by default; if the work needs a dedicated planner or a reports-to line, add one.` });
   }
+  // Owner, 2026-11-18: teams run members side by side, each on its own area, and someone brings the parts together. A team of one has nothing to merge.
+  if (draft.members.length > 1) {
+    if (!draft.members.some((member) => SEPARATE_AREA.test(member.instructions))) {
+      findings.push({ id: 'no-separate-areas', severity: 'advice', field: 'members', message: 'No member\'s instructions say which part of the work it owns. Members run at the same time where they can, so give each one its own area (files, modules, or sections of the deliverable) and say what it must leave alone. That keeps their work from clashing.' });
+    }
+    if (!INTEGRATION_STEP.test(draft.description) && !draft.members.some((member) => INTEGRATION_STEP.test(member.instructions))) {
+      findings.push({ id: 'no-integration', severity: 'advice', field: 'members', message: 'No member\'s instructions say who brings the parts together. Say who merges the members\' work, sorts out conflicts, and checks the whole (an integrator or editor member, or the lead, which does it when no member does).' });
+    }
+  }
   return findings;
+}
+
+/** The parallel-work advice, shown as notes while editing (never blocking a save, and never making a team need attention). */
+export function checkNotes(findings: readonly TeamFinding[]): DraftIssue[] {
+  return findings.filter((finding) => finding.severity === 'advice' && PARALLEL_NOTE_IDS.includes(finding.id)).map((finding) => ({ message: finding.message, ...(finding.field ? { field: finding.field } : {}) }));
 }
 
 /** The findings that show while editing, as the studio's warnings (advice stays in the Improve panel). */

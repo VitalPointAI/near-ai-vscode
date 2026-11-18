@@ -98,6 +98,38 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'e4c5a80e8a348381'
         ]
       }
+    },
+    {
+      version: 4,
+      definition: '469b6c224d1b0cb7',
+      guidance: [
+        '31d825e6f675015a'
+      ],
+      members: {
+        architect: [
+          '7538976c221fd0b4',
+          '85cd7cfbdb1400d0'
+        ],
+        developer: [
+          'fe156abc0a09b676'
+        ],
+        reviewer: [
+          'd246124d948fe28c'
+        ],
+        qa: [
+          'b9fb2b080b0ae354'
+        ],
+        security: [
+          '6b064752212d1b8a',
+          'a391f2ca67c02a18'
+        ],
+        devops: [
+          'd7b8931558efcc4e'
+        ],
+        'red-team': [
+          'c2ceba95618ce0b3'
+        ]
+      }
     }
   ],
   research: [
@@ -228,6 +260,41 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '87ea442ac61149ab'
         ]
       }
+    },
+    {
+      version: 5,
+      definition: 'aff84c57309daa87',
+      guidance: [
+        '76545adcac90c53e'
+      ],
+      members: {
+        investigator: [
+          '64b67f885fa2b9d9',
+          '38c881161c89a43b'
+        ],
+        'source-verifier': [
+          '4ce61cd591aff9e2',
+          'dc7e11aeb6347b8e'
+        ],
+        analyst: [
+          '2baf60169e7e56c8'
+        ],
+        writer: [
+          '874024fabb5bc954'
+        ],
+        'plagiarism-checker': [
+          'a1218a163b19b75d',
+          '3f4be9bd2187e99b'
+        ],
+        'red-team': [
+          'a41fb9088a1e24ea',
+          '1f141d5da5ac9efc'
+        ],
+        editor: [
+          'a006bba7bb2ff1ef',
+          'e8a94dda54943fb8'
+        ]
+      }
     }
   ],
   presales: [
@@ -292,6 +359,37 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'e434e10c84ad743e'
         ]
       }
+    },
+    {
+      version: 3,
+      definition: '8098ef2ff211e6cf',
+      guidance: [
+        '69c48914436164ea'
+      ],
+      members: {
+        'requirements-analyst': [
+          '8958a897d48ae2e4',
+          'd62143a648498c93'
+        ],
+        'solution-architect': [
+          '49eea83353b79c2d',
+          '148cae384a372c74'
+        ],
+        'pricing-analyst': [
+          'd39c256238aa7287',
+          'cb414bb4cfedcab4'
+        ],
+        'proposal-writer': [
+          '9c79f7f577789b68'
+        ],
+        reviewer: [
+          'e63826f291ec06c4'
+        ],
+        'red-team': [
+          '326d0ca1b98edc38',
+          '2877b07665ff177f'
+        ]
+      }
     }
   ],
   writing: [
@@ -349,6 +447,34 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'adad85053daa381c'
         ]
       }
+    },
+    {
+      version: 3,
+      definition: '24a958f2eea6b17e',
+      guidance: [
+        'd98141f43b93aac8'
+      ],
+      members: {
+        researcher: [
+          '9b34cfd74e8eaf11',
+          '5dac54cff65d0a3a'
+        ],
+        writer: [
+          '1a66f26738bf4416'
+        ],
+        'fact-checker': [
+          '8457a41ccacac020',
+          'ec64b590ca088290'
+        ],
+        editor: [
+          '09960a089815f447',
+          '3306568caca6e7e4'
+        ],
+        'red-team': [
+          'b0891019100bbcbc',
+          '40c594b0e2519e71'
+        ]
+      }
     }
   ],
   data: [
@@ -393,6 +519,27 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '49fb32d27f911479'
         ]
       }
+    },
+    {
+      version: 3,
+      definition: 'fa37820985700e06',
+      guidance: [
+        '8bea4c217b1a3a42'
+      ],
+      members: {
+        'data-engineer': [
+          '22abaff74371f717'
+        ],
+        analyst: [
+          'd5948db7ae4d6df2'
+        ],
+        reviewer: [
+          'a495f5d40c9a993d'
+        ],
+        'red-team': [
+          'e1723bdee82b6101'
+        ]
+      }
     }
   ],
   general: [
@@ -415,6 +562,28 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
         ],
         'red-team': [
           'd9781385bbf1e3e2'
+        ]
+      }
+    },
+    {
+      version: 2,
+      definition: '066cf2f98ea11d1f',
+      guidance: [
+        'b21a9409e27609eb'
+      ],
+      members: {
+        planner: [
+          '5aaacce107f47588',
+          '4be1563ebc1bc616'
+        ],
+        implementer: [
+          '7d452a11763e2225'
+        ],
+        reviewer: [
+          '84faac28c689dc9b'
+        ],
+        'red-team': [
+          '1625ec52a826996b'
         ]
       }
     }
