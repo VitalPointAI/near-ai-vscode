@@ -612,8 +612,11 @@ test('SECURITY.md, README and CHANGELOG say Public requests go over the proven c
   assert.ok(readme.includes('A **trust badge** under each cloud answer of the lead agent says'));
   assert.ok(readme.includes('It is on the lead agent\'s answers only; a helper agent\'s answer has none.'));
   assert.ok(readme.includes('At a level that needs an attested cloud a mismatch refuses the request; at other levels it is sent without the key held and the badge says so.'));
-  const unreleased = flat(CHANGELOG.slice(CHANGELOG.indexOf('## Unreleased'), CHANGELOG.indexOf('\n## ', CHANGELOG.indexOf('## Unreleased') + 5)));
-  assert.ok(unreleased.includes('**Public chats over the proven connection too.**'));
-  assert.ok(unreleased.includes('Levels that need an attested cloud still refuse on a mismatch.'));
-  for (const text of [badge, unreleased]) { assert.ok(!text.includes(EM_DASH)); assert.doesNotMatch(text, /NEAR organization/); }
+  // Found by its own words wherever it sits (under "## Unreleased" before the release that ships it, under its version after), like the entries above,
+  // so the release step that renames the section does not break this test.
+  const entry = flat(CHANGELOG.split(/\n(?=## )/).slice(1).find((section) => section.includes('**Public chats over the proven connection too.**')) ?? '');
+  assert.match(entry, /^## (?:Unreleased|\d+\.\d+\.\d+)/, 'the entry sits under Unreleased or a release heading');
+  assert.ok(entry.includes('**Public chats over the proven connection too.**'));
+  assert.ok(entry.includes('Levels that need an attested cloud still refuse on a mismatch.'));
+  for (const text of [badge, entry]) { assert.ok(!text.includes(EM_DASH)); assert.doesNotMatch(text, /NEAR organization/); }
 });
