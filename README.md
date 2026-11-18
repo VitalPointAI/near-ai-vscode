@@ -1182,7 +1182,10 @@ copy of Open-GSD to a project that doesn't already have one.
   the project, and agents cannot read what your clearances do not cover. Add a
   clearance with **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy Draft**.
   A chat's label rises with what its agents read and decides where its content
-  is sent; only you lower it, with **NEAR AI: Lower This Chat's Label** and a
+  is sent. Content at a level that needs a private cloud model goes to NEAR AI
+  Cloud only over a connection proven to end inside its private hardware, and
+  each such answer is checked afterwards; otherwise it stays on this computer.
+  Only you lower a chat's label, with **NEAR AI: Lower This Chat's Label** and a
   reason. Click the chat's label beside the model to run it, or use the button
   under a refusal that names it; lowering a file's label does not lower a chat
   that already read it. Labels and routing are an organizational control that helps prevent
