@@ -330,3 +330,9 @@ body.vscode-high-contrast .stars input:focus-visible + label { outline-color: va
   .tabs .tab { padding: 6px 8px; }
   .member-box { padding: 8px; }
 }
+
+/* Staff teams: gold is a person's decision, violet is agent work (Staff Room colour language), from the theme's own chart colours. */
+.staff-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; font-size: 0.9em; }
+.staff-legend span, .badge.staff-person, .badge.staff-agent { border-radius: 999px; padding: 1px 8px; border: 1px solid; }
+.staff-person { color: var(--vscode-charts-yellow); border-color: var(--vscode-charts-yellow); }
+.staff-agent { color: var(--vscode-charts-purple); border-color: var(--vscode-charts-purple); }

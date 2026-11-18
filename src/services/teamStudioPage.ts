@@ -34,7 +34,7 @@ function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: st
   }]));
 }
 import { isAbliteratedModel } from '../domain/cyberModel';
-import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAgentModel, type DirectoryInput, type DirectoryModel, type ToolStatus, type ToolsDirectory } from './toolsDirectory';
+import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAgentModel, type DirectoryInput, type DirectoryTool, type DirectoryModel, type ToolStatus, type ToolsDirectory } from './toolsDirectory';
 
 // NEAR AI Team Studio: a guided, visual way to build and manage agent teams. The team Markdown
 // files stay the source of truth; the studio reads them, writes them through TeamLibrary (so
@@ -45,7 +45,8 @@ import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAge
 export type StudioTarget = 'project' | 'user';
 
 /** `words`: what the tool's manifest says it can do, from the same sentences the Tools page shows (GATE-03, D-07); the member card shows them beside the tool. */
-export interface StudioTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; words: string[] }
+/** `server`: a built-in staff server's tool (or its whole-server grant, `mcp:<id>`): the picker groups it under that server, and only a staff team's run gets it. */
+export interface StudioTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; words: string[]; server?: { id: string; name: string } }
 export interface StudioRole { id: string; label: string; description: string; source: 'team' | 'gsd'; suggestion: string; tools: string[] | null; model: string }
 /** `name`: the team's own name (startingPointTeamName), set by buildStudioContext so the page never works one out. */
 export interface StudioStartingPoint { id: string; group: 'recommend' | 'project-type' | 'gsd' | 'empty'; label: string; name?: string; description: string; members: string[] }
@@ -68,7 +69,7 @@ export interface StudioMemberModel { tier: string; model: string; privacy: Direc
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
 /** `icon` (0.4.30): the team's own icon as a PNG data URI, checked; absent when the team shows the default (initials on a colour, drawn by the page). */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; /** The person's own rating (1 to 5 stars), from the ratings kept on this computer by the team's identity; never from or into the file. */ rating?: number; /** Host only: a `rating:` line an earlier build wrote into the file, read once into the kept ratings. */ legacyRating?: number; /** What the free local check finds in it, counted. */ check?: CheckCounts; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; /** A military staff section team: its section and the named person's role who decides. */ staff?: { section: string; humanLead?: string }; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; /** The person's own rating (1 to 5 stars), from the ratings kept on this computer by the team's identity; never from or into the file. */ rating?: number; /** Host only: a `rating:` line an earlier build wrote into the file, read once into the kept ratings. */ legacyRating?: number; /** What the free local check finds in it, counted. */ check?: CheckCounts; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -263,7 +264,19 @@ const GSD_TEMPLATES: Array<{ id: string; label: string; description: string; mem
 ];
 
 function studioTools(directory: ToolsDirectory): StudioTool[] {
-  return directory.tools.map((tool) => ({ name: tool.name, description: tool.description, capability: tool.capability, status: tool.status, statusText: tool.statusText, words: tool.words }));
+  const entry = (tool: DirectoryTool, server?: StudioTool['server']): StudioTool => ({ name: tool.name, description: tool.description, capability: tool.capability, status: tool.status, statusText: tool.statusText, words: tool.words, ...(server ? { server } : {}) });
+  // A built-in staff server's tools are grouped under the server, after the tools every run gets, with the whole-server grant first (what the staff
+  // templates write). The grant runs the way its strictest tool does under the approval mode.
+  const serverOf = new Map(directory.staffServers.flatMap((server) => server.tools.map((tool) => [tool.name, { id: server.id, name: server.name }] as const)));
+  const rank: Record<ToolStatus, number> = { runs: 0, 'auto-checked': 1, asks: 2, off: 3, stopped: 4 };
+  const listed = new Set(directory.tools.map((tool) => tool.name));
+  const staff = directory.staffServers.flatMap((server) => {
+    const tag = { id: server.id, name: server.name };
+    const strictest = server.tools.reduce<DirectoryTool | undefined>((worst, tool) => (!worst || rank[tool.status] > rank[worst.status] ? tool : worst), undefined);
+    const grant: StudioTool = { name: server.grant, description: `Every tool of ${server.name.replace(/ \(built in\)$/, '')}. ${server.description}`, capability: strictest?.capability ?? 'read', status: strictest?.status ?? 'asks', statusText: strictest?.statusText ?? '', words: [], server: tag };
+    return [grant, ...server.tools.filter((tool) => !listed.has(tool.name)).map((tool) => entry(tool, tag))];
+  });
+  return [...directory.tools.map((tool) => entry(tool, serverOf.get(tool.name))), ...staff];
 }
 
 /** Everything the studio's pickers need, computed from the Tools directory (the same sources a run uses). */
@@ -398,6 +411,7 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
       ...(entry.error ? { error: plainTeamError(entry.error, entry.file) } : {}),
       ...(team && teamIsPrivate(team) ? { private: true } : {}),
+      ...(team?.staff ? { staff: { section: team.staff.section, ...(team.staff.humanLead ? { humanLead: team.staff.humanLead } : {}) } } : {}),
       ...(!entry.project && pending.has(path.resolve(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
@@ -508,6 +522,7 @@ export type StudioMessage =
   | { type: 'create'; draft: TeamDraft; target: StudioTarget; projectType?: { id: string; goal: string }; clone?: true }
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string; path?: BuilderPath }
   | { type: 'optimise-all' }
+  | { type: 'staff-setup' }
   | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
   /**
@@ -626,6 +641,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       return draft ? { type: 'review', seq: message.seq as number, draft, ...(message.id !== undefined ? { id: message.id as string } : {}), ...(message.clone ? { clone: true as const } : {}) } : undefined;
     }
     case 'optimise-all': return isPlain(message) && exactKeys(message, ['type']) ? { type: 'optimise-all' } : undefined;
+    case 'staff-setup': return exactKeys(message, ['type']) ? { type: 'staff-setup' } : undefined;
     case 'draft-team': {
       if (!exactKeys(message, ['type', 'idea'], ['outputFormat', 'depth', 'private']) || !text(message.idea, 2000) || !message.idea.trim()) return undefined;
       if (message.private !== undefined && typeof message.private !== 'boolean') return undefined;
@@ -745,6 +761,8 @@ export interface TeamStudioDeps {
   openSetting(key: string): Promise<unknown>;
   /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
   updateTeam?(file: string): Promise<unknown>;
+  /** NEAR AI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
+  setUpStaffTeam?(): Promise<unknown>;
   /** 0.4.28: whether a run of the team with this slug is going now, and opening Team Live to watch it. */
   liveRun?(slug: string): boolean;
   /** Opens Team Live; with a run id, on that run. */
@@ -1684,6 +1702,12 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'open-markdown': {
         const file = fileFor(message.id, ['project', 'user', 'archived']);
         if (file) await deps.openFile(file);
+        return;
+      }
+      case 'staff-setup': {
+        if (!deps.setUpStaffTeam) return;
+        await deps.setUpStaffTeam();
+        await refresh();
         return;
       }
       case 'update-team': {

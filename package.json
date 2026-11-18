@@ -157,6 +157,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.setUpStaffTeam",
+        "title": "Set Up a Staff Team",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.loadStaffScenario",
         "title": "Load Staff Exercise Scenario",
         "category": "NEAR AI"

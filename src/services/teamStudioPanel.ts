@@ -161,6 +161,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     openFile: async (file) => vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false, viewColumn: vscode.ViewColumn.Beside }),
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
     updateTeam: (file) => Promise.resolve(vscode.commands.executeCommand('nearAi.updateTeam', file)),
+    setUpStaffTeam: () => Promise.resolve(vscode.commands.executeCommand('nearAi.setUpStaffTeam')),
     liveRun: (slug) => sharedActivityFeed().agentStats().some((stat) => stat.team === slug && stat.status === 'running' && stat.agentId === `main-${stat.runId}`),
     watchLive: (runId) => Promise.resolve(runId ? vscode.commands.executeCommand('nearAi.openTeamLive', runId) : vscode.commands.executeCommand('nearAi.openTeamLive')),
     // The dashboard (0.4.31): the open project's run history, the team runs going now, and a notification when one starts or ends.

@@ -536,6 +536,13 @@
     return Math.floor(minutes / 60) + ' h' + (minutes % 60 ? ' ' + (minutes % 60) + ' min' : '');
   }
 
+  // Staff teams: gold is a person's decision, violet is agent work (the Staff Room's colour language), always with words, never colour alone.
+  function staffLegend() {
+    const legend = el('p', 'staff-legend');
+    legend.append(el('span', 'staff-person', 'A named person decides'), document.createTextNode(' '), el('span', 'staff-agent', 'Agents draft and recommend'));
+    return legend;
+  }
+
   function renderLibrary(root) {
     const bar = el('div', 'toolbar');
     const heading = el('h2', '', 'Your teams'); heading.id = 'library-title';
@@ -547,9 +554,12 @@
     // 0.4.19 review: it said "This takes a few minutes", and six members on three models can run for hours. The host asks first and states the ceiling
     // worked out from the runs, so the button only says the run is coming, not how long it takes.
     actions.append(button('Optimise all teams', () => { announce('Testing every team to set its models. The cost and the longest it can take are asked before anything runs.'); vscode.postMessage({ type: 'optimise-all' }); }, { label: 'Test every team and set each member model from what the tests found, after asking about the cost', id: 'optimise-all' }));
+    // A military staff section (J2 intelligence or J5 plans) for this project's doctrine profile: the questions are asked in VS Code, then it is listed here.
+    actions.append(button('Set up a staff team', () => { announce('Choose the section, doctrine profile and level in the questions at the top of the window.'); vscode.postMessage({ type: 'staff-setup' }); }, { label: 'Set up a military staff team (J2 intelligence or J5 plans) for this project\'s doctrine profile', id: 'staff-setup' }));
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
+    if (lib.teams.some((team) => team.staff)) root.append(staffLegend());
 
     if (savedDraft) {
       const resume = el('div', 'resume');
@@ -684,6 +694,8 @@
     head.append(teamIcon(team.name, team.icon), title, kindBadge(team));
     // 0.4.27: a private team (marked private, or every member private) runs and is reviewed only on private models.
     if (team.private) head.append(badge('Private', 'kind private', 'Every member runs only on a private model (NEAR TEE or this machine), and Improve with AI uses only a private model.'));
+    // A staff section team: who decides in gold, that its members draft in violet (the Staff Room's colours, with words).
+    if (team.staff) head.append(badge('Staff ' + team.staff.section.toUpperCase(), 'staff-agent', 'A military staff section team. Its members draft and recommend.'), badge((team.staff.humanLead || 'A named person') + ' decides', 'staff-person', 'Only a named person approves, rejects and releases its products, with the NEAR AI: Staff commands.'));
     card.setAttribute('aria-labelledby', title.id);
     card.append(head);
     // The status, as words in a pill (never colour alone), and Watch it live while it runs.
@@ -1508,8 +1520,13 @@
 
   function toolGroups() {
     const groups = new Map();
-    for (const tool of ctx ? ctx.tools : []) { if (!groups.has(tool.capability)) groups.set(tool.capability, []); groups.get(tool.capability).push(tool); }
-    return [...CAPABILITY_ORDER.filter((cap) => groups.has(cap)), ...[...groups.keys()].filter((cap) => !CAPABILITY_ORDER.includes(cap))].map((cap) => ({ capability: cap, tools: groups.get(cap) }));
+    const servers = new Map();
+    for (const tool of ctx ? ctx.tools : []) {
+      // A built-in staff server's tools sit together under the server, after the tools every run gets: only a staff team's run is given them.
+      if (tool.server) { if (!servers.has(tool.server.id)) servers.set(tool.server.id, { capability: 'staff:' + tool.server.id, legend: tool.server.name + ': staff teams only', tools: [] }); servers.get(tool.server.id).tools.push(tool); continue; }
+      if (!groups.has(tool.capability)) groups.set(tool.capability, []); groups.get(tool.capability).push(tool);
+    }
+    return [...[...CAPABILITY_ORDER.filter((cap) => groups.has(cap)), ...[...groups.keys()].filter((cap) => !CAPABILITY_ORDER.includes(cap))].map((cap) => ({ capability: cap, tools: groups.get(cap) })), ...servers.values()];
   }
   const toolByName = (name) => (ctx ? ctx.tools : []).find((tool) => tool.name === name);
 
@@ -1538,12 +1555,12 @@
       bar.append(label,
         button('Read-only', () => { member.tools = READ_ONLY.slice(); work.openTools = index; changed(true); }, { label: 'Give ' + member.name + ' read-only tools' }),
         button('Read & edit', () => { member.tools = READ_EDIT.slice(); work.openTools = index; changed(true); }, { label: 'Give ' + member.name + ' read and edit tools' }),
-        button('Everything', () => { member.tools = (ctx ? ctx.tools : []).filter((tool) => tool.status !== 'off').map((tool) => tool.name); work.openTools = index; changed(true); }, { label: 'Give ' + member.name + ' every available tool' }));
+        button('Everything', () => { member.tools = (ctx ? ctx.tools : []).filter((tool) => tool.status !== 'off' && !tool.server).map((tool) => tool.name); work.openTools = index; changed(true); }, { label: 'Give ' + member.name + ' every available tool' }));
       details.append(bar);
       const runs = []; const asks = [];
       for (const group of toolGroups()) {
         const set = el('fieldset', 'tool-group');
-        set.append(el('legend', '', CAPABILITY_LABEL[group.capability] || group.capability));
+        set.append(el('legend', '', group.legend || CAPABILITY_LABEL[group.capability] || group.capability));
         for (const tool of group.tools) {
           const id = 'm-tool-' + index + '-' + tool.name;
           const box = el('input'); box.type = 'checkbox'; box.id = id; box.checked = chosen.includes(tool.name); box.disabled = member.tools === null;

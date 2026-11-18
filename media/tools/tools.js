@@ -136,6 +136,29 @@
       list.append(item);
     }
     root.append(list);
+    renderStaffServers(root, data.staffServers || []);
+  }
+
+  // The built-in staff servers: only a staff team's run gets them, and a member only when its tools line names the server or the tool.
+  function renderStaffServers(root, servers) {
+    if (!servers.length) return;
+    root.append(el('h3', '', 'Built-in staff servers'), el('p', 'hint', 'Given only to a military staff team (a team file with a staff: block), to members whose tools line names the server, such as mcp:staff-products, or one of its tools. Agents recommend; a person approves, rejects and releases with the NEAR AI: Staff commands, and no tool can.'));
+    const list = el('ul', 'list'); list.setAttribute('aria-label', 'Built-in staff servers');
+    for (const server of servers) {
+      const item = row('li', [server.name, server.grant, server.description, ...server.tools.map((tool) => tool.name + ' ' + tool.description)]);
+      const head = el('div', 'item-head');
+      head.append(el('strong', 'name', server.name), el('code', '', server.grant));
+      item.append(head, el('p', 'desc', server.description));
+      const tools = el('ul', 'members');
+      for (const tool of server.tools) {
+        const line = el('li');
+        line.append(el('code', '', tool.name), document.createTextNode(' '), badge(tool.capability, 'capability', 'Capability'), statusBadge(tool.status, tool.statusText), el('span', 'hint', ' ' + tool.description));
+        tools.append(line);
+      }
+      item.append(tools);
+      list.append(item);
+    }
+    root.append(list);
   }
 
   function renderMcp(data) {
