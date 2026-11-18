@@ -205,7 +205,9 @@ test('the 13 tools a run has only in a special setting are on the Tools page wit
 test('the team studio pickers offer the 13 tools with their words, and TeamKnowledge is no longer warned about as not built in', () => {
   const studio = buildStudioContext(directoryInput(), { hasProject: true, knowledgeBase: false });
   const names = studio.tools.map((tool) => tool.name);
-  assert.deepEqual(names, EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
+  assert.deepEqual(names.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
+  // After the catalog: each built-in staff server's whole-server grant, and the staff tools that are not catalog tools (the intel-workbench's).
+  assert.ok(names.slice(EXPECTED_ORDER.length).every((name) => /^mcp:(?:staff-products|guard-scan|intel-workbench)$/.test(name) || name.startsWith('mcp__intel-workbench__')), 'only staff server entries follow the catalog');
   const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
   for (const name of [...CYBER_TOOLS, 'TeamKnowledge', 'Learn']) assert.deepEqual(studio.tools.find((tool) => tool.name === name)!.words, describeManifest(byName.get(name)!.manifest!), `${name} words in the picker`);
   const draft = { name: 'k', description: '', members: [{ name: 'a', role: '', model: '', tools: ['TeamKnowledge', 'Learn', 'CyberHttpProbe', 'Teleport'], instructions: 'x' }] } as unknown as Parameters<typeof reviewDraft>[0];
