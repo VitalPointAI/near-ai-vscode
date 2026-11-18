@@ -789,16 +789,18 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     if (credentialFile !== undefined) this.grants.noteCredentialRead(credentialFile);
     // The same hook raises the chat's mark by the labels of what the call reads, before it runs, so a read that fails or is cancelled still counts (D-54).
     // One shared hook raises the mark and, once the call is done, feeds what it read to the fingerprints (D-54, D-60), so the two never diverge.
+    // The read is settled in a finally (PR #87 review round 5): no throw between here and the call's end can leave it open, which would refuse every call
+    // that could send for the rest of the chat.
     const read = beginLabelledRead(this.gate, this.grants, gateCall.readLabels, gateCall.maySend, tool.name, { model: this.options.model });
     const ranAt = Date.now();
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
-    // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
-    if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
-    // What a search returns raises the mark by its paths' labels before the results reach the model (CLAS-04); labels that cannot be read fail the call.
-    context.noteRead = async (relativePaths) => {
-      read.add(await labelsOfPaths(this.gate, context.root, relativePaths));
-    };
     try {
+      // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
+      if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
+      // What a search returns raises the mark by its paths' labels before the results reach the model (CLAS-04); labels that cannot be read fail the call.
+      context.noteRead = async (relativePaths) => {
+        read.add(await labelsOfPaths(this.gate, context.root, relativePaths));
+      };
       let output: string;
       try {
         output = await tool.run(input, context);
@@ -820,6 +822,8 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     } catch (error) {
       if (signal.aborted) return this.finish(call.id, false, 'Cancelled.');
       return this.finish(call.id, false, `Error: ${(error as Error).message}`);
+    } finally {
+      read.settle(undefined);
     }
   }
 

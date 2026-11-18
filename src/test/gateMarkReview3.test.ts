@@ -25,8 +25,9 @@ import { CyberEvidenceStore, CyberLedgerStore } from '../services/cyberLedgerSto
 import { startCyberRun } from '../services/cyberRun';
 import type { CyberRunEvent, RunTool } from '../services/cyberRun';
 import { testGateRuntime } from './helpers/gatedRuns';
-import { grantsAt, keys, label, labelledProject } from './helpers/markFixtures';
+import { call, grantsAt, keys, label, labelledProject, runWith } from './helpers/markFixtures';
 
+let LAST_SCAN_GRANTS: RunGrants | undefined;
 const LINE = 'Quarterly figures show the river office spent four hundred thousand on contractors last year.';
 const ACCEPTANCE: DisclaimerAcceptance = { acceptor: 'Example Organisation Ltd', osUser: 'test-user', machine: 'test-machine', extensionVersion: '0.4.10', textVersion: 'v1', region: 'us', acceptedAt: '2026-10-31T12:00:00Z' };
 const SCOPE = { hosts: ['example.test'], ports: [443], paths: [], exclusions: [] };
@@ -45,7 +46,7 @@ class ScriptedModel {
 }
 
 /** A cyber scan with two steps: MemoRead reads memo.md (org/Internal), then Upload sends the memo's line in its arguments, not in a command. */
-async function scan(): Promise<{ uploads: string[]; events: CyberRunEvent[]; grants: RunGrants; records: DecisionRecord[] }> {
+async function scan(onEvent?: (event: CyberRunEvent) => void): Promise<{ uploads: string[]; events: CyberRunEvent[]; grants: RunGrants; records: DecisionRecord[] }> {
   const root = labelledProject({ entries: { 'memo.md': label('org', 'Internal') } });
   writeFileSync(path.join(root, 'memo.md'), `${LINE}\n`);
   const memoRead: AgentTool<{ path: string }> = {
@@ -70,6 +71,7 @@ async function scan(): Promise<{ uploads: string[]; events: CyberRunEvent[]; gra
   const shell = new ShellSession(root);
   const context: ToolContext = { root, signal: new AbortController().signal, checkpoints: new RunCheckpoints('r3'), shell, readFiles: new Set() };
   const grants = new RunGrants();
+  LAST_SCAN_GRANTS = grants;
   grants.mark = new SessionMark([label('org', 'Public')]);
   grants.outbound = new OutboundFingerprints();
   const gate = testGateRuntime();
@@ -84,7 +86,7 @@ async function scan(): Promise<{ uploads: string[]; events: CyberRunEvent[]; gra
       engagement, currentAcceptance: { region: 'us', scope: scopeFingerprint(SCOPE), extensionVersion: '0.4.10', textVersion: 'v1' },
       driver: new ScriptedModel(replies) as never, tools, ledger: new CyberLedgerStore(directory), evidence: new CyberEvidenceStore(directory), grants,
       policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }),
-      signal: new AbortController().signal, toolContext: context, gate, now: () => new Date('2026-11-17T12:00:00Z'), onEvent: (event) => events.push(event)
+      signal: new AbortController().signal, toolContext: context, gate, now: () => new Date('2026-11-17T12:00:00Z'), onEvent: (event) => { events.push(event); onEvent?.(event); }
     });
   } finally {
     shell.dispose();
@@ -150,4 +152,54 @@ test('review 3.1: one shared hook raises a mark from content and feeds its finge
   const users = [...text].filter(([, source]) => /beginLabelledRead\(/.test(source)).map(([file]) => file).sort();
   assert.deepEqual(users, ['agent/gateAdapter.ts', 'agent/loop.ts', 'services/cyberRun.ts']);
   assert.ok(!/export function raiseRunMark/.test(text.get('agent/gateAdapter.ts') ?? ''), 'the raise alone is not exported');
+});
+
+// ---- PR #87 review round 5: no path can leave a labelled read open ----
+
+test('review 5.1: when the label filter throws after a labelled read opened, the read is settled, and the next call is not refused as unchecked', async () => {
+  const gateLabels = require('../agent/gateLabels') as { labelReadFilter: unknown };
+  const real = gateLabels.labelReadFilter;
+  const root = labelledProject({ entries: { 'memo.md': label('org', 'Internal') } });
+  writeFileSync(path.join(root, 'memo.md'), `${LINE}\n`);
+  const runtime = testGateRuntime();
+  const grants = grantsAt([label('org', 'Public')]);
+  gateLabels.labelReadFilter = async () => { throw new Error('the label filter failed'); };
+  let outputs: string[];
+  try {
+    outputs = (await runWith(root, [call('r1', 'Read', { file_path: 'memo.md' })], grants, runtime)).outputs;
+  } finally {
+    gateLabels.labelReadFilter = real;
+  }
+  assert.match(outputs[0] ?? '', /^Error: the label filter failed/, 'the call failed with the filter\'s error');
+  assert.deepEqual(keys(grants.mark!.current()), ['org/Internal'], 'the read still raised the mark');
+  assert.equal(grants.outbound!.pending, 0, 'and was settled');
+  const next = await gateToolCall(runtime, { tool: webFetchTool, raw: { url: 'https://example.test/?q=weather' }, root, callId: 'f', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, grants, buildAuto: async () => undefined });
+  assert.notEqual(next.decision.reason, OUTBOUND_UNCHECKED_TEXT);
+  assert.ok(!next.decision.rule.startsWith('label.'), next.decision.rule);
+});
+
+test('review 5.1: when a cyber scan\'s event listener throws as a step starts, the step\'s read is settled', async () => {
+  let grantsSeen: RunGrants | undefined;
+  await scan((event) => { if (event.type === 'step-started') throw new Error('the panel went away'); }).then(
+    (done) => { grantsSeen = done.grants; },
+    () => undefined
+  );
+  // The scan either stopped with the listener's error or carried on; either way no read is left open.
+  const pendingAfter = grantsSeen?.outbound?.pending ?? LAST_SCAN_GRANTS?.outbound?.pending;
+  assert.equal(pendingAfter, 0);
+});
+
+test('review 5.1: every runner settles its labelled read in a finally', () => {
+  const src = path.join(__dirname, '..', '..', 'src');
+  for (const file of ['agent/loop.ts', 'services/cyberRun.ts']) {
+    const source = readFileSync(path.join(src, ...file.split('/')), 'utf8');
+    const at = source.indexOf('const read = beginLabelledRead(');
+    assert.ok(at >= 0, file);
+    const after = source.slice(at);
+    const finallyAt = after.indexOf('} finally {');
+    assert.ok(finallyAt > 0 && /^\s*read\.settle\(undefined\);/.test(after.slice(finallyAt + '} finally {'.length)), `${file} settles the read in a finally`);
+    const tryAt = after.indexOf('try {');
+    const awaitAt = after.indexOf('await ');
+    assert.ok(tryAt > 0 && (awaitAt < 0 || tryAt < awaitAt), `${file} opens its try before anything it awaits`);
+  }
 });
