@@ -533,8 +533,9 @@ test('SECURITY.md carries CONNECTION_BINDING_TEXT after the attested-cloud sente
 
 test('Checking a response\'s signature says answers at attested-cloud levels are checked automatically, and Known limitations has both rows', () => {
   const signature = flat(sectionOf(SECURITY, '### Checking a response\'s signature'));
-  assert.ok(signature.includes(flat('is checked this way automatically, in the background, after it arrives')));
-  assert.ok(signature.includes(flat('A failed check shows **Check again**, which always fetches a fresh report.')));
+  assert.ok(signature.includes(flat('every answer NEAR AI Cloud sends, tool-call turns and helper agents\' answers included, is checked this way automatically, in the background, after it arrives.')));
+  assert.ok(signature.includes(flat('A failed check shows **Check again**, which checks the failed answers again with a fresh report.')));
+  assert.ok(!signature.includes(flat('Tool-call turns are signed the same way but are not checked.')), 'tool-call turns are checked at attested-cloud levels now');
   const limits = sectionOf(SECURITY, '## Known limitations');
   assert.ok(limits.includes('The check of an answer\'s attestation and signature runs after the answer, so it cannot stop that answer\'s request; a failed check stops the next ones.'));
   assert.ok(limits.includes('The check that a connection ends inside the enclave relies on NEAR AI Cloud\'s attestation and Intel\'s root of trust. Like the answer check, it does not check the platform\'s TCB status, certificate revocation or which code the enclave runs.'));

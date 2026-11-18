@@ -69,13 +69,6 @@ NEAR's reference verifier (`nearai/nearai-cloud-verifier`) and checks that:
 4. The quote's `report_data` binds the signing address and the fresh nonce, and
    any GPU evidence echoes the nonce.
 
-An answer at a level that needs an attested cloud (see
-[Classification labels and routing](#classification-labels-and-routing)) is
-checked this way automatically, in the background, after it arrives, and the
-result shows under the answer. For these automatic checks a report NEAR AI has
-already verified for the same signing key is reused for up to ten minutes. A
-failed check shows **Check again**, which always fetches a fresh report.
-
 The result names which key signed. **NEAR AI's gateway key** (seen for
 tool-calling responses) proves the exchange passed unaltered through NEAR's
 attested gateway. It does not by itself prove which enclave ran the model,
@@ -92,7 +85,18 @@ What is **not** checked in the editor, and the result says so:
 
 For those, use [cloud.near.ai/verify](https://cloud.near.ai/verify) or NEAR's
 verifier. Only the final answer of a run is offered for verification. Tool-call
-turns are signed the same way but are not checked.
+turns are signed the same way; they are checked only at a level that needs an
+attested cloud, as below.
+
+At a level that needs an attested cloud (see
+[Classification labels and routing](#classification-labels-and-routing)), every
+answer NEAR AI Cloud sends, tool-call turns and helper agents' answers included,
+is checked this way automatically, in the background, after it arrives. The
+final answer's result shows under it, and a failed check of any answer of the
+run shows there too. For these automatic checks a report NEAR AI has already
+verified for the same signing key is reused for up to ten minutes. A failed
+check shows **Check again**, which checks the failed answers again with a fresh
+report.
 
 ### What the agent can do without asking
 
