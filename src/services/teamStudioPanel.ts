@@ -283,7 +283,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       const rows = leaderboardRows(runs, tasks, active?.models ?? [], [], Date.now());
       return suggestForTeam(rows, members);
     },
-    ask: (prompt, value) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? undefined : 'Enter a name.' })),
+    ask: (prompt, value, validate) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? validate?.(text) : 'Enter a name.' })),
     // A share file is <team>.near-team.json; the dialog filters on its last extension, json. A team .md file can be imported too.
     pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(rootNow() ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
     pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'NEAR AI team': ['json', 'md'] }, title: 'Import a NEAR AI team', canSelectMany: false }))?.[0]?.fsPath,

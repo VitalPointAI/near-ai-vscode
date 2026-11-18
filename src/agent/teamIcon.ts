@@ -128,10 +128,23 @@ function plain(text: string, max: number): string {
  * What an image model is asked for an icon: the team's name and what it is for, nothing else from the team (not its members, instructions or models).
  * SECURITY.md says this is what leaves the computer when the image model is not a private one.
  */
-export function teamIconPrompt(team: { name: string; description: string }): string {
+export function teamIconPrompt(team: { name: string; description: string }, variation?: number): string {
   const name = plain(team.name, 80) || 'team';
   const purpose = plain(team.description, 300);
-  return `A simple, flat square app icon for a team called "${name}".${purpose ? ` What the team does: ${purpose}${/[.!?]$/.test(purpose) ? '' : '.'}` : ''} One bold symbol centred on a plain background, readable at small sizes. No text, letters or numbers.`;
+  return `A simple, flat square app icon for a team called "${name}".${purpose ? ` What the team does: ${purpose}${/[.!?]$/.test(purpose) ? '' : '.'}` : ''} One bold symbol centred on a plain background, readable at small sizes.${variation === undefined ? '' : ` ${iconVariation(variation)}`} No text, letters or numbers.`;
+}
+
+// A per-request variation (owner, 2026-11-18: a clone's generated icon came out the same as the icon of the team it was copied from). An image model can
+// answer the same prompt with the same picture, so each request also names a colour scheme and a drawing style, chosen at random by the caller. It adds
+// nothing from the team: what leaves the computer is still only the team's name and what it is for.
+const ICON_PALETTES = ['warm reds and oranges', 'cool blues and teals', 'greens and earth tones', 'purples and magentas', 'gold on deep navy', 'one bright accent on greys', 'soft pastel colours', 'black with one vivid colour'];
+const ICON_STYLES = ['rounded, friendly shapes', 'sharp geometric shapes', 'clean line art', 'a bold filled silhouette', 'a soft gradient', 'a badge or emblem shape'];
+/** How many different variations there are; a variation is a whole number from 0 up to this, exclusive. */
+export const ICON_VARIATIONS = ICON_PALETTES.length * ICON_STYLES.length;
+/** The words one variation adds to the prompt. Any number is taken modulo ICON_VARIATIONS. */
+export function iconVariation(variation: number): string {
+  const index = ((Math.floor(variation) % ICON_VARIATIONS) + ICON_VARIATIONS) % ICON_VARIATIONS;
+  return `Use ${ICON_PALETTES[index % ICON_PALETTES.length]}, drawn with ${ICON_STYLES[Math.floor(index / ICON_PALETTES.length)]}.`;
 }
 
 // ---- the front matter's icon line ----

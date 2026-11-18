@@ -15,10 +15,10 @@ import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify, TeamLibrary, teamKnowled
 import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
-import { attachTeamStudio, buildStudioContext, KEPT_WIZARD_TEXT, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, png, SVG, WEBP } from './iconFixtures';
-import { withIconReference } from '../agent/teamIcon';
+import { iconVariation, ICON_VARIATIONS, teamIconPrompt, withIconReference } from '../agent/teamIcon';
 import { buildDashboard, type DashboardTeam } from '../domain/teamDashboard';
 import type { ActivitySessionSummary } from '../domain/activity';
 import { withTeamRating } from '../agent/teamFrontMatter';
@@ -2176,8 +2176,8 @@ test('page: with no project open, Use as is says it opens the team in chat, and 
   assert.equal(page.doc.getElementById('open-user-review-team')!.parent!.parent!.className.includes('flash'), true);
 });
 
-test('page: Clone and modify fills the Purpose step with "Copy of" a unique name, the description and Save it as, and Back returns to the picker', async () => {
-  const page = await builderPage({ teams: [WEB_CARD, { ...WEB_CARD, id: 'user:copy-of-web-team', name: 'Copy of Web team' }] });
+test('page: Clone and modify fills the Purpose step with "<name> copy" made unique, the description and Save it as, and Back returns to the picker', async () => {
+  const page = await builderPage({ teams: [WEB_CARD, { ...WEB_CARD, id: 'user:web-team-copy', name: 'Web team copy' }] });
   page.byLabel('New team')!.click();
   page.byLabel('Use an existing team')!.click();
   page.select('lib:web');
@@ -2186,7 +2186,7 @@ test('page: Clone and modify fills the Purpose step with "Copy of" a unique name
   page.dispatch({ type: 'starting-point', id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   assert.equal(page.heading(), 'Purpose');
   assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'));
-  assert.equal(page.doc.getElementById('f-name')!.value, 'Copy of Web team 2', 'unique among your teams');
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Web team copy 2', 'unique among your teams');
   assert.equal(page.doc.getElementById('f-desc')!.value, 'Builds pages');
   assert.match(page.text(), /Save it as/);
   assert.match(page.doc.getElementById('announce')!.textContent, /Cloned Web team/);
@@ -2207,7 +2207,7 @@ test('page: Clone and modify fills the Purpose step with "Copy of" a unique name
   page.byLabel('Clone Software development team and modify it')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'type:software', goal: 'Ship billing', locality: 'cloud' });
   page.dispatch({ type: 'starting-point', id: 'type:software', projectType: 'software', draft: { name: '', description: 'A software development team. Goal: Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
-  assert.equal(page.doc.getElementById('f-name')!.value, 'Software development team', 'the name it filled in before is replaced, since it was not changed');
+  assert.equal(page.doc.getElementById('f-name')!.value, 'Software development team copy', 'the name it filled in before is replaced, since it was not changed');
   assert.equal(page.doc.getElementById('f-desc')!.value, 'Ship billing');
   // Saved as the project's team, a project type still writes its AGENTS.md guidance.
   const project = page.radios('target').find((node) => node.value === 'project')!;
@@ -2215,7 +2215,8 @@ test('page: Clone and modify fills the Purpose step with "Copy of" a unique name
   assert.match(page.text(), /AGENTS\.md/);
   for (const step of ['Members', 'Models', 'Tools & permissions', 'Instructions & review']) page.byLabel(`Next: ${step}`)!.click();
   page.byLabel('Save project team')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'create', draft: { name: 'Software development team', description: 'Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] }, target: 'project', projectType: { id: 'software', goal: 'Ship billing' } });
+  // A clone: the host checks its name again when it saves (owner, 2026-11-18).
+  assert.deepEqual(page.posts.at(-1), { type: 'create', draft: { name: 'Software development team copy', description: 'Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] }, target: 'project', projectType: { id: 'software', goal: 'Ship billing' }, clone: true });
   // From scratch after a clone starts blank again.
   page.byLabel('Step 1 of 5: Purpose (done)')!.click();
   page.byLabel('Back')!.click();
@@ -2488,13 +2489,14 @@ test('page: a declined Use as is says Not changed and stays on the picker', asyn
 test('host: the picker carries the names Use as is saves under and a clone starts from, and they match what is saved, taken names included', async () => {
   const h = await harness();
   await h.library.create('Web team', teamMarkdown(draft()));
-  await h.library.create('Copy of Web team', teamMarkdown(draft({ name: 'Copy of Web team' })));
+  await h.library.create('Web team copy', teamMarkdown(draft({ name: 'Web team copy' })));
   await h.library.create('Review team', teamMarkdown(draft({ name: 'Review team' })));
+  await h.library.create('Review team copy', teamMarkdown(draft({ name: 'Review team copy' })));
   h.setRoot(undefined, false);
   await h.send({ type: 'ready' });
   const entry = (id: string, from = last(h, 'state').picker) => (from as any[]).find((candidate) => candidate.id === id);
-  assert.deepEqual([entry('gsd:review').saveAs, entry('gsd:review').cloneName], ['Review team 2', 'Review team 2']);
-  assert.deepEqual([entry('lib:web-team').cloneName, entry('lib:web-team').saveAs], ['Copy of Web team 2', undefined], 'a saved team is not saved again');
+  assert.deepEqual([entry('gsd:review').saveAs, entry('gsd:review').cloneName], ['Review team 2', 'Review team copy 2']);
+  assert.deepEqual([entry('lib:web-team').cloneName, entry('lib:web-team').saveAs], ['Web team copy 2', undefined], 'a saved team is not saved again');
   assert.equal(entry('type:software').saveAs, 'Software development team');
   const preview = entry('gsd:review').saveAs;
   await h.send({ type: 'use-team', id: 'gsd:review' });
@@ -2503,9 +2505,9 @@ test('host: the picker carries the names Use as is saves under and a clone start
   assert.equal(entry('gsd:review', last(h, 'library').picker).saveAs, 'Review team 3', 'the next preview moves on');
   // A clone's name comes with its members, resolved when it is made.
   await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
-  assert.equal(last(h, 'starting-point').cloneName, 'Copy of Web team 2');
+  assert.equal(last(h, 'starting-point').cloneName, 'Web team copy 2');
   await h.send({ type: 'starting-point', id: 'gsd:review', goal: '', locality: 'cloud' });
-  assert.equal(last(h, 'starting-point').cloneName, 'Review team 3');
+  assert.equal(last(h, 'starting-point').cloneName, 'Review team copy 2');
   h.close();
 });
 
@@ -4108,4 +4110,282 @@ test('page: Open and Update team have ids made from the card key like every othe
     assert.ok(page.doc.activeElement === page.byLabel(label), `${label}: focus kept`);
   }
   assert.doesNotMatch(await readFile(SCRIPT, 'utf8'), /id: '(?:open|update)-' \+ team\.id/, 'no control id is made from the raw team id');
+});
+
+// ---------- a clone has a name and an icon of its own (owner, 2026-11-18) ----------
+
+const BUILT_INS = [{ id: 'gsd:review', label: 'Review' }, { id: 'type:software', label: 'Software development' }, { id: 'recommend', label: 'Recommended' }, { id: 'empty', label: 'Start empty' }];
+const SAVED = [
+  { id: 'user:web-team', kind: 'user' as const, name: 'Web team' },
+  // Renamed after it was saved: its file is still web-crew.md.
+  { id: 'user:web-crew', kind: 'user' as const, name: 'Frontend' },
+  { id: 'project', kind: 'project' as const, name: 'Shop project team' }
+];
+
+test('a clone\'s name: no saved team, built-in team or project team may have it, ignoring case and compared by the file name it would get', () => {
+  const taken = takenTeamNames(SAVED, BUILT_INS);
+  assert.deepEqual(taken.map((name) => [name.name, name.by]), [['Web team', 'saved'], ['Frontend', 'saved'], ['Shop project team', 'project'], ['Review team', 'builtin'], ['Software development team', 'builtin'], ['Recommended team', 'builtin']], '"Start empty" is not a team');
+  // Case.
+  assert.match(cloneNameProblem('WEB TEAM', taken)!, /^"Web team" is already the name of one of your teams\. Give the new team a name of its own\.$/);
+  assert.match(cloneNameProblem('  web team ', taken)!, /already the name of one of your teams/);
+  // The file name it would be saved under (slug): punctuation and spaces do not make a name different.
+  assert.match(cloneNameProblem('Web-Team!', taken)!, /^"Web-Team!" is too close to "Web team", one of your teams: names are compared without capitals, spaces or punctuation\./);
+  // A saved team's file name, which its name has moved away from.
+  assert.match(cloneNameProblem('Web crew', taken)!, /^"Web crew" would be saved under the same file name as "Frontend", one of your teams\./);
+  // A built-in's name, and this project's team.
+  assert.match(cloneNameProblem('review team', taken)!, /^"Review team" is already the name of a built-in team\./);
+  assert.match(cloneNameProblem('Software Development Team', taken)!, /a built-in team/);
+  assert.match(cloneNameProblem('shop project team', taken)!, /this project's team/);
+  assert.match(cloneNameProblem('Recommended team', taken)!, /a built-in team/);
+  // Names that are free.
+  for (const free of ['Web team copy', 'New team', 'Review crew', 'Frontend 2', '']) assert.equal(cloneNameProblem(free, taken), undefined, free);
+  // Names with no letter or digit a file name can use all fall back to one file name; they are told apart by the name itself.
+  const scripts = takenTeamNames([{ id: 'user:team', kind: 'user', name: 'Équipe' }], []);
+  assert.equal(teamNameClash('Команда', [{ name: 'チーム', by: 'saved' }]), undefined);
+  assert.ok(teamNameClash('équipe', scripts), 'the same name in another case');
+  // The name a clone starts with.
+  assert.equal(cloneNameFor('Web team', taken), 'Web team copy');
+  assert.equal(cloneNameFor('Web team', takenTeamNames([...SAVED, { id: 'user:web-team-copy', kind: 'user', name: 'web team COPY' }], BUILT_INS)), 'Web team copy 2');
+  assert.equal(cloneNameFor('Review team', taken), 'Review team copy');
+  assert.equal(cloneNameFor('x'.repeat(80), taken).length <= 80, true);
+});
+
+test('message parsing: review and create say they are for a clone with clone: true and nothing else; an open team is never a clone', () => {
+  assert.deepEqual(parseStudioMessage({ type: 'review', seq: 1, draft: draft(), clone: true }), { type: 'review', seq: 1, draft: draft(), clone: true });
+  assert.deepEqual(parseStudioMessage({ type: 'create', draft: draft(), target: 'user', clone: true }), { type: 'create', draft: draft(), target: 'user', clone: true });
+  assert.deepEqual(parseStudioMessage({ type: 'create', draft: draft(), target: 'user' }), { type: 'create', draft: draft(), target: 'user' }, 'a team that is not a clone is as before');
+  for (const bad of [{ type: 'review', seq: 1, draft: draft(), clone: false }, { type: 'review', seq: 1, draft: draft(), clone: 'yes' }, { type: 'review', seq: 1, draft: draft(), id: 'user:web', clone: true }, { type: 'create', draft: draft(), target: 'user', clone: 1 }]) {
+    assert.equal(parseStudioMessage(bad), undefined, JSON.stringify(bad));
+  }
+});
+
+test('host: a clone\'s review and Save refuse a name a team has (case, file name, built-in), and a team that is not a clone is checked as before', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  const files = async () => (await h.library.list(undefined)).map((entry) => path.basename(entry.file)).sort();
+  const before = await files();
+  // The review the page shows under the name field.
+  await h.send({ type: 'review', seq: 1, draft: draft({ name: 'WEB team' }), clone: true });
+  assert.deepEqual(last(h, 'review').errors, [{ field: 'name', message: '"Web team" is already the name of one of your teams. Give the new team a name of its own.' }]);
+  await h.send({ type: 'review', seq: 2, draft: draft({ name: 'Web team copy' }), clone: true });
+  assert.deepEqual(last(h, 'review').errors, []);
+  await h.send({ type: 'review', seq: 3, draft: draft({ name: 'WEB team' }) });
+  assert.deepEqual(last(h, 'review').errors, [], 'From scratch, an AI draft and an open team are not checked this way');
+  // Save checks it again, whatever the page let through.
+  for (const name of ['web team', 'Web-Team', 'Review team', 'review TEAM']) {
+    await h.send({ type: 'create', draft: draft({ name }), target: 'user', clone: true });
+    const failed = last(h, 'save-failed');
+    assert.equal(failed.errors.length, 1, name);
+    assert.equal(failed.errors[0].field, 'name');
+    assert.match(failed.errors[0].message, /^"[^"]+" (is already the name of|is too close to) .*(one of your teams|a built-in team)/, name);
+    h.posted.length = 0;
+  }
+  assert.deepEqual(await files(), before, 'nothing was written');
+  // A team saved since the page last heard is seen too.
+  await h.library.create('Late team', teamMarkdown(draft({ name: 'Late team' })));
+  await h.send({ type: 'create', draft: draft({ name: 'late team' }), target: 'user', clone: true });
+  assert.match(last(h, 'save-failed').errors[0].message, /"Late team" is already the name of one of your teams/);
+  // Not a clone: saved as before, under a file name of its own.
+  await h.send({ type: 'create', draft: draft({ name: 'Web team' }), target: 'user' });
+  assert.ok((await files()).includes('web-team-2.md'));
+  h.close();
+});
+
+test('host: a saved clone never takes the source team\'s icon: the new team and a replaced project team show the default, and the person is told', async () => {
+  const h = await harness();
+  const source = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(source, icon);
+  await h.send({ type: 'ready' });
+  // Into My teams.
+  await h.send({ type: 'create', draft: draft({ name: 'Web team copy' }), target: 'user', clone: true });
+  const copy = path.join(h.library.directory, 'web-team-copy.md');
+  assert.equal(last(h, 'team').id, 'user:web-team-copy');
+  assert.ok(last(h, 'team').notice.endsWith(CLONE_ICON_NOTE));
+  assert.equal(last(h, 'team').icon, undefined);
+  assert.doesNotMatch(await readFile(copy, 'utf8'), /^icon:/m);
+  assert.equal(await h.library.readIcon(copy), undefined);
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team-copy.icon.png')), false);
+  assert.deepEqual(await h.library.readIcon(source), icon, 'the source keeps its own');
+  const listed = (last(h, 'library').library.teams as Array<{ id: string; icon?: string }>);
+  assert.equal(listed.find((team) => team.id === 'user:web-team-copy')!.icon, undefined);
+  // As this project's team, over a project team that has the source's icon (Use as is keeps it there).
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const project = TeamLibrary.projectTeamFile(h.root);
+  assert.deepEqual(await h.library.readIcon(project), icon);
+  await h.send({ type: 'create', draft: draft({ name: 'Shop team' }), target: 'project', clone: true });
+  assert.equal(await h.library.readIcon(project), undefined, 'the clone shows the default');
+  assert.doesNotMatch(await readFile(project, 'utf8'), /^icon:/m);
+  assert.ok(last(h, 'team').notice.endsWith(CLONE_ICON_NOTE));
+  h.close();
+});
+
+test('host: Generate for a clone asks with its own name, purpose and a variation, makes it once more when it matches the source icon, then says so', async () => {
+  const h = await harness();
+  const source = await h.library.create('Web team', teamMarkdown(draft()));
+  const sourceIcon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(source, sourceIcon);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'create', draft: draft({ name: 'Web team copy', description: 'Ships the shop pages' }), target: 'user', clone: true });
+  const id = 'user:web-team-copy';
+  const copy = path.join(h.library.directory, 'web-team-copy.md');
+  const { ai, made } = fakeImageAi([IMAGE_MODEL]);
+  h.deps.teamAi = async () => ai;
+  h.deps.random = () => 0;
+  h.chooseAnswer.value = 'Generate icon';
+  await h.send({ type: 'icon-generate', id });
+  assert.equal(h.asked.length, 1);
+  assert.match(h.asked[0]!.message, /If the picture comes out the same as another team's icon, one more is made, at the same cost again\./);
+  assert.equal(made.length, 1);
+  assert.equal(made[0]!.prompt, teamIconPrompt({ name: 'Web team copy', description: 'Ships the shop pages' }, 0));
+  assert.match(made[0]!.prompt, /"Web team copy"/);
+  assert.match(made[0]!.prompt, /Ships the shop pages/);
+  assert.ok(made[0]!.prompt.includes(iconVariation(0)));
+  // The page made the same PNG as the source's icon: one more is made, with another variation, without asking again.
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: sourceIcon.toString('base64') });
+  assert.equal(made.length, 2);
+  assert.equal(h.asked.length, 1);
+  assert.notEqual(made[1]!.prompt, made[0]!.prompt);
+  assert.ok(made[1]!.prompt.includes(iconVariation(1)));
+  assert.equal(await h.library.readIcon(copy), undefined, 'nothing saved yet');
+  // The same again: said plainly, and the icon is not changed.
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: sourceIcon.toString('base64') });
+  assert.equal(made.length, 2, 'only once more');
+  assert.equal(last(h, 'error').text, 'The icon was not changed: the image model made the same picture as the icon of "Web team" twice. Upload a picture instead, or change the team\'s name or what it is for and generate again.');
+  assert.equal(await h.library.readIcon(copy), undefined);
+  // Another try: the second picture differs from the source's, so it is the clone's icon.
+  h.deps.random = () => 0.5;
+  await h.send({ type: 'icon-generate', id });
+  assert.ok(made[2]!.prompt.includes(iconVariation(Math.floor(0.5 * ICON_VARIATIONS))));
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: sourceIcon.toString('base64') });
+  const own = png(128, 128, { seed: 12 });
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: own.toString('base64') });
+  assert.deepEqual(await h.library.readIcon(copy), own);
+  assert.notDeepEqual(await h.library.readIcon(copy), await h.library.readIcon(source));
+  assert.equal(last(h, 'icon-updated').icon, `data:image/png;base64,${own.toString('base64')}`);
+  // An uploaded picture is the person's choice, and is not compared.
+  const pick = path.join(h.storage, 'pick.png');
+  await writeFile(pick, sourceIcon);
+  h.deps.pickIconSource = async () => pick;
+  await h.send({ type: 'icon-upload', id });
+  await h.send({ type: 'icon-set', seq: last(h, 'icon-source').seq, id, png: sourceIcon.toString('base64') });
+  assert.deepEqual(await h.library.readIcon(copy), sourceIcon);
+  h.close();
+});
+
+test('teamIconPrompt: a variation adds a colour scheme and a style, never a number, and different variations ask differently', () => {
+  const team = { name: 'Web team copy', description: 'Ships pages' };
+  assert.equal(teamIconPrompt(team), 'A simple, flat square app icon for a team called "Web team copy". What the team does: Ships pages. One bold symbol centred on a plain background, readable at small sizes. No text, letters or numbers.', 'unchanged without one');
+  const prompts = new Set(Array.from({ length: ICON_VARIATIONS }, (_, index) => teamIconPrompt(team, index)));
+  assert.equal(prompts.size, ICON_VARIATIONS);
+  for (const prompt of prompts) { assert.doesNotMatch(prompt.replace('No text, letters or numbers.', ''), /\d/); assert.match(prompt, /No text, letters or numbers\.$/); }
+  assert.equal(iconVariation(ICON_VARIATIONS + 3), iconVariation(3));
+  assert.equal(iconVariation(-1), iconVariation(ICON_VARIATIONS - 1));
+});
+
+test('host: Use as is is unchanged: a saved team keeps its name and icon, and a built-in keeps the name a clone may not take', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  const icon = png(128, 128, { seed: 8 });
+  await h.library.setIcon(file, icon);
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const project = TeamLibrary.projectTeamFile(h.root);
+  assert.equal(parseTeam(await readFile(project, 'utf8'), project).name, 'Web team');
+  assert.deepEqual(await h.library.readIcon(project), icon);
+  assert.match(last(h, 'team').notice, /^"Web team" is now this project's team\./);
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  assert.equal(parseTeam(await readFile(project, 'utf8'), project).name, 'Review team');
+  h.setRoot(undefined, false);
+  await h.send({ type: 'use-team', id: 'gsd:review' });
+  assert.match(last(h, 'used').text, /^Saved "Review team" to My teams/);
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  assert.match(last(h, 'used').text, /\/team:web-team is in the chat box/);
+  h.close();
+});
+
+test('host: Duplicate offers "<name> copy" made unique, checks the name as it is typed, and refuses a name a team has', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.create('Web team copy', teamMarkdown(draft({ name: 'Web team copy' })));
+  await h.send({ type: 'ready' });
+  const asked: Array<{ value: string; validate?: (value: string) => string | undefined }> = [];
+  let answer = 'Web team copy 2';
+  h.deps.ask = async (_prompt, value, validate) => { asked.push({ value, ...(validate ? { validate } : {}) }); return answer; };
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  assert.equal(asked[0]!.value, 'Web team copy 2');
+  assert.match(asked[0]!.validate!('review team')!, /a built-in team/);
+  assert.equal(asked[0]!.validate!('My web team'), undefined);
+  assert.ok(existsSync(path.join(h.library.directory, 'web-team-copy-2.md')));
+  answer = 'WEB TEAM';
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  assert.equal(last(h, 'error').text, 'Not duplicated: "Web team" is already the name of one of your teams. Give the new team a name of its own.');
+  assert.equal(existsSync(path.join(h.library.directory, 'web-team-2.md')), false);
+  h.close();
+});
+
+test('page: a clone\'s name problem shows under the name field, Save stays off until the host finds it unique, and Save says it is a clone', async () => {
+  const page = await builderPage();
+  const reviews = () => page.posts.filter((post) => post.type === 'review');
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.match(page.text(), /starts with the default icon \(its initials on a colour\), not the icon of the team you copied\. After you save it, upload a picture or generate one on its Purpose tab\./);
+  assert.match(page.text(), /A copy needs a name no other team has\./);
+  page.type('f-name', 'web TEAM');
+  await settle();
+  const asked = reviews().at(-1)!;
+  assert.equal(asked.clone, true);
+  const problem = '"Web team" is already the name of one of your teams. Give the new team a name of its own.';
+  page.dispatch({ type: 'review', seq: asked.seq, markdown: '', errors: [{ field: 'name', message: problem }], warnings: [], members: [] });
+  assert.equal(page.doc.getElementById('f-name-issues')!.textContent.trim(), problem);
+  assert.equal(page.doc.getElementById('f-name')!.getAttribute('aria-invalid'), 'true');
+  assert.ok(page.doc.getElementById('f-name')!.getAttribute('aria-describedby')!.split(' ').includes('f-name-issues'));
+  // Save, on the last step, is off while the name is taken.
+  for (let guard = 0; guard < 6; guard += 1) { const next = page.doc.body.all().find((node) => node.tagName === 'button' && node.textContent.startsWith('Next: ')); if (!next) break; next.click(); }
+  assert.equal(page.doc.getElementById('save')!.disabled, true);
+  // Back to Purpose with a name of its own: the problem goes, and Save sends the team as a clone, so the host checks it again.
+  page.byLabel('Step 1 of 5: Purpose (done)')!.click();
+  assert.equal(page.doc.getElementById('f-name-issues')!.textContent.trim(), problem, 'still shown until the host answers');
+  page.type('f-name', 'Shop team');
+  await settle();
+  page.dispatch({ type: 'review', seq: reviews().at(-1)!.seq, markdown: '---\nname: Shop team\n---\n', errors: [], warnings: [], members: [] });
+  assert.equal(page.doc.getElementById('f-name-issues')!.textContent, '');
+  assert.equal(page.doc.getElementById('f-name')!.getAttribute('aria-invalid'), 'false');
+  for (let guard = 0; guard < 6; guard += 1) { const next = page.doc.body.all().find((node) => node.tagName === 'button' && node.textContent.startsWith('Next: ')); if (!next) break; next.click(); }
+  page.doc.getElementById('save')!.click();
+  const create = page.posts.at(-1)!;
+  assert.equal(create.type, 'create');
+  assert.equal(create.clone, true);
+  assert.equal(create.draft.name, 'Shop team');
+});
+
+test('page: From scratch and an AI draft are not clones: no clone check, no icon note', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
+  page.type('f-name', 'Web team');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const review = page.posts.filter((post) => post.type === 'review').at(-1)!;
+  assert.equal(review.clone, undefined);
+  assert.doesNotMatch(page.text(), /not the icon of the team you copied/);
+  // A clone abandoned for From scratch is not a clone any more.
+  page.byLabel('Back')!.click();
+  page.byLabel('Clone an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [] } });
+  assert.match(page.text(), /not the icon of the team you copied/);
+  page.byLabel('Back')!.click();
+  page.byLabel('Back')!.click();
+  page.byLabel('From scratch')!.click();
+  page.type('f-name', 'Web team');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(page.posts.filter((post) => post.type === 'review').at(-1)!.clone, undefined);
+  assert.doesNotMatch(page.text(), /not the icon of the team you copied/);
 });
