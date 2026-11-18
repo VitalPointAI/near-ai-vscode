@@ -350,6 +350,11 @@ export class AgentConversation {
    */
   private badgeFailures = new Map<string, { runId: string; model: string; evidence: ResponseEvidence; client: NearAiClient }>();
   /**
+   * How many of the badge's failed checks were dropped past FAILED_CHECKS_KEPT (PR #95 review). They can no longer be checked again, but they still count:
+   * every later badge of the chat stays Not verified and says a new chat is needed.
+   */
+  private droppedBadgeFailures = 0;
+  /**
    * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
    * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
    * person's Lower This Chat's Label is the one way down.
@@ -1002,13 +1007,22 @@ export class AgentConversation {
     if (result.outcome !== 'failed' || this.uncheckedFailures.has(evidence.chatId)) return;
     this.badgeFailures.delete(evidence.chatId);
     this.badgeFailures.set(evidence.chatId, { runId, model: entry.model, evidence, client: entry.client });
-    for (const old of [...this.badgeFailures.keys()].slice(0, -FAILED_CHECKS_KEPT)) this.badgeFailures.delete(old);
+    for (const old of [...this.badgeFailures.keys()].slice(0, -FAILED_CHECKS_KEPT)) { this.badgeFailures.delete(old); this.droppedBadgeFailures += 1; }
   }
 
   /** The badge a run's lead answer shows now, or undefined when the run's badge is no longer kept or it came through a local client. */
   public trustBadge(runId: string): TrustBadge | undefined {
     const entry = this.verifiable.get(runId);
     return entry === undefined ? undefined : this.badgeOf(entry);
+  }
+
+  /**
+   * The badge a run's answer shows now, with one more reason (PR #95 review): Check again could not run, so the page is given its badge back with the cause
+   * rather than left on "Checking again". The state is what the checks that did run proved. Undefined when the run never had a badge here.
+   */
+  public badgeWithNotice(runId: string, reason: string): TrustBadge | undefined {
+    const badge = this.trustBadge(runId) ?? this.shownBadges.get(runId);
+    return badge === undefined ? undefined : { ...badge, reasons: [...badge.reasons.filter((known) => known !== reason), reason] };
   }
 
   /** Show full attestation (CLAS-08): one answer's check details, or undefined when the run's badge is no longer kept (the newest TRUST_ENTRIES_KEPT). */
@@ -1079,8 +1093,8 @@ export class AgentConversation {
   /** The badge of one entry, chosen by trustBadgeFor alone, with what the editor does not check. */
   private badgeOf(entry: BadgeEntry): TrustBadge | undefined {
     const own = entry.evidence?.chatId;
-    const earlierCheckFailed = [...this.uncheckedFailures, ...this.badgeFailures.keys()].some((chatId) => chatId !== own);
-    const earlierCheckLost = [...this.uncheckedFailures].some((chatId) => chatId !== own && !this.routeFailures.has(chatId));
+    const earlierCheckLost = this.droppedBadgeFailures > 0 || [...this.uncheckedFailures].some((chatId) => chatId !== own && !this.routeFailures.has(chatId));
+    const earlierCheckFailed = earlierCheckLost || [...this.uncheckedFailures, ...this.badgeFailures.keys()].some((chatId) => chatId !== own);
     const badge = trustBadgeFor({ ...entry.facts, verification: entry.verification, ...(entry.result ? { verificationSummary: entry.result.summary } : {}), earlierCheckFailed, ...(earlierCheckLost ? { earlierCheckLost } : {}) });
     return badge === undefined ? undefined : { ...badge, notChecked: entry.result?.notChecked ?? NOT_CHECKED_IN_EDITOR };
   }
@@ -1245,6 +1259,7 @@ export class AgentConversation {
     this.uncheckedFailures = new Set();
     this.routeFailures = new Map();
     this.badgeFailures = new Map();
+    this.droppedBadgeFailures = 0;
   }
 
   public dispose(): void { this.reset(); }

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  BADGE_CHECK_TIMEOUT_MS, MAX_TRUST_RECORDS, TRUST_BADGE_STATES, TRUST_BADGE_TEXT, TRUST_BADGE_TITLES, TRUST_VERIFICATIONS, parseTrustRecord, trustBadgeFor, trustBadgeRank,
+  BADGE_CHECK_TIMEOUT_MS, MAX_TRUST_BYTES, MAX_TRUST_RECORDS, mergeTrustRecords, trustBadgeFromRecord, TRUST_BADGE_STATES, TRUST_BADGE_TEXT, TRUST_BADGE_TITLES, TRUST_VERIFICATIONS, parseTrustRecord, trustBadgeFor, trustBadgeRank,
   trustRecordKey, trustRecordOf, type TrustBadge, type TrustBadgeFacts, type TrustRecord, type TrustVerification
 } from '../domain/gate/trustBadge';
 import type { ConnectionBindingFact } from '../domain/gate/routing';
@@ -905,4 +905,88 @@ test('review 89 minor 2: an attested answer with no signature id, or one read wi
   assert.equal(checked().length, 2, 'a non-streamed answer is recorded too');
   assert.equal(JSON.stringify(checked()[1]).includes(UNCHECKABLE_ANSWER_REASONS['no-hashes']), true);
   assert.equal(route.attestation.failed, false, 'nothing changed');
+});
+
+// ---- PR #95 review (first round, 4 minor), each with a test ----
+
+test('review 95.1: when Check again throws, the badge is posted again with the reason it could not be checked, so the page leaves "Checking again"', async () => {
+  const { checkBadgeAgain } = await import('../services/trustDetails');
+  const posted: Array<Record<string, unknown>> = [];
+  const shown = { state: 'model-verified' as const, title: TRUST_BADGE_TITLES['model-verified'], explanation: TRUST_BADGE_TEXT.explanation['model-verified'], reasons: [], helpers: TRUST_BADGE_TEXT.helpers };
+  const agent = {
+    async checkAgain(): Promise<TrustBadge | undefined> { throw new Error('socket hang up'); },
+    badgeWithNotice: (_runId: string, reason: string): TrustBadge => ({ ...shown, reasons: [reason] })
+  };
+  await checkBadgeAgain({ agent, post: (message) => posted.push(message) }, 'run-1-aaaaaa', (error) => (error as Error).message);
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0]!.type, 'trust-badge');
+  assert.deepEqual((posted[0]!.badge as TrustBadge).reasons, [`${TRUST_BADGE_TEXT.unavailable} socket hang up`]);
+  assert.equal((posted[0]!.badge as TrustBadge).state, 'model-verified', 'the state the checks that ran proved');
+  // In the real page the details are drawn again, so Check again is ready again.
+  const page = chatPage();
+  const reply = await answerOn(page, 'run-1-aaaaaa');
+  page.send({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: shown });
+  badgesUnder(reply)[0]!.click();
+  under(reply).find((node) => node.tagName === 'button' && node.textContent === 'Check again')!.click();
+  assert.ok(under(reply).some((node) => node.textContent === 'Checking again…'));
+  page.send({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: posted[0]!.badge });
+  assert.ok(!under(reply).some((node) => node.textContent === 'Checking again…'), 'no longer stuck');
+  assert.match(textOf(reply), /socket hang up/);
+  // With no badge for the run, a plain notice says why.
+  const none: Array<Record<string, unknown>> = [];
+  await checkBadgeAgain({ agent: { ...agent, badgeWithNotice: () => undefined }, post: (message) => none.push(message) }, 'run-1-aaaaaa', (error) => (error as Error).message);
+  assert.deepEqual(none, [{ type: 'notice', text: `${TRUST_BADGE_TEXT.unavailable} socket hang up` }]);
+  // The session's own badgeWithNotice keeps the shown badge and adds the reason once.
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-notice-'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
+  await conversation.send({ text: 'hi', client: plainClient() as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+  const runId = [...(conversation as unknown as { verifiable: Map<string, unknown> }).verifiable.keys()][0]!;
+  const noticed = conversation.badgeWithNotice(runId, 'It could not be checked: x');
+  assert.equal(noticed?.reasons.filter((reason) => reason === 'It could not be checked: x').length, 1);
+  assert.equal(conversation.badgeWithNotice('run-9-ffffff', 'x'), undefined);
+});
+
+test('review 95.2: a replayed badge never says a check may still finish: the in-time reason is reworded and Checking now is left out', () => {
+  const kept = trustRecordOf('An answer.', { state: 'not-verified', reasons: [TRUST_BADGE_TEXT.timedOut, TRUST_BADGE_TEXT.checking] }, new Date('2026-11-18T10:00:00.000Z'));
+  const replayed = trustBadgeFromRecord(kept);
+  assert.ok(!replayed.reasons.includes(TRUST_BADGE_TEXT.timedOut));
+  assert.ok(!replayed.reasons.includes(TRUST_BADGE_TEXT.checking));
+  assert.deepEqual(replayed.reasons, [TRUST_BADGE_TEXT.timedOutReplayed, TRUST_BADGE_TEXT.replayed]);
+  assert.doesNotMatch(replayed.reasons.join(' '), /changes if the check finishes later/);
+});
+
+test('review 95.3: failed badge checks dropped past FAILED_CHECKS_KEPT still count, so later badges stay Not verified and say a new chat is needed', async () => {
+  const { FAILED_CHECKS_KEPT } = await import('../services/agentSession');
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-badge-drop-'));
+  const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
+  await conversation.send({ text: 'hi', client: plainClient() as never, model: 'tee-model', privacy: PRIVATE, policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES });
+  const internals = conversation as unknown as { verifiable: Map<string, { model: string; client: unknown }>; badgeFailures: Map<string, unknown>; noteBadgeCheck(runId: string, entry: unknown, evidence: unknown, result: unknown): void };
+  const [runId, entry] = [...internals.verifiable][0]!;
+  const failed = { outcome: 'failed', summary: 'The signature does not match the signing address.', checks: {}, notChecked: [] };
+  for (let index = 0; index <= FAILED_CHECKS_KEPT; index += 1) internals.noteBadgeCheck(runId, entry, { chatId: `chatcmpl-old-${String(index)}`, requestHash: 'a', responseHash: 'b' }, failed);
+  assert.equal(internals.badgeFailures.size, FAILED_CHECKS_KEPT, 'one was dropped past the bound');
+  // Every kept failure is checked again and passes: the dropped one still holds.
+  internals.badgeFailures.clear();
+  const badge = conversation.trustBadge(runId)!;
+  assert.ok(badge.reasons.includes(TRUST_BADGE_TEXT.earlierFailedLost), JSON.stringify(badge.reasons));
+  assert.equal(badge.state, 'not-verified');
+  conversation.reset();
+  assert.equal((conversation as unknown as { droppedBadgeFailures: number }).droppedBadgeFailures, 0, 'a new chat starts clean');
+});
+
+test('review 95.4: a chat\'s badge records are capped in bytes as well as in number, the oldest dropped first', () => {
+  const long = 'x'.repeat(390);
+  const many = Array.from({ length: MAX_TRUST_RECORDS }, (_, index) => trustRecordOf(`answer ${String(index)}`, { state: 'not-verified', reasons: Array.from({ length: 12 }, () => long) }, new Date(Date.UTC(2026, 10, 18, 0, index))));
+  assert.ok(new TextEncoder().encode(JSON.stringify(many)).length > MAX_TRUST_BYTES, 'the fixture is over the cap');
+  const kept = mergeTrustRecords(many, []);
+  assert.ok(new TextEncoder().encode(JSON.stringify(kept)).length <= MAX_TRUST_BYTES);
+  assert.ok(kept.length > 0 && kept.length < MAX_TRUST_RECORDS);
+  assert.equal(kept.at(-1)!.key, many.at(-1)!.key, 'the newest is kept');
+  assert.equal(kept[0]!.key, many[MAX_TRUST_RECORDS - kept.length]!.key, 'the oldest went first');
+  // Read back from a meta, the same cap holds.
+  const read = validMeta(metaWith('2026-11-18T12:00:00.000Z', { trust: many }), 'conv-trust-merge-1')!.trust!;
+  assert.deepEqual(read.map((record) => record.key), kept.map((record) => record.key));
+  // Small records are not touched by the byte cap.
+  const small = many.map((record) => ({ ...record, reasons: [] }));
+  assert.equal(mergeTrustRecords(small, []).length, MAX_TRUST_RECORDS);
 });

@@ -1,7 +1,7 @@
 // Show full attestation on a trust badge (CLAS-08): the details of one answer's check as one JSON object, opened in an untitled editor tab. Nothing is
 // written to the workspace, to disk or to a decision record; the document lives only in the editor until the person closes or saves it themselves.
 import type { ConnectionBindingFact } from '../domain/gate/routing';
-import type { TrustBadge } from '../domain/gate/trustBadge';
+import { TRUST_BADGE_TEXT, type TrustBadge } from '../domain/gate/trustBadge';
 import type { AnswerCheckResult } from '../gate/sessionMark';
 
 /** Said when the answer's details are no longer kept: the same 20 answers whose badge facts the chat keeps. */
@@ -66,4 +66,25 @@ export async function openTrustDetails(editor: TrustDetailsEditor, details: Reco
   const document = await editor.workspace.openTextDocument({ language: 'json', content: `${JSON.stringify(details, null, 2)}\n` });
   await editor.window.showTextDocument(document as never, { preview: true });
   try { await editor.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession'); } catch { /* an editor without it shows the tab as editable; nothing is saved either way */ }
+}
+
+/** What Check again needs of a chat: a fresh check that gives the run's badge, and the badge with one more reason when the check could not run. */
+export interface BadgeChecker {
+  checkAgain(runId: string): Promise<TrustBadge | undefined>;
+  badgeWithNotice(runId: string, reason: string): TrustBadge | undefined;
+}
+
+/**
+ * The trust badge's Check again (CLAS-08): a fresh check, then the run's badge again under that run's own answer. When the check throws, the badge is posted
+ * again with the reason it could not be checked (PR #95 review), so the page never stays on "Checking again"; a plain notice only when the run has no badge.
+ */
+export async function checkBadgeAgain(tab: { agent?: BadgeChecker; post(message: Record<string, unknown>): void }, runId: string, describe: (error: unknown) => string): Promise<void> {
+  let badge: TrustBadge | undefined;
+  let failure: string | undefined;
+  try { badge = tab.agent ? await tab.agent.checkAgain(runId) : undefined; } catch (error) {
+    failure = `${TRUST_BADGE_TEXT.unavailable} ${describe(error)}`;
+    try { badge = tab.agent?.badgeWithNotice(runId, failure); } catch { badge = undefined; }
+  }
+  if (badge) tab.post({ type: 'trust-badge', runId, badge });
+  else tab.post({ type: 'notice', text: failure ?? TRUST_BADGE_TEXT.notKept });
 }

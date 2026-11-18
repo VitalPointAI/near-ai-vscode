@@ -31,6 +31,7 @@ export const TRUST_BADGE_TEXT = Object.freeze({
   checking: 'Checking now.',
   unavailable: 'It could not be checked:',
   timedOut: 'It could not be checked in time. The badge changes if the check finishes later.',
+  timedOutReplayed: 'It could not be checked in time when the answer arrived.',
   failed: 'The check failed:',
   notRun: 'It was not checked.',
   forwarded: 'This model runs outside a verified enclave: NEAR AI forwards it to {provider}.',
@@ -170,6 +171,8 @@ export interface TrustRecord {
 
 /** How many badge records a chat keeps: the newest by time. */
 export const MAX_TRUST_RECORDS = 200;
+/** The most bytes a chat's badge records take in its metadata (as JSON), the oldest dropped first (PR #95 review). */
+export const MAX_TRUST_BYTES = 64 * 1024;
 const MAX_RECORD_REASONS = 12;
 const MAX_REASON_LENGTH = 400;
 /** A run of hex long enough to be a key, an address or a fingerprint: never kept in a record. */
@@ -227,9 +230,19 @@ export function mergeTrustRecords(a: readonly unknown[] | undefined, b: readonly
   return newestTrustRecords([...byKey.values()]);
 }
 
-/** The newest MAX_TRUST_RECORDS records by time, oldest first. */
+const UTF8 = new TextEncoder();
+function jsonBytes(value: unknown): number { return UTF8.encode(JSON.stringify(value)).length; }
+
+/** The newest records by time, oldest first: at most MAX_TRUST_RECORDS, and at most MAX_TRUST_BYTES as JSON, the oldest dropped first. */
 export function newestTrustRecords(records: readonly TrustRecord[]): TrustRecord[] {
-  return [...records].sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key)).slice(-MAX_TRUST_RECORDS);
+  const kept = [...records].sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key)).slice(-MAX_TRUST_RECORDS);
+  // The JSON of a list is its records' JSON, a comma between each, and the two brackets.
+  let bytes = 2 + kept.reduce((sum, record) => sum + jsonBytes(record) + 1, 0) - (kept.length > 0 ? 1 : 0);
+  while (kept.length > 0 && bytes > MAX_TRUST_BYTES) {
+    const dropped = kept.shift()!;
+    bytes -= jsonBytes(dropped) + (kept.length > 0 ? 1 : 0);
+  }
+  return kept;
 }
 
 /** The badge a reopened chat shows for a record: replayed (no Check again, no full attestation), saying it shows the check made when the answer arrived. */
@@ -238,7 +251,8 @@ export function trustBadgeFromRecord(record: TrustRecord): TrustBadge {
     state: record.state,
     title: TRUST_BADGE_TITLES[record.state],
     explanation: TRUST_BADGE_TEXT.explanation[record.state],
-    reasons: [...record.reasons, TRUST_BADGE_TEXT.replayed],
+    // A reason that speaks of a check still to come is about the window that checked it, never true on replay: it is reworded or left out.
+    reasons: [...record.reasons.flatMap((reason) => reason === TRUST_BADGE_TEXT.timedOut ? [TRUST_BADGE_TEXT.timedOutReplayed] : reason === TRUST_BADGE_TEXT.checking ? [] : [reason]), TRUST_BADGE_TEXT.replayed],
     helpers: TRUST_BADGE_TEXT.helpers,
     replayed: true
   };

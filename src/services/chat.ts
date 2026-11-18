@@ -3,8 +3,7 @@ import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { TRUST_BADGE_TEXT, type TrustBadge } from '../domain/gate/trustBadge';
-import { openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from './trustDetails';
+import { checkBadgeAgain, openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from './trustDetails';
 import { beginRun } from './runActivity';
 import { formatGsdStatusLine, parseGsdPlanningState, statusSnapshot, withLiveStatus } from '../domain/gsdStatus';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
@@ -754,7 +753,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (message.type === 'verify-response') {
-      await checkBadgeAgain(tab, message.runId);
+      await checkBadgeAgain(tab, message.runId, providerErrorMessage);
       return;
     }
     if (message.type === 'trust-details') {
@@ -762,7 +761,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       const details = tab.agent?.trustDetails(message.runId);
       if (details) { await openTrustDetails(vscode, details); return; }
       const choice = await vscode.window.showInformationMessage(TRUST_DETAILS_NOT_KEPT_TEXT, 'Check again');
-      if (choice === 'Check again') await checkBadgeAgain(tab, message.runId);
+      if (choice === 'Check again') await checkBadgeAgain(tab, message.runId, providerErrorMessage);
       return;
     }
     if (message.type === 'insert-code') {
@@ -1241,15 +1240,6 @@ export async function openGsdArtifact(root: string, requested: Pick<GsdArtifactL
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved));
   await vscode.window.showTextDocument(document, { preview: true });
   return true;
-}
-
-/** The trust badge's Check again (CLAS-08): a fresh check, then the run's badge again under that run's own answer, or a plain notice when it has none. */
-async function checkBadgeAgain(tab: { agent?: AgentConversation; post(message: Record<string, unknown>): void }, runId: string): Promise<void> {
-  let badge: TrustBadge | undefined;
-  let failure: string | undefined;
-  try { badge = tab.agent ? await tab.agent.checkAgain(runId) : undefined; } catch (error) { failure = `The answer could not be checked again: ${providerErrorMessage(error)}`; }
-  if (badge) tab.post({ type: 'trust-badge', runId, badge });
-  else tab.post({ type: 'notice', text: failure ?? TRUST_BADGE_TEXT.notKept });
 }
 
 async function insertIntoActiveEditor(text: string): Promise<void> {
