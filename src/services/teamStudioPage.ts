@@ -17,6 +17,9 @@ import { gradingCoverage } from '../domain/teamKnowledge';
 import { knowledgeFile, loadKnowledge } from './teamKnowledgeStore';
 import { buildTeamPackage, cleanKnowledge, importQuestion, MAX_TEAM_PACKAGE_BYTES, readTeamMarkdown, readTeamPackage, shareProblems, TEAM_PACKAGE_EXTENSION, TeamPackageError, type ReadPackage } from '../agent/teamPackage';
 import type { TeamKnowledge } from '../domain/teamKnowledge';
+import { teamRating, withTeamRating } from '../agent/teamFrontMatter';
+import { buildDashboard, legacyRoleTestKey, migrateRoleTests, moveKept, parseRatings, parseRoleTests, projectIdentity, teamKey, withRating, type CheckCounts, type DashboardTeam, type RatingRecord, type RoleTestRecord, type RunningTeam, type TeamDashboard } from '../domain/teamDashboard';
+import type { ActivitySessionSummary } from '../domain/activity';
 import { checkTeamIcon, decodeIconBase64, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, TeamIconPartialError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
@@ -65,7 +68,7 @@ export interface StudioMemberModel { tier: string; model: string; privacy: Direc
 /** `update`: the built-in template the team was made from and whether a newer version exists, so the card can offer Update Team. */
 /** `imported`: added with Import team and not yet approved to run; the person is asked the first time it would run. */
 /** `icon` (0.4.30): the team's own icon as a PNG data URI, checked; absent when the team shows the default (initials on a colour, drawn by the page). */
-export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; members: Array<{ name: string; role?: string } & StudioMemberModel> }
+export interface LibraryTeam { id: string; kind: 'project' | 'user'; name: string; description: string; command?: string; file: string; savedAt?: string; error?: string; imported?: boolean; derived?: boolean; /** 0.4.27: marked private, or every member private. */ private?: boolean; update?: { template: string; from?: number; to: number; available: boolean }; icon?: string; /** The person's own rating (1 to 5 stars), from the ratings kept on this computer by the team's identity; never from or into the file. */ rating?: number; /** Host only: a `rating:` line an earlier build wrote into the file, read once into the kept ratings. */ legacyRating?: number; /** What the free local check finds in it, counted. */ check?: CheckCounts; members: Array<{ name: string; role?: string } & StudioMemberModel> }
 export interface LibraryArchived { id: string; name: string; file: string; savedAt?: string }
 export interface LibraryState { teams: LibraryTeam[]; archived: LibraryArchived[] }
 
@@ -280,7 +283,11 @@ const exists = async (file: string) => Boolean(await stat(file).catch(() => unde
 const mtime = async (file: string) => (await stat(file).catch(() => undefined))?.mtime.toISOString();
 
 /** Every team the studio manages: the project team, the user's teams, and archived teams. */
-export async function listLibrary(library: TeamLibrary, root: string | undefined, input: DirectoryInput): Promise<LibraryState> {
+/**
+ * `checks`: the local check's counts by the file's content hash, kept by the caller, so a listing (every library, state and dashboard message) checks only
+ * a file that changed (PR 86 review).
+ */
+export async function listLibrary(library: TeamLibrary, root: string | undefined, input: DirectoryInput, options: { checks?: Map<string, CheckCounts | undefined> } = {}): Promise<LibraryState> {
   const entries = await library.list(root);
   // The unapproved team files themselves (the library maps each marker to its file), compared by path rather than rebuilt from marker names.
   const pending = new Set((await library.pendingImportFiles()).map((file) => path.resolve(file)));
@@ -291,16 +298,26 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
     const template = text !== undefined ? detectTemplate(text) : undefined;
     // 0.4.30: the team's own icon, checked, as a data URI; the page draws the default for a team without one.
     const icon = text !== undefined ? await library.readIcon(entry.file, text) : undefined;
+    const legacyRating = text !== undefined ? teamRating(text) : undefined;
+    let check: CheckCounts | undefined;
+    if (text !== undefined) {
+      // The file and its content: the check reads the file's name too, so two files with the same text are each checked (PR 86 review, round 2).
+      const key = `${path.resolve(entry.file)}\n${hash(text)}`;
+      if (options.checks?.has(key)) check = options.checks.get(key);
+      else { check = checkCounts(text, entry.file); options.checks?.set(key, check); }
+    }
     return {
       id: entry.project ? 'project' : `user:${slug}`, kind: entry.project ? 'project' : 'user', file: entry.file,
       name: team?.name ?? slug, description: team?.description ?? '',
       ...(team ? { command: `/team:${entry.project ? 'project' : team.slug} ` } : {}),
-      ...(entry.error ? { error: entry.error } : {}),
+      ...(entry.error ? { error: plainTeamError(entry.error, entry.file) } : {}),
       ...(team && teamIsPrivate(team) ? { private: true } : {}),
       ...(!entry.project && pending.has(path.resolve(entry.file)) ? { imported: true, ...((await library.pendingKind(entry.file))?.kind === 'derived' ? { derived: true } : {}) } : {}),
       ...(template ? { update: { template: template.label, ...(template.fromVersion ? { from: template.fromVersion } : {}), to: template.toVersion, available: !template.stamped || template.fromVersion !== template.toVersion } } : {}),
       ...(await mtime(entry.file) ? { savedAt: await mtime(entry.file) } : {}),
       ...(icon ? { icon: iconDataUri(icon) } : {}),
+      ...(legacyRating ? { legacyRating } : {}),
+      ...(check ? { check } : {}),
       members: (team?.members ?? []).map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...memberModel(member, input) }))
     };
   }));
@@ -310,6 +327,63 @@ export async function listLibrary(library: TeamLibrary, root: string | undefined
     return { id: `archived:${slugify(path.basename(file, '.md'))}`, name, file, ...(savedAt ? { savedAt } : {}) };
   }));
   return { teams, archived };
+}
+
+/** The free local check's findings for a team file, counted by how serious they are; undefined when the file does not read as a draft. */
+function checkCounts(text: string, file: string): CheckCounts | undefined {
+  try {
+    const findings = checkTeam(draftFromMarkdown(text, file), { defaultTools: DEFAULT_TOOLS });
+    return { block: findings.filter((finding) => finding.severity === 'block').length, warning: findings.filter((finding) => finding.severity === 'warning').length, advice: findings.filter((finding) => finding.severity === 'advice').length };
+  } catch { return undefined; }
+}
+
+/**
+ * An actual path in a message (PR 86 review, round 5): an absolute Unix path of two or more parts, a drive letter, a home path (~/), or any backslash
+ * (a Windows or UNC path). A model id (vendor/model) or a /team: command is not one.
+ */
+const NAMES_A_PATH = /\\|(?:^|[\s'"(\[=,])(?:\/[^\s/'"]+\/[^\s'"]*|~\/|[A-Za-z]:\/)/;
+
+/** What the page shows for a team file whose reason names a path. */
+export const UNREADABLE_TEAM = 'The team file cannot be read as a team. Open it as Markdown to fix it.';
+
+/**
+ * Why a team file is not usable, in words the page may show (PR 86 review, rounds 3 and 4). A file-system error is mapped by its code (fileProblem),
+ * whatever the spelling of the path it carries; any other reason that names a path (a separator, or a drive letter) is replaced by a fixed sentence,
+ * so no spelling of a path on this computer ever reaches the page. The team loader's own reasons name no path and pass through.
+ */
+export function plainTeamError(message: string, _file?: string): string {
+  const code = /^(E[A-Z]+):/.exec(message)?.[1];
+  if (code) return `The team file could not be read${fileProblem({ code })}.`;
+  if (NAMES_A_PATH.test(message)) return UNREADABLE_TEAM;
+  return message;
+}
+
+/** The listing as the page gets it: everything but the files' paths, which stay here (the page names teams only by the ids it was given). */
+export function pageLibrary(state: LibraryState): { teams: Array<Omit<LibraryTeam, 'file' | 'legacyRating'>>; archived: Array<Omit<LibraryArchived, 'file'>> } {
+  return { teams: state.teams.map(({ file: _file, legacyRating: _legacy, ...team }) => team), archived: state.archived.map(({ file: _file, ...entry }) => entry) };
+}
+
+/** The slug `/team:` names a team by: a library team's file name, and the project team's file is team.md. */
+const slugOf = (team: Pick<LibraryTeam, 'id' | 'kind' | 'file'>) => (team.kind === 'project' ? slugify(path.basename(team.file, '.md')) : team.id.slice('user:'.length));
+
+/** A listed team as the dashboard counts it, with its stable key (`project`: this project's identity). */
+function dashboardTeam(team: LibraryTeam, project: string | undefined): DashboardTeam {
+  const key = teamKey({ kind: team.kind, slug: team.id.slice('user:'.length) }, project);
+  return {
+    id: team.id, kind: team.kind, slug: slugOf(team), file: team.file, ...(key ? { key } : {}),
+    ...(team.error ? { error: team.error } : {}), ...(team.imported ? { imported: true } : {}), ...(team.derived ? { derived: true } : {}), ...(team.check ? { check: team.check } : {}),
+    members: team.members.map((member) => ({ name: member.name, model: member.model, ...(member.available !== undefined ? { available: member.available } : {}) }))
+  };
+}
+
+/** The dashboard's sort orders. */
+export const DASHBOARD_SORTS = ['used', 'recent', 'rating', 'name'] as const;
+export type DashboardSort = typeof DASHBOARD_SORTS[number];
+
+/** A kept dashboard view read back: exactly a known sort and a yes or no, or nothing. */
+export function dashboardView(value: unknown): { sort: DashboardSort; attention: boolean } | undefined {
+  if (!isPlain(value) || !exactKeys(value, ['sort', 'attention']) || !(DASHBOARD_SORTS as readonly unknown[]).includes(value.sort) || typeof value.attention !== 'boolean') return undefined;
+  return { sort: value.sort as DashboardSort, attention: value.attention };
 }
 
 // ---- Messages from the page: strictly validated; anything else is ignored. ----
@@ -325,7 +399,15 @@ const WORK_SHAPES = ['feature', 'bugfix', 'refactor', 'research', 'release'] as 
 const RISKS = ['low', 'medium', 'high'] as const;
 
 export type StudioMessage =
-  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' } | { type: 'watch-live' }
+  | { type: 'ready' } | { type: 'refresh' } | { type: 'import' } | { type: 'discard-draft' } | { type: 'discard-kept' }
+  /** The drafted team waiting for review was used (Use this team) or discarded (Discard, Start over): it is no longer kept. */
+  | { type: 'proposal-done' }
+  /** Watch it live (Team Live): `id`, the team whose run to show; without one, the newest run. */
+  | { type: 'watch-live'; id?: string }
+  /** The person's own rating of a team, 1 to 5 stars; 0 clears it. */
+  | { type: 'rate'; id: string; rating: number }
+  /** How the person last sorted and filtered the dashboard, kept so the tab opens that way again. */
+  | { type: 'view'; sort: DashboardSort; attention: boolean }
   /** Cancel or "All teams" in the guided builder with unsaved changes: the host asks Discard changes / Save draft. */
   | { type: 'leave-wizard'; wizard: SavedWizard }
   /** "All teams" in the editor with unsaved changes: the host asks Discard changes / Save. */
@@ -417,8 +499,20 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
   const message = value;
   const id = () => typeof message.id === 'string' && TEAM_ID.test(message.id);
   switch (message.type) {
-    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept': case 'watch-live':
+    case 'ready': case 'refresh': case 'import': case 'discard-draft': case 'discard-kept': case 'proposal-done':
       return exactKeys(message, ['type']) ? { type: message.type } : undefined;
+    case 'watch-live':
+      if (!exactKeys(message, ['type'], ['id'])) return undefined;
+      if (message.id === undefined) return { type: 'watch-live' };
+      return typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) ? { type: 'watch-live', id: message.id } : undefined;
+    case 'view': {
+      if (!exactKeys(message, ['type', 'sort', 'attention'])) return undefined;
+      const view = dashboardView({ sort: message.sort, attention: message.attention });
+      return view ? { type: 'view', ...view } : undefined;
+    }
+    case 'rate':
+      return exactKeys(message, ['type', 'id', 'rating']) && typeof message.id === 'string' && ICON_TEAM_ID.test(message.id) && Number.isInteger(message.rating) && (message.rating as number) >= 0 && (message.rating as number) <= 5
+        ? { type: 'rate', id: message.id, rating: message.rating as number } : undefined;
     case 'leave-wizard': {
       const wizard = exactKeys(message, ['type', 'wizard']) ? savedWizard(message.wizard) : undefined;
       return wizard ? { type: 'leave-wizard', wizard } : undefined;
@@ -563,7 +657,22 @@ export interface TeamStudioDeps {
   updateTeam?(file: string): Promise<unknown>;
   /** 0.4.28: whether a run of the team with this slug is going now, and opening Team Live to watch it. */
   liveRun?(slug: string): boolean;
-  watchLive?(): Promise<unknown>;
+  /** Opens Team Live; with a run id, on that run. */
+  watchLive?(runId?: string): Promise<unknown>;
+  /** The open project's run history (its activity history); asked only with a folder open. */
+  history?(): Promise<ActivitySessionSummary[]>;
+  /** The team runs going now, from the live activity feed: each run's id, the slug its team runs under, and the team's file when the feed has it. */
+  runningTeams?(): RunningTeam[];
+  /** A team run started or ended (the activity feed's own notification, never a timer), so the dashboard is listed again. */
+  onDidChangeRuns?(listener: () => void): { dispose(): void };
+  /** The last role test of each team, as Optimise all teams kept it: scores only, keyed by the team's identity (user:<slug>, archived:<slug>, project:<hash>). */
+  roleTests?: { get(): unknown; set?(value: Record<string, RoleTestRecord>): Promise<void> };
+  /** A drafted team waiting for the person to review it (Describe it, and AI drafts it), kept in this extension's storage on this computer. */
+  proposal?: { get(): unknown; set(value: KeptProposal | undefined): Promise<void> };
+  /** The person's own ratings of their teams, kept by each team's identity in this extension's storage on this computer (never in a team file). */
+  ratings?: { get(): unknown; set(value: Record<string, RatingRecord>): Promise<void> };
+  /** The dashboard's sort and filter, kept for the person in this extension's storage on this computer. */
+  view?: { get(): unknown; set(value: { sort: DashboardSort; attention: boolean }): Promise<void> };
   confirm(message: string, action: string): Promise<boolean>;
   ask(prompt: string, value: string): Promise<string | undefined>;
   /** Where to save a team's share file (`<team>.near-team.json`); undefined when the person cancelled. */
@@ -681,24 +790,141 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     ? deps.choose(message, ...actions)
     : deps.confirm(message, actions[0]).then((yes) => (yes ? actions[0] : undefined));
 
+  /** The local check's counts by file content, so a listing checks only what changed. Bounded: cleared when it grows past a few hundred files. */
+  const checks = new Map<string, CheckCounts | undefined>();
+  const listNow = async () => {
+    if (checks.size > 500) checks.clear();
+    library = await listLibrary(deps.library, deps.root(), input!, { checks });
+    await adoptKept();
+  };
+  /** This project's identity (its folder's real path, hashed), worked out once per folder. */
+  let identity: { root: string; id: string } | undefined;
+  const projectId = async (): Promise<string | undefined> => {
+    const root = deps.root();
+    if (!root) return undefined;
+    if (identity?.root !== root) identity = { root, id: await projectIdentity(root) };
+    return identity.id;
+  };
+  const keyOf = async (team: LibraryTeam) => teamKey({ kind: team.kind, slug: team.id.slice('user:'.length) }, await projectId());
+  /**
+   * Once per team (PR 86 review): a `rating:` line an earlier build wrote into a team file is read into the kept ratings (the file is left as it is), and
+   * role tests kept under the old path keys move to the teams' identities. Then each listed team gets its rating from the kept ratings.
+   */
+  const adoptKept = async () => {
+    const project = await projectId();
+    const keyed = library.teams.map((team) => ({ team, key: teamKey({ kind: team.kind, slug: team.id.slice('user:'.length) }, project) }));
+    let ratings: Record<string, RatingRecord> = parseRatings(deps.ratings?.get());
+    if (deps.ratings) {
+      let adopted = false;
+      for (const { team, key } of keyed) {
+        if (!key || key in ratings || !team.legacyRating) continue;
+        ratings = withRating(ratings, key, team.legacyRating, new Date().toISOString());
+        adopted = true;
+      }
+      if (adopted) await deps.ratings.set(ratings).catch(() => undefined);
+    }
+    if (deps.roleTests?.set) {
+      const records = parseRoleTests(deps.roleTests.get());
+      const moves = keyed.flatMap(({ team, key }) => (key && legacyRoleTestKey(team.file) in records ? [{ from: legacyRoleTestKey(team.file), to: key }] : []));
+      const moved = migrateRoleTests(records, moves);
+      if (moved.changed) await deps.roleTests.set(moved.records).catch(() => undefined);
+    }
+    for (const { team, key } of keyed) {
+      // Without a place to keep ratings (an older host), a line in the file is still shown; with one, only what is kept counts.
+      const rating = deps.ratings ? (key ? ratings[key]?.rating : undefined) : team.legacyRating;
+      if (rating) team.rating = rating; else delete team.rating;
+    }
+  };
+  /**
+   * The run history, read once and kept until a run starts or ends, the folder changes or the page asks for Refresh (PR 86 review: every library, state
+   * and dashboard message, and every Watch it live, read the whole history again).
+   */
+  let historyRead: Promise<{ history: boolean; sessions: ActivitySessionSummary[] }> | undefined;
+  const forgetHistory = () => { historyRead = undefined; };
+  /**
+   * A `rating:` line an earlier build wrote, dropped from what is saved once the rating is kept on this computer (PR 86 review, round 5), so the next save
+   * of the team through the studio takes it out of the file, a project team's included. A host with nowhere to keep ratings leaves it: it is the only copy.
+   */
+  const withoutAdoptedRating = async (markdown: string, id: string): Promise<string> => {
+    const team = teamFor(id);
+    const key = team ? await keyOf(team) : undefined;
+    if (!deps.ratings || !key || !(key in parseRatings(deps.ratings.get()))) return markdown;
+    return withTeamRating(markdown, undefined);
+  };
+  /** Rating writes, one after another. */
+  let ratingWrites: Promise<unknown> = Promise.resolve();
+  /**
+   * What is kept for a team moves with it (archive, restore), or is dropped for a new team under a name an earlier team had (create, duplicate, import,
+   * a new project team), so a new team never inherits another's stars or health (PR 86 review, round 3). Written in turn with the ratings.
+   */
+  const moveKeptFor = async (from: string | undefined, to: string | undefined) => {
+    if (!from) return;
+    const write = ratingWrites.then(async () => {
+      if (deps.ratings) {
+        const now = parseRatings(deps.ratings.get());
+        const next = moveKept(now, from, to);
+        if (JSON.stringify(next) !== JSON.stringify(now)) await deps.ratings.set(next);
+      }
+      if (deps.roleTests?.set) {
+        const now = parseRoleTests(deps.roleTests.get());
+        const next = moveKept(now, from, to);
+        if (JSON.stringify(next) !== JSON.stringify(now)) await deps.roleTests.set(next as Record<string, RoleTestRecord>);
+      }
+    });
+    ratingWrites = write.catch(() => undefined);
+    await write.catch(() => undefined);
+  };
+  const userKey = (file: string) => `user:${slugify(path.basename(file, '.md'))}`;
+  /** The dashboard last worked out, which Watch it live reads its run from. */
+  let lastDashboard: TeamDashboard | undefined;
   const load = async () => {
     input = await deps.gather();
     context = buildStudioContext(input, { hasProject: Boolean(deps.root()), knowledgeBase: await deps.knowledgeBase().catch(() => false) });
-    library = await listLibrary(deps.library, deps.root(), input);
+    await listNow();
   };
   const refresh = async () => {
+    forgetHistory();
     await load();
     const saved = savedWizard(deps.drafts.get());
     const kept = keptWork(deps.kept?.get());
     // The builder's draft is already the resumable draft: say once that it was kept. An open
     // team's changes stay kept until the user reopens or discards them.
     if (kept?.kind === 'wizard' || (kept?.kind === 'editor' && !library.teams.some((team) => team.id === kept.id))) await deps.kept?.set(undefined);
-    post({ type: 'state', library, context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
+    const view = dashboardView(deps.view?.get());
+    // A host with somewhere to keep a drafted team always says whether one is waiting (null: none), so a page holding one that was used elsewhere drops it.
+    const waiting = deps.proposal ? { proposal: keptProposal(deps.proposal.get()) ?? null } : {};
+    post({ type: 'state', library: pageLibrary(library), dashboard: await dashboardOf(), ...(view ? { view } : {}), ...waiting, context, picker: teamPicker(context!.startingPoints, library.teams), ...(saved ? { savedDraft: saved } : {}), ...(kept?.kind === 'wizard' && saved ? { kept: { kind: 'wizard', text: KEPT_WIZARD_TEXT } } : kept?.kind === 'editor' && library.teams.some((team) => team.id === kept.id) ? { kept: { ...kept, text: `Your unsaved changes to "${kept.name || 'the team'}" were kept as a draft.` } } : {}) });
   };
   const refreshLibrary = async () => {
     if (!input) return;
-    library = await listLibrary(deps.library, deps.root(), input);
-    post({ type: 'library', library, ...(context ? { picker: teamPicker(context.startingPoints, library.teams) } : {}) });
+    await listNow();
+    await postLibrary(await dashboardOf());
+  };
+  const postLibrary = async (dashboard: TeamDashboard) => {
+    post({ type: 'library', library: pageLibrary(library), dashboard, ...(context ? { picker: teamPicker(context.startingPoints, library.teams) } : {}) });
+  };
+  /**
+   * The dashboard from the listing held now: the open project's run history (none without a folder, or when it cannot be read, which the page then says
+   * rather than showing zeros as fact), the runs going now, and the role tests kept.
+   */
+  const dashboardOf = async (): Promise<TeamDashboard> => {
+    historyRead ??= (async () => {
+      if (!deps.root() || !deps.history) return { history: false, sessions: [] };
+      try { return { history: true, sessions: await deps.history() }; } catch { return { history: false, sessions: [] }; }
+    })();
+    const { history, sessions } = await historyRead;
+    let running: RunningTeam[] = [];
+    try { running = deps.runningTeams?.() ?? []; } catch { running = []; }
+    const project = await projectId();
+    lastDashboard = buildDashboard({ now: Date.now(), history, sessions, running, roleTests: parseRoleTests(deps.roleTests?.get()) as Record<string, RoleTestRecord>, teams: library.teams.map((team) => dashboardTeam(team, project)) });
+    return lastDashboard;
+  };
+  /** A team run started or ended: the dashboard alone is sent again, once for a burst of changes. */
+  let dashboardTimer: ReturnType<typeof setTimeout> | undefined;
+  const dashboardSoon = () => {
+    if (dashboardTimer) clearTimeout(dashboardTimer);
+    dashboardTimer = setTimeout(() => { dashboardTimer = undefined; void dashboardOf().then((dashboard) => post({ type: 'dashboard', dashboard }), () => undefined); }, 150);
+    dashboardTimer.unref?.();
   };
   const soon = () => {
     if (timer) clearTimeout(timer);
@@ -846,7 +1072,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     }
     const review = reviewDraft(edit.draft, disk, input!, context!);
     if (review.errors.length) { post({ type: 'save-failed', id: edit.id, errors: review.errors }); return undefined; }
-    await writeFile(file, review.markdown, 'utf8');
+    await writeFile(file, await withoutAdoptedRating(review.markdown, edit.id), 'utf8');
     const version = await deps.library.snapshot(file);
     await refreshLibrary();
     return { file, notice: `Saved "${edit.draft.name.trim()}" as version ${version}.` };
@@ -888,6 +1114,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     await deps.library.snapshot(file);
     // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
     await deps.library.setProjectDerived(file, unapprovedFrom);
+    // A new project team: the replaced team's stars and health are not its own.
+    const project = await projectId();
+    await moveKeptFor(project ? `project:${project}` : undefined, undefined);
     if (projectType) await deps.applyProjectType(root, projectType.type, projectType.goal);
     return file;
   };
@@ -945,7 +1174,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } finally { stop?.dispose(); }
         if (controller.signal.aborted && done < teams.length) results.push(`Cancelled after ${done} of ${teams.length} teams; the ones already tested kept their models.`);
         post({ type: 'notice', text: results.join(' ') });
-        await sendTeam('library', open?.file ?? '', '');
+        // The role tests just run count in each team's health on the dashboard. A team open in the editor was already told about its new models
+        // (external-change, from optimiseTeam); it used to be sent again here under the id "library", and with none open this read an empty path and
+        // showed a raw file-system error.
+        await refreshLibrary();
         return;
       }
       case 'draft-team': {
@@ -965,7 +1197,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           if (!reply.ok) throw new Error(knowledgeBase && !message.private && reply.reason.startsWith('It needs a private model') ? `${KNOWLEDGE_BASE_PRIVATE} ${reply.reason}` : reply.reason);
           const drafted = parseProposal(reply.text, brief);
           // A team asked for as private stays private once it is a draft, so saving it keeps every member on a private model.
-          post({ type: 'team-proposal', proposal: drafted.proposal, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, text: proposalText(drafted.proposal), problems: drafted.problems });
+          const waiting: KeptProposal = { proposal: drafted.proposal as unknown as Record<string, unknown>, draft: { ...proposalDraft(drafted.proposal), ...(message.private ? { private: true } : {}) }, problems: drafted.problems };
+          // PR 86 review, round 2: a drafted team cost a model call, so it is kept until the person uses or discards it, whatever else happens (a banner,
+          // unsaved work, the studio closing).
+          await deps.proposal?.set(waiting).catch(() => undefined);
+          post({ type: 'team-proposal', ...waiting, text: proposalText(drafted.proposal) });
         } catch (error) { post({ type: 'error', text: `The team could not be drafted: ${(error as Error).message}` }); }
         return;
       }
@@ -1048,7 +1284,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'review': {
         if (!input || !context) await load();
         const original = message.id && open?.id === message.id ? open.text : undefined;
-        post({ type: 'review', seq: message.seq, ...reviewDraft(message.draft, original, input!, context!) });
+        const review = reviewDraft(message.draft, original, input!, context!);
+        // What the preview shows is what Save writes, the old rating line's removal included.
+        post({ type: 'review', seq: message.seq, ...review, ...(message.id ? { markdown: await withoutAdoptedRating(review.markdown, message.id) } : {}) });
         return;
       }
       case 'starting-point': {
@@ -1154,6 +1392,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             }
             // A built-in with no project: chat runs teams by their file, so it is saved to My teams first, under its own name.
             const file = await deps.library.create(name, markdown);
+            await moveKeptFor(userKey(file), undefined);
             if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
             const slug = path.basename(file, '.md');
             unsaved = {};
@@ -1241,6 +1480,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           id = 'project';
         } else {
           file = await deps.library.create(message.draft.name.trim(), markdown);
+          await moveKeptFor(userKey(file), undefined);
           if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
           id = `user:${slugify(path.basename(file, '.md'))}`;
           created = true;
@@ -1269,7 +1509,33 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         return;
       }
       case 'discard-draft': await deps.drafts.set(undefined); return;
-      case 'watch-live': await deps.watchLive?.(); return;
+      case 'proposal-done': await deps.proposal?.set(undefined); return;
+      case 'watch-live': {
+        // The team's own run when it has one going now (the listing's ids only); otherwise the newest run, as before.
+        // The run is read from the dashboard the page was last sent, not by reading the history again (PR 86 review).
+        const run = message.id ? lastDashboard?.cards[message.id]?.runId : undefined;
+        await (run ? deps.watchLive?.(run) : deps.watchLive?.());
+        return;
+      }
+      case 'view': await deps.view?.set({ sort: message.sort, attention: message.attention }); return;
+      case 'rate': {
+        // PR 86 review: the rating is the person's own opinion, kept on this computer by the team's identity and never written into the team file (a
+        // project team's file goes wherever the project's files go, a code push included).
+        const team = teamFor(message.id);
+        if (!team) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
+        if (team.error) { post({ type: 'error', text: 'Fix this team file first, then rate it.' }); return; }
+        const key = await keyOf(team);
+        if (!deps.ratings || !key) { post({ type: 'error', text: 'Ratings cannot be kept here.' }); return; }
+        // One write after another (PR 86 review, round 2): two ratings sent together each read the store the other wrote, so neither is lost.
+        const store = deps.ratings;
+        const write = ratingWrites.then(() => store.set(withRating(parseRatings(store.get()), key, message.rating, new Date().toISOString())));
+        ratingWrites = write.catch(() => undefined);
+        try { await write; } catch { post({ type: 'error', text: 'The rating could not be saved. Nothing was changed.' }); return; }
+        if (message.rating) team.rating = message.rating; else delete team.rating;
+        await postLibrary(lastDashboard ?? await dashboardOf());
+        post({ type: 'rated', id: message.id, rating: message.rating, text: message.rating ? `Rated ${team.name} ${message.rating} out of 5.` : `Cleared your rating of ${team.name}.` });
+        return;
+      }
       case 'use-in-chat': {
         const team = teamFor(message.id);
         if (team?.command) await deps.sidebar.prefill(team.command);
@@ -1292,6 +1558,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const name = (await deps.ask('Name for the copy', `${team.name} copy`))?.trim();
         if (!name) return;
         const copy = await deps.library.duplicate(file, name.slice(0, 80));
+        await moveKeptFor(userKey(copy), undefined);
         await refreshLibrary();
         post({ type: 'notice', text: `Duplicated as "${name}".`, focus: `user:${slugify(path.basename(copy, '.md'))}` });
         return;
@@ -1300,7 +1567,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id, ['user']);
         if (!file) return;
         const name = teamFor(message.id)?.name ?? path.basename(file, '.md');
-        await deps.library.archive(file);
+        const archived = await deps.library.archive(file);
+        await moveKeptFor(userKey(file), `archived:${slugify(path.basename(archived, '.md'))}`);
         if (open?.id === message.id) open = undefined;
         await refreshLibrary();
         post({ type: 'notice', text: `Archived "${name}". Restore it from Archived teams.` });
@@ -1310,6 +1578,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id, ['archived']);
         if (!file) return;
         const restored = await deps.library.restore(file);
+        await moveKeptFor(`archived:${slugify(path.basename(file, '.md'))}`, userKey(restored));
         await refreshLibrary();
         post({ type: 'notice', text: `Restored "${path.basename(restored, '.md')}".`, focus: `user:${slugify(path.basename(restored, '.md'))}` });
         return;
@@ -1329,7 +1598,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           return;
         }
         if (await choose(importQuestion(read), 'Add to my teams') !== 'Add to my teams') { post({ type: 'notice', text: 'Nothing was imported.' }); return; }
-        const file = await deps.library.importTeam(read.team.name, read.markdown);
+        // Someone else's rating is not the person's own: it is left out, so the card shows only ratings they gave.
+        const file = await deps.library.importTeam(read.team.name, withTeamRating(read.markdown, undefined));
+        await moveKeptFor(userKey(file), undefined);
         // 0.4.30: the icon the file carried, checked when it was read, goes beside the new team under its own name. Without one, the imported text's
         // icon line is removed, so it can never show an icon file it happens to name (one left in the library folder, say).
         let iconNote = '';
@@ -1360,7 +1631,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const entry = teamFor(message.id);
         if (!file || !entry || entry.error) return;
         if (!deps.pickShareTarget) { post({ type: 'error', text: 'Sharing is not available here.' }); return; }
-        const markdown = await readFile(file, 'utf8');
+        // The person's own rating stays here: it is their opinion, not part of the team (a version 1 file read by any build).
+        const markdown = withTeamRating(await readFile(file, 'utf8'), undefined);
         const problems = shareProblems(markdown, file, deps.home);
         if (problems.refused) { post({ type: 'error', text: problems.refused }); return; }
         if (problems.paths.length && !await deps.confirm(`${problems.paths.join(', ')} ${problems.paths.length === 1 ? 'names' : 'name'} a folder on this computer. Anyone you send the team to will see it. Share it anyway?`, 'Share anyway')) return;
@@ -1545,6 +1817,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
     ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { void refresh(); })] : []),
+    ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { forgetHistory(); if (pageReady) dashboardSoon(); })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
       if (!message) return;
@@ -1564,6 +1837,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   const dispose = () => {
     if (timer) clearTimeout(timer);
+    if (dashboardTimer) clearTimeout(dashboardTimer);
     cancelRefine();
     for (const subscription of subscriptions) subscription.dispose();
     void keepUnsaved().catch(() => undefined);
@@ -1585,6 +1859,21 @@ function keptWork(value: unknown): KeptWork | undefined {
   if (value.kind !== 'editor') return undefined;
   const edit = openEdit({ id: value.id, draft: value.draft, base: value.base });
   return edit ? { kind: 'editor', name, ...edit } : undefined;
+}
+
+/** A drafted team waiting for review: the proposal the page shows, the draft Use this team starts from, and what was repaired in it. */
+export interface KeptProposal { proposal: Record<string, unknown>; draft: TeamDraft; problems: string[] }
+
+/** A kept drafted team read back, checked: the draft as strictly as one from the page, and the proposal's shape; anything else is not offered. */
+export function keptProposal(value: unknown): KeptProposal | undefined {
+  if (!isPlain(value) || !exactKeys(value, ['proposal', 'draft', 'problems'])) return undefined;
+  const proposal = value.proposal;
+  if (!isPlain(proposal) || !text(proposal.name, 120) || !Array.isArray(proposal.members) || !Array.isArray(proposal.outputs ?? [])) return undefined;
+  if (!(proposal.members as unknown[]).every((member) => isPlain(member) && ['name', 'role', 'model', 'produces'].every((key) => member[key] === undefined || text(member[key], 12_000)))) return undefined;
+  const draft = parseDraft(value.draft);
+  const problems = value.problems;
+  if (!draft || !Array.isArray(problems) || problems.length > 40 || !problems.every((problem) => text(problem, 600))) return undefined;
+  return { proposal, draft, problems: problems as string[] };
 }
 
 function savedWizard(value: unknown): SavedWizard | undefined {

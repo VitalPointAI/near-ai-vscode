@@ -32,6 +32,44 @@ label, and routing by label comes in a later release.
 - **A local runtime counts as local only on this computer.** For content that must stay on this
   computer, only a runtime on this computer (`localhost`, `127.0.0.1` or `[::1]`) counts as local,
   unless your organization names its host in the policy. The local runtime setup prompt says so.
+- **Team Studio opens on a dashboard of your teams.** The main page now shows a summary row (how
+  many teams you have, how many are running now, team runs and spend this week, and how many need
+  attention), then one card for each of your saved teams and this project's team. Built-in teams
+  are not on it; they stay in **New team**.
+- **Each card says how the team is doing.** A card shows the team's icon, name and kind (the
+  project team, one of your teams, or imported), whether it is private, and its status: **Running
+  now** with **Watch it live**, **Ready**, **Needs attention** with the reason (an imported team
+  not approved yet, problems the local check found, a member model your key does not offer, or a
+  team file that needs fixing), or **Never run**. It lists each member's model or tier and whether
+  it is private or cloud, and flags a model that is not in the model directory.
+- **Stats come from what was recorded, nothing else.** Each card shows the team's runs, its last
+  run, how many succeeded, the average time and the spend (in total and per run), from this
+  project's run history. Spend is each run's own figure from the spend ledger. Where nothing was
+  recorded the card says "none yet" or "not recorded", and with no project folder open it says
+  that runs are kept per project.
+- **A health score and your own rating.** Each card shows a health score made from the free local
+  check and the last role test that **Optimise all teams** ran, with the score of each part. You
+  can give a team 1 to 5 stars on its card, with the keyboard or the mouse. Your rating is kept on
+  this computer only, never in the team file, so a project team's rating never goes into the
+  project or a code push. Teams are kept by a stable name (a project's team by its folder, even
+  when opened through a link), so ratings and role tests stay with the team. Archiving a team keeps
+  them for **Restore**, and a new team with the same name starts without them. A member counts as
+  passing its role test only with full marks.
+- **Sort, filter, and live updates.** Sort the cards by **Most used**, **Recently run**,
+  **Rating** or **Name**, or show only the teams that need attention; Team Studio remembers your
+  choice. Running now and the stats change as soon as a team run starts or ends.
+- **The AI box moved into New team.** "What should this team be able to produce?" is now under
+  **New team**, **Create a new team**, **Describe it, and AI drafts it**. A drafted team waits on
+  the main page and the **New team** screens until you use it or discard it, even if you were busy
+  with something else when it arrived or closed Team Studio. If you have unsaved changes when you
+  review it, you are asked about them first, and keeping them keeps the drafted team too. A star
+  you choose just before you close Team Studio is still saved. The toolbar is **New team**,
+  **Optimise all teams**, **Import…** and **Refresh**. A project with no team gets a card that says
+  so, with **Set up**, and an empty library shows **New team** and **Set up a team for this
+  project**.
+- **Optimise all teams ends cleanly.** With no team open it no longer ends with a file error, and
+  with a team open it no longer sends that team to the page a second time; the dashboard shows
+  each team's new role test as soon as it is done.
 
 ## 0.4.30
 

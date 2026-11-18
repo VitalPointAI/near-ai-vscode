@@ -626,6 +626,39 @@ until it runs out aren't shown.
   model may add its own rating of the team before and after its suggestions;
   it is shown as the model's own opinion, not a measurement. **Cancel**,
   Emergency stop, or opening another team stops a review in progress.
+- **Team Studio's dashboard.** Team Studio opens on your teams: a summary
+  row (teams, running now, team runs and spend this week, and how many need
+  attention), then a card for each of your saved teams and this project's
+  team, all the same size (built-in teams are offered under **New team**).
+  Each card shows the team's icon, name and kind, whether it is private, and
+  its status: **Running now** (with **Watch it live**), **Ready**, **Needs
+  attention** with the reason (an imported team not approved yet, problems
+  the local check found, a member model your key does not offer, or a file
+  that needs fixing) or **Never run**. It lists each member's model or tier,
+  private or cloud, and flags a model that is not in the model directory.
+  Its stats (runs, last run, success, average time, spend in total and per
+  run) come from this project's run history: a run counts for a team when it
+  was started with that team's `/team:` command, and its spend is the run's
+  own figure from the spend ledger. Where nothing was recorded the card says
+  "none yet" or "not recorded"; with no folder open there is no history. The
+  health score is made from the local team check and the last role test that
+  **Optimise all teams** ran (its scores only, kept on this computer), and
+  shows each part. Your own 1 to 5 stars are set on the card (a group of radio
+  buttons: Tab to it, then the arrow keys) and kept in this extension's
+  storage on this computer, never in the team file, so a project team's
+  rating never goes into the project or a code push. Ratings and role tests
+  are kept by the team's identity: a team in My teams by its name there, a
+  project's team by the project folder's real path. A `rating:` line an
+  earlier build wrote into a team file is read once, and is left out of
+  the file the next time you save that team in Team Studio.
+  Archiving a team keeps its stars and health for Restore, and a new team
+  under the same name starts without them. A member passes its role test
+  only with full marks, as the model comparisons count a pass.
+  Sharing or importing a team leaves out any `rating:` line. Sort by **Most used**, **Recently run**, **Rating** or **Name**, or
+  show only the teams that need attention; Team Studio remembers your choice
+  on this computer. Running
+  now and the stats change as a team run starts or ends. With a project open
+  and no project team, the first card says so and **Set up** starts one.
 - **Building a team.** **New team** in Team Studio (and **Set Up Project
   Team**) first asks how you want to start: **Use an existing team**,
   **Create a new team** or **Recommend a team for me**. **Use an existing
@@ -650,7 +683,11 @@ until it runs out aren't shown.
   with the same two buttons; changing an answer clears it until you ask
   again. **Create a new team** starts **From scratch**, from
   **Clone an existing team** (the same list, to clone only), or from
-  **Describe it, and AI drafts it**. Only a new team or a clone asks for its
+  **Describe it, and AI drafts it** (say what the team should produce; AI
+  proposes a team for you to look over before anything is saved; a drafted
+  team waits on the main page and the New team screens until you use or
+  discard it, even after Team Studio is closed, and reviewing it while you
+  have unsaved changes asks about them first). Only a new team or a clone asks for its
   name, what it is for, **Private team** and **Save it as**. **Back** returns
   to the screen before from every step, and a saved draft opens on the step
   you left it. Saved as the project's team, a team is asked about before it

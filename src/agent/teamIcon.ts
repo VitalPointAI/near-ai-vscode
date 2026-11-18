@@ -1,4 +1,4 @@
-import { parseFrontmatter } from '../gsd/library';
+import { frontMatterValue, withFrontMatterLine } from './teamFrontMatter';
 
 // Team icons (0.4.30, owner 2026-11-17: "give user ability to upload or AI generate an icon for the team. Ensure there's a default icon available if none
 // are selected/generated"). No VS Code imports, so the tests run it directly, and nothing here reads or writes a file.
@@ -136,26 +136,9 @@ export function teamIconPrompt(team: { name: string; description: string }): str
 
 // ---- the front matter's icon line ----
 
-const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
-const ICON_LINE = /^icon:/;
-
-/**
- * The one reading of a team file's icon lines (PR #82 review: reading took the last `icon:` line and writing changed the first, so a hand edit with two
- * lines kept a stale one). The first `icon:` line in the front matter is the reference; any later one is a leftover that every write removes.
- */
-function iconLines(text: string): { match: RegExpExecArray; lines: string[]; at: number[] } | undefined {
-  const match = FRONTMATTER.exec(text);
-  if (!match) return undefined;
-  const lines = match[1]!.split(/\r?\n/);
-  return { match, lines, at: lines.flatMap((line, index) => (ICON_LINE.test(line) ? [index] : [])) };
-}
-
-/** The `icon:` value in a team file's front matter (its first icon line), or undefined. */
+/** The `icon:` value in a team file's front matter (its first icon line), or undefined. One rule for every line the studio writes (teamFrontMatter). */
 export function iconReference(text: string): string | undefined {
-  const found = iconLines(text);
-  if (!found || !found.at.length) return undefined;
-  const value = found.lines[found.at[0]!]!.replace(ICON_LINE, '').trim().replace(/^(['"])(.*)\1$/, '$2');
-  return value || undefined;
+  return frontMatterValue(text, 'icon');
 }
 
 /**
@@ -163,44 +146,7 @@ export function iconReference(text: string): string | undefined {
  * undefined. Every other byte is kept, line endings included; a file with no front matter (not a usable team) is returned as it is.
  */
 export function withIconReference(text: string, name: string | undefined): string {
-  const found = iconLines(text);
-  if (!found) return text;
-  const { match, lines, at } = found;
-  const line = name === undefined ? undefined : `icon: ${name}`;
-  if (line === undefined ? !at.length : at.length === 1 && lines[at[0]!] === line) return text;
-  const inner = match[1]!;
-  const open = /^---\r?\n/.exec(match[0])![0];
-  const close = match[0].slice(open.length + inner.length);
-  const eol = inner.includes('\r\n') || open.includes('\r\n') ? '\r\n' : '\n';
-  const kept = lines.filter((_, index) => !at.includes(index));
-  if (line !== undefined) {
-    if (at.length) kept.splice(at[0]!, 0, line);
-    else kept.splice(iconLinePlace(kept), 0, line);
-  }
-  return `${open}${kept.join(eol)}${close}${text.slice(match[0].length)}`;
-}
-
-/** A top-level key line as the team loader's front matter parser reads it (parseFrontmatter in gsd/library.ts): a key at the start of the line. */
-const KEY_LINE = /^([A-Za-z0-9_-]+):\s*(.*)$/;
-
-/**
- * Where a new icon line goes (PR #82 review, round 2: it went after any `description:` line, which put it inside a hand-written `description: |` block).
- * Right after the description only when its value is complete on that one line (not a block scalar, not a quote left open, not continued on an indented
- * line); otherwise at the end of the front matter, which ends any value above it. The place is then checked with the loader's own parser: every key must
- * read as it did, or the line goes at the end.
- */
-function iconLinePlace(lines: string[]): number {
-  const description = lines.findIndex((entry) => /^description:/.test(entry));
-  if (description < 0) return lines.length;
-  const value = (KEY_LINE.exec(lines[description]!)?.[2] ?? '').trim();
-  const quote = value[0] === '"' || value[0] === "'" ? value[0] : undefined;
-  const oneLine = value !== '' && !/^[|>]/.test(value) && (!quote || (value.length > 1 && value.endsWith(quote)))
-    && !/^\s/.test(lines[description + 1] ?? '');
-  if (!oneLine) return lines.length;
-  const read = (entries: string[]) => JSON.stringify(parseFrontmatter(`---\n${entries.join('\n')}\n---\n`).data);
-  const placed = [...lines.slice(0, description + 1), 'icon: x', ...lines.slice(description + 1)];
-  const { icon: _icon, ...rest } = parseFrontmatter(`---\n${placed.join('\n')}\n---\n`).data;
-  return JSON.stringify(rest) === read(lines) ? description + 1 : lines.length;
+  return withFrontMatterLine(text, 'icon', name);
 }
 
 // ---- small helpers ----
