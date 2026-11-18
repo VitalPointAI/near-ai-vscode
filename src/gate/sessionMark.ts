@@ -39,6 +39,10 @@ export interface AnswerCheckResult {
   readonly signer?: 'model' | 'gateway';
   readonly checks: Readonly<Record<string, boolean | undefined>>;
   readonly notChecked: readonly string[];
+  /** The signed text and signature NEAR AI returned, when it did (Show full attestation, CLAS-08). */
+  readonly signed?: { readonly text: string; readonly signature: string };
+  /** The attestation report the check verified or reused, in memory only (Show full attestation, CLAS-08). */
+  readonly report?: unknown;
 }
 
 /** The hashes an answer check works from (the client's ResponseEvidence): no prompt or answer text. */

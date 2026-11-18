@@ -3,7 +3,7 @@
 // Attestation tests use the recorded fixtures and fake fetches; nothing reaches the network and no key is read.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -18,6 +18,9 @@ import { AgentConversation } from '../services/agentSession';
 import { NearAiClient, type AgentMessage, type CompletionEvent, type ToolCall } from '../services/nearAiClient';
 import type { ConnectionBindingSource } from '../services/connectionBinding';
 import { TranscriptStore } from '../services/transcripts';
+import { parseChatWebviewMessage } from '../services/chatBridge';
+import { openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from '../services/trustDetails';
+import { createVscodeStub } from './helpers/vscodeStub';
 import { TEST_ROOT, personalSign, testQuote, testSigner } from './helpers/attestationFixtures';
 import { labelledProject } from './helpers/markFixtures';
 import { chatPage, type StubNode } from './helpers/chatPage';
@@ -536,3 +539,188 @@ test('a sub-agent\'s answer posts no trust badge: only the lead agent\'s answer 
   assert.equal(badges.length, 1, 'one badge, the lead\'s');
   assert.equal(badges[0]!.runId, posted.find((message) => message.type === 'assistant-done')!.runId);
 });
+
+// ---- Task 3: a click explains the badge and opens the full attestation on request, in colours that read in every theme ----
+
+interface FullKit extends TrustKit { TEXT: Record<string, string> }
+const fullKit = kit as FullKit;
+
+const FAILED_BADGE = {
+  state: 'not-verified', title: 'Not verified', explanation: TRUST_BADGE_TEXT.explanation['not-verified'],
+  reasons: [`${TRUST_BADGE_TEXT.failed} The signature does not match the signing address.`], helpers: TRUST_BADGE_TEXT.helpers,
+  notChecked: ['platform TCB status and certificate revocation (Intel collateral)', 'which code the enclave runs (measurements)']
+};
+
+function drawnBadge(badge: unknown = FAILED_BADGE): { doc: FakeDocument; button: FakeNode; details: FakeNode; posts: unknown[] } {
+  const doc = new FakeDocument();
+  const container = doc.createElement('div');
+  doc.body.append(container);
+  const posts: unknown[] = [];
+  const button = fullKit.renderTrustBadge(doc, container, badge, (message) => posts.push(message), 'run-1-aaaaaa')!;
+  const details = container.find((node) => node.className === 'trust-details')!;
+  return { doc, button, details, posts };
+}
+const wordsIn = (node: FakeNode): string => [node.textContent, ...node.all(() => true).map((child) => child.textContent)].join(' ');
+const buttonIn = (node: FakeNode, label: string): FakeNode | undefined => node.find((child) => child.tagName === 'button' && child.textContent === label);
+
+test('a click opens the details: the explanation, the reasons, the helper-agent sentence and what is not checked; aria-expanded follows; Escape closes them and returns focus to the badge', () => {
+  const { doc, button, details } = drawnBadge();
+  assert.equal(details.hidden, true, 'closed at first');
+  assert.equal(button.attributes.get('aria-controls'), details.id);
+  button.click();
+  assert.equal(button.attributes.get('aria-expanded'), 'true');
+  assert.equal(details.hidden, false);
+  const words = wordsIn(details);
+  assert.ok(words.includes(TRUST_BADGE_TEXT.explanation['not-verified']));
+  assert.ok(words.includes('The check failed: The signature does not match the signing address.'));
+  assert.ok(words.includes(TRUST_BADGE_TEXT.helpers));
+  assert.ok(words.includes('Not checked in the editor: platform TCB status and certificate revocation (Intel collateral), which code the enclave runs (measurements). '));
+  details.press('Escape');
+  assert.equal(details.hidden, true);
+  assert.equal(button.attributes.get('aria-expanded'), 'false');
+  assert.equal(doc.activeElement, button, 'focus is back on the badge');
+  // A second click opens them again; a key other than Escape changes nothing.
+  button.click();
+  button.press('Enter');
+  assert.equal(details.hidden, false);
+});
+
+test('Check again posts verify-response and Show full attestation posts trust-details, each for the badge\'s own run id; an update keeps the details open', () => {
+  const { button, details, posts } = drawnBadge();
+  button.click();
+  buttonIn(details, 'Check again')!.click();
+  buttonIn(details, 'Show full attestation')!.click();
+  assert.deepEqual(posts, [{ type: 'verify-response', runId: 'run-1-aaaaaa' }, { type: 'trust-details', runId: 'run-1-aaaaaa' }]);
+  assert.ok(buttonIn(details, 'Checking again…'), 'Check again says it is checking until the badge comes back');
+  // The updated badge arrives: the details stay open and show the new words, with Check again ready again.
+  const container = button.parent!.parent!;
+  fullKit.renderTrustBadge(new FakeDocument(), container, { ...FAILED_BADGE, state: 'model-verified', title: TRUST_BADGE_TITLES['model-verified'], explanation: TRUST_BADGE_TEXT.explanation['model-verified'], reasons: [] }, () => undefined, 'run-1-aaaaaa');
+  assert.equal(details.hidden, false);
+  assert.ok(wordsIn(details).includes(TRUST_BADGE_TEXT.explanation['model-verified']));
+  assert.ok(buttonIn(details, 'Check again'));
+});
+
+test('a replayed badge (a reopened chat) shows its explanation and reasons but neither button, and says the full attestation is kept only while the window that checked it is open', () => {
+  const { button, details } = drawnBadge({ ...FAILED_BADGE, replayed: true, reasons: [...FAILED_BADGE.reasons, TRUST_BADGE_TEXT.replayed] });
+  button.click();
+  assert.equal(buttonIn(details, 'Check again'), undefined);
+  assert.equal(buttonIn(details, 'Show full attestation'), undefined);
+  const words = wordsIn(details);
+  assert.ok(words.includes(TRUST_BADGE_TEXT.keptWhileOpen));
+  assert.ok(words.includes(TRUST_BADGE_TEXT.replayed));
+  assert.ok(words.includes(TRUST_BADGE_TEXT.explanation['not-verified']));
+});
+
+test('the kit\'s own words are the host\'s, and it never writes markup', () => {
+  assert.equal(fullKit.TEXT.fullCheck, TRUST_BADGE_TEXT.fullCheck);
+  assert.equal(fullKit.TEXT.keptWhileOpen, TRUST_BADGE_TEXT.keptWhileOpen);
+  assert.equal(fullKit.TEXT.notChecked, TRUST_BADGE_TEXT.notChecked);
+  const source = readFileSync(path.join(ROOT, 'media', 'chat', 'trustBadge.js'), 'utf8');
+  assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|outerHTML/);
+  // Report text with markup in a reason is drawn as text.
+  const { button, details } = drawnBadge({ ...FAILED_BADGE, reasons: ['<img src=x onerror=alert(1)>'] });
+  button.click();
+  assert.ok(details.all((node) => node.textContent === '<img src=x onerror=alert(1)>').length === 1);
+  assert.equal(details.all((node) => node.tagName === 'img').length, 0);
+});
+
+test('the real chat page: the badge opens its details, and Check again and Show full attestation post for the run (with the chat id)', async () => {
+  const page = chatPage();
+  const reply = await answerOn(page, 'run-1-aaaaaa');
+  page.send({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: FAILED_BADGE });
+  const badge = badgesUnder(reply)[0]!;
+  badge.click();
+  assert.equal(badge.getAttribute('aria-expanded'), 'true');
+  assert.match(textOf(reply), /The signature does not match/);
+  const before = page.sent().length;
+  under(reply).find((node) => node.tagName === 'button' && node.textContent === 'Check again')!.click();
+  under(reply).find((node) => node.tagName === 'button' && node.textContent === 'Show full attestation')!.click();
+  const posted = page.sent().slice(before) as Array<{ type: string; runId: string }>;
+  assert.deepEqual(posted.map((message) => [message.type, message.runId]), [['verify-response', 'run-1-aaaaaa'], ['trust-details', 'run-1-aaaaaa']]);
+});
+
+test('the bridge accepts trust-details with exactly a run id (and the chat id), and refuses extra fields or a bad run id', () => {
+  assert.deepEqual(parseChatWebviewMessage({ type: 'trust-details', runId: 'run-1-abcdef' }), { type: 'trust-details', runId: 'run-1-abcdef' });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'trust-details', runId: 'run-1-abcdef', conversationId: 'conv-mf3k2-0a1b2c3d' }), { type: 'trust-details', runId: 'run-1-abcdef', conversationId: 'conv-mf3k2-0a1b2c3d' });
+  assert.equal(parseChatWebviewMessage({ type: 'trust-details', runId: 'run-1-abcdef', report: '{}' }), undefined);
+  for (const runId of ['run-1', '../run-1-abcdef', 'run-1-ABCDEF', 'run-1-abcdef ', 42, undefined]) {
+    assert.equal(parseChatWebviewMessage({ type: 'trust-details', runId }), undefined, String(runId));
+  }
+});
+
+test('Show full attestation opens one untitled JSON document holding the signature, the signing address, who holds the key, the checks, the connection with its fingerprint and the report; nothing is written to the workspace', async () => {
+  const near = await cloud('bound');
+  const chat = badgeChat(CONFIDENTIAL);
+  await send(chat, near.client);
+  await settle();
+  const runId = chat.badges().at(-1)!.runId;
+  const root = (chat.conversation as unknown as { root: string }).root;
+  const before = listTree(root);
+  const details = chat.conversation.trustDetails(runId)!;
+  assert.ok(details !== undefined);
+  const stub = createVscodeStub();
+  const vscodeApi = stub.vscode as unknown as Parameters<typeof openTrustDetails>[0];
+  const executed: string[] = [];
+  const realExecute = vscodeApi.commands.executeCommand.bind(vscodeApi.commands);
+  (vscodeApi.commands as { executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown> }).executeCommand = async (command: string, ...args: unknown[]) => { executed.push(command); return realExecute(command, ...args); };
+  await openTrustDetails(vscodeApi, details);
+  assert.equal(stub.shownDocuments.length, 1);
+  const shown = stub.shownDocuments[0]!;
+  assert.match(shown.uri, /^untitled:/);
+  const parsed = JSON.parse(shown.text) as { check: Record<string, unknown>; connection: Record<string, unknown>; attestationReport: unknown; badge: { state: string }; notCheckedInEditor: string[] };
+  assert.equal((parsed.check.signingAddress as string).toLowerCase(), SIGNING.address.toLowerCase());
+  assert.equal(parsed.check.keyHeldBy, 'the model\'s own enclave');
+  assert.equal(typeof parsed.check.signature, 'string');
+  assert.match(String(parsed.check.signedText), /^[0-9a-f]{64}:[0-9a-f]{64}$/);
+  assert.equal((parsed.check.checks as Record<string, boolean>).signature, true);
+  assert.equal(parsed.connection.state, 'bound');
+  assert.equal(parsed.connection.fingerprint, 'ab'.repeat(32));
+  assert.equal(parsed.connection.requestHeldToThisKey, true);
+  assert.ok(Array.isArray((parsed.attestationReport as { model_attestations?: unknown[] }).model_attestations), 'the report the check used');
+  assert.equal(parsed.badge.state, 'verified-private');
+  assert.ok(parsed.notCheckedInEditor.length > 0);
+  assert.deepEqual(executed, ['workbench.action.files.setActiveEditorReadonlyInSession'], 'the tab is made read-only for the session');
+  assert.deepEqual(listTree(root), before, 'nothing was written under the workspace');
+  // A run whose badge is no longer kept has no details; the host says so and offers Check again.
+  assert.equal(chat.conversation.trustDetails('run-9-ffffff'), undefined);
+  assert.match(TRUST_DETAILS_NOT_KEPT_TEXT, /last 20 answers of this window/);
+});
+
+test('a reused attestation report is still shown on request: the report travels with the 10-minute cache, in memory only', async () => {
+  const near = await cloud('bound');
+  const chat = badgeChat();
+  await send(chat, near.client);
+  await send(chat, near.client);
+  await settle();
+  assert.equal(near.reportGets(), 1, 'the second answer reused the report');
+  const second = chat.badges().at(-1)!.runId;
+  const details = chat.conversation.trustDetails(second) as { attestationReport: { model_attestations?: unknown[] } | null; check: { summary: string } };
+  assert.match(details.check.summary, /report was reused/);
+  assert.ok(Array.isArray(details.attestationReport?.model_attestations));
+});
+
+test('the badge is styled by state with VS Code theme variables only, with a visible focus and a border in high contrast, and no hard-coded colour', () => {
+  const css = readFileSync(path.join(ROOT, 'media', 'chat', 'chat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = css.split('\n').filter((line) => line.includes('.trust'));
+  for (const state of TRUST_BADGE_STATES) assert.ok(rules.some((line) => line.includes(`.trust-badge[data-state="${state}"]`) && line.includes('var(--vscode-')), `${state} has a rule`);
+  assert.ok(rules.some((line) => line.includes('.trust-badge[data-state="verified-private"]') && line.includes('--vscode-testing-iconPassed')));
+  assert.ok(rules.some((line) => line.includes('.trust-badge[data-state="model-verified"]') && line.includes('--vscode-editorWarning-foreground')));
+  assert.ok(rules.some((line) => line.includes('.trust-badge:focus-visible') && line.includes('--vscode-focusBorder')), 'a visible focus');
+  assert.ok(rules.some((line) => line.includes('body.vscode-high-contrast .trust-badge') && line.includes('body.vscode-high-contrast-light .trust-badge') && line.includes('--vscode-contrastBorder')), 'a border in high contrast');
+  for (const line of rules) assert.doesNotMatch(line, /#[0-9a-fA-F]{3,8}\b(?!\w)|rgba?\(|hsla?\(|\b(?:red|green|orange|yellow|white|black)\b/, `no hard-coded colour: ${line}`);
+  assert.doesNotMatch(css, /^\.verify\b/m, 'the old row\'s rules are gone');
+});
+
+/** Every file under a folder, with its size, so a test can show nothing was written there. */
+function listTree(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else out.push(`${path.relative(root, full)}:${String(statSync(full).size)}`);
+    }
+  };
+  walk(root);
+  return out.sort();
+}

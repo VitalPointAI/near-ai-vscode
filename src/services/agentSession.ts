@@ -57,6 +57,7 @@ import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
 import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence } from './attestation';
+import { trustDetailsOf } from './trustDetails';
 import { BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_TEXT, trustBadgeFor, type TrustBadge, type TrustBadgeFacts, type TrustVerification } from '../domain/gate/trustBadge';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
@@ -980,6 +981,13 @@ export class AgentConversation {
   public trustBadge(runId: string): TrustBadge | undefined {
     const entry = this.verifiable.get(runId);
     return entry === undefined ? undefined : this.badgeOf(entry);
+  }
+
+  /** Show full attestation (CLAS-08): one answer's check details, or undefined when the run's badge is no longer kept (the newest TRUST_ENTRIES_KEPT). */
+  public trustDetails(runId: string): Record<string, unknown> | undefined {
+    const entry = this.verifiable.get(runId);
+    if (entry === undefined) return undefined;
+    return trustDetailsOf({ runId, model: entry.model, badge: this.badgeOf(entry), result: entry.result, connection: entry.facts.connection, connectionPinned: entry.facts.connectionFresh });
   }
 
   /**

@@ -454,9 +454,21 @@ body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hov
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
-.verify { margin-top: 4px; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
-.verify-ok { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
-.verify-failed { color: var(--vscode-errorForeground); }
+/* The trust badge under a cloud answer (CLAS-08): theme colours only, the state also in words and an icon, a border in high contrast. */
+.trust { margin-top: 4px; font-size: 0.9em; }
+.trust-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; cursor: pointer; }
+.trust-badge:hover { background: var(--vscode-toolbar-hoverBackground); }
+.trust-badge:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.trust-badge[data-state="verified-private"] { color: var(--vscode-testing-iconPassed); }
+.trust-badge[data-state="model-verified"] { color: var(--vscode-editorWarning-foreground); }
+.trust-badge[data-state="not-verified"] { color: var(--vscode-descriptionForeground); }
+body.vscode-high-contrast .trust-badge, body.vscode-high-contrast-light .trust-badge { border-color: var(--vscode-contrastBorder); }
+.trust-details { margin: 4px 0 0; padding: 6px 8px; border-left: 2px solid var(--vscode-textBlockQuote-border); color: var(--vscode-descriptionForeground); }
+.trust-details p, .trust-details ul { margin: 0 0 4px; }
+.trust-details ul { padding-left: 18px; }
+.trust-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.trust-action { padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
+.trust-action:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 
 /* Narrow sidebars: things wrap or stack instead of pushing the sidebar sideways. */
 @media (max-width: 260px) {
