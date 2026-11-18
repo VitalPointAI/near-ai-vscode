@@ -1,0 +1,164 @@
+{
+  "format": "near-ai-staff-scenario",
+  "version": 1,
+  "id": "iron-lantern",
+  "title": "Exercise IRON LANTERN",
+  "marking": "UNCLASSIFIED // EXERCISE // FICTIONAL DATA",
+  "fictional": true,
+  "summary": "Ten days ago the Dravic Federation seized the Kestrel Peninsula from the Republic of Aldmark with one coastal brigade, and now holds Port Calder, the peninsula's only deep-water port, on the Varn Strait. A coalition joint task force, JTF BEACON, has five days to plan the peninsula's return to Aldmark before Dravic can reinforce across the Aurel Sea. Nobody knows whether the strait has been mined. Your staff is the JTF BEACON staff. At tactical level, play the TF ANVIL staff instead: JTF BEACON is then your higher headquarters and its land tasks are yours. Every place, unit, person and number here is invented; equipment is described by class with notional planning figures, never as real equipment data.",
+  "region": {
+    "name": "Kestrel Peninsula and the Varn Strait",
+    "description": "A peninsula about 60 km long running north into the Aurel Sea, joined to the Aldmark mainland in the south. Its north coast faces the Varn Strait, about 8 km wide, which links the Aurel Sea to the open ocean and carries most of the region's merchant shipping. Harrow Ridge runs along the east of the peninsula and overlooks the only main road, Route IRON, where it crosses the River Brenn at Ashby Ford. Port Calder sits at the north end of Route IRON with the peninsula's only deep-water harbour.",
+    "grid": { "kind": "fictional", "name": "KQ" },
+    "features": [
+      { "id": "aurel-sea", "kind": "sea", "name": "Aurel Sea", "location": "North and east of the peninsula, KQ 48 to KQ 49 and beyond", "description": "Enclosed sea between Aldmark and the Dravic Federation. Dravic ports on its far shore are about 180 km from Port Calder, roughly 10 hours for a notional landing ship." },
+      { "id": "varn-strait", "kind": "strait", "name": "Varn Strait", "location": "KQ 41 to KQ 46, north of the peninsula", "description": "About 8 km wide. The eastern channel is deep enough for landing ships and merchant vessels; the western channel is shallow and used by fishing boats. Strong tidal current, slack water about every six hours. Morning fog most days in this season. The only sea route from the open ocean to Port Calder." },
+      { "id": "north-coast", "kind": "coast", "name": "North coast of the Kestrel Peninsula", "location": "KQ 42 to KQ 49 along the strait", "description": "Cliffs from Port Calder east to Harrow Ridge. West of Port Calder the coast is low, with sand and shingle beaches backed by dunes and a coast road." },
+      { "id": "beach-amber", "kind": "beach", "name": "Beach AMBER", "location": "KQ 4413 to KQ 4613, 3 to 5 km west of Port Calder", "description": "About 2 km of firm sand, gentle gradient, exits to the coast road at two points. Suitable for landing craft in sea state 3 or less. Overlooked from the western edge of Port Calder." },
+      { "id": "gull-island", "kind": "island", "name": "Gull Island", "location": "KQ 4108, in the western mouth of the strait", "description": "Small rocky island with a staffed lighthouse that marks the strait for all shipping. Protected site under the restraints." },
+      { "id": "harrow-ridge", "kind": "high-ground", "name": "Harrow Ridge", "location": "KQ 4720 to KQ 4926, running south-west to north-east", "description": "Wooded ridge about 300 m above the valley floor. Dominates Ashby Ford, Route IRON north of the ford and the eastern approaches to Port Calder. A forestry track runs along its crest from Kell; tracked vehicles can use it, wheeled vehicles only in dry weather." },
+      { "id": "river-brenn", "kind": "river", "name": "River Brenn", "location": "Rises on Harrow Ridge, flows west through Ashby Ford to the sea at KQ 4224", "description": "About 40 m wide and 1 m deep at normal levels. Rises quickly after rain. Marshes on the south bank west of the ford." },
+      { "id": "ashby-ford", "kind": "crossing", "name": "Ashby Ford", "location": "KQ 4522", "description": "Paved ford and small village where Route IRON crosses the Brenn. Passable to tracked vehicles at all river levels seen so far, and to wheeled vehicles only when the river is low. The only crossing between the sea and the bridge at Kell." },
+      { "id": "kell-bridge", "kind": "crossing", "name": "Kell bridge", "location": "KQ 4818", "description": "Two-lane road bridge at Kell on the minor road along the foot of Harrow Ridge. Notional load class allows all wheeled and most tracked vehicles. Reported intact (PR-12)." },
+      { "id": "route-iron", "kind": "route", "name": "Route IRON", "location": "Saltmere KQ 4335, Ashby Ford KQ 4522, Port Calder KQ 4614", "description": "The peninsula's only two-lane main road, running north from Saltmere through Ashby Ford to Port Calder. The main supply route for any force moving north by land, and the route civilians use to move south." },
+      { "id": "port-calder", "kind": "port", "name": "Port Calder", "location": "KQ 4614", "description": "Town of about 40,000 people with the peninsula's only deep-water harbour, a container quay and a fuel terminal. Narrow streets in the old town; newer housing and a power station on the eastern edge." },
+      { "id": "saltmere", "kind": "town", "name": "Saltmere", "location": "KQ 4335", "description": "Market town of about 12,000 people at the south end of Route IRON, with the peninsula's main hospital. Held by Aldmark; the coalition's assembly area is just north of it." },
+      { "id": "kell", "kind": "town", "name": "Kell", "location": "KQ 4818", "description": "Village of about 2,000 people at the north-east end of Harrow Ridge with the Kell bridge." },
+      { "id": "brenn-marsh", "kind": "marsh", "name": "Brenn marshes", "location": "KQ 4223 to KQ 4424, south bank of the Brenn", "description": "No-go for vehicles in every season. Restricted for people on foot." }
+    ],
+    "weather": {
+      "summary": "Late autumn. Rain fronts cross the peninsula every three to four days. Temperatures 4 to 12 degrees C. Sunrise about 0700, sunset about 1700 local.",
+      "effects": [
+        "Morning fog over the strait and the north coast until about 1000 on most days limits imagery from aircraft and uncrewed aircraft, for both sides, and hides movement in the harbour.",
+        "Sea state is usually 2 to 3 and reaches 4 or more about one day in four; at 4 or more, landing craft cannot use Beach AMBER.",
+        "After a rain front the Brenn rises for about 24 hours: Ashby Ford closes to wheeled vehicles, and the Harrow Ridge crest track becomes tracked only.",
+        "Low cloud on about three days in ten restricts close air support and helicopter flying."
+      ]
+    },
+    "civil": [
+      { "id": "civ-calder-people", "kind": "people", "name": "Population of Port Calder", "description": "About 40,000 people, most still in the town. Some sympathy for Dravic among older residents; a small armed militia (the Calder Volunteer Guard) has formed." },
+      { "id": "civ-harbour", "kind": "structure", "name": "Port Calder harbour and fuel terminal", "description": "The only deep-water berths on the peninsula. Needed intact for coalition sustainment from D+3 and for the town's food and fuel." },
+      { "id": "civ-power", "kind": "capability", "name": "Port Calder power station", "description": "Supplies electricity to the whole peninsula, including the hospital at Saltmere." },
+      { "id": "civ-hospital", "kind": "structure", "name": "Saltmere hospital", "description": "The peninsula's main hospital, 200 beds, working on generator power at times." },
+      { "id": "civ-fishing", "kind": "organization", "name": "Strait fishing fleet", "description": "About 60 small boats that work the western channel of the strait daily from Port Calder and Saltmere. A source of reporting, and a risk if the strait is mined." },
+      { "id": "civ-relief", "kind": "organization", "name": "Peninsula Relief Society", "description": "Local volunteer aid group running shelters in Saltmere for people who have left Port Calder." },
+      { "id": "civ-lighthouse", "kind": "area", "name": "Gull Island lighthouse", "description": "Protected site. Its two keepers still work and report weather to the coast guard." },
+      { "id": "civ-movement", "kind": "event", "name": "Civilian movement south on Route IRON", "description": "Several hundred people a day walk or drive south through Ashby Ford toward Saltmere. Dravic checkpoints at Ashby Ford have slowed the flow." }
+    ]
+  },
+  "parties": [
+    { "id": "coalition", "name": "Coalition (JTF BEACON)", "side": "friendly", "description": "A coalition of several fictional nations acting at the request of the Republic of Aldmark." },
+    { "id": "aldmark", "name": "Republic of Aldmark", "side": "host-nation", "description": "The fictional state whose territory the peninsula is. Its army is committed elsewhere; its coastal guard and police remain in Saltmere." },
+    { "id": "dravic", "name": "Dravic Federation", "side": "adversary", "description": "The fictional state across the Aurel Sea that seized the peninsula. It claims the peninsula on historical grounds and says it will defend it." },
+    { "id": "merchant", "name": "Merchant shipping", "side": "neutral", "description": "Merchant vessels of several flags waiting to pass the strait or anchored off the Aurel Sea coast." },
+    { "id": "unidentified", "name": "Unidentified contacts", "side": "unknown", "description": "Contacts not yet identified as belonging to any party." }
+  ],
+  "forces": [
+    { "id": "f-beacon", "party": "coalition", "designation": "JTF BEACON", "kind": "Joint task force headquarters", "location": "Aboard the command ship off Saltmere, KQ 4038", "notes": "Your headquarters. Commands TF ANVIL, TG SHOAL and AIR DET LARK." },
+    { "id": "f-anvil", "party": "coalition", "designation": "TF ANVIL", "kind": "Mechanized infantry brigade headquarters", "echelon": "brigade", "parent": "f-beacon", "location": "AA OAK, KQ 4332", "strength": "About 4,500 people" },
+    { "id": "f-1mech", "party": "coalition", "designation": "1 MECH", "kind": "Mechanized infantry battalion", "echelon": "battalion", "parent": "f-anvil", "location": "AA OAK, KQ 4431", "strength": "About 600 people, notional 44 tracked infantry vehicles", "capabilities": ["Can cross Ashby Ford at any river level seen so far"] },
+    { "id": "f-2inf", "party": "coalition", "designation": "2 INF", "kind": "Infantry battalion", "echelon": "battalion", "parent": "f-anvil", "location": "KQ 4633, east of Saltmere", "strength": "About 650 people, wheeled", "capabilities": ["Wheeled: cannot use Ashby Ford for about 24 hours after rain"] },
+    { "id": "f-asqn", "party": "coalition", "designation": "A SQN", "kind": "Armour squadron", "echelon": "company", "parent": "f-anvil", "location": "AA OAK, KQ 4231", "strength": "Notional 14 tanks", "notes": "Brigade reserve." },
+    { "id": "f-recce", "party": "coalition", "designation": "RECCE", "kind": "Reconnaissance squadron", "echelon": "company", "parent": "f-anvil", "location": "Screen south of the Brenn, KQ 4425", "capabilities": ["Patrols to PL SLATE", "Small uncrewed aircraft, notional 10 km reach"] },
+    { "id": "f-fdregt", "party": "coalition", "designation": "FD REGT", "kind": "Field artillery regiment", "echelon": "regiment", "parent": "f-anvil", "location": "KQ 4034", "capabilities": ["Notional reach 25 km from current positions: covers Ashby Ford and PL SLATE, not Port Calder"] },
+    { "id": "f-cssb", "party": "coalition", "designation": "CSS BN", "kind": "Combat service support battalion", "echelon": "battalion", "parent": "f-anvil", "location": "Saltmere, KQ 4336", "capabilities": ["Notional 3 days of supply held forward"] },
+    { "id": "f-shoal", "party": "coalition", "designation": "TG SHOAL", "kind": "Amphibious task group", "parent": "f-beacon", "location": "At sea, 60 km west of Gull Island", "strength": "Notional 2 landing ships, 6 landing craft, 2 escorts", "capabilities": ["Landing craft can lift one battalion in two waves", "Cannot enter the eastern channel until it is cleared or found clear of mines"] },
+    { "id": "f-3amph", "party": "coalition", "designation": "3 AMPH", "kind": "Amphibious infantry battalion", "echelon": "battalion", "parent": "f-shoal", "location": "Embarked in TG SHOAL", "strength": "About 700 people" },
+    { "id": "f-mcm", "party": "coalition", "designation": "MCM DET", "kind": "Mine countermeasures detachment", "parent": "f-shoal", "location": "At sea with TG SHOAL", "strength": "Notional 2 mine countermeasures vessels and an uncrewed underwater vehicle team", "capabilities": ["Notional rate: survey of the eastern channel takes about 36 hours; clearance longer if mines are found"] },
+    { "id": "f-lark", "party": "coalition", "designation": "AIR DET LARK", "kind": "Air detachment", "parent": "f-beacon", "location": "Airfield on the Aldmark mainland, 90 km south", "capabilities": ["Notional 2 uncrewed reconnaissance aircraft, one airborne at a time", "Notional 8 close air support sorties a day in good weather"] },
+    { "id": "h-guard", "party": "aldmark", "designation": "ALDMARK COASTAL GUARD", "kind": "Coast guard flotilla", "location": "Saltmere harbour, KQ 4237", "strength": "Notional 6 patrol boats", "capabilities": ["Local pilots for the strait", "Liaison with the fishing fleet"] },
+    { "id": "h-police", "party": "aldmark", "designation": "SALTMERE DISTRICT POLICE", "kind": "Police", "location": "Saltmere", "capabilities": ["Runs the civilian reception point at Saltmere"] },
+    { "id": "e-41", "party": "dravic", "designation": "41 CSTL BDE", "kind": "Coastal brigade headquarters", "echelon": "brigade", "location": "Eastern edge of Port Calder, KQ 4715", "strength": "About 3,500 people in all", "reportedBy": ["EW-07", "HQ-07"] },
+    { "id": "e-1-41", "party": "dravic", "designation": "1-41 MECH", "kind": "Mechanized infantry battalion", "echelon": "battalion", "parent": "e-41", "location": "Along PL COPPER north of Ashby Ford, KQ 4519", "strength": "Notional 30 tracked vehicles seen", "capabilities": ["Engineer obstacles at the north exit of Ashby Ford"], "reportedBy": ["PR-11"] },
+    { "id": "e-2-41", "party": "dravic", "designation": "2-41 MECH", "kind": "Mechanized infantry battalion", "echelon": "battalion", "parent": "e-41", "location": "In hides east of Port Calder, KQ 4815", "reportedBy": ["IM-04"] },
+    { "id": "e-3-41", "party": "dravic", "designation": "3-41 ARMD", "kind": "Armour company", "echelon": "company", "parent": "e-41", "location": "South slope of Harrow Ridge, KQ 4822 (reported)", "strength": "Notional 10 tanks (not confirmed)", "notes": "The only adversary armour reported on the peninsula. Two of the three reports share one origin.", "reportedBy": ["IM-04", "OS-02", "OS-03"] },
+    { "id": "e-41-arty", "party": "dravic", "designation": "41 ARTY", "kind": "Artillery battalion", "echelon": "battalion", "parent": "e-41", "location": "South of Kell, KQ 4917", "capabilities": ["Notional reach 20 km: covers Ashby Ford, Beach AMBER and the harbour approaches"], "reportedBy": ["EW-07"] },
+    { "id": "e-41-cstl-bty", "party": "dravic", "designation": "41 CSTL BTY", "kind": "Coastal battery", "parent": "e-41", "location": "Cliffs east of Port Calder, KQ 4813 (two years old)", "notes": "Position known from before the invasion. Whether it is manned now is unknown.", "reportedBy": ["TR-01"] },
+    { "id": "e-41-uas", "party": "dravic", "designation": "41 UAS PLT", "kind": "Uncrewed aircraft platoon", "parent": "e-41", "location": "Port Calder", "capabilities": ["Small reconnaissance aircraft, notional 15 km reach"], "reportedBy": ["EW-07"] },
+    { "id": "e-41-ew", "party": "dravic", "designation": "41 EW DET", "kind": "Electronic warfare detachment", "parent": "e-41", "location": "Harrow Ridge crest, KQ 4723", "capabilities": ["Can direction-find and jam tactical radios across the Brenn valley"], "reportedBy": ["EW-07"] },
+    { "id": "e-militia", "party": "dravic", "designation": "CALDER VOLUNTEER GUARD", "kind": "Local militia aligned with Dravic", "location": "Port Calder old town", "strength": "Perhaps 200 armed people", "reportedBy": ["OS-02", "HR-02"] },
+    { "id": "u-1", "party": "unidentified", "designation": "U-1", "kind": "Small fast surface contact", "location": "Eastern channel near Gull Island", "notes": "Seen twice at night, no lights and no identification signal.", "reportedBy": ["MP-05", "FR-01"] },
+    { "id": "n-orla", "party": "merchant", "designation": "MV ORLA", "kind": "Merchant vessel (bulk carrier)", "location": "Anchored in the Aurel Sea, KQ 4908", "notes": "Waiting to pass the strait. Master reports by radio to the coast guard." }
+  ],
+  "controlMeasures": [
+    { "id": "pl-slate", "kind": "phase-line", "name": "PL SLATE", "location": "East-west along the north bank of the Brenn, through Ashby Ford", "description": "First phase line north of the river." },
+    { "id": "pl-copper", "kind": "phase-line", "name": "PL COPPER", "location": "East-west 4 km south of Port Calder", "description": "Second phase line; the adversary's forward positions lie along it." },
+    { "id": "obj-falcon", "kind": "objective", "name": "OBJ FALCON", "location": "Port Calder and its harbour, KQ 4614", "description": "Port Calder: the town, the harbour and the fuel terminal. Its seizure ends adversary control of the strait." },
+    { "id": "obj-kite", "kind": "objective", "name": "OBJ KITE", "location": "South spur of Harrow Ridge, KQ 4822", "description": "Ground that overlooks Ashby Ford from the east." },
+    { "id": "aa-oak", "kind": "assembly-area", "name": "AA OAK", "location": "North of Saltmere, KQ 4332", "description": "TF ANVIL assembly area." },
+    { "id": "la-amber", "kind": "landing-area", "name": "LA AMBER", "location": "Beach AMBER, KQ 4413 to KQ 4613", "description": "The only landing area within 10 km of Port Calder." },
+    { "id": "nai-1", "kind": "nai", "name": "NAI 1", "location": "Route IRON between Ashby Ford and PL COPPER", "description": "Watch for adversary withdrawal toward Port Calder or reinforcement of the ford." },
+    { "id": "nai-2", "kind": "nai", "name": "NAI 2", "location": "West slope of Harrow Ridge above Ashby Ford", "description": "Watch for armour moving off the ridge toward the ford." },
+    { "id": "nai-3", "kind": "nai", "name": "NAI 3", "location": "Port Calder harbour approaches and the eastern channel", "description": "Watch for coastal battery activity, mine laying and small craft." }
+  ],
+  "mission": {
+    "higher": {
+      "headquarters": "CJFC NORTHGATE",
+      "order": "CJFC NORTHGATE OPORD 03 (IRON LANTERN)",
+      "mission": "CJFC NORTHGATE restores the Republic of Aldmark's control of the Kestrel Peninsula from D-day in order to re-establish Aldmark's sovereignty and reopen the Varn Strait to shipping.",
+      "intent": {
+        "purpose": "Return the peninsula and the strait to Aldmark quickly, before Dravic can reinforce across the Aurel Sea, without damage that stops the people of Port Calder returning to normal life.",
+        "keyTasks": [
+          "Defeat 41 CSTL BDE on the peninsula",
+          "Reopen the Varn Strait to merchant shipping",
+          "Protect the civilian population and keep Port Calder harbour usable",
+          "Hand security of the peninsula back to Aldmark"
+        ],
+        "endState": "Aldmark controls the peninsula; Dravic forces have left it; the strait is open to shipping; Port Calder harbour and power station work; the population is safe and civilians can move freely."
+      }
+    },
+    "own": {
+      "headquarters": "JTF BEACON",
+      "tasks": [
+        "Seize Port Calder (OBJ FALCON) with its harbour usable",
+        "Defeat 41 CSTL BDE on the Kestrel Peninsula",
+        "Clear, or confirm clear, the eastern channel of the Varn Strait",
+        "Prevent Dravic reinforcement of the peninsula by sea",
+        "Hand over security of the peninsula to Aldmark by D+10"
+      ],
+      "constraints": [
+        "Port Calder harbour must be usable for coalition sustainment by D+3",
+        "Keep Route IRON open for civilians moving south until D-1",
+        "Be ready to start operations at H-hour on D-day"
+      ],
+      "restraints": [
+        "No indirect fire into Port Calder town without the JTF commander's approval",
+        "No action against the Gull Island lighthouse or its keepers",
+        "No operations beyond the Aurel Sea median line"
+      ],
+      "assumptions": [
+        { "id": "A-1", "text": "Dravic will not reinforce the peninsula by air in the first 72 hours." },
+        { "id": "A-2", "text": "The Aldmark Coastal Guard will provide pilots for the strait." },
+        { "id": "A-3", "text": "Ashby Ford stays passable to tracked vehicles at every river level." },
+        { "id": "A-4", "text": "Landing craft are available to lift one battalion in two waves." },
+        { "id": "A-5", "text": "Most people in Port Calder will shelter in place rather than move south on Route IRON once fighting starts." }
+      ],
+      "timeline": [
+        { "id": "T-1", "when": "D-5 0800", "event": "Warning order from CJFC NORTHGATE received; planning starts" },
+        { "id": "T-2", "when": "D-4 1600", "event": "Mission analysis brief to the JTF commander" },
+        { "id": "T-3", "when": "D-3 1200", "event": "COA decision brief" },
+        { "id": "T-4", "when": "D-2 1800", "event": "JTF BEACON order issued to components" },
+        { "id": "T-5", "when": "D-day H-hour", "event": "Operations start" },
+        { "id": "T-6", "when": "D+3", "event": "Port Calder harbour usable for sustainment" },
+        { "id": "T-7", "when": "D+10", "event": "Handover of security to Aldmark" }
+      ]
+    }
+  },
+  "reports": [
+    { "id": "PR-11", "kind": "patrol", "title": "Adversary digging in along PL COPPER", "received": "D-6 0540", "source": "RECCE squadron foot patrol", "origin": "Direct observation by the RECCE patrol", "grade": { "reliability": "B", "credibility": "2" }, "text": "Patrol observed about 30 tracked infantry vehicles in prepared positions along PL COPPER north of Ashby Ford, with engineers laying wire and mines at the ford's north exit. Digging continued through the night. No armour seen.", "about": ["e-1-41", "ashby-ford", "pl-copper"] },
+    { "id": "PR-12", "kind": "patrol", "title": "Kell bridge intact, ford passable", "received": "D-6 2210", "source": "2 INF reconnaissance platoon", "origin": "Direct observation by the 2 INF patrol", "grade": { "reliability": "A", "credibility": "2" }, "text": "Kell bridge intact and unguarded at 2100. Ashby Ford water depth about 0.8 m; tracked vehicles can cross, wheeled vehicles could not after the last rain. The south bank west of the ford is marsh and impassable.", "about": ["kell-bridge", "ashby-ford", "brenn-marsh"] },
+    { "id": "IM-04", "kind": "imagery", "title": "Vehicles in hides east of Port Calder and on Harrow Ridge", "received": "D-5 1130", "source": "AIR DET LARK uncrewed aircraft, single pass after the fog lifted", "origin": "Imagery from one pass", "grade": { "reliability": "B", "credibility": "3" }, "text": "Imagery shows about 25 vehicles under camouflage in hides east of Port Calder, and four tracked vehicles in revetments on the south slope of Harrow Ridge. The ridge vehicles could be tanks or engineer vehicles; the image does not settle it.", "about": ["e-2-41", "e-3-41", "harrow-ridge"] },
+    { "id": "OS-02", "kind": "open-source", "title": "Video of tanks on the Harrow Ridge road", "received": "D-5 1900", "source": "Exercise open-source cell", "origin": "One video posted by a Port Calder resident's social media account", "grade": { "reliability": "C", "credibility": "3" }, "text": "A 40-second video shows what look like four tanks driving up the forestry track toward the Harrow Ridge crest at dusk. The poster also says armed local men in plain clothes now guard the harbour gates. Location matches the ridge track; the date cannot be checked.", "deception": "Could be staged or old. The account was created after the invasion.", "about": ["e-3-41", "e-militia"] },
+    { "id": "OS-03", "kind": "open-source", "title": "Local news: armour moved to Harrow Ridge", "received": "D-5 2130", "source": "Calder Courier website (fictional local newspaper)", "origin": "One video posted by a Port Calder resident's social media account", "grade": { "reliability": "C", "credibility": "3" }, "text": "The newspaper reports that Dravic tanks have moved onto Harrow Ridge, citing a video circulating online. It adds no new detail.", "deception": "Not independent of OS-02: it repeats the same video.", "about": ["e-3-41"] },
+    { "id": "EW-07", "kind": "signals", "title": "41 CSTL BDE radio net and stations", "received": "D-5 0600", "source": "Coalition signals unit (notional)", "origin": "Direction finding over 48 hours", "grade": { "reliability": "B", "credibility": "2" }, "text": "The brigade command net has stations at the eastern edge of Port Calder, south of Kell and on the Harrow Ridge crest. Traffic from the ridge station rises at dusk each day. A short-range data link consistent with small uncrewed aircraft operates from Port Calder. A jammer was active on the Brenn valley frequencies for two hours on D-6.", "about": ["e-41", "e-41-arty", "e-41-ew", "e-41-uas"] },
+    { "id": "MP-05", "kind": "maritime", "title": "Unidentified small craft near Gull Island", "received": "D-5 0310", "source": "TG SHOAL escort helicopter", "origin": "Radar and night camera, one sortie", "grade": { "reliability": "C", "credibility": "3" }, "text": "A small fast craft without lights or identification signal moved east through the eastern channel near Gull Island at about 25 knots and stopped for 10 to 15 minutes twice before contact was lost near the cliffs east of Port Calder.", "about": ["u-1", "varn-strait", "gull-island"] },
+    { "id": "FR-01", "kind": "human", "title": "Fishing skipper's account of night activity in the eastern channel", "received": "D-4 0800", "source": "A fishing skipper, passed on by the Aldmark Coastal Guard", "origin": "The skipper's own sighting", "text": "A skipper says that three nights ago a small boat without lights stopped several times in the eastern channel and that crew seemed to put things over the side. He did not see what. He has not fished the eastern channel since.", "deception": "Ungraded. Could be smuggling, or the same craft as MP-05. Nothing else reports mine laying, and nothing reports the channel clear.", "about": ["u-1", "varn-strait", "civ-fishing"] },
+    { "id": "HR-02", "kind": "human", "title": "Walk-in at the Saltmere reception point", "received": "D-4 1430", "source": "A Port Calder resident at the Saltmere civilian reception point", "origin": "The resident's account of what militia members said", "grade": { "reliability": "D", "credibility": "3" }, "text": "A resident who left Port Calder yesterday says militia members told her the Dravic commander will pull everyone back into the town if attacked from the south, and that the harbour fuel tanks would be set alight rather than handed over.", "about": ["e-militia", "e-41", "civ-harbour"] },
+    { "id": "TR-01", "kind": "technical", "title": "Pre-invasion record of a coastal battery position", "received": "D-7 0900", "source": "Aldmark Coastal Guard records", "origin": "A survey made two years before the invasion", "grade": { "reliability": "B", "credibility": "4" }, "text": "A coastal battery position with four gun pits and an observation post is recorded on the cliffs east of Port Calder, covering the harbour approaches and the eastern channel. It was empty when surveyed. Whether Dravic has manned it is unknown.", "about": ["e-41-cstl-bty", "nai-3"] },
+    { "id": "HQ-07", "kind": "other", "title": "CJFC NORTHGATE INTSUM 07 extract", "received": "D-5 2000", "source": "CJFC NORTHGATE J2", "origin": "Higher headquarters all-source assessment", "grade": { "reliability": "B", "credibility": "2" }, "text": "A second Dravic brigade is loading at ports on the far shore of the Aurel Sea and could land at Port Calder within 72 hours of sailing if the harbour and the strait are open to it. 41 CSTL BDE is assessed to be under strength after the invasion.", "about": ["e-41", "aurel-sea", "civ-harbour"] },
+    { "id": "OS-04", "kind": "open-source", "title": "Dravic state broadcast claims the coast is mined", "received": "D-4 1800", "source": "Dravic state broadcaster (fictional)", "origin": "Dravic government statement", "grade": { "reliability": "E", "credibility": "4" }, "text": "A Dravic state broadcast says the peninsula's coast and the strait are mined and that any landing will fail.", "deception": "Likely meant to deter a landing. It is not evidence that mines are, or are not, laid.", "about": ["varn-strait", "north-coast"] }
+  ],
+  "sourceRegister": [
+    { "id": "SRC-1", "title": "Exercise IRON LANTERN starter scenario, version 1", "origin": "in-house", "distribution": "Unclassified fictional exercise data, free to use and share. No real places, units, people, operations or equipment data.", "licence": "MIT, as the extension" }
+  ]
+}
