@@ -19,7 +19,7 @@ import { AgentConversation } from '../services/agentSession';
 import type { AgentTurnRequest } from '../services/agentSession';
 
 const NOW = Date.UTC(2026, 10, 18, 12, 0);
-const REGISTERS = ['products/j2/source-register.json', 'products/j2/pir-register.json', 'products/j2/collection-plan.json'];
+const REGISTERS = ['.planning/staff/products/j2/source-register.json', '.planning/staff/products/j2/pir-register.json', '.planning/staff/products/j2/collection-plan.json'];
 
 function workbench(): Map<string, AgentTool<any>> {
   return new Map(intelWorkbenchTools({ now: () => NOW }).map((tool) => [tool.name.replace(`mcp__${INTEL_WORKBENCH_SERVER}__`, ''), tool]));
@@ -87,12 +87,12 @@ test('each tool names exactly the register files it touches, so the gate\'s labe
     collection_plan: { reads: [REGISTERS[2], REGISTERS[1]], writes: [] },
     intsum_draft: { reads: [REGISTERS[0], REGISTERS[1], '.planning/.near-ai/project.json'], writes: [] },
     intrep_draft: { reads: [REGISTERS[0], REGISTERS[1], '.planning/.near-ai/project.json'], writes: [] },
-    compilation_check: { reads: ['products/j2/intsum-181200z-nov-26.md', REGISTERS[0]], writes: [] },
+    compilation_check: { reads: ['.planning/staff/products/j2/intsum-181200z-nov-26.md', REGISTERS[0]], writes: [] },
     check: { reads: [...REGISTERS], writes: [] }
   };
   assert.deepEqual([...tools.keys()].sort(), Object.keys(expected).sort());
   for (const [name, tool] of tools) {
-    const input = name === 'compilation_check' ? { path: 'products/j2/intsum-181200z-nov-26.md' } : {};
+    const input = name === 'compilation_check' ? { path: '.planning/staff/products/j2/intsum-181200z-nov-26.md' } : {};
     const effects = effectsFor(tool.manifest, input);
     assert.ok(effects.ok, `${name} effects fill from the call`);
     if (!effects.ok) continue;
@@ -257,11 +257,11 @@ test('compilation_check asks a person when a product ties units to places, and n
   mkdirSync(path.join(root, 'products', 'j2'), { recursive: true });
   writeFileSync(path.join(root, 'products', 'j2', 'risky.md'), '---\nproduct: risky\n---\n\n3rd Armoured Brigade with 40 tanks at 45.4215, -75.6972\n');
   writeFileSync(path.join(root, 'products', 'j2', 'calm.md'), '---\nproduct: calm\n---\n\nThe weather was clear.\n');
-  const risky = await call(tools, 'compilation_check', { path: 'products/j2/risky.md' }, context);
+  const risky = await call(tools, 'compilation_check', { path: '.planning/staff/products/j2/risky.md' }, context);
   assert.match(risky, /possible compilation\. A person decides\./);
   assert.match(risky, /line 5 ties unit, location, capability detail together/);
   assert.match(risky, /Question for a person with authority:/);
-  const calm = await call(tools, 'compilation_check', { path: 'products/j2/calm.md' }, context);
+  const calm = await call(tools, 'compilation_check', { path: '.planning/staff/products/j2/calm.md' }, context);
   assert.match(calm, /does not clear the product/);
   for (const text of [risky, calm]) assert.doesNotMatch(text, /CLEARED/);
   await assert.rejects(call(tools, 'compilation_check', { path: '../outside.md' }, context), /outside the workspace/);

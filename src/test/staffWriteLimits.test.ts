@@ -9,7 +9,7 @@ import test from 'node:test';
 import { editTool, writeTool } from '../agent/tools';
 import type { ToolContext } from '../agent/tools';
 import type { StaffTeamBlock } from '../domain/staff/teamBlock';
-import { RED_TEAM_PRODUCT, STAFF_GUARD_FOLDER, staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
+import { RED_TEAM_PRODUCT, staffGuardFolder, staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
 
 const CRITIQUE = staffProductPath('j5', RED_TEAM_PRODUCT);
 
@@ -17,7 +17,7 @@ test('the limits: the red team its critique in its own section, the guard its ve
   const block = (section: StaffTeamBlock['section']): StaffTeamBlock => ({ section, steps: {}, products: [], layers: [] });
   assert.deepEqual(staffWriteLimit(block('j5'), 'red-team'), [CRITIQUE]);
   assert.deepEqual(staffWriteLimit(block('special-staff'), 'red-team'), ['.planning/staff/products/special-staff/red-team-critique.md']);
-  assert.deepEqual(staffWriteLimit(block('j2'), 'release-guard'), [STAFF_GUARD_FOLDER]);
+  assert.deepEqual(staffWriteLimit(block('j2'), 'release-guard'), ['.planning/staff/products/j2/guard/']);
   assert.equal(staffWriteLimit(block('j5'), 'lead-planner'), undefined);
   assert.equal(staffWriteLimit(undefined, 'red-team'), undefined);
 });
@@ -26,10 +26,10 @@ test('the write limit: exact files and folders only, compared after resolving, s
   assert.equal(writeAllowedBy([CRITIQUE], CRITIQUE), true);
   assert.equal(writeAllowedBy([CRITIQUE], staffProductPath('j5', 'coa-a')), false);
   assert.equal(writeAllowedBy([CRITIQUE], `${CRITIQUE}.bak`), false);
-  assert.equal(writeAllowedBy([STAFF_GUARD_FOLDER], `${STAFF_GUARD_FOLDER}coa-a-v1.md`), true);
-  assert.equal(writeAllowedBy([STAFF_GUARD_FOLDER], STAFF_GUARD_FOLDER), false);
-  assert.equal(writeAllowedBy([STAFF_GUARD_FOLDER], '.planning/staff/guardian/x.md'), false);
-  assert.equal(writeAllowedBy([STAFF_GUARD_FOLDER], `${STAFF_GUARD_FOLDER}../products/j5/coa-a.md`), false);
+  assert.equal(writeAllowedBy([staffGuardFolder('j5')], `${staffGuardFolder('j5')}coa-a-v1.md`), true);
+  assert.equal(writeAllowedBy([staffGuardFolder('j5')], staffGuardFolder('j5')), false);
+  assert.equal(writeAllowedBy([staffGuardFolder('j5')], '.planning/staff/products/j5/guardian/x.md'), false);
+  assert.equal(writeAllowedBy([staffGuardFolder('j5')], `${staffGuardFolder('j5')}../coa-a.md`), false);
   assert.equal(writeAllowedBy([CRITIQUE], `/${CRITIQUE}`), false);
 });
 

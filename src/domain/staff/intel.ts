@@ -650,8 +650,11 @@ export const INTEL_REGISTER_NAMES = ['source-register', 'pir-register', 'collect
 export type IntelRegisterName = (typeof INTEL_REGISTER_NAMES)[number];
 export const INTEL_FORMAT_VERSION = 1;
 
-/** The J2 products folder (design 10, 3.1: structured registers sit beside the products as JSON). */
-export const INTEL_FOLDER = 'products/j2';
+/**
+ * The J2 products folder (design 10, 3.1: structured registers sit beside the products as JSON). The source register here is the project's one source
+ * register: the tradecraft lint reads it too when a product carries no sources block of its own.
+ */
+export const INTEL_FOLDER = '.planning/staff/products/j2';
 export function registerPath(name: IntelRegisterName): string {
   return `${INTEL_FOLDER}/${name}.json`;
 }

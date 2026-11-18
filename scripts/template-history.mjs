@@ -59,21 +59,10 @@ function fromGit(commit) {
   }
 }
 
-/** One snapshot of every staff section template (src/agent/staff/templates.ts): each variant's members and guidance, and a hash of everything it generates. */
+/** One snapshot of every staff section template (src/agent/staff/templates.ts): each rendering's members and guidance, and a hash of everything it renders. */
 function staffSnapshot() {
-  const out = {};
-  const { STAFF_TEMPLATES } = require(path.join(DIST, 'staff', 'templates.js'));
-  for (const template of STAFF_TEMPLATES) {
-    const members = {};
-    for (const team of template.teams()) {
-      for (const section of splitTeam(team).sections) {
-        const fingerprint = memberFingerprint({ ...section, tools: section.tools ?? null });
-        members[section.name] = [...new Set([...(members[section.name] ?? []), fingerprint])];
-      }
-    }
-    out[template.id] = { definition: definitionHash(template.definition()), guidance: [...new Set(template.guidance().map(guidanceFingerprint))], members };
-  }
-  return out;
+  const { STAFF_TEMPLATES, staffTemplateSnapshot } = require(path.join(DIST, 'staff', 'templates.js'));
+  return Object.fromEntries(STAFF_TEMPLATES.map((template) => [template.id, staffTemplateSnapshot(template)]));
 }
 
 function append(history, snap) {

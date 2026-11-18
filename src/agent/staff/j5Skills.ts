@@ -268,7 +268,7 @@ export interface TemplateFile { readonly path: string; readonly text: string }
 
 /**
  * Everything the J5 template puts in a project: the team file, PROFILE.md, and the four skills. The project guidance (j5Guidance) goes between the
- * project-type markers of AGENTS.md, as every project type's does.
+ * section's own markers in AGENTS.md (guidance.ts withStaffGuidance), beside any project type's block.
  */
 export function j5TemplateFiles(options: J5TemplateOptions): TemplateFile[] {
   const template = j5Template(options);

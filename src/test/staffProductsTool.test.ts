@@ -86,7 +86,7 @@ test('draft to guard-checked: CLEARED on the exact hash; the guard report is wri
   const events = collect(world);
   await cleared(world);
   assert.equal(await stateOf(world, 'concept-of-operations'), 'guard-checked');
-  const report = await readFile(path.join(world.root, 'products/j5/guard/concept-of-operations-v1.md'), 'utf8');
+  const report = await readFile(path.join(world.root, '.planning/staff/products/j5/guard/concept-of-operations-v1.md'), 'utf8');
   assert.match(report, /Verdict: CLEARED/);
   assert.deepEqual(events.map((event) => event.type), ['staff.product.state', 'staff.product.state', 'staff.gate.verdict'], 'one state event per transition, and one verdict event');
 });

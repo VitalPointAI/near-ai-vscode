@@ -48,7 +48,7 @@ export interface StaffToolAccess {
   readonly run: string;
 }
 
-const STAFF_PATHS = ['products/**', '.planning/staff/**'];
+const STAFF_PATHS = ['.planning/staff/**'];
 const READS = { verb: 'read', paths: STAFF_PATHS };
 const WRITES = { verb: 'workspaceWrite', paths: STAFF_PATHS };
 const readManifest = (tool: string) => declareManifest({ tool, effects: [READS], contexts: INTERACTIVE_AND_UNATTENDED });
@@ -105,11 +105,11 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     return host;
   };
   const name = (verb: string) => staffToolName(STAFF_PRODUCTS_SERVER, verb);
-  const PRODUCT = { type: 'string', description: 'The product name, as in products/<section>/<product>.md (for example intelligence-estimate).' };
+  const PRODUCT = { type: 'string', description: 'The product name, as in .planning/staff/products/<section>/<product>.md (for example intelligence-estimate).' };
 
   const propose: AgentTool<{ product: string; kind?: string; label?: string; dependsOn?: ProductDependency[] }> = {
     name: name('propose'),
-    description: '[staff-products] Record the product you own as a new version, after you wrote it at products/<section>/<product>.md. The first propose makes you its owner. Give kind on the first one (estimate, adversary-coa-set, coa-statement, register, matrix, map-layer, annex, order, report, brief, critique, plan), the label (default org/Internal) and what it depends on (product@version). The tool writes the staff header; you write only the body. Any later change to the file makes a new version and voids earlier gate verdicts.',
+    description: '[staff-products] Record the product you own as a new version, after you wrote it at .planning/staff/products/<section>/<product>.md. The first propose makes you its owner. Give kind on the first one (estimate, adversary-coa-set, coa-statement, register, matrix, map-layer, annex, order, report, brief, critique, plan), the label (default org/Internal) and what it depends on (product@version). The tool writes the staff header; you write only the body. Any later change to the file makes a new version and voids earlier gate verdicts.',
     parameters: { type: 'object', properties: { product: PRODUCT, kind: { type: 'string' }, label: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } }, required: ['product'], additionalProperties: false },
     capability: 'workspaceWrite',
     manifest: writeManifest(name('propose')),

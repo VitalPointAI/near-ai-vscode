@@ -15,7 +15,7 @@ import { icd203Skill, sourceGradingSkill } from '../agent/staff/j2Skills';
 import { j2Guidance, j2Renderings, j2Template, j2TeamDescription, j2WorkflowSteps, MAX_TEAM_MEMBERS, renderJ2Team, withJ2Guidance } from '../agent/staff/j2Template';
 import { J2_VARIANTS, j2VariantFor, j2Vocabulary } from '../agent/staff/j2Vocabulary';
 import type { J2Variant } from '../agent/staff/j2Vocabulary';
-import { STAFF_TEMPLATES, staffTemplateSnapshot } from '../agent/staff/staffTemplates';
+import { STAFF_TEMPLATES, staffTemplateSnapshot } from '../agent/staff/templates';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
 import { ANNEX_SUBJECTS, CROSSWALK_STEPS, DOCTRINE_PROFILES, ICD203_LIKELIHOOD, STAFF_PROCESSES } from '../domain/staff/doctrine';
 import { defaultStaffSettings, stepName } from '../domain/staff/profiles';

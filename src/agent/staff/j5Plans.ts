@@ -17,7 +17,7 @@ import { STAFF_MARKERS, staffPreambleText } from '../../domain/staff/products';
 import { defaultStaffSettings, describePlacement, resolveProfile, sectionCode } from '../../domain/staff/profiles';
 import type { ResolvedProfile, StaffSettings } from '../../domain/staff/profiles';
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
-import { RED_TEAM_PRODUCT, STAFF_FOLDER, STAFF_GUARD_FOLDER, staffProductPath } from '../../domain/staff/writeLimits';
+import { RED_TEAM_PRODUCT, STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
 
 export type J5Variant = 'standard' | 'mdo';
@@ -394,7 +394,7 @@ function releaseGuard(_ctx: Context): J5Member {
     'Job: you are the blocking release gate. Before any J5 product goes to a person for a decision, check its current version. Use the guard-scan tool first when the project has it, then judge what rules cannot.',
     `Hold the product if it contains: a classification or caveat marking of any scale (TOP SECRET, SECRET, CONFIDENTIAL used as a marking, NATO RESTRICTED and above, PROTECTED B or C, CUI, EYES ONLY, REL TO and the like); coordinates outside the exercise box; a name on the project's real-entity list; text from a publication that is not public; a decision written as made ("selected", "approved", "the commander will") instead of marked ${decisionFor('<role>')}; a legal product without ${STAFF_MARKERS.legalReview}; a consumption number with no formula; or personal data.`,
     'Check compilation: whether items that are each releasable reveal more together. A suspected compilation is a HOLD with the question for a person with authority. Check that the red team\'s dissent reached the decision brief unedited.',
-    owns(`the verdict files under ${STAFF_GUARD_FOLDER} (one per product version, named <product>-v<version>.md)`),
+    owns(`the verdict files under ${staffGuardFolder('j5')} (one per product version, named <product>-v<version>.md)`),
     'Those are the only files you may write. The extension refuses every other write, the product you judge included.',
     'Boundary: "Your output is a verdict and reasons; you never release and you never fix."',
     'Hands back: a verdict file that ends with exactly CLEARED or HOLD, with the numbered reasons and the product version it applies to.'

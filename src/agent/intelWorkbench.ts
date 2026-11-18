@@ -135,7 +135,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
 
   const sourceAdd: AgentTool<Record<string, unknown>> = {
     name: intelToolName('source_add'),
-    description: 'Add one item to the J2 source register (products/j2/source-register.json). Grade the source\'s reliability (A to F) and the information\'s credibility (1 to 6) separately, as two fields: never one combined grade such as "B2". Record the origin, where the information first came from, separately from the source that gave it to you: two items with one origin are one piece of evidence and never corroborate each other. Credibility 1 means confirmed by another item from a different origin. List the claims the item reports on as short slugs so reports on one claim can be compared. Exercise and fictional data only.',
+    description: 'Add one item to the J2 source register (.planning/staff/products/j2/source-register.json). Grade the source\'s reliability (A to F) and the information\'s credibility (1 to 6) separately, as two fields: never one combined grade such as "B2". Record the origin, where the information first came from, separately from the source that gave it to you: two items with one origin are one piece of evidence and never corroborate each other. Credibility 1 means confirmed by another item from a different origin. List the claims the item reports on as short slugs so reports on one claim can be compared. Exercise and fictional data only.',
     parameters: {
       type: 'object',
       properties: {
@@ -214,7 +214,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
 
   const pirAdd: AgentTool<Record<string, unknown>> = {
     name: intelToolName('pir_add'),
-    description: 'Add a PIR candidate to the J2 PIR register (products/j2/pir-register.json). Every PIR names the decision point it supports and the latest time its answer is of value; break it into indicators. A new PIR is a candidate: you recommend it, and only a named person approves it.',
+    description: 'Add a PIR candidate to the J2 PIR register (.planning/staff/products/j2/pir-register.json). Every PIR names the decision point it supports and the latest time its answer is of value; break it into indicators. A new PIR is a candidate: you recommend it, and only a named person approves it.',
     parameters: {
       type: 'object',
       properties: {
@@ -292,7 +292,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
 
   const collectionRecommend: AgentTool<Record<string, unknown>> = {
     name: intelToolName('collection_recommend'),
-    description: 'Add a recommendation to the J2 collection plan (products/j2/collection-plan.json): which capability could answer one indicator of one PIR, at which NAI, and when. It is a recommendation only: the J3 approves the allocation of collection assets, and you never task an asset. HUMINT, SIGINT, MASINT and CI always need a partner. Collection must end by the PIR\'s latest time of value.',
+    description: 'Add a recommendation to the J2 collection plan (.planning/staff/products/j2/collection-plan.json): which capability could answer one indicator of one PIR, at which NAI, and when. It is a recommendation only: the J3 approves the allocation of collection assets, and you never task an asset. HUMINT, SIGINT, MASINT and CI always need a partner. Collection must end by the PIR\'s latest time of value.',
     parameters: {
       type: 'object',
       properties: {
@@ -350,7 +350,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
 
   const intsumDraft: AgentTool<Record<string, unknown>> = {
     name: intelToolName('intsum_draft'),
-    description: 'Draft an INTSUM skeleton for a period: the product header, the five headings, significant activity filled from the source register with each item\'s grades and independent origins, and gaps from the open PIRs. The assessment of intent and the changes since last are yours to write. It returns the text; write it to products/j2/ with Write.',
+    description: 'Draft an INTSUM skeleton for a period: the product header, the five headings, significant activity filled from the source register with each item\'s grades and independent origins, and gaps from the open PIRs. The assessment of intent and the changes since last are yours to write. It returns the text; write it to .planning/staff/products/j2/ with Write.',
     parameters: draftParameters({ from: { type: 'string', description: 'Period start: ISO time in UTC, a date, or a DTG.' }, to: { type: 'string', description: 'Period end.' } }, ['from', 'to']),
     capability: 'read',
     manifest: declareManifest({ tool: intelToolName('intsum_draft'), effects: [readEffect(SOURCES, PIRS, STAFF_SETTINGS_PATH)], contexts: INTERACTIVE_AND_UNATTENDED }),
@@ -367,7 +367,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
 
   const intrepDraft: AgentTool<Record<string, unknown>> = {
     name: intelToolName('intrep_draft'),
-    description: 'Draft an INTREP skeleton for an event: what happened, which indicators it fires and the PIR and decision point each serves, the items it rests on with their grades and how many independent origins they come from, and a marked place for your deduction. It returns the text; write it to products/j2/ with Write.',
+    description: 'Draft an INTREP skeleton for an event: what happened, which indicators it fires and the PIR and decision point each serves, the items it rests on with their grades and how many independent origins they come from, and a marked place for your deduction. It returns the text; write it to .planning/staff/products/j2/ with Write.',
     parameters: draftParameters({
       event: { type: 'string', description: 'What happened, one line.' },
       at: { type: 'string', description: 'When: ISO time in UTC, a date, or a DTG. Default now.' },
@@ -389,7 +389,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
   const compilationCheck: AgentTool<{ path: string }> = {
     name: intelToolName('compilation_check'),
     description: 'Check one product for compilation risk: whether its lines, together with the source register it draws on, tie units to locations or capabilities, or pile up unit, location and capability detail. It never clears a product. When it finds a pattern it gives the question a person with authority must answer, and the release-guard writes HOLD with that question.',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'The product file, such as products/j2/intsum-181200z-nov-26.md.' } }, required: ['path'], additionalProperties: false },
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'The product file, such as .planning/staff/products/j2/intsum-181200z-nov-26.md.' } }, required: ['path'], additionalProperties: false },
     capability: 'read',
     manifest: declareManifest({ tool: intelToolName('compilation_check'), effects: [{ verb: 'read', paths: [{ from: 'input', field: 'path', as: 'path' }, SOURCES] }], contexts: INTERACTIVE_AND_UNATTENDED }),
     parse: (raw) => {

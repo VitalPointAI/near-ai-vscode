@@ -4,6 +4,7 @@
 // Prompts are written once with tokens such as `{code}`, `{prep}` and `{step:2}` and resolved against the profile, level and scenario, so the same
 // script says J-2, JIPOE and Annex B under US Joint and J2, JIPOE and Annex D under NATO/Canadian. Every term comes from doctrine.ts or the resolved
 // profile; a token the resolver does not know is an error, never left in the text.
+import { staffProductPath } from './writeLimits';
 import { ADVERSARY_COA_TERMS, INTELLIGENCE_REQUIREMENT_TERMS, STAFF_SECTIONS } from './doctrine';
 import type { CrosswalkStep, StaffSectionId } from './doctrine';
 import { acceptanceFixture, fixtureChecklist } from './acceptance';
@@ -234,7 +235,7 @@ export function renderDemoScript(section: DemoSection, settings: StaffSettings, 
     lines.push(`What to show: ${beat.show}`, '');
     for (const product of beat.products) {
       const fixture = acceptanceFixture(product, settings.profile, settings.level);
-      lines.push(`Done when ${fixture.title} (\`products/${fixture.section}/${fixture.products[0]}.md\`):`, '', ...fixtureChecklist(fixture).map((item) => `- ${item}`), '');
+      lines.push(`Done when ${fixture.title} (\`${staffProductPath(fixture.section, fixture.products[0])}\`):`, '', ...fixtureChecklist(fixture).map((item) => `- ${item}`), '');
     }
     if (script.inject && script.inject.beforeBeat === index) lines.push('Inject before this beat (paste into the chat):', '', `> ${script.inject.text}`, '');
   });

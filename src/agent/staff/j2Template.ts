@@ -13,6 +13,7 @@ import { defaultStaffSettings, levelOffer, renderProfileMarkdown } from '../../d
 import type { StaffSettings } from '../../domain/staff/profiles';
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { renderTeam } from '../teams';
+import { withStaffGuidance } from './guidance';
 import { J2_ROSTERS, J2_WEB_TOOLS } from './j2Members';
 import { variantProducts } from './j2Products';
 import { j2SkillFiles } from './j2Skills';
@@ -117,9 +118,6 @@ function workflow(v: J2Vocabulary): WorkflowRow[] {
   }
 }
 
-const GUIDANCE_START = (id: string) => `<!-- near-ai:staff-section:${id}:start -->`;
-const GUIDANCE_END = (id: string) => `<!-- near-ai:staff-section:${id}:end -->`;
-
 /** The J2 section's project guidance: the text between its own markers in AGENTS.md, read by the lead and every member. */
 export function j2Guidance(settings: StaffSettings, options: Pick<J2RenderOptions, 'echelon'> = {}): string {
   const v = j2Vocabulary(settings, j2VariantFor(settings, options.echelon));
@@ -162,11 +160,7 @@ export function j2Guidance(settings: StaffSettings, options: Pick<J2RenderOption
 
 /** AGENTS.md with the J2 guidance between its own markers, replacing an earlier copy; everything else in the file is kept as it was. */
 export function withJ2Guidance(existing: string, settings: StaffSettings, options: Pick<J2RenderOptions, 'echelon'> = {}): string {
-  const block = `${GUIDANCE_START(J2_TEMPLATE_ID)}\n${j2Guidance(settings, options)}${GUIDANCE_END(J2_TEMPLATE_ID)}`;
-  const start = existing.indexOf(GUIDANCE_START(J2_TEMPLATE_ID));
-  const end = existing.indexOf(GUIDANCE_END(J2_TEMPLATE_ID));
-  if (start >= 0 && end > start) return `${existing.slice(0, start)}${block}${existing.slice(end + GUIDANCE_END(J2_TEMPLATE_ID).length)}`;
-  return existing.trim() ? `${existing.replace(/\s*$/, '')}\n\n${block}\n` : `# Agent instructions\n\n${block}\n`;
+  return withStaffGuidance(existing, J2_TEMPLATE_ID, j2Guidance(settings, options));
 }
 
 export interface J2TemplateOutput {

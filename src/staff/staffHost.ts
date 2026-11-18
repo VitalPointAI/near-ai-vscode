@@ -2,7 +2,10 @@
 // wargame ledger, guard-scan, the tradecraft lint, and the staff events. Node I/O only: this module never imports vscode, so the tests drive it directly.
 //
 // Where things live in the project:
-// - products:        products/<section>/<product>.md (a staff header, then the body), with gate reports in products/<section>/guard/ and tradecraft/
+// - products:        .planning/staff/products/<section>/<product>.md (a staff header, then the body), with gate reports beside them in guard/ and
+//                    tradecraft/ (src/domain/staff/writeLimits.ts staffProductPath, the one layout every package uses)
+// - J2 registers:    .planning/staff/products/j2/{source-register,pir-register,collection-plan}.json (intel.ts; the source register is the one
+//                    the tradecraft lint reads)
 // - the ledger:      .planning/staff/ledger/products.jsonl, one signed entry per line, chained (src/domain/staff/ledger.ts)
 // - the events:      .planning/staff/ledger/events.jsonl, one staff event per line, for the Staff Room, Team Live and replay
 // - the wargame:     .planning/staff/wargame/ledger.jsonl
@@ -14,6 +17,8 @@
 // which can only propose, give a gate verdict, submit, withdraw, read and write registers, record the wargame and mark a step. And a person, through
 // the VS Code commands (src/services/staffCommands.ts), which alone can approve, reject, release or supersede, signed with this device's key. The state
 // machine refuses a decision from any agent whatever this host is asked, so the two paths never meet.
+import { registerPath } from '../domain/staff/intel';
+import { staffProductPath } from '../domain/staff/writeLimits';
 import { mkdir, readFile, readdir, rename, appendFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
@@ -58,7 +63,7 @@ export const GUARD_CONFIG_FILE = '.planning/.near-ai/staff-guard.json';
 export const REAL_ENTITIES_FILE = '.planning/staff/real-entities.txt';
 export const CALCULATOR_DIR = '.planning/staff/calculator';
 /** The source register the tradecraft lint reads when a product carries no sources block of its own (intel-workbench writes it). */
-export const SOURCES_FILE = '.planning/staff/intel/sources.json';
+export const SOURCES_FILE = registerPath('source-register');
 const LEDGER_LOCK = 'ledger.lock';
 const EVENTS_LOCK = 'events.lock';
 const WARGAME_LOCK = 'wargame.lock';
@@ -69,7 +74,7 @@ const MAX_EVENTS_READ = 20_000;
 export const J2_LINT_INPUTS = { pirs: 'pir-register', hvts: 'hvt-list', adversaryCoas: 'adversary-coa-set' } as const;
 
 export function productPath(section: StaffSectionId, product: string): string {
-  return `products/${section}/${product}.md`;
+  return staffProductPath(section, product);
 }
 
 /** The team a staff run works with, as the tools see it: its section, its members, and the member who leads (integrates) the section. */
@@ -489,7 +494,7 @@ export class StaffHost {
     if (block) { try { return sourcesFrom(JSON.parse(block[1])); } catch { return []; } }
     const text = await readText(path.join(this.options.root, SOURCES_FILE));
     if (text === undefined) return undefined;
-    try { const value = JSON.parse(text) as unknown; return sourcesFrom(Array.isArray(value) ? value : (value as { sources?: unknown })?.sources); } catch { return []; }
+    try { const value = JSON.parse(text) as unknown; return sourcesFrom(Array.isArray(value) ? value : (value as { entries?: unknown; sources?: unknown })?.entries ?? (value as { sources?: unknown })?.sources); } catch { return []; }
   }
 
   /**

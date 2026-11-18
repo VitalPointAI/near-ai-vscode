@@ -19,7 +19,7 @@ import { writerOf } from '../domain/staff/ownership';
 import { staffPreambleText } from '../domain/staff/products';
 import { defaultStaffSettings, retiredSpaceTerms } from '../domain/staff/profiles';
 import type { StaffSettings } from '../domain/staff/profiles';
-import { RED_TEAM_PRODUCT, STAFF_GUARD_FOLDER, staffProductPath, staffWriteLimit } from '../domain/staff/writeLimits';
+import { RED_TEAM_PRODUCT, staffGuardFolder, staffProductPath, staffWriteLimit } from '../domain/staff/writeLimits';
 
 const settings = (extra: Partial<StaffSettings> = {}): StaffSettings => ({ ...defaultStaffSettings(), ...extra });
 const ALL = j5OptionSets();
@@ -152,7 +152,7 @@ test('the red team is independent and can write nothing but its critique: no rep
     assert.match(red.instructions, /unedited/);
     const agents = teamAgents(team);
     assert.deepEqual(agents.find((agent) => agent.name === 'red-team')!.writeOnly, [CRITIQUE]);
-    assert.deepEqual(agents.find((agent) => agent.name === 'release-guard')!.writeOnly, [STAFF_GUARD_FOLDER]);
+    assert.deepEqual(agents.find((agent) => agent.name === 'release-guard')!.writeOnly, [staffGuardFolder('j5')]);
     assert.ok(agents.filter((agent) => !['red-team', 'release-guard'].includes(agent.name)).every((agent) => agent.writeOnly === undefined), 'nobody else is limited');
   }
   assert.equal(staffWriteLimit(undefined, 'red-team'), undefined, 'a team with no staff block keeps its red team as it was');
@@ -277,5 +277,5 @@ test('the J5 template cannot change without a new template version', () => {
     }
     for (const guidance of template.guidance()) assert.ok(latest.guidance.includes(guidanceFingerprint(guidance)));
   }
-  assert.ok(STAFF_TEMPLATES.some((template) => template.id === 'staff-j5-plans'));
+  assert.ok(STAFF_TEMPLATES.some((template) => template.id === 'j5-plans'));
 });
