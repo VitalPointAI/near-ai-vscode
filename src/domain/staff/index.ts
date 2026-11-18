@@ -8,3 +8,6 @@ export * from './products';
 export * from './profiles';
 export * from './release';
 export * from './teamBlock';
+export * from './scenario';
+export * from './acceptance';
+export * from './demoScripts';
