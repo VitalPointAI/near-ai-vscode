@@ -20,7 +20,7 @@ import { SCALE_PRESETS, parseLabel } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import { judgeLowering, reportLowering } from '../domain/gate/lowerings';
+import { chatProjectMark, judgeLowering, reportLowering } from '../domain/gate/lowerings';
 import type { LoweringVerdict } from '../domain/gate/lowerings';
 export { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
 export type { LabelLoweringJudge, LoweringContext, LoweringOutcomeListener, LoweringVerdict } from '../domain/gate/lowerings';
@@ -158,7 +158,8 @@ export function mergeChatLabel(a: ThreadMeta, b: ThreadMeta): ChatLabelState | u
     const other = holder === 'left' ? right : left;
     const otherMeta = holder === 'left' ? b : a;
     const fresh = holder === 'left' ? onlyLeft : onlyRight;
-    const verdicts = fresh.map((lowering) => ({ lowering, verdict: judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt }) }));
+    const projectMark = chatProjectMark(a.id);
+    const verdicts = fresh.map((lowering) => ({ lowering, verdict: judgeLowering(lowering, { chatId: a.id, otherMark: other.mark, otherLastUsedAt: otherMeta.lastUsedAt, ...(projectMark === undefined ? {} : { projectMark }) }) }));
     const applied = verdicts.filter((each): each is { lowering: unknown; verdict: Extract<LoweringVerdict, { apply: true }> } => each.verdict.apply);
     // Each lowering is judged on its own (PR #87 review round 5): the verified ones apply, from the newest one's signed target, and any that do not verify
     // are rejected with their own cause. A rejected one never stops a verified one, since the result comes only from verified records and never from the
@@ -493,27 +494,44 @@ export class ThreadStore implements ConversationStore {
    * is kept); a person's lowering (`lowering` given: the signed declassification, or `true` when this install could not sign) replaces the mark, keeping
    * the union of the signed lowerings.
    */
-  public async setChatLabel(id: string, mark: Mark, lowering?: unknown): Promise<void> {
+  public async setChatLabel(id: string, mark: Mark, lowering?: unknown, from?: Mark): Promise<'saved' | 'unchanged' | 'raised-meanwhile'> {
     assertThreadId(id);
     return this.enqueue(async () => {
       const material = await this.writeMaterial();
+      // Read again here, inside the store's lock (PR #87 review): a sync that raised the stored mark since the person chose is seen now.
       const existing = await this.readMeta(id, material);
       const stored = chatLabelOf(existing);
       let label: ChatLabelState | undefined;
+      // A lowering from `from` whose stored mark has risen above `from` meanwhile would undo that raise: it is not saved as a lowering. The stored mark is
+      // joined with the lowered one instead (raise-only), without the lowering, and the caller is told so it can raise the chat again.
+      if (lowering !== undefined && from !== undefined && stored.kind === 'mark' && !sameMark(joinMarks(from, stored.mark), from)) {
+        const joined = joinMarks(stored.mark, mark);
+        const meta = await this.updateMeta(id, material, { label: { mark: [...joined], ...(stored.lowerings.length > 0 ? { lowerings: [...stored.lowerings] } : {}) } });
+        await this.indexThread(material, meta);
+        return 'raised-meanwhile';
+      }
       if (lowering !== undefined) {
         const kept = stored.kind === 'mark' ? stored.lowerings : [];
         const lowerings = unionLowerings(kept, lowering === true ? [] : [lowering]);
         label = { mark: [...mark], ...(lowerings.length > 0 ? { lowerings } : {}) };
       } else if (stored.kind === 'unreadable') {
-        return;
+        return 'unchanged';
       } else {
         const joined = stored.kind === 'mark' ? joinMarks(stored.mark, mark) : mark;
-        if (stored.kind === 'mark' && sameMark(joined, stored.mark)) return;
+        if (stored.kind === 'mark' && sameMark(joined, stored.mark)) return 'unchanged';
         label = { mark: [...joined], ...(stored.kind === 'mark' && stored.lowerings.length > 0 ? { lowerings: [...stored.lowerings] } : {}) };
       }
       const meta = await this.updateMeta(id, material, { label });
       await this.indexThread(material, meta);
+      return 'saved';
     });
+  }
+
+  /** The chat's stored mark, read through chatLabelOf; undefined when none is stored or it cannot be read. */
+  public async storedChatMark(id: string): Promise<Mark | undefined> {
+    assertThreadId(id);
+    const read = chatLabelOf(await this.meta(id).catch(() => undefined));
+    return read.kind === 'mark' ? read.mark : undefined;
   }
 
   private async readMeta(id: string, material: Material): Promise<ThreadMeta | undefined> {

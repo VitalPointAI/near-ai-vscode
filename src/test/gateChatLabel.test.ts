@@ -8,8 +8,10 @@ import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
 import type { Label } from '../domain/gate/labels';
 import { providerErrorMessage } from '../services/chatBridge';
-import { AgentConversation, UNREADABLE_CHAT_LABEL_TEXT } from '../services/agentSession';
+import { AgentConversation, LOWERING_OVERTAKEN_TEXT, UNREADABLE_CHAT_LABEL_TEXT } from '../services/agentSession';
 import { RouteRefusedError } from '../services/nearAiClient';
+import { ROUTE_REFUSALS } from '../domain/gate/routing';
+import { NETWORK_AT_MARK_TEXT } from '../agent/gateAdapter';
 import { stateHomeFor } from '../services/stateHome';
 import { stateKeysFor } from '../services/stateKeys';
 import { ThreadStore, chatLabelOf, mergeMeta, registerLabelLoweringJudge, registerLoweringOutcomes, validMeta } from '../services/threadStore';
@@ -501,4 +503,218 @@ test('review 5.2: a copy holding one valid and one invalid fresh lowering applie
   assert.equal(records.filter((record) => rule(record) === 'label.declassify').length, 1);
   assert.equal(records.filter((record) => rule(record) === 'label.declassify-rejected').length, 1);
   assert.deepEqual(records.find((record) => rule(record) === 'label.declassify')?.unmapped.nearAi.mark?.map((each) => each.level), ['Public'], 'the record matches the state');
+});
+
+// ---- PR #87 review, last rounds (fixed in PR 4d) ----
+
+test('review 4.1: a verified signed lowering whose target is not below its from-mark, or is below the project\'s label, is not applied', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  // A target equal to (or above) its from-mark is not a lowering, however it verifies.
+  const notLower = judged(keys, () => both(...copies(lowered(identity, [CONFIDENTIAL], [CONFIDENTIAL, label('ca-protected', 'Protected A')]), [CONFIDENTIAL])));
+  assert.deepEqual([...new Set(notLower.outcomes.map((each) => each.cause))], ['not-lower']);
+  // Below the project's label as this computer last ran the chat at: refused; at it: applied.
+  const { noteChatProjectMark } = await import('../domain/gate/lowerings');
+  noteChatProjectMark(CHAT, [label('org', 'Internal')]);
+  try {
+    const below = judged(keys, () => both(...copies(lowered(identity, [RESTRICTED], [PUBLIC]), [RESTRICTED])));
+    for (const merged of below.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+    assert.deepEqual([...new Set(below.outcomes.map((each) => each.cause))], ['below-project']);
+    const at = judged(keys, () => both(meta(CHAT, LATER, { mark: [label('org', 'Internal')], lowerings: [lowered(identity, [RESTRICTED], [label('org', 'Internal')])] }), meta(CHAT, T0, { mark: [RESTRICTED] })));
+    for (const merged of at.result) assert.deepEqual(markOf(merged), ['org/Internal']);
+  } finally {
+    noteChatProjectMark(CHAT, []);
+  }
+});
+
+test('review 4.2: times are compared as times: a use 500 ms before the signing is not after it, and a time that cannot be read refuses the lowering', async () => {
+  const identity = await signerOf();
+  const keys = ACTIVE_FOR(identity.fingerprint);
+  const signedAt = '2026-11-17T11:00:00.500Z';
+  const lowering = signChatLowering(identity, { chatId: CHAT, from: [RESTRICTED], to: [PUBLIC], reason: 'reviewed', at: signedAt });
+  // As text, "…11:00:00Z" sorts after "…11:00:00.500Z" ('Z' > '.'), which read the earlier use as later. As times it is earlier.
+  const earlierUse = judged(keys, () => both(...copies(lowering, [RESTRICTED], '2026-11-17T11:00:00Z')));
+  for (const merged of earlierUse.result) assert.deepEqual(markOf(merged), ['org/Public']);
+  const unreadable = judged(keys, () => both(...copies(lowering, [RESTRICTED], 'not a time')));
+  for (const merged of unreadable.result) assert.deepEqual(markOf(merged), ['org/Restricted']);
+  assert.deepEqual([...new Set(unreadable.outcomes.map((each) => each.cause))], ['unreadable-time']);
+});
+
+test('review 4.6: the person\'s lowering records the strictest label of the new mark, and a chat in view that has not run yet gets its own sentence', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-label-strictest-')));
+  const { host, storage } = await labelHost(root);
+  // Lowered to Public on the org scale while Protected B stays: the record's label is Protected B (local-only), not the first label of the mark.
+  const chat = viewOf(root, [RESTRICTED, label('ca-protected', 'Protected B')], 'conv-strictest-1');
+  resetUi();
+  stub.quickPickAnswers.push('org/Public, ca-protected/Protected B');
+  stub.inputAnswers.push('reviewed');
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
+  const record = (await recordsOf(host, storage, root)).find((each) => each.authorizations[0]?.policy.name === 'label.declassify');
+  assert.equal(record?.unmapped.nearAi.label?.level, 'Protected B');
+  resetUi();
+  const notRun: ChatInView = { id: 'conv-not-run-1', root, mark: () => undefined, defaultLabel: () => SHIPPED_DEFAULT_LABEL, prepareLowering: () => undefined };
+  assert.equal(await gateCommands.lowerChatLabel(host, notRun), false);
+  assert.ok(stub.notifications.some((entry) => entry.message === gateCommands.CHAT_NOT_RUN_TEXT));
+  assert.ok(!stub.notifications.some((entry) => entry.message === gateCommands.NO_CHAT_IN_VIEW_TEXT));
+});
+
+test('review 4.7: a lowering saved after a sync raised the stored label above its from-mark keeps the higher label, and the chat is raised and told', async () => {
+  const root = labelledProject();
+  const store = storeFor(root);
+  const posts: Array<Record<string, unknown>> = [];
+  const conversation = await chatIn(root, store, posts);
+  await conversation.send(request([call('r1', 'Read', { file_path: 'conf.md' })]));
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Confidential']);
+  // A sync raises the stored label to Restricted while the person is choosing.
+  await store.setChatLabel(conversation.id, [RESTRICTED]);
+  conversation.prepareLowering(true);
+  conversation.mark!.lowerByPerson([PUBLIC], 'reviewed');
+  for (let wait = 0; wait < 50 && !posts.some((post) => post.type === 'notice' && post.text === LOWERING_OVERTAKEN_TEXT); wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(markOf((await store.meta(conversation.id))!), ['org/Restricted'], 'the raise is kept');
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted'], 'the chat is raised to it');
+  assert.ok(posts.some((post) => post.type === 'notice' && post.text === LOWERING_OVERTAKEN_TEXT));
+  // Without a raise meanwhile the lowering is saved as it was made.
+  assert.equal(await store.setChatLabel(conversation.id, [PUBLIC], true, [RESTRICTED]), 'saved');
+  assert.deepEqual(markOf((await store.meta(conversation.id))!), ['org/Public']);
+});
+
+test('review 4.9: an unsigned lowering survives a reload: the reopened chat starts at the lowered label', async () => {
+  const root = labelledProject();
+  const store = storeFor(root);
+  const conversation = await chatIn(root, store);
+  await conversation.send(request([call('r1', 'Read', { file_path: 'docs/plan.md' })]));
+  assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted']);
+  // This install could not sign the lowering (`true`), so it is kept on this computer only.
+  conversation.prepareLowering(true);
+  conversation.mark!.lowerByPerson([label('org', 'Internal')], 'reviewed');
+  for (let wait = 0; wait < 50 && markOf((await store.meta(conversation.id))!).join() !== 'org/Internal'; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  const id = conversation.id;
+  // A window reload: a new conversation over a new store on the same project opens the chat again.
+  const reopened = await chatIn(root, storeFor(root));
+  await reopened.restore(id);
+  assert.deepEqual(keys(reopened.mark!.current()), ['org/Internal']);
+});
+
+// ---- PR #89 review: Lower This Chat's Label is reachable where people look (owner, after the 0.4.31 check) ----
+
+/** Every node under `root`, depth first. */
+function nodesUnder(root: { children: unknown[] } | undefined): Array<{ id: string; className: string; textContent: string; children: unknown[]; click(): void; tagName: string }> {
+  const out: Array<{ id: string; className: string; textContent: string; children: unknown[]; click(): void; tagName: string }> = [];
+  const walk = (node: unknown): void => {
+    if (typeof node !== 'object' || node === null) return;
+    out.push(node as never);
+    for (const child of (node as { children?: unknown[] }).children ?? []) walk(child);
+  };
+  for (const child of root?.children ?? []) walk(child);
+  return out;
+}
+const lowerButtons = (root: { children: unknown[] } | undefined) => nodesUnder(root).filter((node) => node.tagName === 'button' && node.textContent === 'Lower This Chat’s Label');
+
+test('review 89.6: the label chip is a button with its tooltip, and a click asks to lower this chat\'s label', () => {
+  const html = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'panelView.ts'), 'utf8');
+  assert.ok(html.includes('<button id="chat-label" class="chip chat-label" type="button" title="This chat\'s label. Click to lower it." hidden></button>'), 'a native button: Enter and Space work, and it is in the tab order');
+  const page = chatPage();
+  page.send({ type: 'chat-label', text: 'org/Confidential' });
+  const chip = page.nodes.get('chat-label')!;
+  assert.equal(chip.hidden, false);
+  chip.click();
+  assert.deepEqual(page.sent().filter((message) => (message as { type: string }).type === 'lower-chat-label'), [{ type: 'lower-chat-label' }]);
+});
+
+test('review 89.6: a refusal that names Lower This Chat\'s Label shows a button that runs it, in an error notice and under a refused tool call; other notices do not', () => {
+  const page = chatPage();
+  const transcript = page.nodes.get('transcript');
+  page.send({ type: 'assistant-error', text: ROUTE_REFUSALS['route.no-local-model'] });
+  page.send({ type: 'notice', text: 'Nothing to do with labels.' });
+  const buttons = lowerButtons(transcript);
+  assert.equal(buttons.length, 1);
+  buttons[0]!.click();
+  assert.equal(page.sent().filter((message) => (message as { type: string }).type === 'lower-chat-label').length, 1);
+  page.send({ type: 'tool-start', callId: 'c1', title: 'WebFetch' });
+  page.send({ type: 'tool-end', callId: 'c1', ok: false, output: NETWORK_AT_MARK_TEXT });
+  page.send({ type: 'tool-start', callId: 'c2', title: 'Read' });
+  page.send({ type: 'tool-end', callId: 'c2', ok: false, output: 'File not found.' });
+  assert.equal(lowerButtons(transcript).length, 2, 'one more, under the refused call only');
+  // Every route.* and label.* refusal text that names the command gets the button through the same check.
+  for (const text of [...Object.values(ROUTE_REFUSALS), NETWORK_AT_MARK_TEXT]) {
+    if (!text.includes("NEAR AI: Lower This Chat's Label")) continue;
+    const fresh = chatPage();
+    fresh.send({ type: 'assistant-error', text });
+    assert.equal(lowerButtons(fresh.nodes.get('transcript')).length, 1, text.slice(0, 60));
+  }
+});
+
+test('review 89.6: the page asks for lower-chat-label only in its known shape, and the command runs on the chat it is given', async () => {
+  const { parseChatWebviewMessage } = await import('../services/chatBridge');
+  assert.deepEqual(parseChatWebviewMessage({ type: 'lower-chat-label' }), { type: 'lower-chat-label' });
+  assert.deepEqual(parseChatWebviewMessage({ type: 'lower-chat-label', conversationId: 'conv-abcdef-1' }), { type: 'lower-chat-label', conversationId: 'conv-abcdef-1' });
+  assert.equal(parseChatWebviewMessage({ type: 'lower-chat-label', extra: 1 }), undefined);
+  const chatSource = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'chat.ts'), 'utf8');
+  assert.ok(chatSource.includes("executeCommand('nearAi.label.lowerChat', inView(tab))"), 'the page\'s own conversation, not whichever chat the status bar shows');
+  const { isChatInView } = await import('../services/chatInView');
+  assert.equal(isChatInView({ fsPath: '/x' }), false, 'an Explorer argument is not a chat');
+  assert.equal(isChatInView(viewOf('/tmp/x', [RESTRICTED])), true);
+});
+
+test('review 89.6: lowering a file\'s label with Set Label tells the chat in view that read it that it keeps its label, with a button that lowers it', async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'near-ai-chat-keeps-')));
+  const { host } = await labelHost(root);
+  await host.changeLabels(root, (map) => setLabelEntry(map, 'conf.md', CONFIDENTIAL));
+  const chat = viewOf(root, [CONFIDENTIAL], 'conv-keeps-label-1');
+  setChatInView(chat);
+  try {
+    resetUi();
+    stub.messageAnswers.length = 0;
+    stub.notificationActions.length = 0;
+    stub.quickPickAnswers.push('org', 'Internal', []);
+    stub.inputAnswers.push('', 'the budget was published');
+    // The first message is "conf.md is labelled ..."; the second is the chat's notice, answered with its button.
+    stub.messageAnswers.push(undefined, gateCommands.LOWER_CHAT_LABEL_ACTION);
+    stub.quickPickAnswers.push('org/Internal');
+    stub.inputAnswers.push('it only read the published budget');
+    assert.equal(await gateCommands.setLabel(host, { root, path: 'conf.md' }), true);
+    const index = stub.notifications.findIndex((entry) => entry.message === gateCommands.CHAT_KEEPS_LABEL_TEXT);
+    assert.ok(index >= 0, 'the chat keeps its label, and says so');
+    assert.deepEqual(stub.notificationActions[index], [gateCommands.LOWER_CHAT_LABEL_ACTION]);
+    for (let wait = 0; wait < 50 && keys(chat.session.current()).join() !== 'org/Internal'; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(keys(chat.session.current()), ['org/Internal'], 'the button ran Lower This Chat\'s Label on that chat');
+    // Raising a label, or a chat that does not hold the old label, says nothing.
+    resetUi();
+    stub.messageAnswers.length = 0;
+    stub.notificationActions.length = 0;
+    const other = viewOf(root, [PUBLIC], 'conv-keeps-label-2');
+    setChatInView(other);
+    stub.quickPickAnswers.push('org', 'Public', []);
+    stub.inputAnswers.push('', 'published');
+    assert.equal(await gateCommands.setLabel(host, { root, path: 'conf.md' }), true);
+    assert.ok(!stub.notifications.some((entry) => entry.message === gateCommands.CHAT_KEEPS_LABEL_TEXT));
+  } finally {
+    setChatInView(undefined);
+  }
+});
+
+test('review 89.4: a Verify signature row is placed only under its own run\'s answer, and waits for it rather than going under another one', async () => {
+  const page = chatPage();
+  const transcript = page.nodes.get('transcript')!;
+  const answer = async (runId: string) => {
+    page.send({ type: 'assistant-start', model: 'tee-model', privacy: 'Private' });
+    page.send({ type: 'assistant-done', runId, usage: { inputTokens: 1, outputTokens: 1 } });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return transcript.children.at(-1) as never as { children: unknown[] };
+  };
+  const reply1 = await answer('run-1-aaaaaa');
+  // run-2's row and its failed result arrive before run-2's answer is on the page.
+  page.send({ type: 'response-verifiable', runId: 'run-2-bbbbbb' });
+  page.send({ type: 'response-verification', runId: 'run-2-bbbbbb', result: { outcome: 'failed', summary: 'The signature does not match the signing address.', checks: {}, notChecked: [] } });
+  assert.equal(nodesUnder(transcript as never).filter((node) => node.id === 'verify-run-2-bbbbbb').length, 0, 'not placed under run-1\'s answer, or anywhere');
+  const reply2 = await answer('run-2-bbbbbb');
+  assert.notEqual(reply2, reply1);
+  const rows = nodesUnder(reply2).filter((node) => node.id === 'verify-run-2-bbbbbb');
+  assert.equal(rows.length, 1, 'under run-2\'s own answer');
+  assert.equal(nodesUnder(reply1).filter((node) => node.id === 'verify-run-2-bbbbbb').length, 0);
+  assert.match(nodesUnder(rows[0] as never).map((node) => node.textContent).join(' '), /The signature does not match/);
+  assert.ok(nodesUnder(rows[0] as never).some((node) => node.tagName === 'button' && node.textContent === 'Check again'));
+  // A row for a run whose answer is already on the page goes straight under it.
+  page.send({ type: 'response-verifiable', runId: 'run-1-aaaaaa' });
+  assert.equal(nodesUnder(reply1).filter((node) => node.id === 'verify-run-1-aaaaaa').length, 1);
 });

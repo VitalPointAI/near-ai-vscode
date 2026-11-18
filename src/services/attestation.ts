@@ -35,8 +35,44 @@ export function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-/** Verifies one response. `get` performs an authenticated GET against the provider's /v1 base. */
-export async function verifyResponse(evidence: ResponseEvidence, model: string, get: (path: string) => Promise<unknown>, options: { nonce?: string; trustedRoot?: string; now?: Date } = {}): Promise<VerificationResult> {
+/** How long a verified attestation report counts for its signing address (A3): a long run checks each answer without asking for the report each time. */
+export const REPORT_CACHE_MS = 600_000;
+
+/** What a verified report proved for one signing address, and when. Never the report itself, the quote or a fingerprint. */
+interface CachedReport { readonly role: 'model' | 'gateway'; readonly gpuNonce: boolean | undefined; readonly at: number }
+
+/**
+ * Verified attestation reports by signing address, each counting for REPORT_CACHE_MS (10 minutes) from when it was checked, on an injected clock. A
+ * client owns one for the checks it runs after each answer; a person's Check again never uses it. Holds at most 64 addresses, the oldest dropped first.
+ */
+export class AttestationReportCache {
+  private readonly entries = new Map<string, CachedReport>();
+  public constructor(private readonly now: () => number = Date.now, private readonly maxEntries = 64) {}
+
+  /** The verified report for the address while it is younger than 10 minutes; undefined otherwise (and a clock that went back counts as expired). */
+  public get(address: string): CachedReport | undefined {
+    const key = address.toLowerCase();
+    const entry = this.entries.get(key);
+    if (entry === undefined) return undefined;
+    const age = this.now() - entry.at;
+    if (age >= 0 && age < REPORT_CACHE_MS) return entry;
+    this.entries.delete(key);
+    return undefined;
+  }
+
+  public set(address: string, entry: Omit<CachedReport, 'at'>): void {
+    const key = address.toLowerCase();
+    this.entries.delete(key);
+    this.entries.set(key, { ...entry, at: this.now() });
+    while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value as string);
+  }
+}
+
+/**
+ * Verifies one response. `get` performs an authenticated GET against the provider's /v1 base. With `cache`, a signing address whose report was verified
+ * less than 10 minutes ago skips the report GET and the quote check, and the summary says the report was reused; a newly verified report is stored.
+ */
+export async function verifyResponse(evidence: ResponseEvidence, model: string, get: (path: string) => Promise<unknown>, options: { nonce?: string; trustedRoot?: string; now?: Date; cache?: AttestationReportCache } = {}): Promise<VerificationResult> {
   const nonce = options.nonce ?? randomBytes(32).toString('hex');
   const checks: VerificationResult['checks'] = {};
   const fail = (summary: string, signingAddress?: string): VerificationResult => ({ outcome: 'failed', summary, signingAddress, checks, notChecked: NOT_CHECKED_IN_EDITOR });
@@ -59,12 +95,21 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   if (!checks.requestHash) return fail('The signed request hash does not match the request this editor sent.', address);
   if (!checks.responseHash) return fail('The signed response hash does not match the response this editor received.', address);
   if (!checks.signature) return fail('The signature does not match the signing address.', address);
+  const cached = options.cache?.get(address);
+  if (cached !== undefined) {
+    checks.genuineQuote = true;
+    checks.addressInQuote = true;
+    checks.nonceInQuote = true;
+    if (cached.gpuNonce !== undefined) checks.gpuNonce = cached.gpuNonce;
+    return { outcome: 'signed', summary: `Signed by ${cached.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. The genuine Intel TDX quote that binds that key was checked less than 10 minutes ago, and that report was reused.`, signingAddress: address, signer: cached.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
+  }
 
   let report: Record<string, unknown>;
   try {
     report = await get(`/attestation/report?model=${encodeURIComponent(model)}&nonce=${nonce}&signing_algo=ecdsa&signing_address=${encodeURIComponent(address)}`) as Record<string, unknown>;
   } catch (error) {
-    return fail(`The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, address);
+    // A report that cannot be fetched (offline, a timeout, an error answer) proves nothing either way: unavailable, never failed (D-55).
+    return { outcome: 'unavailable', summary: `The response is signed, but the attestation report could not be fetched (${(error as Error).message}).`, signingAddress: address, checks, notChecked: NOT_CHECKED_IN_EDITOR };
   }
   const candidates = attestationsIn(report);
   const match = candidates.find((item) => item.attestation.signing_address.toLowerCase() === address.toLowerCase());
@@ -77,20 +122,72 @@ export async function verifyResponse(evidence: ResponseEvidence, model: string, 
   try { reportData = verifyTdxQuote(attestation.intel_quote, { trustedRoot: options.trustedRoot, now: options.now }).reportData; } catch (error) { checks.genuineQuote = false; return fail(`The response is signed, but its attestation quote is not genuine: ${(error as Error).message}.`, address); }
   checks.genuineQuote = true;
   const fingerprint = typeof attestation.tls_cert_fingerprint === 'string' ? attestation.tls_cert_fingerprint : undefined;
-  const addressBytes = Buffer.from(address.replace(/^0x/i, ''), 'hex');
-  const expectedFirst = fingerprint ? createHash('sha256').update(addressBytes).update(Buffer.from(fingerprint, 'hex')).digest() : Buffer.concat([addressBytes, Buffer.alloc(32 - addressBytes.length)]);
-  checks.addressInQuote = reportData.subarray(0, 32).equals(expectedFirst);
-  checks.nonceInQuote = reportData.subarray(32, 64).equals(Buffer.from(nonce, 'hex'));
+  const bound = reportDataBinds(reportData, address, fingerprint, nonce);
+  checks.addressInQuote = bound.addressInQuote;
+  checks.nonceInQuote = bound.nonceInQuote;
   if (typeof attestation.nvidia_payload === 'string') {
     try { checks.gpuNonce = String((JSON.parse(attestation.nvidia_payload) as { nonce?: unknown }).nonce).toLowerCase() === nonce.toLowerCase(); } catch { checks.gpuNonce = false; }
   }
   if (!checks.addressInQuote) return fail('The TDX quote does not bind the key that signed this response.', address);
   if (!checks.nonceInQuote) return fail('The TDX quote does not contain this request\'s fresh nonce, so it may be replayed.', address);
   if (checks.gpuNonce === false) return fail('The GPU attestation does not contain this request\'s fresh nonce.', address);
+  options.cache?.set(address, { role: match.role, gpuNonce: checks.gpuNonce });
   return { outcome: 'signed', summary: `Signed by ${match.role === 'gateway' ? 'NEAR AI\'s gateway key' : 'the model\'s key'} ${address}. A genuine Intel TDX quote, fresh for this check, binds that key${checks.gpuNonce ? ', with matching GPU evidence' : ''}.`, signingAddress: address, signer: match.role, checks, notChecked: NOT_CHECKED_IN_EDITOR };
 }
 
 type Attestation = Record<string, unknown> & { signing_address: string; intel_quote: string };
+
+/**
+ * The one check of what a quote's report_data binds, used by verifyResponse and by attestedTlsFingerprint, so the two can never disagree. NEAR AI Cloud
+ * (crates/services/src/attestation/report_data.rs in github.com/nearai/cloud-api) lays report_data out as: bytes 0 to 31 the signing address zero-padded to
+ * 32 bytes, or, when the attestation carries a TLS fingerprint, sha256(signing address bytes followed by the fingerprint bytes); bytes 32 to 63 the
+ * caller's fresh nonce.
+ */
+export function reportDataBinds(reportData: Buffer, address: string, fingerprint: string | undefined, nonce: string): { addressInQuote: boolean; nonceInQuote: boolean } {
+  const addressBytes = Buffer.from(address.replace(/^0x/i, ''), 'hex');
+  if (addressBytes.length === 0 || addressBytes.length > 32) return { addressInQuote: false, nonceInQuote: false };
+  const expectedFirst = fingerprint ? createHash('sha256').update(addressBytes).update(Buffer.from(fingerprint, 'hex')).digest() : Buffer.concat([addressBytes, Buffer.alloc(32 - addressBytes.length)]);
+  const nonceBytes = Buffer.from(nonce, 'hex');
+  return { addressInQuote: reportData.subarray(0, 32).equals(expectedFirst), nonceInQuote: nonceBytes.length === 32 && reportData.subarray(32, 64).equals(nonceBytes) };
+}
+
+/**
+ * Which attestation of NEAR AI Cloud's report names the TLS key its endpoint serves: the gateway's. NEAR AI Cloud's gateway (cloud-api) answers
+ * `/v1/attestation/report?include_tls_fingerprint=true` with `gateway_attestation.tls_cert_fingerprint`, the SHA-256 of the DER SubjectPublicKeyInfo of the
+ * certificate it serves (cloud-api, crates/services/src/attestation/environment.rs `compute_spki_hash`; nearai-cloud-verifier, ts/tls_verifier.ts).
+ */
+export const TLS_FINGERPRINT_ROLE = 'gateway' as const;
+
+export type AttestedTlsFingerprint =
+  | { readonly state: 'bound-in-quote'; readonly fingerprint: string; readonly signingAddress: string; readonly role: typeof TLS_FINGERPRINT_ROLE }
+  | { readonly state: 'absent' }
+  | { readonly state: 'invalid'; readonly reason: string };
+
+/**
+ * The TLS key fingerprint NEAR AI Cloud's report binds to its enclave (CLAS-05 as the owner amplified it): the gateway's attestation must carry
+ * `tls_cert_fingerprint` (64 hex characters) and a quote that verifies to Intel's root CA, whose report_data binds sha256(signing address, fingerprint) and
+ * this check's own nonce. `absent` when the report names no fingerprint (the binding is not exposed); `invalid` when it names one that the quote does not
+ * prove. Never fetches anything.
+ */
+export function attestedTlsFingerprint(report: unknown, nonce: string, options: { trustedRoot?: string; now?: Date } = {}): AttestedTlsFingerprint {
+  const record = report !== null && typeof report === 'object' ? report as Record<string, unknown> : undefined;
+  const gateway = record?.gateway_attestation;
+  const attestation = gateway !== null && typeof gateway === 'object' ? gateway as Record<string, unknown> : undefined;
+  const given = attestation?.tls_cert_fingerprint;
+  if (attestation === undefined || given === undefined || given === null || given === '') return { state: 'absent' };
+  if (typeof given !== 'string' || !/^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$/.test(given)) return { state: 'invalid', reason: 'The report\'s TLS fingerprint is not a SHA-256 value.' };
+  const fingerprint = given.replace(/:/g, '').toLowerCase();
+  const address = attestation.signing_address;
+  const quote = attestation.intel_quote;
+  if (typeof address !== 'string' || !/^(0x)?[0-9a-fA-F]{2,64}$/.test(address) || address.replace(/^0x/i, '').length % 2 !== 0) return { state: 'invalid', reason: 'The report names no usable signing address.' };
+  if (typeof quote !== 'string') return { state: 'invalid', reason: 'The report carries no quote.' };
+  let reportData: Buffer;
+  try { reportData = verifyTdxQuote(quote, options).reportData; } catch (error) { return { state: 'invalid', reason: `The quote is not genuine: ${(error as Error).message}.` }; }
+  const bound = reportDataBinds(reportData, address, fingerprint, nonce);
+  if (!bound.nonceInQuote) return { state: 'invalid', reason: 'The quote does not contain this check\'s fresh nonce, so it may be replayed.' };
+  if (!bound.addressInQuote) return { state: 'invalid', reason: 'The quote does not bind the TLS fingerprint the report names.' };
+  return { state: 'bound-in-quote', fingerprint, signingAddress: address.toLowerCase(), role: TLS_FINGERPRINT_ROLE };
+}
 
 /**
  * Every attestation in a report that names a signing key and carries a quote: the model's

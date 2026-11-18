@@ -3,7 +3,9 @@
 // test sets the session's mark by hand, which plan 19's route check already supports; no label is needed. Every fetch is a counting stub; nothing reaches
 // the network and no key is read.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { Mark } from '../domain/gate/dominance';
@@ -17,11 +19,15 @@ import { TranscriptStore } from '../services/transcripts';
 import { labelledProject } from './helpers/markFixtures';
 import type { ActorRef } from '../domain/gate/decide';
 import type { BundleState } from '../domain/gate/bundle';
-import { withSessionRoute } from '../gate/sessionMark';
+import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { validateDecisionRecord } from '../domain/gate/record';
+import type { DecisionRecord } from '../domain/gate/record';
+import type { ConnectionBindingSource } from '../services/connectionBinding';
+import { TEST_ROOT, personalSign, testQuote, testSigner } from './helpers/attestationFixtures';
 import type { SessionRoute } from '../gate/sessionMark';
 import { NearAiClient, RouteRefusedError } from '../services/nearAiClient';
 import type { NearAiClientOptions } from '../services/nearAiClient';
-import { testBundleState, testGateHost } from './helpers/gatedRuns';
+import { testBundleState, testGateHost, testGateRuntime } from './helpers/gatedRuns';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const ACTOR: ActorRef = { kind: 'agent', deviceFingerprint: 'device-test', sessionId: 'tiers', agentId: 'main', agentLabel: 'agent' };
@@ -217,11 +223,318 @@ test('a chat raised to Restricted by a read, with no local model, is refused wit
 });
 
 test('each refusal at a strict label, and label.network-at-mark, names Lower This Chat\'s Label, and none says to start a new chat', () => {
-  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound'] as const) {
+  // PR #87 review: route.attestation-failed and route.no-session name it too, as SECURITY.md says every refusal at a strict label does.
+  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound', 'route.attestation-failed', 'route.no-session'] as const) {
     assert.ok(ROUTE_REFUSALS[rule].includes(LOWER), rule);
     assert.ok(!/start a new chat/i.test(ROUTE_REFUSALS[rule]), rule);
   }
   assert.ok(NETWORK_AT_MARK_TEXT.includes(LOWER));
   assert.ok(!/start a new chat/i.test(NETWORK_AT_MARK_TEXT));
   assert.match(ROUTE_REFUSALS['route.no-local-model'], /Add a local model/);
+});
+
+// ---- Plan 25 (PR 4d): each attested-cloud answer is checked afterwards (D-36), a failed check stops that level for the chat, Check again clears it (D-55) ----
+
+const SIGNING = testSigner('near-ai-gateway-test-key');
+const IMPOSTOR = testSigner('someone-else');
+const CONFIDENTIAL = label('org', 'Confidential');
+const PRIVATE = 'Private · runs in NEAR TEE';
+
+interface FakeNear {
+  readonly client: NearAiClient;
+  readonly content: string[];
+  readonly reportGets: () => number;
+  readonly signatureGets: () => number;
+  /** What the signature endpoint does now: sign with the gateway key, sign with another key, throw as when offline, or never answer. */
+  mode: 'valid' | 'bad-signature' | 'offline' | 'hang';
+  clock: number;
+  release: () => void;
+}
+
+/** A fake NEAR AI Cloud that streams answers and signs them the way NEAR does, with a bound connection fact whose pinned fetch is the same fake. */
+async function fakeNear(): Promise<FakeNear> {
+  const content: string[] = [];
+  const answers = new Map<string, { request: string; response: string }>();
+  let reports = 0;
+  let signatures = 0;
+  let released!: () => void;
+  const held = new Promise<void>((resolve) => { released = resolve; });
+  const state: { mode: FakeNear['mode']; clock: number } = { mode: 'valid', clock: Date.UTC(2026, 10, 18) };
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    if (method === 'GET' && url.pathname.endsWith('/models')) return Response.json({ data: [{ id: 'tee-model' }] });
+    if (method === 'GET' && url.pathname.endsWith('/model/list')) return Response.json({ models: [{ modelId: 'tee-model', metadata: { attestationSupported: true, providerType: 'vllm' } }] });
+    if (method === 'POST' && url.pathname.endsWith('/chat/completions')) {
+      const chatId = `chatcmpl-${String(content.length + 1)}`;
+      content.push(chatId);
+      const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+      const response = chunk({ id: chatId, choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] }) + chunk({ id: chatId, choices: [], usage: { prompt_tokens: 3, completion_tokens: 1 } }) + 'data: [DONE]\n\n';
+      answers.set(chatId, { request: String(init?.body), response });
+      return new Response(response, { headers: { 'content-type': 'text/event-stream', 'inference-id': `inf-${chatId}` } });
+    }
+    if (method === 'GET' && url.pathname.startsWith('/v1/signature/')) {
+      signatures += 1;
+      if (state.mode === 'offline') throw new TypeError('fetch failed');
+      if (state.mode === 'hang') await held;
+      const answer = answers.get(decodeURIComponent(url.pathname.slice('/v1/signature/'.length)));
+      if (answer === undefined) return new Response('{}', { status: 404 });
+      const text = `${createHash('sha256').update(answer.request).digest('hex')}:${createHash('sha256').update(answer.response).digest('hex')}`;
+      return Response.json({ text, signature: personalSign(text, (state.mode === 'bad-signature' ? IMPOSTOR : SIGNING).key), signing_address: SIGNING.address, signing_algo: 'ecdsa' });
+    }
+    if (method === 'GET' && url.pathname.endsWith('/attestation/report')) {
+      reports += 1;
+      const reportData = Buffer.alloc(64);
+      Buffer.from(SIGNING.address.slice(2), 'hex').copy(reportData, 0);
+      Buffer.from(url.searchParams.get('nonce') ?? '', 'hex').copy(reportData, 32);
+      return Response.json({ model_attestations: [{ signing_address: SIGNING.address, signing_algo: 'ecdsa', intel_quote: testQuote(reportData) }] });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+  const fact = { state: 'bound' as const, host: NEAR, checkedAt: Date.now(), fingerprint: 'ab'.repeat(32) };
+  const binding: ConnectionBindingSource = { current: () => ({ ...fact, checkedAt: Date.now() }), refresh: async () => fact, markNotBound: () => undefined, fetchFor: () => fetchFn };
+  const client = new NearAiClient({ baseUrl: NEAR, apiKey: 'test-key', fetchFn, route: 'near', binding, maxRetries: 0, attestationTrust: { trustedRoot: TEST_ROOT }, now: () => state.clock });
+  await client.listModels();
+  const near: FakeNear = {
+    client, content, reportGets: () => reports, signatureGets: () => signatures,
+    get mode() { return state.mode; }, set mode(value) { state.mode = value; },
+    get clock() { return state.clock; }, set clock(value) { state.clock = value; },
+    release: () => released()
+  };
+  return near;
+}
+
+/** A local runtime on 127.0.0.1 that streams its answers, counting them. */
+async function streamingLocal(): Promise<{ client: NearAiClient; content: string[] }> {
+  const content: string[] = [];
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if ((init?.method ?? 'GET') === 'GET' && url.endsWith('/models')) return Response.json({ data: [{ id: 'local-model' }] });
+    content.push(url);
+    const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+    return new Response(chunk({ id: 'local-1', choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  }) as typeof fetch;
+  const client = new NearAiClient({ baseUrl: 'http://127.0.0.1:11434/v1', apiKey: '', fetchFn, route: 'local' });
+  await client.listLocalModels();
+  return { client, content };
+}
+
+interface CheckedChat {
+  readonly conversation: AgentConversation;
+  readonly posted: Array<{ type: string; runId?: string; result?: { outcome: string } }>;
+  readonly records: DecisionRecord[];
+}
+
+/** A chat in a project labelled org/Confidential (or unlabelled), whose gate runtimes keep their records. */
+function checkedChat(projectLabel: Label | null = CONFIDENTIAL): CheckedChat {
+  const root = projectLabel === null ? mkdtempSync(path.join(tmpdir(), 'near-ai-tiers-')) : labelledProject({ project: projectLabel });
+  const posted: CheckedChat['posted'] = [];
+  const conversation = new AgentConversation(root, (message) => posted.push(message as never), path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
+  const records: DecisionRecord[] = [];
+  conversation.gateHost = {
+    runtimeFor: async (request) => {
+      const runtime = testGateRuntime({ presence: request.presence, context: request.context, actor: { ...request.actor, deviceFingerprint: 'device-test' } });
+      return { ...runtime, sink: { record: (record: DecisionRecord) => { records.push(record); runtime.sink.record(record); } } };
+    }
+  };
+  return { conversation, posted, records };
+}
+
+const sendTo = (chat: CheckedChat, client: NearAiClient, model = 'tee-model', privacy = PRIVATE, local = false) =>
+  chat.conversation.send({ text: 'hello', client, model, privacy, ...(local ? { local: true } : {}), policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES });
+
+/** Waits for the check after the answer with this chat id, then for its listeners. */
+async function settled(near: FakeNear, chatId: string): Promise<string> {
+  const check = near.client.answerCheck(chatId);
+  assert.ok(check !== undefined, `a check was started for ${chatId}`);
+  const result = await check;
+  await new Promise((resolve) => setImmediate(resolve));
+  return result.outcome;
+}
+
+const checkedRecords = (chat: CheckedChat, event = 'route.attestation-checked') => chat.records.filter((record) => record.authorizations[0]?.policy.name === event);
+const attestationOf = (record: DecisionRecord): unknown => (record.unmapped.nearAi as { attestation?: unknown }).attestation;
+
+test('an org/Confidential chat sends to the TEE model over the bound connection; the check afterwards is recorded as verified and shown under the answer', async () => {
+  const near = await fakeNear();
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  assert.deepEqual(near.content, ['chatcmpl-1']);
+  assert.equal(await settled(near, 'chatcmpl-1'), 'signed');
+  const records = checkedRecords(chat);
+  assert.equal(records.length, 1);
+  assert.equal(attestationOf(records[0]!), 'verified');
+  assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(records[0]))).ok);
+  assert.ok(!JSON.stringify(records[0]).includes(SIGNING.address.slice(2)), 'no signing address in the record');
+  const offered = chat.posted.findIndex((message) => message.type === 'response-verifiable');
+  const shown = chat.posted.findIndex((message) => message.type === 'response-verification');
+  assert.ok(offered >= 0 && shown > offered, 'the row is offered first, then shows the result');
+  assert.equal(chat.posted[shown]!.result?.outcome, 'signed');
+  assert.equal(chat.conversation.routeAttestation.failed, false);
+});
+
+test('a failed check stops attested-cloud for the chat: the next request is refused before fetch, a local model in the chat still works, and a sub-agent is refused too', async () => {
+  const near = await fakeNear();
+  near.mode = 'bad-signature';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  assert.equal(await settled(near, 'chatcmpl-1'), 'failed');
+  assert.equal(attestationOf(checkedRecords(chat)[0]!), 'failed');
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the chat\'s stop is set');
+  let refused: unknown;
+  await sendTo(chat, near.client).catch((error: unknown) => { refused = error; });
+  assert.ok(refused instanceof RouteRefusedError && refused.rule === 'route.attestation-failed', String(refused));
+  assert.equal((refused as Error).message, ROUTE_REFUSALS['route.attestation-failed']);
+  assert.match((refused as Error).message, /Use Check again under that answer/);
+  assert.equal(near.content.length, 1, 'nothing more was sent');
+  const local = await streamingLocal();
+  await sendTo(chat, local.client, 'local-model', 'Local · runs on this machine', true);
+  assert.equal(local.content.length, 1, 'a local model in the same chat is still sent');
+  // A sub-agent's route shares the chat's attestation state, so it is refused the same way.
+  const child = sessionRouteFrom(testGateRuntime(), { attestation: chat.conversation.routeAttestation, markOf: () => [CONFIDENTIAL] });
+  await assert.rejects(() => withSessionRoute(child, () => ask(near.client, 'tee-model')), refusedWith('route.attestation-failed'));
+  assert.equal(near.content.length, 1);
+  const failedRow = chat.posted.find((message) => message.type === 'response-verification');
+  assert.equal(failedRow?.result?.outcome, 'failed', 'the answer\'s row shows the failure, where Check again is offered');
+});
+
+test('a check that cannot reach NEAR AI is unavailable, never failed, and the next request is sent', async () => {
+  const near = await fakeNear();
+  near.mode = 'offline';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  assert.equal(await settled(near, 'chatcmpl-1'), 'unavailable');
+  assert.equal(attestationOf(checkedRecords(chat)[0]!), 'unavailable');
+  assert.equal(chat.conversation.routeAttestation.failed, false);
+  await sendTo(chat, near.client);
+  assert.equal(near.content.length, 2);
+});
+
+test('two answers within 10 minutes from one signing key make one report GET, after 10 minutes a second, and Check again always fetches a new report', async () => {
+  const near = await fakeNear();
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await settled(near, 'chatcmpl-1');
+  near.clock += 9 * 60_000;
+  await sendTo(chat, near.client);
+  assert.equal(await settled(near, 'chatcmpl-2'), 'signed');
+  assert.equal(near.reportGets(), 1, 'exactly one report GET for two answers');
+  near.clock += 2 * 60_000;
+  await sendTo(chat, near.client);
+  assert.equal(await settled(near, 'chatcmpl-3'), 'signed');
+  assert.equal(near.reportGets(), 2, 'the cached report expired after 10 minutes');
+  const runId = chat.posted.filter((message) => message.type === 'response-verifiable').at(-1)!.runId!;
+  assert.equal((await chat.conversation.verifyRun(runId)).outcome, 'signed');
+  assert.equal(near.reportGets(), 3, 'Check again never uses the cache');
+});
+
+test('Check again on the failed answer: a signed fresh result clears the stop and is recorded; one that fails again leaves it', async () => {
+  const near = await fakeNear();
+  near.mode = 'bad-signature';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await settled(near, 'chatcmpl-1');
+  const runId = chat.posted.find((message) => message.type === 'response-verifiable')!.runId!;
+  assert.equal((await chat.conversation.verifyRun(runId)).outcome, 'failed', 'still failing');
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the stop stays');
+  assert.equal(checkedRecords(chat, 'route.attestation-cleared').length, 0);
+  near.mode = 'valid';
+  assert.equal((await chat.conversation.verifyRun(runId)).outcome, 'signed');
+  assert.equal(chat.conversation.routeAttestation.failed, false, 'the stop is cleared');
+  const cleared = checkedRecords(chat, 'route.attestation-cleared');
+  assert.equal(cleared.length, 1);
+  assert.ok(validateDecisionRecord(JSON.parse(JSON.stringify(cleared[0]))).ok);
+  assert.equal(checkedRecords(chat).filter((record) => attestationOf(record) === 'failed').length, 1, 'the failure stays in the log');
+  await sendTo(chat, near.client);
+  assert.equal(near.content.length, 2, 'the next request is sent');
+});
+
+test('a new chat starts without the stop', async () => {
+  const near = await fakeNear();
+  near.mode = 'bad-signature';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await settled(near, 'chatcmpl-1');
+  const stopped = chat.conversation.routeAttestation;
+  assert.equal(stopped.failed, true);
+  chat.conversation.reset();
+  assert.equal(chat.conversation.routeAttestation.failed, false);
+  assert.notEqual(chat.conversation.routeAttestation, stopped);
+  near.mode = 'valid';
+  await sendTo(chat, near.client);
+  assert.equal(near.content.length, 2);
+});
+
+test('a check that settles after its chat was closed posts nothing and sets nothing; its record is still written', async () => {
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  const old = chat.conversation.routeAttestation;
+  chat.conversation.dispose();
+  const before = chat.posted.length;
+  near.mode = 'bad-signature';
+  near.release();
+  assert.equal(await settled(near, 'chatcmpl-1'), 'failed');
+  assert.equal(chat.posted.length, before, 'nothing was posted');
+  assert.equal(old.failed, false, 'nothing was set on the closed chat');
+  assert.equal(chat.conversation.routeAttestation.failed, false);
+  assert.equal(attestationOf(checkedRecords(chat)[0]!), 'failed', 'the record still reached the log');
+});
+
+test('the next decision never waits for a check: a check that never settles does not delay the next request', async () => {
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  assert.equal(near.content.length, 2);
+  assert.equal(checkedRecords(chat).length, 0, 'neither check has settled');
+  near.release();
+});
+
+test('a request at any-cloud starts no automatic check', async () => {
+  const near = await fakeNear();
+  const chat = checkedChat(null);
+  await sendTo(chat, near.client);
+  assert.equal(near.content.length, 1);
+  assert.equal(near.client.answerCheck('chatcmpl-1'), undefined);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(near.signatureGets(), 0);
+  assert.equal(checkedRecords(chat).length, 0);
+});
+
+// ---- PR #89 review ----
+
+test('review 89.3: Check again does not clear the stop while a failed answer is unchecked, even after its run left the newest 50', async () => {
+  const near = await fakeNear();
+  near.mode = 'hang';
+  const chat = checkedChat();
+  // Two answers in flight, both of whose checks then fail.
+  await sendTo(chat, near.client);
+  await sendTo(chat, near.client);
+  near.mode = 'bad-signature';
+  near.release();
+  await settled(near, 'chatcmpl-1');
+  await settled(near, 'chatcmpl-2');
+  assert.equal(chat.conversation.routeAttestation.failed, true);
+  const [first, second] = chat.posted.filter((message) => message.type === 'response-verifiable').map((message) => message.runId!);
+  assert.ok(first !== undefined && second !== undefined && first !== second);
+  // The first run leaves the newest-50 list, as it would after 50 more runs.
+  (chat.conversation as unknown as { answerChecks: Map<string, unknown> }).answerChecks.delete(first);
+  near.mode = 'valid';
+  assert.equal((await chat.conversation.verifyRun(second)).outcome, 'signed');
+  assert.equal(chat.conversation.routeAttestation.failed, true, 'the failure of the evicted run still holds the stop');
+  assert.equal(checkedRecords(chat, 'route.attestation-cleared').length, 0);
+  // A new chat still clears it.
+  chat.conversation.reset();
+  assert.equal(chat.conversation.routeAttestation.failed, false);
+});
+
+test('review 89.2: the conversation keeps answer checks with the fields the gate side declares, never by casting the client result', () => {
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'agentSession.ts'), 'utf8');
+  assert.ok(!/as VerificationResult/.test(source));
+  assert.ok(!/VerificationResult/.test(source), 'agentSession works with the gate AnswerCheckResult');
+  const gate = readFileSync(path.join(__dirname, '..', '..', 'src', 'gate', 'sessionMark.ts'), 'utf8');
+  for (const field of ['readonly outcome:', 'readonly summary:', 'readonly signingAddress?:', 'readonly signer?:', 'readonly checks:', 'readonly notChecked:']) assert.ok(gate.includes(field), field);
 });

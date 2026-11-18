@@ -1163,7 +1163,9 @@ copy of Open-GSD to a project that doesn't already have one.
   clearance with **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy Draft**.
   A chat's label rises with what its agents read and decides where its content
   is sent; only you lower it, with **NEAR AI: Lower This Chat's Label** and a
-  reason. Labels and routing are an organizational control that helps prevent
+  reason. Click the chat's label beside the model to run it, or use the button
+  under a refusal that names it; lowering a file's label does not lower a chat
+  that already read it. Labels and routing are an organizational control that helps prevent
   mistakes. See [Classification labels and routing](SECURITY.md#classification-labels-and-routing)
   and [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - API keys live in VS Code's encrypted **SecretStorage**, scoped to each

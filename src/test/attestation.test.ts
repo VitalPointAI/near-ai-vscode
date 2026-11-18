@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { createHash, createPrivateKey, generateKeyPairSync, sign, X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { keccak256, recoverPersonalSignAddress, verifyTdxQuote } from '../services/attestation';
 import { NearAiClient, type UsageMetadata } from '../services/nearAiClient';
+import { FIXTURES, TEST_CHAIN, TEST_ROOT, TRUST, testQuote } from './helpers/attestationFixtures';
 import { newTestConversation } from './helpers/gatedRuns';
 
 // Vectors produced with ethers 5.7.2, the library NEAR's reference verifier uses.
@@ -22,30 +22,6 @@ test('keccak-256 and personal_sign recovery match ethers', () => {
   assert.equal(recoverPersonalSignAddress(SIGNED_TEXT, SIGNATURE), SIGNER);
   assert.notEqual(recoverPersonalSignAddress(`${SIGNED_TEXT}0`, SIGNATURE), SIGNER, 'a changed message recovers a different key');
 });
-
-const FIXTURES = path.resolve(__dirname, '../../test/fixtures/tdx');
-const TEST_CHAIN = readFileSync(path.join(FIXTURES, 'test-chain.pem'), 'utf8');
-const TEST_ROOT = new X509Certificate(TEST_CHAIN.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g)!.at(-1)!).fingerprint256;
-const TEST_PCK_KEY = createPrivateKey(readFileSync(path.join(FIXTURES, 'test-pck-key.pem')));
-
-/** A v4 TDX quote with the given report_data, signed the way Intel hardware signs one, but chained to the test CA. */
-function testQuote(reportData: Buffer, options: { chain?: string } = {}): string {
-  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
-  const jwk = publicKey.export({ format: 'jwk' });
-  const attestationKey = Buffer.concat([Buffer.from(jwk.x!, 'base64url'), Buffer.from(jwk.y!, 'base64url')]);
-  const header = Buffer.alloc(48); header.writeUInt16LE(4, 0); header.writeUInt16LE(2, 2); header.writeUInt32LE(0x81, 4);
-  const body = Buffer.alloc(584); reportData.copy(body, 520);
-  const signed = Buffer.concat([header, body]);
-  const qeAuth = Buffer.alloc(32, 9);
-  const qeReport = Buffer.alloc(384); createHash('sha256').update(attestationKey).update(qeAuth).digest().copy(qeReport, 320);
-  const qeSignature = sign('sha256', qeReport, { key: TEST_PCK_KEY, dsaEncoding: 'ieee-p1363' });
-  const chain = Buffer.from(options.chain ?? TEST_CHAIN);
-  const u16 = (value: number) => { const b = Buffer.alloc(2); b.writeUInt16LE(value); return b; };
-  const u32 = (value: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(value); return b; };
-  const certBody = Buffer.concat([qeReport, qeSignature, u16(qeAuth.length), qeAuth, u16(5), u32(chain.length), chain]);
-  const auth = Buffer.concat([sign('sha256', signed, { key: privateKey, dsaEncoding: 'ieee-p1363' }), attestationKey, u16(6), u32(certBody.length), certBody]);
-  return Buffer.concat([signed, u32(auth.length), auth]).toString('hex');
-}
 
 test('a real Intel TDX quote verifies against Intel\'s root CA, and any change to it is caught', () => {
   const quote = readFileSync(path.join(FIXTURES, 'intel-sample-quote.bin'));
@@ -67,8 +43,6 @@ test('a quote chained to any CA other than the pinned root is rejected', () => {
   assert.throws(() => verifyTdxQuote(testQuote(Buffer.alloc(64), { chain: `${pck}\n${root}` }), { trustedRoot: TEST_ROOT }), /chain is broken/, 'a missing intermediate breaks the chain');
   assert.throws(() => verifyTdxQuote(quote.replace(/^0400/, '0300')), /unsupported quote version/);
 });
-
-const TRUST = { trustedRoot: TEST_ROOT };
 
 function nearFake(options: { quoteNonce?: (nonce: string) => string; signer?: string; response?: string; forgedQuote?: boolean; placement?: 'model' | 'gateway' | 'missing' } = {}) {
   const requests: string[] = [];

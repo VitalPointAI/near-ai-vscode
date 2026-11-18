@@ -74,6 +74,7 @@ export type ChatWebviewMessage =
   | { type: 'approval-reply'; callId: string; decision: 'allow' | 'allow-run' | 'allow-always' | 'deny'; feedback?: string; conversationId?: string }
   | { type: 'revert-run'; runId: string; conversationId?: string }
   | { type: 'verify-response'; runId: string; conversationId?: string }
+  | { type: 'lower-chat-label'; conversationId?: string }
   | { type: 'insert-code'; text: string }
   | { type: 'prompt-choice'; sessionId: string; promptId: string; choiceId: string }
   | { type: 'prompt-answer'; sessionId: string; promptId: string; text: string }
@@ -304,6 +305,8 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
     if (message.feedback !== undefined && (typeof message.feedback !== 'string' || message.feedback.length > 2000)) return undefined;
     return { type: 'approval-reply', callId: message.callId, decision: message.decision, ...(message.feedback ? { feedback: message.feedback as string } : {}), ...scoped };
   }
+  // The chat's label chip and every refusal that names Lower This Chat's Label ask to run it for their own conversation (owner, after the 0.4.31 check).
+  if (message.type === 'lower-chat-label' && Object.keys(message).every((key) => key === 'type' || key === 'conversationId')) return { type: 'lower-chat-label', ...scoped };
   if ((message.type === 'revert-run' || message.type === 'verify-response') && typeof message.runId === 'string' && /^run-\d+-[a-f0-9]{6}$/.test(message.runId) && Object.keys(message).every((key) => key === 'type' || key === 'runId' || key === 'conversationId')) return { type: message.type, runId: message.runId, ...scoped };
   if ((message.type === 'switch-conversation' || message.type === 'close-conversation') && typeof message.id === 'string' && CONVERSATION_ID.test(message.id) && Object.keys(message).length === 2) return { type: message.type, id: message.id };
   if (message.type === 'insert-code' && typeof message.text === 'string' && message.text.length > 0 && message.text.length <= 100_000) {

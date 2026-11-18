@@ -318,8 +318,10 @@ test('CLAS-05 (D-50): a NEAR client at attested-cloud is refused without a fresh
     assert.match(sentence, /^Nothing was sent\. /);
     assert.match(sentence, /stays on this computer\.$/);
     assert.ok(!sentence.includes(String.fromCharCode(0x2014)), 'no em-dash');
-    assert.ok(!/background|later check/i.test(sentence), 'no sentence promises a check that does not exist yet');
   }
+  // Plan 25 (PR 4d) built the background check, so the unknown sentence now says it runs and to try again; the others promise no check.
+  assert.match(BINDING_REFUSALS.unknown, /NEAR AI checks the connection in the background, so try again in a moment/);
+  assert.ok(!/background|later check/i.test(BINDING_REFUSALS['not-bound']) && !/background|later check/i.test(BINDING_REFUSALS.unavailable));
 });
 
 test('an allowed request decided outside any session is route.default-session; a refused one keeps its refusing rule', () => {

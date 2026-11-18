@@ -6,17 +6,19 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { currentSessionRoute, defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
-import type { RouteAttestation } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import type { AnswerCheckListener, AnswerCheckResult, RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { approveFloorCallLate, endFloorApprovals, recordLateApproval, unavailableGateRuntime } from '../agent/gateAdapter';
 import { projectLabelOf, scalesOf } from '../agent/gateLabels';
 import { OutboundFingerprints } from '../agent/outboundCheck';
 import { SessionMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
+import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { isDefaultMark } from '../gate/sessionMark';
 import { chatLabelOf } from './threadStore';
+import { noteChatProjectMark } from '../domain/gate/lowerings';
 import type { GateRuntime } from '../domain/gate/decide';
 import { AgentEvent, AgentRun, AgentRunError, ApprovalReply, ApprovalRequest, AWAITING_APPROVAL_PREFIX, DEFAULT_MAX_TURNS, RunInput, RunOutcome, RunResult } from '../agent/loop';
 import { countersOf, runSplitOf } from './activityOverview';
@@ -54,7 +56,7 @@ import { entriesToMessages, entriesToView, type ViewItem } from '../domain/state
 import { ThreadStore } from './threadStore';
 import type { ConversationStore, Transcript } from './transcripts';
 import type { RunEnd, RunMarkers } from './runMarkers';
-import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence, type VerificationResult } from './attestation';
+import { NOT_CHECKED_IN_EDITOR, type ResponseEvidence } from './attestation';
 import { PreparedAttachments, StagedAttachment } from '../agent/attachments';
 import { imageTool, ImageDraft, ImageDraftEntry, ImageReviewDecision, ImageReviewer, memoryPreamble, memoryTools } from '../agent/extraTools';
 import { cleanOldDrafts, DRAFT_ID, draftFile } from '../agent/imageDrafts';
@@ -253,6 +255,10 @@ function privateRefusal(label: string, tier: string | undefined, route: PrivateR
 /** Where a chat whose stored label cannot be read opens: the default scale's highest level, never lower than it was (edge CLAS-04 encoding). */
 export const UNREADABLE_CHAT_LABEL: Label = Object.freeze({ scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] });
 
+/** Said when a lowering was overtaken by a sync that raised the chat's label on another copy meanwhile (PR #87 review). */
+export const LOWERING_OVERTAKEN_TEXT =
+  "This chat's label was raised on another copy while you lowered it here, so it keeps the higher label. Run NEAR AI: Lower This Chat's Label again if what it read now allows it.";
+
 /** Said when a chat's stored label cannot be read. */
 export const UNREADABLE_CHAT_LABEL_TEXT =
   "This chat's saved label could not be read, so it opens at org/Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
@@ -260,10 +266,23 @@ export const UNREADABLE_CHAT_LABEL_TEXT =
 export class AgentConversation {
   private messages: AgentMessage[] = [];
   /**
-   * The chat's one attestation state (CLAS-06): every session route this conversation builds (its runs, their sub-agents, its attachment reads) shares
-   * it, so an answer check that fails stops attested-cloud for the chat and its helpers alike (plan 25 sets it).
+   * The chat's one attestation state (CLAS-06, D-55): every session route this conversation builds (its runs, their sub-agents, its attachment reads)
+   * shares it, so an answer check that fails stops attested-cloud for the chat and its helpers alike. A new chat or a reopened one gets a fresh state, and
+   * the old one is marked closed, so a check that settles late sets nothing on the chat that replaced it.
    */
-  public readonly routeAttestation: RouteAttestation = { failed: false };
+  private chatAttestation: RouteAttestation = { failed: false };
+  public get routeAttestation(): RouteAttestation { return this.chatAttestation; }
+  /**
+   * The checks after each run's attested-cloud answers (D-36, D-55), by run id, the newest 50: the failed ones (what Check again checks afresh), the result
+   * for the run's final answer, and the run's route (where Check again's record goes).
+   */
+  private readonly answerChecks = new Map<string, { route: SessionRoute; failed: Map<string, { model: string; evidence: ResponseEvidence; client: NearAiClient }>; results: Map<string, AnswerCheckResult> }>();
+  /**
+   * The chat ids of this chat's failed answer checks that no Check again has passed yet (PR #89 review). Kept for the whole chat, apart from the newest-50
+   * list above, so a failure whose run has left that list still holds the stop: only a new chat or a reload clears it then. Failures are few, since the
+   * first one stops further requests at that level.
+   */
+  private uncheckedFailures = new Set<string>();
   /**
    * The chat's high-water mark (CLAS-04, D-29, D-54): set at the project's resolved label when the chat's first run starts (or at its stored mark when it
    * was reopened), raised by what any of its agents read, and read by every session route of the chat before each model request. It only rises; the
@@ -271,7 +290,7 @@ export class AgentConversation {
    */
   private chatMark: SessionMark | undefined;
   /** Set by prepareLowering for the one change the person's lowering makes. */
-  private pendingLowering: unknown;
+  private pendingLowering: { readonly lowering: unknown; readonly from?: Mark } | undefined;
   /** Stops saving and showing the current mark's changes (a new chat or a reopened one replaces the mark). */
   private stopMarkListener: (() => void) | undefined;
   /** The policy's default label as the last run read it: the chat's label is shown only above it (D-33). */
@@ -377,6 +396,8 @@ export class AgentConversation {
     } catch { this.defaultLabel = SHIPPED_DEFAULT_LABEL; }
     if (this.chatMark === undefined) this.adoptMark(new SessionMark(projectLabel));
     else this.chatMark.raise(projectLabel, scalesOf(gate));
+    // A merge never applies a signed lowering of this chat below the project's label as this run found it (PR #87 review).
+    noteChatProjectMark(this.conversationId, projectLabel);
     return this.chatMark!;
   }
 
@@ -387,9 +408,9 @@ export class AgentConversation {
     this.chatMark = mark;
     if (mark !== undefined) {
       this.stopMarkListener = mark.onDidChange((next) => {
-        const lowering = this.pendingLowering;
+        const pending = this.pendingLowering;
         this.pendingLowering = undefined;
-        void this.saveLabel(next, lowering);
+        void this.saveLabel(next, pending?.lowering, pending?.from);
         this.showLabel();
       });
       void this.saveLabel(mark.current());
@@ -397,11 +418,20 @@ export class AgentConversation {
     this.showLabel();
   }
 
-  /** Saves the chat's mark in its thread meta, joined with what is stored (a raise), or, with `lowering`, as the person's lowering. Never throws. */
-  private async saveLabel(mark: Mark, lowering?: unknown): Promise<void> {
+  /**
+   * Saves the chat's mark in its thread meta, joined with what is stored (a raise), or, with `lowering`, as the person's lowering from `from`. When a sync
+   * raised the stored mark above `from` meanwhile, the store keeps the higher label (PR #87 review) and the chat is raised to it here too, and says so.
+   * Never throws.
+   */
+  private async saveLabel(mark: Mark, lowering?: unknown, from?: Mark): Promise<void> {
     const store = this.transcripts;
     if (!(store instanceof ThreadStore)) return;
-    await store.setChatLabel(this.conversationId, mark, lowering).catch(() => undefined);
+    const id = this.conversationId;
+    const outcome = await store.setChatLabel(id, mark, lowering, from).catch(() => undefined);
+    if (outcome !== 'raised-meanwhile' || id !== this.conversationId) return;
+    const stored = await store.storedChatMark(id).catch(() => undefined);
+    if (stored !== undefined) this.chatMark?.raise(stored, SCALE_PRESETS);
+    this.post({ type: 'notice', text: LOWERING_OVERTAKEN_TEXT });
   }
 
   /** The chat's label as the page and the status bar show it: the mark's labels while it is above the policy's default label, otherwise nothing. */
@@ -422,7 +452,9 @@ export class AgentConversation {
    * SessionMark.lowerByPerson.
    */
   public prepareLowering(signed: unknown): void {
-    this.pendingLowering = signed;
+    // The mark the person lowers from, so the store can tell a raise that arrived meanwhile from the lowering itself.
+    const from = this.chatMark?.current();
+    this.pendingLowering = { lowering: signed, ...(from === undefined ? {} : { from }) };
   }
 
   /** The policy's default label as this chat last read it. */
@@ -611,7 +643,11 @@ export class AgentConversation {
         // Every NEAR request the run makes (sub-agents, safety checks, summaries included) is tagged with it.
         // CLAS-06: and every one of them is routed by the run's session route, decided at the client before anything is sent and recorded in the run's log.
         // With no gate host (a test) the run is wrapped in the default route, so the call is wrapped either way (PR 4a review).
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation: this.routeAttestation, markOf: () => mark.current() }) : defaultSessionRoute();
+        const attestation = this.chatAttestation;
+        let routeOfRun: SessionRoute | undefined;
+        const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked }) : defaultSessionRoute();
+        routeOfRun = runRoute;
         result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
@@ -649,6 +685,9 @@ export class AgentConversation {
           this.verifiable.set(runId, { model: request.model, evidence, client: request.client });
           for (const old of [...this.verifiable.keys()].slice(0, -20)) this.verifiable.delete(old);
           this.post({ type: 'response-verifiable', runId });
+          // A check after an answer of this run that settled while it ran is shown now: a failed one first, so its row offers Check again.
+          const shown = this.shownCheck(runId, evidence.chatId);
+          if (shown) this.post({ type: 'response-verification', runId, result: shown });
         }
       }
       if (changed.length) this.post({ type: 'run-changes', runId, files: changed });
@@ -827,11 +866,71 @@ export class AgentConversation {
     consumeInterrupt: () => { this.interrupting = false; }
   };
 
-  /** Checks NEAR's signature and TDX attestation for a run's final answer. */
-  public async verifyRun(runId: string): Promise<VerificationResult> {
+  /**
+   * Checks NEAR's signature and TDX attestation for a run's final answer, always afresh (never the 10-minute report cache). When a check after one of this
+   * run's answers had failed (D-55), Check again checks each of those answers afresh: when every one is signed, the chat's stop is cleared (if no other run
+   * of the chat still has a failed check) and route.attestation-cleared is recorded; a fresh result that fails again leaves the stop.
+   */
+  public async verifyRun(runId: string): Promise<AnswerCheckResult> {
+    const checks = this.answerChecks.get(runId);
+    if (checks && checks.failed.size > 0) {
+      const attestation = this.chatAttestation;
+      let last: AnswerCheckResult | undefined;
+      let model = '';
+      for (const [chatId, failed] of [...checks.failed]) {
+        model = failed.model;
+        last = await failed.client.verifyResponse(failed.model, failed.evidence);
+        if (last.outcome !== 'signed') return last;
+        checks.failed.delete(chatId);
+        if (attestation === this.chatAttestation) this.uncheckedFailures.delete(chatId);
+        checks.results.set(chatId, last);
+      }
+      // Cleared only when no failed answer of the chat is left unchecked, counted for the whole chat (an evicted run's failure still counts).
+      if (this.uncheckedFailures.size === 0 && attestation === this.chatAttestation && attestation.closed !== true && attestation.failed) {
+        attestation.failed = false;
+        try { checks.route.sink?.record(routeEventRecordFor(checks.route, 'route.attestation-cleared', { model, attestation: 'verified' })); } catch { /* D-21 */ }
+      }
+      const entry = this.verifiable.get(runId);
+      return entry && checks.results.has(entry.evidence.chatId) ? checks.results.get(entry.evidence.chatId)! : last!;
+    }
     const entry = this.verifiable.get(runId);
     if (!entry) return { outcome: 'unavailable', summary: 'This response can no longer be verified from the editor (only the last 20 are kept).', checks: {}, notChecked: NOT_CHECKED_IN_EDITOR };
     return entry.client.verifyResponse(entry.model, entry.evidence);
+  }
+
+  /**
+   * The check after one of a run's attested-cloud answers settled (D-36, D-55). For a closed or replaced chat nothing is posted or set. A failed check is
+   * kept for Check again; the result is shown under the run's answer when the run's row is there (a failed one under that row even when it was for an
+   * earlier turn), or when the run ends.
+   */
+  private answerChecked(runId: string, route: SessionRoute, attestation: RouteAttestation, chatId: string, result: AnswerCheckResult, checked: { model: string; evidence: ResponseEvidence; client: NearAiClient }): void {
+    if (attestation !== this.chatAttestation || attestation.closed === true) return;
+    let checks = this.answerChecks.get(runId);
+    if (!checks) {
+      checks = { route, failed: new Map(), results: new Map() };
+      this.answerChecks.set(runId, checks);
+      for (const old of [...this.answerChecks.keys()].slice(0, -50)) this.answerChecks.delete(old);
+    }
+    checks.results.set(chatId, result);
+    if (result.outcome === 'failed') { checks.failed.set(chatId, checked); this.uncheckedFailures.add(chatId); }
+    const entry = this.verifiable.get(runId);
+    if (entry) {
+      // The run has ended and its row is there: its final answer's result, or any failure of the run, is shown on it.
+      if (entry.evidence.chatId === chatId || result.outcome === 'failed') this.post({ type: 'response-verification', runId, result });
+    } else if (result.outcome === 'failed' && this.currentRunId !== runId) {
+      // A run that ended with no row (for example its final answer carried no evidence) gets one, so the failure can be checked again from it.
+      this.verifiable.set(runId, checked);
+      this.post({ type: 'response-verifiable', runId });
+      this.post({ type: 'response-verification', runId, result });
+    }
+  }
+
+  /** What a run's row shows when the run ends: a failed check of any of its answers, else its final answer's result, else nothing yet. */
+  private shownCheck(runId: string, finalChatId: string): AnswerCheckResult | undefined {
+    const checks = this.answerChecks.get(runId);
+    if (!checks) return undefined;
+    const failed = [...checks.failed.keys()][0];
+    return failed !== undefined ? checks.results.get(failed) : checks.results.get(finalChatId);
   }
 
   /** Undoes every file change a run made with the file tools. */
@@ -926,6 +1025,11 @@ export class AgentConversation {
     // A new chat starts with no mark (its first run sets it at the project's label) and no fingerprints.
     this.outboundPrints = new OutboundFingerprints();
     this.adoptMark(undefined);
+    // ...and without the stop of a failed answer check (D-55): the old state is closed, so a check of the old chat that settles later sets nothing.
+    this.chatAttestation.closed = true;
+    this.chatAttestation = { failed: false };
+    this.answerChecks.clear();
+    this.uncheckedFailures = new Set();
   }
 
   public dispose(): void { this.reset(); }
@@ -1252,7 +1356,7 @@ export class AgentConversation {
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
             // (research 9.1); outside a parent route (a test) it starts from the chat's own state.
             const parentRoute = currentSessionRoute();
-            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation }) : parentRoute ?? defaultSessionRoute();
+            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}) }) : parentRoute ?? defaultSessionRoute();
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
             this.activity?.agentEnded(agent.id, result.outcome);
