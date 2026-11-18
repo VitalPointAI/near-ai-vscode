@@ -1,5 +1,6 @@
-// Show full attestation on a trust badge (CLAS-08): the details of one answer's check as one JSON object, opened in an untitled editor tab. Nothing is
-// written to the workspace, to disk or to a decision record; the document lives only in the editor until the person closes or saves it themselves.
+// Show full attestation on a trust badge (CLAS-08): the details of one answer's check as one JSON object, shown in a read-only editor tab served from memory
+// on the near-ai-attestation scheme. Nothing is written to the workspace, to disk or to a decision record, and the tab is never dirty, so closing it never
+// asks to save.
 import type { ConnectionBindingFact } from '../domain/gate/routing';
 import { TRUST_BADGE_TEXT, type TrustBadge } from '../domain/gate/trustBadge';
 import type { AnswerCheckResult } from '../gate/sessionMark';
@@ -11,6 +12,8 @@ export const TRUST_DETAILS_NOT_KEPT_TEXT = 'The full attestation is kept only fo
 export interface TrustDetailsInput {
   readonly runId: string;
   readonly model: string;
+  /** When the answer finished (ms since the epoch), which the tab's title shows. */
+  readonly answeredAt?: number;
   readonly badge: TrustBadge | undefined;
   readonly result: AnswerCheckResult | undefined;
   readonly connection: ConnectionBindingFact | undefined;
@@ -28,7 +31,7 @@ export function trustDetailsOf(input: TrustDetailsInput): Record<string, unknown
   const result = input.result;
   const connection = input.connection;
   return {
-    answer: { runId: input.runId, model: input.model },
+    answer: { runId: input.runId, model: input.model, answeredAt: typeof input.answeredAt === 'number' && Number.isFinite(input.answeredAt) ? new Date(input.answeredAt).toISOString() : null },
     badge: input.badge === undefined ? null : { state: input.badge.state, title: input.badge.title, explanation: input.badge.explanation, reasons: [...input.badge.reasons] },
     check: result === undefined ? { outcome: 'not checked' } : {
       outcome: result.outcome,
@@ -51,21 +54,103 @@ export function trustDetailsOf(input: TrustDetailsInput): Record<string, unknown
   };
 }
 
+/** The scheme the read-only attestation tabs are served on: from memory only, never a file. */
+export const ATTESTATION_SCHEME = 'near-ai-attestation';
+/** How many answers' details the tabs keep: the same 20 answers whose badge facts the chat keeps. */
+const ATTESTATION_DOCUMENTS_KEPT = 20;
+
+interface UriLike { toString(): string }
+interface DisposableLike { dispose(): unknown }
+
 /** The editor calls Show full attestation needs, so a test can give its own. */
 export interface TrustDetailsEditor {
-  readonly workspace: { openTextDocument(options: { language: string; content: string }): PromiseLike<unknown> };
-  readonly window: { showTextDocument(document: never, options?: { preview?: boolean }): PromiseLike<unknown> };
-  readonly commands: { executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown> };
+  readonly Uri: { from(components: { scheme: string; path: string; query?: string }): UriLike };
+  readonly EventEmitter: new () => { readonly event: unknown; fire(value: UriLike): void; dispose(): void };
+  readonly workspace: {
+    registerTextDocumentContentProvider(scheme: string, provider: { onDidChange?: never; provideTextDocumentContent(uri: never): string }): DisposableLike;
+    openTextDocument(uri: never): PromiseLike<unknown>;
+  };
+  readonly languages: { setTextDocumentLanguage(document: never, languageId: string): PromiseLike<unknown> };
+  readonly window: { showTextDocument(document: never, options?: { preview?: boolean; preserveFocus?: boolean; viewColumn?: number }): PromiseLike<unknown> };
+  readonly ViewColumn: { readonly Active: number };
+}
+
+/** HH:MM in the person's own time zone, or undefined when the time is missing. */
+function clockTime(iso: unknown): string | undefined {
+  if (typeof iso !== 'string') return undefined;
+  const at = new Date(iso);
+  if (!Number.isFinite(at.getTime())) return undefined;
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }
 
 /**
- * Opens the details as an untitled JSON document in a preview tab and marks that tab read-only for the session where the editor supports it. Nothing is
- * saved: the document has no file until the person chooses to save it.
+ * The tab's title: "Attestation: answer at 14:32, <model>". A model id such as "org/model" is shown by its last part, because a slash would cut the title
+ * (the full id is in the document). Control characters are dropped and the title is kept short.
  */
-export async function openTrustDetails(editor: TrustDetailsEditor, details: Record<string, unknown>): Promise<void> {
-  const document = await editor.workspace.openTextDocument({ language: 'json', content: `${JSON.stringify(details, null, 2)}\n` });
-  await editor.window.showTextDocument(document as never, { preview: true });
-  try { await editor.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession'); } catch { /* an editor without it shows the tab as editable; nothing is saved either way */ }
+export function attestationTitle(details: Record<string, unknown>): string {
+  const answer = (details.answer ?? {}) as { runId?: unknown; model?: unknown; answeredAt?: unknown };
+  const clean = (text: string): string => text.replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  const model = clean(typeof answer.model === 'string' ? answer.model.split(/[\\/]/).filter(Boolean).at(-1) ?? '' : '').slice(0, 80);
+  const time = clockTime(answer.answeredAt);
+  const when = time === undefined ? 'Attestation: answer' : `Attestation: answer at ${time}`;
+  return model ? `${when}, ${model}` : when;
+}
+
+/** The read-only attestation tabs: the newest ATTESTATION_DOCUMENTS_KEPT answers' JSON, kept in memory and served on ATTESTATION_SCHEME. */
+export interface AttestationView extends DisposableLike {
+  /** Opens one answer's details as a read-only JSON tab, in a preview tab of the editor area beside the chat. */
+  open(details: Record<string, unknown>): Promise<void>;
+}
+
+const views = new WeakMap<TrustDetailsEditor, AttestationView>();
+
+/**
+ * The attestation view for this editor, registered once: the provider is in place before any tab asks for it, so a tab VS Code restores after a reload
+ * reads the "no longer kept" note rather than an error. `keep` is given the registration so the extension disposes of it.
+ */
+export function attestationView(editor: TrustDetailsEditor, keep: (disposable: DisposableLike) => void = () => undefined): AttestationView {
+  const known = views.get(editor);
+  if (known !== undefined) return known;
+  const texts = new Map<string, string>();
+  const changed = new editor.EventEmitter();
+  const notKept = `${JSON.stringify({ note: TRUST_DETAILS_NOT_KEPT_TEXT }, null, 2)}\n`;
+  const registration = editor.workspace.registerTextDocumentContentProvider(ATTESTATION_SCHEME, {
+    onDidChange: changed.event as never,
+    provideTextDocumentContent: (uri: UriLike) => texts.get(uri.toString()) ?? notKept
+  });
+  const view: AttestationView = {
+    open: async (details) => {
+      const answer = (details.answer ?? {}) as { runId?: unknown };
+      const runId = typeof answer.runId === 'string' ? answer.runId : '';
+      const uri = editor.Uri.from({ scheme: ATTESTATION_SCHEME, path: `/${attestationTitle(details)}`, query: `run=${encodeURIComponent(runId)}` });
+      const key = uri.toString();
+      const text = `${JSON.stringify(details, null, 2)}\n`;
+      const before = texts.get(key);
+      texts.delete(key);
+      texts.set(key, text);
+      for (const old of [...texts.keys()].slice(0, -ATTESTATION_DOCUMENTS_KEPT)) texts.delete(old);
+      // An open tab of this answer shows the newest details (after Check again) rather than what it showed first.
+      if (before !== undefined && before !== text) changed.fire(uri);
+      const opened = await editor.workspace.openTextDocument(uri as never);
+      const document = await editor.languages.setTextDocumentLanguage(opened as never, 'json');
+      // The chat is a side-bar view, so the editor area is already beside it: the active group, as a preview tab, rather than splitting the person's file.
+      await editor.window.showTextDocument(document as never, { preview: true, preserveFocus: false, viewColumn: editor.ViewColumn.Active });
+    },
+    dispose: () => {
+      views.delete(editor);
+      texts.clear();
+      changed.dispose();
+      registration.dispose();
+    }
+  };
+  views.set(editor, view);
+  keep(view);
+  return view;
+}
+
+/** Opens the details as a read-only JSON tab (see attestationView). Nothing is saved anywhere and the tab has no unsaved state. */
+export async function openTrustDetails(editor: TrustDetailsEditor, details: Record<string, unknown>, keep?: (disposable: DisposableLike) => void): Promise<void> {
+  await attestationView(editor, keep).open(details);
 }
 
 /** What Check again needs of a chat: a fresh check that gives the run's badge, and the badge with one more reason when the check could not run. */

@@ -7,7 +7,10 @@ import * as vm from 'node:vm';
 
 // A DOM just large enough to start the real chat page, so the button is judged by what it does rather than by the words in its source. The page needs
 // only a handful of node methods and the helper kits panelView loads before it (the trust badge kit is the real one); anything it reaches for that is missing fails the test loudly.
-export function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown) => void; posts: unknown[]; sent: () => unknown[] } {
+/** An event as the page's listeners see it, with whether a listener already used it. */
+export interface StubEvent { key?: string; target: StubNode; defaultPrevented: boolean; preventDefault(): void }
+
+export function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown) => void; posts: unknown[]; sent: () => unknown[]; dispatch: (type: string, target: StubNode, key?: string) => StubEvent; focused: () => StubNode | undefined } {
   focused = undefined;
   const nodes = new Map<string, StubNode>();
   const posts: unknown[] = [];
@@ -61,7 +64,14 @@ export function chatPage(): { nodes: Map<string, StubNode>; send: (data: unknown
   new vm.Script(source, { filename: 'chat.js' }).runInContext(context);
   // Messages are made inside the page's own context, so they are compared as plain data rather than by prototype.
   const sent = () => posts.map((message) => JSON.parse(JSON.stringify(message)) as unknown);
-  return { nodes, send: (data) => { for (const listener of listeners) listener({ data }); }, posts, sent };
+  // As a browser delivers it: the target, each of its ancestors, then the document (it bubbles), so a page-wide listener sees what the others did.
+  const dispatch = (type: string, target: StubNode, key?: string): StubEvent => {
+    const event: StubEvent = { ...(key === undefined ? {} : { key }), target, defaultPrevented: false, preventDefault: () => { event.defaultPrevented = true; } };
+    for (let at: StubNode | undefined = target; at; at = at.parent) for (const listener of at.listeners[type] ?? []) listener(event);
+    for (const listener of document.listeners[type] ?? []) listener(event);
+    return event;
+  };
+  return { nodes, send: (data) => { for (const listener of listeners) listener({ data }); }, posts, sent, dispatch, focused: () => focused };
 }
 
 export class StubNode {
@@ -160,7 +170,9 @@ class StubDocument {
     const role = /\[role="([\w-]+)"\]/.exec(selector)?.[1];
     return role === undefined ? [] : this.body.all((node) => node.getAttribute('role') === role);
   }
-  public addEventListener(): void {}
+  /** The page's own document-wide listeners, which a test reaches through chatPage's dispatch. */
+  public readonly listeners: Record<string, Array<(event: StubEvent) => void>> = {};
+  public addEventListener(type: string, listener: (event: StubEvent) => void): void { (this.listeners[type] ??= []).push(listener); }
   public removeEventListener(): void {}
   public hasFocus(): boolean { return true; }
   public execCommand(): boolean { return true; }

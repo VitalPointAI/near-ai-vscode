@@ -1,7 +1,9 @@
 // The trust badge under each cloud answer (CLAS-08). The host chooses the state and every word (trustBadgeFor in src/domain/gate/trustBadge.ts); this
 // only draws it. Every word is set with textContent, never as HTML. The badge is a real button whose accessible name says its state; the state is also
 // given by its words and an icon, never by colour alone. A click opens its details: why it says what it says, what was not checked, Check again and Show
-// full attestation (a reopened chat's badge has neither, D-51 and plan 27). Escape closes the details and returns focus to the badge.
+// full attestation (a reopened chat's badge has neither, D-51 and plan 27). Opening the details moves focus into them. While they are open, Escape anywhere in
+// the page closes them and returns focus to the badge, unless something else on the page already used that Escape (stopping a run, closing a menu); a
+// click outside the badge and its details closes them too.
 (function (root) {
   'use strict';
 
@@ -18,6 +20,35 @@
 
   /** Per container: the badge's wrapper, button and details, so a later message updates the one badge rather than adding a second. */
   const drawn = new WeakMap();
+  /** Per document: the badges whose details are open, oldest first, and whether the page-wide listeners are installed. */
+  const pages = new WeakMap();
+
+  /** The page's record of open details, with one keydown and one click listener on the document, installed once. */
+  function pageOf(doc) {
+    let page = pages.get(doc);
+    if (page) return page;
+    page = { open: [] };
+    pages.set(doc, page);
+    if (doc && typeof doc.addEventListener === 'function') {
+      // Escape from anywhere closes the newest open details. A handler that already used the key (it called preventDefault) keeps it, so stopping a run
+      // from the message box or closing a menu still works and does not also close a badge.
+      doc.addEventListener('keydown', (event) => {
+        if (!event || event.key !== 'Escape' || event.defaultPrevented) return;
+        const known = page.open[page.open.length - 1];
+        if (!known) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        setExpanded(known, false, true);
+      });
+      // A click outside a badge and its details closes them; a click inside (the badge itself, Check again, a reason's text) does not.
+      doc.addEventListener('click', (event) => {
+        const target = event && event.target;
+        for (const known of [...page.open]) {
+          if (!(target && typeof known.wrap.contains === 'function' && (known.wrap === target || known.wrap.contains(target)))) setExpanded(known, false, false);
+        }
+      });
+    }
+    return page;
+  }
 
   function el(doc, tag, className, text) {
     const node = doc.createElement(tag);
@@ -42,12 +73,18 @@
     return Array.isArray(list) ? list.filter((item) => typeof item === 'string' && item.length > 0) : [];
   }
 
-  /** Opens or closes the details; closing by Escape returns focus to the badge. */
+  /** Opens or closes the details. Opening moves focus into them; closing by Escape returns focus to the badge. */
   function setExpanded(known, expanded, refocus) {
     known.expanded = expanded;
     known.button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     known.details.hidden = !expanded;
-    if (!expanded && refocus && typeof known.button.focus === 'function') known.button.focus();
+    const open = known.page.open;
+    const at = open.indexOf(known);
+    if (at >= 0) open.splice(at, 1);
+    if (expanded) {
+      open.push(known);
+      if (typeof known.details.focus === 'function') known.details.focus();
+    } else if (refocus && typeof known.button.focus === 'function') known.button.focus();
   }
 
   /** The details' words and buttons, drawn again on each update so they always match the badge. */
@@ -93,13 +130,17 @@
       const details = el(doc, 'div', 'trust-details');
       details.id = 'trust-details-' + String(runId || '');
       details.hidden = true;
+      // Focusable from script only, so opening can move focus into the details without adding a tab stop; its name says what it is.
+      details.setAttribute('tabindex', '-1');
+      details.setAttribute('role', 'group');
+      details.setAttribute('aria-label', 'Trust details');
       button.setAttribute('aria-controls', details.id);
       button.setAttribute('aria-expanded', 'false');
       // Its words must be read whole: the layout check reports a badge whose title is cut off.
       button.setAttribute('data-must-read', '');
       wrap.append(button, details);
       container.append(wrap);
-      known = { wrap, button, details, expanded: false };
+      known = { wrap, button, details, expanded: false, doc, page: pageOf(doc) };
       drawn.set(container, known);
       // Installed once; they read the latest badge, so an update never stacks listeners.
       button.addEventListener('click', () => setExpanded(known, !known.expanded, false));
@@ -122,7 +163,11 @@
     const icon = el(doc, 'span', 'trust-icon', ICONS[badge.state]);
     icon.setAttribute('aria-hidden', 'true');
     button.replaceChildren(icon, el(doc, 'span', 'trust-title', badge.title));
+    // Drawing again replaces the buttons; focus that was on one of them (Check again, then the badge comes back) moves to the details, not the page body.
+    const active = known.doc && known.doc.activeElement;
+    const focusInside = Boolean(active) && active !== known.details && typeof known.details.contains === 'function' && known.details.contains(active);
     drawDetails(doc, known);
+    if (focusInside && known.expanded && !known.details.contains(known.doc.activeElement) && typeof known.details.focus === 'function') known.details.focus();
     return button;
   }
 

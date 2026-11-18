@@ -26,7 +26,7 @@ import { entriesToView } from '../domain/state/threadView';
 import { findSecrets } from '../domain/team/secrets';
 import { MemorySecrets } from './helpers/stateFixtures';
 import { parseChatWebviewMessage } from '../services/chatBridge';
-import { openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from '../services/trustDetails';
+import { ATTESTATION_SCHEME, attestationTitle, attestationView, openTrustDetails, TRUST_DETAILS_NOT_KEPT_TEXT } from '../services/trustDetails';
 import { createVscodeStub } from './helpers/vscodeStub';
 import { TEST_ROOT, personalSign, testQuote, testSigner } from './helpers/attestationFixtures';
 import { labelledProject } from './helpers/markFixtures';
@@ -590,6 +590,8 @@ test('a click opens the details: the explanation, the reasons, the helper-agent 
   assert.ok(words.includes('The check failed: The signature does not match the signing address.'));
   assert.ok(words.includes(TRUST_BADGE_TEXT.helpers));
   assert.ok(words.includes('Not checked in the editor: platform TCB status and certificate revocation (Intel collateral), which code the enclave runs (measurements). '));
+  assert.equal(doc.activeElement, details, 'opening moves focus into the details');
+  assert.equal(details.attributes.get('tabindex'), '-1', 'focusable from script, with no extra tab stop');
   details.press('Escape');
   assert.equal(details.hidden, true);
   assert.equal(button.attributes.get('aria-expanded'), 'false');
@@ -598,6 +600,73 @@ test('a click opens the details: the explanation, the reasons, the helper-agent 
   button.click();
   button.press('Enter');
   assert.equal(details.hidden, false);
+});
+
+test('Escape from anywhere in the page closes open details and returns focus to the badge; an Escape another control already used, or any other key, leaves them open', () => {
+  const { doc, button, details } = drawnBadge();
+  const elsewhere = doc.createElement('textarea');
+  doc.body.append(elsewhere);
+  // Escape with nothing open is left alone for whoever else wants it.
+  assert.equal(doc.dispatch('keydown', elsewhere, 'Escape').defaultPrevented, false, 'a closed badge never takes Escape');
+  button.click();
+  elsewhere.focus();
+  assert.equal(doc.dispatch('keydown', elsewhere, 'Enter').defaultPrevented, false);
+  assert.equal(details.hidden, false, 'another key changes nothing');
+  // A control that used the key itself (it called preventDefault, as stopping a run does) keeps it: the details stay open.
+  elsewhere.addEventListener('keydown', ((event: { key: string; preventDefault(): void }) => { if (event.key === 'Escape') event.preventDefault(); }) as never);
+  doc.dispatch('keydown', elsewhere, 'Escape');
+  assert.equal(details.hidden, false, 'an Escape another control used does not also close the details');
+  assert.equal(doc.activeElement, elsewhere);
+  // From a node that does not use Escape, the details close and focus returns to the badge.
+  const plain = doc.createElement('p');
+  doc.body.append(plain);
+  const event = doc.dispatch('keydown', plain, 'Escape');
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(details.hidden, true);
+  assert.equal(button.attributes.get('aria-expanded'), 'false');
+  assert.equal(doc.activeElement, button, 'focus is back on the badge');
+  // From inside the details the same happens once: the details' own handler closes them and the page-wide one sees the key was used.
+  button.click();
+  const inside = buttonIn(details, 'Check again')!;
+  inside.focus();
+  assert.equal(doc.dispatch('keydown', inside, 'Escape').defaultPrevented, true);
+  assert.equal(details.hidden, true);
+  assert.equal(doc.activeElement, button);
+});
+
+test('a click outside closes open details without moving focus; a click on the badge or inside the details does not; two badges are never both left open by mouse', () => {
+  const { doc, button, details } = drawnBadge();
+  const second = doc.createElement('div');
+  doc.body.append(second);
+  const otherButton = fullKit.renderTrustBadge(doc, second, FAILED_BADGE, () => undefined, 'run-2-bbbbbb')!;
+  const otherDetails = second.find((node) => node.className === 'trust-details')!;
+  doc.dispatch('click', button);
+  assert.equal(details.hidden, false, 'a click on the badge opens it');
+  doc.dispatch('click', details.find((node) => node.className === 'trust-explanation')!);
+  assert.equal(details.hidden, false, 'a click on the details\' text keeps them open');
+  // Opening the other badge is a click outside the first one.
+  doc.dispatch('click', otherButton);
+  assert.equal(otherDetails.hidden, false);
+  assert.equal(details.hidden, true, 'the first badge closed');
+  assert.equal(button.attributes.get('aria-expanded'), 'false');
+  assert.equal(otherButton.attributes.get('aria-expanded'), 'true');
+  const page = doc.createElement('div');
+  doc.body.append(page);
+  page.focus();
+  doc.dispatch('click', page);
+  assert.equal(otherDetails.hidden, true, 'a click on the page closes them');
+  assert.equal(otherButton.attributes.get('aria-expanded'), 'false');
+  assert.equal(doc.activeElement, page, 'a click outside leaves focus where the click put it');
+  // Nothing is open any more, so Escape is left alone.
+  assert.equal(doc.dispatch('keydown', page, 'Escape').defaultPrevented, false);
+});
+
+test('an update while the focus is on a details button keeps the focus in the details', () => {
+  const { doc, button, details } = drawnBadge();
+  button.click();
+  buttonIn(details, 'Check again')!.focus();
+  fullKit.renderTrustBadge(doc, button.parent!.parent!, { ...FAILED_BADGE, reasons: [] }, () => undefined, 'run-1-aaaaaa');
+  assert.equal(doc.activeElement, details, 'the replaced button\'s focus moves to the details, not the page body');
 });
 
 test('Check again posts verify-response and Show full attestation posts trust-details, each for the badge\'s own run id; an update keeps the details open', () => {
@@ -654,6 +723,64 @@ test('the real chat page: the badge opens its details, and Check again and Show 
   assert.deepEqual(posted.map((message) => [message.type, message.runId]), [['verify-response', 'run-1-aaaaaa'], ['trust-details', 'run-1-aaaaaa']]);
 });
 
+test('the real chat page: Escape from the message box closes open details unless it stopped a run or closed the command menu, the menus keep their own Escape, and a click elsewhere closes the details', async () => {
+  const page = chatPage();
+  const reply = await answerOn(page, 'run-1-aaaaaa');
+  page.send({ type: 'trust-badge', runId: 'run-1-aaaaaa', badge: FAILED_BADGE });
+  const badge = badgesUnder(reply)[0]!;
+  const details = under(reply).find((node) => node.className === 'trust-details')!;
+  const input = page.nodes.get('input')!;
+  const transcript = page.nodes.get('transcript')!;
+  const menu = page.nodes.get('commands')!;
+  // The markup ships the command menu hidden; a stub node starts visible, so this is the page as loaded.
+  menu.hidden = true;
+  page.dispatch('click', badge);
+  assert.equal(details.hidden, false);
+  assert.equal(page.focused(), details, 'opening moves focus into the details');
+  // A run is going and the message box is empty: Escape there stops the run, and only that.
+  page.send({ type: 'assistant-start', model: 'tee-model', privacy: 'Private · runs in NEAR TEE' });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  input.value = '';
+  input.focus();
+  const before = page.sent().length;
+  page.dispatch('keydown', input, 'Escape');
+  assert.deepEqual((page.sent().slice(before) as Array<{ type: string }>).map((message) => message.type), ['stop'], 'Escape still stops the run');
+  assert.equal(details.hidden, false, 'and does not also close the details');
+  // The command menu is open: Escape closes the menu, and only that.
+  page.send({ type: 'commands', commands: [{ command: 'plan', title: 'Plan', description: 'Plan the work' }] });
+  input.value = '/pl';
+  for (const listener of input.listeners.input ?? []) listener({ preventDefault: () => undefined, target: input });
+  assert.equal(menu.hidden, false, 'the command menu is open');
+  page.dispatch('keydown', input, 'Escape');
+  assert.equal(menu.hidden, true, 'Escape closes the command menu');
+  assert.equal(details.hidden, false, 'and leaves the details open');
+  // The step menu keeps its own Escape too.
+  page.send({ type: 'action-policy', mode: 'approve-risky', stopped: false, scope: 'workspace', options: [{ mode: 'approve-risky', label: 'Approve risky actions', summary: 'Asks before anything risky', description: '', risky: false }], autoAdvance: { on: false, text: 'Stops at every step.' } });
+  const advance = page.nodes.get('advance')!;
+  const advanceMenu = page.nodes.get('advance-menu')!;
+  advanceMenu.hidden = true;
+  advance.click();
+  assert.equal(advanceMenu.hidden, false);
+  page.dispatch('keydown', advanceMenu, 'Escape');
+  assert.equal(advanceMenu.hidden, true, 'Escape closes the step menu');
+  assert.equal(details.hidden, false, 'and leaves the details open');
+  // With text in the message box Escape does nothing there, so it closes the details and focus returns to the badge.
+  input.value = 'half a thought';
+  input.focus();
+  const sentBefore = page.sent().length;
+  page.dispatch('keydown', input, 'Escape');
+  assert.equal(details.hidden, true, 'Escape from elsewhere in the page closes the details');
+  assert.equal(badge.getAttribute('aria-expanded'), 'false');
+  assert.equal(page.focused(), badge, 'focus is back on the badge');
+  assert.deepEqual(page.sent().slice(sentBefore), [], 'nothing was posted');
+  // A click elsewhere in the page closes them as well.
+  page.dispatch('click', badge);
+  assert.equal(details.hidden, false);
+  page.dispatch('click', transcript);
+  assert.equal(details.hidden, true, 'a click outside closes the details');
+  assert.equal(badge.getAttribute('aria-expanded'), 'false');
+});
+
 test('the bridge accepts trust-details with exactly a run id (and the chat id), and refuses extra fields or a bad run id', () => {
   assert.deepEqual(parseChatWebviewMessage({ type: 'trust-details', runId: 'run-1-abcdef' }), { type: 'trust-details', runId: 'run-1-abcdef' });
   assert.deepEqual(parseChatWebviewMessage({ type: 'trust-details', runId: 'run-1-abcdef', conversationId: 'conv-mf3k2-0a1b2c3d' }), { type: 'trust-details', runId: 'run-1-abcdef', conversationId: 'conv-mf3k2-0a1b2c3d' });
@@ -663,9 +790,10 @@ test('the bridge accepts trust-details with exactly a run id (and the chat id), 
   }
 });
 
-test('Show full attestation opens one untitled JSON document holding the signature, the signing address, who holds the key, the checks, the connection with its fingerprint and the report; nothing is written to the workspace', async () => {
+test('Show full attestation opens one read-only JSON tab on its own scheme, titled by the answer\'s time and model, holding the signature, the signing address, who holds the key, the checks, the connection with its fingerprint and the report; nothing is written to the workspace', async () => {
   const near = await cloud('bound');
   const chat = badgeChat(CONFIDENTIAL);
+  const sentAt = Date.now();
   await send(chat, near.client);
   await settle();
   const runId = chat.badges().at(-1)!.runId;
@@ -675,14 +803,34 @@ test('Show full attestation opens one untitled JSON document holding the signatu
   assert.ok(details !== undefined);
   const stub = createVscodeStub();
   const vscodeApi = stub.vscode as unknown as Parameters<typeof openTrustDetails>[0];
+  const commands = (stub.vscode as { commands: { executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown> } }).commands;
   const executed: string[] = [];
-  const realExecute = vscodeApi.commands.executeCommand.bind(vscodeApi.commands);
-  (vscodeApi.commands as { executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown> }).executeCommand = async (command: string, ...args: unknown[]) => { executed.push(command); return realExecute(command, ...args); };
-  await openTrustDetails(vscodeApi, details);
+  const realExecute = commands.executeCommand.bind(commands);
+  (commands as { executeCommand: (command: string, ...args: unknown[]) => PromiseLike<unknown> }).executeCommand = async (command: string, ...args: unknown[]) => { executed.push(command); return realExecute(command, ...args); };
+  const kept: unknown[] = [];
+  await openTrustDetails(vscodeApi, details, (registration) => kept.push(registration));
   assert.equal(stub.shownDocuments.length, 1);
   const shown = stub.shownDocuments[0]!;
-  assert.match(shown.uri, /^untitled:/);
-  const parsed = JSON.parse(shown.text) as { check: Record<string, unknown>; connection: Record<string, unknown>; attestationReport: unknown; badge: { state: string }; notCheckedInEditor: string[] };
+  // Served from memory on its own scheme: not an untitled document, not a file, so there is nothing to edit and nothing to save.
+  assert.ok(shown.uri.startsWith(`${ATTESTATION_SCHEME}:`), shown.uri);
+  assert.doesNotMatch(shown.uri, /^(untitled|file):/);
+  assert.ok(stub.contentProviders.has(ATTESTATION_SCHEME), 'a content provider serves the scheme, which VS Code shows read-only');
+  assert.equal(kept.length, 1, 'the registration is handed to the extension to dispose of');
+  assert.equal(shown.languageId, 'json');
+  assert.deepEqual(shown.options, { preview: true, preserveFocus: false, viewColumn: (stub.vscode as { ViewColumn: { Active: number } }).ViewColumn.Active }, 'a preview tab in the editor area beside the chat');
+  assert.deepEqual(executed, [], 'no command marks an editable tab read-only or saves it: the tab is read-only by its scheme');
+  // The title names the answer by its time and model, and the tab is the answer's own.
+  const time = new Date(sentAt);
+  const hhmm = (at: Date): string => `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  const title = attestationTitle(details);
+  assert.ok([hhmm(time), hhmm(new Date(Date.now()))].some((clock) => title === `Attestation: answer at ${clock}, ${(details.answer as { model: string }).model}`), title);
+  assert.equal(decodeURIComponent(shown.uri.slice(`${ATTESTATION_SCHEME}:`.length).split('?')[0]!), `/${title}`, 'the tab shows the title, not the run id');
+  assert.ok(shown.uri.endsWith(`?run=${runId}`), 'the run id keeps two answers of the same minute apart');
+  // Pretty-printed JSON of the same details.
+  assert.equal(shown.text, `${JSON.stringify(details, null, 2)}\n`);
+  const parsed = JSON.parse(shown.text) as { answer: { runId: string; answeredAt: string }; check: Record<string, unknown>; connection: Record<string, unknown>; attestationReport: unknown; badge: { state: string }; notCheckedInEditor: string[] };
+  assert.equal(parsed.answer.runId, runId);
+  assert.ok(Date.parse(parsed.answer.answeredAt) >= sentAt - 1000, 'the answer\'s time is kept');
   assert.equal((parsed.check.signingAddress as string).toLowerCase(), SIGNING.address.toLowerCase());
   assert.equal(parsed.check.keyHeldBy, 'the model\'s own enclave');
   assert.equal(typeof parsed.check.signature, 'string');
@@ -694,11 +842,37 @@ test('Show full attestation opens one untitled JSON document holding the signatu
   assert.ok(Array.isArray((parsed.attestationReport as { model_attestations?: unknown[] }).model_attestations), 'the report the check used');
   assert.equal(parsed.badge.state, 'verified-private');
   assert.ok(parsed.notCheckedInEditor.length > 0);
-  assert.deepEqual(executed, ['workbench.action.files.setActiveEditorReadonlyInSession'], 'the tab is made read-only for the session');
   assert.deepEqual(listTree(root), before, 'nothing was written under the workspace');
   // A run whose badge is no longer kept has no details; the host says so and offers Check again.
   assert.equal(chat.conversation.trustDetails('run-9-ffffff'), undefined);
   assert.match(TRUST_DETAILS_NOT_KEPT_TEXT, /last 20 answers of this window/);
+});
+
+test('the attestation view registers its scheme once, refreshes an open tab with newer details, keeps only the last 20 answers in memory and says so for an older one', async () => {
+  const stub = createVscodeStub();
+  const vscodeApi = stub.vscode as unknown as Parameters<typeof openTrustDetails>[0];
+  const view = attestationView(vscodeApi);
+  assert.equal(attestationView(vscodeApi), view, 'one view per editor');
+  const provider = stub.contentProviders.get(ATTESTATION_SCHEME) as unknown as { provideTextDocumentContent(uri: { toString(): string }): string; onDidChange: (listener: (uri: { toString(): string }) => void) => unknown };
+  const changed: string[] = [];
+  provider.onDidChange((uri) => changed.push(uri.toString()));
+  const at = new Date(2026, 10, 18, 14, 32).getTime();
+  const answer = (index: number, summary = 'first'): Record<string, unknown> => ({ answer: { runId: `run-${String(index)}-abcdef`, model: 'deepseek-ai/DeepSeek-V3.1', answeredAt: new Date(at).toISOString() }, check: { summary } });
+  await view.open(answer(1));
+  assert.equal(stub.shownDocuments[0]!.text, `${JSON.stringify(answer(1), null, 2)}\n`);
+  assert.equal(attestationTitle(answer(1)), 'Attestation: answer at 14:32, DeepSeek-V3.1', 'a model id with a slash is named by its last part, so the title is not cut');
+  // The same answer again after Check again: the open tab is told to read the newer details.
+  await view.open(answer(1, 'second'));
+  assert.deepEqual(changed, [stub.shownDocuments[0]!.uri]);
+  assert.match(stub.shownDocuments[1]!.text, /"second"/);
+  // Twenty more answers: the first is no longer kept, and a tab of it (one VS Code restores, say) reads the note rather than an error.
+  for (let index = 2; index <= 21; index += 1) await view.open(answer(index));
+  const first = { toString: () => stub.shownDocuments[0]!.uri };
+  assert.deepEqual(JSON.parse(provider.provideTextDocumentContent(first)), { note: TRUST_DETAILS_NOT_KEPT_TEXT });
+  assert.match(provider.provideTextDocumentContent({ toString: () => stub.shownDocuments.at(-1)!.uri }), /run-21-abcdef/);
+  view.dispose();
+  assert.equal(stub.contentProviders.has(ATTESTATION_SCHEME), false, 'disposed with the extension');
+  assert.notEqual(attestationView(vscodeApi), view, 'a fresh view after disposal');
 });
 
 test('a reused attestation report is still shown on request: the report travels with the 10-minute cache, in memory only', async () => {

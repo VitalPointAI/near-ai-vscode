@@ -315,6 +315,8 @@ interface BadgeEntry {
   readonly client: NearAiClient;
   readonly evidence: ResponseEvidence | undefined;
   readonly facts: AnswerFacts;
+  /** When the answer finished (ms since the epoch): the attestation tab's title shows it. */
+  readonly answeredAt: number;
   verification: TrustVerification;
   result?: AnswerCheckResult;
 }
@@ -1070,7 +1072,7 @@ export class AgentConversation {
   public trustDetails(runId: string): Record<string, unknown> | undefined {
     const entry = this.verifiable.get(runId);
     if (entry === undefined) return undefined;
-    return trustDetailsOf({ runId, model: entry.model, badge: this.badgeOf(entry), result: entry.result, connection: entry.facts.connection, connectionPinned: entry.facts.connectionFresh });
+    return trustDetailsOf({ runId, model: entry.model, answeredAt: entry.answeredAt, badge: this.badgeOf(entry), result: entry.result, connection: entry.facts.connection, connectionPinned: entry.facts.connectionFresh });
   }
 
   /**
@@ -1092,7 +1094,7 @@ export class AgentConversation {
     const evidence = usage?.evidence;
     // A check follows only for a TEE model on NEAR AI Cloud's own endpoint whose answer carried a signature id; anything else is never checked.
     const willCheck = facts.boundary === 'tee' && facts.nearEndpoint && evidence !== undefined;
-    const entry: BadgeEntry = { thread: this.conversationId, answerText, model: request.model, client: request.client, evidence, facts, verification: willCheck ? 'pending' : 'not-run' };
+    const entry: BadgeEntry = { thread: this.conversationId, answerText, model: request.model, client: request.client, evidence, facts, answeredAt: Date.now(), verification: willCheck ? 'pending' : 'not-run' };
     this.verifiable.delete(runId);
     this.verifiable.set(runId, entry);
     for (const old of [...this.verifiable.keys()].slice(0, -TRUST_ENTRIES_KEPT)) this.verifiable.delete(old);

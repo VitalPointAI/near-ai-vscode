@@ -1210,7 +1210,12 @@ copy of Open-GSD to a project that doesn't already have one.
   exists. At a level that needs an attested cloud a mismatch refuses the
   request; at other levels it is sent without the key held and the badge says
   so. Click it for the
-  reasons, Check again and the full attestation. See
+  reasons, Check again and the full attestation. Escape anywhere in the chat,
+  or a click outside, closes the details. **Show full attestation** opens a
+  read-only JSON tab named for the answer, such as "Attestation: answer at
+  14:32, glm-5.3". It is not a file: you cannot edit it, it never asks to be
+  saved, and nothing is written to your project. It is kept for the last 20
+  answers. See
   [what it does and doesn't check](SECURITY.md#the-trust-badge-on-each-answer).
 - The chat view only receives display data; credentials and raw context stay
   in the extension host.
