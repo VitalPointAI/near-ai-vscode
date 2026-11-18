@@ -21,6 +21,8 @@ export interface LayoutReport {
   clipped: string[];
   /** The page's images (the first 25), with each one's decoded width: 0 means it did not render. */
   images?: Array<{ element: string; naturalWidth: number; complete: boolean }>;
+  /** Each trust badge on the page (CLAS-08), with its state and its title as shown. */
+  trustBadges?: Array<{ state: string; title: string }>;
 }
 
 export function layoutProbeEnabled(): boolean {

@@ -95,6 +95,8 @@
       details.hidden = true;
       button.setAttribute('aria-controls', details.id);
       button.setAttribute('aria-expanded', 'false');
+      // Its words must be read whole: the layout check reports a badge whose title is cut off.
+      button.setAttribute('data-must-read', '');
       wrap.append(button, details);
       container.append(wrap);
       known = { wrap, button, details, expanded: false };
