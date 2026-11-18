@@ -7,6 +7,8 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 model="${1:?give the path to a Piper .onnx voice}"
+command -v piper >/dev/null || { echo "piper is not installed (pipx install piper-tts)" >&2; exit 1; }
+[ -f "$model" ] || { echo "voice not found: $model" >&2; exit 1; }
 mkdir -p "$here/audio"
 python3 - "$here/war-room.html" <<'PY' | while IFS=$'\t' read -r name text; do
 import re, sys
@@ -14,9 +16,13 @@ src = open(sys.argv[1], encoding='utf-8').read()
 for array, prefix in (('const ORIENT = [', 'orient'), ('const NARR = [', 'narr')):
     block = src[src.index(array):]
     block = block[:block.index('\n];')]
-    for i, m in enumerate(re.finditer(r"text: '((?:[^'\\]|\\.)*)'", block), 1):
+    entries = block.count('{ ')
+    found = list(re.finditer(r"text: '((?:[^'\\]|\\.)*)'", block))
+    if len(found) != entries:
+        sys.exit(f"{array} has {entries} entries but {len(found)} readable text fields; check the quoting")
+    for i, m in enumerate(found, 1):
         print(f"{prefix}-{i:02d}\t{m.group(1).replace(chr(92) + chr(39), chr(39))}")
 PY
-  printf '%s' "$text" | piper -m "$model" --sentence-silence 0.3 --length-scale 1.05 -f "$here/audio/$name.wav" >/dev/null 2>&1
+  printf '%s' "$text" | piper -m "$model" --sentence-silence 0.3 --length-scale 1.05 -f "$here/audio/$name.wav" >/dev/null 2>"$here/audio/.piper-error.log" || { echo "piper failed on $name; see audio/.piper-error.log" >&2; exit 1; }
   echo "$name.wav"
 done
