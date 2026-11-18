@@ -422,3 +422,32 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
   j9: { id: 'j9', number: 9, function: 'Civil-military cooperation' },
   'special-staff': { id: 'special-staff', function: 'Special staff' }
 };
+
+// Intelligence vocabulary the J2 products and the demo acceptance fixtures use (design 10, 3.2 and 4.4; WP-DEMO).
+
+/** The ICD 203 likelihood terms in order, with their ranges in percent and the alternative wording ICD 203 allows (02 T10; ICD 203, 2015, para D.6.b.2.a). */
+export const ICD_203_LIKELIHOOD_TERMS: ReadonlyArray<{ readonly term: string; readonly alternative: string; readonly range: readonly [number, number] }> = [
+  { term: 'almost no chance', alternative: 'remote', range: [1, 5] },
+  { term: 'very unlikely', alternative: 'highly improbable', range: [5, 20] },
+  { term: 'unlikely', alternative: 'improbable', range: [20, 45] },
+  { term: 'roughly even chance', alternative: 'roughly even odds', range: [45, 55] },
+  { term: 'likely', alternative: 'probable', range: [55, 80] },
+  { term: 'very likely', alternative: 'highly probable', range: [80, 95] },
+  { term: 'almost certain', alternative: 'nearly certain', range: [95, 99] }
+];
+
+/** Source reliability grades A to F (AJP-2.1 Edition B, the NATO two-character grading; 02 T10). Graded separately from credibility. */
+export const SOURCE_RELIABILITY_GRADES: Readonly<Record<string, string>> = {
+  A: 'Completely reliable', B: 'Usually reliable', C: 'Fairly reliable', D: 'Not usually reliable', E: 'Unreliable', F: 'Reliability cannot be judged'
+};
+
+/** Information credibility grades 1 to 6 (AJP-2.1 Edition B; the older Canadian text reads 1 as "confirmed by other sources", 02 T10). */
+export const INFORMATION_CREDIBILITY_GRADES: Readonly<Record<string, string>> = {
+  1: 'Confirmed by other sources', 2: 'Probably true', 3: 'Possibly true', 4: 'Doubtful', 5: 'Improbable', 6: 'Truth cannot be judged'
+};
+
+/** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
+export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
+
+/** Intelligence requirement terms (JP 2-0; design 10, 3.2): priority intelligence requirement, named area of interest, latest time of value. */
+export const INTELLIGENCE_REQUIREMENT_TERMS = { pir: 'PIR', nai: 'NAI', ltiov: 'Latest time of value' } as const;
