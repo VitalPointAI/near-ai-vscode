@@ -4,12 +4,14 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29); 0.4.23 to 0.4.28 published before it; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
-- **v0.5.0 Trusted-source knowledge base**: PAUSED 2026-10-29 and moving to a separate project. Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
-- **v0.6.0 Team Mode**: Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.7.0 Phase 69; the rest is the later milestone L2 (disposition table there).
-- **v0.7.0 Governed agent platform and messaging relay**: Phases 68-84 (Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; replanned 2026-11-15 from the owner's platform direction; relay phases renumbered)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
+- **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
+- **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
+- **v0.5.0 Governed agent platform**: Phases 68-74 (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
+- **v0.6.0 Data platform**: Phases 85-101, after Stage 1 and before the relay (owner, 2026-11-18); it contains L1a, the host and local inference
+- **v0.7.0 Messaging relay**: Phases 75-84, split from the governed agent platform on 2026-11-18, after the data platform
 - **v0.8.0 Cybersecurity**: Phase 25 (executed; deferred by the owner until everything else in this plan is finished, may move to its own product)
-- **Later milestones L1-L6** (outlined 2026-11-15): Theia appliance and local inference; Team Mode on the governed core; routines and signed packages; verifiable identity and policy on NEAR; edge grouping, compute pooling and HQ federation; Theia desktop app and learned skills
+- **Later milestones L1b and L2-L6** (outlined 2026-11-15; L1 split 2026-11-18): Theia appliance (its host and local inference, L1a, moved into v0.6.0 Data platform); Team Mode on the governed core; routines and signed packages; verifiable identity and policy on NEAR; edge grouping, compute pooling and HQ federation; Theia desktop app and learned skills
 
 ## 0.4.x line
 
@@ -61,7 +63,7 @@ Plans:
 ### Phase 27: Project state follows the project across interfaces and machines (0.4.20)
 
 **Goal**: A person opens a project in any interface (code-server from any browser, desktop VS Code, another machine) and finds the same chats, run records, checkpoints, model comparison results and applied model choices, is offered "pick up where you left off", and never has to set the profile up again or pay to redo work already done; everything that leaves the machine is encrypted end to end.
-**Depends on**: Nothing (builds on the shipped 0.4.19 storage, transcripts, profile store and model comparison panel). Ships as release 0.4.20 before v0.7.0 Phase 68.
+**Depends on**: Nothing (builds on the shipped 0.4.19 storage, transcripts, profile store and model comparison panel). Ships as release 0.4.20 before v0.7.0 Phase 68 (now v0.5.0).
 **Requirements**: SYNC-01 … SYNC-09
 **Evidence (before)**: 2026-11-13 the owner opened in desktop VS Code a week of work done through code-server on the same host. Projects are mounted at the same path, so project ids match, but chats, runs, checkpoints and `evals/` live in each editor's own `globalStorage` (code-server holds 5 transcript folders and the 2026-11-12 comparison; desktop stops at 2026-11-06), applied model recommendations are written to *user* settings (`modelComparisonPanel.ts` `applyRecommended`, ConfigurationTarget.Global), and the API key plus the transcript encryption key (`nearAi.transcripts.key`) are in each editor's SecretStorage (code-server: the browser), so the profile needed setting up again and copied transcripts could not be decrypted.
 **Success Criteria** (what must be TRUE):
@@ -143,9 +145,13 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 29 to break down)
 
-## Milestone v0.7.0: Governed agent platform and messaging relay
+## Milestone v0.5.0: Governed agent platform
 
-**Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy. On that layer, people reach their teams from Microsoft Teams, Signal and Telegram through a relay without opening VS Code: the group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
+**Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
+
+**Renumbered 2026-11-18** (owner: "considering we are on 0.4 now, lower the rest to start at 0.5"): this milestone was v0.7.0 until then and is now v0.5.0; the data platform is v0.6.0, the messaging relay v0.7.0, and Cybersecurity keeps v0.8.0 and stays last. The never-shipped former v0.5.0 knowledge-base plan and former v0.6.0 Team Mode branch plan gave up their numbers. Dated records (CONTEXT, PLAN, SUMMARY and VERIFICATION files, PR titles) keep the numbers they were written with, so "v0.7.0 Phase 68" there means this milestone.
+
+**Split 2026-11-18** (owner, data platform decision 2): the data platform comes after Stage 1 and before the relay, so the relay stages (Phases 75 to 84) left this milestone and are their own milestone, v0.7.0 Messaging relay, after v0.6.0 Data platform (Phases 85 to 101). Phase numbers, requirements and their mappings are unchanged. This milestone keeps Phase 68 (the relay foundation, complete, shipped as "v0.7.0 Phase 68", now v0.5.0) and Stage 1 (Phases 69 to 74). Until the split the milestone was "Governed agent platform and messaging relay"; the second half of its goal (people reaching their teams from Microsoft Teams, Signal and Telegram) is now the relay milestone's goal.
 
 **Replanned 2026-11-15** from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"; research in `.planning/research/platform-direction/`). The milestone was "Messaging relay: Teams, Signal and Telegram" (Phases 68-76 plus 71.1 and 75.1). Phase 68 stands as built; the relay phases after it are renumbered (table below) and gain the designs the owner named: capability manifests, run contracts and channel pairing, plus a single gate with a non-overridable floor, restrict-only delegation, execution backends, a credential broker and request-bound signed approvals.
 
@@ -153,22 +159,25 @@ Plans:
 
 **Amended 2026-11-16** with the owner's agent authorization decisions (`.planning/PROJECT.md`, Platform direction decisions 14-17; evidence in `.planning/research/platform-direction/agent-authz-prior-art.md`): NEAR function-call access keys are used only for agents' and nodes' on-chain calls, which is milestone L4 (draft ANCH-09 … ANCH-15); off-chain capabilities stay in private credentials, so Phase 73's broker gains CRED-08 (it checks a signed invocation bound to each request against the agent's credentials, with audience binding and receipts); the automatic trust badge check of CLAS-08 is now the owner's decision (Phase 70, criterion 8), and Phase 71 gains a research flag so its binding credential can later bind on-chain keys. Phases 70, 71 and 72 keep their requirements.
 
-**Why one milestone, not two.** The owner asked for v0.7.0 to be replanned with these designs folded in, Phase 68 already ships as "v0.7.0 Phase 68" (PR #50), and the relay's later phases depend on the governance phases in one chain (a relay run needs a contract, a sandbox and signed approvals). Splitting would also stop Phase 75, which touches only `relay/`, from running beside Stage 1. The milestone is therefore one, in three stages with a gate between Stage 1 and the relay's first runs. It is larger than the standard 4 to 6 phases; the stages are the natural checkpoints.
+**Why it was one milestone, and why it split.** On 2026-11-15 (when it was numbered v0.7.0) it stayed one milestone because the owner asked for v0.7.0 to be replanned with these designs folded in, Phase 68 already shipped as "v0.7.0 Phase 68" (PR #50), and the relay's later phases depend on the governance phases in one chain (a relay run needs a contract, a sandbox and signed approvals); splitting would also have stopped Phase 75, which touches only `relay/`, from running beside Stage 1. On 2026-11-18 the owner put the data platform between Stage 1 and the relay, which made the split necessary. The chain is kept by dependencies (Phase 77 waits for the Stage 1 gate and the data platform gate), and Phase 75 keeps its permission to start early in its own worktree.
 
-### Order of work across every stream (sequencing summary)
+### Order of work across every stream (sequencing summary, updated 2026-11-18)
 
 | Step | Work | Why here |
 |------|------|----------|
 | 1 | **0.4.23** (PR #51 and release PR #52): done, published 2026-11-15 | It closes a live gap (agents could read the project's key folder) and `main` is strict, so the extension line goes first. |
 | 2 | **PR #50** (Phase 68): merged 2026-11-15 as 052d5cf; the owner added `relay` to branch protection the same day (D-19, done); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) was to be met by re-pinning (owner, 2026-11-15; changed 2026-11-18: the pin is left to lapse and Phase 82 re-pins it) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
 | 3 | **0.4.24 patch**: the four #46 review minors and the three doc mismatches; **Phase 27 record close** (done 2026-11-17: the owner's check on the real host passed, 27-16 summary written) | Small debt, cleared before the engine changes; SECURITY.md and README must agree before Phase 70 changes the floor. |
-| 4 | **Phase 69, Team Mode reconciliation** (`feat/team-fix-pass` archived on GitHub at 4207080) | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
+| 4 | **Phase 69, Team Mode reconciliation** (`feat/team-fix-pass` archived on GitHub at 4207080): done, PR 1 #59 and PR 2 #61 merged 2026-11-15 | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (done, see openshell-spike.md) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
-| 5 | **Stage 1, Phases 70 to 74**: gate, manifests and classification labels, identities, credentials and delegation, execution backends, credential broker, run contracts. **Phase 29** (cleanup member and CleanUp tool) follows Phase 70 | The vocabulary and the gate come first because everything else is checked by them; delegation narrows what the gate checks; backends make protected folders absent; the broker needs the backends' network fence; contracts refer to capabilities, grants and backends. |
-| 5a | **Stage gate**: Stage 1 verified and merged before Phase 77 starts. v0.8.0 is deferred to the end (owner, 2026-11-15) | The relay must not run tools before contracts and sandboxes exist. |
-| 6 | **Stage 2, Phases 75 to 81**: inbound authenticity and channel manifests (may start once Phase 70 is merged, beside Phases 71 to 74), identity and pairing, the Teams 1:1 slice under a contract in a sandbox, the setup view, budgets, the command surface with signed approvals, group chats | Trust boundary before any happy path, 1:1 before groups, budgets once real runs exist, approvals where remote answers arrive. |
-| 7 | **Stage 3, Phases 82 to 84**: Signal, Telegram, ops and release | Further channels are a manifest plus one adapter once Teams is the reference; release needs every surface to exist. |
-| 8 | **Later milestones**, outlined below: Theia appliance and local inference, Team Mode on the governed core, routines and signed packages, verifiable identity and policy on NEAR, edge grouping and HQ federation, Theia desktop and learned skills | Each depends on v0.7.0's layer; the order and reasons are in that section. |
+| 4b | **0.4.33** (the release PR from `release/0.4.33`: Phase 70's part 4e, the trust badge, and the new team's icon fix), then **the follow-up patch** (the review follow-ups carried from Phase 70's part 4 PRs) | `main` is strict, so the extension line goes first, and the follow-ups touch the gate code that Phases 71 to 74 build on. |
+| 5 | **Stage 1, Phases 70 to 74**: gate, manifests and classification labels, identities, credentials and delegation, execution backends, credential broker, run contracts. Phase 70 is executed (every PR merged by 2026-11-18, part 4e last as #95; its verification record is still to write). **Phase 29** (cleanup member and CleanUp tool) follows Phase 70 | The vocabulary and the gate come first because everything else is checked by them; delegation narrows what the gate checks; backends make protected folders absent; the broker needs the backends' network fence; contracts refer to capabilities, grants and backends. |
+| 5a | **Stage gate**: Stage 1 verified and merged before the data platform reads your organization's data (Phase 88 on) and before Phase 77 starts. v0.8.0 is deferred to the end (owner, 2026-11-15) | The relay must not run tools, and the data platform must not read real data, before verified clearances, the broker, contracts and sandboxes exist. |
+| 6 | **v0.6.0 Data platform, Phases 85 to 101** (owner, 2026-11-18): the host and local inference (L1a), the data map, sources connected in one click and collectors installed by device management, extraction, classification and labels, erasure and the personal mark, holds and requests, search, ask and analytics, the model factory and the opportunity agent. Phases 85 and 86 may start during Phases 72 to 74 (the host and a test tenant only) | The owner put it after Stage 1 and before the relay. It extends the Stage 1 gate (labels, clearances, the broker, contracts) and needs all of it before it reads real data. |
+| 6a | **Data platform gate**: Phases 85 to 101 verified and merged before Phase 77 lets the relay run tools | Owner priority (2026-11-18). |
+| 7 | **v0.7.0 Messaging relay, Stage 2, Phases 75 to 81**: inbound authenticity and channel manifests (may start once Phase 70 is merged, beside Phases 71 to 74), identity and pairing, the Teams 1:1 slice under a contract in a sandbox, the setup view, budgets, the command surface with signed approvals, group chats | Trust boundary before any happy path, 1:1 before groups, budgets once real runs exist, approvals where remote answers arrive. |
+| 8 | **v0.7.0 Messaging relay, Stage 3, Phases 82 to 84**: Signal, Telegram, ops and release | Further channels are a manifest plus one adapter once Teams is the reference; release needs every surface to exist. |
+| 9 | **Later milestones**, outlined below: the Theia appliance (L1b; its host and local inference, L1a, are built in v0.6.0 Data platform), Team Mode on the governed core, routines and signed packages, verifiable identity and policy on NEAR, edge grouping and HQ federation, Theia desktop and learned skills | Each depends on v0.5.0's layer; the order and reasons are in that section. |
 
 ### Old and new phase numbers
 
@@ -202,7 +211,7 @@ Phase 68 records (CONTEXT, PLAN, SUMMARY and VERIFICATION files) use the old num
 | Signal sidecar re-pin (tag 0.101, signal-cli 0.14.8, lapses about 2026-12-10; owner 2026-11-18: let it lapse, re-pin before first start) and A4 sidecar hardening | 68-CONTEXT D-21, 68-SECURITY | Phase 82 |
 | Operator runbook (reverse proxy, TLS, backups, upgrades) | 68-CONTEXT deferred | Phase 84 |
 
-> **Naming trap.** This milestone's relay is the *messaging* relay at `relay/`. It is **not** the paused v0.5.0 ciphertext sync relay (RELAY-01/02 archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. The RELAY-01/02 ids are reused here deliberately and scoped as "v0.7.0 RELAY-01/02" in REQUIREMENTS.md.
+> **Naming trap.** This milestone's relay is the *messaging* relay at `relay/`. It is **not** the ciphertext sync relay of the paused former v0.5.0 knowledge-base plan (RELAY-01/02 archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. The RELAY-01/02 ids are reused here deliberately and scoped as "Phase 68 RELAY-01/02" in REQUIREMENTS.md (they were scoped as "v0.7.0 RELAY-01/02" before the renumbering).
 
 ### Phase 68: Relay foundation
 **Goal**: An operator runs the relay as their own host-side service — its own workspace, its own state directory, its own hardened container — before any chat traffic is accepted.
@@ -247,7 +256,7 @@ Plans:
 These phases change the extension's engine (`src/agent`, `src/domain`, `src/team`, with no `vscode` import in the core) and land on `main` one feature PR at a time. Everything here is editor-independent, so it moves to Theia unchanged; new UI stays small additions to existing views.
 
 ### Phase 69: Team Mode reconciliation: identities and signed events on main
-**Goal**: The identity, signed-event and permission core built for Team Mode (Phase 60, verified on the unmerged `feat/team-fix-pass` branch) runs on current `main`, so the governance phases build on one tested set of device keys, signatures and permission rules; projects without Team Mode behave exactly as before, and what remains of v0.6.0 has a recorded place in the new plan.
+**Goal**: The identity, signed-event and permission core built for Team Mode (Phase 60, verified on the unmerged `feat/team-fix-pass` branch) runs on current `main`, so the governance phases build on one tested set of device keys, signatures and permission rules; projects without Team Mode behave exactly as before, and what remains of the former v0.6.0 Team Mode branch plan has a recorded place in the new plan.
 **Depends on**: Nothing in this milestone. Starts now that 0.4.23 is merged and published (2026-11-15), so the port is done once against a quiet `main`. Owner first: push `feat/team-fix-pass` to GitHub as an archive branch, and commit or record the five uncommitted files in its legacy worktree.
 **Requirements**: TMR-01, TMR-02, TMR-03, TMR-04, TMR-05
 **Success Criteria** (what must be TRUE):
@@ -255,7 +264,7 @@ These phases change the extension's engine (`src/agent`, `src/domain`, `src/team
   2. On `main`, a lead turns on Team Mode and two clones share one signed coordination log over the project's own remote; forged, unbound or under-privileged events are rejected by both with a reason, and replaying the same events always gives the same state. Phase 60's success criteria hold again on `main`, re-verified rather than assumed. (TMR-02)
   3. A project with no team file behaves exactly as before: the full suite is green, and a canary run finds no secret in the log, `team.json`, settings or audit. (TMR-03)
   4. A person's device identity signs and verifies any canonical payload (a policy bundle, a grant, an approval answer), and a key rotation or revocation is itself a signed event that later checks honour; Phases 70, 71 and 80 use this one interface. (TMR-05)
-  5. Every v0.6.0 phase and requirement has a recorded disposition (landed here, carried to the Team Mode milestone, folded into a named new phase, or retired), and carried v0.6.0 ids that collide with v0.7.0 ids (TEAM-01..04, SETUP-01) carry a `TM-` prefix. (TMR-04)
+  5. Every phase and requirement of the former v0.6.0 Team Mode branch plan has a recorded disposition (landed here, carried to the Team Mode milestone, folded into a named new phase, or retired), and its carried ids that collide with live ids (TEAM-01..04, SETUP-01) carry a `TM-` prefix. (TMR-04)
 **Research flags**: (1) The branch forked at 0.4.11; `main` is at 0.4.22 or later, with Phases 26 and 27 in between. Decide per file whether to port by cherry-pick or re-apply from the Phase 60 SUMMARY files; `src/extension.ts`, the `package.json` contributions and `src/agent/permissions.ts` changed most. (2) Team Mode's coordination transport and Phase 27's sync both run private git mirrors: check they cannot share or lock each other's mirror. (3) Phases 61, 62 and 62.1 stay on the archive branch for milestone L2 (owner, 2026-11-15); the branch is archived on GitHub at 4207080.
 **Undo cost**: Low for the code (additive, inert while Team Mode is off). Higher for the signing interface (TMR-05): grants and policy bundles signed through it outlive a change.
 **Plans:** 15/15 plans executed (one per wave; PR 1 is plans 01-08 on `feat/team-core-on-main`, PR 2 is plans 09-15 on `feat/team-signed-payloads`)
@@ -301,7 +310,7 @@ Plans:
 - [x] 69-13-PLAN.md — rotation and revocation helpers for the person's key
 
 **Wave 14** *(blocked on Wave 13 completion)*
-- [x] 69-14-PLAN.md — v0.6.0 disposition record (TMR-01, TMR-04)
+- [x] 69-14-PLAN.md — disposition record of the former v0.6.0 Team Mode branch plan (TMR-01, TMR-04)
 
 **Wave 15** *(blocked on Wave 14 completion)*
 - [x] 69-15-PLAN.md — automated check that PR 1 is on main, rebase PR 2, gate, open PR 2 (no owner checkpoint, D-30)
@@ -500,7 +509,420 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 74 to break down)
 
-**Stage gate (after Phase 74):** Phases 69-74 are verified and merged before Phase 77 lets the relay run tools. The extension's releases carry each Stage 1 phase as it lands. v0.8.0 waits until everything else is finished (owner, 2026-11-15).
+**Stage gate (after Phase 74):** Phases 69-74 are verified and merged before the data platform reads your organization's data (Phase 88 on) and before Phase 77 lets the relay run tools; Phase 77 also waits for the data platform gate (owner, 2026-11-18). The extension's releases carry each Stage 1 phase as it lands. v0.8.0 waits until everything else is finished (owner, 2026-11-15).
+
+### Requirement coverage for this milestone
+
+| Phase | Requirements | Count |
+|-------|--------------|-------|
+| 68 Relay foundation | RELAY-01 … RELAY-04 | 4 |
+| 69 Team Mode reconciliation | TMR-01 … TMR-05 | 5 |
+| 70 Capability vocabulary, manifests and one gate | GATE-01 … GATE-07, OFFL-01 … OFFL-03, CLAS-01 … CLAS-08 | 18 |
+| 71 Identities, credentials and delegation that only narrows | DLGT-01 … DLGT-08, VCRD-01 … VCRD-07 | 15 |
+| 72 Execution backends on a copy, with a guarded apply | EXEC-01 … EXEC-10 | 10 |
+| 73 Credential broker | CRED-01 … CRED-08 | 8 |
+| 74 Run contracts | CTRT-01 … CTRT-06, OFFL-04 | 7 |
+| **Total** | | **67** |
+
+Before the split of 2026-11-18 one table covered Phases 68 to 84 with 134 requirements; 67 stay here and 67 moved with Phases 75 to 84 to v0.7.0 Messaging relay (its table is at the end of that milestone). RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132. The owner added CLAS-08 (the trust badge, Phase 70) on 2026-11-16: 133. The owner's agent authorization decisions of 2026-11-16 added CRED-08 (signed, request-bound invocations checked by the broker, Phase 73): 134 in total. The L4 drafts ANCH-09 … ANCH-15 are not counted.
+
+## Milestone v0.6.0: Data platform
+
+**Milestone goal:** Once installed, the platform finds your organization's data on its machines, file shares, Microsoft 365 and Google Workspace, reads it once from the beginning and then keeps up with every change, gives every item a full description card and a label that only rises, and lets people and agents search it, ask about it, report on it and turn it into small specialist models trained on your organization's own machines, always within their clearance and the source's own permissions. Policy is set once, and people see only real exceptions.
+
+**Adopted 2026-11-18.** The owner accepted the research and design in `.planning/research/data-platform/` (`00-DESIGN.md`, decisions in its section 10) and the draft milestone `01-DRAFT-MILESTONE.md`, which is kept as the record; this roadmap and REQUIREMENTS.md are now the source of truth. Decisions 1 to 13 of the design's section 10.1 and its 32 settled-in-design choices were accepted as recommended. Decision 14 was changed to one-click connection ("easy from the start"), and the owner added collectors that are simple to install and training only on your organization's own machines or hardware endpoints it controls. PROJECT.md, Platform direction decisions 18 to 25, records them.
+
+**Version:** v0.6.0, set by the owner on 2026-11-18 when the versions were renumbered to start at 0.5. v0.8.0 stays with the deferred cybersecurity milestone. Phases 85 to 101 are read from this heading, so v0.5.0 can be closed with `/gsd-complete-milestone` without taking them along.
+
+**Where it sits.** After Stage 1 (v0.5.0, Phases 69 to 74, with Phases 28 and 29 beside it) and before v0.7.0 Messaging relay (Phases 75 to 84, below). Phases 85 and 86 need no Stage 1 code (the host and a test tenant), so they may start while Phases 72 to 74 finish. Nothing that reads your organization's real data starts before the Stage 1 gate, because it needs verified clearances (Phase 71), the credential broker (Phase 73) and run contracts (Phase 74). The milestone contains L1a, the host and local inference (Phase 85 and the host parts of Phase 88); L1b, the Theia appliance, stays a later milestone.
+
+**Data platform gate (after Phase 101):** Phases 85 to 101 are verified and merged before Phase 77 lets the relay run tools (owner priority, 2026-11-18).
+
+**Size.** 17 phases, more than the standard 4 to 6, as decided (design decision 2). The six stages (A to F) are the natural checkpoints: the data map ships value early, and the model factory runs beside the sources.
+
+### Ground rules (carried from the paused knowledge base and Stage 1)
+
+- A success criterion counts only when a test drives the real path. Source-text tests do not count.
+- Every phase that adds a network destination extends the network-spy test; every phase that adds a place where data is written extends the canary leak scan.
+- From Phase 88 on, every new view or count is computed reader-relative and extends the two-compartment indistinguishability test.
+- Every new event id is named before it ships (D-49). Every gate format change is a v2 beside v1 (D-22).
+- The licence check in CI covers code and model weights from Phase 85.
+- Test runs on the host use memory caps (cgroup limits) and one heavy job at a time.
+- Unlabelled content is never sent to a cloud model to find out what it is.
+
+### Owner decisions and where they land
+
+| Decision (design section 10.1; owner, 2026-11-18) | Answer | Phases |
+|---|---|---|
+| 1 Host slice of L1 | Split: L1a, the host and local inference, is built here; L1b, the Theia appliance, stays later | 85, 88; L1b |
+| 2 Milestone identity | Its own milestone, Phases 85 to 101, between Stage 1 and the relay; the relay becomes its own milestone | this section |
+| 3 Plaintext on the host | Postgres in plaintext on an encrypted disk, per-item keys for erasable content, an encrypted blob store; said plainly in SECURITY.md | 85, 88, 94, 101 |
+| 4 Python on the host | Pinned, sandboxed worker containers; the engine and the gate stay TypeScript | 85, 92, 93, 98 |
+| 5 Raw copies | Only the capped re-extraction cache (on by default for scans, images and audio, 10 percent of the host disk, 180 days), the write-once hold store and rare approved training snapshots | 92, 95 |
+| 6 Mail and personal folders | Off by default; turned on only after your organization confirms a privacy assessment and an employee notice; mail then label-only | 89, 90, 91 |
+| 7 What people learn about items they cannot see | Strict indistinguishability by default; "existence only" placeholders as an opt-in per scale | 96 |
+| 8 Personal mark defaults | Own areas only; 5 GB and 20,000 items per person; location-only off; notice at override time, any delay at most 90 days and recorded | 94 |
+| 9 Erasure and trained models | Retrain from the manifest within 30 days; the incumbent model takes over if the deadline passes | 99 |
+| 10 Derivatives as records | They follow the original's retention class, are searched in requests and are listed as processing (pending counsel) | 94, 95, 101 |
+| 11 Teacher models | Local, or attested NEAR AI TEE models as inference where the label's routing allows; training itself never leaves your organization's hardware | 98 |
+| 12 Going live | One click to shadow, a second click for canary; auto-promotion off by default | 98 |
+| 13 First training data | Chat and run logs first; organization data only after classification, holds and erasure exist, opt-in per source or collection and signed | 98, 99 |
+| 14 Source onboarding (changed) | One-click connection: an administrator signs in once, and setup creates your organization's own app registration in its own tenant with a certificate generated on the host (private key never leaves the host, held in the broker) and grants admin consent; no shared multi-tenant app that we publish; Google Workspace and file shares get the same one click | 86, 89, 90, 91 |
+| Added: collectors | Small signed native packages pushed by device management, zero-config enrolment with a code, automatic updates, a local notice with the personal mark; agentless where possible | 91 |
+| Added: training hardware | Fine-tuning only on your organization's own machines or hardware endpoints it controls | 98 |
+
+### What it absorbs from the paused knowledge base
+
+The knowledge base of the paused former v0.5.0 knowledge-base plan returns here as the viewing layer (owner requirement R8), instead of moving to a separate project. Each paused phase is marked in `.planning/milestones/v0.5.0-paused/ROADMAP.md` with where it went. The Phase 13 code on its local branch is read with `git show` and ported piece by piece; it is not merged as a branch.
+
+| Former v0.5.0 phase | Disposition | Lands in |
+|---|---|---|
+| 13 Sovereignty gate, PQ crypto, encrypted log | Carries with changes: PQ primitives, signed segments, the four-timestamp fold, crypto-shredding, canary scan and network spy harnesses carry; envelope v2 for lattice labels; sharded item-key store; per-label routing replaces KB mode; device identity replaces the KB vault | 88 (log and harnesses), 94 (crypto-shredding) |
+| 14 Encrypted scalable store and search | Superseded by the host store (Postgres, pgvector, BM25). "Benchmark first" and "damaged data reported, never replaced by an empty base" carry | 88, 96 |
+| 15 Intake with agent tools | Changes: connectors replace hand intake; quote-verified evidence, untrusted-on-read fencing, proposed links with undo, importers (CSV, STIX, GeoJSON), the offline gazetteer and the panel shell carry | 96 (evidence, links, shell), 100 (importers) |
+| 16 Admiralty grading and reports | Carries as an optional trust layer for intelligence projects; ReportBuilder and ReportVerifier carry for all reports | 97 (reports); grading after this milestone |
+| 17 RAFT network and slices | Changes: RAFT becomes one ontology profile; slices become saved scopes | 97 |
+| 18 Feeds, unattended work, alerts | Superseded in part: feeds become connectors; the spend governor carries; tripwires become insights | 92 and 96 (governor), 97 (insights) |
+| 19 Team sharing | Superseded by L2 | none |
+| 20 Compartments, roles, access | Changes, and becomes the core: compartments are label compartments, roles are Phase 71 credentials; the reader-relative rule and the two-compartment indistinguishability test carry unchanged | 88, 93, 96, 101 |
+| 21 Ciphertext relay | Superseded by the Phase 68 relay and L5 | none |
+| 22 Globe and timeline | Timeline carries; the globe is deferred | 97 |
+| 23 Forecasting | Deferred, intelligence projects only | none |
+| 24 Hardening and release | Carries, extended to the database, caches and model server logs | 101 |
+
+### Stage A: host and spikes (Phases 85-87)
+
+### Phase 85: Host and local inference on Strix Halo (L1a), measured
+**Goal**: The always-on host your organization owns runs the platform's container stack on the Strix Halo machine, installs with one command from a signed offline bundle, serves local models to the extension, and the throughput numbers the design estimates are measured rather than guessed.
+**Depends on**: Nothing in code. Owner decisions 1 (L1a in this milestone) and 4 (Python worker containers). May start while Stage 1 Phases 72 to 74 finish.
+**Requirements**: SPIKE-01, SPIKE-02, SPIKE-03
+**Success Criteria** (what must be TRUE):
+  1. The stack installs with one command from a signed offline bundle, comes up with no network and survives a host reboot, and RLS refuses a query that carries no clearance token. (SPIKE-01)
+  2. A chat in the extension answers from a model served on the host through a hybrid profile, with ROCm and Vulkan both measured. (SPIKE-02)
+  3. One LoRA adapter on a 4B base is trained on the host, converted, served and answers through the extension. (SPIKE-03)
+  4. A measurement table replaces the low-confidence estimates of research reports 01 section 6.2, 03 section 1.2 and 04 section 3.4, and the design is updated wherever a number changes a decision. (SPIKE-03)
+**Research flags**: Spike by definition. The exact ROCm and PyTorch pairing for gfx1151, how much of the unified memory the GPU can address, and Vulkan as the dependable fallback. SPIKE-01 and SPIKE-02 build the lasting host (L1a), not a throwaway (decision 1 rejected a throwaway host); L1b later adds Theia, the engine and the relay to the same stack.
+**Undo cost**: Medium: the offline bundle format and image layout are what your organization installs on a machine without network.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 85 to break down)
+
+### Phase 86: Microsoft 365 connector spike
+**Goal**: The Microsoft 365 risks, including the one-click setup path, are answered against a real test tenant before the connector is built.
+**Depends on**: A test tenant; nothing in code. Owner decision 14 (one-click connection). May run beside Phase 85.
+**Requirements**: SPIKE-04, SPIKE-05, SPIKE-06, SPIKE-09
+**Success Criteria** (what must be TRUE):
+  1. A written finding per question, each with the recorded calls, feeds the Phase 89 plan. (SPIKE-04, SPIKE-05, SPIKE-06)
+  2. From one administrator sign-in, the setup sequence creates an app registration in the test tenant, uploads a certificate generated on the host whose private key never leaves it, and grants admin consent for the least permissions, each with a reason an administrator can read; the certificate then rotates with no new sign-in, and nothing of the sign-in is kept. (SPIKE-09)
+  3. A budget calculator predicts backfill days for a given inventory within 25 percent of a measured run on the test tenant. (SPIKE-06)
+**Research flags**: Spike by definition. Which public client the administrator's one sign-in goes through, so that no app of ours or of any other publisher has to exist in your organization's tenant before setup, and what that sign-in can do while it lasts; whether Exchange RBAC for Applications scoping (for mail, which is off by default) can be set in the same flow or needs a command shown to the administrator; how the app adds its next certificate itself with proof of the current one.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 86 to break down)
+
+### Phase 87: Extraction and OCR throughput spike
+**Goal**: The extraction and OCR tiers are chosen from measurements on the host, not estimates.
+**Depends on**: Phase 85.
+**Requirements**: SPIKE-07, SPIKE-08
+**Success Criteria** (what must be TRUE):
+  1. Pages per second and accuracy per tier are recorded on the fixed test set, and the page-difficulty router sends no more than the measured share of pages to the GPU tier. (SPIKE-07, SPIKE-08)
+  2. The backlog estimate for the 500-person planning model (research report 01 section 6.1) is recomputed from these numbers. (SPIKE-07)
+**Research flags**: Spike by definition; weight licences confirmed for every OCR and vision model tried.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 87 to break down)
+
+### Stage B: the data map and the sources (Phases 88-92)
+
+### Phase 88: Ingestion core, governed store and the data map
+**Goal**: Your organization sees a live map of what data exists, where, how big, who owns it and how fresh it is (inventory and metadata only, no content), and everything shown is filtered by the viewer's clearance and the source's permissions from the first screen.
+**Depends on**: Phase 85; the Stage 1 gate (Phases 70, 71, 73 and 74).
+**Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-08, DSEC-01, DSEC-02, DSEC-03
+**Success Criteria** (what must be TRUE):
+  1. Pointing the host at a folder tree fills the data map within the measured time, the source moving from `proposed` through `backfilling` to `live` with each state's reason shown; deleting, renaming and re-permissioning files there shows up within the freshness target. (DATA-03, DATA-05, DATA-06, DATA-08)
+  2. Killing the host mid-batch replays that batch with no duplicate and no gap, and a forced "missed something" signal moves the source to `degraded` and resyncs it with nothing lost. (DATA-01, DATA-02, DATA-04)
+  3. Two people with different clearances and permissions see different maps, each identical to the map of a base that never held the other's items (the indistinguishability test), and an item whose permission snapshot is stale is hidden, never shown. (DSEC-01, DSEC-02, DATA-08)
+  4. No content is read in dry-run mode, every discovered item carries the ingest-default label from its first moment, every label, permission and lifecycle event is in the signed governance log, and the canary scan finds no content in the store, logs or caches. (DATA-07, DSEC-03)
+**Research flags**: Standard patterns documented in the research; plan without a research step. The host parts of L1a land here (the governed store and its RLS on the Phase 85 stack).
+**Undo cost**: High: the connector contract, the item ledger keys and the label store format are what every connector and every later phase writes to.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 88 to break down)
+
+### Phase 89: Microsoft 365 connector with one-click connection
+**Goal**: An administrator connects Microsoft 365 with one sign-in, and SharePoint, OneDrive and Exchange appear in the data map, then backfill and stay in sync, with their permissions and labels.
+**Depends on**: Phases 86 and 88; Phase 73 (the broker holds the certificate).
+**Requirements**: DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, CONN-01, CONN-02
+**Success Criteria** (what must be TRUE):
+  1. On the test tenant, an administrator signs in once and setup creates your organization's own app registration with a certificate generated on the host and admin consent; no shared app is used, nothing of the sign-in is kept after setup, and the sites, drives and mailboxes appear as a `proposed` source in inventory-only mode. (CONN-01, DATA-09)
+  2. A backfill completes and the source reaches `live`, and a file's permission change hides the file from a removed person before their next query. (DATA-10, DATA-11)
+  3. A forced 410 moves the source to `degraded` and then back to `live` with no lost item. (DATA-10)
+  4. The wizard shows every permission with its reason, mail stays off until your organization's confirmation is recorded, and Purview labels (unreadable and double-key items included) map to our labels and never lower them. (DATA-12, DATA-13)
+  5. A setup interrupted midway finishes on re-run without duplicating anything, the certificate rotates with no new sign-in, and Disconnect lists what setup created and removes it only after the administrator confirms. (CONN-02)
+**Research flags**: Permission fidelity and budgets from Phase 86; the v1.0 permission table for label reads.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 89 to break down)
+
+### Phase 90: Google Workspace connector with one-click connection
+**Goal**: An administrator connects Google Workspace with one sign-in, and Drive, shared drives and Gmail appear in the data map and stay in sync, with their permissions and Drive labels.
+**Depends on**: Phase 88; Phase 73. Uses the setup behaviour of CONN-02 from Phase 89.
+**Requirements**: DATA-14, DATA-15, DATA-16, CONN-03
+**Success Criteria** (what must be TRUE):
+  1. On a test domain, an administrator signs in once and setup creates the project, service account and credential in your organization's own Google Cloud and authorizes exactly the listed scopes; a step Google allows only in its admin console is one prefilled page that setup opens and then checks. (CONN-03, DATA-14)
+  2. A mailbox larger than the history window backfills with no gap. (DATA-15)
+  3. Removing a user from a shared drive hides its items from that user within the permission target, and Drive labels map to our labels and never lower them. (DATA-16)
+**Research flags**: Quotas checked in a test project; keyless or short-lived service-account credentials on an on-premises host (organization policies that block service-account keys are common); which setup steps Google exposes through APIs (project, API enablement, service account, domain-wide delegation) and which need the one prefilled admin console page. Mail follows decision 6.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 90 to break down)
+
+### Phase 91: Endpoint collectors, file shares and simple install
+**Goal**: Windows, macOS and Linux machines and file shares are discovered and kept in sync without ever pulling cloud placeholder files down; file shares are read from the host with nothing installed on the file servers, and endpoint collectors install, enrol and update through your organization's device management with no setup on each machine.
+**Depends on**: Phase 88; Phase 71 (enrolment gives each collector a device binding credential); Phase 73 (the broker holds the file-share account).
+**Requirements**: DATA-17, DATA-18, DATA-19, DATA-20, DATA-21, CONN-04, COLL-01, COLL-02, COLL-03, COLL-04, COLL-05, COLL-06
+**Success Criteria** (what must be TRUE):
+  1. A machine with a synced cloud folder causes zero placeholder downloads, and files that live only on that machine show "may disappear" in coverage. (DATA-17, DATA-18, DATA-19)
+  2. Wrapping the change journal or overflowing the event queue triggers a rescan of the affected folders, with no lost item. (DATA-17, DATA-18)
+  3. An administrator connects file shares with one sign-in, the host reads them over SMB and NFS with nothing installed on the file servers, and their NTFS and POSIX permissions hold for every reader. (CONN-04, DATA-20, COLL-05)
+  4. A collector pushed silently by device management (an MSI through Intune or Group Policy, a signed pkg through Jamf or Intune, a .deb or .rpm, or the one-line install) enrols with the host from a code with no prompt on the machine, talks only over the device-key-signed channel and updates itself from the host; a revoked device stops at its next contact. (COLL-01, COLL-02, COLL-03, COLL-06, DATA-21)
+  5. Each machine shows in plain words what is collected from it, with Mark as Personal one click away, and a mark known from an item's location is honoured before any fetch. (COLL-04, DATA-21)
+**Research flags**: Device-management deployment (the macOS Full Disk Access profile; the enrolment code as an MSI property or a managed profile); code signing and notarization per operating system in our release pipeline, and the MSI build tool's licence and terms; how an enrolment code is scoped (device group, count, expiry) so a leaked code cannot enrol machines unnoticed; the least rights for the file-share account (read files and read permissions only) and whether a managed service account can be created in the same click.
+**Undo cost**: Medium: installed collectors and their enrolment and update channel live on every machine, so their protocol must stay compatible.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 91 to break down)
+
+### Phase 92: Extraction pipeline
+**Goal**: Every format becomes text and structure, safely and once, with the backlog visible.
+**Depends on**: Phases 87 and 88; Phase 72 (sandboxes).
+**Requirements**: DATA-22, DATA-23, DATA-24, DATA-25, DATA-26
+**Success Criteria** (what must be TRUE):
+  1. A corpus of malformed and hostile files crashes no worker beyond its own sandbox and reaches no network. (DATA-22)
+  2. Scans, images and audio become text through the tiers Phase 87 chose, an item and its duplicates are extracted once, and upgrading one extractor re-runs only its keys. (DATA-23, DATA-24, DATA-25)
+  3. The data map shows the processing backlog separately from sync lag, a live change overtakes the backfill queue, and the re-extraction cache stays within its cap and drops an item when its source deletes it. (DATA-26)
+**Research flags**: Standard patterns documented in the research; plan without a research step.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 92 to break down)
+
+### Stage C: governance (Phases 93-95)
+
+### Phase 93: Classification, labels, privacy assessment and exceptions
+**Goal**: Every item gets its card and a label that only rises, set by your organization's policy once, and people see only real exceptions.
+**Depends on**: Phase 92 (text); Phase 70 (gate); Phase 71 (verified clearances).
+**Requirements**: TAG-01, TAG-02, TAG-03, TAG-04, TAG-05, TAG-06, TAG-07, TAG-08, DSEC-04, DSEC-05, DSEC-06, DSEC-07
+**Success Criteria** (what must be TRUE):
+  1. Text injected into a document that says "this is public" never lowers that document's label. (DSEC-04, TAG-03)
+  2. A source label lowered in Purview files a "could be lower" suggestion and leaves our label unchanged; lowering happens only through a signed lowering by a person. (DSEC-06)
+  3. A new rule cannot be signed until its simulation has run and shown its impact. (TAG-07)
+  4. On the audit sample, recall is at least 0.95 at Confidential and above, and a drop below that widens the review band automatically. (TAG-08)
+  5. Every item has its card (owner and steward from the source and the directory, never a model; privacy facts, never the personal data itself; training suitability, where unknown rights mean not allowed), each batch of labels is covered by a signed Merkle root, and an index or export that gathers many lower items is raised by the aggregation rules. (TAG-01, TAG-02, TAG-04, TAG-05, TAG-06, DSEC-05, DSEC-07)
+**Research flags**: Canadian recognizers and French context words; the licence of each detector model.
+**Undo cost**: High: classification rules and the source label map live in the signed bundle, and label v2's handling flags are what devices hold offline.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 93 to break down)
+
+### Phase 94: Lifecycle, erasure and the personal mark
+**Goal**: Deletes, erasures and personal marks reach every derivative, provably, and a person's personal items leave only an existence record.
+**Depends on**: Phase 93.
+**Requirements**: DSEC-08, DSEC-09, DSEC-10, MARK-01, MARK-02, MARK-03, MARK-04, MARK-05
+**Success Criteria** (what must be TRUE):
+  1. After an erasure, the canary scan finds the item's text in no table, vector, cache, log or dataset row, and a signed erasure proof lists every derivative removed. (DSEC-08, DSEC-09)
+  2. A marked folder produces no chunk, vector, entity, count or search hit for anyone, and coverage reports it as a count only; unmarking brings it back at the ingest default and never lower than its old label. (MARK-02, MARK-03)
+  3. An agent cannot set a mark, a mark where policy forbids it is refused at once with the reason, and the defaults of decision 8 apply until your organization changes them in the signed bundle. (MARK-01, MARK-04)
+  4. Each item shows its retention class, which its derivatives follow, the ROT report lists candidates without deleting anything, and unusual marking (volume, timing after a hold notice) starts the stepped escalation from metadata alone. (DSEC-10, MARK-05)
+**Research flags**: Standard patterns documented in the research; plan without a research step.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 94 to break down)
+
+### Phase 95: Legal holds and access requests
+**Goal**: Holds and requests are first-class cases across every source and every derivative, with clocks, custody and an honest coverage statement.
+**Depends on**: Phase 94; Phase 71 (officer roles); Phase 29 (the CleanUp never-touch list).
+**Requirements**: HOLD-01, HOLD-02, HOLD-03, HOLD-04, HOLD-05, HOLD-06, HOLD-07, HOLD-08, HOLD-09, HOLD-10
+**Success Criteria** (what must be TRUE):
+  1. A hold shows each source as `pending` until it confirms and stays visibly `partial` while a source has no hold feature or failed and its write-once copy runs; deleting a held item at the source keeps its derivatives, records the attempt and alerts the hold administrator. (HOLD-01, HOLD-02, HOLD-04)
+  2. CleanUp, retention, ROT and dataset and model deletion each refuse a held item through their own code check. (HOLD-03)
+  3. A request reaching 95 percent of its time shows the warning, and an extension cannot be recorded without its notice. (HOLD-05)
+  4. A request's search covers our indexes, live source searches (with cursor age) and lineage down to derivatives and models, under a time-boxed grant with recusal and the two-person rule above the officer's clearance, and every redaction is confirmed one by one with its exemption code. (HOLD-06, HOLD-07, HOLD-09)
+  5. A released package verifies against its signed manifest, its coverage statement names every source not searched, and a personal-mark override shows `notice-pending` to the privacy officer until notice is sent. (HOLD-08, HOLD-10)
+**Research flags**: Purview and Vault hold API maturity (some parts were beta only); regime clock data reviewed by counsel.
+**Undo cost**: High: custody logs, hold manifests and release packages are legal records.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 95 to break down)
+
+### Stage D: the knowledge layer (Phases 96-97)
+
+### Phase 96: Search, context graph, entity pages and ask
+**Goal**: People find anything they are cleared for in one search box, see everything about a customer or project across sources, and ask questions answered with citations, within their clearance. The paused knowledge base becomes this view layer.
+**Depends on**: Phase 93.
+**Requirements**: KB-01, KB-02, KB-03, KB-04, KB-05, KB-06, KB-07, KB-08, KB-15
+**Success Criteria** (what must be TRUE):
+  1. A person cleared only for compartment A gets results, entity pages and answers identical to those from a base that never held compartment B. (KB-07, KB-08)
+  2. A search with a very selective clearance still returns the full top-k. (KB-01)
+  3. Every answer's citations open the exact source span, and the answer carries its high-water label and is routed by it. (KB-02, KB-06)
+  4. Entity pages show a customer or project across sources; a merge of two entities is a proposal with undo, and model-written relations run only on priority items under the spend governor, each backed by a verified quote. (KB-03, KB-04, KB-05)
+  5. With your organization's opt-in for a scale, a person sees only that an item exists, its steward and a request-access button, and only for items whose discovery description a person approved; with it off (the default), nothing shows. (KB-15)
+**Research flags**: Mosaic and Splink licences and dependency trees; pgvector recall at low clearance.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 96 to break down)
+
+### Phase 97: Analytics, reports, insights and views
+**Goal**: Dashboards, reports and suggested insights appear without setup, with every number computed under the viewer's clearance.
+**Depends on**: Phase 96.
+**Requirements**: KB-09, KB-10, KB-11, KB-12, KB-13, KB-14
+**Success Criteria** (what must be TRUE):
+  1. Dashboard totals for two clearances each match the totals of the corresponding single-clearance base. (KB-09)
+  2. Model-written SQL that tries to set its own clearance is refused, and every question shows the SQL it ran. (KB-10)
+  3. A report fails verification after any underlying figure changes. (KB-12)
+  4. Suggested insights appear with no setup, each with its query; the graph explorer and timeline replay ("as known at T") work within saved scopes and say when a view was cut at its cap; and a label-change preview shows who would gain or lose access before a label changes. (KB-11, KB-13, KB-14)
+**Research flags**: Standard patterns documented in the research; plan without a research step.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 97 to break down)
+
+### Stage E: the model factory (Phases 98-99)
+
+### Phase 98: Model factory v1, first specialist from chat and run logs
+**Goal**: One specialist goes from proposal card to live for one role, trained on your organization's own machine, matching or beating the incumbent, with rollback tested.
+**Depends on**: Phase 85 (the host trainer); Phase 74 (contracts). It needs none of Phases 88 to 97, so it runs beside them. Owner decisions 11, 12 and 13.
+**Requirements**: FAC-01, FAC-02, FAC-03, FAC-04, FAC-05, FAC-06, FAC-07, FAC-08, FAC-09
+**Success Criteria** (what must be TRUE):
+  1. A specialist for one role is live, is at least as good as the incumbent on held-out tasks, and is cheaper or faster. (FAC-03, FAC-04, FAC-05, FAC-07)
+  2. A session below the model's label cannot route to it, and requests fall back to the incumbent while the host is down. (FAC-08)
+  3. One click takes a specialist to shadow and a second to canary (auto-promotion off by default), and a rollback restores the previous model in one click with a recorded reason. (FAC-06)
+  4. No training job calls any network destination outside the machine it runs on. (FAC-01)
+  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts, and teacher calls follow the label's routing. (FAC-02, FAC-09)
+**Research flags**: The pinned ROCm and PyTorch pairing from Phase 85.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 98 to break down)
+
+### Phase 99: Opportunity agent, data-gap planning and specialists from organization data
+**Goal**: The always-watching agent finds optimization opportunities in how the system and the business are used, proposes them on one-click cards, plans how to get missing data, and trains specialists on classified organization data within rights, marks and labels.
+**Depends on**: Phase 98; Phase 93 (training suitability); Phase 94 (erasure triggers retraining); Phase 74.
+**Requirements**: OPP-01, OPP-02, OPP-03, OPP-04, OPP-05, OPP-06, OPP-07
+**Success Criteria** (what must be TRUE):
+  1. With content access off, the agent proposes at least one real opportunity from metadata alone, on a card that says who can approve it. (OPP-01, OPP-02, OPP-03)
+  2. A goal with too few examples produces a data plan rather than a dead end. (OPP-04)
+  3. An erasure that touches a dataset retrains and swaps the adapter, or falls back to the incumbent, within the deadline. (OPP-07)
+  4. The agent cannot read content its approver's clearance does not dominate. (OPP-02)
+  5. A specialist trained on organization data uses only training-allowed items from sources or collections opted in with a signature, one compartment at a time, and no opportunity scores a named person. (OPP-05, OPP-06)
+**Research flags**: Standing-policy wording for content clustering; employee-monitoring notice text.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 99 to break down)
+
+### Stage F: continual sources and release (Phases 100-101)
+
+### Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases
+**Goal**: Adding a new source takes a few clicks, and agents can write new connectors safely.
+**Depends on**: Phase 88; Phases 72 and 73. May start any time after Phase 92 if capacity allows.
+**Requirements**: DATA-27, DATA-28, DATA-29, DATA-30, DATA-31, DATA-32
+**Success Criteria** (what must be TRUE):
+  1. An agent writes a connector for a REST source that passes conformance and runs after one approval. (DATA-28, DATA-29, DATA-30)
+  2. A connector that tries an undeclared host is blocked and recorded. (DATA-29)
+  3. A Postgres source reaches `live` through CDC, and dropping its connection releases the replication slot. (DATA-31)
+  4. The source catalog shows each source in plain words with its exact scopes, their reasons and an estimated backfill time, and CSV, STIX and GeoJSON imports and the offline gazetteer from the paused knowledge base work through it. (DATA-27, DATA-32)
+**Research flags**: Standard patterns documented in the research; plan without a research step.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 100 to break down)
+
+### Phase 101: End-to-end hardening and release
+**Goal**: The milestone keeps its promises under attack-style and at-scale checks, and the product copy says only what is true.
+**Depends on**: Phases 85 to 100.
+**Requirements**: DSEC-11, DSEC-12, DSEC-13, DATA-33
+**Success Criteria** (what must be TRUE):
+  1. The canary scan, the network spy and the indistinguishability test cover every flow, view, count, answer, dashboard and specialist, and every DSEC check is green in CI. (DSEC-11, DSEC-12)
+  2. The scale run at 1 million items and 10 million mail headers on one host meets its recorded budgets. (DSEC-13)
+  3. SECURITY.md and README say plainly that content is in plaintext on the host's encrypted disk and what clearances guarantee, and counsel's review items from decisions 6, 8, 9 and 10 are recorded as closed or explicitly deferred. (DATA-33)
+**Research flags**: Standard patterns documented in the research; plan without a research step.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 101 to break down)
+
+### Order and parallel waves
+
+| Wave | Phases | Why this order |
+|------|--------|----------------|
+| 0 | 85, 86 (during the Stage 1 tail) | They remove hardware and tenant uncertainty and touch no product code |
+| 1 | 87, 88, 98 | 88 and 98 need only the host; 87 needs the host |
+| 2 | 89, 90, 91, 92 (100 optional) | All plug into 88's contract independently |
+| 3 | 93 | Needs text from 92 |
+| 4 | 94, 96 | Both need labels; neither needs the other |
+| 5 | 95, 97, 99, 100 | 95 needs 94; 97 needs 96; 99 needs 93, 94 and 98 |
+| 6 | 101 | Everything |
+
+Sequential links that cannot be split: 93 waits for 92 (classification needs text); 95 waits for 94 (holds suspend the deletion paths 94 builds).
+
+**Visible value by wave:** wave 1 delivers the data map on the host and the first local specialist; wave 2 extends the map to every first source, each connected in one click and inventory-only on its first day; wave 4 delivers search and ask; wave 5 delivers holds, requests, dashboards and the opportunity agent.
+
+### Requirement coverage for this milestone
+
+| Phase | Requirements | Count |
+|-------|--------------|-------|
+| 85 Host and local inference on Strix Halo (L1a) | SPIKE-01 … SPIKE-03 | 3 |
+| 86 Microsoft 365 connector spike | SPIKE-04 … SPIKE-06, SPIKE-09 | 4 |
+| 87 Extraction and OCR throughput spike | SPIKE-07, SPIKE-08 | 2 |
+| 88 Ingestion core, governed store and the data map | DATA-01 … DATA-08, DSEC-01 … DSEC-03 | 11 |
+| 89 Microsoft 365 connector with one-click connection | DATA-09 … DATA-13, CONN-01, CONN-02 | 7 |
+| 90 Google Workspace connector with one-click connection | DATA-14 … DATA-16, CONN-03 | 4 |
+| 91 Endpoint collectors, file shares and simple install | DATA-17 … DATA-21, CONN-04, COLL-01 … COLL-06 | 12 |
+| 92 Extraction pipeline | DATA-22 … DATA-26 | 5 |
+| 93 Classification, labels, privacy assessment and exceptions | TAG-01 … TAG-08, DSEC-04 … DSEC-07 | 12 |
+| 94 Lifecycle, erasure and the personal mark | DSEC-08 … DSEC-10, MARK-01 … MARK-05 | 8 |
+| 95 Legal holds and access requests | HOLD-01 … HOLD-10 | 10 |
+| 96 Search, context graph, entity pages and ask | KB-01 … KB-08, KB-15 | 9 |
+| 97 Analytics, reports, insights and views | KB-09 … KB-14 | 6 |
+| 98 Model factory v1 | FAC-01 … FAC-09 | 9 |
+| 99 Opportunity agent and data-gap planning | OPP-01 … OPP-07 | 7 |
+| 100 Easy sources | DATA-27 … DATA-32 | 6 |
+| 101 End-to-end hardening and release | DSEC-11 … DSEC-13, DATA-33 | 4 |
+| **Total** | | **119** |
+
+The draft had 106. Adopting it added SPIKE-09 and CONN-01 … CONN-04 (decision 14 as changed), COLL-01 … COLL-06 (collector packaging and enrolment), FAC-09 (training only on your organization's own machines or hardware endpoints it controls) and KB-15 (decision 7's opt-in placeholder, which no draft requirement built): 119.
+
+## Milestone v0.7.0: Messaging relay
+
+**Milestone goal:** People reach their teams from Microsoft Teams, Signal and Telegram through a relay, without VS Code: the group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox, on the governance layer of v0.5.0.
+
+**Split from the governed agent platform on 2026-11-18** (owner, data platform decision 2; that milestone was numbered v0.7.0 until the renumbering the same day and is now v0.5.0): the relay stages run after v0.6.0 Data platform. Phase numbers, requirements and their mappings do not change. Phase 68, the relay foundation, stays recorded in v0.5.0 because it shipped as "v0.7.0 Phase 68" (now v0.5.0); its carried items are in v0.5.0's "Carried from Phase 68" table, and its old and new numbers are in v0.5.0's table of them. Phase 75 keeps its permission to start early in its own worktree, because it touches only `relay/`; Phase 77, the first phase that runs tools for people, waits for the Stage 1 gate and the data platform gate.
+
+**Version:** v0.7.0, set by the owner on 2026-11-18 when the versions were renumbered to start at 0.5.
 
 ### Stage 2: the relay on the governed core (Phases 75-81)
 
@@ -542,7 +964,7 @@ Plans:
 
 ### Phase 77: Teams 1:1 slice under a contract in a sandbox
 **Goal**: A person asks a question in a private Teams chat and the team answers, composed headlessly from the existing engine and streamed live under the tenant's own bot identity; the run executes under a contract issued from the tenant's and requester's authority, inside a container or OpenShell sandbox, never on the relay host itself. First end-to-end value, deliberately before any group work.
-**Depends on**: Phase 74 (the Stage 1 gate), Phase 76
+**Depends on**: Phase 74 (the Stage 1 gate), the data platform gate (Phase 101; owner priority, 2026-11-18), Phase 76
 **Requirements**: RUNL-01, RUNL-03, TEAM-01, TEAM-02, TEAM-03, TEAM-04, EXEC-11, CTRT-07
 **Success Criteria** (what must be TRUE):
   1. The relay runs a team headlessly by composing the existing engine, tools, team library, model client, checkpoints and run markers together with the gate, grants and contracts, and the extension's own behaviour is unchanged by it. (RUNL-01)
@@ -677,13 +1099,6 @@ Plans:
 
 | Phase | Requirements | Count |
 |-------|--------------|-------|
-| 68 Relay foundation | RELAY-01 … RELAY-04 | 4 |
-| 69 Team Mode reconciliation | TMR-01 … TMR-05 | 5 |
-| 70 Capability vocabulary, manifests and one gate | GATE-01 … GATE-07, OFFL-01 … OFFL-03, CLAS-01 … CLAS-08 | 18 |
-| 71 Identities, credentials and delegation that only narrows | DLGT-01 … DLGT-08, VCRD-01 … VCRD-07 | 15 |
-| 72 Execution backends on a copy, with a guarded apply | EXEC-01 … EXEC-10 | 10 |
-| 73 Credential broker | CRED-01 … CRED-08 | 8 |
-| 74 Run contracts | CTRT-01 … CTRT-06, OFFL-04 | 7 |
 | 75 Inbound authenticity, allowlisting and channel manifests | AUTH-01 … AUTH-06, CHAN-01 … CHAN-03 | 9 |
 | 76 Identity, tenants, requesters and pairing | IDNT-01 … IDNT-05, PAIR-01 … PAIR-04 | 9 |
 | 77 Teams 1:1 slice under a contract in a sandbox | RUNL-01, RUNL-03, TEAM-01 … TEAM-04, EXEC-11, CTRT-07 | 8 |
@@ -694,9 +1109,9 @@ Plans:
 | 82 Signal channel | SGNL-01 … SGNL-05 | 5 |
 | 83 Telegram channel | TGRM-01 … TGRM-04 | 4 |
 | 84 Ops, onboarding and release | OPS-01 … OPS-07 | 7 |
-| **Total** | | **134** |
+| **Total** | | **67** |
 
-RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132. The owner added CLAS-08 (the trust badge, Phase 70) on 2026-11-16: 133. The owner's agent authorization decisions of 2026-11-16 added CRED-08 (signed, request-bound invocations checked by the broker, Phase 73): 134 in total. The L4 drafts ANCH-09 … ANCH-15 are not counted.
+These 67 were part of the governed agent platform's 134 (then v0.7.0, now v0.5.0) until the split of 2026-11-18; nothing was re-mapped. RUNL-05 is retired (see v0.5.0's coverage note).
 
 ## Milestone v0.8.0: Cybersecurity
 
@@ -722,25 +1137,28 @@ RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace 
 
 ## Later milestones (outlined 2026-11-15)
 
-Outlines, not plans: each gets a version number, requirements and phases (numbered from 85 on) when the owner starts it. Draft requirement ids are listed in REQUIREMENTS.md under "Later milestones". All of them build on v0.7.0's governance layer; none needs IronClaw, Hermes or OpenShell as a product we depend on, only their designs, OpenShell's policy format and its prover.
+Outlines, not plans: each gets a version number, requirements and phases (numbered from 102 on; 85 to 101 are the data platform) when the owner starts it. All of them come after v0.6.0 Data platform and v0.7.0 Messaging relay. Draft requirement ids are listed in REQUIREMENTS.md under "Later milestones". All of them build on v0.5.0's governance layer; none needs IronClaw, Hermes or OpenShell as a product we depend on, only their designs, OpenShell's policy format and its prover.
 
-**Recommended order and why.** (1) Theia appliance and local inference first, because it is the owner's first Theia product, it is how edge devices are deployed, and an edge device with no connectivity is useless without a local model. (2) Team Mode next, because its built work decays the longer it waits and people's identities (invites, roster, device revocation) are what anchoring and federation need. (3) Routines and signed packages, the main autonomy lever, once people can sign standing orders as a team. (4) Verifiable identity and policy on NEAR, once agent, person and node identities all exist to anchor. (5) Edge grouping, compute pooling and HQ federation, which needs the appliance, people, anchoring and revocation. (6) The Theia desktop app with learned skills last, because learned skills are the riskiest self-modification and the desktop UI is where they and routines are best reviewed. Routines (3) depend only on v0.7.0 and can move earlier if the owner wants autonomy sooner.
+**Recommended order and why.** (1) The Theia appliance (L1b) first, because it is the owner's first Theia product and it is how edge devices are deployed; its host and local inference (L1a) are already built inside v0.6.0 Data platform (owner, 2026-11-18), because an edge device with no connectivity is useless without a local model and the data platform needs the host first. (2) Team Mode next, because its built work decays the longer it waits and people's identities (invites, roster, device revocation) are what anchoring and federation need. (3) Routines and signed packages, the main autonomy lever, once people can sign standing orders as a team. (4) Verifiable identity and policy on NEAR, once agent, person and node identities all exist to anchor. (5) Edge grouping, compute pooling and HQ federation, which needs the appliance, people, anchoring and revocation. (6) The Theia desktop app with learned skills last, because learned skills are the riskiest self-modification and the desktop UI is where they and routines are best reviewed. Routines (3) depend only on v0.5.0 and can move earlier if the owner wants autonomy sooner.
 
-### L1: Theia appliance and local inference on one machine
-**Goal**: A team runs on one machine it owns, connected or not: a Compose stack with Theia in the browser, the agent engine, the relay and an optional OpenShell gateway, local models on an NVIDIA or AMD GPU, and NEAR AI Cloud as a burst target when the network and the policy allow.
-**Scope**: Multi-architecture images (arm64 for DGX Spark class GB10 machines, amd64 for Strix Halo class machines) pinned by manifest-list digest and loadable offline as a signed bundle; GPU passthrough optional and vendor-neutral (NVIDIA Container Toolkit and CDI; AMD ROCm through `/dev/kfd` and `/dev/dri`; a CPU or Vulkan fallback), with sandboxes passing exactly the devices a grant names; a local inference service exposed to the engine as a provider next to NEAR AI Cloud, built on today's local and hybrid profiles (`src/domain/auth.ts`, `src/services/providerFactory.ts`, `privateRouteFor`, the `privacy: private` member rule); routing local first, then a NEAR AI Cloud burst, decided by the gate (private data never bursts to a non-TEE target; NEAR AI TEE models count as private only when attested; burst spend counts against the run contract); a full offline start in which the cloud is simply unavailable; the current VSIX inside Theia as the bridge for the first release (the `@nearai` chat participant is stubbed in Theia, and Theia stores AI keys in clear text, so we keep our own secret handling).
-**Depends on**: v0.7.0 (relay, execution backends, gate, contracts).
-**AMD first (owner, 2026-11-15):** the first test hardware is an AMD Ryzen AI Max (Strix Halo) machine, so L1 is built and accepted on AMD first: amd64 images, ROCm and Vulkan passthrough, and a local inference server proven on Strix Halo before the arm64 GB10 and NVIDIA path, which follows without blocking it.
+### L1a: Host and local inference (built in the data platform milestone)
+**Split (owner, 2026-11-18, data platform decision 1):** L1 is split in two. L1a, the always-on host and local inference, moved into v0.6.0 Data platform, which needs the host before the relay exists: the Compose stack on amd64 with the Strix Halo machine first, ROCm and Vulkan passthrough, the local inference service exposed through the hybrid provider as `local` models, and an offline start from a signed bundle (Phase 85, and the host parts of Phase 88). It needs no Theia, relay or OpenShell. Of the L1 draft requirements, L1a meets the AMD and amd64 half of APPL-02, APPL-03 and APPL-05 and the single-machine half of INFR-01 and INFR-03, through SPIKE-01 and SPIKE-02; the rest stays in L1b. L1b builds on L1a's stack rather than a second one.
 
-**Research flags**: Local inference on Strix Halo first (gfx1151 iGPU, large unified memory): ROCm support level for gfx1151 in each candidate (vLLM ROCm builds, llama.cpp with ROCm/HIP and with Vulkan, Ollama, SGLang), Vulkan as the dependable fallback, and how much of the unified memory the GPU can address; then GB10 arm64 with CUDA; AMD passthrough inside OpenShell needs a hardware test on a Strix Halo machine (the spike found AMD works only by listing `/dev/kfd` and `/dev/dri` in the policy, with the `render` and `video` groups and the seccomp path untested); Theia version, branding and how the VSIX bridge behaves; whether several people share one appliance (one container per person or team until Theia Cloud is needed).
+### L1b: Theia appliance on one machine
+**Goal**: A team runs on one machine it owns, connected or not: the L1a host gains Theia in the browser, the agent engine, the relay and an optional OpenShell gateway, local models on an NVIDIA or AMD GPU, and NEAR AI Cloud as a burst target when the network and the policy allow.
+**Scope** (what L1a has not already built): Multi-architecture images (arm64 for DGX Spark class GB10 machines, amd64 for Strix Halo class machines) pinned by manifest-list digest and loadable offline as a signed bundle; GPU passthrough optional and vendor-neutral (NVIDIA Container Toolkit and CDI; AMD ROCm through `/dev/kfd` and `/dev/dri`; a CPU or Vulkan fallback), with sandboxes passing exactly the devices a grant names; a local inference service exposed to the engine as a provider next to NEAR AI Cloud, built on today's local and hybrid profiles (`src/domain/auth.ts`, `src/services/providerFactory.ts`, `privateRouteFor`, the `privacy: private` member rule); routing local first, then a NEAR AI Cloud burst, decided by the gate (private data never bursts to a non-TEE target; NEAR AI TEE models count as private only when attested; burst spend counts against the run contract); a full offline start in which the cloud is simply unavailable; the current VSIX inside Theia as the bridge for the first release (the `@nearai` chat participant is stubbed in Theia, and Theia stores AI keys in clear text, so we keep our own secret handling).
+**Depends on**: v0.5.0 (execution backends, gate, contracts), v0.7.0 Messaging relay, and L1a (v0.6.0 Data platform).
+**AMD first (owner, 2026-11-15):** the first test hardware is an AMD Ryzen AI Max (Strix Halo) machine, so L1 is built and accepted on AMD first (L1a, in Phase 85, already proves the host and local inference there): amd64 images, ROCm and Vulkan passthrough, and a local inference server proven on Strix Halo before the arm64 GB10 and NVIDIA path, which follows without blocking it.
+
+**Research flags**: Phase 85 (L1a) answers the Strix Halo inference questions first and L1b inherits its findings. Local inference on Strix Halo first (gfx1151 iGPU, large unified memory): ROCm support level for gfx1151 in each candidate (vLLM ROCm builds, llama.cpp with ROCm/HIP and with Vulkan, Ollama, SGLang), Vulkan as the dependable fallback, and how much of the unified memory the GPU can address; then GB10 arm64 with CUDA; AMD passthrough inside OpenShell needs a hardware test on a Strix Halo machine (the spike found AMD works only by listing `/dev/kfd` and `/dev/dri` in the policy, with the `render` and `video` groups and the seccomp path untested); Theia version, branding and how the VSIX bridge behaves; whether several people share one appliance (one container per person or team until Theia Cloud is needed).
 **Undo cost**: Medium: the offline bundle format and image layout are what people install on machines without network.
 **Phases**: TBD.
 
-### L2: Team Mode on the governed core (the rest of v0.6.0)
-**Goal**: Several people, each with their own agents, work one project without colliding, overspending or leaking secrets, now on the identities, gate, grants and backends of v0.7.0 rather than beside them.
-**Scope and disposition of v0.6.0** (the branch `feat/team-fix-pass`, archived in Phase 69):
+### L2: Team Mode on the governed core (the rest of the former Team Mode branch plan)
+**Goal**: Several people, each with their own agents, work one project without colliding, overspending or leaking secrets, now on the identities, gate, grants and backends of v0.5.0 rather than beside them.
+**Scope and disposition of the former v0.6.0 Team Mode branch plan** (the branch `feat/team-fix-pass`, archived in Phase 69):
 
-| v0.6.0 phase | Disposition |
+| Team Mode branch phase | Disposition |
 |--------------|-------------|
 | 60 Team core | Landed on `main` by Phase 69. |
 | 61 Invitations, joining, removal, organization and key integration (33/35 plans) | Carried: close its owner re-test chain (61-32 to 61-35), then land on `main`. Key delivery and device revocation reuse Phase 69's signing interface. |
@@ -751,36 +1169,38 @@ Outlines, not plans: each gets a version number, requirements and phases (number
 | 66 Budgets and allocations | Re-based: allocations become spend constraints in grants and use the budget arithmetic of BUDG-04; per-key caps at the provider stay. |
 | 67 Metrics, collaboration, team memory, team stop, release readiness, relay transport | Carried, except: team memory proposals share the staged-proposal pipeline with learned skills (L6), team stop builds on the gate's stop, and `relayTransport.ts` is superseded by L5's federation transport. |
 
-The full record, with the archive evidence and a disposition for every one of the 34 v0.6.0 requirements, is `.planning/research/v0.6.0-disposition.md`.
+The full record, with the archive evidence and a disposition for every one of the branch plan's 34 requirements, is `.planning/research/v0.6.0-disposition.md`.
 
 Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 already moved chats, run records, checkpoints and project spend history into each project's own state folder, so with one copy of the project per person those are per person already; what remains is the editor-wide spend ledger and daily limit per person, a recovery code that unlocks an encrypted backup of the person's device key and own NEAR AI key, and "Replace my device" (the lead accepts the person back as the same member).
-**Depends on**: Phase 69 and v0.7.0 Stage 1.
-**Research flags**: Drift: the branch forked at 0.4.11; every month on the archive raises the cost of landing 61 and 62. The v0.6.0 ids that collide with v0.7.0 ids carry a `TM-` prefix (Phase 69). Transport privacy (Calimero evaluation, 2026-11-15, section 5.4, recommended instead of Calimero): encrypt each Team Mode event payload to the member device keys over the existing git transport, leaving signatures and hashes in clear, so the git host and the network see only ciphertext and sizes; removing a member re-encrypts future events only; roots over the ciphertext hashes can still be anchored in L4, written at fixed intervals so timing reveals nothing. Phase 69's plaintext signed log is not changed by this; it is a decision for this milestone.
-**Phases**: TBD (the planner may reuse the v0.6.0 phase content under new numbers).
+**Depends on**: Phase 69 and v0.5.0 Stage 1.
+**Research flags**: Drift: the branch forked at 0.4.11; every month on the archive raises the cost of landing 61 and 62. The Team Mode branch ids that collide with live ids carry a `TM-` prefix (Phase 69). Transport privacy (Calimero evaluation, 2026-11-15, section 5.4, recommended instead of Calimero): encrypt each Team Mode event payload to the member device keys over the existing git transport, leaving signatures and hashes in clear, so the git host and the network see only ciphertext and sizes; removing a member re-encrypts future events only; roots over the ciphertext hashes can still be anchored in L4, written at fixed intervals so timing reveals nothing. Phase 69's plaintext signed log is not changed by this; it is a decision for this milestone.
+**Phases**: TBD (the planner may reuse the Team Mode branch phase content under new numbers).
 
 ### L3: Routines and signed packages
 **Goal**: Teams do standing work without a person starting each run, and your organization shares teams, skills and tools as signed packages, all inside the governance layer.
 **Scope**: Routines as markdown files (team, schedule or trigger, task, run contract), signed by a person and expiring; agents may propose routines, only a person creates them; unattended firings get no approvals (anything that needs one is denied and reported); the emergency stop covers routines; routines run headlessly on the relay host or appliance engine, and in the editor only while it is open (said plainly); a minimal list in today's UI, the full surface in Theia. Signed packages in the cross-vendor Agent Plugins v1 layout (`plugin.json`, `skills/`, `agents/`, `teams/`, `mcp.json`) with a capabilities block that maps one-to-one onto grant constraints; package code never runs in the extension or engine process; the Hermes lifecycle (installed disabled, pinned to a commit, scanned with a non-overridable "dangerous" verdict, fresh consent when an update widens capabilities); installing is a governed action never available to member agents. Also per-MCP-server spend limits and tool schemas loaded on demand (MCP sampling stays off).
-**Depends on**: v0.7.0 (contracts, relay, signed approvals); L2 for team-signed routines.
+**Depends on**: v0.5.0 (contracts) and v0.7.0 Messaging relay (relay, signed approvals); L2 for team-signed routines.
 **Research flags**: IronClaw's routine guardrails and no-result sentinel; Hermes `/goal` as a small bounded continuation; how a routine's contract is renewed before expiry without silent widening.
 **Future item (owner, 2026-11-16)**: team packages can later be listed in the agent marketplace exchange. The `.near-team.json` share file from 0.4.26 reserves a `listing` field (always null today) and a `formatVersion`, so a signed version 2 (Phase 69's signer) and a marketplace listing can be added without breaking files already shared. No selling UI until then.
 **Phases**: TBD.
 
 ### L4: Verifiable identity and policy on NEAR
-**Goal**: The identities, credentials and policies v0.7.0 keeps locally are anchored on NEAR without anything readable on chain, revocation has one source of truth, agents and nodes write on chain only with narrow keys that a person adds and removes, and anyone given the data can check an agent's chain of authority.
+**Goal**: The identities, credentials and policies v0.5.0 keeps locally are anchored on NEAR without anything readable on chain, revocation has one source of truth, agents and nodes write on chain only with narrow keys that a person adds and removes, and anyone given the data can check an agent's chain of authority.
 **Scope** (revised 2026-11-15, PROJECT.md Platform direction decision 13, owner-confirmed): nothing readable on chain: one anchor account per organization writes only 32-byte Merkle roots over DID log heads, status lists and policy bundle hashes, at fixed intervals even when nothing changed, so timing does not show who was added or revoked; credentials, clearances, roles, relationships, DID documents and ciphertext of any of them stay off chain; the anchor is one interface (`anchor(root, kind, epoch)`, `latest(kind)`) with public NEAR mainnet first and a NEAR confidential backend once NEAR accepts third-party contracts and data on its private shard; HQ is the credential issuer, the `did:webvh` host and witness, the status list publisher and the only anchor writer, with your organization's root key offline under `did:webvh` pre-rotation and a separate online issuing key; run admission checks the anchored roots once per run and issues a short-lived signed lease, never per action, and the local gate decides every action; offline, the signed local copy decides and anything wider fails closed; revocation through HQ's status lists, committed in the roots, cached with `validUntil` and checked at run start and lease renewal; a grant credential references the run's generated OpenShell policy by hash, with the prover result recorded and our own subset check for what the prover cannot model (MCP tools, spend, schedules, depth, expiry); the hash-chained audit log (OCSF records) included in the roots from time to time, queued while offline; the activity dashboard shows each agent's DID and delegation chain in plain words.
 **Scope added 2026-11-16** (PROJECT.md, Platform direction decisions 14-17, owner): NEAR function-call access keys for on-chain calls only (option (a)). Each agent or node that may write on chain gets its own function-call key on your organization's account, whose only receiver is the registry contract, listing only the methods its grant allows, with a small allowance (ANCH-09); a child key's methods are a non-empty subset of its parent's, since an empty list means every method (ANCH-10); keys are added only with a person's full-access key or by the orchestrator under authority a person delegated, and removed only by a person running the exact command the product shows (ANCH-11); the registry contract checks the signing key against the delegation chain and revocation beside NEAR's own key check, both must allow and a revocation in either wins (ANCH-12); registry methods are cheap and move no value (ANCH-13); on-chain keys are dedicated, bound to the agent's or node's DID by a credential and rotated (ANCH-14); chain reads fail closed (ANCH-15). Off-chain capabilities (external APIs, model providers, messaging channels) never go in the key list: they stay in private credentials checked by Phase 73's broker (CRED-08), with only roots on chain. Option (b), a public key registry for off-chain capabilities with hashed method names, was considered and declined (decision 15 gives the reasons).
-**Depends on**: v0.7.0 (DIDs, credentials, status lists, grants, signed bundles, generated sandbox policies, the broker's signed invocations), L1 (an always-on host for HQ's roles), L2 (people and device revocation).
+**From the data platform (2026-11-18):** release package manifest roots, hold manifests and governance-log roots can be anchored the same way, roots only (data platform design, section 8.2).
+**Depends on**: v0.5.0 (DIDs, credentials, status lists, grants, signed bundles, generated sandbox policies, the broker's signed invocations), L1a (an always-on host for HQ's roles, built in v0.6.0 Data platform), L2 (people and device revocation).
 **Owner action (closed 2026-11-18)**: the owner asked NEAR whether the private shard will accept third-party contracts and data; the answer is that if it happens it will not be anytime soon. Roots-only anchoring on public NEAR is the plan of record for L4, with no confidential backend scheduled. The anchor interface (ANCH-07) stays, so a backend can be added later without changing what is anchored; revisit only if NEAR announces third-party contracts on the private shard.
-**Research flags**: (1) NEAR confidential today (`identity-research.md`, section 1): Confidential Intents moves balances only; the private shard runs only the Intents engine, has no public RPC and takes no third-party contracts (risk 1). Its trust model is seven permissioned validators and a TEE bridge with no NEP or source found (risk 2), and several claims about it come only from secondary sources that disagree (risk 11): re-check all of it before building the confidential backend. (2) Calimero Network, evaluated 2026-11-15 (`.planning/research/platform-direction/calimero-evaluation.md`): not now. Calimero 1.0 (release candidate, 2026-10 and 2026-11) removed all NEAR integration (0.10.1-rc.9, 2026-03-25) and its peer-to-peer sync; it is now a leader-ordered confidential cloud on Intel TDX servers (3 nodes, GCP images), with no LAN or offline groups, no NEAR anchoring, only an insecure dev mode on AMD Strix Halo and NVIDIA GB10 (no TDX), a TypeScript client with runtime dependencies and no independent audit. Revisit only if HQ moves onto Intel TDX hosting and Calimero ships a stable, audited 1.0 that supports our hardware. (3) Metadata: the anchor account and its timing show that your organization exists and is active; roots are written at fixed intervals, even when nothing changed, so timing reveals nothing about who was added or revoked (risk 3; the Calimero evaluation recommends the same). (4) Issuer key compromise at HQ undermines everything: offline root key, online issuing key, pre-rotation, and a tested recovery drill (risk 6). (5) Not post-quantum: anchored roots stay valid commitments, but Ed25519 signatures need a migration path; the paused v0.5.0 post-quantum work is relevant (risk 10). (6) Cost and latency of anchoring: 1 NEAR per 100 KB of contract state, so only the latest root per kind is kept in state and history goes to event logs. (7) The prover cannot prove sub-folder narrowing, so the file-path vocabulary stays fixed; spend constraints need running totals, not static comparisons (spike). Risks from the prior-art report (`.planning/research/platform-direction/agent-authz-prior-art.md`, section 8.5) for the function-call keys of 2026-11-16: (8) Privacy of key lists (risk 1): anyone can list your organization's account keys with each key's receiver and method names, and see when each was added and removed, so the list shows how many agents and nodes write on chain and how often they change, and every registry call shows which key signed it and when; decision 15 keeps off-chain capabilities out of it, and research weighs what remains against decision 13 (for example fixed-interval writes, as for the roots). (9) Key sprawl and staking cost (risk 7): one key per agent or node per grant, about 100 bytes and 0.001 NEAR staked each, and a transaction for every add and remove; session-key systems report sprawl and revocation hygiene as their main weakness, so keys stay few, the product shows the person how many exist and what they stake, and keys no grant needs are offered for removal (by a shown command). (10) Revocation latency (risk 8): a key keeps working on chain until a person removes it, and the contract's own check sees a revocation only once it is in the latest anchored status root; UCAN calls revocation "the last line of defense", so allowances stay small, expiry short and grants narrow. (11) The key-adding power is the prime target (risk 6): whoever holds a full-access key on your organization's account can mint any capability, and the subset rule is enforced only by the code that builds the add; research decides how the orchestrator adds keys under delegated authority without holding a full-access key itself (for example a person signs each add the orchestrator prepares, or a contract method with its own subset check), keeps full-access keys with people (offline where possible) and makes any key added outside the product visible; it also decides whether the anchor account, the account that holds the agents' and nodes' keys and the registry contract's account are one account or separate, since separating them limits what one leaked full-access key can do. (12) The broker as a single point of failure (risk 11) and a confused deputy (risk 12): Phase 73's broker holds every real credential, so it needs redaction, an availability plan and a fail-closed default, and every credential and lease stays bound to one audience (CRED-08). (13) The other NEAR rules in the report: NEP-413 expects a full-access key (risk 2), so any reuse of its layout carries our own tag and recipient; at most 2,000 bytes of method names per key and 256 per name (risk 4); a stolen key can still send transactions until its allowance is spent (risk 5, ANCH-13); the credential chain and the key list can disagree, so both must allow and either revocation wins (risk 10, ANCH-12); a free public RPC can be down, rate-limited or wrong (risk 9, ANCH-15). The first design question is how the registry contract checks a delegation chain when nothing readable is on chain (for example a credential hash with an inclusion proof against the latest anchored root).
+**Research flags**: (1) NEAR confidential today (`identity-research.md`, section 1): Confidential Intents moves balances only; the private shard runs only the Intents engine, has no public RPC and takes no third-party contracts (risk 1). Its trust model is seven permissioned validators and a TEE bridge with no NEP or source found (risk 2), and several claims about it come only from secondary sources that disagree (risk 11): re-check all of it before building the confidential backend. (2) Calimero Network, evaluated 2026-11-15 (`.planning/research/platform-direction/calimero-evaluation.md`): not now. Calimero 1.0 (release candidate, 2026-10 and 2026-11) removed all NEAR integration (0.10.1-rc.9, 2026-03-25) and its peer-to-peer sync; it is now a leader-ordered confidential cloud on Intel TDX servers (3 nodes, GCP images), with no LAN or offline groups, no NEAR anchoring, only an insecure dev mode on AMD Strix Halo and NVIDIA GB10 (no TDX), a TypeScript client with runtime dependencies and no independent audit. Revisit only if HQ moves onto Intel TDX hosting and Calimero ships a stable, audited 1.0 that supports our hardware. (3) Metadata: the anchor account and its timing show that your organization exists and is active; roots are written at fixed intervals, even when nothing changed, so timing reveals nothing about who was added or revoked (risk 3; the Calimero evaluation recommends the same). (4) Issuer key compromise at HQ undermines everything: offline root key, online issuing key, pre-rotation, and a tested recovery drill (risk 6). (5) Not post-quantum: anchored roots stay valid commitments, but Ed25519 signatures need a migration path; the post-quantum work of the paused former v0.5.0 knowledge-base plan is relevant (risk 10). (6) Cost and latency of anchoring: 1 NEAR per 100 KB of contract state, so only the latest root per kind is kept in state and history goes to event logs. (7) The prover cannot prove sub-folder narrowing, so the file-path vocabulary stays fixed; spend constraints need running totals, not static comparisons (spike). Risks from the prior-art report (`.planning/research/platform-direction/agent-authz-prior-art.md`, section 8.5) for the function-call keys of 2026-11-16: (8) Privacy of key lists (risk 1): anyone can list your organization's account keys with each key's receiver and method names, and see when each was added and removed, so the list shows how many agents and nodes write on chain and how often they change, and every registry call shows which key signed it and when; decision 15 keeps off-chain capabilities out of it, and research weighs what remains against decision 13 (for example fixed-interval writes, as for the roots). (9) Key sprawl and staking cost (risk 7): one key per agent or node per grant, about 100 bytes and 0.001 NEAR staked each, and a transaction for every add and remove; session-key systems report sprawl and revocation hygiene as their main weakness, so keys stay few, the product shows the person how many exist and what they stake, and keys no grant needs are offered for removal (by a shown command). (10) Revocation latency (risk 8): a key keeps working on chain until a person removes it, and the contract's own check sees a revocation only once it is in the latest anchored status root; UCAN calls revocation "the last line of defense", so allowances stay small, expiry short and grants narrow. (11) The key-adding power is the prime target (risk 6): whoever holds a full-access key on your organization's account can mint any capability, and the subset rule is enforced only by the code that builds the add; research decides how the orchestrator adds keys under delegated authority without holding a full-access key itself (for example a person signs each add the orchestrator prepares, or a contract method with its own subset check), keeps full-access keys with people (offline where possible) and makes any key added outside the product visible; it also decides whether the anchor account, the account that holds the agents' and nodes' keys and the registry contract's account are one account or separate, since separating them limits what one leaked full-access key can do. (12) The broker as a single point of failure (risk 11) and a confused deputy (risk 12): Phase 73's broker holds every real credential, so it needs redaction, an availability plan and a fail-closed default, and every credential and lease stays bound to one audience (CRED-08). (13) The other NEAR rules in the report: NEP-413 expects a full-access key (risk 2), so any reuse of its layout carries our own tag and recipient; at most 2,000 bytes of method names per key and 256 per name (risk 4); a stolen key can still send transactions until its allowance is spent (risk 5, ANCH-13); the credential chain and the key list can disagree, so both must allow and either revocation wins (risk 10, ANCH-12); a free public RPC can be down, rate-limited or wrong (risk 9, ANCH-15). The first design question is how the registry contract checks a delegation chain when nothing readable is on chain (for example a credential hash with an inclusion proof against the latest anchored root).
 **Undo cost**: High: anything put on chain is permanent; roots-only keeps that to 32-byte commitments that reveal nothing, and every function-call key ever added or removed stays in your organization's account history.
 **Phases**: TBD.
 
 ### L5: Edge grouping, compute pooling and HQ federation
 **Goal**: Machines at the edge link up with no internet to share work and GPU power, and federate with an HQ server when connectivity returns, syncing identities, policy, audit and results without either side being able to forge the other's records.
 **Scope**: Node identities as `did:key` bound to your organization by a credential (issued by a person with authority, revocable through the status list); local grouping by discovery on the local network with mutual authentication by node identity and binding credentials, each node's gate still deciding alone; offline verification (revised 2026-11-15, Platform direction decision 13): before going offline a device syncs your organization's DID log, the DID logs of the people it works with, all status lists, the policy bundle and the latest anchor roots with inclusion proofs, verifies locally and checks the cached copies against the roots; each level has a maximum offline age after which new access at that level fails closed; two offline devices exchange stapled status lists signed by your organization; on reconnect, sessions that ran on stale data are re-evaluated and flagged; a second site may hold its own issuer DID under a narrower delegation; compute pooling for local inference across linked machines, NVIDIA and AMD; routing extended to local, then linked machines, then the HQ cluster, then a NEAR AI Cloud burst, each hop only where policy, privacy tier and contract allow; federation sync of identities, policy (down, as signed bundles that never widen an edge's anchored authority), audit (up, hash-chained, gaps detected) and results; inference federation to an HQ cluster as one more provider.
-**Builds on**: Phase 27's encrypted sync (bundles over git with a recovery code, records merged without loss); Team Mode's signed coordination log and git transport; the paused v0.5.0 ciphertext relay design (a relay that stores only ciphertext, checks signed append capabilities, and can withhold but not forge; RELAY-01/02 in `.planning/milestones/v0.5.0-paused/`); the planned `relayTransport.ts`, which this transport replaces.
-**Depends on**: L1, L2, L4.
+**Builds on**: Phase 27's encrypted sync (bundles over git with a recovery code, records merged without loss); Team Mode's signed coordination log and git transport; the ciphertext relay design of the paused former v0.5.0 knowledge-base plan (a relay that stores only ciphertext, checks signed append capabilities, and can withhold but not forge; RELAY-01/02 in `.planning/milestones/v0.5.0-paused/`); the planned `relayTransport.ts`, which this transport replaces.
+**From the data platform (2026-11-18):** catalog federation between edge and HQ, per-label-cell keys for edge devices that store data, and pooled compute for extraction and training (data platform design, section 8.2).
+**Depends on**: L1a and L1b, L2, L4.
 **Research flags**: Pooling across heterogeneous NVIDIA and AMD nodes is hard and must be flagged honestly: one model split across vendors may not be practical, so expect per-vendor pools with request-level balancing; options to evaluate include llama.cpp RPC, vLLM and SGLang multi-node, and Ollama per node behind a router; OpenShell has nothing for pooling (the spike: a model server on each box behind an allowed endpoint, or a Kubernetes cluster); clock trust without network time (offline age uses monotonic counters and last-sync time, not the wall clock alone: `identity-research.md`, risk 8); offline revocation lag: a revoked person keeps working on a device until its cached list or the level's maximum offline age runs out, so each level's limit is set deliberately (risk 5; the research's values are examples only); conflict rules when an edge and HQ both changed policy; the federation transport can reuse Team Mode's git transport with event payloads encrypted to member device keys and signatures and hashes left in clear (works over any git remote or a LAN bare repository; Calimero evaluation, 2026-11-15, recommended instead of Calimero, which has no LAN or offline groups), and anchor roots are written at fixed intervals so timing reveals nothing.
 **Undo cost**: High for the federation record formats.
 **Phases**: TBD.
@@ -788,7 +1208,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 ### L6: Theia desktop app and learned skills
 **Goal**: People who want a local install get a desktop app from the same code, with Team Studio and chat rebuilt as Theia widgets and agents, a routines screen, and teams that get better at recurring work through skills a person approves.
 **Scope**: Desktop app from the appliance's code; Team Studio, chat and the board as Theia widgets or Theia AI agents; our gate in front of every tool, including tools Theia provides; routines UI; learned skills only as staged proposals (diff, the run that produced it, a scan verdict) approved by a person into a scope, signed, with the skills folder protected from file tools and no proposals from runs that read untrusted content; named agents with personalities and decision agents (PROJECT.md planned features) in the rebuilt team builder, with a decision agent acting only under a grant. The VS Code extension keeps shipping while the shared core makes that cheap.
-**Depends on**: L1, L3.
+**Depends on**: L1b, L3.
 **Research flags**: Theia AI's agent, skill and MCP formats (they already read `agent.md`, `SKILL.md` and MCP); which of today's webviews to rebuild first.
 **Phases**: TBD.
 
@@ -799,14 +1219,31 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 27. Project state follows the project (0.4.20) | 36/36 | Complete: shipped in 0.4.20; owner host check passed | 2026-11-17 (released 2026-11-14) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
-| 68. Relay foundation | 8/8 | Complete; merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
-| 69. Team Mode reconciliation | 15/15 | In Progress (two PRs) | - |
-| 70. Capability vocabulary, manifests and one gate | 0/TBD | Not started | - |
+| 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
+| 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
+| 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
 | 71. Identities, credentials and delegation that only narrows | 0/TBD | Not started (opens with a research step) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |
 | 74. Run contracts | 0/TBD | Not started | - |
-| 75. Inbound authenticity, allowlisting and channel manifests | 0/TBD | Not started | - |
+| 85. Host and local inference on Strix Halo (L1a), measured | 0/TBD | Not started (v0.6.0 Data platform; may start during Phases 72 to 74) | - |
+| 86. Microsoft 365 connector spike | 0/TBD | Not started (may start during Phases 72 to 74) | - |
+| 87. Extraction and OCR throughput spike | 0/TBD | Not started | - |
+| 88. Ingestion core, governed store and the data map | 0/TBD | Not started (after the Stage 1 gate) | - |
+| 89. Microsoft 365 connector with one-click connection | 0/TBD | Not started | - |
+| 90. Google Workspace connector with one-click connection | 0/TBD | Not started | - |
+| 91. Endpoint collectors, file shares and simple install | 0/TBD | Not started | - |
+| 92. Extraction pipeline | 0/TBD | Not started | - |
+| 93. Classification, labels, privacy assessment and exceptions | 0/TBD | Not started | - |
+| 94. Lifecycle, erasure and the personal mark | 0/TBD | Not started | - |
+| 95. Legal holds and access requests | 0/TBD | Not started | - |
+| 96. Search, context graph, entity pages and ask | 0/TBD | Not started | - |
+| 97. Analytics, reports, insights and views | 0/TBD | Not started | - |
+| 98. Model factory v1, first specialist from chat and run logs | 0/TBD | Not started | - |
+| 99. Opportunity agent, data-gap planning and specialists from organization data | 0/TBD | Not started | - |
+| 100. Easy sources: catalog, manifest connectors, agent-written connectors, databases | 0/TBD | Not started | - |
+| 101. End-to-end hardening and release | 0/TBD | Not started | - |
+| 75. Inbound authenticity, allowlisting and channel manifests | 0/TBD | Not started (v0.7.0 Messaging relay, after the data platform; may start early in its own worktree) | - |
 | 76. Identity, tenants, requesters and pairing | 0/TBD | Not started | - |
 | 77. Teams 1:1 slice under a contract in a sandbox | 0/TBD | Not started | - |
 | 78. Messaging setup view and pairing | 0/TBD | Not started | - |

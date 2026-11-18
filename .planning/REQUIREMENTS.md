@@ -1,15 +1,17 @@
 # Requirements: Near AI for VSCode
 
-## Milestone v0.7.0: Governed agent platform and messaging relay
+## Milestone v0.5.0: Governed agent platform (Phases 68-74), and v0.7.0 Messaging relay (Phases 75-84)
 
 **Defined:** 2026-11-13 (relay). **Replanned:** 2026-11-15 from the owner's platform direction (`.planning/PROJECT.md`, "Platform direction"): the identity and governance core was added, the relay requirements were re-mapped to renumbered phases, and new groups were added (TMR, GATE, OFFL, DLGT, EXEC, CRED, CTRT, CHAN, PAIR, APRV).
 **Amended:** 2026-11-15 with the identity, credential and classification design the owner approved (`.planning/PROJECT.md`, Platform direction decisions 8-13; evidence in `.planning/research/platform-direction/identity-research.md`): CLAS (classification labels and routing, Phase 70) and VCRD (verifiable credentials, Phase 71) added, DLGT-08 added, DLGT-01, DLGT-03, DLGT-07, OFFL-03, OFFL-04 and IDNT-05 revised, and the L4 and L5 drafts revised for roots-only anchoring, the confidential backend interface, HQ's roles and the per-level maximum offline age.
 **Amended:** 2026-11-16 by the owner: CLAS-08 (the trust badge) added and CLAS-05 ratified; then the agent authorization decisions (`.planning/PROJECT.md`, Platform direction decisions 14-17; evidence in `.planning/research/platform-direction/agent-authz-prior-art.md`): CRED-08 added to Phase 73, CLAS-08 notes the automatic check, and L4 drafts ANCH-09 … ANCH-15 added for NEAR function-call access keys on agents' and nodes' on-chain calls only.
-**Core value:** Every agent works under a governance layer a person can see and check, deciding offline from a signed local policy; and a person in a Microsoft Teams, Signal or Telegram chat asks the team for something and the answer arrives where they already are, without VS Code. The group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
+**Split:** 2026-11-18 (owner, data platform decision 2): the relay requirements of Phases 75 to 84 (AUTH, CHAN, IDNT, PAIR, RUNL, CMND, APRV, GRP, BUDG, TEAM, SETUP, SGNL, TGRM, OPS, EXEC-11 and CTRT-07) now belong to the separate milestone v0.7.0 Messaging relay, which runs after v0.6.0 Data platform. Their ids, text and phase mappings are unchanged, so they stay in this section and its traceability table. v0.5.0 keeps Phases 68 to 74 (67 requirements; RELAY-01 … RELAY-04 stay with Phase 68, which shipped as "v0.7.0 Phase 68", now v0.5.0) and the relay milestone holds 67.
+**Renumbered:** 2026-11-18 (owner: "considering we are on 0.4 now, lower the rest to start at 0.5"): the governed agent platform, v0.7.0 until then, is v0.5.0; the data platform is v0.6.0 and the messaging relay v0.7.0. No id, text or phase mapping changed.
+**Core value:** Every agent works under a governance layer a person can see and check, deciding offline from a signed local policy; and (now v0.7.0 Messaging relay) a person in a Microsoft Teams, Signal or Telegram chat asks the team for something and the answer arrives where they already are, without VS Code. The group sees only the finished result, the working thread stays private to whoever asked, and every relay run executes under a contract in a sandbox.
 
-> **What "relay" means here.** The new messaging relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. **Not** the paused v0.5.0 ciphertext sync relay (RELAY-01/02, archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. Those are separate, deliberate, unrelated work.
+> **What "relay" means here.** The new messaging relay at `relay/`: receive a chat message, drive an existing agent team, post the result back. **Not** the ciphertext sync relay of the paused former v0.5.0 knowledge-base plan (RELAY-01/02, archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. Those are separate, deliberate, unrelated work.
 
-> **Id collisions with v0.6.0.** The Team Mode requirements on `feat/team-fix-pass` use TEAM-01..04 (team and identity) and SETUP-01 (guided project setup) with other meanings. In this file TEAM-xx is the Teams channel and SETUP-xx the Messaging setup view; carried v0.6.0 ids take a `TM-` prefix (TMR-04).
+> **Id collisions with the former v0.6.0 Team Mode branch plan.** The Team Mode requirements on `feat/team-fix-pass` use TEAM-01..04 (team and identity) and SETUP-01 (guided project setup) with other meanings. In this file TEAM-xx is the Teams channel and SETUP-xx the Messaging setup view; its carried ids take a `TM-` prefix (TMR-04).
 
 > **Two kinds of credential.** CRED-xx (Phase 73, credential broker) are secrets such as API keys that agents use by handle and never hold. VCRD-xx (Phase 71) are W3C Verifiable Credentials: signed statements about an identity's authority, clearance, roles and compartments. The prefixes differ on purpose.
 
@@ -23,9 +25,9 @@
 ### Team Mode reconciliation (Phase 69)
 
 - [x] **TMR-01**: Before any code moves, `feat/team-fix-pass` is preserved on GitHub as an archive branch and the uncommitted files in its legacy worktree are committed or recorded.
-- [x] **TMR-02**: The Team Mode core verified in v0.6.0 Phase 60 (device identities held in SecretStorage, canonical JSON, the signed append-only event envelope with Lamport ordering, event validation, the deterministic materializer, the role-by-action permission matrix, the git coordination transport and the roster) runs on current `main`, re-verified against Phase 60's success criteria, in `src/domain/team/` and `src/team/` with no `vscode` import and no new runtime dependency.
+- [x] **TMR-02**: The Team Mode core verified in Phase 60 of the former v0.6.0 Team Mode branch plan (device identities held in SecretStorage, canonical JSON, the signed append-only event envelope with Lamport ordering, event validation, the deterministic materializer, the role-by-action permission matrix, the git coordination transport and the roster) runs on current `main`, re-verified against Phase 60's success criteria, in `src/domain/team/` and `src/team/` with no `vscode` import and no new runtime dependency.
 - [x] **TMR-03**: A project with no team file behaves exactly as before, the full suite stays green, and a canary test proves no secret reaches the coordination log, `team.json`, settings or audit.
-- [x] **TMR-04**: Every v0.6.0 phase and requirement has a recorded disposition (landed in Phase 69, carried to the Team Mode milestone, folded into a named v0.7.0 phase, or retired), and carried ids that collide with v0.7.0 ids take a `TM-` prefix.
+- [x] **TMR-04**: Every phase and requirement of the former v0.6.0 Team Mode branch plan has a recorded disposition (landed in Phase 69, carried to the Team Mode milestone, folded into a named phase of the then v0.7.0 plan, or retired), and carried ids that collide with live ids take a `TM-` prefix.
 - [x] **TMR-05**: A person's device identity signs and verifies any canonical payload through one interface (policy bundles, grants, approval answers), and key rotation and revocation are signed events that later checks honour.
 
 ### Capability gate and manifests (Phase 70)
@@ -224,8 +226,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RELAY-01 | Phase 68: Relay foundation *(v0.7.0 RELAY-01: not the archived v0.5.0 ciphertext-sync RELAY-01)* | Complete |
-| RELAY-02 | Phase 68: Relay foundation *(v0.7.0 RELAY-02: not the archived v0.5.0 ciphertext-sync RELAY-02)* | Complete |
+| RELAY-01 | Phase 68: Relay foundation *(Phase 68 RELAY-01: not the archived ciphertext-sync RELAY-01 of the former v0.5.0 knowledge-base plan)* | Complete |
+| RELAY-02 | Phase 68: Relay foundation *(Phase 68 RELAY-02: not the archived ciphertext-sync RELAY-02 of the former v0.5.0 knowledge-base plan)* | Complete |
 | RELAY-03 | Phase 68: Relay foundation | Complete |
 | RELAY-04 | Phase 68: Relay foundation | Complete |
 | TMR-01 | Phase 69: Team Mode reconciliation | Complete |
@@ -360,7 +362,298 @@
 | OPS-06 | Phase 84: Ops, onboarding and release | Pending |
 | OPS-07 | Phase 84: Ops, onboarding and release | Pending |
 
-Coverage: 134 of 134 active v0.7.0 requirements mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84.
+Coverage: 134 of 134 active requirements of v0.5.0 and v0.7.0 Messaging relay (one milestone, numbered v0.7.0, until 2026-11-18) mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.5.0 Governed agent platform (Phases 68-74) and 67 in v0.7.0 Messaging relay (Phases 75-84).
+
+## Milestone v0.6.0: Data platform (Phases 85-101)
+
+**Defined:** 2026-11-18 from the owner's requirements R1 to R11 and the design built on them (`.planning/research/data-platform/00-DESIGN.md`), which the owner accepted the same day: decisions 1 to 13 and the 32 settled-in-design choices as recommended, decision 14 changed to one-click connection, and collectors that are simple to install added. The draft (`01-DRAFT-MILESTONE.md`) had 106 requirements; adoption added SPIKE-09, CONN-01 … CONN-04, COLL-01 … COLL-06, KB-15 and FAC-09, and revised SPIKE-01, DATA-14, DATA-17, DATA-20, DSEC-10 and FAC-06 (119). Version set by the owner when the milestone starts.
+**Core value:** Once installed, the platform finds your organization's data wherever it lives, keeps it in sync, describes and labels every item, and lets people and agents use it (search, ask, reports, specialists trained on your organization's own machines) only within their clearance and the source's own permissions, with people asked only on real exceptions.
+
+> **Prefixes.** DSEC (data-centric security), not SEC: SEC-01 … SEC-04 are carried ids of the former v0.6.0 Team Mode branch plan, and the paused former v0.5.0 knowledge-base plan used SEC as well. CONN (one-click connection) is not CRED (Phase 73's credential broker) or VCRD (Phase 71's verifiable credentials). None of SPIKE, DATA, CONN, COLL, TAG, DSEC, MARK, HOLD, KB, FAC and OPP is used anywhere else in the plan or in the archive of the paused former v0.5.0 knowledge-base plan. SPIKE-01 and SPIKE-02 build the lasting host (L1a), not a throwaway.
+
+> **Decisions.** "Decision N" means decision N of the design's section 10.1, as the owner answered it on 2026-11-18 (the roadmap's data platform section has a table of them).
+
+### Host and spikes (Phases 85-87)
+
+- [ ] **SPIKE-01**: A Compose stack on amd64 runs Postgres 18 with pgvector, pg_textsearch and RLS, DuckDB with DuckLake, the encrypted blob store, a sandboxed Python worker image and llama.cpp. Images are pinned by digest, install with one command from a signed offline bundle and start with no network. Postgres holds content in plaintext on an encrypted disk, with per-item keys for erasable content (decision 3). This is the lasting host (L1a), not a throwaway. *(Revised 2026-11-18: one-command install from the signed bundle, L1a.)*
+- [ ] **SPIKE-02**: Local inference on the host is reachable from the extension through the existing hybrid provider as `local` models, with ROCm and Vulkan both measured.
+- [ ] **SPIKE-03**: Measured on a fixed test set: embeddings in chunks per second, GLiNER spans per second, local LLM tokens per second for prompt and generation, LoRA on a 4B base in tokens per second with peak memory, and stability at a GPU memory fraction of 0.8 under a cgroup cap. The exact ROCm and PyTorch versions are recorded.
+- [ ] **SPIKE-04**: Permission fidelity for SharePoint and OneDrive is measured with read scopes plus hierarchical sharing, against full control, and `Sites.Selected` is checked with and without broad file scopes.
+- [ ] **SPIKE-05**: The delta `nextLink` lifetime over a multi-day backfill, a 410 resync on a large drive, and `immutableId` with message delta across folder moves are measured.
+- [ ] **SPIKE-06**: A resource-unit budget model for a tenant of under 1,000 licences, plus reads of Purview sensitivity and retention labels (`extractSensitivityLabels`, LabelInfo, the 423 cases) and Exchange RBAC for Applications scoping, all checked against v1.0 permissions.
+- [ ] **SPIKE-07**: On a fixed set of 1,000 pages (born-digital, clean scans, hard scans with tables and handwriting) and 10 hours of audio, Tika, the Docling standard and VLM pipelines, Tesseract or PP-OCRv5 on CPU, PaddleOCR-VL and granite-docling on GPU, and whisper.cpp large-v3-turbo are measured under ROCm and Vulkan.
+- [ ] **SPIKE-08**: A page-difficulty router (tier 1 to tier 2 OCR) is built with its accuracy and cost recorded, and the licence of every model weight it uses is confirmed.
+- [ ] **SPIKE-09**: The one-click Microsoft 365 setup is proven on the test tenant: one administrator sign-in, through a public client that holds no secret of ours, creates the app registration in the tenant, uploads a certificate generated on the host (the private key never leaves it) and grants admin consent for the least permissions, each with a reason; the app then adds its next certificate itself with no new sign-in; and nothing of the administrator's sign-in is stored. *(Added 2026-11-18 with decision 14 as changed.)*
+
+### Discovery, connectors and ingestion (Phases 88-92, 100, 101)
+
+- [ ] **DATA-01**: The connector contract (`RECORD`, `STATE`, `DELETE`, `ACL`, `LOG` messages), the connector runtime and per-partition cursors advanced in the same transaction as their batch.
+- [ ] **DATA-02**: An item ledger with identity, version and derivative keys, idempotent upserts and an outbox for side effects.
+- [ ] **DATA-03**: The source lifecycle (`proposed`, `approved`, `backfilling`, `live`, `degraded`, `paused`, `retired`), with every state, transition and reason visible.
+- [ ] **DATA-04**: Three levels of reconciliation sweep, and automatic resync on any "missed something" signal.
+- [ ] **DATA-05**: Reorgs at catalog level: a delete hides the item at once, a move or rename updates it in place, and a permission change recomputes the subtree before the next query.
+- [ ] **DATA-06**: A filesystem connector on the host itself, as the reference connector.
+- [ ] **DATA-07**: The inventory-only dry run, showing names, sizes, counts, types and owners before any content is read.
+- [ ] **DATA-08**: The data map view in the extension, showing sources and items by type, size, owner, label and freshness, plus each source's status (phase, backfill progress, sync lag, processing backlog, last event, throttle state, coverage).
+- [ ] **DATA-09**: Microsoft 365 site, drive and mailbox discovery, inventory-only first.
+- [ ] **DATA-10**: Per-drive delta with hierarchical sharing and sharing-change annotations; the live cursor captured before backfill; the resource-unit budget; a global `Retry-After`; off-peak backfill.
+- [ ] **DATA-11**: A separate identity sync (users and groups delta) on its own schedule.
+- [ ] **DATA-12**: Mailbox delta with immutable ids, scoped by Exchange RBAC for Applications. Mail follows decision 6: off by default, and label-only (a card, no content, chunks or vectors) once your organization confirms its privacy assessment and employee notice.
+- [ ] **DATA-13**: Purview sensitivity and retention labels read into `sourceLabels` and `retentionClass`; unreadable (423) and double-key items treated as the top level and metadata-only.
+- [ ] **DATA-14**: The Google connector runs on the per-organization setup of CONN-03: a service account with domain-wide delegation for exactly the listed scopes, its credential held in the broker (short-lived or keyless where the research finds it workable). *(Revised 2026-11-18; was: domain-wide delegation set up with one pasted client id and scope list.)*
+- [ ] **DATA-15**: `changes.list` per user and per shared drive, and Gmail `history.list`, with the cursor captured before backfill and a full resync on 404.
+- [ ] **DATA-16**: Drive labels mapped; the Admin SDK used for identity sync; quotas checked in a test project before planning.
+- [ ] **DATA-17**: A Rust collector on Windows (MFT enumeration plus the USN journal), running as a service with the rights it needs and installed by the COLL-01 package, with journal sizing advice. *(Revised 2026-11-18: installed by the package.)*
+- [ ] **DATA-18**: A macOS collector (FSEvents with stored event ids, and a Full Disk Access profile from device management) and a Linux collector (fanotify, with inotify as the fallback).
+- [ ] **DATA-19**: Sync roots and cloud placeholder attributes detected and skipped; operating system folders, caches and build outputs excluded by default.
+- [ ] **DATA-20**: File shares read from the host over SMB and NFS with nothing installed on the file servers: directory enumeration, change notifications as hints only, and snapshot diffs as the feed; a collector on a file server is optional, for faster change detection; NTFS and POSIX permissions resolved through the directory. *(Revised 2026-11-18 for "agentless where possible"; was: a collector on the file server where possible.)*
+- [ ] **DATA-21**: A mutually authenticated collector channel to the host, signed with device keys; a personal mark known from an item's location is honoured before fetching.
+- [ ] **DATA-22**: A Tika and Docling router in sandboxed workers with no network and with size and time limits.
+- [ ] **DATA-23**: Tiered OCR using the Phase 87 router, and whisper.cpp for audio and video.
+- [ ] **DATA-24**: Content-addressed derivatives keyed by `(hash, extractor, version, options)`, so an item is extracted once across duplicates.
+- [ ] **DATA-25**: Exact and near-duplicate detection (hash, MinHash).
+- [ ] **DATA-26**: The bounded, encrypted re-extraction cache of decision 5 (on by default for scans, images and audio, capped at 10 percent of the host disk, kept 180 days), deleted along with its source item; a priority queue in which live changes pre-empt backfill; the spend governor (from paused Phase 18) on GPU work.
+- [ ] **DATA-27**: A source catalog showing plain descriptions, exact scopes with their reasons, and an estimated backfill time.
+- [ ] **DATA-28**: A declarative manifest schema of our own (auth, pagination, record selector, cursor, deletion signal, permission mapping).
+- [ ] **DATA-29**: Agent-written connectors: manifest first, then sandboxed code; egress only to declared hosts; credentials injected by the broker; read-only scopes enforced by the broker.
+- [ ] **DATA-30**: A conformance suite against recorded fixtures (pagination, resume, incremental, deletion, permission mapping, throttling, idempotent replay); a person approves a connector, and again for every later change.
+- [ ] **DATA-31**: Databases: directory-first discovery; network scanning off by default; dlt backfill and Debezium CDC, with abandoned replication slots monitored; each database approved on its own.
+- [ ] **DATA-32**: The importers carried from paused Phase 15 (CSV, STIX, GeoJSON) and the offline gazetteer.
+- [ ] **DATA-33**: PIA and DPIA packs generated from catalog facts; monitoring-policy text; SECURITY.md and README updated (including plaintext on the host's encrypted disk and what clearances guarantee); the operator runbook for the host.
+
+### One-click connection (Phases 89-91)
+
+Added 2026-11-18 with decision 14 as changed ("easy from the start").
+
+- [ ] **CONN-01**: One-click "Connect Microsoft 365". An administrator signs in once. Setup then creates your organization's own app registration in its own tenant, uploads a certificate generated on the host (the private key never leaves the host and is held in the credential broker), and grants admin consent for exactly the permissions the wizard listed with their reasons. The administrator's sign-in is used only during setup, held in memory and dropped when setup ends. No shared multi-tenant app that we publish is used or offered, because its publisher-held credential could reach every customer tenant.
+- [ ] **CONN-02**: Every one-click connection keeps itself working and can be undone: its credential is rotated before expiry with no new sign-in; setup can be re-run and adds only what is missing; a setup cut off midway says what was done and what was not, reads nothing until it is finished, and finishes on re-run without duplicating anything; Disconnect lists what setup created and removes it only after the administrator confirms.
+- [ ] **CONN-03**: One-click "Connect Google Workspace", the same pattern as CONN-01: an administrator signs in once; setup creates a project and a service account in your organization's own Google Cloud, enables only the needed APIs, creates the credential on the host and keeps it in the broker, and authorizes exactly the listed scopes for domain-wide delegation. A step Google allows only in its admin console is one prefilled page that setup opens and then checks. No shared app that we publish.
+- [ ] **CONN-04**: One-click "Connect file shares": the host finds the SMB and NFS shares your organization publishes (its directory and DFS namespaces), an administrator picks them and signs in once, setup uses a dedicated read-only account kept in the broker, and the host reads the shares with nothing installed on the file servers.
+
+### Collector packaging and enrolment (Phase 91)
+
+Added 2026-11-18 (owner: collectors must be super simple to install).
+
+- [ ] **COLL-01**: Endpoint collectors are small signed native packages, not containers: an MSI for Windows that Intune or Group Policy installs silently, a signed and notarized pkg for macOS that Jamf or Intune installs, .deb and .rpm packages for Linux, and a one-line install for machines without device management that checks the package signature before installing. The host itself is a container stack (SPIKE-01).
+- [ ] **COLL-02**: Enrolment needs no configuration on the machine: your organization's device-management tools deliver an enrolment code issued by the host (an MSI property, a managed configuration profile, or an install argument). On first start the collector creates its own device key, enrols with the code and receives a device binding credential (VCRD-06), so nobody types anything on the machine. Codes are scoped to a device group, limited in number, expiring and revocable, and every newly enrolled device shows in the source list.
+- [ ] **COLL-03**: Collectors update themselves from the host: signed updates, staged with rollback, and the host refuses a collector below the minimum version. An update never widens what is collected; that takes a change of policy.
+- [ ] **COLL-04**: Each machine shows a local notice, in plain words, of what is collected from it, what is excluded and who can see it, with Mark as Personal available from the notice and from the file manager where the operating system allows it.
+- [ ] **COLL-05**: Agentless where possible: Microsoft 365, Google Workspace and SMB or NFS shares are read from the host with no software on endpoints or file servers; a collector is needed only for files that live only on endpoints.
+- [ ] **COLL-06**: A collector stays small and can be removed cleanly: low CPU, memory and network budgets, paused on battery and metered connections by default; revoking its device credential or removing the device in device management stops collection at its next contact; uninstalling removes the collector and its local state; the host shows the source as `paused` or `retired` with the reason.
+
+### Classification and metadata (Phase 93)
+
+- [ ] **TAG-01**: Tier 0 detectors, including checksum-backed Canadian identifiers written by us in English and French, and the gitleaks rules (secret values are never stored).
+- [ ] **TAG-02**: Tier 1: the union of GLiNER spans and a second Apache-2.0 classifier, plus language and an embedding.
+- [ ] **TAG-03**: Tier 2: a local LLM (three samples, majority vote, constrained JSON, policy never in the prompt) only for unsettled, sampled or about-to-be-used items, under a run contract.
+- [ ] **TAG-04**: The full item card of design section 5. Owner and steward come from source metadata and the directory, never from a model.
+- [ ] **TAG-05**: Privacy facts (design section 5, privacy layer), stored as facts, never as the personal data itself.
+- [ ] **TAG-06**: Training-suitability fields, where `rights.basis = unknown` means not allowed; TDMRep reservations read.
+- [ ] **TAG-07**: The policy wizard (scales, source label map, ingest default, rules, scope exclusions), with a mandatory shadow simulation before any rule is signed.
+- [ ] **TAG-08**: A weekly stratified blind sampling audit reporting precision and recall per level, with thresholds re-fitted from it.
+
+### Data-centric security (Phases 88, 93, 94, 101)
+
+- [ ] **DSEC-01**: RLS on every table of the governed store, with `FORCE ROW LEVEL SECURITY`; the clearance is set only through a short-lived gate-signed token checked by a security-definer function, never by a plain `SET`, and the application role cannot bypass it.
+- [ ] **DSEC-02**: The `source.acl` layer in `decide` after the label check (an agent's access is its clearance, intersected with the person's clearance and the person's source permissions), a directory snapshot with group expansion at query time, and fail-closed handling of permission snapshots older than the limit (24 hours by default).
+- [ ] **DSEC-03**: The ingest-default label on every discovered item, and the governance log (paused Phase 13's log with envelope v2) recording every label, permission and lifecycle event.
+- [ ] **DSEC-04**: Classification rules and the source label map in the signed bundle; the pure `classify.ts`; label v2 with the handling flags `no-train` and `no-summarize-down`. Automatic steps only ever raise a label.
+- [ ] **DSEC-05**: A signed Merkle root per sync batch over item labels.
+- [ ] **DSEC-06**: The exception queue, ordered by impact and grouped by steward into a weekly batch, with bulk actions on clusters and "could be lower" suggestions; lowering happens only through a signed `lowerByPerson`.
+- [ ] **DSEC-07**: Aggregation rules on indexes, exports, datasets and a chat's running count of distinct items.
+- [ ] **DSEC-08**: The derivative cascade along `derivedFrom`, purged after the source's restore window; datasets marked "contains revoked items"; crypto-shredding with per-item keys (from paused Phase 13).
+- [ ] **DSEC-09**: A signed erasure proof listing every derivative removed.
+- [ ] **DSEC-10**: A retention class per item, which its derivatives follow (decision 10), and a ROT report (report only; disposition is always a person's decision). *(Revised 2026-11-18: derivatives follow the class.)*
+- [ ] **DSEC-11**: The canary scan and the network spy across every flow, including the database, caches, model server logs and training jobs.
+- [ ] **DSEC-12**: The indistinguishability test across every view, count, answer, dashboard and specialist.
+- [ ] **DSEC-13**: A scale test at 1 million items and 10 million mail headers on one host, within recorded budgets.
+
+### Personal mark (Phase 94)
+
+- [ ] **MARK-01**: Mark as Personal on files, folders and personal areas, signed by the person's device key and refused at once with a reason where policy forbids it; agents cannot set a mark.
+- [ ] **MARK-02**: A marked item keeps only the existence record of research report 02 section 10.3; its existing derivatives are removed unless a hold covers them.
+- [ ] **MARK-03**: Unmarking re-enters the item at the ingest default, and its label is never lower than before.
+- [ ] **MARK-04**: The personal-mark policy in the bundle, with the defaults of decision 8: allowed in a person's own areas only; 5 GB and 20,000 items per person; location-only mode off; notice at override time, with any delay at most 90 days and recorded.
+- [ ] **MARK-05**: Abuse signals computed from existence records and metadata only, with stepped escalation (a private notice, then counts for the privacy officer, then sampling only under an override).
+
+### Legal holds and requests (Phase 95)
+
+- [ ] **HOLD-01**: The hold lifecycle of design section 4.3, with per-source confirmation and a visible `partial` state that never times out silently.
+- [ ] **HOLD-02**: Holds applied through Purview eDiscovery and Vault where available (manual import first), plus our write-once hold store with signed manifests for sources without a hold feature.
+- [ ] **HOLD-03**: A hold check in every deletion path (sync propagation, retention, ROT, CleanUp, dataset and model deletion), carried along lineage.
+- [ ] **HOLD-04**: Change attempts on held items recorded as `hold.change-observed`; custodian notices with signed acknowledgment, reminders and release notices.
+- [ ] **HOLD-05**: The request lifecycle of design section 4.4, with regime deadline rules held as data in the signed bundle, extensions recorded only after their notice, and warnings at 50, 80 and 95 percent of the time.
+- [ ] **HOLD-06**: Subject resolution to identifiers; searches of our indexes plus live source searches that record cursor age; lineage followed to derivatives and models.
+- [ ] **HOLD-07**: Redaction proposals confirmed one by one with exemption codes, burned in, with a redaction log.
+- [ ] **HOLD-08**: Release as a signed package declassification, with the manifest root signed and an append-only custody log.
+- [ ] **HOLD-09**: A request-scoped, time-boxed grant; recusal; the two-person rule above the officer's clearance; agents propose and never decide.
+- [ ] **HOLD-10**: The personal-mark override of design section 4.5, with `notice-pending` visible to the privacy officer, and the coverage statement of research report 02 section 9.5 for every hold and request.
+
+### Knowledge layer (Phases 96-97)
+
+- [ ] **KB-01**: Chunks and embeddings carry their item's label; hybrid BM25 and vector search with reciprocal-rank fusion and reranking, filtered inside the scan; recall tested at low clearance.
+- [ ] **KB-02**: Tier 0 entity tagging and noun-phrase co-occurrence; evidence rows pointing to exact spans; entities and edges with no stored attributes, computed at read time from the rows the reader may see.
+- [ ] **KB-03**: Entity resolution (deterministic keys, blocking, Splink or an LLM group judge) as reversible proposals with undo; each link labelled with the join of both sides.
+- [ ] **KB-04**: Tier 1 LLM relation extraction with verified quotes, queued under the spend governor for priority items only.
+- [ ] **KB-05**: The knowledge-base panel shell (strict CSP, capped results, from paused Phase 15): data map, search, item and entity pages.
+- [ ] **KB-06**: An ask agent with `catalog.search`, `catalog.describe`, `catalog.lineage`, graph neighbourhood and timeline tools. Every sentence cites items, the answer carries its high-water label, and the model is routed by that label.
+- [ ] **KB-07**: No side channels: no hidden counts, caches keyed by clearance, no summaries across labels.
+- [ ] **KB-08**: The two-compartment indistinguishability test extended to search, entity pages, facets, autocomplete and answers.
+- [ ] **KB-09**: Automatic dashboards (Mosaic, Perspective) fed by host-built, label-filtered results; DuckLake analytics tables written per label cell and read only by the query service.
+- [ ] **KB-10**: Natural-language questions turned into SQL over curated views, parsed and allowlisted, run under RLS, and always shown with their SQL.
+- [ ] **KB-11**: Suggested insights, each with its query: new or fast-growing entities, unusual volume, new connections, possible oversharing, stale data and unclassified items.
+- [ ] **KB-12**: Reports carried from ReportBuilder and ReportVerifier, carrying their high-water label and failing verification if any figure differs from the store.
+- [ ] **KB-13**: A graph explorer with saved scopes (slices) and the RAFT profile, plus timeline replay ("as known at T"), with the slice cap and a truncation notice.
+- [ ] **KB-14**: A label-change impact preview ("what changes if this label changes").
+- [ ] **KB-15**: Your organization may turn on, per scale, "existence only" placeholders (decision 7): a search or entity page then shows that an item exists, with its steward and a request-access button, only for items whose discovery description a person approved. It is off by default, so strict indistinguishability holds unless your organization opts in, and the indistinguishability test covers both settings. *(Added 2026-11-18: no draft requirement built decision 7's opt-in.)*
+
+### Model factory (Phase 98)
+
+- [ ] **FAC-01**: A trainer worker in a pinned container, driven by job specs, with a heartbeat, checkpoints and resume, a GPU memory fraction of 0.8 or less, a cgroup cap and one heavy job at a time; a training job reaches no network destination outside the machine it runs on.
+- [ ] **FAC-02**: A licence registry for bases and teachers; Llama-licensed bases blocked by default; teacher terms recorded per dataset.
+- [ ] **FAC-03**: A dataset builder over the sealed thread store (outcome filter, Presidio scrub, dedup, decontamination, time-and-source split, golden set) producing a manifest with record-level hashes; the dataset's label is the join of its inputs. The first specialist uses chat and run logs only (decision 13).
+- [ ] **FAC-04**: An evaluator using the extension's graders, a golden set, a regression subset and a memorisation probe, with the gates of research report 04 section 6.2.
+- [ ] **FAC-05**: A registrar writing a sealed model card (label, lineage, licence, evaluation, approvals, deletion log); the specialist registered as a `local` model.
+- [ ] **FAC-06**: A router covering shadow, canary and live by role or tier, with automatic rollback triggers and one-click rollback. One click approves a specialist up to shadow and a second click is needed for canary; auto-promotion is off by default and only policy turns it on (decision 12). *(Revised 2026-11-18: the two clicks.)*
+- [ ] **FAC-07**: The specialist lifecycle of design section 4.6, with every stuck-state guard.
+- [ ] **FAC-08**: Serving gated on dominance (the session's clearance must dominate the model's label), with fallback to the incumbent when the host is down.
+- [ ] **FAC-09**: Training runs only on your organization's own machines or hardware endpoints it controls, each listed as a training target in the signed policy (the host first); a job naming any other target, or a training service, is refused before it starts. Teacher inference that writes training targets follows the label's routing (local, or attested NEAR AI TEE models where the label allows; decision 11); it is inference, never training. *(Added 2026-11-18, owner.)*
+
+### Opportunity agent (Phase 99)
+
+- [ ] **OPP-01**: A signal collector over the spend ledger, activity history, approvals, edits and benchmark results, reading metadata only.
+- [ ] **OPP-02**: Signature clustering, plus content clustering under the standing signed policy for your organization's lowest level, or above it after an approval whose clearance dominates the data.
+- [ ] **OPP-03**: Scoring (value, feasibility gates, risk) and the one-click proposal card of research report 04 section 7.4, naming who can approve.
+- [ ] **OPP-04**: Data-gap planning (design section 3.6): when a feasibility gate fails, a data plan with ranked options, each its own card, with only counts for blocked or marked items.
+- [ ] **OPP-05**: Process-level opportunities from run and business event logs, using a TypeScript directly-follows graph and variant counts; usage is aggregated to groups and no person is scored.
+- [ ] **OPP-06**: Specialists from organization data built through `dataset.assemble` (training-allowed items only, opt-in per source or collection, signed), one compartment at a time.
+- [ ] **OPP-07**: Deletion-triggered retraining: a touched model moves to `retrain-required` with the 30-day deadline of decision 9, and traffic falls back to the incumbent when the deadline passes.
+
+### Traceability (data platform)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| SPIKE-01 | Phase 85: Host and local inference on Strix Halo (L1a), measured | Pending |
+| SPIKE-02 | Phase 85: Host and local inference on Strix Halo (L1a), measured | Pending |
+| SPIKE-03 | Phase 85: Host and local inference on Strix Halo (L1a), measured | Pending |
+| SPIKE-04 | Phase 86: Microsoft 365 connector spike | Pending |
+| SPIKE-05 | Phase 86: Microsoft 365 connector spike | Pending |
+| SPIKE-06 | Phase 86: Microsoft 365 connector spike | Pending |
+| SPIKE-07 | Phase 87: Extraction and OCR throughput spike | Pending |
+| SPIKE-08 | Phase 87: Extraction and OCR throughput spike | Pending |
+| SPIKE-09 | Phase 86: Microsoft 365 connector spike | Pending |
+| DATA-01 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-02 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-03 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-04 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-05 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-06 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-07 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-08 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DATA-09 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| DATA-10 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| DATA-11 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| DATA-12 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| DATA-13 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| DATA-14 | Phase 90: Google Workspace connector with one-click connection | Pending |
+| DATA-15 | Phase 90: Google Workspace connector with one-click connection | Pending |
+| DATA-16 | Phase 90: Google Workspace connector with one-click connection | Pending |
+| DATA-17 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| DATA-18 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| DATA-19 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| DATA-20 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| DATA-21 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| DATA-22 | Phase 92: Extraction pipeline | Pending |
+| DATA-23 | Phase 92: Extraction pipeline | Pending |
+| DATA-24 | Phase 92: Extraction pipeline | Pending |
+| DATA-25 | Phase 92: Extraction pipeline | Pending |
+| DATA-26 | Phase 92: Extraction pipeline | Pending |
+| DATA-27 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| DATA-28 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| DATA-29 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| DATA-30 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| DATA-31 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| DATA-32 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| DATA-33 | Phase 101: End-to-end hardening and release | Pending |
+| CONN-01 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| CONN-02 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
+| CONN-03 | Phase 90: Google Workspace connector with one-click connection | Pending |
+| CONN-04 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| COLL-01 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| COLL-02 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| COLL-03 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| COLL-04 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| COLL-05 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| COLL-06 | Phase 91: Endpoint collectors, file shares and simple install | Pending |
+| TAG-01 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-02 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-03 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-04 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-05 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-06 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-07 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| TAG-08 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| DSEC-01 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DSEC-02 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DSEC-03 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| DSEC-04 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| DSEC-05 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| DSEC-06 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| DSEC-07 | Phase 93: Classification, labels, privacy assessment and exceptions | Pending |
+| DSEC-08 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| DSEC-09 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| DSEC-10 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| DSEC-11 | Phase 101: End-to-end hardening and release | Pending |
+| DSEC-12 | Phase 101: End-to-end hardening and release | Pending |
+| DSEC-13 | Phase 101: End-to-end hardening and release | Pending |
+| MARK-01 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| MARK-02 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| MARK-03 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| MARK-04 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| MARK-05 | Phase 94: Lifecycle, erasure and the personal mark | Pending |
+| HOLD-01 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-02 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-03 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-04 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-05 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-06 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-07 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-08 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-09 | Phase 95: Legal holds and access requests | Pending |
+| HOLD-10 | Phase 95: Legal holds and access requests | Pending |
+| KB-01 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-02 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-03 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-04 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-05 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-06 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-07 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-08 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| KB-09 | Phase 97: Analytics, reports, insights and views | Pending |
+| KB-10 | Phase 97: Analytics, reports, insights and views | Pending |
+| KB-11 | Phase 97: Analytics, reports, insights and views | Pending |
+| KB-12 | Phase 97: Analytics, reports, insights and views | Pending |
+| KB-13 | Phase 97: Analytics, reports, insights and views | Pending |
+| KB-14 | Phase 97: Analytics, reports, insights and views | Pending |
+| KB-15 | Phase 96: Search, context graph, entity pages and ask | Pending |
+| FAC-01 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-02 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-03 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-04 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-05 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-06 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-07 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-08 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| FAC-09 | Phase 98: Model factory v1, first specialist from chat and run logs | Pending |
+| OPP-01 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+| OPP-02 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+| OPP-03 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+| OPP-04 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+| OPP-05 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+| OPP-06 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+| OPP-07 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
+
+Coverage: 119 of 119 data platform requirements mapped, each to exactly one phase, all pending (SPIKE 9, DATA 33, CONN 4, COLL 6, TAG 8, DSEC 13, MARK 5, HOLD 10, KB 15, FAC 9, OPP 7; 17 phases). Nothing in v0.5.0 or v0.7.0 was re-mapped.
 
 ## Phase 25 requirements: Cybersecurity harness (milestone v0.8.0)
 
@@ -396,7 +689,7 @@ Coverage: 134 of 134 active v0.7.0 requirements mapped, each to exactly one phas
 
 ---
 
-The v0.5.0 requirements (55, trusted-source knowledge base) are archived with the paused milestone in `.planning/milestones/v0.5.0-paused/REQUIREMENTS.md`.
+The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source knowledge base, paused, its number reassigned on 2026-11-18) are archived in `.planning/milestones/v0.5.0-paused/REQUIREMENTS.md`. Its knowledge base returns as the viewing layer of v0.6.0 Data platform (owner, 2026-11-18): the data platform requirements above take over from its ids, and ROADMAP.md (data platform section) records what happened to each paused phase.
 
 ## Phase 26 requirements: Performance — faster agent and research runs
 
@@ -471,6 +764,8 @@ Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are 
 
 ### L1 Theia appliance and local inference on one machine
 
+Split 2026-11-18 (owner, data platform decision 1): L1a, the host and local inference, is built in v0.6.0 Data platform (Phase 85 and the host parts of Phase 88), where SPIKE-01 and SPIKE-02 meet the AMD and amd64 half of APPL-02, APPL-03 and APPL-05 and the single-machine half of INFR-01 and INFR-03. Everything else below is L1b, the Theia appliance, and stays a later milestone.
+
 - **APPL-01**: One Compose stack holds Theia in the browser, the agent engine, the relay, a local inference service and an optional OpenShell gateway on the host side; it replaces today's code-server setup, and the current VSIX bridges the first release.
 - **APPL-02**: Images build for arm64 (DGX Spark class GB10) and amd64 (Strix Halo class) from one definition, pinned by manifest-list digest, and install offline from a signed bundle with checksums.
 - **APPL-03**: GPU passthrough is optional and vendor-neutral: NVIDIA through the Container Toolkit and CDI, AMD through ROCm device passthrough (`/dev/kfd`, `/dev/dri`), and a CPU or Vulkan fallback; the stack says what it found.
@@ -483,7 +778,7 @@ Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are 
 
 ### L2 Team Mode on the governed core
 
-- Carried from v0.6.0 (text on the archived `feat/team-fix-pass`, ids prefixed where they collide): TM-TEAM-02, TM-TEAM-03, BOARD-01 … BOARD-04, ASSIGN-01 … ASSIGN-03, CLAIM-01 … CLAIM-05, INTEG-01 … INTEG-03, BUDGET-01 … BUDGET-05, METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, FLOW-01, TM-SETUP-01, UX-01. TM-TEAM-01, TM-TEAM-04, SEC-01 and SEC-04 land with Phase 69 (TMR-02, TMR-03). Phase 69 records each disposition (TMR-04). Record: `.planning/research/v0.6.0-disposition.md`.
+- Carried from the former v0.6.0 Team Mode branch plan (text on the archived `feat/team-fix-pass`, ids prefixed where they collide): TM-TEAM-02, TM-TEAM-03, BOARD-01 … BOARD-04, ASSIGN-01 … ASSIGN-03, CLAIM-01 … CLAIM-05, INTEG-01 … INTEG-03, BUDGET-01 … BUDGET-05, METRIC-01, COLLAB-01, COLLAB-02, SEC-02, SEC-03, FLOW-01, TM-SETUP-01, UX-01. TM-TEAM-01, TM-TEAM-04, SEC-01 and SEC-04 land with Phase 69 (TMR-02, TMR-03). Phase 69 records each disposition (TMR-04). Record: `.planning/research/v0.6.0-disposition.md`.
 - **SHRD-01**: On a shared code-server or appliance, each person's editor-wide spend ledger and daily limit are their own.
 - **SHRD-02**: A recovery code shown once unlocks an encrypted backup of the person's device key and own NEAR AI key (strong KDF; the code is never stored or logged; a wrong code and tampering are refused, tested).
 - **SHRD-03**: "Replace my device": the lead accepts a person back as the same member, keeping assignments, history and role.
