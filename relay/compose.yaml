@@ -44,9 +44,10 @@ services:
 
   # Off by default (D-16): docker compose -f relay/compose.yaml --profile signal up -d
   # Tag 0.101 bundles signal-cli 0.14.8 (released 2026-09-10). signal-cli releases stop working about three months after release, so
-  # this pin expires about 2026-12-10 (D-21). Re-checked 2026-11-15: 0.101 is still the newest stable release (only -ci builds since) and
-  # the tag still resolves to this multi-arch index (amd64, arm64/v8, arm/v7). Next re-check 2026-12-01, to leave time to re-pin before
-  # 2026-12-10. Re-pin outside Phase 82 if needed; that phase starts the sidecar.
+  # this pin expires about 2026-12-10 (D-21). Re-checked 2026-11-18: 0.101 is still the newest stable release, though signal-cli itself
+  # is at 0.14.10. Owner decision 2026-11-18: the pin is left to lapse, because the sidecar is off by default and nothing uses it before
+  # Phase 82. After about 2026-12-10 this image no longer works with Signal: do not start this profile until Phase 82 re-pins it to a
+  # current release and confirms it runs with the hardening below.
   signal:
     profiles: ["signal"]
     image: docker.io/bbernhard/signal-cli-rest-api:0.101@sha256:2cf09d66a86fdd210e42ee91662216364acc27da1163a8c44167a77ea3a6559a

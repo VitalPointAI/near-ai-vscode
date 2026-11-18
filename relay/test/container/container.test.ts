@@ -302,7 +302,7 @@ describe('relay container image and Compose project', { timeout: 1_200_000 }, ()
     assert.deepEqual(signal.tmpfs?.map((entry) => entry.split(':')[0]), ['/tmp'], 'only /tmp is writable besides the volume');
     const composeText = readFileSync(COMPOSE_FILE, 'utf8');
     assert.match(composeText, /expires about 2026-12-10/, 'the file records when the bundled signal-cli expires');
-    assert.match(composeText, /Next re-check 2026-12-01/, 'the file records the next re-check of the sidecar pin, before it expires');
+    assert.match(composeText, /do not start this profile until Phase 82 re-pins it/, 'the file says the lapsed pin must be replaced before the sidecar is started');
   });
 
   test('image: user 65532:65532, no secret-like environment variable, no fake secret in history or settings, Node 26.13.1 or later', async () => {

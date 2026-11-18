@@ -160,7 +160,7 @@ Plans:
 | Step | Work | Why here |
 |------|------|----------|
 | 1 | **0.4.23** (PR #51 and release PR #52): done, published 2026-11-15 | It closes a live gap (agents could read the project's key folder) and `main` is strict, so the extension line goes first. |
-| 2 | **PR #50** (Phase 68): merged 2026-11-15 as 052d5cf; the owner added `relay` to branch protection the same day (D-19, done); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) is met by re-pinning (owner, 2026-11-15) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
+| 2 | **PR #50** (Phase 68): merged 2026-11-15 as 052d5cf; the owner added `relay` to branch protection the same day (D-19, done); then a small relay housekeeping PR: the relay's README, Compose file, build script and tests point at the new phase numbers, and the Signal sidecar re-check date (2026-12-10, now before the Signal phase) was to be met by re-pinning (owner, 2026-11-15; changed 2026-11-18: the pin is left to lapse and Phase 82 re-pins it) | The foundation is done; leaving it open blocks every relay phase, and the date falls due long before Phase 82. |
 | 3 | **0.4.24 patch**: the four #46 review minors and the three doc mismatches; **Phase 27 record close** (done 2026-11-17: the owner's check on the real host passed, 27-16 summary written) | Small debt, cleared before the engine changes; SECURITY.md and README must agree before Phase 70 changes the floor. |
 | 4 | **Phase 69, Team Mode reconciliation** (`feat/team-fix-pass` archived on GitHub at 4207080) | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (done, see openshell-spike.md) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
@@ -199,7 +199,7 @@ Phase 68 records (CONTEXT, PLAN, SUMMARY and VERIFICATION files) use the old num
 | A6 tenant resolved through `getBinding` before `acceptInbound` | 68-SECURITY advisory | Phase 76 |
 | D-21 single-instance lock on the state directory (AR-68-01) | 68-CONTEXT, 68-SECURITY | Phase 77 |
 | A2 refuse any `NEAR_AI_KEY_` plain env name whatever its case | 68-SECURITY advisory | Phase 77 |
-| Signal sidecar re-pin (tag 0.101, signal-cli 0.14.8, due about 2026-12-10) and A4 sidecar hardening | 68-CONTEXT D-21, 68-SECURITY | Phase 82 (the date: step 2 above) |
+| Signal sidecar re-pin (tag 0.101, signal-cli 0.14.8, lapses about 2026-12-10; owner 2026-11-18: let it lapse, re-pin before first start) and A4 sidecar hardening | 68-CONTEXT D-21, 68-SECURITY | Phase 82 |
 | Operator runbook (reverse proxy, TLS, backups, upgrades) | 68-CONTEXT deferred | Phase 84 |
 
 > **Naming trap.** This milestone's relay is the *messaging* relay at `relay/`. It is **not** the paused v0.5.0 ciphertext sync relay (RELAY-01/02 archived in `.planning/milestones/v0.5.0-paused/`) and **not** the planned `relayTransport.ts` board sync on the unmerged Team Mode branch. The RELAY-01/02 ids are reused here deliberately and scoped as "v0.7.0 RELAY-01/02" in REQUIREMENTS.md.
@@ -635,7 +635,7 @@ Plans:
   3. Every text command, acknowledgement, result and document attachment works in Signal with the same semantics as Teams, using quoted replies in place of threads, and Signal people pair the same way. (SGNL-03)
   4. An onboarding path exists for provisioning the relay's number, backing up its registration material, and recovering it, because losing that material means losing the number. (SGNL-04)
   5. The Signal card in the Messaging view registers or links the relay's number, backs up its registration material and sends a test message. (SGNL-05)
-**Carried from Phase 68**: re-check and re-pin the sidecar (tag 0.101, signal-cli 0.14.8; the record says before about 2026-12-10, see step 2 of the order of work) and A4 (give the sidecar the relay's hardening before it first starts).
+**Carried from Phase 68**: re-pin the sidecar to a current release before it first starts (tag 0.101 with signal-cli 0.14.8 lapses about 2026-12-10, and the owner chose on 2026-11-18 to let it lapse until this phase) and A4 (give the sidecar the relay's hardening before it first starts).
 **Research flags**: Pin the exact signal-cli version and verify the image's bundled signal-cli age before integrating; confirm the group-id wire format for `/v2/send`; the sidecar image must exist for arm64 as well as amd64 (OPS-07).
 **Plans:** 0 plans
 
