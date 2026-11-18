@@ -7,6 +7,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';
 import { CONNECTION_BINDING_TEXT, DEFAULT_ROUTING } from '../domain/gate/routing';
+import { BADGE_CHECK_TIMEOUT_MS, TRUST_BADGE_STATES, TRUST_BADGE_TEXT, TRUST_BADGE_TITLES } from '../domain/gate/trustBadge';
+import { NOT_CHECKED_IN_EDITOR } from '../services/attestation';
 import { USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
 import { FLOOR_CANNOT_SEE_TEXT, FLOOR_EFFECTS_CANNOT_SEE_TEXT, namesCredentialStore } from '../domain/gate/floor';
 import { classifyCommand, MAX_COMMAND_LENGTH, MAX_NESTING } from '../agent/commandSafety';
@@ -23,6 +25,7 @@ const MANIFEST = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'
 
 const EM_DASH = '—';
 const POLICY_HEADING = '### Your policy file and decision records';
+const BADGE_HEADING = '### The trust badge on each answer';
 
 // From a heading line to the next heading of the same or a higher level (or the end of the file).
 function sectionOf(text: string, heading: string): string {
@@ -531,14 +534,62 @@ test('SECURITY.md carries CONNECTION_BINDING_TEXT after the attested-cloud sente
   assert.doesNotMatch(section, /Phase \d/);
 });
 
-test('Checking a response\'s signature says answers at attested-cloud levels are checked automatically, and Known limitations has both rows', () => {
-  const signature = flat(sectionOf(SECURITY, '### Checking a response\'s signature'));
-  assert.ok(signature.includes(flat('every answer NEAR AI Cloud sends, tool-call turns and helper agents\' answers included, is checked this way automatically, in the background, after it arrives.')));
-  assert.ok(signature.includes(flat('A failed check shows **Check again**, which checks the failed answers again with a fresh report.')));
-  assert.ok(!signature.includes(flat('Tool-call turns are signed the same way but are not checked.')), 'tool-call turns are checked at attested-cloud levels now');
+// PR 4e (CLAS-08): the section that described the per-answer action is now "The trust badge on each answer"; plan 25's sentences about the automatic
+// check at attested-cloud levels and Check again are read from it.
+test('The trust badge on each answer says answers at attested-cloud levels are checked automatically, and Known limitations has both rows', () => {
+  const badge = flat(sectionOf(SECURITY, BADGE_HEADING));
+  assert.ok(badge.includes(flat('every answer NEAR AI Cloud sends, tool-call turns and helper agents\' answers included, is checked this way too, and a failed check stops those levels for the chat')));
+  assert.ok(badge.includes(flat('**Check again** checks the answer again with a fresh report, never a reused one.')));
+  assert.ok(!badge.includes(flat('Tool-call turns are signed the same way but are not checked.')), 'tool-call turns are checked at attested-cloud levels now');
   const limits = sectionOf(SECURITY, '## Known limitations');
   assert.ok(limits.includes('The check of an answer\'s attestation and signature runs after the answer, so it cannot stop that answer\'s request; a failed check stops the next ones.'));
   assert.ok(limits.includes('The check that a connection ends inside the enclave relies on NEAR AI Cloud\'s attestation and Intel\'s root of trust. Like the answer check, it does not check the platform\'s TCB status, certificate revocation or which code the enclave runs.'));
   assert.equal(SECURITY.split('relies on NEAR AI Cloud\'s attestation and Intel\'s root of trust').length - 1, 1);
   assert.ok(!limits.includes(EM_DASH));
+});
+
+// ---- Plan 27 (PR 4e, CLAS-08, CLAS-07, D-56): the trust badge in SECURITY.md and README, word for word with the code ----
+
+test('SECURITY.md states each badge title with its explanation word for word, and the check\'s cost, timeout, lead-only rule, Check again, Show full attestation and what is not checked', () => {
+  const section = sectionOf(SECURITY, BADGE_HEADING);
+  const words = flat(section);
+  for (const state of TRUST_BADGE_STATES) {
+    assert.ok(words.includes(flat(`**${TRUST_BADGE_TITLES[state]}**: ${TRUST_BADGE_TEXT.explanation[state]}`)), `${state}: its title, then its explanation word for word`);
+  }
+  for (const phrase of [
+    'Each cloud answer from a TEE model is checked once, automatically, in the background, after it arrives.',
+    'That costs one signature request per answer; an attestation report NEAR AI has already verified for the same signing key is reused for up to ten minutes.',
+    `A check that has not finished after ${String(BADGE_CHECK_TIMEOUT_MS / 1000)} seconds shows **Not verified**, saying it could not be checked in time`,
+    'if the check finishes later, the badge changes.',
+    'The badge is on the lead agent\'s answers only.',
+    'each badge\'s details say that helper agents in the run may have used other models, each request routed by the chat\'s label and recorded.',
+    'it lifts that stop when the answer now checks out.',
+    '**Show full attestation** opens the details in an editor tab',
+    'Nothing is written to your project or to a decision record.',
+    'shows each answer\'s badge in the state its checks reached when the answer arrived'
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  assert.ok(words.includes(flat(`"${TRUST_BADGE_TEXT.checking}"`)), 'the Checking now words');
+  // NOT_CHECKED_IN_EDITOR, item by item, in the section's own words.
+  assert.equal(NOT_CHECKED_IN_EDITOR.length, 3);
+  for (const phrase of ['the platform\'s TCB status and certificate revocation', 'which code the enclave runs (its measurements', 'NVIDIA\'s GPU attestation verdict', 'cloud.near.ai/verify']) assert.ok(words.includes(flat(phrase)), phrase);
+  // The numbered list of checks is kept.
+  for (const step of ['1. NEAR\'s signature (`/v1/signature/{chat_id}`)', '2. The signature (EIP-191, secp256k1)', '3. A fresh attestation report', '4. The quote\'s `report_data` binds']) assert.ok(words.includes(flat(step)), step);
+  assert.ok(!section.includes(EM_DASH));
+  assert.doesNotMatch(section, /NEAR organization/);
+  assert.doesNotMatch(section, /Phase \d/);
+});
+
+test('README describes the badge with its three titles and links to the new section; neither file still names the old per-answer action or links to its anchor', () => {
+  for (const title of Object.values(TRUST_BADGE_TITLES)) assert.ok(flat(README).includes(title), title);
+  assert.equal(README.split('SECURITY.md#the-trust-badge-on-each-answer').length - 1, 2, 'both README mentions link to the section');
+  for (const text of [SECURITY, README]) {
+    assert.doesNotMatch(text, /Verify signature/);
+    assert.doesNotMatch(text, /#checking-a-responses-signature/);
+  }
+  assert.ok(SECURITY.includes('(#the-trust-badge-on-each-answer)'), 'the labels section links to it');
+  const limits = sectionOf(SECURITY, '## Known limitations');
+  assert.ok(limits.includes('The trust badge\'s checks do not check TCB status or revocation, enclave measurements, or NVIDIA\'s verdict'));
+  const readmeLines = README.split('\n').filter((line) => /trust badge|Verified private model|SECURITY\.md#the-trust-badge/.test(line));
+  assert.ok(readmeLines.length >= 2);
+  for (const line of readmeLines) { assert.ok(!line.includes(EM_DASH), line); assert.doesNotMatch(line, /NEAR organization/); }
 });
