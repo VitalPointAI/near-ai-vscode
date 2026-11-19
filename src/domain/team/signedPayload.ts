@@ -23,7 +23,7 @@ import { SecretLeakError, assertNoSecrets } from './secrets';
 
 export const PAYLOAD_DOMAIN = 'near-ai-vscode/signed-payload/v1';
 export const PAYLOAD_VERSION = 1;
-export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger'] as const;
+export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head'] as const;
 export type PayloadPurpose = typeof PAYLOAD_PURPOSES[number];
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
 const PUBLIC_KEY_BYTES = 32;

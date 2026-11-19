@@ -34,7 +34,9 @@ fictional data only; labels are not accreditation, and no member has a persona n
   templates, wargame ledger, centre of gravity analysis and assessment framework.
 - **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
   and move from draft through the gates to a person's decision, recorded in a signed, chained
-  ledger in `.planning/staff/ledger/`. Members use the built-in `mcp:staff-products` tools by role
+  ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head
+  outside the project, so a ledger cut short, deleted or replaced reads as tampered, and a ledger
+  or register that cannot be read whole is reported as unreadable, never as empty. Members use the built-in `mcp:staff-products` tools by role
   (propose, status and list for owners; submit and withdraw for the section's lead; verdicts for
   the two gates), with the shared CCIR, RFI, assumptions, annex, synchronization, decision support
   and targeting registers, the wargame ledger and the step rail. Approving, rejecting and
