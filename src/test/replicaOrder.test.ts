@@ -2,11 +2,14 @@
 // late concurrent entry.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildCausalGraph } from '../domain/replica/causal';
+import type { GraphEntry } from '../domain/replica/causal';
 import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
-import type { SealedEntry } from '../domain/replica/entry';
+import type { Dep, SealedEntry } from '../domain/replica/entry';
+import { checkpointOrder, kahnOrder, totalOrder } from '../domain/replica/order';
 import type { ProductTextOutput } from '../domain/replica/textFold';
-import { createWorld } from './helpers/replicaWorld';
+import { WORLD_AT, createWorld, rng } from './helpers/replicaWorld';
 import type { Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
@@ -96,4 +99,69 @@ test('an entry that waits for a missing predecessor changes the held list and ne
   const full = addEntries(early, sealed(a[0]));
   assert.equal(full.result.applied.length, 2);
   sameResult(full.result, foldEntries(sealed(...a), ctx), 'late predecessor');
+});
+
+// A random history of 2 to 5 writers and at most 60 entries with random deps, as graph entries (no sealing needed for ordering).
+function randomHistory(seed: number): GraphEntry[] {
+  const random = rng(seed);
+  const names = ['A', 'B', 'C', 'D', 'E'].slice(0, 2 + random.int(4));
+  const world = createWorld({ members: names.map((name) => ({ member: `mbr-${name.toLowerCase()}${name.toLowerCase()}`, devices: [name] })) });
+  const written: Written[] = [];
+  const result: GraphEntry[] = [];
+  const total = 1 + random.int(60);
+  for (let index = 0; index < total; index += 1) {
+    const name = random.pick(names);
+    const deps: Written[] = [];
+    if (written.length > 0) {
+      const wanted = random.int(4);
+      for (let count = 0; count < wanted; count += 1) {
+        const pick = random.pick(written);
+        if (!deps.includes(pick)) deps.push(pick);
+      }
+    }
+    const entry = world.write(name, { kind: 'doc.update', data: { index }, deps });
+    written.push(entry);
+    const depList: Dep[] = deps.map((dep) => ({ writer: dep.writer, seq: dep.seq, hash: dep.hash }));
+    result.push({ hash: entry.hash, header: entry.entry.header, body: { deps: depList, roster: world.rosterHash, lamport: entry.lamport, at: WORLD_AT, actor: { kind: 'person' }, kind: 'doc.update', data: { index } } });
+  }
+  return result;
+}
+
+test('totalOrder equals a Kahn topological sort with the same tie-break on 200 seeded random histories', () => {
+  for (let seed = 1; seed <= 200; seed += 1) {
+    const entries = randomHistory(seed);
+    const graph = buildCausalGraph(entries);
+    const reference = kahnOrder(entries, graph).map((entry) => entry.hash);
+    const sorted = totalOrder(entries).map((entry) => entry.hash);
+    assert.deepEqual(sorted, reference, `seed ${seed}`);
+    // Whatever order the entries are listed in, the order is the same.
+    const reversed = totalOrder([...entries].reverse()).map((entry) => entry.hash);
+    assert.deepEqual(reversed, reference, `seed ${seed} reversed`);
+  }
+});
+
+test('the total order is a topological order: every entry comes after everything it follows', () => {
+  for (let seed = 201; seed <= 230; seed += 1) {
+    const entries = randomHistory(seed);
+    const graph = buildCausalGraph(entries);
+    const position = new Map(totalOrder(entries).map((entry, index) => [entry.hash, index]));
+    for (const entry of entries) {
+      for (const pred of graph.preds(entry.hash)) assert.ok((position.get(pred) as number) < (position.get(entry.hash) as number), `seed ${seed}`);
+    }
+  }
+});
+
+test('checkpointOrder puts each covered set in order first and the rest after, and equals totalOrder without checkpoints', () => {
+  const entries = randomHistory(7);
+  const sorted = totalOrder(entries);
+  assert.deepEqual(checkpointOrder(entries, []).map((entry) => entry.hash), sorted.map((entry) => entry.hash));
+  const first = new Set(sorted.slice(5, 9).map((entry) => entry.hash));
+  const second = new Set([...first, ...sorted.slice(0, 3).map((entry) => entry.hash)]);
+  const ordered = checkpointOrder(entries, [first, second]).map((entry) => entry.hash);
+  const expected = [
+    ...totalOrder(entries.filter((entry) => first.has(entry.hash))),
+    ...totalOrder(entries.filter((entry) => second.has(entry.hash) && !first.has(entry.hash))),
+    ...totalOrder(entries.filter((entry) => !second.has(entry.hash)))
+  ].map((entry) => entry.hash);
+  assert.deepEqual(ordered, expected);
 });

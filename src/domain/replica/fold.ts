@@ -14,18 +14,26 @@ import { buildCausalGraph } from './causal';
 import type { CausalGraph } from './causal';
 import { classifyChains } from './chain';
 import type { ChainResult, EquivocationProof, HeldEntry, QuarantineRecord, RejectedEntry } from './chain';
+import { checkpointCoverage, checkpointHash, readCheckpoint } from './checkpoint';
+import type { SignedCheckpoint } from './checkpoint';
 import { streamDigests } from './digest';
 import { entryHash, parseHeaderShape } from './entry';
 import { kindFamily } from './kinds';
 import type { KindFamily } from './kinds';
-import { totalOrder } from './order';
+import { checkpointOrder } from './order';
 import { DEFAULT_REDUCERS } from './reducers';
 import type { AnyReducer, FoldView } from './reducers';
 import type { ReplicaContext } from './rosterView';
 import { verifyEntry } from './verify';
 import type { KeepReason, VerifiedEntry, VerifyOutcome } from './verify';
 
-export interface FoldOptions { reducers?: readonly AnyReducer[] }
+export interface FoldOptions {
+  reducers?: readonly AnyReducer[];
+  // Checkpoints the caller has already verified (verifyCheckpoint). The fold uses the longest nested chain of them and reports the rest.
+  checkpoints?: readonly SignedCheckpoint[];
+}
+// A checkpoint the fold did not use because it does not nest with the chain it used.
+export interface CheckpointNote { checkpoint: string; reason: 'does-not-nest' }
 export interface KeptEntry { hash: string; reason: KeepReason; family?: string }
 export interface RefusedEntry { hash: string; reason: string; family: string }
 
@@ -42,8 +50,13 @@ export interface FoldResult {
   proofs: EquivocationProof[];
   // Each reducer's output, by family.
   families: Record<string, unknown>;
-  // The digest of each stream that has admitted entries.
+  // The digest of each stream that has admitted entries. Compare digests only between results with the same `checkpoint`: a machine that holds a
+  // checkpoint and one that does not can number versions differently when a late concurrent entry exists.
   digests: Record<string, string>;
+  // The hash of the last checkpoint the order was fixed by, or null when none was used.
+  checkpoint: string | null;
+  // Checkpoints that did not nest with the chain used.
+  checkpointConflicts: CheckpointNote[];
 }
 
 const byHash = (a: { hash?: string }, b: { hash?: string }): number => ((a.hash ?? '') < (b.hash ?? '') ? -1 : (a.hash ?? '') > (b.hash ?? '') ? 1 : 0);
@@ -81,6 +94,14 @@ interface Run {
   held: HeldEntry[];
 }
 
+// The checkpoints the order is fixed by: a chain of nested covered sets, smallest first.
+interface CheckpointPlan {
+  used: string | null;
+  sets: Array<ReadonlySet<string>>;
+  final: ReadonlySet<string>;
+  conflicts: CheckpointNote[];
+}
+
 // Everything derived from a Store that the apply loop needs.
 interface Prepared {
   verifyHeld: HeldEntry[];
@@ -88,6 +109,7 @@ interface Prepared {
   chains: ChainResult;
   graph: CausalGraph;
   ordered: VerifiedEntry[];
+  plan: CheckpointPlan;
 }
 
 export interface FoldState {
@@ -143,7 +165,53 @@ function retryHeld(store: Store, ctx: ReplicaContext): boolean {
   return changed;
 }
 
-function prepare(store: Store, ctx: ReplicaContext): Prepared {
+const isSubset = (small: ReadonlySet<string>, large: ReadonlySet<string>): boolean => {
+  for (const hash of small) if (!large.has(hash)) return false;
+  return true;
+};
+
+// The longest chain of nested covered sets among the checkpoints (strict subsets, smallest first); ties go to the larger final set, then the smaller
+// hashes, so the choice never depends on the order the caller listed them in. The rest are reported when they are not comparable with the chain.
+function planCheckpoints(checkpoints: readonly SignedCheckpoint[], graph: CausalGraph): CheckpointPlan {
+  const byHash = new Map<string, { hash: string; covered: ReadonlySet<string> }>();
+  for (const signed of checkpoints) {
+    const checkpoint = readCheckpoint(signed.payload);
+    if (checkpoint === undefined) continue;
+    const covered = checkpointCoverage(checkpoint, graph);
+    const hash = checkpointHash({ payload: checkpoint, sig: signed.sig });
+    if (covered.size > 0) byHash.set(hash, { hash, covered });
+  }
+  const items = [...byHash.values()].sort((a, b) => a.covered.size - b.covered.size || (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+  const best: Array<Array<{ hash: string; covered: ReadonlySet<string> }>> = [];
+  items.forEach((item, index) => {
+    let chain = [item];
+    for (let before = 0; before < index; before += 1) {
+      const other = items[before];
+      if (other.covered.size >= item.covered.size || !isSubset(other.covered, item.covered)) continue;
+      const candidate = [...best[before], item];
+      const better = candidate.length > chain.length || (candidate.length === chain.length && candidate.map((entry) => entry.hash).join() < chain.map((entry) => entry.hash).join());
+      if (better) chain = candidate;
+    }
+    best.push(chain);
+  });
+  let chosen: Array<{ hash: string; covered: ReadonlySet<string> }> = [];
+  for (const chain of best) {
+    const last = chain[chain.length - 1];
+    const current = chosen[chosen.length - 1];
+    if (current === undefined || chain.length > chosen.length || (chain.length === chosen.length && last.covered.size > current.covered.size)) chosen = chain;
+  }
+  const inChain = new Set(chosen.map((entry) => entry.hash));
+  const conflicts: CheckpointNote[] = [];
+  for (const item of items) {
+    if (inChain.has(item.hash)) continue;
+    const incomparable = chosen.some((member) => !isSubset(item.covered, member.covered) && !isSubset(member.covered, item.covered));
+    if (incomparable) conflicts.push({ checkpoint: item.hash, reason: 'does-not-nest' });
+  }
+  const last = chosen[chosen.length - 1];
+  return { used: last === undefined ? null : last.hash, sets: chosen.map((entry) => entry.covered), final: last === undefined ? new Set<string>() : last.covered, conflicts };
+}
+
+function prepare(store: Store, ctx: ReplicaContext, options: FoldOptions): Prepared {
   const verified: VerifiedEntry[] = [];
   const verifyHeld: HeldEntry[] = [];
   const verifyRejected: RejectedEntry[] = [];
@@ -158,7 +226,8 @@ function prepare(store: Store, ctx: ReplicaContext): Prepared {
   }
   const chains = classifyChains(verified, ctx);
   const graph = buildCausalGraph(chains.admitted);
-  return { verifyHeld, verifyRejected, chains, graph, ordered: totalOrder(chains.admitted) };
+  const plan = planCheckpoints(options.checkpoints ?? [], graph);
+  return { verifyHeld, verifyRejected, chains, graph, ordered: checkpointOrder(chains.admitted, plan.sets), plan };
 }
 
 function freshRun(reducers: readonly AnyReducer[]): Run {
@@ -183,7 +252,7 @@ function viewOf(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldView {
     position: (hash) => positions.get(hash),
     entry: (hash) => entries.get(hash),
     state: (family) => run.states.get(family)?.state,
-    isFinal: () => false
+    isFinal: (hash) => prepared.plan.final.has(hash)
   };
 }
 
@@ -245,7 +314,9 @@ function buildResult(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldRes
     quarantined: chains.quarantined,
     proofs: chains.proofs,
     families,
-    digests
+    digests,
+    checkpoint: prepared.plan.used,
+    checkpointConflicts: prepared.plan.conflicts
   };
 }
 
@@ -257,7 +328,7 @@ export function foldEntries(input: readonly unknown[], ctx: ReplicaContext, opti
     store.seen.add(item);
     ingest(store, item, ctx);
   }
-  const prepared = prepare(store, ctx);
+  const prepared = prepare(store, ctx, options);
   const run = freshRun(options.reducers ?? DEFAULT_REDUCERS);
   applyFrom(run, prepared, ctx, 0);
   return buildResult(prepared, run, ctx);
@@ -265,7 +336,7 @@ export function foldEntries(input: readonly unknown[], ctx: ReplicaContext, opti
 
 export function createFoldState(ctx: ReplicaContext, options: FoldOptions = {}): FoldState {
   const store = emptyStore();
-  const prepared = prepare(store, ctx);
+  const prepared = prepare(store, ctx, options);
   const run = freshRun(options.reducers ?? DEFAULT_REDUCERS);
   return { result: buildResult(prepared, run, ctx), refolds: 0, ctx, options, store, prepared, run };
 }
@@ -273,6 +344,8 @@ export function createFoldState(ctx: ReplicaContext, options: FoldOptions = {}):
 // Does the order start with the old order, with the same entries skipped as quarantined?
 function extendsOrder(before: Prepared, after: Prepared): boolean {
   if (after.ordered.length < before.ordered.length) return false;
+  // What is final at apply time (isFinal) must not have changed under the entries already applied.
+  if (before.plan.used !== after.plan.used || before.plan.final.size !== after.plan.final.size) return false;
   for (let index = 0; index < before.ordered.length; index += 1) {
     const hash = before.ordered[index].hash;
     if (after.ordered[index].hash !== hash) return false;
@@ -295,7 +368,7 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
   if (retryHeld(store, next)) changed = true;
   if (!changed) return state;
 
-  const prepared = prepare(store, next);
+  const prepared = prepare(store, next, state.options);
   let run: Run;
   let refolds = state.refolds;
   if (extendsOrder(state.prepared, prepared)) {
