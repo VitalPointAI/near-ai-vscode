@@ -1,6 +1,6 @@
 // What the Staff Room reads from a staff project (WP-ROOM): the product ledger and staff events through the staff host, and the files under
-// .planning/staff/ the J2 workspace draws: the scenario, the intel workbench registers, the shared PIR register, the DST and DSM, the adversary COA set and
-// the standing watches. Node I/O only, read-only: nothing here writes a file or records an event. No vscode, so the tests drive it directly.
+// .planning/staff/ the workspaces draw: for the J2 the scenario, the intel workbench registers, the shared PIR register, the DST and DSM, the adversary COA
+// set and the standing watches; for the J5, J3 and J4 their product tables, registers, the wargame ledger and the logistics records. Node I/O only, read-only: nothing here writes a file or records an event. No vscode, so the tests drive it directly.
 //
 // A file that is missing is simply not drawn. A file that is there but cannot be read (damaged, too large, refused by the scenario reader) is named in
 // the J2 workspace's problems, so a person sees why something is absent rather than an empty panel.
@@ -24,6 +24,11 @@ import type { RegisterRow } from '../domain/staff/registers';
 import { parseScenarioText, SCENARIO_DIR } from '../domain/staff/scenario';
 import type { Scenario } from '../domain/staff/scenario';
 import type { StaffRoomInput } from '../domain/staff/staffRoom';
+import type { WorkspacesInput } from '../domain/staff/staffRoomWorkspaces';
+import type { StaffSectionId } from '../domain/staff/doctrine';
+import { parseBandSettings } from '../domain/staff/logistics';
+import { productFacts } from '../domain/staff/orders';
+import type { ProductView } from '../domain/staff/readModels';
 import { staffProductPath } from '../domain/staff/writeLimits';
 import { readRealEntities } from './realEntities';
 import { EVENTS_FILE, LEDGER_DIR } from './staffHost';
@@ -129,6 +134,59 @@ export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<st
   return { watches: shown, problems, unsigned };
 }
 
+/** The product bodies the J5, J3 and J4 workspaces read their tables from, with the section each lives in when the ledger does not say. */
+export const WORKSPACE_BODIES: ReadonlyArray<readonly [string, StaffSectionId]> = [
+  ['coa-themes', 'j5'], ['coa-validity', 'j5'], ['comparison-matrix', 'j5'], ['coa-decision-brief', 'j5'], ['coa-supportability', 'j4']
+];
+/** The registers the workspaces draw, each with the section its file lives in when the ledger does not say (the battle rhythm is the J3's standalone). */
+const WORKSPACE_REGISTERS = [
+  ['syncMatrix', 'sync-matrix', 'j5'], ['eventLog', 'event-log', 'j3'], ['ccir', 'ccir-register', 'j3'], ['rfi', 'rfi-tracker', 'j3'],
+  ['battleRhythm', 'battle-rhythm-calendar', 'j3'], ['annexTracker', 'annex-tracker', 'j5']
+] as const;
+
+/**
+ * What the J5, J3 and J4 workspaces are built from: product tables, registers, the wargame ledger, the orders check's facts and the logistics records.
+ * A register or ledger that is there but cannot be read is named in the problems, never drawn as empty.
+ */
+export async function workspacesInputOf(host: StaffHost | undefined, root: string, registry: readonly ProductView[]): Promise<WorkspacesInput> {
+  const problems: string[] = [];
+  const sectionOf = (product: string, fallback: StaffSectionId) => registry.find((view) => view.product === product)?.section ?? fallback;
+  const bodies: Record<string, string> = {};
+  for (const [product, section] of WORKSPACE_BODIES) {
+    const read = await productBody(root, staffProductPath(sectionOf(product, section), product));
+    if (read.problem) problems.push(read.problem);
+    if (read.text !== undefined) bodies[product] = read.text;
+  }
+  const registers: Partial<Record<(typeof WORKSPACE_REGISTERS)[number][0], RegisterRow[]>> = {};
+  for (const [key, register, section] of WORKSPACE_REGISTERS) {
+    const read = await productBody(root, staffProductPath(sectionOf(register, section), register));
+    if (read.problem) { problems.push(read.problem); continue; }
+    if (read.text === undefined) continue;
+    const rows = parseRegisterBody(registerSchema(register)!, read.text);
+    if (rows) registers[key] = rows;
+    else problems.push(`The ${registerSchema(register)!.title.toLowerCase()} could not be read: its rows do not fit the register, so it is not shown.`);
+  }
+  let wargame: WorkspacesInput['wargame'];
+  let facts: WorkspacesInput['facts'];
+  let logistics: WorkspacesInput['logistics'];
+  if (host) {
+    try { wargame = { entries: await host.wargameEntries() }; } catch (error) { wargame = { unreadable: error instanceof Error ? error.message : String(error) }; }
+    // The annex tracker is held to the ledger by the orders tool's own check, so the facts come from the same replay it uses.
+    if (registers.annexTracker?.length) {
+      try { facts = productFacts(await host.replay()); } catch (error) { problems.push(`The annex tracker could not be checked against the ledger: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    try {
+      const logisticsHost = host.logistics();
+      const [check, reports, definitions] = await Promise.all([logisticsHost.records(), logisticsHost.reports(), logisticsHost.definitionsText()]);
+      logistics = {
+        records: [...check.records.values()], recordProblems: [...check.problems.values()], ...(check.ledgerProblem ? { ledgerProblem: check.ledgerProblem } : {}),
+        reports, bands: definitions ? parseBandSettings(definitions) : []
+      };
+    } catch (error) { problems.push(`The logistics records could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  return { bodies, registers, ...(wargame ? { wargame } : {}), ...(facts ? { facts } : {}), ...(logistics ? { logistics } : {}), problems };
+}
+
 /** Everything the Staff Room model is built from, read now. */
 export async function loadStaffRoomInput(host: StaffHost | undefined, root: string, now: number, run?: string, options: { readonly live?: readonly Observation[] } = {}): Promise<StaffRoomInput> {
   const [snapshot, events, feedEvents, settings, scenario, watches] = await Promise.all([
@@ -164,8 +222,9 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     const read = await productBody(root, staffProductPath(sectionOf(product, 'j2'), product));
     if (read.text !== undefined && /most (likely|dangerous)|\bML ?COA\b|\bMD ?COA\b/i.test(read.text)) { enemyCoaBody = read.text; enemyCoaProduct = product; break; }
   }
+  const workspaces = await workspacesInputOf(host, root, registry);
   return {
-    now, settings, registry, decisions: snapshot?.decisions ?? [], cop: snapshot?.cop ?? { layers: [], eventTail: [] },
+    now, settings, registry, decisions: snapshot?.decisions ?? [], workspaces, cop: snapshot?.cop ?? { layers: [], eventTail: [] },
     ...(snapshot?.ledgerProblem ? { ledgerProblem: snapshot.ledgerProblem } : {}),
     ...(snapshot?.eventLogProblem ? { eventLogProblem: snapshot.eventLogProblem } : {}),
     events, feedEvents, ...(run ? { run } : {}),

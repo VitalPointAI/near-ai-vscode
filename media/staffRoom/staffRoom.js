@@ -1,5 +1,6 @@
-// The Staff Room (UX concept 5 and 8 to 10; owner direction 2026-11-18; WP-ROOM): one room for a staff run. The war room for the full staff, and a
-// workspace per section (J2 here; J5, J3 and J4 arrive in drop 2), all sharing one map, the product ledger, the gold human-decisions panel and one clock.
+// The Staff Room (UX concept 5 and 8 to 10; owner directions 2026-11-18 and 2026-11-19; WP-ROOM): one room for a staff run. The war room for the full
+// staff, and a workspace per section (J2 here; J5, J3 and J4 in staffWorkspaces.js), all sharing one map, the product ledger, the gold human-decisions
+// panel and one clock.
 //
 // The host sends the whole picture (src/domain/staff/staffRoom.ts) and the hand-offs the newest events stand for. This page only lays it out and
 // animates: violet is agent work, gold is a person's decision and nothing else, green is a delivered product. Movement means something (a hand-off, a
@@ -8,13 +9,13 @@
 // asks who they are, confirms in a modal dialog and signs. The page never shows a decision until the ledger records it. Every text goes in with textContent.
 (function () {
   const vscode = acquireVsCodeApi();
-  const saved = Object.assign({ calm: false, theme: 'auto', workspace: 'war-room', follow: true, j2tab: 'threat', keys: true }, (vscode.getState && vscode.getState()) || {});
+  const saved = Object.assign({ calm: false, theme: 'auto', workspace: 'war-room', follow: true, j2tab: 'threat', keys: true, wsTabs: {} }, (vscode.getState && vscode.getState()) || {});
   const $ = (id) => document.getElementById(id);
   const SVG = 'http://www.w3.org/2000/svg';
   const EASE = { std: 'cubic-bezier(.2,0,0,1)', travel: 'cubic-bezier(.45,0,.2,1)', exit: 'cubic-bezier(.3,0,1,1)', settle: 'cubic-bezier(.34,1.4,.64,1)' };
   const MAX_TRACERS = 6, MAX_QUEUE = 12;
   const WORKSPACES = ['war-room', 'j2', 'j5', 'j3', 'j4'];
-  const BUILT = ['war-room', 'j2'];
+  const SECTION_WORKSPACES = ['j5', 'j3', 'j4'];
   const J2_TABS = [['threat', 'Threat'], ['pirs', 'PIRs'], ['collection', 'Collection'], ['sources', 'Sources'], ['watches', 'Watches']];
   const GLYPH = {
     'war-room': 'M8 2v3M8 11v3M2 8h3M11 8h3M8 5.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 0 0 0-5z',
@@ -46,6 +47,7 @@
   let announceQueue = [];
   let announceTimer;
   let noticeTimer;
+  let workspaces;
 
   const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : undefined;
   /** Whether anything may move: not under reduced motion, not in Calm, not while the panel is hidden. */
@@ -186,7 +188,11 @@
     }
     buildWarRoom(nodes.panes.get('war-room'));
     buildJ2(nodes.panes.get('j2'));
-    for (const id of ['j5', 'j3', 'j4']) nodes.panes.get(id).append(el('div', 'coming'));
+    workspaces = window.NearAiStaffWorkspaces.create({
+      el, sv, glyph, button, table, setText, dtg, shortTime, inWords, anim, announce, roving, decisionItem, openProductCard, GLYPH, EASE, saved, save,
+      model: () => model, now: () => clockBase.at + (Date.now() - clockBase.received)
+    });
+    for (const id of SECTION_WORKSPACES) workspaces.build(id, nodes.panes.get(id));
     const feed = el('aside', 'feed');
     feed.setAttribute('aria-label', 'Decisions and products');
     const decide = el('section', 'decide');
@@ -325,7 +331,7 @@
     }
     for (const [key, pane] of nodes.panes) pane.hidden = key !== id;
     // The one map moves to the workspace on screen.
-    const slot = id === 'j2' ? nodes.j2MapSlot : nodes.warMapSlot;
+    const slot = id === 'j2' ? nodes.j2MapSlot : (id === 'j3' && workspaces && workspaces.mapSlot('j3')) || nodes.warMapSlot;
     if (map && map.element.parentNode !== slot) slot.append(map.element);
     if (map && model && changed) { lastMapJson = ''; drawMap(false); }
     moveInk();
@@ -415,11 +421,17 @@
   // ---------- validation of what the host sends ----------
   const isObj = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
   const isArr = Array.isArray;
+  /** The message has exactly these keys, each its own: no extra key, none missing and none inherited (drop 2 review, #113). */
+  const exactKeys = (message, keys) => { const own = Object.keys(message); return own.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(message, key)); };
   /** The host's picture, checked for shape before anything is drawn: a message that does not fit is ignored. */
   function validModel(m) {
     return isObj(m) && m.v === 1 && typeof m.now === 'number' && isObj(m.operation) && isObj(m.profile) && isObj(m.clock) && typeof m.clock.at === 'string'
       && isArr(m.rail) && isArr(m.squads) && isArr(m.ledger) && isArr(m.decisions) && isObj(m.map) && isArr(m.map.units) && isArr(m.map.layers)
-      && isObj(m.j2) && isArr(m.j2.pirs) && isArr(m.j2.collection) && isArr(m.j2.sources) && isArr(m.j2.watches) && isArr(m.j2.ecoas) && isArr(m.activity) && isArr(m.runs) && isObj(m.coming)
+      && isObj(m.j2) && isArr(m.j2.pirs) && isArr(m.j2.collection) && isArr(m.j2.sources) && isArr(m.j2.watches) && isArr(m.j2.ecoas) && isArr(m.activity) && isArr(m.runs)
+      && SECTION_WORKSPACES.every((id) => isObj(m[id]) && isArr(m[id].products) && isArr(m[id].activity) && isArr(m[id].problems))
+      && isArr(m.j5.cells) && isObj(m.j5.comparison) && isArr(m.j5.comparison.criteria) && isObj(m.j5.wargame) && isArr(m.j5.wargame.games) && isObj(m.j5.brief) && isObj(m.j5.annexes) && isArr(m.j5.annexes.rows)
+      && isObj(m.j3.eventLog) && isArr(m.j3.eventLog.rows) && isObj(m.j3.dsm) && isArr(m.j3.dsm.rows) && isObj(m.j3.sync) && isArr(m.j3.sync.rows) && isArr(m.j3.fragos) && isObj(m.j3.rhythm) && isArr(m.j3.rhythm.events) && isArr(m.j3.suspenses) && isArr(m.j3.ccir) && isArr(m.j3.triggers)
+      && isObj(m.j4.logstat) && isArr(m.j4.logstat.units) && isArr(m.j4.calcs) && isArr(m.j4.movement) && isArr(m.j4.readiness) && isArr(m.j4.annexes) && isArr(m.j4.supportability) && isArr(m.j4.calcProblems)
       && m.decisions.every((d) => isObj(d) && typeof d.product === 'string' && typeof d.hash === 'string' && (d.kind === 'decide' || d.kind === 'release'))
       && m.ledger.every((row) => isObj(row) && typeof row.product === 'string' && isArr(row.history));
   }
@@ -449,7 +461,7 @@
     renderLedger(previous);
     renderActivity(previous);
     renderJ2();
-    renderComing();
+    workspaces.render(model, previous);
     drawMap(first);
     if (first) wakeUp();
     first = false;
@@ -584,12 +596,12 @@
     for (const [id, tab] of nodes.tabButtons) {
       setText(tab.children[1], labelOf(id));
       const tag = tab.children[2];
-      if (BUILT.includes(id)) {
-        if (id === 'j2') setText(tag, model.j2.pirs.length + ' PIR' + (model.j2.pirs.length === 1 ? '' : 's'));
-        else setText(tag, model.decisions.length ? model.decisions.length + ' for a person' : 'all sections');
-        tab.classList.toggle('needs', id === 'war-room' && model.decisions.length > 0);
-      } else setText(tag, 'drop 2');
-      tab.classList.toggle('coming', !BUILT.includes(id));
+      const waiting = id === 'war-room' ? model.decisions.length : model.decisions.filter((card) => card.section === id).length;
+      if (waiting) setText(tag, waiting + ' for a person');
+      else if (id === 'j2') setText(tag, model.j2.pirs.length + ' PIR' + (model.j2.pirs.length === 1 ? '' : 's'));
+      else if (id === 'war-room') setText(tag, 'all sections');
+      else setText(tag, workspaces.tag(id, model));
+      tab.classList.toggle('needs', waiting > 0);
     }
   }
 
@@ -602,41 +614,7 @@
     for (const card of model.decisions) {
       const key = card.kind + ':' + card.product + ':' + card.hash;
       now.add(key);
-      const li = el('li', 'dec' + (card.overdue ? ' overdue' : ''));
-      li.dataset.product = card.product;
-      const title = el('div', 'dt');
-      title.append(el('span', 'sec-chip', card.code), document.createTextNode(' ' + card.title + ' v' + card.version));
-      li.append(title);
-      const who = el('div', 'dm', card.kind === 'decide' ? 'For the ' + card.decisionFor + '. Agents stopped here.' : 'Approved; waiting for a person to release it.');
-      li.append(who);
-      if (card.gates) li.append(el('div', 'dm faint', card.gates));
-      if (card.deadline) li.append(el('div', 'dm' + (card.overdue ? ' late' : ''), (card.overdue ? 'Past its deadline: ' : 'Deadline: ') + dtg(Date.parse(card.deadline)) + '. It never decides by itself.'));
-      if (card.options.length) {
-        const list = el('ul', 'opts');
-        for (const option of card.options) { const item = el('li'); item.append(el('b', '', option.label), document.createTextNode(' · Risk: ' + option.risk)); list.append(item); }
-        li.append(list);
-      }
-      if (card.dissent.length) {
-        const box = el('div', 'dissent');
-        box.append(el('span', 'kicker', 'Dissent, unedited'));
-        for (const line of card.dissent) box.append(el('p', '', line));
-        li.append(box);
-      }
-      const row = el('div', 'acts');
-      const decideButton = (action, label, cls) => {
-        const b = button(label, cls, () => {
-          vscode.postMessage({ type: 'decide', action, product: card.product, hash: card.hash });
-          b.setAttribute('aria-busy', 'true');
-          b.disabled = true;
-          setText(b, 'Confirm in VS Code…');
-          announce(label.replace('…', '') + ' ' + card.title + ': confirm who you are and sign in the VS Code dialog.');
-        }, { 'data-action': action, title: 'Opens the signed person-only command in VS Code. Nothing is decided until you confirm there.' });
-        return b;
-      };
-      if (card.kind === 'decide') row.append(decideButton('approve', 'Approve…', 'primary'), decideButton('reject', 'Reject…', ''));
-      else row.append(decideButton('release', 'Release…', 'primary'));
-      row.append(button('Provenance', 'ghost', (event) => openProductCard(card.product, event.currentTarget || event.target)));
-      li.append(row);
+      const li = decisionItem(card);
       nodes.decList.append(li);
       if (!seenDecisions.has(key) && !first) {
         anim(li, [{ opacity: 0, transform: 'translateX(14px)' }, { opacity: 1, transform: 'translateX(0)' }], { duration: 450, easing: EASE.settle });
@@ -646,6 +624,49 @@
     }
     seenDecisions = now;
     void previous;
+  }
+
+  /**
+   * One decision card: gold, with the buttons only a person can press. A button posts only the product and the version hash the person saw; the host
+   * runs the signed, person-only command. Section workspaces use the same card, so there is one path to a decision wherever it is shown.
+   */
+  function decisionItem(card) {
+    const li = el('li', 'dec' + (card.overdue ? ' overdue' : ''));
+    li.dataset.product = card.product;
+    const title = el('div', 'dt');
+    title.append(el('span', 'sec-chip', card.code), document.createTextNode(' ' + card.title + ' v' + card.version));
+    li.append(title);
+    const who = el('div', 'dm', card.kind === 'decide' ? 'For the ' + card.decisionFor + '. Agents stopped here.' : 'Approved; waiting for a person to release it.');
+    li.append(who);
+    if (card.gates) li.append(el('div', 'dm faint', card.gates));
+    if (card.deadline) li.append(el('div', 'dm' + (card.overdue ? ' late' : ''), (card.overdue ? 'Past its deadline: ' : 'Deadline: ') + dtg(Date.parse(card.deadline)) + '. It never decides by itself.'));
+    if (card.options.length) {
+      const list = el('ul', 'opts');
+      for (const option of card.options) { const item = el('li'); item.append(el('b', '', option.label), document.createTextNode(' · Risk: ' + option.risk)); list.append(item); }
+      li.append(list);
+    }
+    if (card.dissent.length) {
+      const box = el('div', 'dissent');
+      box.append(el('span', 'kicker', 'Dissent, unedited'));
+      for (const line of card.dissent) box.append(el('p', '', line));
+      li.append(box);
+    }
+    const row = el('div', 'acts');
+    const decideButton = (action, label, cls) => {
+      const b = button(label, cls, () => {
+        vscode.postMessage({ type: 'decide', action, product: card.product, hash: card.hash });
+        b.setAttribute('aria-busy', 'true');
+        b.disabled = true;
+        setText(b, 'Confirm in VS Code…');
+        announce(label.replace('…', '') + ' ' + card.title + ': confirm who you are and sign in the VS Code dialog.');
+      }, { 'data-action': action, title: 'Opens the signed person-only command in VS Code. Nothing is decided until you confirm there.' });
+      return b;
+    };
+    if (card.kind === 'decide') row.append(decideButton('approve', 'Approve…', 'primary'), decideButton('reject', 'Reject…', ''));
+    else row.append(decideButton('release', 'Release…', 'primary'));
+    row.append(button('Provenance', 'ghost', (event) => openProductCard(card.product, event.currentTarget || event.target)));
+    li.append(row);
+    return li;
   }
 
   function renderLedger() {
@@ -851,30 +872,6 @@
     showJ2Tab(J2_TABS.some(([id]) => id === saved.j2tab) ? saved.j2tab : 'threat', false);
   }
 
-  function renderComing() {
-    for (const id of ['j5', 'j3', 'j4']) {
-      const pane = nodes.panes.get(id);
-      const info = model.coming[id];
-      if (!info) continue;
-      const card = el('div', 'coming');
-      const art = el('div', 'coming-art');
-      art.append(glyph(GLYPH[id] || GLYPH.other, 'big'));
-      const body = el('div', 'coming-body');
-      body.append(el('p', 'kicker', 'Coming in drop 2'), el('h2', '', labelOf(id) + ' workspace'));
-      body.append(el('p', 'muted', 'Its own view of the staff run, on the shared map, beside the same ledger, decisions and clock. It will hold:'));
-      const list = el('ul', 'coming-list');
-      for (const line of info.lines) list.append(el('li', '', line));
-      body.append(list);
-      const squad = model.squads.find((entry) => entry.section === id);
-      body.append(el('p', 'faint', squad && squad.members.length ? 'Its agents are working now: watch them in the squads above and the war room.' : 'Until then the war room shows this section\'s agents, products and hand-offs.'));
-      const row = el('div', 'acts');
-      row.append(button('Go to the war room', 'ai', () => switchTo('war-room', true)));
-      body.append(row);
-      card.append(art, body);
-      pane.replaceChildren(card);
-    }
-  }
-
   // ---------- cards (popovers) ----------
   function closePop() {
     if (nodes.pop.hidden) return;
@@ -979,7 +976,7 @@
   function centerOf(node) { const r = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 }; return [r.left + r.width / 2, r.top + r.height / 2]; }
 
   function handoff(cue) {
-    const target = BUILT.includes(cue.workspace) ? cue.workspace : 'war-room';
+    const target = WORKSPACES.includes(cue.workspace) ? cue.workspace : 'war-room';
     if (saved.follow && target !== saved.workspace) switchTo(target, false);
     else if (!saved.follow && cue.workspace !== saved.workspace) { const tab = nodes.tabButtons.get(cue.workspace); if (tab) tab.classList.add('live'); }
     const from = anchorFor(cue.from), to = anchorFor(cue.to);
@@ -1059,7 +1056,7 @@
   }
 
   // ---------- help and keys ----------
-  const KEYS = [['1 to 5', 'War room, J2, J5, J3, J4'], ['D', 'Jump to the first decision waiting for a person'], ['F', 'Follow the action on or off'], ['M', 'Map as table'], ['C', 'Calm'], ['T', 'Theme'], ['?', 'This list'], ['Escape', 'Close a card or this list'], ['Arrow keys', 'Move along the rail, the agents, the workspaces and the J2 tabs']];
+  const KEYS = [['1 to 5', 'War room, J2, J5, J3, J4'], ['D', 'Jump to the first decision waiting for a person'], ['F', 'Follow the action on or off'], ['M', 'Map as table'], ['C', 'Calm'], ['T', 'Theme'], ['?', 'This list'], ['Escape', 'Close a card or this list'], ['Arrow keys', 'Move along the rail, the agents, the workspaces and each workspace\'s views'], ['Home, End', 'First or last view in a row of tabs']];
   function openHelp() {
     const dialog = nodes.helpDialog;
     dialog.replaceChildren();
@@ -1150,6 +1147,8 @@
       return;
     }
     if (message.type === 'notice' && typeof message.text === 'string') showNotice(message.text.slice(0, 400));
+    // The host opens the room on a section's workspace (the open command's argument): exactly these keys, each its own, and a known workspace.
+    if (message.type === 'show-workspace' && exactKeys(message, ['type', 'workspace']) && WORKSPACES.includes(message.workspace)) switchTo(message.workspace, false);
   });
   vscode.postMessage({ type: 'ready' });
 })();

@@ -17,8 +17,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { OPEN_STAFF_ROOM_COMMAND } from '../domain/staff/commands';
 import type { StaffEvent } from '../domain/staff/events';
-import { buildStaffRoomModel, handoffsFor, STAFF_ROOM_MESSAGE } from '../domain/staff/staffRoom';
-import type { StaffRoomModel } from '../domain/staff/staffRoom';
+import { buildStaffRoomModel, handoffsFor, STAFF_ROOM_MESSAGE, staffRoomWorkspaceOf } from '../domain/staff/staffRoom';
+import type { StaffRoomModel, StaffRoomWorkspace } from '../domain/staff/staffRoom';
 import { labelRecordFilter } from '../agent/gateLabels';
 import type { GateHost } from '../gate/host';
 import { copMapCsp, copMapResources } from '../staff/copMapWebview';
@@ -44,7 +44,8 @@ let panel: vscode.WebviewPanel | undefined;
 export const staffRoomTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void } = {};
 
 export function registerStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>): void {
-  context.subscriptions.push(vscode.commands.registerCommand(OPEN_STAFF_ROOM_COMMAND, () => openStaffRoom(context, gate)));
+  // An optional argument opens the room on one workspace ('j5', 'j3', ...); anything else is ignored and the room opens where the person left it.
+  context.subscriptions.push(vscode.commands.registerCommand(OPEN_STAFF_ROOM_COMMAND, (workspace?: unknown) => openStaffRoom(context, gate, staffRoomWorkspaceOf(workspace))));
 }
 
 /** The folders the page may load from: its own, the shared stylesheet, the COP map component and the vendored map libraries. Nothing else. */
@@ -65,8 +66,8 @@ async function personReader(gate: Pick<GateHost, 'runtimeFor'> | undefined, root
   }
 }
 
-export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>): void {
-  if (panel) { panel.reveal(); return; }
+export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>, workspace?: StaffRoomWorkspace): void {
+  if (panel) { panel.reveal(); if (workspace) void panel.webview.postMessage({ type: 'show-workspace', workspace }); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'staffRoom');
   const view = vscode.window.createWebviewPanel('nearAiStaffRoom', 'Staff Room', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: staffRoomResourceRoots(context.extensionUri) });
   panel = view;
@@ -82,6 +83,8 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
   let listening: Array<{ dispose(): void }> = [];
   /** The picture last sent, as text: an unchanged picture is not sent again until the page asks for everything. */
   let lastPicture: string | undefined;
+  /** The workspace the open command asked for, shown once the page has its first picture. */
+  let showFirst = workspace;
   const post = (message: Record<string, unknown>) => { staffRoomTap.toView?.(message); void view.webview.postMessage(message); };
 
   const send = async () => {
@@ -106,6 +109,7 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
         type: STAFF_ROOM_MESSAGE, model, cues: handoffsFor(input.settings, fresh, input.registry), pictureNow: cop.now,
         ...(changed ? (cop.picture ? { picture: cop.picture } : { pictureProblem: cop.problem }) : {})
       });
+      if (showFirst) { post({ type: 'show-workspace', workspace: showFirst }); showFirst = undefined; }
     } catch (error) {
       post({ type: 'staff-room-empty', reason: `The Staff Room could not read this project: ${error instanceof Error ? error.message : String(error)}` });
     }
@@ -178,5 +182,6 @@ export function staffRoomHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cs
 ${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.declutter}"></script>
 <script nonce="${nonce}" src="${cop.script}"></script>
 <script nonce="${nonce}" src="${asset('staffMap.js')}"></script>
+<script nonce="${nonce}" src="${asset('staffWorkspaces.js')}"></script>
 <script nonce="${nonce}" src="${asset('staffRoom.js')}"></script></body></html>`;
 }

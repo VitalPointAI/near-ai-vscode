@@ -7,6 +7,7 @@
 // through the release state machine like any other product, and only a person releases them.
 import { ANNEX_SUBJECTS, DOCTRINE_PROFILES, FRAGMENTARY_ORDER, ORDER_KINDS, ORDER_PARAGRAPHS } from './doctrine';
 import type { AnnexPlacement, AnnexSubject, OrderKind, StaffProfileId } from './doctrine';
+import type { LedgerReplay, ProductState } from './ledger';
 import type { ReleaseState } from './release';
 
 /** One annex as the caller (or the annex tracker) names it: the subject, and what it claims about letter, product and owner. */
@@ -133,6 +134,25 @@ export function checkAnnexes(profile: StaffProfileId, entries: readonly AnnexEnt
     if (parent !== undefined && !filed.has(parent)) add('parent-missing', entry.subject, `${entry.subject} is ${describe(placement)}, and Annex ${parent} is not in this order; it is placed under an Annex ${parent} heading of its own.`);
   }
   return findings;
+}
+
+/** The newest version of a product a person approved, across its lines. */
+function latestApproved(state: ProductState): number | undefined {
+  const versions = [state, ...state.older].flatMap((line) => line.approvedVersions);
+  return versions.length ? Math.max(...versions) : undefined;
+}
+
+/** What the check knows about every product in the ledger. */
+export function productFacts(replay: LedgerReplay): Map<string, OrderProductFacts> {
+  const facts = new Map<string, OrderProductFacts>();
+  for (const [name, state] of replay.products) {
+    const approved = latestApproved(state);
+    facts.set(name, {
+      state: state.record.state, version: state.record.version, owner: state.record.roles.owner, section: state.record.section, dependsOn: state.meta.dependsOn,
+      ...(approved !== undefined ? { latestApproved: approved } : {}), ...(state.tampered ? { tampered: state.tampered } : {})
+    });
+  }
+  return facts;
 }
 
 export function blocking(findings: readonly OrderFinding[]): OrderFinding[] {

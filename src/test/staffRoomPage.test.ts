@@ -12,7 +12,7 @@ import { parseScenarioText } from '../domain/staff/scenario';
 import { handoffsFor } from '../domain/staff/staffRoom';
 import type { StaffRoomModel } from '../domain/staff/staffRoom';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
-import { modelOf, NOW, project, SCENARIO } from './helpers/staffRoomFixture';
+import { modelOf, NOW, project, SCENARIO, sectionsProject } from './helpers/staffRoomFixture';
 
 const MEDIA = path.join(__dirname, '..', '..', 'media', 'staffRoom');
 
@@ -123,11 +123,16 @@ async function runPage(options: { reduced?: boolean; state?: Record<string, unkn
   vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'declutter.js'), 'utf8'), sandbox, { timeout: 1000 });
   if (options.copMap) vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'copMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffMap.js'), 'utf8'), sandbox, { timeout: 1000 });
+  vm.runInContext(await readFile(path.join(MEDIA, 'staffWorkspaces.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffRoom.js'), 'utf8'), sandbox, { timeout: 1000 });
   const all = () => doc.body.all();
   const byClass = (cls: string) => all().filter((node) => node.classList.contains(cls));
   const byText = (text: string | RegExp) => all().filter((node) => (typeof text === 'string' ? node.textContent === text : text.test(node.textContent)) && node.tagName !== '#text');
-  return { doc, window, posts, states, all, byClass, byText, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data: JSON.parse(JSON.stringify(data)) })) };
+  return {
+    doc, window, posts, states, all, byClass, byText, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data: JSON.parse(JSON.stringify(data)) })),
+    /** Sends the object as it is, without a structured clone, so a test can offer the page an inherited key. */
+    dispatchRaw: (data: unknown) => listeners.forEach((listener) => listener({ data }))
+  };
 }
 
 let fixture: { model: StaffRoomModel; cues: unknown[] } | undefined;
@@ -171,7 +176,8 @@ test('a decision button posts only the product and the version hash; the page ne
   const page = await runPage();
   page.dispatch({ type: 'staff-room', model, cues: [] });
   const decide = model.decisions.find((card) => card.kind === 'decide')!;
-  const buttons = page.all().filter((node) => node.tagName === 'button' && node.getAttribute('data-action'));
+  // The room's decisions panel (each section workspace shows its own cards too; see the workspace tests).
+  const buttons = page.byClass('decide')[0].all().filter((node) => node.tagName === 'button' && node.getAttribute('data-action'));
   assert.deepEqual(buttons.map((node) => node.getAttribute('data-action')).sort(), ['approve', 'reject', 'release']);
   const approve = buttons.find((node) => node.getAttribute('data-action') === 'approve')!;
   approve.click();
@@ -233,10 +239,8 @@ test('the J2 workspace shows the threat picture, PIRs linked to decision points,
   page.doc.key('m', page.doc.body);
   assert.ok(page.byClass('listview')[0].hidden === false);
   assert.ok(page.byClass('listview')[0].textContent.includes('Hostile'));
-  // J5, J3 and J4 say what is coming.
-  const j3 = page.doc.getElementById('pane-j3')!;
-  assert.match(j3.textContent, /Coming in drop 2/);
-  assert.match(j3.textContent, /synchronization matrix/);
+  // J5, J3 and J4 are workspaces of their own now, with nothing to say they are coming.
+  for (const id of ['j5', 'j3', 'j4']) assert.doesNotMatch(page.doc.getElementById(`pane-${id}`)!.textContent, /Coming in drop 2|drop 2/);
 });
 
 test('under reduced motion, nothing moves: no animations, and hand-offs are still links with words', async () => {
@@ -477,4 +481,171 @@ test('a status line that is still typing stops when its node leaves the page', a
   const live = page.byClass('callout')[0];
   await new Promise((resolve) => setTimeout(resolve, 1500));
   assert.ok(live.textContent.length > 0);
+});
+
+// ---- The J5, J3 and J4 workspaces (owner direction 2026-11-19) ----------------------------------------------------------------------------------
+
+let sectionsFixture: { model: StaffRoomModel; cues: unknown[] } | undefined;
+async function sectionsModel(): Promise<{ model: StaffRoomModel; cues: unknown[] }> {
+  if (sectionsFixture) return sectionsFixture;
+  const { world } = await sectionsProject();
+  const input = await loadStaffRoomInput(world.host, world.root, NOW);
+  sectionsFixture = { model: await modelOf(world), cues: handoffsFor(input.settings, input.events, input.registry) };
+  return sectionsFixture;
+}
+const view = (page: Awaited<ReturnType<typeof runPage>>, id: string) => page.doc.getElementById(id)!;
+
+test('each section workspace draws its real state from the host\'s model: products, people\'s decisions in gold, agent work in violet, and its own views', async () => {
+  const { model } = await sectionsModel();
+  const page = await runPage({ state: { workspace: 'j5' } });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const j5 = view(page, 'pane-j5');
+  assert.equal(j5.hidden, false);
+  for (const expected of ['COA A', 'Seize Port Calder from the sea', 'risk: lift for the second wave is short by one day', 'fail: no sustainment outline yet',
+    'Criteria and weights approved by C. Example (commander)', 'Weighted total (recomputed)', '19', '17', 'coa-a', 'against', 'mlcoa', 'Next: turn 1 COUNTERACTION', 'DP2: Commit the reserve (decides: commander)',
+    'Staff recommendation, drafted by agents', 'The staff recommends COA A', 'The red team holds COA B is safer: the beach defences are unknown.', 'Who decides: the commander.',
+    'Annex D', 'not released', 'Coa decision brief v1']) assert.ok(j5.textContent.includes(expected), `the J5 workspace shows ${expected}`);
+  // Gold: the section's decisions with the buttons only a person can press; violet: the agents' work, labelled as agent work.
+  const strip = j5.all().find((node) => node.classList.contains('ws-decide'))!;
+  assert.equal(strip.hidden, false);
+  assert.ok(strip.all().some((node) => node.getAttribute('data-action') === 'approve'));
+  assert.ok(j5.all().some((node) => node.classList.contains('recommend')), 'the recommendation is marked as agents\' work');
+  assert.ok(j5.all().some((node) => node.classList.contains('ws-activity') && node.textContent.includes('coa-cell-a')));
+  assert.ok(j5.all().some((node) => node.classList.contains('human-line') && /approved by C\. Example/.test(node.textContent)));
+  const best = j5.all().find((node) => node.classList.contains('best'))!;
+  assert.equal(best.getAttribute('aria-label'), 'COA A total 19, the highest');
+
+  const j3 = view(page, 'pane-j3');
+  for (const expected of ['E1', 'escalated', 'CCIR PIR-1', 'Two armoured vehicles moving off the south slope', 'CCIR PIR-1 reported as triggered by joc-chief', 'DP-2', 'Decides: commander', 'trigger reported',
+    'while planning. It passes to the', 'manoeuvre', 'H+6', 'Frago 1', 'Commander\'s update brief', 'RFI-7', 'Past its suspense']) assert.ok(j3.textContent.includes(expected), `the J3 workspace shows ${expected}`);
+  const j4 = view(page, 'pane-j4');
+  for (const expected of ['1 Bn', 'Red', '2 Bn (bn2-191000z): failed rule 1', 'calc:fuel-phase-1', '3,500 per day', 'Bridging stock', 'lift short', 'generator', 'Data older than a day',
+    'Not supportable', 'not vouched for by the calculator ledger', 'Logistics annex', 'Annex D, drafting']) assert.ok(j4.textContent.includes(expected), `the J4 workspace shows ${expected}`);
+  const formulas = j4.all().filter((node) => node.classList.contains('formula'));
+  assert.equal(formulas.length, 3, 'each calculator result shows its formula');
+  assert.ok(formulas.some((node) => /250/.test(node.textContent)), 'with the factor a person entered');
+  // Tabs carry each section's own state in words, gold when a person is needed there.
+  assert.match(view(page, 'tab-j3').textContent, /1 for a person/);
+  assert.ok(view(page, 'tab-j3').classList.contains('needs'));
+  assert.match(view(page, 'tab-j4').textContent, /J-?4/);
+});
+
+test('a decision button in a section workspace posts only the product and the version hash, the same as the room\'s decisions panel', async () => {
+  const { model } = await sectionsModel();
+  const page = await runPage({ state: { workspace: 'j3', wsTabs: { j3: 'fragos' } } });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const frago = model.decisions.find((card) => card.product === 'frago-1')!;
+  const fragos = view(page, 'j3panel-fragos');
+  assert.equal(fragos.hidden, false);
+  const approve = fragos.all().find((node) => node.getAttribute('data-action') === 'approve')!;
+  approve.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'decide', action: 'approve', product: 'frago-1', hash: frago.hash });
+  assert.equal(approve.textContent, 'Confirm in VS Code…', 'not optimistic: it waits for the signed command');
+  const brief = model.decisions.find((card) => card.product === 'coa-decision-brief')!;
+  const reject = view(page, 'pane-j5').all().find((node) => node.classList.contains('ws-decide'))!.all().filter((node) => node.getAttribute('data-action') === 'reject')
+    .find((node) => node.parent?.parent?.dataset.product === 'coa-decision-brief')!;
+  reject.click();
+  assert.deepEqual(page.posts.at(-1), { type: 'decide', action: 'reject', product: 'coa-decision-brief', hash: brief.hash });
+  for (const post of page.posts.filter((entry) => entry.type === 'decide')) assert.deepEqual(Object.keys(post).sort(), ['action', 'hash', 'product', 'type']);
+});
+
+test('the section workspaces are still under reduced motion and Calm, and move with motion', async () => {
+  const { model } = await sectionsModel();
+  for (const workspace of ['j5', 'j3', 'j4']) {
+    const reduced = await runPage({ reduced: true, state: { workspace } });
+    reduced.dispatch({ type: 'staff-room', model, cues: [] });
+    assert.equal(reduced.doc.animations.length, 0, `${workspace} under reduced motion`);
+    const calm = await runPage({ state: { workspace, calm: true } });
+    calm.dispatch({ type: 'staff-room', model, cues: [] });
+    view(calm, `${workspace}tab-${workspace === 'j5' ? 'compare' : workspace === 'j3' ? 'sync' : 'calcs'}`).click();
+    assert.equal(calm.doc.animations.length, 0, `${workspace} in Calm`);
+  }
+  const moving = await runPage({ state: { workspace: 'j5' } });
+  moving.dispatch({ type: 'staff-room', model, cues: [] });
+  assert.ok(moving.doc.animations.some((animation) => JSON.stringify(animation.frames).includes('scaleX(0)')), 'the comparison bars grow in');
+  assert.ok(moving.doc.animations.every((animation) => animation.frames.every((frame) => Object.keys(frame as object).every((key) => ['opacity', 'transform', 'strokeDashoffset'].includes(key)))), 'only transform, opacity and stroke-dashoffset animate');
+});
+
+test('keyboard: number keys reach each section, arrows move between workspaces and between a workspace\'s views, Home and End go to the ends', async () => {
+  const { model } = await sectionsModel();
+  const page = await runPage();
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  for (const [key, id] of [['3', 'j5'], ['4', 'j3'], ['5', 'j4']]) {
+    page.doc.key(key, page.doc.body);
+    assert.equal(page.doc.activeElement!.id, `tab-${id}`);
+    assert.equal(view(page, `pane-${id}`).hidden, false);
+  }
+  page.doc.activeElement!.fire('keydown', { key: 'ArrowLeft' });
+  assert.equal(page.doc.activeElement!.id, 'tab-j3');
+  // Inside the J3 workspace: the views are one tab stop, arrows move along them, and each panel follows.
+  const first = view(page, 'j3tab-current');
+  assert.equal(first.tabIndex, 0);
+  assert.equal(view(page, 'j3tab-dsm').tabIndex, -1);
+  first.focus();
+  first.fire('keydown', { key: 'ArrowRight' });
+  assert.equal(page.doc.activeElement!.id, 'j3tab-dsm');
+  assert.equal(view(page, 'j3panel-dsm').hidden, false);
+  assert.equal(view(page, 'j3panel-current').hidden, true);
+  page.doc.activeElement!.fire('keydown', { key: 'End' });
+  assert.equal(page.doc.activeElement!.id, 'j3tab-rhythm');
+  page.doc.activeElement!.fire('keydown', { key: 'Home' });
+  assert.equal(page.doc.activeElement!.id, 'j3tab-current');
+  assert.equal(page.states.at(-1)!.wsTabs && (page.states.at(-1)!.wsTabs as Record<string, string>).j3, 'current', 'the view chosen is remembered');
+  // Every view has its name, and every tab names its panel.
+  for (const [id, tab] of [['j5', 'cells'], ['j3', 'sync'], ['j4', 'logstat']]) {
+    const node = view(page, `${id}tab-${tab}`);
+    assert.equal(node.getAttribute('role'), 'tab');
+    assert.equal(view(page, node.getAttribute('aria-controls')!).getAttribute('aria-labelledby'), node.id);
+  }
+  // The COP map goes with the J3 workspace's current operations view.
+  page.doc.key('4', page.doc.body);
+  assert.ok(page.byClass('mapbox')[0].parent === view(page, 'pane-j3').all().find((node) => node.classList.contains('ws-map')));
+});
+
+test('the host can open the room on a workspace; a message with an extra, missing or inherited key, or an unknown workspace, is refused', async () => {
+  const { model } = await sectionsModel();
+  const page = await runPage({ reduced: true, state: { workspace: 'war-room' } });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const shown = () => ['war-room', 'j2', 'j5', 'j3', 'j4'].find((id) => !view(page, `pane-${id}`).hidden);
+  page.dispatch({ type: 'show-workspace', workspace: 'j4', extra: true });
+  page.dispatch({ type: 'show-workspace' });
+  page.dispatch({ type: 'show-workspace', workspace: 'j9' });
+  page.dispatch({ type: 'show-workspace', workspace: ['j4'] });
+  page.dispatchRaw(Object.assign(Object.create({ workspace: 'j4' }), { type: 'show-workspace' }));
+  assert.equal(shown(), 'war-room');
+  page.dispatch({ type: 'show-workspace', workspace: 'j4' });
+  assert.equal(shown(), 'j4');
+  // A picture without the section workspaces is not drawn at all.
+  const before = page.byClass('step').length;
+  const { j4: _drop, ...partial } = model;
+  void _drop;
+  const fresh = await runPage();
+  fresh.dispatch({ type: 'staff-room', model: partial });
+  fresh.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, eventLog: null } } });
+  assert.equal(fresh.byClass('step').length, 0);
+  assert.ok(before > 0);
+});
+
+test('large registers stay fast: lists show a page at a time with the rest one press away, and the page holds no demo data', async () => {
+  const { model } = await sectionsModel();
+  const rows = Array.from({ length: 200 }, (_, n) => ({ id: `E${n}`, time: '2026-11-19T11:00:00Z', source: 'watch', report: `Report ${n}`, ccir: '', decisionPoint: '', status: 'logged' }));
+  const big = { ...model, j3: { ...model.j3, eventLog: { total: 450, escalated: 0, rows } } };
+  const page = await runPage({ reduced: true, state: { workspace: 'j3' } });
+  page.dispatch({ type: 'staff-room', model: big, cues: [] });
+  const log = () => view(page, 'pane-j3').all().filter((node) => node.classList.contains('ev'));
+  assert.equal(log().length, 40);
+  const more = view(page, 'pane-j3').all().find((node) => node.tagName === 'button' && /^Show 40 more of 160$/.test(node.textContent))!;
+  more.click();
+  assert.equal(log().length, 80);
+  // The workspace script draws only what the host sends: no exercise names, units or places of its own.
+  const source = await readFile(path.join(MEDIA, 'staffWorkspaces.js'), 'utf8');
+  assert.doesNotMatch(source, /IRON LANTERN|Port Calder|Harrow|Brenn|1-41|3-41|PIR-\d|DP ?-?\d|calc:[a-z]/);
+  assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|eval\(|new Function/);
+  // An empty project: each workspace says what would fill it.
+  const empty = await runPage({ reduced: true, state: { workspace: 'j4' } });
+  const blank = { ...model, decisions: [], j5: { ...model.j5, cells: [], products: [], activity: [] }, j3: { ...model.j3, fragos: [], eventLog: { total: 0, escalated: 0, rows: [] } }, j4: { ...model.j4, calcs: [], logstat: { reports: 0, units: [], heldOut: [] } } };
+  empty.dispatch({ type: 'staff-room', model: blank, cues: [] });
+  assert.match(view(empty, 'pane-j4').textContent, /No LOGSTAT yet/);
+  assert.match(view(empty, 'pane-j5').textContent, /No COA cells yet/);
+  assert.match(view(empty, 'pane-j3').textContent, /No FRAGO drafts/);
 });

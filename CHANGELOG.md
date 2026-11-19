@@ -134,6 +134,18 @@ persona name or a rank.
   and J4 workspaces say what they will hold. Night, day and high contrast themes follow VS Code; Calm and the system's
   reduced-motion setting stop all movement; the whole room works from the keyboard, with
   single-key shortcuts you can turn off; Follow the action moves the view to where the work is.
+- **J5, J3 and J4 workspaces in the Staff Room.** Each section has its own workspace beside the
+  J2's, drawn from the project's real products, registers and records: its products with owner,
+  version and release state, the decisions waiting for a named person in gold with the same
+  signed buttons, and the agents' work in violet. J5: COA cells with their themes and validity
+  tests, the comparison against the criteria and weights a person approved, the wargame ledger,
+  the decision brief with dissent unedited, and the annex tracker through the orders check. J3:
+  the event log with escalations and CCIR matches on the COP map, the decision support and
+  synchronization matrices with their owner (the J3 only after a person approves the transition
+  brief), FRAGO drafts waiting for a person, the battle rhythm and suspenses. J4: LOGSTAT by unit,
+  calculator results with their formulas, movement, readiness, supportability per COA and the
+  logistics annex. Nothing moves under reduced motion or Calm, every view works from the
+  keyboard, and long registers show a page at a time.
 - **IRON LANTERN on the globe, and its directions fixed.** The starter scenario's grid references
   now grow northward, so "north of Saltmere", "along PL COPPER north of Ashby Ford", "south of
   Kell" and the artillery reach statements all hold on the map. Scenario files gain version 2

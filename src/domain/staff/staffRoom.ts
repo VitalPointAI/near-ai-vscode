@@ -1,4 +1,4 @@
-// The Staff Room (UX concept 4.1, 5 and 12; owner direction 2026-11-18; WP-ROOM): the one picture of a staff run the page draws, built from the drop 1
+// The Staff Room (UX concept 4.1, 5 and 12; owner directions 2026-11-18 and 2026-11-19; WP-ROOM): the one picture of a staff run the page draws, built from the drop 1
 // read models (step board, product registry, decision queue, COP), the staff events, the scenario and the J2's registers and products. Pure: no I/O, no
 // clock (the time is passed in), no vscode. The page lays this out and animates it; it never decides state, and it never receives anything it could
 // approve, release or decide with. A person's decision goes back as a message naming the product and the version hash they saw, and the host runs the
@@ -22,6 +22,8 @@ import { currentSteps, stepBoard } from './readModels';
 import type { RegisterRow } from './registers';
 import type { Scenario } from './scenario';
 import { buildStaffMap } from './staffRoomMap';
+import { buildSectionWorkspaces } from './staffRoomWorkspaces';
+import type { J3Workspace, J4Workspace, J5Workspace, WorkspacesInput } from './staffRoomWorkspaces';
 import type { StaffMapModel, EnemyCoa } from './staffRoomMap';
 import { staffProductPath } from './writeLimits';
 
@@ -32,24 +34,10 @@ export const STAFF_ROOM_VERSION = 1;
 export const STAFF_ROOM_WORKSPACES = ['war-room', 'j2', 'j5', 'j3', 'j4'] as const;
 export type StaffRoomWorkspace = (typeof STAFF_ROOM_WORKSPACES)[number];
 
-/** What each section workspace will hold when it arrives in drop 2, named on its own tab now (owner direction 2026-11-18). */
-export const WORKSPACES_COMING: Readonly<Record<'j5' | 'j3' | 'j4', { readonly title: string; readonly lines: readonly string[] }>> = {
-  j5: {
-    title: 'J5 plans workspace',
-    lines: ['COA cells side by side, each with its sketch on its own copy of the map', 'The profile\'s validity tests on every COA, with the reason for any risk',
-      'J3 and J4 supportability arriving as each sketch is drawn', 'The distinctness check that flags two COAs drifting together', 'The comparison against the commander\'s approved criteria, with the dissent unedited']
-  },
-  j3: {
-    title: 'J3 operations workspace',
-    lines: ['The wargame on the shared map: action, reaction and counteraction, with the red cell playing to win', 'The synchronization matrix filling under one time cursor',
-      'Decision points as gold stars, each tied to its PIR, becoming the DST and DSM', 'The current operations picture and the CCIR watch', 'Orders and annexes assembling in parallel, letters from the profile']
-  },
-  j4: {
-    title: 'J4 logistics workspace',
-    lines: ['Supportability of each COA, with every number from a calculator that shows its formula', 'Days of supply and fuel over time, with the culmination warning',
-      'Lines of communication and the logistics layer on the shared map', 'Logistics decision points straight into the commander\'s decision support', 'The sustainment row of the synchronization matrix']
-  }
-};
+/** A workspace named by the open command's argument, or undefined for anything that is not one. */
+export function staffRoomWorkspaceOf(value: unknown): StaffRoomWorkspace | undefined {
+  return typeof value === 'string' && (STAFF_ROOM_WORKSPACES as readonly string[]).includes(value) ? value as StaffRoomWorkspace : undefined;
+}
 
 /** Display caps: the page receives display data only, and never more of it than it can show. */
 const CAP = { text: 600, short: 160, ledger: 80, history: 10, activity: 40, cues: 6, list: 200 } as const;
@@ -178,7 +166,10 @@ export interface StaffRoomModel {
   readonly map: StaffMapModel;
   readonly j2: J2Workspace;
   readonly activity: readonly ActivityLine[];
-  readonly coming: typeof WORKSPACES_COMING;
+  /** The J5, J3 and J4 workspaces (staffRoomWorkspaces.ts): each section's real state, read from its products, registers and records. */
+  readonly j5: J5Workspace;
+  readonly j3: J3Workspace;
+  readonly j4: J4Workspace;
   readonly ledgerProblem?: string;
   readonly eventLogProblem?: string;
 }
@@ -216,6 +207,8 @@ export interface StaffRoomInput {
   readonly scenario?: Scenario;
   readonly scenarioProblem?: string;
   readonly j2: J2Input;
+  /** What the J5, J3 and J4 workspaces read; missing parts are simply not drawn yet. */
+  readonly workspaces?: WorkspacesInput;
 }
 
 // ---- Small helpers -----------------------------------------------------------------------------------------------------------------------------------
@@ -634,7 +627,10 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     map,
     j2: buildJ2(input, map),
     activity,
-    coming: WORKSPACES_COMING,
+    ...buildSectionWorkspaces({
+      now: input.now, profile: settings.profile, coaTests: resolved.coaTests, registry: input.registry, decisions: input.decisions, events: input.events,
+      ...(input.j2.dsm ? { dsm: input.j2.dsm } : {}), code: (section) => codeOf(settings, section), input: input.workspaces ?? {}
+    }),
     ...(input.ledgerProblem ? { ledgerProblem: clip(input.ledgerProblem) } : {}),
     ...(input.eventLogProblem ? { eventLogProblem: clip(input.eventLogProblem) } : {})
   };
