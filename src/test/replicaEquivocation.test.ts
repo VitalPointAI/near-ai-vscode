@@ -2,15 +2,16 @@
 // whatever the arrival order, while every other writer carries on.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { entryHash } from '../domain/replica/entry';
+import { entryHash, signHeader } from '../domain/replica/entry';
 import type { SealedEntry } from '../domain/replica/entry';
 import { canonicalProof, findEquivocations, proofHash, quarantineRecords, verifyProof } from '../domain/replica/equivocation';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
+import { staticRosterView } from '../domain/replica/rosterView';
 import type { ProductTextOutput } from '../domain/replica/textFold';
-import { forkAt } from './helpers/replicaForks';
-import { createWorld, permutations, updateData } from './helpers/replicaWorld';
-import type { Written } from './helpers/replicaWorld';
+import { forkAt, resealAt } from './helpers/replicaForks';
+import { createWorld, permutations, streamId, updateData } from './helpers/replicaWorld';
+import type { Editor, Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
 
@@ -18,6 +19,7 @@ interface ForkWorld {
   world: ReturnType<typeof createWorld>;
   w0: Written; w1a: Written; w1b: Written; w2: Written;
   x0: Written; x1: Written;
+  x: Editor;
 }
 
 // W writes seq 0 (doc.client), seq 1 (doc.update "aa"), a clone of W writes a different seq 1 ("bb") with the same prev, W writes seq 2 on branch a.
@@ -33,7 +35,7 @@ function forkWorld(): ForkWorld {
   const w1b = forkAt(world, 'W', world.stream, 1, { kind: 'doc.update', data: updateData(PRODUCT, clone.insertUpdate(0, 'bb')) });
   const w2 = w.insert(2, 'cc');
   const x1 = x.insert(0, 'xx');
-  return { world, w0, w1a, w1b, w2, x0, x1 };
+  return { world, w0, w1a, w1b, w2, x0, x1, x };
 }
 
 const sealed = (...items: Written[]): SealedEntry[] => items.map((item) => item.entry);
@@ -107,4 +109,75 @@ test('findEquivocations and quarantineRecords: two forks of one writer in one st
   const proofs = findEquivocations(verifiedLike, world.ctx().roster);
   assert.equal(proofs.length, 2);
   assert.deepEqual(quarantineRecords(proofs, world.ctx().roster), [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 1 }]);
+});
+
+test('a roster choice of one branch (device.release) admits that branch and its descendants again, keeps the other excluded and lifts the quarantine', () => {
+  const { world, w0, w1a, w1b, w2, x0, x1 } = forkWorld();
+  const writer = world.writerOf('W');
+  const roster = staticRosterView({ ...world.rosterSpec, chosenBranches: [{ writer, stream: world.stream, seq: 1, hash: w1a.hash }] });
+  const chosenA = foldEntries(world.entries, world.ctx({ roster }));
+  assert.deepEqual(chosenA.quarantined, []);
+  assert.equal(chosenA.proofs.length, 1, 'the proof of the fork is still there');
+  assert.deepEqual(chosenA.excluded, [w1b.hash]);
+  assert.deepEqual([...chosenA.applied].sort(), [w0.hash, w1a.hash, w2.hash, x0.hash, x1.hash].sort());
+  assert.match(textOf(chosenA), /aa/);
+  assert.doesNotMatch(textOf(chosenA), /bb/);
+
+  const rosterB = staticRosterView({ ...world.rosterSpec, chosenBranches: [{ writer, stream: world.stream, seq: 1, hash: w1b.hash }] });
+  const chosenB = foldEntries(world.entries, world.ctx({ roster: rosterB }));
+  assert.deepEqual(chosenB.excluded, [w1a.hash, w2.hash].sort(), 'branch b has no descendants here, and W2 follows branch a');
+  assert.match(textOf(chosenB), /bb/);
+
+  // A choice naming something that is not one of the two branches resolves nothing.
+  const bogus = staticRosterView({ ...world.rosterSpec, chosenBranches: [{ writer, stream: world.stream, seq: 1, hash: 'e'.repeat(64) }] });
+  assert.deepEqual(foldEntries(world.entries, world.ctx({ roster: bogus })).quarantined, [{ writer, stream: world.stream, fromSeq: 1 }]);
+});
+
+test('signing the same header again after a crash gives the same entry and no proof; sealing the same body again at the same seq is a fork', () => {
+  const { world, w0, w1a, x0 } = forkWorld();
+  const { sig: _sig, ...unsigned } = w1a.entry.header;
+  const resigned = signHeader(world.signerOf('W').signer, unsigned);
+  assert.deepEqual(resigned, w1a.entry.header);
+  assert.equal(entryHash(resigned), w1a.hash);
+  const retry = foldEntries([w0.entry, x0.entry, w1a.entry, { header: resigned, body: w1a.entry.body }], world.ctx());
+  assert.deepEqual([retry.proofs, retry.quarantined, retry.excluded], [[], [], []]);
+  assert.equal(retry.applied.length, 3);
+
+  const resealed = resealAt(world, 'W', w1a.entry);
+  assert.notEqual(resealed.hash, w1a.hash);
+  assert.notEqual(resealed.entry.header.body.hash, w1a.entry.header.body.hash, 'a new IV gives a new ciphertext');
+  assert.equal(resealed.entry.header.seq, w1a.entry.header.seq);
+  const forked = foldEntries([w0.entry, x0.entry, w1a.entry, resealed.entry], world.ctx());
+  assert.equal(forked.proofs.length, 1);
+  assert.equal(verifyProof(forked.proofs[0]), true);
+  assert.deepEqual(forked.quarantined, [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 1 }]);
+  assert.deepEqual(forked.excluded, [w1a.hash, resealed.hash].sort());
+});
+
+test('another writer\'s entry that cites an excluded entry is still applied, so one forked device never stalls the project', () => {
+  const { world, w1b, x } = forkWorld();
+  const citing = x.insert(2, 'yy', { deps: [w1b] });
+  const result = foldEntries(world.entries, world.ctx());
+  assert.equal(result.applied.includes(citing.hash), true);
+  assert.equal(result.excluded.includes(w1b.hash), true);
+  assert.deepEqual(result.held, []);
+  assert.match(textOf(result), /yy/);
+});
+
+test('exclusion reaches other streams only for entries that follow a forked entry: an earlier entry of the same writer there still stands', () => {
+  const { world, w0, w1b, x0 } = forkWorld();
+  const other = streamId('second');
+  const before = world.write('W', { stream: other, kind: 'doc.client', data: { product: PRODUCT, clientId: 701, actor: { kind: 'person' } } });
+  const following = world.write('W', { stream: other, kind: 'doc.client', data: { product: PRODUCT, clientId: 702, actor: { kind: 'person' } }, deps: [w1b] });
+  const later = world.write('W', { stream: other, kind: 'doc.client', data: { product: PRODUCT, clientId: 703, actor: { kind: 'person' } } });
+  const unrelated = world.write('X', { stream: other, kind: 'doc.client', data: { product: PRODUCT, clientId: 704, actor: { kind: 'person' } }, deps: [following] });
+  const result = foldEntries(world.entries, world.ctx());
+  assert.equal(result.applied.includes(before.hash), true);
+  assert.equal(result.applied.includes(w0.hash), true);
+  assert.equal(result.applied.includes(x0.hash), true);
+  assert.equal(result.excluded.includes(following.hash), true);
+  assert.equal(result.excluded.includes(later.hash), true, 'it follows the excluded entry in its own log');
+  assert.equal(result.applied.includes(unrelated.hash), true, 'another writer\'s entry citing an excluded one stands');
+  assert.deepEqual(result.quarantined, [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 1 }], 'the quarantine record names the forked stream only');
+  assert.equal(Object.keys(result.digests).length, 2);
 });
