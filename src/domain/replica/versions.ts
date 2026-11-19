@@ -15,8 +15,12 @@
 // before it in the total order. A proposal that names updates the fold has not reached is held updates-missing, not guessed at.
 import type { Actor } from './entry';
 import { blobBytesHash, openBlob } from './entry';
-import { snapshotMissing, textAtSnapshot } from './doc';
+import { attributionAtSnapshot, snapshotMissing, textAtSnapshot } from './doc';
+import { attributeText, summariseAuthors } from './attribution';
+import type { AuthorSummary } from './attribution';
 import type { CausalGraph } from './causal';
+import { resolveDecisions } from './decisions';
+import type { DecisionAct, DecisionClass, DecisionOutcome, DecisionResult } from './decisions';
 import type { FamilyReducer, FoldView, ReduceOutcome } from './reducers';
 import type { RosterView } from './rosterView';
 import type { TextState } from './textFold';
@@ -24,7 +28,7 @@ import type { VerifiedEntry } from './verify';
 import { isRecord } from '../team/validate';
 import { createHash } from 'node:crypto';
 import { transition } from '../staff/release';
-import type { GuardVerdict, ProductRecord, ProductRoles, ReleaseRefusalReason, ReleaseResult, StaffActor, TradecraftVerdict } from '../staff/release';
+import type { GuardVerdict, PersonActor, ProductRecord, ProductRoles, ReleaseEvent, ReleaseRefusalReason, ReleaseResult, StaffActor, TradecraftVerdict } from '../staff/release';
 
 // Owner decision 4: the owner is asked, never overruled, once this many changes by other writers have piled up since a version. A named constant so it
 // can be retuned. Nothing is ever withdrawn automatically.
@@ -41,6 +45,11 @@ export const VERSION_REFUSALS = {
   'no-change': 'The proposal has the same hash as a version the product already has.',
   'wrong-state': 'That step is not possible from the version\'s current state.',
   'stale-version': 'That names a version this product does not have.',
+  'not-decision-holder': 'Only a person who holds the decision role the version was submitted to can do that.',
+  'not-released': 'The newer version has not been released, so it cannot replace this one.',
+  'no-approval': 'There is no approval of this exact version in the past of this step.',
+  'no-release': 'There is no release of this version in the past of this step.',
+  'decline-not-pending': 'A decline can only settle decisions that were waiting for confirmation.',
   'unsupported-kind': 'This kind of entry is not applied by this version.'
 } as const;
 export type VersionRefusalReason = keyof typeof VERSION_REFUSALS | ReleaseRefusalReason;
@@ -76,6 +85,8 @@ export interface VersionProposal {
   roles: ProductRoles;
   pins: Pin[];
   header: Record<string, unknown>;
+  // The Yjs snapshot the proposal pinned, kept to read who shaped the text at that point (D-20).
+  snapshot: Uint8Array;
 }
 
 export interface ProductEntry {
@@ -109,6 +120,29 @@ export interface VersionView {
   verdictConflict?: boolean;
   // Submits naming different decision_for roles with none after the other (a conservative reading).
   submitConflict?: boolean;
+  // Set while the decisions on the version are in dispute or wait for confirmation (DESIGN 15.5). The state stays where it was.
+  overlay?: 'contested' | 'pending-confirmation';
+  decision: DecisionSummary;
+  // Who shaped the text at the version's snapshot, persons and agents with their run (D-20). Later edits never change it.
+  attribution: AuthorSummary[];
+  // The products this version pins whose newest released version has a different hash (D-26).
+  sourceChanged: SourceChange[];
+}
+
+export interface SourceChange { product: string; pinned: string; current: string }
+
+// The outcome of the decision algebra for one version, in the words the interface needs (D-25).
+export interface DecisionSummary {
+  status: 'none' | 'effective' | 'contested';
+  outcome?: DecisionClass;
+  // The names of the persons whose acts are effective (agents are named by their member slug).
+  names: string[];
+  // Entry hashes: the maximal acts that conflict, the acts that count, the acts waiting for confirmation, and the acts held for an unknown entry.
+  contested: string[];
+  effective: string[];
+  pending: string[];
+  held: Array<{ id: string; reason: string }>;
+  finalBeforeDispute: boolean;
 }
 
 // What 30-10 builds on: the version with its release.ts record and every act that names it.
@@ -130,6 +164,8 @@ export interface ProductVersions {
   versions: VersionView[];
   records: VersionRecord[];
   refusals: VersionRefusal[];
+  // The working text is withdrawn exactly when the newest version is withdrawn, and open again once a newer one is proposed (D-23).
+  working: 'open' | 'withdrawn';
 }
 
 const productKey = (stream: string, product: string): string => `${stream}/${product}`;
@@ -157,8 +193,15 @@ export function isOwnerSide(who: Acting, section: string, seats: readonly string
 // adapter proposes. An agent is never presented as a person, and a person who is not owner side stays a person, which the gate steps refuse.
 export function actorForTransition(who: Acting, roster: RosterView, roles: ProductRoles, ownerSide: boolean): StaffActor {
   if (who.actor.kind === 'agent') return { kind: 'agent', member: who.actor.member };
+  // A hub is never a person (D-06). The fold keeps hub entries before they reach a reducer; this is the second guard.
+  if (who.actor.kind === 'hub') return { kind: 'agent', member: `hub:${who.actor.watch}` };
   if (ownerSide) return { kind: 'agent', member: roles.owner };
   return { kind: 'person', name: roster.memberName(who.member, who.roster) ?? who.member, role: 'member', deviceFingerprint: who.writer };
+}
+
+// The named person release.ts is shown for a decision: the roster's name for the member, the role the version waits on, and the signing device.
+export function personForTransition(member: string, role: string, writer: string, rosterHash: string, roster: RosterView): PersonActor {
+  return { kind: 'person', name: roster.memberName(member, rosterHash) ?? member, role, deviceFingerprint: writer };
 }
 
 function held(reason: keyof typeof VERSION_HOLDS): ReduceOutcome {
@@ -224,7 +267,8 @@ function applyPropose(state: VersionsState, entry: VerifiedEntry, view: FoldView
     proposer: { writer: entry.header.writer, member: entry.member, actor: entry.body.actor },
     roles: product.roles,
     pins,
-    header: read.header
+    header: read.header,
+    snapshot
   });
   return { status: 'applied' };
 }
@@ -271,9 +315,11 @@ export const versionsReducer: FamilyReducer<VersionsState, ProductVersions[]> = 
   },
   finish(state, view) {
     const text = view.state('doc') as TextState | undefined;
-    return [...state.products.values()]
+    const derived = [...state.products.values()]
       .sort((a, b) => compare(a.stream, b.stream) || compare(a.product, b.product))
       .map((product) => deriveProduct(product, text, view));
+    markSourceChanges(derived);
+    return derived;
   },
   canonical(output, stream) {
     return output
@@ -295,8 +341,22 @@ export const versionsReducer: FamilyReducer<VersionsState, ProductVersions[]> = 
           othersChangesSince: version.othersChangesSince,
           ownerPromptDue: version.ownerPromptDue,
           verdictConflict: version.verdictConflict === true,
-          submitConflict: version.submitConflict === true
+          submitConflict: version.submitConflict === true,
+          overlay: version.overlay ?? null,
+          decision: {
+            status: version.decision.status,
+            outcome: version.decision.outcome ?? null,
+            names: [...version.decision.names],
+            contested: [...version.decision.contested],
+            effective: [...version.decision.effective],
+            pending: [...version.decision.pending],
+            held: version.decision.held.map((item): [string, string] => [item.id, item.reason]),
+            finalBeforeDispute: version.decision.finalBeforeDispute
+          },
+          attribution: version.attribution.map((row) => [row.writer, row.member, row.actor, row.agentMember ?? null, row.run ?? null, row.characters]),
+          sourceChanged: version.sourceChanged.map((change): [string, string, string] => [change.product, change.pinned, change.current])
         })),
+        working: product.working,
         refusals: product.refusals.map((refusal): [string, string] => [refusal.entry, refusal.reason])
       }));
   },
@@ -321,9 +381,21 @@ const last = <T>(items: readonly T[]): T => items[items.length - 1];
 
 interface Verdict { act: VersionAct; verdict: string; reasons: string[]; entry: string }
 
-interface Derived { record: ProductRecord; refusals: VersionRefusal[]; verdictConflict: boolean; submitConflict: boolean }
+interface Derived {
+  record: ProductRecord;
+  refusals: VersionRefusal[];
+  verdictConflict: boolean;
+  submitConflict: boolean;
+  decision: DecisionSummary;
+  overlay?: 'contested' | 'pending-confirmation';
+  // Entry hashes of the release acts that count, for the supersede check of an older version.
+  releaseActs: string[];
+}
 
-function deriveVersion(product: ProductEntry, version: VersionProposal, view: FoldView): Derived {
+// Was a release of this version (by hash) made in the causal past of the entry? Supplied by the product, which derives the newest version first.
+type ReleasedBefore = (versionHash: string, entry: string) => boolean;
+
+function deriveVersion(product: ProductEntry, version: VersionProposal, view: FoldView, releasedBefore: ReleasedBefore): Derived {
   const graph = view.graph;
   const roster = view.ctx.roster;
   const roles = version.roles;
@@ -407,12 +479,203 @@ function deriveVersion(product: ProductEntry, version: VersionProposal, view: Fo
       else refuse(chosen.act, result.reason);
     }
   }
-  return { record, refusals, verdictConflict, submitConflict };
+  const decided = deriveDecisions(product, version, record, submits.map((item) => ({ entry: item.act.entry, decisionFor: item.decisionFor })), view, releasedBefore);
+  refusals.push(...decided.refusals);
+  return { record: decided.record, refusals, verdictConflict, submitConflict, decision: decided.decision, ...(decided.overlay === undefined ? {} : { overlay: decided.overlay }), releaseActs: decided.releaseActs };
+}
+
+const DECISION_KINDS: readonly string[] = ['version.decide', 'version.release', 'version.withdraw', 'version.supersede'];
+const SEEN_KINDS: readonly string[] = ['version.decide', 'version.release', 'version.withdraw'];
+
+function outcomeOf(act: VersionAct): DecisionOutcome | undefined {
+  if (act.kind === 'version.release') return 'release';
+  if (act.kind === 'version.withdraw') return 'withdraw';
+  if (act.kind === 'version.supersede') return 'supersede';
+  const outcome = act.data.outcome;
+  return outcome === 'approve' || outcome === 'reject' || outcome === 'decline' ? outcome : undefined;
+}
+
+// How an act is shown to release.ts: a person as a named person with the role the version waits on, an agent as itself, a hub as an agent that can
+// never decide.
+function presented(act: VersionAct, role: string, roster: RosterView): StaffActor {
+  if (act.actor.kind === 'person') return personForTransition(act.member, role, act.writer, act.roster, roster);
+  if (act.actor.kind === 'agent') return { kind: 'agent', member: act.actor.member };
+  return { kind: 'agent', member: `hub:${act.actor.watch}` };
+}
+
+interface Candidate { act: VersionAct; outcome: DecisionOutcome; entry: DecisionAct; actor: StaffActor }
+
+const NO_DECISION: DecisionSummary = { status: 'none', names: [], contested: [], effective: [], pending: [], held: [], finalBeforeDispute: false };
+
+interface Decided { record: ProductRecord; refusals: VersionRefusal[]; decision: DecisionSummary; overlay?: 'contested' | 'pending-confirmation'; releaseActs: string[] }
+
+// Decisions on one version (D-24, D-25; DESIGN 15.4 rows 6 to 11, 15.5). Each act is judged alone first: an agent or hub act goes to release.ts
+// transition() and is refused there (agent-cannot-decide) before any roster check, so the rule holds without the roster. A person must hold
+// decision_for:<role> at the roster the act cites. The surviving acts go to resolveDecisions with the causal order, and the effective outcome is applied
+// to the record through transition(). Nothing here reads fold order, so every delivery order of the same entries gives the same result.
+function deriveDecisions(product: ProductEntry, version: VersionProposal, start: ProductRecord, submits: ReadonlyArray<{ entry: string; decisionFor: string }>, view: FoldView, releasedBefore: ReleasedBefore): Decided {
+  const graph = view.graph;
+  const roster = view.ctx.roster;
+  const roles = version.roles;
+  const acts = product.acts.filter((act) => DECISION_KINDS.includes(act.kind) && act.data.hash === version.hash);
+  if (acts.length === 0) return { record: start, refusals: [], decision: NO_DECISION, releaseActs: [] };
+
+  const refusals: VersionRefusal[] = [];
+  const decisionFor = start.decisionFor;
+  const role = decisionFor ?? 'owner-side';
+  const probePerson: PersonActor = { kind: 'person', name: 'probe', role, deviceFingerprint: 'probe' };
+  const awaiting = start.state === 'awaiting-decision' ? start : undefined;
+  const approveStep = awaiting === undefined ? undefined : transition(awaiting, { type: 'approve', hash: version.hash }, probePerson);
+  const approved = approveStep !== undefined && approveStep.ok ? approveStep.record : undefined;
+  const releaseStep = approved === undefined ? undefined : transition(approved, { type: 'release', hash: version.hash }, probePerson);
+  const released = releaseStep !== undefined && releaseStep.ok ? releaseStep.record : undefined;
+
+  const holder = (act: VersionAct): boolean => decisionFor !== undefined && roster.hasRole(act.member, `decision_for:${decisionFor}`, act.roster);
+  const ownerSide = (act: VersionAct): boolean => isOwnerSide(act, product.section, [roles.owner], roster);
+  const seenOf = (act: VersionAct): string[] => (SEEN_KINDS.includes(act.kind) ? ([...(act.data.decisionsSeen as string[])]) : []);
+  // A person's decision is unconfirmed when the removal of the role is concurrent with it: the decision may have been made after the role was lost, so a
+  // person who still holds the role must confirm it (D-25). A removal the decision saw is no problem; one it follows is a stale citation, rejected by the chain.
+  const confirmed = (act: VersionAct): boolean => {
+    if (act.actor.kind !== 'person' || decisionFor === undefined) return true;
+    const removal = roster.roleWithdrawnBy(act.member, `decision_for:${decisionFor}`, act.roster);
+    if (removal === undefined || view.entry(removal) === undefined) return true;
+    return !graph.concurrent(act.entry, removal);
+  };
+  const nameOf = (act: VersionAct): string => {
+    if (act.actor.kind === 'person') return roster.memberName(act.member, act.roster) ?? act.member;
+    return act.actor.kind === 'agent' ? `agent:${act.actor.member}` : `hub:${act.actor.watch}`;
+  };
+  const build = (act: VersionAct, outcome: DecisionOutcome, withConfirmation: boolean): DecisionAct => ({
+    id: act.entry, outcome, by: nameOf(act), versionHash: version.hash, seen: seenOf(act), confirmed: withConfirmation ? confirmed(act) : true, final: view.isFinal(act.entry)
+  });
+  const resolve = (list: readonly DecisionAct[]): DecisionResult => resolveDecisions({ versionHash: version.hash, acts: list, before: graph.isBefore, isKnownEntry: (id) => graph.has(id) });
+
+  const candidates: Candidate[] = [];
+  const reject = (act: VersionAct, reason: VersionRefusalReason): void => { refusals.push({ entry: act.entry, reason }); };
+
+  // Step one: every act but withdraw, judged alone.
+  for (const act of acts) {
+    const outcome = outcomeOf(act);
+    if (outcome === undefined || act.kind === 'version.withdraw') continue;
+    const actor = presented(act, role, roster);
+    const newer = act.kind === 'version.supersede' ? product.versions.find((other) => other.hash === act.data.byHash) : undefined;
+    const event: ReleaseEvent =
+      act.kind === 'version.release' ? { type: 'release', hash: version.hash }
+        : act.kind === 'version.supersede' ? { type: 'supersede', byVersion: newer?.number ?? version.number + 1 }
+          : outcome === 'reject' ? { type: 'reject', reasons: act.data.reasons as string[] }
+            // A decline is no transition; its actor is judged as an approve would be, which is the same human-only rule.
+            : { type: 'approve', hash: version.hash };
+    if (act.actor.kind !== 'person') {
+      const result = transition(start, event, actor);
+      reject(act, result.ok ? 'agent-cannot-decide' : result.reason);
+      continue;
+    }
+    if (decisionFor === undefined || awaiting === undefined) {
+      reject(act, act.kind === 'version.decide' ? 'wrong-state' : act.kind === 'version.release' ? 'no-approval' : 'no-release');
+      continue;
+    }
+    if (!holder(act)) { reject(act, 'not-decision-holder'); continue; }
+    let step: ReleaseResult | undefined;
+    if (act.kind === 'version.decide') {
+      if (!submits.some((submit) => submit.decisionFor === decisionFor && graph.isBefore(submit.entry, act.entry))) { reject(act, 'wrong-state'); continue; }
+      step = transition(awaiting, event, actor);
+    } else if (act.kind === 'version.release') {
+      step = approved === undefined ? undefined : transition(approved, event, actor);
+    } else {
+      if (newer === undefined) { reject(act, 'stale-version'); continue; }
+      if (newer.number <= version.number) { reject(act, 'out-of-order'); continue; }
+      if (!releasedBefore(newer.hash, act.entry)) { reject(act, 'not-released'); continue; }
+      step = released === undefined ? undefined : transition(released, event, actor);
+    }
+    if (step !== undefined && !step.ok) { reject(act, step.reason); continue; }
+    candidates.push({ act, outcome, entry: build(act, outcome, true), actor });
+  }
+
+  // Step two: withdraws. Whether the version was already approved when the act was made decides who may withdraw it (release.ts: the owner side before,
+  // a person after), and that depends on the acts in the withdraw's own past.
+  const approvedIn = (act: VersionAct): boolean => {
+    const known = new Set(seenOf(act));
+    const before = candidates.filter((item) => item.outcome !== 'supersede' && (graph.isBefore(item.act.entry, act.entry) || known.has(item.act.entry))).map((item) => item.entry);
+    const result = resolve(before);
+    return result.status === 'effective' && result.outcome === 'APPROVE';
+  };
+  for (const act of acts) {
+    if (act.kind !== 'version.withdraw') continue;
+    const actor = presented(act, role, roster);
+    const locked = approvedIn(act);
+    const reason = act.data.reason as string;
+    const against = locked && approved !== undefined ? approved : start;
+    const result = transition(against, { type: 'withdraw', reason }, actor);
+    if (!result.ok) { reject(act, result.reason); continue; }
+    if (act.actor.kind === 'hub') { reject(act, 'agent-cannot-decide'); continue; }
+    if (act.actor.kind === 'agent') {
+      if (!ownerSide(act)) { reject(act, 'not-owner'); continue; }
+    } else if (locked) {
+      if (!holder(act)) { reject(act, 'not-decision-holder'); continue; }
+    } else if (!ownerSide(act) && !holder(act)) {
+      reject(act, 'not-owner-or-person');
+      continue;
+    }
+    // An owner-side withdraw before any approval needs no confirmation: only the decision role can be withdrawn from a person.
+    candidates.push({ act, outcome: 'withdraw', entry: build(act, 'withdraw', locked || !ownerSide(act)), actor });
+  }
+
+  const all = candidates.map((item) => item.entry);
+  const result = resolve(all);
+  const byId = new Map(candidates.map((item) => [item.act.entry, item]));
+  for (const item of result.refused) refusals.push({ entry: item.id, reason: item.reason });
+  const dropped = new Set([...result.refused.map((item) => item.id), ...result.held.map((item) => item.id)]);
+
+  // A dispute leaves the version where its undisputed past put it: the acts that precede every contested act decide the state (DESIGN 15.5).
+  let basis = result;
+  let set = all;
+  while (basis.status === 'contested') {
+    const disputed = basis.contested;
+    set = set.filter((item) => disputed.every((id) => graph.isBefore(item.id, id)));
+    basis = resolve(set);
+  }
+
+  let record = start;
+  if (basis.status === 'effective' && basis.outcome !== undefined) {
+    const chosen = basis.effective.map((id) => byId.get(id) as Candidate).sort((a, b) => compare(a.act.entry, b.act.entry));
+    const first = chosen[0];
+    let applied: ReleaseResult | undefined;
+    if (basis.outcome === 'APPROVE') {
+      const approver = chosen.find((item) => item.outcome === 'approve') ?? first;
+      applied = transition(record, { type: 'approve', hash: version.hash }, approver.actor);
+      const releaser = chosen.find((item) => item.outcome === 'release');
+      if (applied.ok && releaser !== undefined) applied = transition(applied.record, { type: 'release', hash: version.hash }, releaser.actor);
+    } else if (basis.outcome === 'REJECT') {
+      applied = transition(record, { type: 'reject', reasons: first.act.data.reasons as string[] }, first.actor);
+    } else if (basis.outcome === 'WITHDRAW') {
+      applied = transition(record, { type: 'withdraw', reason: first.act.data.reason as string }, first.actor);
+    } else {
+      const newer = product.versions.find((other) => other.hash === first.act.data.byHash);
+      applied = transition(record, { type: 'supersede', byVersion: newer?.number ?? version.number }, first.actor);
+    }
+    if (applied.ok) record = applied.record;
+    else refusals.push({ entry: first.act.entry, reason: applied.reason });
+  }
+
+  const overlay = result.status === 'contested' ? 'contested' as const : result.status === 'none' && result.pending.length > 0 ? 'pending-confirmation' as const : undefined;
+  const decision: DecisionSummary = {
+    status: result.status,
+    ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
+    names: [...result.names],
+    contested: [...result.contested],
+    effective: [...result.effective],
+    pending: [...result.pending],
+    held: result.held.map((item) => ({ id: item.id, reason: item.reason })),
+    finalBeforeDispute: result.finalBeforeDispute
+  };
+  const releaseActs = candidates.filter((item) => item.outcome === 'release' && !dropped.has(item.act.entry) && item.entry.confirmed).map((item) => item.act.entry).sort(compare);
+  return { record, refusals, decision, ...(overlay === undefined ? {} : { overlay }), releaseActs };
 }
 
 function deriveProduct(product: ProductEntry, text: TextState | undefined, view: FoldView): ProductVersions {
   const roster = view.ctx.roster;
-  const updates = text?.products.get(productKey(product.stream, product.product))?.accepted ?? [];
+  const productText = text?.products.get(productKey(product.stream, product.product));
+  const updates = productText?.accepted ?? [];
   const sideCache = new Map<string, boolean>();
   const ownerSideUpdate = (hash: string, owner: string): boolean => {
     const cacheKey = `${hash}/${owner}`;
@@ -424,11 +687,21 @@ function deriveProduct(product: ProductEntry, text: TextState | undefined, view:
     return side;
   };
 
+  // The newest version first: a supersede of an older one needs the newer one's release to be in its causal past.
+  const derivedBy = new Map<string, Derived>();
+  const releases = new Map<string, string[]>();
+  const releasedBefore: ReleasedBefore = (versionHash, entry) => (releases.get(versionHash) ?? []).some((release) => view.graph.isBefore(release, entry));
+  for (const proposal of [...product.versions].sort((a, b) => b.number - a.number)) {
+    const derived = deriveVersion(product, proposal, view, releasedBefore);
+    derivedBy.set(proposal.hash, derived);
+    releases.set(proposal.hash, derived.releaseActs);
+  }
+
   const refusals: VersionRefusal[] = [];
   const versions: VersionView[] = [];
   const records: VersionRecord[] = [];
   for (const proposal of product.versions) {
-    const derived = deriveVersion(product, proposal, view);
+    const derived = derivedBy.get(proposal.hash) as Derived;
     refusals.push(...derived.refusals);
     const past = view.graph.past(proposal.entry);
     const since = updates.filter((update) => !past.has(update.hash));
@@ -437,6 +710,9 @@ function deriveProduct(product: ProductEntry, text: TextState | undefined, view:
       .filter((other) => other.number < proposal.number && view.graph.concurrent(other.entry, proposal.entry))
       .map((other) => other.number);
     const record = derived.record;
+    // Who shaped the text as it stood at the snapshot (D-20). A snapshot the fold cannot read gives no rows rather than a guess.
+    const runs = productText === undefined ? undefined : attributionAtSnapshot(updates.map((update) => update.update), proposal.snapshot);
+    const attribution = runs === undefined || productText === undefined ? [] : summariseAuthors(attributeText(runs, productText.registrations));
     versions.push({
       number: proposal.number,
       hash: proposal.hash,
@@ -451,7 +727,11 @@ function deriveProduct(product: ProductEntry, text: TextState | undefined, view:
       pins: proposal.pins.map((pin) => ({ ...pin })),
       header: proposal.header,
       ...(derived.verdictConflict ? { verdictConflict: true } : {}),
-      ...(derived.submitConflict ? { submitConflict: true } : {})
+      ...(derived.submitConflict ? { submitConflict: true } : {}),
+      ...(derived.overlay === undefined ? {} : { overlay: derived.overlay }),
+      decision: derived.decision,
+      attribution,
+      sourceChanged: []
     });
     records.push({
       number: proposal.number,
@@ -462,11 +742,41 @@ function deriveProduct(product: ProductEntry, text: TextState | undefined, view:
       acts: product.acts.filter((act) => act.data.hash === proposal.hash)
     });
   }
-  // A verdict or submit that names a hash this product has no version for is stale: nothing it names exists.
+  // A step that names a hash this product has no version for is stale: nothing it names exists.
   const known = new Set(product.versions.map((version) => version.hash));
   for (const act of product.acts) {
-    if ((act.kind === 'version.verdict' || act.kind === 'version.submit') && !known.has(act.data.hash as string)) refusals.push({ entry: act.entry, reason: 'stale-version' });
+    if (act.kind !== 'version.propose' && !known.has(act.data.hash as string)) refusals.push({ entry: act.entry, reason: 'stale-version' });
   }
   refusals.sort((a, b) => compare(a.entry, b.entry) || compare(a.reason, b.reason));
-  return { stream: product.stream, product: product.product, section: product.section, title: product.title, roles: { ...product.roles }, versions, records, refusals };
+  const newest = versions[versions.length - 1];
+  const working = newest !== undefined && newest.state === 'withdrawn' ? 'withdrawn' : 'open';
+  return { stream: product.stream, product: product.product, section: product.section, title: product.title, roles: { ...product.roles }, versions, records, refusals, working };
+}
+
+// The dependants' "source changed" (D-26): a pin names product@hash, and that product's newest released version is another hash. Only a released version
+// counts, so an approved one that has not been released shows nothing. A pin of a version newer than the newest released one is not out of date.
+function markSourceChanges(products: readonly ProductVersions[]): void {
+  const newest = new Map<string, { number: number; hash: string }>();
+  const numbers = new Map<string, number>();
+  for (const product of products) {
+    for (const version of product.versions) {
+      numbers.set(`${product.product}@${version.hash}`, version.number);
+      if (version.state !== 'released') continue;
+      const current = newest.get(product.product);
+      if (current === undefined || version.number > current.number || (version.number === current.number && version.hash < current.hash)) newest.set(product.product, { number: version.number, hash: version.hash });
+    }
+  }
+  for (const product of products) {
+    for (const version of product.versions) {
+      version.sourceChanged = version.pins
+        .filter((pin) => {
+          const current = newest.get(pin.product);
+          if (current === undefined || current.hash === pin.hash) return false;
+          const pinned = numbers.get(`${pin.product}@${pin.hash}`);
+          return pinned === undefined || pinned < current.number;
+        })
+        .map((pin) => ({ product: pin.product, pinned: pin.hash, current: (newest.get(pin.product) as { hash: string }).hash }))
+        .sort((a, b) => compare(a.product, b.product) || compare(a.pinned, b.pinned));
+    }
+  }
 }
