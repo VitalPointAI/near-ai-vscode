@@ -673,6 +673,11 @@ export class StaffHost {
     return { profile: team?.profile ?? defaults.profile, level: team?.level ?? defaults.level };
   }
 
+  /** The profile and level the project's staff settings name (or the team's block, or the defaults): what the orders and battle-rhythm servers use. */
+  public async profileFor(team?: StaffTeamInfo): Promise<{ profile: StaffProfileId; level: StaffLevel }> {
+    return this.settings(team);
+  }
+
   /** The guard settings a person keeps for the project: the exercise box and the real-entity list. Missing or unreadable means none. */
   public async guardConfig(): Promise<GuardConfig> {
     const text = await readText(path.join(this.options.root, GUARD_CONFIG_FILE));

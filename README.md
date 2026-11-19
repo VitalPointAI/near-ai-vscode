@@ -272,8 +272,12 @@ synchronization matrix, the DST and DSM and the assessment plan (in place,
 where the J5 made them; the J5 then proposes changes), and every
 FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
 `mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:cop-map`,
-`mcp:logistics`) are listed on the Tools page and in the Team Studio tool picker; only a staff
-team's run gets them. `mcp:observations` reads the feed reports kept in
+`mcp:logistics`, `mcp:orders`, `mcp:battle-rhythm`) are listed on the Tools page and in the Team
+Studio tool picker; only a staff team's run gets them. `mcp:orders` gives the annex letters of your
+doctrine profile, checks an order's annexes (wrong letter, missing owner, not yet released, stale
+source), assembles an order or plan from released products and drafts FRAGOs, each a draft a
+person releases. `mcp:battle-rhythm` keeps the battle rhythm calendar and exports it to an `.ics`
+file, or imports one you put in the project. `mcp:observations` reads the feed reports kept in
 `.planning/staff/observations/` (not committed), shows only what your
 clearances cover, and says when a limit cut an answer.
 A J4 logistics team starts support planning at the first step, alongside force

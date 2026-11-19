@@ -1,5 +1,5 @@
 // The built-in staff servers, listed once (design 10, 6.2): staff-products, guard-scan, the intel-workbench, observations (research note 11, section
-// 5), cop-map and logistics. The Tools page, the Team Studio tool picker and a staff team's run all read this one list. The servers run inside the
+// 5), cop-map, logistics, orders and battle-rhythm. The Tools page, the Team Studio tool picker and a staff team's run all read this one list. The servers run inside the
 // extension and are given only to a staff team's run (a team file with a `staff:` block); a member reaches them through its `tools:` line, by the
 // whole server (`mcp:<id>`), a family pattern or one tool at a time (`mcp__<id>__<tool>`). staff-products and guard-scan are gated by role inside the
 // staff tools; every other server is gated on grants (staffGrantGate.ts), so the run's lead and an ungranted member cannot call it. The tool objects
@@ -7,10 +7,12 @@
 // rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
 import type { ObservationStore } from '../staff/observationStore';
 import type { StaffHost, StaffTeamInfo } from '../staff/staffHost';
+import { BATTLE_RHYTHM_SERVER, battleRhythmTools } from './battleRhythmTools';
 import { COP_MAP_SERVER, copMapTools } from './copMap';
 import { INTEL_WORKBENCH_SERVER, intelWorkbenchTools } from './intelWorkbench';
 import { LOGISTICS_SERVER, logisticsTools } from './logisticsTools';
 import { OBSERVATIONS_SERVER, observationsTools } from './observationsTools';
+import { ORDERS_SERVER, ordersTools } from './ordersTools';
 import { grantedToMembers } from './staffGrantGate';
 import type { GrantedTeam } from './staffGrantGate';
 import { GUARD_SCAN_SERVER, STAFF_PRODUCTS_SERVER, staffTools } from './staffTools';
@@ -66,6 +68,16 @@ const GATED_STAFF_SERVERS: readonly GatedStaffServer[] = [
     id: LOGISTICS_SERVER, name: 'Logistics (built in)',
     description: 'The J4 tools: the consumption calculator (planning factors a person entered, the formula on every result, each result a signed calculator record), LOGSTAT entry, validation and consolidation, notional movement tables and local routing, and readiness import. It ships no planning factor tables and decides nothing.',
     build: (access) => logisticsTools({ host: () => access.host()?.logistics(), team: access.team, run: access.run })
+  },
+  {
+    id: ORDERS_SERVER, name: 'Orders (built in)', hint: 'Ask the member that writes the plan or order.',
+    description: 'Orders and plans in the profile\'s format: the annex list with each letter from the doctrine profile, the consistency check (a wrong letter, a missing owner, an annex not released, a stale source), assembly of an order or plan from released products, and FRAGO drafts. Each result is a draft through the release state machine; only a person releases it. Nothing is sent.',
+    build: (access) => ordersTools({ host: () => access.host(), team: access.team, run: access.run })
+  },
+  {
+    id: BATTLE_RHYTHM_SERVER, name: 'Battle rhythm (built in)', hint: 'Ask the member that keeps the battle rhythm.',
+    description: 'The battle rhythm calendar: boards, bureaus, centres, cells, working groups, meetings and briefs with their times, owners, inputs and outputs; export to and import from an .ics file (RFC 5545) in the project, the import size-capped, validated and fenced; and the suspenses of open RFIs and decisions. Nothing is fetched or sent.',
+    build: (access) => battleRhythmTools({ host: () => access.host(), team: access.team, run: access.run })
   }
 ];
 
@@ -91,7 +103,7 @@ export function builtInStaffServers(): BuiltInStaffServer[] {
     },
     ...GATED_STAFF_SERVERS.map((server) => ({
       id: server.id, grant: staffServerGrant(server.id), name: server.name, description: server.description,
-      tools: server.build(NO_PROJECT(server.id === LOGISTICS_SERVER ? 'j4' : 'j2'))
+      tools: server.build(NO_PROJECT(server.id === LOGISTICS_SERVER ? 'j4' : server.id === BATTLE_RHYTHM_SERVER ? 'j3' : 'j2'))
     }))
   ];
 }

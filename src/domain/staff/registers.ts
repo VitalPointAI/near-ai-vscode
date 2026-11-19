@@ -8,7 +8,7 @@
 // register's columns here, which is what lets the gates check them mechanically (02 s3.5): every PIR in the CCIR register has a latest time of value,
 // every assumption an invalidation trigger, every targeting row both review marks.
 import type { StaffSectionId } from './doctrine';
-import { STAFF_SECTION_IDS } from './doctrine';
+import { BATTLE_RHYTHM_KINDS, STAFF_SECTION_IDS } from './doctrine';
 import type { RfiAnsweredEvent, RfiOpenedEvent, RfiOverdueEvent } from './events';
 import { isOneLine, isRecord, ownValue } from './parse';
 import type { ProductKind } from './products';
@@ -95,8 +95,29 @@ export const REGISTER_SCHEMAS: Readonly<Record<string, RegisterSchema>> = {
       { key: 'subject', title: 'Subject', required: true },
       { key: 'letter', title: 'Letter' },
       { key: 'owner', title: 'Owner', required: true },
-      { key: 'status', title: 'Status', required: true, values: ['not-started', 'drafting', 'in-review', 'done'] }
+      { key: 'status', title: 'Status', required: true, values: ['not-started', 'drafting', 'in-review', 'done'] },
+      // The product that carries the annex, so the orders tool's consistency check can hold the row to the ledger (WP-ORD).
+      { key: 'product', title: 'Product' }
     ]
+  },
+  // Design 10, 4.3 and 6.2 (`battle-rhythm`): each event of the battle rhythm with its kind, time, owner, inputs and outputs, exported to and imported
+  // from an .ics file (RFC 5545) by the battle-rhythm server. Times are UTC; an event repeats once, daily or weekly.
+  'battle-rhythm-calendar': {
+    register: 'battle-rhythm-calendar', title: 'Battle rhythm', kind: 'register',
+    columns: [
+      { key: 'id', title: 'ID', required: true },
+      { key: 'title', title: 'Event', required: true },
+      { key: 'kind', title: 'Kind', required: true, values: [...BATTLE_RHYTHM_KINDS] },
+      { key: 'start', title: 'Start (UTC)', required: true, form: 'time' },
+      { key: 'durationMinutes', title: 'Duration (min)', required: true, form: 'number' },
+      { key: 'repeat', title: 'Repeats', required: true, values: ['once', 'daily', 'weekly'] },
+      { key: 'chair', title: 'Owner', required: true },
+      { key: 'attendees', title: 'Attendees' },
+      { key: 'inputs', title: 'Inputs' },
+      { key: 'outputs', title: 'Outputs' },
+      { key: 'location', title: 'Where' }
+    ],
+    rules: [(row) => (typeof row.durationMinutes === 'number' && (row.durationMinutes < 1 || row.durationMinutes > 1440) ? 'An event lasts from 1 to 1440 minutes.' : undefined)]
   },
   'sync-matrix': {
     register: 'sync-matrix', title: 'Synchronization matrix', kind: 'matrix',

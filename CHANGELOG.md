@@ -210,6 +210,19 @@ members draft and recommend, and a named person makes every decision.
   observations, COP map and logistics tools only when a member's tools line grants them, and the
   run's lead can call none of them. J3 integrator, current operations, watch officer and the
   maritime and air liaison are granted the observations server.
+- **Orders server.** Staff members granted `mcp:orders` (the J3 director and future operations
+  planner, the J5 lead planner and plans writer, and the J4 director) get the annex list of your
+  doctrine profile with every letter from the profile, a consistency check that names a wrong
+  annex letter, a missing owner, an annex not yet released and an annex built on a source that has
+  a newer approved version, assembly of an OPORD, OPLAN, CONOPS or the profile's other orders from
+  released products only, and FRAGO drafts against a released order. Each result is a draft that
+  goes through the release guard; only a person releases it.
+- **Battle-rhythm server.** The J3 current operations chief keeps the battle rhythm (boards,
+  bureaus, centres, cells, working groups, meetings and briefs, with times, owners, inputs and
+  outputs) with `mcp:battle-rhythm`, exports it to an `.ics` file you can open in a calendar
+  program, and imports one you put in the project; the import is size-capped, checked line by line
+  and shown to the model as untrusted data. The information planner reads it. It also lists the
+  suspenses of open RFIs and decisions waiting on a person.
 - **Never writing over a member's bytes.** Every write the drop 2 servers make to a file a member
   can also write (COP layers, their proposals and merges, calculator records, the LOGSTAT
   validation log, the observation store's indexes) replaces only the bytes the server read; a

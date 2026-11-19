@@ -1,4 +1,4 @@
-// One gate for every built-in staff server a run is given beside the staff-products tools (intel-workbench, observations, cop-map, logistics), the way
+// One gate for every built-in staff server a run is given beside the staff-products tools (intel-workbench, observations, cop-map, logistics, orders, battle-rhythm), the way
 // drop 1 review round 3 gated the intel-workbench: a call counts only from a member of the team whose own tools line grants that tool (the whole server
 // `mcp:<id>`, a family pattern such as `mcp__logistics__calc*`, or the tool's name). The run's lead is not a member, so it cannot call them, and neither
 // can a member without the grant. A team where no member is granted any of a server's tools gets none of them. Pure: no I/O, no vscode.
