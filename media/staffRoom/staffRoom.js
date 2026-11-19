@@ -431,7 +431,8 @@
       && SECTION_WORKSPACES.every((id) => isObj(m[id]) && isArr(m[id].products) && isArr(m[id].activity) && isArr(m[id].problems))
       && isArr(m.j5.cells) && isObj(m.j5.comparison) && isArr(m.j5.comparison.criteria) && isObj(m.j5.wargame) && isArr(m.j5.wargame.games) && isObj(m.j5.brief) && isObj(m.j5.annexes) && isArr(m.j5.annexes.rows)
       && isObj(m.j3.eventLog) && isArr(m.j3.eventLog.rows) && isObj(m.j3.dsm) && isArr(m.j3.dsm.rows) && isObj(m.j3.sync) && isArr(m.j3.sync.rows) && isArr(m.j3.fragos) && isObj(m.j3.rhythm) && isArr(m.j3.rhythm.events) && isArr(m.j3.suspenses) && isArr(m.j3.ccir) && isArr(m.j3.triggers)
-      && isObj(m.j4.logstat) && isArr(m.j4.logstat.units) && isArr(m.j4.calcs) && isArr(m.j4.movement) && isArr(m.j4.readiness) && isArr(m.j4.annexes) && isArr(m.j4.supportability) && isArr(m.j4.calcProblems)
+      && isArr(m.j5.comparison.coas) && isArr(m.j5.comparison.totals) && isArr(m.j5.brief.dissent) && isArr(m.j5.tests) && isObj(m.j3.dsm.owner) && isObj(m.j3.sync.owner)
+      && isObj(m.j4.logstat) && isArr(m.j4.logstat.units) && isArr(m.j4.logstat.heldOut) && isArr(m.j4.calcs) && isArr(m.j4.movement) && isArr(m.j4.readiness) && isArr(m.j4.annexes) && isArr(m.j4.supportability) && isArr(m.j4.calcProblems)
       && m.decisions.every((d) => isObj(d) && typeof d.product === 'string' && typeof d.hash === 'string' && (d.kind === 'decide' || d.kind === 'release'))
       && m.ledger.every((row) => isObj(row) && typeof row.product === 'string' && isArr(row.history));
   }
@@ -1121,6 +1122,8 @@
   switchTo(WORKSPACES.includes(saved.workspace) ? saved.workspace : 'war-room', false);
   setFollow(saved.follow);
   document.addEventListener('keydown', onKey);
+  // A narrower or wider panel wraps the tabs differently: the ink follows the selected tab, without moving.
+  if (typeof window.addEventListener === 'function') window.addEventListener('resize', () => { if (nodes.tabInk) { const tab = nodes.tabButtons.get(saved.workspace); if (tab) nodes.tabInk.style.transform = 'translateX(' + (tab.offsetLeft || 0) + 'px) scaleX(' + Math.max(0.01, (tab.offsetWidth || 0) / 100) + ')'; } });
   if (document.addEventListener) document.addEventListener('visibilitychange', () => { if (document.hidden && clockTimer) { clearInterval(clockTimer); clockTimer = undefined; } else if (!document.hidden && !clockTimer) clockTimer = setInterval(tick, 1000); });
   clockTimer = setInterval(tick, 1000);
   if (reducedQuery && typeof reducedQuery.addEventListener === 'function') reducedQuery.addEventListener('change', applyTheme);

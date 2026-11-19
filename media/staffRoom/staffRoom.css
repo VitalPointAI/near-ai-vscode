@@ -175,7 +175,8 @@ body { background: var(--vscode-editor-background); }
 
 /* Workspace switcher */
 .switcher { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
-.tabs { position: relative; display: flex; flex-wrap: wrap; gap: 2px; flex: 1 1 300px; min-width: 0; }
+/* The ink is placed from the tab's offset, which changes when the tabs wrap: it is kept inside the row and placed again on resize. */
+.tabs { position: relative; display: flex; flex-wrap: wrap; gap: 2px; flex: 1 1 300px; min-width: 0; overflow: hidden; }
 .tab { all: unset; position: relative; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 7px 12px 8px; font-size: var(--fs-s); color: var(--text2); border-radius: 6px 6px 0 0; max-width: 100%; }
 .tab:hover { color: var(--text); background: color-mix(in srgb, var(--card) 60%, transparent); }
 .tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

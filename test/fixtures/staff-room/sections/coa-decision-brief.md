@@ -6,7 +6,8 @@ As approved by the commander.
 
 ## Recommendation
 
-The staff recommends COA A: it takes the port on day one. Main risk: lift for the second wave; mitigation: hold a reserve of landing craft.
+The staff recommends COA A: it takes the port on day one.
+Main risk: lift for the second wave; mitigation: hold a reserve of landing craft.
 
 ## Decision
 

@@ -44,7 +44,7 @@ test('J5: COA cells with their themes and validity tests, the comparison with we
   assert.deepEqual(game.turns[0].phases.map((phase) => [phase.phase, phase.side]), [['action', 'friendly'], ['reaction', 'adversary']]);
   assert.match(game.turns[0].phases[1].decisionPoints[0], /DP2: Commit the reserve \(decides: commander\)/);
   // The brief: the recommendation the agents drafted, the dissent unedited, who decides.
-  assert.match(j5.brief.recommendation, /The staff recommends COA A/);
+  assert.equal(j5.brief.recommendation, 'The staff recommends COA A: it takes the port on day one. Main risk: lift for the second wave; mitigation: hold a reserve of landing craft.', 'the whole first paragraph, not only its first line');
   assert.deepEqual(j5.brief.dissent, ['The red team holds COA B is safer: the beach defences are unknown.']);
   assert.equal(j5.brief.decisionFor, 'commander');
   assert.equal(j5.brief.product!.pill, 'awaiting');

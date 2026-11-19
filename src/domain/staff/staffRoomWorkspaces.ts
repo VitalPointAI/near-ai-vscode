@@ -352,8 +352,19 @@ function buildJ5(ctx: WorkspaceContext): J5Workspace {
   const briefView = find(ctx, 'coa-decision-brief');
   const briefBody = bodies['coa-decision-brief'] ?? '';
   const recommendation = (() => {
-    const match = /^#{1,6}\s*[^\n]*recommend[^\n]*\n+([\s\S]*?)(?=\n#{1,6}\s|$)/im.exec(briefBody) ?? /^\s*(?:\*\*)?Recommendation(?:\*\*)?\s*:\s*(.+)$/im.exec(briefBody);
-    return match ? clip(match[1].trim().replace(/\s+/g, ' '), CAP.text) : '';
+    // The first paragraph under a heading that names the recommendation, or a "Recommendation:" line.
+    const lines = briefBody.replace(/\r\n/g, '\n').split('\n');
+    const heading = lines.findIndex((line) => /^#{1,6}\s.*recommend/i.test(line));
+    if (heading >= 0) {
+      const rest = lines.slice(heading + 1);
+      const start = rest.findIndex((line) => line.trim() !== '');
+      if (start >= 0 && !/^#{1,6}\s/.test(rest[start])) {
+        const end = rest.findIndex((line, index) => index > start && (line.trim() === '' || /^#{1,6}\s/.test(line)));
+        return clip(rest.slice(start, end < 0 ? undefined : end).join(' ').replace(/\s+/g, ' ').trim(), CAP.text);
+      }
+    }
+    const line = /^\s*(?:\*\*)?Recommendation(?:\*\*)?\s*:\s*(.+)$/im.exec(briefBody);
+    return line ? clip(line[1].trim(), CAP.text) : '';
   })();
   const queued = ctx.decisions.find((entry) => entry.product === 'coa-decision-brief');
   const redTeam = find(ctx, 'red-team-critique');
