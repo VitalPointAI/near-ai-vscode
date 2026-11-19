@@ -225,7 +225,7 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
 
   const register: AgentTool<{ action: 'write' | 'propose' | 'trigger'; register: string; rows: unknown[]; remove: string[]; part?: string; note?: string; ccir?: string; report?: string; label?: string }> = {
     name: name('register'),
-    description: '[staff-products] Changes the structured registers: ccir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log. action write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns. Read a register with mcp__staff-products__register_read. The PIR register is kept by the intel workbench, not here.',
+    description: '[staff-products] Changes the structured registers: ccir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log, battle-rhythm-calendar (also kept through the battle-rhythm server). action write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns. Read a register with mcp__staff-products__register_read. The PIR register is kept by the intel workbench, not here.',
     parameters: {
       type: 'object',
       properties: {

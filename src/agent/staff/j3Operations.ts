@@ -30,7 +30,8 @@ import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
 import {
-  COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools
+  BATTLE_RHYTHM, BATTLE_RHYTHM_READ, COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, ORDERS, ORDERS_FRAGO, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL,
+  STAFF_WARGAME_TOOL, staffProductTools
 } from './grants';
 
 export const J3_TEMPLATE_ID = 'j3-operations';
@@ -175,7 +176,7 @@ const horizons = (ctx: Context): string => {
 };
 
 /** The release path every FRAGO takes, in one sentence. */
-const fragoPath = (ctx: Context): string => `Every ${ctx.frago} is a staff product: register it with mcp__staff-products__propose, the release-guard checks that exact version, the ${ctx.director} submits it ${decisionFor(ctx.humanLead)}, and only that person releases it. You never send, issue or execute a ${ctx.frago} yourself.`;
+const fragoPath = (ctx: Context, viaOrders = false): string => `Every ${ctx.frago} is a staff product: ${viaOrders ? 'the orders tool registers it for you, as mcp__staff-products__propose would' : 'register it with mcp__staff-products__propose'}, the release-guard checks that exact version, the ${ctx.director} submits it ${decisionFor(ctx.humanLead)}, and only that person releases it. You never send, issue or execute a ${ctx.frago} yourself.`;
 
 // ---- Members -----------------------------------------------------------------------------------------------------------------------------------------
 
@@ -199,7 +200,7 @@ function director(ctx: Context): J3Member {
       : `Staff planning is led by the ${ctx.planningLead}; your section supports it and takes the plan at transition.`,
     `Running estimate: read .planning/staff/skills/running-estimate.md. Its headings are the ${ctx.functions.length === 7 ? 'seven joint functions' : `${ctx.functions.length} operational functions`}: ${list(ctx.functions)}. Members propose their sections to you in .planning/staff/proposals/j3-running-estimate/; you merge them, settle conflicts by asking the owners, and check the whole. ${RUNNING_ESTIMATE.rule}`,
     `CCIRs: propose them in the CCIR register with the register tool: the FFIRs yourself; the PIRs come from the ${ctx.intel}'s requirements manager by proposal, and logistics entries from the ${ctx.log}. Every CCIR names the decision point it supports. The register goes to the commander as ${decisionFor('commander')}.`,
-    `Orders: the operations annex is ${annex(ctx, 'operations')}; rules of engagement are ${annex(ctx, 'rules-of-engagement')}. Take every letter from PROFILE.md, never from memory. Draft rules of engagement requests as a matrix (the situation, the measure, why it is needed, the risk of not having it), each carrying ${STAFF_MARKERS.legalReview}; legal interpretation belongs to a human legal adviser. Write the annex as a Markdown product.`,
+    `Orders: the operations annex is ${annex(ctx, 'operations')}; rules of engagement are ${annex(ctx, 'rules-of-engagement')}. Take every letter from the orders tool (mcp__orders__annexes) or PROFILE.md, never from memory. Draft rules of engagement requests as a matrix (the situation, the measure, why it is needed, the risk of not having it), each carrying ${STAFF_MARKERS.legalReview}; legal interpretation belongs to a human legal adviser. Write the annex as a Markdown product, then run mcp__orders__check on the section's annexes (subject, product, owner) before you submit them: it names a wrong letter, a missing owner, an annex not yet released and a stale source. The plans writer assembles the plan with the orders tool, which takes no annex a person has not released; you give it the contents.`,
     `Planning support: give the warning order inputs at the start, score the ${ctx.ops} criteria (risk and tempo, forces available) in comparison, and write the decision brief inputs for the people who decide.`,
     owns(...ownList),
     'Boundary: "Your output is options with risk; you never approve, release or decide."',
@@ -207,7 +208,7 @@ function director(ctx: Context): J3Member {
   ].join('\n\n');
   return {
     name: ctx.director, role: tactical ? `${ctx.ops} integrator: running estimate, CCIR proposals, operations annex` : `${ctx.ops} integrator: running estimate, CCIR proposals, operations annex, ROE requests`,
-    model: 'deep', tools: [...READ, ...WRITE, ...DOCS, ...LEAD, COP_MAP], instructions: text
+    model: 'deep', tools: [...READ, ...WRITE, ...DOCS, ...LEAD, COP_MAP, ORDERS], instructions: text
   };
 }
 
@@ -218,15 +219,15 @@ function currentOpsChief(ctx: Context): J3Member {
     `Job: you run current operations in the ${lowerFirst(ctx.centre)}${tactical ? `, with ${CURRENT_OPERATIONS_BODIES.tacticalDuties}` : ''}. You own the operations layer of the COP and merge the other sections' layers into the published picture (the plans layer never merges into it). You keep the event log, give the shift brief, run battle drills from their checklists, and keep the battle rhythm calendar when no chief of staff team is present.`,
     'Event log: the watch officer has no Write; it proposes entries with the register tool to the event-log register. Merge them in order, check each against the CCIR register and the DSM triggers, and escalate a match at once: tell the lead, mark the entry escalated, and name the decision point and the person who decides. Interpretation is yours, never the watch\'s.',
     `Feed layers (friendly positions, and the air and maritime pictures from the liaison) are views, not products: you set which channels and grades the friendly positions layer shows, and nobody writes a feed layer by hand.`,
-    `Immediate changes: when a battle drill or a CCIR match needs a change within the current operations horizon, draft an immediate ${ctx.frago} with the changes only. ${fragoPath(ctx)}`,
-    'Battle rhythm: keep a calendar of the shift change brief, the commander\'s update brief, the operations synchronization meeting, the targeting working group and board, the information and assessment working groups, and the logistics synchronization meeting, each with its inputs, outputs and owner. Names vary by headquarters; the person edits the defaults in .planning/staff/skills/execution-loop.md.',
+    `Immediate changes: when a battle drill or a CCIR match needs a change within the current operations horizon, draft an immediate ${ctx.frago} with the changes only, with mcp__orders__frago, which refuses an order a person has not released (it writes the draft and registers it for you). ${fragoPath(ctx, true)}`,
+    'Battle rhythm: keep a calendar of the shift change brief, the commander\'s update brief, the operations synchronization meeting, the targeting working group and board, the information and assessment working groups, and the logistics synchronization meeting, each with its inputs, outputs and owner. Names vary by headquarters; the person edits the defaults in .planning/staff/skills/execution-loop.md. Keep it with the battle-rhythm tools: mcp__battle-rhythm__events_write for the events, ics_export to write the .ics file a person opens in a calendar program, ics_import to read one a person put in the project, and suspense for the open RFIs and the decisions waiting on a person.',
     owns('cop', 'cop-operations-layer', 'event-log', 'shift-brief', 'battle-drill-checklists', 'battle-rhythm-calendar', 'immediate-frago'),
     `Boundary: "Your output is the current picture and drafts; ${ctx.frago} release is a person's."`,
     'Hands back: the COP and its layer changes, the event log with every escalation, the shift brief, battle drill records, the battle rhythm calendar, and any immediate draft waiting on a person.'
   ].join('\n\n');
   return {
     name: ctx.currentOps, role: tactical ? `Current operations cell chief (${lowerFirst(CURRENT_OPERATIONS_BODIES.tactical.split(',')[0])})` : `Current operations: ${lowerFirst(ctx.centre)}, COP, event log, battle rhythm`,
-    model: 'standard', tools: [...READ, ...WRITE, ...OWNER, COP_MAP], reportsTo: ctx.director, instructions: text
+    model: 'standard', tools: [...READ, ...WRITE, ...OWNER, COP_MAP, BATTLE_RHYTHM, ORDERS_FRAGO], reportsTo: ctx.director, instructions: text
   };
 }
 
@@ -253,12 +254,12 @@ function futureOpsPlanner(ctx: Context): J3Member {
     `Job: you are future operations${ctx.level === 'operational' ? ` (the ${ctx.ops.replace(/-?3$/, '')}35 in many headquarters)` : ''}. Inside the future operations horizon you develop branches to the current operation, keep the DST and DSM current, keep the synchronization matrix in execution and draft the ${ctx.frago}s that start a branch. ${horizons(ctx)}${strategic ? ' At this level a branch may run for weeks.' : ''}`,
     `Planning: in COA development, check each COA against the forces available and say what holding them takes from current operations; in the wargame, play the friendly side's manoeuvre with the COA owner. The ${ctx.plans} owns the sync matrix and the DST and DSM until transition.`,
     `Transition: ${PLANNING_HORIZONS.futurePlans.name} hand the plan to you through a transition brief. When the ${ctx.plans} section team is present its lead-planner writes the brief and you review it by proposal; otherwise you write it from the plan the person gave you: what the ${lowerFirst(ctx.centre)} receives (the plan, the DST and DSM, the sync matrix, the branch list, the assessment plan), the conditions for hand-over and the open risks. A person accepts it ${decisionFor(ctx.humanLead)}; from then on the project is in execution and the sync matrix and the DST and DSM are yours, written through the register tool.`,
-    `Execution: the DSM is the operations centre's trigger table: decision point, indicator, NAI, recommended action and decision maker for each row. When a trigger fires, write the branch in one paragraph, ask the ${ctx.intel} for an updated adversary COA and the ${ctx.log} for a sustainment check by proposal, then draft the ${ctx.frago} with the changes only. ${fragoPath(ctx)} Sequels are not yours: send them to the ${ctx.plans}.`,
+    `Execution: the DSM is the operations centre's trigger table: decision point, indicator, NAI, recommended action and decision maker for each row. When a trigger fires, write the branch in one paragraph, ask the ${ctx.intel} for an updated adversary COA and the ${ctx.log} for a sustainment check by proposal, then draft the ${ctx.frago} with the changes only, with mcp__orders__frago, which refuses an order a person has not released (it writes the draft and registers it for you). ${fragoPath(ctx, true)} Sequels are not yours: send them to the ${ctx.plans}.`,
     owns('coa-force-checks', 'branch-plans', TRANSITION_PRODUCT, 'sync-matrix', 'dst-dsm', 'frago'),
     'Boundary: "Your output is branches; sequels are the J5\'s."',
     `Hands back: the branch plans with their triggers and decision makers, the ${ctx.frago} drafts with their state, the current DST and DSM and sync matrix, the transition brief, and any sequel you found for the ${ctx.plans}.`
   ].join('\n\n');
-  return { name: 'future-ops-planner', role: 'Future operations: branches, FRAGO drafts, DST and DSM in execution', model: 'deep', tools: [...READ, ...WRITE, ...OWNER, STAFF_WARGAME_TOOL], reportsTo: ctx.director, instructions: text };
+  return { name: 'future-ops-planner', role: 'Future operations: branches, FRAGO drafts, DST and DSM in execution', model: 'deep', tools: [...READ, ...WRITE, ...OWNER, STAFF_WARGAME_TOOL, ORDERS], reportsTo: ctx.director, instructions: text };
 }
 
 function firesCoordinator(ctx: Context): J3Member {
@@ -304,7 +305,7 @@ function spaceText(): string {
 function informationPlanner(ctx: Context): J3Member {
   const text = [
     preamble(),
-    `Job: synchronize information activities with operations: what each activity must achieve, when, and against which decision points, in the information synchronization matrix. ${informationText(ctx)} Read the battle rhythm for the information working group.`,
+    `Job: synchronize information activities with operations: what each activity must achieve, when, and against which decision points, in the information synchronization matrix. ${informationText(ctx)} Read the battle rhythm (mcp__battle-rhythm__events_read) for the information working group.`,
     'Synchronization matrix columns: activity; purpose; notional audience; timing against the phases and decision points; the effect wanted and how it will be measured; the owner; the person who must agree before it happens. Ask the assessment-analyst by proposal how each effect will be measured, the fires-effects-coordinator where non-lethal effects meet fires, and the intelligence section for its analysis of the information environment.',
     'Protect your own side too: list what the operation must keep from the adversary (timings, intentions, weak points) and how each is protected, and give that list to the release-guard for its compilation check.',
     `Draft inputs only. Any outward-facing message is a draft for a person and public affairs to decide on (public affairs is filed as ${annex(ctx, 'public-affairs')}).`,
@@ -312,7 +313,7 @@ function informationPlanner(ctx: Context): J3Member {
     'Boundary: "Draft inputs only; any outward-facing message needs human and public affairs approval."',
     'Hands back: the information synchronization matrix, the annex inputs, and the questions for public affairs.'
   ].join('\n\n');
-  return { name: 'information-planner', role: `Information planner: ${lowerFirst(ctx.resolved.informationTerm)} synchronization`, model: 'deep', tools: [...READ, ...WRITE, ...OWNER], reportsTo: ctx.director, instructions: text };
+  return { name: 'information-planner', role: `Information planner: ${lowerFirst(ctx.resolved.informationTerm)} synchronization`, model: 'deep', tools: [...READ, ...WRITE, ...OWNER, ...BATTLE_RHYTHM_READ], reportsTo: ctx.director, instructions: text };
 }
 
 function cyberSpacePlanner(ctx: Context): J3Member {

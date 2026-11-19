@@ -10,7 +10,7 @@ import { STAFF_MARKERS, staffPreambleText } from '../../domain/staff/products';
 import { RELEASE_GUARD_TIER, RELEASE_GUARD_TOOLS, releaseGuardInstructions } from '../../domain/staff/releaseGuard';
 import {
   COP_MAP, LEAD_VERBS, LOGISTICS_CALCULATOR, LOGISTICS_LOGSTAT, LOGISTICS_LOGSTAT_READ, LOGISTICS_LOGSTAT_VALIDATE, LOGISTICS_MOVEMENT,
-  LOGISTICS_MOVEMENT_READ, LOGISTICS_READINESS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, staffProductTools
+  LOGISTICS_MOVEMENT_READ, LOGISTICS_READINESS, ORDERS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, staffProductTools
 } from './grants';
 import { CALC_RECORDS_HEADING, j4ProductPath, j4ProductsOwnedBy } from './j4Products';
 import type { J4Variant, J4Vocabulary } from './j4Vocabulary';
@@ -81,7 +81,7 @@ function integrator(name: 'j4-director' | 's4-lead'): J4MemberSpec {
   return {
     name, model: 'deep',
     role: (v) => `${lowerFirst(v.function)} section integrator`,
-    tools: [...READ, ...WRITE, ...DOCS, ...staffProductTools(LEAD_VERBS), ...STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, LOGISTICS_CALCULATOR, ...(name === 's4-lead' ? [LOGISTICS_MOVEMENT_READ] : [])],
+    tools: [...READ, ...WRITE, ...DOCS, ...staffProductTools(LEAD_VERBS), ...STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, LOGISTICS_CALCULATOR, ...(name === 's4-lead' ? [LOGISTICS_MOVEMENT_READ] : []), ORDERS],
     instructions: (v) => compose({
       job: `You lead the ${v.code} section's ${lowerFirst(v.function)} work and you are its integrator: keep the force supported to the commander's priorities. ${SUPPORT_PLANNING_RULE} So start the section at step 1 (${v.step(1)}), the same turn the ${v.planningLead} starts force planning, never after the decision. Give the lead agent the lanes for each step from the workflow in AGENTS.md, so the functional planners work at the same time, each on its own function from one shared task list and force list. Then merge their products into the section's deliverables: read each one, reconcile them, and send any conflict back to the owning members with both sides; never overwrite a member's work. ${levelText(v)}`,
       method: [
@@ -90,7 +90,7 @@ function integrator(name: 'j4-director' | 's4-lead'): J4MemberSpec {
         name === 's4-lead'
           ? `With no logistics plans officer in the section, you also write the ${lowerFirst(v.overview)}, the ${lowerFirst(v.estimate)}, the supportability screen, the logistics war game and the logistics decision points yourself.`
           : 'The log-plans-officer drafts the estimate, the supportability screen and the war game; you integrate them and score the logistics criteria.',
-        `The logistics annex is ${v.annex}${v.movementsAnnex ? `; movements are ${v.movementsAnnex}, which the mobility-planner drafts` : ''}. Health services are ${v.placement('health-services')}; contracting is ${v.placement('contracting-finance')}. Take every letter from PROFILE.md, never from memory. The orders tool sets the paragraph format; you give it the contents.${v.canadian && !v.tactical ? ' With the Canadian nation setting, give the support plan (SUPLAN) inputs the planning group asks for.' : ''}`,
+        `The logistics annex is ${v.annex}${v.movementsAnnex ? `; movements are ${v.movementsAnnex}, which the mobility-planner drafts` : ''}. Health services are ${v.placement('health-services')}; contracting is ${v.placement('contracting-finance')}. Take every letter from the orders tool (mcp__orders__annexes) or PROFILE.md, never from memory, and run mcp__orders__check on the section's annexes before you submit them. The orders tool sets the paragraph format; you give it the contents.${v.canadian && !v.tactical ? ' With the Canadian nation setting, give the support plan (SUPLAN) inputs the planning group asks for.' : ''}`,
         CALC_RULE
       ].join('\n\n'),
       owns: ownsText(name, v),

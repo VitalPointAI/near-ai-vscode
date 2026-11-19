@@ -29,6 +29,18 @@ export const STAFF_LINT_TOOL = 'mcp__staff-products__lint';
 export const INTEL_WORKBENCH = 'mcp__intel-workbench__*';
 export const COP_MAP = 'mcp__cop-map__*';
 export const GUARD_SCAN = 'mcp__guard-scan__*';
+/**
+ * The orders server (design 10, 6.2; WP-ORD): the annex list from the profile, the consistency check, assembly from released products and FRAGO drafts.
+ * Granted where the design's rosters name `mcp:orders`: the J3 director and future operations planner, the J5 lead planner and plans writer, and the J4
+ * director.
+ */
+export const ORDERS = 'mcp__orders__*';
+/** FRAGO drafting only (owner, 2026-11-19): the current operations chief drafts an immediate FRAGO against a released order when a drill or CCIR match needs one. */
+export const ORDERS_FRAGO = 'mcp__orders__frago';
+/** The battle-rhythm server (design 10, 6.2; WP-ORD): the calendar, its .ics export and import, and the suspenses. Granted whole to its writer. */
+export const BATTLE_RHYTHM = 'mcp__battle-rhythm__*';
+/** The battle rhythm, read only: the members the design gives `mcp:battle-rhythm` (read). */
+export const BATTLE_RHYTHM_READ: readonly string[] = ['mcp__battle-rhythm__events_read', 'mcp__battle-rhythm__suspense'];
 
 /**
  * The logistics server (design 10, 6.2; built by WP-LOG), granted by tool family so each J4 member gets only what its job needs. WP-LOG names its tools

@@ -917,6 +917,61 @@ export const FRAGMENTARY_ORDER = {
   abbreviation: { 'us-joint': 'FRAGORD', 'us-army': 'FRAGORD', 'nato-ca': 'FRAGO' }
 } as const satisfies { readonly abbreviation: Readonly<Record<StaffProfileId, string>> } & Record<string, unknown>;
 
+/** One kind of order or plan the orders tool assembles: its id, the name a person reads, its abbreviation, and the product kind it is recorded as. */
+export interface OrderKind { readonly id: string; readonly name: string; readonly abbreviation: string; readonly productKind: 'order' | 'plan' }
+
+/** The orders and plans each profile issues (design 10, 2.1 row 7 and 6.2 `orders`). The FRAGO is FRAGMENTARY_ORDER's, drafted by its own tool. */
+// US Joint: JP 5-0 (1 July 2025) ch. IV, orders and plan levels (design 10, 2.8 item 5). US Army: FM 5-0 (November 2024) ch. on orders production (05 s2).
+// NATO/Canadian: CFJP 5.0 (2008) art. 403 to 405 (Wng O at Stage 2; CONOPS approved first, then the OPLAN; Impl O or Op O at Stage 4), by best
+// judgement for the abbreviations where AJP-5 gives none.
+export const ORDER_KINDS: Readonly<Record<StaffProfileId, readonly OrderKind[]>> = {
+  'us-joint': [
+    { id: 'warnord', name: 'Warning order', abbreviation: 'WARNORD', productKind: 'order' },
+    { id: 'planord', name: 'Planning order', abbreviation: 'PLANORD', productKind: 'order' },
+    { id: 'alertord', name: 'Alert order', abbreviation: 'ALERTORD', productKind: 'order' },
+    { id: 'opord', name: 'Operation order', abbreviation: 'OPORD', productKind: 'order' },
+    { id: 'exord', name: 'Execute order', abbreviation: 'EXORD', productKind: 'order' },
+    { id: 'conplan', name: 'Concept plan', abbreviation: 'CONPLAN', productKind: 'plan' },
+    { id: 'oplan', name: 'Operation plan', abbreviation: 'OPLAN', productKind: 'plan' }
+  ],
+  'us-army': [
+    { id: 'warnord', name: 'Warning order', abbreviation: 'WARNORD', productKind: 'order' },
+    { id: 'opord', name: 'Operation order', abbreviation: 'OPORD', productKind: 'order' },
+    { id: 'oplan', name: 'Operation plan', abbreviation: 'OPLAN', productKind: 'plan' }
+  ],
+  'nato-ca': [
+    { id: 'wngo', name: 'Warning order', abbreviation: 'Wng O', productKind: 'order' },
+    { id: 'conops', name: 'Concept of operations', abbreviation: 'CONOPS', productKind: 'plan' },
+    { id: 'oplan', name: 'Operation plan', abbreviation: 'OPLAN', productKind: 'plan' },
+    { id: 'opo', name: 'Operation order', abbreviation: 'Op O', productKind: 'order' },
+    { id: 'implo', name: 'Implementation order', abbreviation: 'Impl O', productKind: 'order' }
+  ]
+};
+
+/** The five paragraphs of an order or plan under each profile, in order. A FRAGO uses the same five, with the changes only. */
+// US Joint: AY26 Campaign Planning Handbook OPORD format (paragraph 4 Administration and Logistics, paragraph 5 Command and Control). US Army: FM 5-0
+// (November 2024) app. E (paragraph 4 Sustainment, paragraph 5 Command and Signal; 05 s2). NATO/Canadian: by best judgement from the NATO five-paragraph
+// order (paragraph 4 Service Support), until a COPD or Canadian staff duties check (design 10, 2.9).
+export const ORDER_PARAGRAPHS: Readonly<Record<StaffProfileId, readonly string[]>> = {
+  'us-joint': ['Situation', 'Mission', 'Execution', 'Administration and Logistics', 'Command and Control'],
+  'us-army': ['Situation', 'Mission', 'Execution', 'Sustainment', 'Command and Signal'],
+  'nato-ca': ['Situation', 'Mission', 'Execution', 'Service Support', 'Command and Signal']
+};
+
+/** The kinds of battle rhythm event (boards, bureaus, centres, cells and working groups, plus the meetings and briefs between them). */
+export const BATTLE_RHYTHM_KINDS = ['board', 'bureau', 'centre', 'cell', 'working-group', 'meeting', 'brief'] as const;
+export type BattleRhythmKind = (typeof BATTLE_RHYTHM_KINDS)[number];
+
+/** How each profile names the battle rhythm bodies: US spelling under the US profiles, Commonwealth spelling under NATO/Canadian. */
+// AY26 Campaign Planning Handbook (boards, bureaus, centers, cells, and working groups, B2C2WG); JP 5-0 (1 July 2025) app. H, figure H-7 notional
+// battle rhythm integration; JP 3-33 (2018) by title for the B2C2WG term. NATO/Canadian spelling by best judgement (Land Operations, 2008, writes
+// "centre").
+export const BATTLE_RHYTHM_NAMES: Readonly<Record<StaffProfileId, Readonly<Record<BattleRhythmKind, string>>>> = {
+  'us-joint': { board: 'Board', bureau: 'Bureau', centre: 'Center', cell: 'Cell', 'working-group': 'Working group', meeting: 'Meeting', brief: 'Brief' },
+  'us-army': { board: 'Board', bureau: 'Bureau', centre: 'Center', cell: 'Cell', 'working-group': 'Working group', meeting: 'Meeting', brief: 'Brief' },
+  'nato-ca': { board: 'Board', bureau: 'Bureau', centre: 'Centre', cell: 'Cell', 'working-group': 'Working group', meeting: 'Meeting', brief: 'Brief' }
+};
+
 /** The space products the space command owns; the J3 cyber and space planner feeds them and never writes them. */
 // JP 3-14, Joint Space Operations (23 August 2023) ch. III (design 10, 3.4, cyber-space-planner).
 export const SPACE_COMMAND_PRODUCTS: readonly string[] = ['Space operations directive', 'Master space plan', 'Combined space tasking order (weekly)'];

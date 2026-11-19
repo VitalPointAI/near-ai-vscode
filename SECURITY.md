@@ -931,6 +931,23 @@ never change one: its validation tool writes only the validation log and its
 product, and every consolidation checks the plausibility rules again rather
 than trusting the log.
 
+The orders server (`mcp:orders`) builds an order or plan only from staff
+products a person released, and only when each product file still holds the
+exact version the ledger records as released. It writes the result, and every
+FRAGO it drafts, as a draft product of the calling member in
+`.planning/staff/products/<section>/`, over only the bytes it read, and
+registers it through the same propose step as any product, so the release
+guard checks it and only a person approves and releases it. It takes annex
+letters from the doctrine profile, never from the caller. The battle-rhythm
+server (`mcp:battle-rhythm`) writes the calendar through the register tool, so
+only its one writer changes it, writes an `.ics` file only under
+`.planning/staff/exports/`, and reads an `.ics` file only from inside the
+project. That file is treated as untrusted: at most 256 KB, refused whole when
+a line is not a well-formed iCalendar line, has control characters or BEGIN
+and END that do not nest, each event checked against the register's columns,
+and its text returned to the model fenced as untrusted data. Neither server
+reaches the network, and neither has an approve, release, issue or send verb.
+
 ### Exercise scenarios for staff teams
 
 **NEAR AI: Load Staff Exercise Scenario** reads the starter scenario shipped
