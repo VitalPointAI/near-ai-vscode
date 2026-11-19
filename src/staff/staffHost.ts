@@ -21,7 +21,7 @@ import { registerPath } from '../domain/staff/intel';
 import { GUARD_CONFIG_FILE } from '../domain/staff/realEntities';
 import { readRealEntities } from './realEntities';
 import { staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
-import { mkdir, readFile, readdir, rename, appendFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, appendFile, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
@@ -125,8 +125,13 @@ async function readText(file: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
+/** The refusal for a product file over the size limit: it is there, but too large to read, so nothing acts on it. */
+export function tooLargeText(file: string): string {
+  return `${file} is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB, so it was not read. Shorten it or split it into products of their own, then try again.`;
+}
+
 /** A product file as read from disk: its parsed header (if it has one that parses), its body, and the version hash of both. */
-export interface ProductFile { readonly exists: boolean; readonly header?: ProductHeader; readonly headerText: boolean; readonly body: string; readonly hash: string; readonly dependsOn: readonly ProductDependency[] }
+export interface ProductFile { readonly exists: boolean; /** The file is there but over the 2 MB limit, so it was not read. */ readonly tooLarge?: boolean; readonly header?: ProductHeader; readonly headerText: boolean; readonly body: string; readonly hash: string; readonly dependsOn: readonly ProductDependency[] }
 
 /**
  * How a product file on disk stands against the ledger. `pending-edit`: the body changed while the product can still change, which the host records as an
@@ -276,7 +281,10 @@ export class StaffHost {
   // ---- Product files ---------------------------------------------------------------------------------------------------------------------------
 
   private async readProduct(root: string, section: StaffSectionId, product: string, fallbackDepends: readonly ProductDependency[] = []): Promise<ProductFile> {
-    const text = await readText(path.join(root, productPath(section, product)));
+    const file = path.join(root, productPath(section, product));
+    const size = await stat(file).then((info) => (info.isFile() ? info.size : undefined), () => undefined);
+    if (size !== undefined && size > MAX_FILE_BYTES) return { exists: false, tooLarge: true, headerText: false, body: '', hash: productHash('', fallbackDepends), dependsOn: fallbackDepends };
+    const text = await readText(file);
     if (text === undefined) return { exists: false, headerText: false, body: '', hash: productHash('', fallbackDepends), dependsOn: fallbackDepends };
     const parts = splitProductFile(text);
     const body = parts ? parts.body : text;
@@ -377,6 +385,28 @@ export class StaffHost {
     return { phase: phaseFrom(replay.products.get(TRANSITION_PRODUCT)), mode: 'standalone' };
   }
 
+  /**
+   * The host checks the role, not the grant (design 10, 4.1): a team file can grant any member any staff-products tool, so each verb with a role
+   * restriction is held here to the roles the ledger recorded when the product started, before anything is read, scanned or written. The release
+   * state machine checks the same roles again when the entry is appended.
+   *  - verdict: only the recorded release-guard (gate guard) or tradecraft reviewer (gate tradecraft); never the product's owner or section lead.
+   *  - submit: only the owner or the section lead.
+   *  - withdraw: only the owner (a person withdraws through the Staff commands).
+   */
+  private async roleProblem(member: string, product: string, verb: 'verdict' | 'submit' | 'withdraw', gate?: StaffGate): Promise<StaffResult | undefined> {
+    const state = (await this.replay()).products.get(product);
+    if (!state) return undefined;
+    const roles = state.record.roles;
+    if (verb === 'verdict') {
+      const gateMember = gate === 'guard' ? roles.releaseGuard : gate === 'tradecraft' ? roles.tradecraftReviewer : undefined;
+      if (gate === 'tradecraft' && gateMember === undefined) return refuse(RELEASE_REFUSALS['no-tradecraft-gate']);
+      if (member !== gateMember || member === roles.owner || member === roles.sectionLead) return refuse(`${RELEASE_REFUSALS['not-gate-member']} ${product}'s ${gate === 'tradecraft' ? 'tradecraft reviewer' : 'release-guard'} is ${gateMember ?? 'not set'}; you are ${member}.`);
+      return undefined;
+    }
+    if (verb === 'submit') return member === roles.owner || member === roles.sectionLead ? undefined : refuse(RELEASE_REFUSALS['not-owner-or-lead']);
+    return member === roles.owner ? undefined : refuse(RELEASE_REFUSALS['not-owner-or-person']);
+  }
+
   /** A shared product has one writer (design 10, 4.3): anyone else proposes an entry. */
   private sharedWriterProblem(product: string, caller: StaffCaller, member: string, replay: LedgerReplay): StaffResult | undefined {
     if (!sharedProduct(product)) return undefined;
@@ -407,7 +437,7 @@ export class StaffHost {
     const section = existing?.record.section ?? caller.team.section;
     if (section !== caller.team.section) return refuse(`${input.product} belongs to ${section}, not to this team's section. Propose your change in ${proposalFolder(input.product)}.`);
     const file = await this.readProduct(caller.root, section, input.product, input.dependsOn ?? existing?.meta.dependsOn ?? []);
-    if (!file.exists) return refuse(`Write the product first, at ${productPath(section, input.product)}, then propose it.`);
+    if (!file.exists) return refuse(file.tooLarge ? tooLargeText(productPath(section, input.product)) : `Write the product first, at ${productPath(section, input.product)}, then propose it.`);
     const dependsOn = input.dependsOn ?? file.dependsOn;
     const hash = productHash(file.body, dependsOn);
     const settings = await this.settings(caller.team);
@@ -455,7 +485,7 @@ export class StaffHost {
     const state = replay.products.get(product);
     const section = state?.record.section ?? caller.team.section;
     const read = file ?? await this.readProduct(caller.root, section, product);
-    if (!read.exists) return refuse(`There is no product at ${productPath(section, product)}.`);
+    if (!read.exists) return refuse(read.tooLarge ? tooLargeText(productPath(section, product)) : `There is no product at ${productPath(section, product)}.`);
     const header = state ? projectHeader(state) : read.header;
     const result = guardScan({ ...(header ? { header } : {}), body: read.body, section, owner: state?.record.roles.owner ?? header?.owner ?? '', config: await this.guardConfig() });
     // The hash of the file as scanned: the current version's, or the version the next write records when the file changed since.
@@ -473,7 +503,7 @@ export class StaffHost {
     const state = replay.products.get(product);
     const section = state?.record.section ?? caller.team.section;
     const read = file ?? await this.readProduct(caller.root, section, product);
-    if (!read.exists) return refuse(`There is no product at ${productPath(section, product)}.`);
+    if (!read.exists) return refuse(read.tooLarge ? tooLargeText(productPath(section, product)) : `There is no product at ${productPath(section, product)}.`);
     const kind = state?.meta.kind ?? read.header?.kind;
     const bodyOf = async (name: string): Promise<string | undefined> => {
       const other = await this.readProduct(caller.root, section, name);
@@ -514,12 +544,14 @@ export class StaffHost {
   public async verdict(caller: StaffCaller, input: { product: string; gate: StaffGate; verdict: string; hash: string; reasons: readonly string[] }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const role = await this.roleProblem(member, input.product, 'verdict', input.gate);
+    if (role) return role;
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
     if (state.tampered) return refuse(`${input.product} cannot be checked: ${state.tampered}`);
     if (fresh.disagreement) return refuse(`${input.product} reads as tampered: ${TAMPER_REASONS[fresh.disagreement]} Its owner writes it again, then you check the new version.`);
-    if (!fresh.file?.exists) return refuse(`The file ${productPath(state.record.section, input.product)} is missing.`);
+    if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product)) : `The file ${productPath(state.record.section, input.product)} is missing.`);
     if (input.hash !== state.record.hash) return refuse(`${RELEASE_REFUSALS['stale-version']} The current version is ${state.record.version}, hash ${state.record.hash}.`);
     let findingsText: string | undefined;
     if (input.gate === 'guard' && input.verdict === 'CLEARED') {
@@ -562,11 +594,13 @@ export class StaffHost {
   public async submit(caller: StaffCaller, input: { product: string; decisionFor: string; options?: readonly DecisionOption[]; dissent?: readonly string[]; deadline?: string }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const role = await this.roleProblem(member, input.product, 'submit');
+    if (role) return role;
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
     if (state.tampered || fresh.disagreement) return refuse(`${input.product} reads as tampered: ${state.tampered ?? TAMPER_REASONS[fresh.disagreement!]}`);
-    if (!fresh.file?.exists) return refuse(`The file ${productPath(state.record.section, input.product)} is missing.`);
+    if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product)) : `The file ${productPath(state.record.section, input.product)} is missing.`);
     const options = (input.options ?? []).slice(0, 10).map((option) => ({ label: option.label.trim(), risk: option.risk.trim() }));
     if (!options.every((option) => isOneLine(option.label, 200) && isOneLine(option.risk, 500))) return refuse('Each option has a label and its risk, each one line.');
     const dissent = (input.dissent ?? []).map((line) => line.trim()).filter(Boolean).slice(0, 20);
@@ -585,6 +619,8 @@ export class StaffHost {
   public async withdraw(caller: StaffCaller, input: { product: string; reason: string }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const role = await this.roleProblem(member, input.product, 'withdraw');
+    if (role) return role;
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
@@ -635,6 +671,8 @@ export class StaffHost {
   private async registerRows(root: string, register: string, section: StaffSectionId): Promise<RegisterRow[] | undefined> {
     const schema = registerSchema(register)!;
     const file = await this.readProduct(root, section, register);
+    // A register over the size limit is unreadable, never empty: an empty read would let the next write replace every row.
+    if (file.tooLarge) return undefined;
     return file.exists ? parseRegisterBody(schema, file.body) : [];
   }
 

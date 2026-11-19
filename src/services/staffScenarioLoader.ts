@@ -3,7 +3,8 @@
 //
 // A scenario already in the project is never deleted or overwritten in place: it is moved, with the demo scripts made from it, to
 // `.planning/staff/archive/<time>/` first. Nothing is written unless the whole scenario reads cleanly, and nothing is written through a symbolic link.
-import { lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { lstat, mkdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { DEMO_SECTIONS, demoScriptPath, renderDemoScript } from '../domain/staff/demoScripts';
 import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profiles';
@@ -97,7 +98,11 @@ function stamp(now: Date): string {
  * Checks the scenario text and, only if it reads cleanly, writes it into the project: the scenario folder and, when the starter demo scripts fit
  * the scenario, the J2 and J5 demo scripts for the project's profile and level. An earlier scenario and its demo scripts are archived first.
  */
-export async function loadScenarioIntoProject(root: string, text: string, options: { readonly now?: Date } = {}): Promise<LoadScenarioResult> {
+/** The staging folder's name prefix, inside `.planning/staff/` so the swap is a rename on one file system. */
+const STAGING_PREFIX = '.planning/staff/.scenario-staging-';
+const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+export async function loadScenarioIntoProject(root: string, text: string, options: { readonly now?: Date; /** For tests: the folder move. */ readonly rename?: (from: string, to: string) => Promise<void> } = {}): Promise<LoadScenarioResult> {
   const parsed = parseScenarioText(text, { realEntities: await projectRealEntities(root) });
   if (!parsed.ok) return { ok: false, message: parsed.message };
   const scenario = parsed.value;
@@ -117,23 +122,52 @@ export async function loadScenarioIntoProject(root: string, text: string, option
     demoSkipped = `The demo scripts are written for the starter scenario and do not fit this one (${error instanceof Error ? error.message : String(error)}).`;
   }
 
-  let archivedTo: string | undefined;
-  // The demo scripts belong to the scenario they were made from, so they move with it even when the new scenario gets none.
-  for (const relative of [SCENARIO_DIR, DEMO_DIR]) {
-    if (!(await exists(path.join(root, relative)))) continue;
-    archivedTo ??= `${ARCHIVE_DIR}/${stamp(options.now ?? new Date())}`;
-    const target = path.join(root, archivedTo, path.basename(relative));
-    if (await exists(target)) return { ok: false, message: `${archivedTo} already exists. Try again in a moment.` };
-    await mkdir(path.dirname(target), { recursive: true });
-    await rename(path.join(root, relative), target);
+  // Every new file is written to a staging folder first, then the folders are swapped in, so a failure part way never leaves a partial scenario. The
+  // demo scripts belong to the scenario they were made from, so they move with it even when the new scenario gets none.
+  const move = options.rename ?? rename;
+  const staging = path.join(root, STAGING_PREFIX + stamp(options.now ?? new Date()) + '-' + randomBytes(3).toString('hex'));
+  const written: string[] = [];
+  try {
+    for (const file of [...scenarioFiles(scenario), ...demos]) {
+      const target = path.join(staging, file.path);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, file.content, { encoding: 'utf8', flag: 'wx' });
+      written.push(file.path);
+    }
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true });
+    return { ok: false, message: `Nothing changed: the new scenario could not be written (${reason(error)}).` };
   }
 
-  const written: string[] = [];
-  for (const file of [...scenarioFiles(scenario), ...demos]) {
-    const target = path.join(root, file.path);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, file.content, { encoding: 'utf8', flag: 'wx' });
-    written.push(file.path);
+  let archivedTo: string | undefined;
+  const archived: Array<{ from: string; to: string }> = [];
+  const placed: string[] = [];
+  try {
+    for (const relative of [SCENARIO_DIR, DEMO_DIR]) {
+      if (!(await exists(path.join(root, relative)))) continue;
+      archivedTo ??= `${ARCHIVE_DIR}/${stamp(options.now ?? new Date())}`;
+      const target = path.join(root, archivedTo, path.basename(relative));
+      if (await exists(target)) throw new Error(`${archivedTo} already exists. Try again in a moment.`);
+      await mkdir(path.dirname(target), { recursive: true });
+      await move(path.join(root, relative), target);
+      archived.push({ from: path.join(root, relative), to: target });
+    }
+    for (const relative of [SCENARIO_DIR, DEMO_DIR]) {
+      const staged = path.join(staging, relative);
+      if (!(await exists(staged))) continue;
+      await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+      await move(staged, path.join(root, relative));
+      placed.push(path.join(root, relative));
+    }
+  } catch (error) {
+    // Put the project back as it was: the new folders go back to staging, the archived ones return to their places.
+    for (const folder of placed.reverse()) await move(folder, path.join(staging, path.relative(root, folder))).catch(() => undefined);
+    for (const entry of archived.reverse()) await move(entry.to, entry.from).catch(() => undefined);
+    // The archive folder made for this load is empty again; rmdir removes only an empty folder, so nothing archived earlier can go.
+    if (archivedTo) await rmdir(path.join(root, archivedTo)).catch(() => undefined);
+    await rm(staging, { recursive: true, force: true });
+    return { ok: false, message: `The earlier scenario was kept: the new one could not be put in place (${reason(error)}).` };
   }
+  await rm(staging, { recursive: true, force: true });
   return { ok: true, scenario, written, ...(archivedTo ? { archivedTo } : {}), settings, settingsFrom: from, ...(demoSkipped ? { demoSkipped } : {}) };
 }
