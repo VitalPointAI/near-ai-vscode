@@ -5,6 +5,10 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { staffTools } from '../../agent/staffTools';
+import { logisticsTools } from '../../agent/logisticsTools';
+import { RunCheckpoints } from '../../agent/checkpoints';
+import { FACTORS_FILE } from '../../domain/staff/logistics';
+import type { PlanningFactor } from '../../domain/staff/logistics';
 import type { AgentTool, ToolContext } from '../../agent/tools';
 import { fingerprintOf } from '../../domain/team/canonical';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
@@ -87,6 +91,26 @@ export async function callTool(world: StaffWorld, team: StaffTeamInfo, name: str
   } catch (error) {
     return { ok: false, text: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** Calls a logistics server tool (src/agent/logisticsTools.ts) as a run does, as `member`, over the world's host. */
+export async function callLogistics(world: StaffWorld, team: StaffTeamInfo, name: string, args: Record<string, unknown>, member?: string): Promise<{ ok: boolean; text: string }> {
+  const tools: AgentTool<any>[] = logisticsTools({ host: () => world.host.logistics(), team, run: 'run-1' });
+  const tool = tools.find((candidate) => candidate.name === name || candidate.name === `mcp__logistics__${name}`);
+  if (!tool) throw new Error(`No tool ${name}`);
+  const context = { root: world.root, signal: new AbortController().signal, checkpoints: new RunCheckpoints('logistics', path.join(world.root, '.ckpt')), readFiles: new Set<string>(), ...(member ? { agentLabel: member } : {}) } as unknown as ToolContext;
+  try {
+    const input = tool.parse(args);
+    return { ok: true, text: await tool.run(input, context) };
+  } catch (error) {
+    return { ok: false, text: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Writes the planning factor file as a person would (the extension ships none). */
+export async function writeFactors(root: string, factors: readonly PlanningFactor[]): Promise<void> {
+  await mkdir(path.join(root, path.dirname(FACTORS_FILE)), { recursive: true });
+  await writeFile(path.join(root, FACTORS_FILE), JSON.stringify({ factors }, null, 2), 'utf8');
 }
 
 export const HASH = /hash ([0-9a-f]{64})/;

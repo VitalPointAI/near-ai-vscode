@@ -773,12 +773,33 @@ scenarios. Staff templates are for exercise and fictional
 data only: labels are not accreditation.
 
 In a J4 logistics team, guard-scan holds any number that has no calculator
-record on its line (`calc:<id>`), or a record id with no file in
-`.planning/staff/calculator/`. That check proves a record file exists, not that
-the calculator wrote it: the folder is ordinary project files, which a member
-with Write could also write, so review changes to it as you would any product.
+record on its line (`calc:<id>`), or a `calc:<id>` the calculator did not
+write. Every record the logistics server writes to
+`.planning/staff/calculator/<id>.json` is entered in the calculator ledger,
+`.planning/staff/ledger/calculator.jsonl`: one entry per record holding the
+SHA-256 of the record file, signed with this device's key and chained to the
+entry before it, like the product ledger. A record counts only when its file
+matches a trusted entry. A file a member wrote by hand has no entry, and a
+record changed after the calculator wrote it no longer matches its hash, so
+guard-scan holds a product that cites either one and says which. An agent
+never holds the key, so it cannot add an entry that verifies; a removed,
+reordered or forged entry breaks the chain, and no record after it is
+trusted. Records never change: a revised calculation is a new record.
+
+The calculator takes no rate from an agent. Rates are planning factors a person
+enters in `.planning/.near-ai/staff-factors.json`, which an agent must ask
+before changing, and every result shows its formula with each factor and who
+entered it. The extension ships no planning factor tables. Readiness data comes
+only from a CSV file a person puts in the project, and each import records the
+file's name and hash. Movement tables are notional, and a table naming a real
+deployment database is refused. Road routing runs on a road graph in the
+project (`.planning/staff/logistics/roads.json`); no route request leaves the
+machine, and no logistics tool declares a network effect.
+
 The LOGSTAT analyst has no file tools at all, so it can flag a report but
-never change one.
+never change one: its validation tool writes only the validation log and its
+product, and every consolidation checks the plausibility rules again rather
+than trusting the log.
 
 ### Exercise scenarios for staff teams
 

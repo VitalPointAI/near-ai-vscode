@@ -12,6 +12,7 @@ import { webSearchTool } from '../agent/webTools';
 import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
 import { INTEL_WORKBENCH_TOOL_NAMES } from '../agent/intelWorkbench';
+import { LOGISTICS_TOOL_NAMES } from '../agent/logisticsTools';
 import { builtInTools, CATALOG_TOOL_FILES, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { buildStudioContext, reviewDraft } from '../services/teamStudioPage';
@@ -207,8 +208,9 @@ test('the team studio pickers offer the 13 tools with their words, and TeamKnowl
   const studio = buildStudioContext(directoryInput(), { hasProject: true, knowledgeBase: false });
   const names = studio.tools.map((tool) => tool.name);
   assert.deepEqual(names.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
-  // After the catalog: each built-in staff server's whole-server grant, and the staff tools that are not catalog tools (the intel-workbench's).
-  assert.ok(names.slice(EXPECTED_ORDER.length).every((name) => /^mcp:(?:staff-products|guard-scan|intel-workbench)$/.test(name) || name.startsWith('mcp__intel-workbench__')), 'only staff server entries follow the catalog');
+  // After the catalog: each built-in staff server's whole-server grant, and the staff tools that are not catalog tools (the intel-workbench's and the
+  // logistics server's).
+  assert.ok(names.slice(EXPECTED_ORDER.length).every((name) => /^mcp:(?:staff-products|guard-scan|intel-workbench|logistics)$/.test(name) || name.startsWith('mcp__intel-workbench__') || name.startsWith('mcp__logistics__')), 'only staff server entries follow the catalog');
   const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
   for (const name of [...CYBER_TOOLS, 'TeamKnowledge', 'Learn']) assert.deepEqual(studio.tools.find((tool) => tool.name === name)!.words, describeManifest(byName.get(name)!.manifest!), `${name} words in the picker`);
   const draft = { name: 'k', description: '', members: [{ name: 'a', role: '', model: '', tools: ['TeamKnowledge', 'Learn', 'CyberHttpProbe', 'Teleport'], instructions: 'x' }] } as unknown as Parameters<typeof reviewDraft>[0];
@@ -479,12 +481,13 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
 
 test('a run with every option on is given exactly the catalog\'s tools, in the catalog\'s order, so a tool added to a run but not to the catalog fails here', () => {
   const given = toolsOfARunWithEverythingOn().map((tool) => tool.name);
-  // The run is a staff team's, so it also gets the intel-workbench: a built-in local server whose tools, like a connected server's, are not catalog
-  // entries (intelWorkbench.test.ts). They come right after the staff tools; everything else is exactly the catalog.
+  // The run is a staff team's, so it also gets the intel-workbench and the logistics server: built-in local servers whose tools, like a connected
+  // server's, are not catalog entries (intelWorkbench.test.ts, staffLogistics.test.ts). They come right after the staff tools; everything else is exactly
+  // the catalog.
   const catalog = builtInTools().map((tool) => tool.name);
   const after = catalog.indexOf('mcp__guard-scan__scan') + 1;
   assert.ok(after > 0);
-  assert.deepEqual(given, [...catalog.slice(0, after), ...INTEL_WORKBENCH_TOOL_NAMES, ...catalog.slice(after)]);
+  assert.deepEqual(given, [...catalog.slice(0, after), ...INTEL_WORKBENCH_TOOL_NAMES, ...LOGISTICS_TOOL_NAMES, ...catalog.slice(after)]);
 });
 
 function sourceFilesUnder(folder: string): string[] {

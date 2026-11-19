@@ -38,8 +38,13 @@ export interface GuardConfig {
   readonly exerciseBox?: ExerciseBox;
   /** Real units, people and bases the products must never name. */
   readonly realEntities: readonly string[];
-  /** The calculator record ids that exist; when given, a `calc:` reference to any other id is a finding. */
+  /**
+   * The calculator record ids a product may cite: the host gives only those whose file matches a trusted entry in the calculator ledger (WP-LOG). When
+   * given, a `calc:` reference to any other id is a finding.
+   */
   readonly calculatorRecords?: ReadonlySet<string>;
+  /** Record ids with a file the calculator ledger does not vouch for (no entry, or changed since), with the reason guard-scan shows. */
+  readonly calculatorProblems?: ReadonlyMap<string, string>;
 }
 
 export interface GuardInput {
@@ -246,7 +251,12 @@ export function guardScan(input: GuardInput): GuardScanResult {
         add('number-without-calculation', 'hold', number, excerptOf(raw, quantity.index, quantity[0].length), 'A J4 number has no calculator record. Put the calc:<id> of the record that produced it on the same line, so the formula can be shown.');
       }
       const known = input.config.calculatorRecords;
-      if (known) for (const id of references) if (!known.has(id)) add('number-without-calculation', 'hold', number, `calc:${id}`, `calc:${id} names no calculator record in this project.`);
+      const problems = input.config.calculatorProblems;
+      for (const id of references) {
+        const problem = problems?.get(id);
+        if (problem !== undefined && !known?.has(id)) add('number-without-calculation', 'hold', number, `calc:${id}`, problem);
+        else if (known && !known.has(id)) add('number-without-calculation', 'hold', number, `calc:${id}`, `calc:${id} names no calculator record in this project.`);
+      }
     }
   });
 
