@@ -111,6 +111,8 @@ export interface AgentTool<I = Record<string, unknown>> {
   risky?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
   /** Its result is outside content: the run is treated as having read untrusted input from then on. */
   untrusted?: boolean;
+  /** The id of the MCP server this tool calls, set only on MCP tools: the gate judges the server's label ceiling by it (WP-GATE). */
+  mcpServer?: string;
   /**
    * 0.4.17: in Auto mode this tool runs without asking, and its own checks still apply (WebFetch's exfiltration check after outside content). Only the
    * two web tools set it, by the owner's decision that research must not be a stream of questions; an MCP or remote tool with the network

@@ -82,6 +82,16 @@ fictional data only; labels are not accreditation, and no member has a persona n
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
   tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
 
+- **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
+  can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through
+  NEAR AI: Edit Policy). A call to that server from a chat whose label is above it is refused before
+  anything is sent, at every routing tier, with a plain reason and a decision record
+  (`label.mcp-ceiling`). Servers with no ceiling, and every server under the shipped policy, behave
+  as before. A server's tool descriptions now reach the model fenced as untrusted text and cut to
+  1,024 characters, like its results, and a description that looks like an injection is flagged to
+  you. When a server adds a tool or changes a tool's description, inputs or hints after you approved
+  it, those tools are held until you choose Approve tool changes on the MCP page.
+
 ## 0.4.33
 
 Every answer of the lead agent from a cloud model now shows a trust badge that says what the

@@ -333,6 +333,17 @@ always ends with a question for a person and never with a clearance. Entries
 take exercise labels only: org/Public, org/Internal, NATO Unclassified or
 Protected A.
 
+A server's tool descriptions are its own words, so they reach the model fenced
+as untrusted text, cut to 1,024 characters, the way its results are, and a
+description that looks like it tries to instruct the assistant is flagged to
+you. The tools a server lists at its first connection are the ones you
+approved; if it later adds a tool or changes a tool's description, inputs or
+hints, those tools are not offered to agents until you choose **Approve tool
+changes** on the MCP page. Your policy can also set the highest label each
+server may receive (`ceiling.mcpLabelCeilings`, through **NEAR AI: Edit
+Policy**): a call from a chat whose label is above it is refused before
+anything is sent. See SECURITY.md, "MCP connections".
+
 ### Compare Models
 
 **NEAR AI: Compare Models** (also on the Tools page) shows which models do your
