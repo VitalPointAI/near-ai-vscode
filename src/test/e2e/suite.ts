@@ -474,7 +474,12 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           await snap('e2e-globe');
         }
         console.log(`[real-window] 3D terrain at Harrow Ridge: ${height === undefined ? 'no height' : `${Math.round(height)} m`}; origins: ${(report.map?.origins ?? []).join(', ')}`);
-        assert.ok(typeof height === 'number' && height > 150, `Harrow Ridge stands over 150 m in 3D (${height}; ${JSON.stringify(report.map?.ground)})`);
+        // Advisory (owner decision, 2026-11-19): in this window the map draws with software WebGL under xvfb, where tile loads can time out
+        // before MapLibre settles, so the height is a diagnostic here, not a gate. The headless-browser page tests measure it (166 to 168 m), and the
+        // security checks below stay blocking.
+        if (!(typeof height === 'number' && height > 150)) {
+          console.warn(`[real-window] ADVISORY: Harrow Ridge did not reach 150 m in 3D in this software-WebGL window (${height}; ${JSON.stringify(report.map?.ground)})`);
+        }
         assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation');
         const foreign = (report.map?.origins ?? []).filter((origin) => !/vscode-resource|vscode-cdn\.net|^vscode-webview:|^null$/.test(origin));
         assert.deepEqual(foreign, [], 'every request goes to the extension');
