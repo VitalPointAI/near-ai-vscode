@@ -758,6 +758,176 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '25c777fc410454bf'
         ]
       }
+    },
+    {
+      version: 2,
+      definition: 'ff42d434c8e656a4',
+      guidance: [
+        '8c12c625cdb08b4b',
+        'bd0fd1276a805473',
+        'd3ab8bb578f20342',
+        '610cf2b8c0bb9bcf',
+        '7c25b1f681c87ea3',
+        'a763c353ed731ddf',
+        '27eaf1db9b6b234c',
+        '768e9882b7784261',
+        'c830d57a444578ae',
+        'b20c60d2da90469f',
+        '649121d50eaaf2c2',
+        '1f815670f2b25fc4',
+        '26e228010166b899',
+        'bc432fe88e96cd0e',
+        '0d978fb692aad0ff',
+        'a0d7e4d60e4914af',
+        '6b7472bffe87ba9e',
+        '85b1cc8b3bdda9d7',
+        '9a19baa18052b3eb',
+        'bbcdad39b975225d',
+        '7ecfa64a981b9575',
+        '899b3c1b18813b8c',
+        '80a095a382cb507f',
+        '34115b0914ef0f03'
+      ],
+      members: {
+        'j2-chief': [
+          '89cb58b90ea1bd17',
+          'a93bf1e92683485b',
+          'da13e5459ee50a3d',
+          '6d12ea7267b396d4',
+          '35510e71bba2e6c8',
+          '72992d6a6f796c4a',
+          'da75f75e2a0bfbca',
+          'badc5256a0480e63',
+          '61cc3beb64a3257c',
+          'e5e5c768b1d1c1d1',
+          '56b2a486796b4a4d',
+          '388dfbc099f6203a',
+          '90a0bba3dc8ef090',
+          'bc3f4f1c44fff833',
+          'abad9e1a445d28d3',
+          '78547f172217fedb',
+          'f8eb208565d74da2',
+          'e730f8e9e40b9c9b',
+          'c692459f0ec83dd3',
+          'f0d66751d367f95d'
+        ],
+        'requirements-manager': [
+          'a7505f756deef82a',
+          '8ef0ae1d3d929f3a',
+          'd428d65c584ea89a',
+          '9dfc3d01c1aafbc6',
+          'fb841cee1cefdd39',
+          '777919be1c390fc7'
+        ],
+        'collection-manager': [
+          '0a88c8e7e90e4320',
+          '8efa15e208a9c210',
+          'd2e361bb52ff8d6d',
+          '99705bedee6463e7',
+          'a70e2e0031b819d0',
+          '691696b35973bf50',
+          '2bcd3d144381018d'
+        ],
+        'jipoe-analyst': [
+          '27d2394ce56917df',
+          'd9532d2838bf819e',
+          'cf03278df023328f',
+          '856abad3cf12926f'
+        ],
+        'threat-analyst': [
+          '34761b9eb22a23d7',
+          'fba0ec99fbb9b5f6',
+          'c70ea9e7e15cce23',
+          'bc93b02465095d88',
+          '9a6e015f733f96f7',
+          '045e056673fc33da',
+          '0360b13236a4dc75',
+          '95bdd41c3368a6b3'
+        ],
+        'warning-analyst': [
+          'f280fee949a9f023',
+          '995eb551e95b0e84',
+          '216c27b5086e9f3f',
+          '08bc3f4d32dfcf99'
+        ],
+        'red-cell': [
+          'e4019a86a5a23a34',
+          '8b8ccad11e70a19a',
+          '55561faadbcef9ae',
+          '037ed07b5a4471f2',
+          '9c56e34b8374a79f',
+          'd5253fe2518043cb',
+          '8e6fdf762b006284',
+          '01d60c9700f1b7c2'
+        ],
+        'tradecraft-reviewer': [
+          'cc9a5893b4ea246a',
+          '15e046b57ef48fc6',
+          'a2777214df176834',
+          '7be7d9526387fcfe',
+          'a0332c137262bcb4',
+          'e76ea8b9bf5885f6',
+          '5a2a7d1088246f17',
+          'b2434c4391441b53'
+        ],
+        'release-guard': [
+          '47e3009e94ddfaa9',
+          '3b740c9d51c85c2a',
+          '8f18d1e78e05e586',
+          '5242d1d96816960b',
+          'd86137390df3084a'
+        ],
+        'geoint-analyst': [
+          '08aa14631077e26c',
+          '5609fa7df3458959',
+          'f4600301449f548e',
+          '49e62e06fd6e6393'
+        ],
+        'osint-analyst': [
+          'e1a4fba2db1db5c4',
+          'ed1a2eb966c123db',
+          '2317abe7bd7a6f0c',
+          '9853fcebfe0b336e'
+        ],
+        'watch-officer': [
+          '21cbd9e4dfc4204d',
+          '23e2fe2577b6c464',
+          '4a56882655ab21a1',
+          'c155542240f546c4',
+          'cb0545969e0872d2',
+          '31429ed72633d747',
+          'a99d9eaad554432e',
+          'b114973d3aecbe5f',
+          '6d7eb92981145bc5',
+          'acca2686889ab218'
+        ],
+        'target-analyst': [
+          'dec983630cabfaae',
+          'b9e131c32367aa7f'
+        ],
+        's2-lead': [
+          'dfefd3e373b63d15',
+          'db8850466734d0b0',
+          'd15007871bc925c8',
+          '88ae01f31f726a77',
+          'b7d79549366330f4',
+          'ad37e56f69f15bf6',
+          '2b51440c99e2bcd1',
+          '044b2a8d33242a18',
+          '4b397703b80f148a',
+          'c4dd10e94c2f31de'
+        ],
+        'ipb-analyst': [
+          'b996addedf0d4c0c',
+          'd5f3d0ad3abb8a59',
+          '5359c83c59409f92',
+          '5cfb2fc1855b171e',
+          'ebf3b66f4d22eed1',
+          '5dc1378bd58a708e',
+          '62fc7101473438ab',
+          '7a6c346f45133f0a'
+        ]
+      }
     }
   ],
   'j5-plans': [

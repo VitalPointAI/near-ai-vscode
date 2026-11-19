@@ -197,7 +197,8 @@
   // ---- Symbols ----------------------------------------------------------------------------------------------------------------------------
 
   function symbolOptions(p) {
-    const options = { size: 28, uniqueDesignation: p.name };
+    // The standard light fills by affiliation (UX 5.10), also for civilian entities, which milsymbol would otherwise fill purple.
+    const options = { size: 28, uniqueDesignation: p.name, civilianColor: false };
     if (p.state === 'stale') options.fillOpacity = 0.4;
     if (p.state === 'lost') { options.fill = false; options.uniqueDesignation = p.name + ' (lost)'; }
     return options;
