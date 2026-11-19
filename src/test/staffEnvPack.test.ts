@@ -2,6 +2,7 @@
 // the synthetic IRON LANTERN pack made again from its seed, contours and hillshade from a DEM, the weather frame the time slider picks, the layers on the
 // COP map with no request made, and the pack builder's refusals.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,7 +26,9 @@ import { BUNDLED_ENV_DIR, readEnvPackDir, scenarioEnvironment } from '../staff/e
 const REPO = path.resolve(__dirname, '..', '..');
 const PACK_DIR = path.join(REPO, 'resources', 'staff', 'env', 'iron-lantern');
 const SCHEMA = JSON.parse(readFileSync(path.join(REPO, 'resources', 'staff', 'env', 'env-pack.schema.json'), 'utf8'));
-const NAMES = ['manifest.json', 'dem.json', 'coastline.geojson', 'weather.json'];
+const NAMES = ['manifest.json', 'dem.json', 'coastline.geojson', 'weather.json', 'landcover.geojson'];
+/** The four files of a version 1 pack (the size check below has always covered these). */
+const V1_NAMES = ['manifest.json', 'dem.json', 'coastline.geojson', 'weather.json'];
 
 function starter() {
   const parsed = parseScenarioText(readFileSync(path.join(REPO, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
@@ -67,23 +70,30 @@ test('the bundled IRON LANTERN pack validates against its frame and against the 
   const read = await readEnvPackDir(PACK_DIR, { frame: scenario.region.frame, scenario: scenario.id });
   assert.ok(read?.ok, read && !read.ok ? read.problems.join('\n') : 'no pack');
   const files = committed();
-  const total = Object.values(files).reduce((sum, file) => sum + file.length, 0);
+  const total = V1_NAMES.reduce((sum, name) => sum + files[name].length, 0);
   assert.ok(total < 200 * 1024, `${total} bytes`);
+  assert.ok(files['landcover.geojson'].length < 300 * 1024, `land cover ${files['landcover.geojson'].length} bytes`);
   const json = (name: string) => JSON.parse(files[name].toString('utf8'));
   assert.ok(schemaCheck()(json('manifest.json')), 'manifest');
   assert.ok(schemaCheck('dem')(json('dem.json')), 'dem');
   assert.ok(schemaCheck('weather')(json('weather.json')), 'weather');
   assert.ok(schemaCheck('coastline')(json('coastline.geojson')), 'coastline');
+  assert.ok(schemaCheck('landcover')(json('landcover.geojson')), 'landcover');
   const manifest = json('manifest.json');
   assert.equal(manifest.data, 'synthetic');
-  assert.deepEqual(manifest.generator, { script: 'scripts/generate-env-pack.mjs', seed: IRON_LANTERN_SEED, version: 1 });
+  assert.equal(manifest.version, 2, 'a version 2 pack: land cover and tiles');
+  assert.deepEqual(manifest.generator, { script: 'scripts/generate-env-pack.mjs', seed: IRON_LANTERN_SEED, version: 2 });
+  assert.deepEqual(Object.keys(manifest.tiles), ['path', 'sha256', 'bytes']);
+  assert.equal(manifest.tiles.path, 'tiles/index.json');
   assert.match(manifest.attribution[0], /Nothing in this pack is a real place or a real forecast/);
   assert.equal(path.join(BUNDLED_ENV_DIR, 'iron-lantern'), path.join(REPO, 'resources', 'staff', 'env', 'iron-lantern'), 'the extension reads the committed pack');
 });
 
 test('the synthetic pack is made again byte for byte from its seed, and another seed makes another pack', () => {
   const scenario = starter();
-  const again = syntheticEnvPack(scenario, { seed: IRON_LANTERN_SEED })!;
+  // The manifest records the committed tile index's size and hash (the script makes the tiles; tiles are checked in staffMapTiles.test.ts).
+  const index = readFileSync(path.join(PACK_DIR, 'tiles', 'index.json'));
+  const again = syntheticEnvPack(scenario, { seed: IRON_LANTERN_SEED, tiles: { path: 'tiles/index.json', sha256: createHash('sha256').update(index).digest('hex'), bytes: index.length } })!;
   for (const name of NAMES) assert.equal(again[name], committed()[name].toString('utf8'), `${name} matches the generator (run node scripts/generate-env-pack.mjs)`);
   const other = syntheticEnvPack(scenario, { seed: 7 })!;
   assert.notEqual(other['dem.json'], again['dem.json']);

@@ -47,6 +47,8 @@ export interface ExerciseFrame {
   /** How many squares the frame spans east and north from the origin. */
   readonly extent: { readonly eastings: number; readonly northings: number };
   readonly axis: FrameAxis;
+  /** The magnetic declination the map's margin shows (degrees, east positive). A scenario's value is fictional, like the frame, and its note says so. */
+  readonly magneticDeclination?: { readonly degreesEast: number; readonly note: string };
 }
 
 /** The closed list of reasons a frame is refused. */

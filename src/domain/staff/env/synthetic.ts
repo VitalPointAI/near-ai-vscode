@@ -9,13 +9,14 @@
 // bytes; scripts/generate-env-pack.mjs writes them and a test makes them again and compares.
 import { gridToWgs84 } from '../obs/frame';
 import type { ExerciseFrame } from '../obs/frame';
-import { SYNTHETIC_OUTLINES } from '../cop/geography';
+import { naturalLand, SYNTHETIC_OUTLINES } from '../cop/geography';
 import type { Scenario } from '../scenario';
-import type { Bounds, Coastline, CoastlineFeature, Dem, WeatherFrameValues, WeatherGrid } from './pack';
+import type { Bounds, Coastline, CoastlineFeature, Dem, EnvFileEntry, WeatherFrameValues, WeatherGrid } from './pack';
+import { syntheticLandcover } from './landcover';
 import { writeEnvPack } from './pack';
 
 /** Bumped when the generator's output changes for the same seed, so a pack says which generator made it. */
-export const SYNTHETIC_GENERATOR_VERSION = 1;
+export const SYNTHETIC_GENERATOR_VERSION = 2;
 export const SYNTHETIC_GENERATOR_SCRIPT = 'scripts/generate-env-pack.mjs';
 /** The seed of the bundled IRON LANTERN pack. */
 export const IRON_LANTERN_SEED = 20270524;
@@ -86,11 +87,15 @@ function lonLat(frame: ExerciseFrame, km: Km): [number, number] {
 }
 
 /** The terrain box of the IRON LANTERN pack in km east and north of the frame origin, and its spacing: the peninsula, the strait and the far shore. */
-const DEM_BOX = { sw: [20, 0] as Km, ne: [78, 58] as Km, stepKm: 0.5 };
+export const DEM_BOX = { sw: [20, 0] as Km, ne: [78, 58] as Km, stepKm: 0.5 };
 /** The forecast: every 10 km over the whole frame, every six hours over the inject script's window (D-6 0000 to D-3 0600, D-day 2027-05-24). */
 const WEATHER = { stepKm: 10, runAt: '2027-05-17T18:00:00.000Z', firstValid: '2027-05-18T00:00:00.000Z', frames: 14, stepHours: 6 };
 
-export interface SyntheticPackOptions { readonly seed: number }
+export interface SyntheticPackOptions {
+  readonly seed: number;
+  /** The tile index entry (tiles/index.json's size and hash), once the generator script has made the tiles; the manifest records it. */
+  readonly tiles?: EnvFileEntry;
+}
 
 /** The synthetic pack's files (manifest.json, dem.json, coastline.geojson, weather.json) as text. Undefined for a scenario with no frame or outline. */
 export function syntheticEnvPack(scenario: Pick<Scenario, 'id' | 'title' | 'region'>, options: SyntheticPackOptions = { seed: IRON_LANTERN_SEED }): Record<string, string> | undefined {
@@ -100,8 +105,10 @@ export function syntheticEnvPack(scenario: Pick<Scenario, 'id' | 'title' | 'regi
   const random = seededRandom(options.seed);
   const side: Km = [frame.extent.eastings * frame.squareMetres / 1000, frame.extent.northings * frame.squareMetres / 1000];
   const onBoxEdge = (a: Km, b: Km) => (a[1] === 0 && b[1] === 0) || (a[0] === 0 && b[0] === 0) || (a[1] === side[1] && b[1] === side[1]) || (a[0] === side[0] && b[0] === side[0]);
-  const coastDistance = (p: Km) => Math.min(...outline.land.map((ring) => pathDistance(p, ring, onBoxEdge)));
-  const onLand = (p: Km) => outline.land.some((ring) => insideRing(p, ring));
+  // The natural coast (pack version 2): the same detailed rings the map's synthetic geography draws.
+  const land = naturalLand(outline, side);
+  const coastDistance = (p: Km) => Math.min(...land.map((ring) => pathDistance(p, ring, onBoxEdge)));
+  const onLand = (p: Km) => land.some((ring) => insideRing(p, ring));
 
   // ---- DEM ----
   const width = Math.round((DEM_BOX.ne[0] - DEM_BOX.sw[0]) / DEM_BOX.stepKm) + 1;
@@ -132,7 +139,7 @@ export function syntheticEnvPack(scenario: Pick<Scenario, 'id' | 'title' | 'regi
 
   // ---- Coastline: the same land outline the map's synthetic geography draws ----
   const names = ['Kestrel Peninsula and the Aldmark mainland', 'Far shore of the Varn Strait', 'Gull Island'];
-  const features: CoastlineFeature[] = outline.land.map((ring, index) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring.map((point) => lonLat(frame, point))] }, properties: { kind: 'land', ...(names[index] ? { name: names[index] } : {}) } }));
+  const features: CoastlineFeature[] = land.map((ring, index) => ({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring.map((point) => lonLat(frame, point))] }, properties: { kind: 'land', ...(names[index] ? { name: names[index] } : {}) } }));
   const coastline: Coastline = { type: 'FeatureCollection', features };
 
   // ---- Weather ----
@@ -171,10 +178,12 @@ export function syntheticEnvPack(scenario: Pick<Scenario, 'id' | 'title' | 'regi
   };
 
   return writeEnvPack({
-    id: `${scenario.id}-synthetic`, title: `${scenario.title}: synthetic terrain and weather`, data: 'synthetic', bounds: weather.bounds,
+    id: `${scenario.id}-synthetic`, title: `${scenario.title}: synthetic terrain, imagery and weather`, data: 'synthetic', bounds: weather.bounds,
     frame: { scenario: scenario.id, grid: frame.grid },
     generator: { script: SYNTHETIC_GENERATOR_SCRIPT, seed: options.seed, version: SYNTHETIC_GENERATOR_VERSION },
-    attribution: ['Synthetic exercise terrain and weather, generated from a seed. Nothing in this pack is a real place or a real forecast.'],
-    licence: 'MIT, the same licence as this extension', dem, coastline, weather
+    attribution: ['Synthetic exercise terrain, imagery and weather, generated from a seed. Nothing in this pack is a real place or a real forecast.'],
+    licence: 'MIT, the same licence as this extension', dem, coastline, weather,
+    // Version 2: the land cover the imagery and the topographic map draw, and the tiles when the script has made them.
+    landcover: syntheticLandcover(scenario, dem, DEM_BOX, options.seed), ...(options.tiles ? { tiles: options.tiles } : {})
   });
 }

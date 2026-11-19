@@ -85,7 +85,14 @@ export interface PictureLayer {
 export interface CopPicture {
   readonly version: typeof PICTURE_VERSION;
   readonly marking: string;
-  readonly frame?: { readonly grid: string; readonly bounds: readonly [number, number, number, number]; readonly centre: readonly [number, number] };
+  /**
+   * The exercise frame: its grid, outer box and centre, how many grid squares it spans and their side (so the page draws the grid lines every square
+   * and every ten), and the scenario's magnetic declination when it gives one (fictional, with its note).
+   */
+  readonly frame?: {
+    readonly grid: string; readonly bounds: readonly [number, number, number, number]; readonly centre: readonly [number, number];
+    readonly squares: readonly [number, number]; readonly squareMetres: number; readonly declination?: { readonly degreesEast: number; readonly note: string };
+  };
   readonly geography?: Geography;
   /** Terrain and weather from an environment pack (WP-ENV): drawn under the layers, toggled like them, the weather frame picked by the clock. */
   readonly environment?: PictureEnvironment;
@@ -328,7 +335,10 @@ export function buildCopPicture(input: PictureInput): CopPicture {
   const cut = feed && feed.tracks > feed.shown ? `Showing the ${feed.shown.toLocaleString('en-US')} most recently updated of ${feed.tracks.toLocaleString('en-US')} tracks (budget ${limit.toLocaleString('en-US')}).` : undefined;
   return {
     version: PICTURE_VERSION, marking: input.marking,
-    ...(input.frame ? { frame: { grid: input.frame.grid, ...frameBounds(input.frame) } } : {}),
+    ...(input.frame ? { frame: {
+      grid: input.frame.grid, ...frameBounds(input.frame), squares: [input.frame.extent.eastings, input.frame.extent.northings] as const, squareMetres: input.frame.squareMetres,
+      ...(input.frame.magneticDeclination ? { declination: { degreesEast: input.frame.magneticDeclination.degreesEast, note: input.frame.magneticDeclination.note } } : {})
+    } } : {}),
     ...(input.geography ? { geography: input.geography } : {}),
     ...(input.environment ? { environment: input.environment } : {}),
     layers, features,

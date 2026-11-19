@@ -1,8 +1,8 @@
 {
   "format": "near-env-pack",
-  "version": 1,
+  "version": 2,
   "id": "iron-lantern-synthetic",
-  "title": "Exercise IRON LANTERN: synthetic terrain and weather",
+  "title": "Exercise IRON LANTERN: synthetic terrain, imagery and weather",
   "data": "synthetic",
   "crs": "EPSG:4326",
   "bounds": [
@@ -18,27 +18,37 @@
   "generator": {
     "script": "scripts/generate-env-pack.mjs",
     "seed": 20270524,
-    "version": 1
+    "version": 2
   },
   "attribution": [
-    "Synthetic exercise terrain and weather, generated from a seed. Nothing in this pack is a real place or a real forecast."
+    "Synthetic exercise terrain, imagery and weather, generated from a seed. Nothing in this pack is a real place or a real forecast."
   ],
   "licence": "MIT, the same licence as this extension",
   "files": {
     "dem": {
       "path": "dem.json",
-      "sha256": "77863470de64e1551c3b157ebbb8df75706e9ec616c0323243b680290e558f97",
-      "bytes": 51818
+      "sha256": "f875dd5869a08f39e2ace9e772417523e58e17b755e97859e8160a7bed99cce2",
+      "bytes": 51705
     },
     "coastline": {
       "path": "coastline.geojson",
-      "sha256": "a821bf1e5f856b7c582d95102e22e99a926e57f9d2efb220527bfdae8e082e56",
-      "bytes": 1432
+      "sha256": "c5786006aca71cd81020b48bf899f2d48dad91b582f1ab5495893af516174a6a",
+      "bytes": 82969
     },
     "weather": {
       "path": "weather.json",
       "sha256": "f1fcf51deafed07c8c4c7717fd459a20af7b74d20988e762b218717d6dbf3911",
       "bytes": 30850
+    },
+    "landcover": {
+      "path": "landcover.geojson",
+      "sha256": "d31a51ef872e49d1a8cb17d3a7d64d47ee8bb2db1f2adf95e7d29fdd86a2a49b",
+      "bytes": 220018
     }
+  },
+  "tiles": {
+    "path": "tiles/index.json",
+    "sha256": "eefe90e7d51dc9c4a405877eadcc8c7b36f1bf7394bd9b518880ececd581e1be",
+    "bytes": 76996
   }
 }

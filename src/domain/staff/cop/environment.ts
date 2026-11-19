@@ -12,8 +12,8 @@ import type { EnvPack } from '../env/pack';
 /** The picture layer ids of the environment layers. They start `env-`, so they are never mistaken for a product or feed layer. */
 export const ENV_LAYERS = { hillshade: 'env-hillshade', contours: 'env-contours', weather: 'env-weather' } as const;
 
-/** Contour spacing on the map, in metres; every fifth line is an index contour. */
-export const CONTOUR_INTERVAL_M = 50;
+/** Contour spacing on the map, in metres; every fifth line (every 100 m) is an index contour, labelled with its height. */
+export const CONTOUR_INTERVAL_M = 20;
 
 export interface CoastFeature {
   readonly type: 'Feature';
