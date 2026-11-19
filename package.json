@@ -1095,6 +1095,8 @@
     "compare:models": "npm run compile && node scripts/compare-models.mjs",
     "package": "npm run compile && npm run sbom && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
+    "generate:globe": "node scripts/build-globe-tiles.mjs",
+    "generate:env-pack": "npm run compile && node scripts/generate-env-pack.mjs --tiles",
     "install:global": "node scripts/install-global-extension.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
     "smoke:staff": "npm run compile && node scripts/staff-smoke.mjs",
@@ -1104,6 +1106,8 @@
     "sbom": "node scripts/extension-sbom.mjs"
   },
   "devDependencies": {
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/webp": "1.5.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@resvg/resvg-wasm": "2.6.2",
     "@types/node": "^22.10.0",
