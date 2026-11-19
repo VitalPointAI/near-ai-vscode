@@ -253,10 +253,10 @@ Design 10's dependency rule carries over unchanged: dependants pin a version has
 
 **Make This Staff Project Multi-User** writes `project.genesis`, signed by the person who runs it, who becomes the **staff lead**. Genesis names the project id, profile, level, label map hash, the lead's device, first cell grants, and the hub's key and certificate pin if any. Every machine pins it on join (Team Mode's `GenesisAnchor` and the trust pin of `src/team/teamFile.ts` are the model).
 
-The roster is single-writer and linear: only lead devices write it, and every roster entry cites the previous one (`rosterPrev`), so authority never needs general state resolution (the Matrix lesson, `RESEARCH.md`).
+The roster is single-writer and linear: only the devices of the staff lead and the deputy lead write it (owner decision 5), and every roster entry cites the previous one (`rosterPrev`), so authority never needs general state resolution (the Matrix lesson, `RESEARCH.md`).
 - Online, the hub accepts a roster entry only if `rosterPrev` is the current head.
-- Offline, two lead devices writing on one `rosterPrev` **split** the roster: both pending, the common prefix applies, and the lead writes `roster.choose`. The Staff Room says "The roster was changed on two of the lead's machines at once. The lead must choose."
-- `lead.handover` names a new lead. If the lead is lost before Phase 71, the project is re-founded by export and import into a new genesis (owner question 5).
+- Offline, two roster writers (two of the lead's devices, or the lead and the deputy) writing on one `rosterPrev` **split** the roster: both pending, the common prefix applies, and the lead (or, if the lead is unavailable, the deputy) writes `roster.choose`. The Staff Room says "The roster was changed in two places at once. The lead or the deputy must choose."
+- `lead.handover` names a new lead; the deputy may sign it when the lead is lost, so losing one lead is not fatal (owner decision 5). `deputy.name` names or replaces the deputy and is written by the lead. Only if both are lost before Phase 71 is the project re-founded by export and import into a new genesis.
 
 | Entry | Content |
 |---|---|
@@ -267,7 +267,7 @@ The roster is single-writer and linear: only lead devices write it, and every ro
 | `hub.admit` / `grant` / `revoke` | Hub key, certificate pin, clearance ceiling, granted cells (10.2) |
 | `cell.create` / `rekey` | New cell or epoch; wraps delivered as grants (8.2) |
 
-Roles: **staff lead** (writes the roster), **member** (reads and writes granted cells), **decision roles** (approve, reject, release for named products or sections), **observer** (reads, writes only presence), **hub** (service member). Agents act under the device of the person who ran them and are not roster members.
+Roles: **staff lead** (writes the roster), **deputy lead** (also writes the roster, and may hand over the lead), **member** (reads and writes granted cells), **decision roles** (approve, reject, release for named products or sections), **observer** (reads, writes only presence), **hub** (service member). Agents act under the device of the person who ran them and are not roster members.
 
 ### 7.2 Self-declared until Phase 71, then credentials
 
@@ -466,7 +466,7 @@ Chats, transcripts, prompts and tool calls (Phase 27 state); NEAR AI key, spend 
 5. **Observations** may be imported by feed, as the lead chooses.
 6. **Files become projections**: `.planning/staff/**` is rewritten from the fold; the header tamper check compares against folded state.
 7. **Idempotent**: a re-run after interruption makes the same entries (ids from file hashes); nothing is deleted; legacy files move to `.planning/staff/legacy/`.
-8. **No way back in drop A**; a single-machine copy is owner question 6.
+8. **Way back**: **Make a Single-Machine Copy** ships in drop A (owner decision 6): it folds the shared state into today's single-machine files, signed by this device, and leaves the shared project untouched.
 
 ---
 
@@ -707,12 +707,14 @@ Plain words, one sentence per state, as the Phase 27 sync control and Staff Room
 
 ---
 
-## 21. Open questions for the owner
+## 21. Owner decisions (2026-11-19)
 
-1. **Vendoring Yjs.** Vendor Yjs 13.6.33 and `lib0` (MIT, pure JavaScript) into the bundle, recorded like MapLibre and milsymbol, as the first vendored code in the extension host itself (the others run in webviews)? Recommended: yes.
-2. **Hub model credential.** Hub watches need a model credential of the hub's own: a separate key of your organization, or a local model on the hub host. Which, and whose budget? Recommended: a separate organization key with a daily cap; local models for `local-only` cells once the data platform host exists.
-3. **Default hub grants.** Grant the hub the base cell by default, or nothing until the lead chooses? Recommended: nothing by default; per-cell grants with the trade-off sentence.
-4. **Edits during review.** Only "N changes since v5", or ask the owner to withdraw past a threshold? Recommended: the count only.
-5. **Lost staff lead before Phase 71.** Accept re-founding by export and import as the only recovery until your organization's issuer can name a new lead? Recommended: yes; a deputy lead as a second roster writer later.
-6. **Way back to single-machine.** **Make a Single-Machine Copy** in drop A or later? Recommended: after drop B.
-7. **Release vehicle.** Two staff collaboration drops in 0.4.x (Phases 30 to 33, then 34 and 35) before the remaining v0.5.0 Stage 1 phases, as staff drops 1 and 2 were? Recommended: yes; the work reads labels but changes no gate code.
+The owner accepted these on 2026-11-19. They are decided, and they override anything else in this design that differs.
+
+1. **Vendoring Yjs.** Yes. Yjs 13.6.33 and `lib0` are vendored into the bundle, pinned and hash-checked like MapLibre and milsymbol, recorded in SECURITY.md as the first vendored code in the extension host itself.
+2. **Hub model credential.** A dedicated NEAR AI key of your organization for the hub, with its own daily spend cap set in the signed policy. Local models for `local-only` cells once the data platform host exists.
+3. **Default hub grants.** None. The staff lead grants the hub each cell, with the trade-off sentence shown.
+4. **Edits during review.** Show "N changes since v5". After about 20 changes, prompt the product's owner to propose a new version. Never withdraw automatically.
+5. **Lost staff lead before Phase 71.** The roster names a deputy lead who can also sign membership changes, so losing one lead is not fatal. Re-founding by export and import stays as the last resort.
+6. **Way back to single-machine.** **Make a Single-Machine Copy** ships in drop A, so there is always a safe exit.
+7. **Release vehicle.** Yes: two staff collaboration drops in 0.4.x (Phases 30 to 33, then 34 and 35).
