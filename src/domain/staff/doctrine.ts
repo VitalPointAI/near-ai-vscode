@@ -802,3 +802,71 @@ export const RED_TEAM_NOTES: Readonly<Record<StaffProfileId, { readonly note: st
   'us-army': { note: 'The red team is an independent group, separate from the S-2 or G-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
   'nato-ca': { note: 'Red teaming is a UK national element in AJP-5, not NATO doctrine. It is on by default; the commander may switch it off.', optional: true }
 };
+
+// ---- Operations terms (design 10, 3.4; research note 03, part A; WP-J3) -----------------------------------------------------------------------------
+// The J3 template and its two skills (running-estimate, execution-loop) read these tables. The running estimate headings are FUNCTION_SETS above, the
+// space vocabulary SPACE_MISSION_AREAS, and the horizon lengths come from the staff settings (STAFF_DEFAULTS), never from here.
+
+/**
+ * The three venues of planning in execution, by time horizon: what each covers and which body usually owns it. The codes (J-3, J35, G-5) come from the
+ * profile; these words are code-neutral.
+ */
+// JP 5-0 (1 July 2025) ch. IV, planning in execution (03 A3, quoting the 2020 text, which the 2025 edition keeps); JP 3-33 (2018) for the future
+// operations cell under the J-3 (J35 in many headquarters, design 10, 3.1).
+export const PLANNING_HORIZONS = {
+  currentOperations: { name: 'Current operations', covers: 'immediate and near-term issues of the operation under way', owner: 'the operations centre' },
+  futureOperations: { name: 'Future operations', covers: 'branches to the current operation', owner: 'the future operations cell of the operations section' },
+  futurePlans: { name: 'Future plans', covers: 'the next phase of the operation and sequels', owner: 'the plans section' }
+} as const;
+
+/** The current operations body at each level. */
+// 03 A13 (JP 3-33, 2018; FM 6-0, May 2022, integrating cells); ATP 6-0.5 (2017) for the battle captain and battle NCO duties (03 A7); Land Operations
+// (2008) for the Canadian operations centre (design 10, 2.5).
+export const CURRENT_OPERATIONS_BODIES = {
+  strategic: 'Command centre or joint operations centre (JOC)',
+  operational: 'Joint operations centre (JOC)',
+  tactical: 'Tactical operations centre (TOC) or main command post, with the current operations integration cell',
+  tacticalDuties: 'the battle captain\'s and battle NCO\'s duties'
+} as const;
+
+/** The competition continuum: the J3 at strategic level runs day-to-day campaigning across it, not only crisis response. */
+// JP 1 Volume 1, Joint Warfighting (27 August 2023); JP 3-0 (18 June 2022) summary of changes (design 10, 2.8 item 8; 03 A2).
+export const COMPETITION_CONTINUUM: readonly string[] = ['Cooperation', 'Competition below armed conflict', 'Armed conflict'];
+
+/** The US Army information activities the information planner synchronizes. */
+// ADP 3-13, Information (27 November 2023) (03 A5). JP 3-04 (2022) is not public and is not used.
+export const INFORMATION_ACTIVITIES: readonly string[] = ['Enable', 'Protect', 'Inform', 'Influence', 'Attack'];
+
+/** The Canadian Army influence activities, which replace the information operations umbrella in land planning. */
+// CADN 16-01, Land Operations Doctrine: an updated summary (27 May 2016) (design 10, 2.5).
+export const INFLUENCE_ACTIVITIES: readonly string[] = ['Psychological operations (PSYOPS)', 'Key leader engagement', 'Civil support', 'Posture, profile and presence', 'Media relations'];
+
+/**
+ * The six phases of the joint targeting cycle, which may run at the same time and serve deliberate and dynamic targeting. Phase 4 is the commander's
+ * decision; working groups prepare and boards decide.
+ */
+// JP 3-60, Joint Targeting (28 September 2018), released through the DoD FOIA reading room (03 A5). Phase 6: the 2013 edition said "combat assessment";
+// the 2018 renaming could not be read in a primary copy (03 gap 3), so the plain name "Assessment" is used, by best judgement.
+export const JOINT_TARGETING_CYCLE: readonly string[] = [
+  'End state and commander\'s objectives', 'Target development and prioritization', 'Capabilities analysis', 'Commander\'s decision and force assignment',
+  'Mission planning and force execution', 'Assessment'
+];
+
+/** What every running estimate holds, and the rule that it always carries recommendations for anticipated decisions. */
+// FM 5-0, Planning and Orders Production (November 2024), running estimates (03 A6; 03 A14 item 8).
+export const RUNNING_ESTIMATE = {
+  parts: ['Facts', 'Assumptions', 'Friendly force status', 'Enemy activities and capabilities', 'Civil considerations', 'Conclusions and recommendations, with risk'],
+  rule: 'A running estimate always includes recommendations for anticipated decisions; one without them is sent back.'
+} as const;
+
+/** The fragmentary order: what it is, and the abbreviation each profile uses. */
+// FM 5-0 (November 2024) definition (03 A6); JP 5-0 (1 July 2025) joint orders list, FRAGORD (design 10, 2.8 item 5); NATO and Canadian usage FRAGO
+// (CFJP 5.0, 2008, art. 406 writes "Frag O"; Land Operations, 2008), by best judgement where AJP-5 gives no abbreviation.
+export const FRAGMENTARY_ORDER = {
+  definition: 'An abbreviated order that changes or modifies an order, or executes a branch or sequel; it gives the changes only, in the five-paragraph format.',
+  abbreviation: { 'us-joint': 'FRAGORD', 'us-army': 'FRAGORD', 'nato-ca': 'FRAGO' }
+} as const satisfies { readonly abbreviation: Readonly<Record<StaffProfileId, string>> } & Record<string, unknown>;
+
+/** The space products the space command owns; the J3 cyber and space planner feeds them and never writes them. */
+// JP 3-14, Joint Space Operations (23 August 2023) ch. III (design 10, 3.4, cyber-space-planner).
+export const SPACE_COMMAND_PRODUCTS: readonly string[] = ['Space operations directive', 'Master space plan', 'Combined space tasking order (weekly)'];
