@@ -799,6 +799,11 @@ test('the map is sized to the room left below its top, so it fills the panel wit
   await new Promise((resolve) => setTimeout(resolve, 20));
   // The stand-in DOM puts every box at top 10: 1000 - 10 - 14 of padding.
   assert.equal(page.doc.getElementById('app')!.style['--map-h'], '976px');
+  // With under 300px left below its top, the map keeps a usable height and the page scrolls to it.
+  const small = await runPage({ reduced: true, window: { innerHeight: 300, scrollY: 0 } });
+  small.dispatch({ type: 'staff-room', model, cues: [] });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(small.doc.getElementById('app')!.style['--map-h'], '320px');
 });
 
 test('Full map fills the Staff Room with the map, and Escape or the button brings the room back; nothing moves under reduced motion or Calm', async () => {

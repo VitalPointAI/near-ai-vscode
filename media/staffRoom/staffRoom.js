@@ -150,7 +150,6 @@
     nodes.roomBar = el('div', 'roombar');
     nodes.roomBar.hidden = true;
     nodes.roomBarText = el('span', 'roombar-t', '');
-    nodes.roomBarText.setAttribute('role', 'status');
     nodes.roomBarToggle = button('Show the process and sections', 'small ghost', () => setRoomOpen(!saved.roomOpen), { 'aria-expanded': 'false', 'aria-controls': 'room-process room-squads' });
     nodes.roomBar.append(glyph('M2 4h12M2 8h12M2 12h8'), nodes.roomBarText, nodes.roomBarToggle);
 
@@ -418,7 +417,7 @@
 
   /**
    * Sizes the map to the room left below its top, so it fills the panel without scrolling (--map-h on the app; staffRoom.css). A map that would get
-   * less than half the panel (a workspace with more above it) gets about two thirds of it, and the page scrolls to it. Nothing while the full map is on.
+   * under 300px (a workspace with more above it) gets about two thirds of the panel, and the page scrolls to it. Nothing while the full map is on.
    */
   let fitPending = false;
   function fitMap() {
@@ -431,8 +430,9 @@
     const viewport = window.innerHeight;
     const scroll = window.scrollY || (document.documentElement && document.documentElement.scrollTop) || 0;
     let height = Math.floor(viewport - (rect.top + scroll) - 14);
-    if (height < viewport * 0.5) height = Math.floor(viewport * 0.68);
-    height = Math.max(320, height);
+    // A narrow panel, whose header and tabs wrap, still keeps the map in view down to 300px; with less room than that (a workspace with more above
+    // the map) the map takes about two thirds of the panel and the page scrolls to it.
+    if (height < 300) height = Math.max(320, Math.floor(viewport * 0.68));
     if (app.style && typeof app.style.setProperty === 'function') app.style.setProperty('--map-h', height + 'px');
   }
   function fitMapSoon() {

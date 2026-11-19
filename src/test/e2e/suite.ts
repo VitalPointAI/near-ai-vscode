@@ -441,7 +441,8 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           console.log(`  ${where}: map ${box ? `${box.top}-${box.bottom} (${box.height}px) of ${box.viewport}px, scrolled ${box.scrollY}` : 'not found'}; page ${report.scrollWidth}/${report.clientWidth}`);
           if (!box) { problems.push(`${where}: no map box`); continue; }
           if (box.scrollY !== 0 || box.top < 0 || box.bottom > box.viewport + 1) problems.push(`${where}: the map is not in view without scrolling (${JSON.stringify(box)})`);
-          if (box.height < 0.55 * box.viewport) problems.push(`${where}: the map covers ${Math.round((100 * box.height) / box.viewport)}% of the panel's height, under 55%`);
+          // At the normal width the map is most of the panel; at the narrow width the header and tabs wrap, so it must only be in view.
+          if (target === editor && box.height < 0.55 * box.viewport) problems.push(`${where}: the map covers ${Math.round((100 * box.height) / box.viewport)}% of the panel's height, under 55%`);
           if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${where}: scrolls sideways (${report.scrollWidth} in ${report.clientWidth})`);
           for (const offender of report.offenders) problems.push(`${where}: ${offender}`);
           // The layer drawer opens with focus inside, and Escape closes it with focus back on its button.
