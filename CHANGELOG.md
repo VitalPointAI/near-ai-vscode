@@ -286,6 +286,11 @@ persona name or a rank.
   example Annex SS2 for information operations and Annex TT for public affairs) and write
   "Frag O"; NATO JIPOE has its three steps; the joint targeting cycle ends in combat assessment;
   and source grade 1 reads "Confirmed by other sources" (NATO) or "Confirmed" (US Army).
+- **Standing watches and the release guard, tightened.** A watch nobody signed shows as proposed in
+  the Staff Room whatever the file says, and only the watch grant (`mcp__observations__watch_*`)
+  gives the watch tools. With an exercise box set, two plain numbers that read as a position outside
+  it go to the release guard to check. A stray merged copy no longer blocks a COP merge, and a
+  feed import whose parser cannot start is refused at once.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

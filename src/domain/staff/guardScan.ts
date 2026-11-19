@@ -14,7 +14,7 @@ import type { ProductHeader } from './products';
 import { STAFF_MARKERS } from './products';
 
 export const GUARD_RULES = [
-  'marking', 'label-ceiling', 'outside-exercise-box', 'coordinates-without-box', 'grid-reference', 'real-entity', 'restricted-title', 'decision-as-made',
+  'marking', 'label-ceiling', 'outside-exercise-box', 'coordinates-without-box', 'unmarked-pair-outside-box', 'grid-reference', 'real-entity', 'restricted-title', 'decision-as-made',
   'personal-data', 'secret', 'number-without-calculation', 'review-mark-missing'
 ] as const;
 export type GuardRule = (typeof GUARD_RULES)[number];
@@ -128,8 +128,9 @@ const DECIMAL_PAIR = /(?<![\d.[])(-?\d{1,2}\.\d{3,})\s*°?\s*([NS])?\s*[,;/ ]\s*
 /**
  * A latitude and longitude written to two decimals ("45.42, -75.69", about a kilometre). Short decimals are also money, versions, scores and measures, so
  * a pair counts only when it is separated by a comma, is not part of a longer number or a word (v1.25, $12.50, 12.50%), and is marked as a position: a
- * hemisphere letter, a minus sign or a degree sign. Plain numbers are never held: "12.50, 3.50" and "51.10, 11.10" are not positions, while
- * "51.10 N, 11.10 E", "51.10°, 11.10°" and "45.42, -75.69" are.
+ * hemisphere letter, a minus sign or a degree sign: "51.10 N, 11.10 E", "51.10°, 11.10°" and "45.42, -75.69" are positions. An unmarked pair
+ * ("12.50, 3.50") is not a position on its own; only when a person has set an exercise box does one that reads as a plausible latitude and longitude
+ * outside the box go to the guard to check by hand (unmarkedPairsIn), and one inside the box passes.
  */
 const TWO_DECIMAL_PAIR = /(?<![\w.[$€£¥]|\d,)(-?\d{1,2}\.\d{2})\s*(°)?\s*([NS])?\s*,\s*(-?\d{1,3}\.\d{2})\s*(°)?\s*([EW])?(?![\d%]|\.\d|\s*%)/g;
 const GEOJSON_PAIR = /\[\s*(-?\d{1,3}\.\d{3,})\s*,\s*(-?\d{1,2}\.\d{3,})\s*\]/g;
@@ -180,15 +181,31 @@ export function coordinatesIn(line: string): Array<{ point: [number, number]; in
     const lon = Number(match[3]) * (match[4] === 'W' ? -1 : 1);
     push(lon, lat, match.index ?? 0, match[0]);
   }
+  for (const match of twoDecimalPairs(line)) if (match.marked) push(match.point[0], match.point[1], match.index, match.text);
+  return out;
+}
+
+/** Every two-decimal pair in a line, read latitude first, with whether it carries a position mark (hemisphere letter, minus sign or degree sign). */
+function twoDecimalPairs(line: string): Array<{ point: [number, number]; index: number; text: string; marked: boolean }> {
+  const out: Array<{ point: [number, number]; index: number; text: string; marked: boolean }> = [];
   for (const match of line.matchAll(TWO_DECIMAL_PAIR)) {
     const [, latText, latDegree, ns, lonText, lonDegree, ew] = match;
-    const positional = ns !== undefined || ew !== undefined || latDegree !== undefined || lonDegree !== undefined || latText.startsWith('-') || lonText.startsWith('-');
-    if (!positional) continue;
+    const marked = ns !== undefined || ew !== undefined || latDegree !== undefined || lonDegree !== undefined || latText.startsWith('-') || lonText.startsWith('-');
     const lat = Number(latText) * (ns === 'S' ? -1 : 1);
     const lon = Number(lonText) * (ew === 'W' ? -1 : 1);
-    push(lon, lat, match.index ?? 0, match[0]);
+    out.push({ point: [lon, lat], index: match.index ?? 0, text: match[0], marked });
   }
   return out;
+}
+
+/**
+ * The unmarked two-decimal pairs in a line that read as a plausible latitude and longitude ([longitude, latitude] points): "12.50, 3.50". They are not
+ * positions on their own (money, scores and measures look the same), so guard-scan looks at them only against an exercise box a person set.
+ */
+export function unmarkedPairsIn(line: string): Array<{ point: [number, number]; index: number; text: string }> {
+  return twoDecimalPairs(line)
+    .filter((pair) => !pair.marked && Math.abs(pair.point[1]) <= 90 && Math.abs(pair.point[0]) <= 180)
+    .map(({ point, index, text }) => ({ point, index, text }));
 }
 
 /** Runs every rule on a product. The findings are in line order, header first; `hold` is true when any of them is one the guard must hold for. */
@@ -229,6 +246,14 @@ export function guardScan(input: GuardInput): GuardScanResult {
       const box = input.config.exerciseBox;
       if (!box || box.length < 3) add('coordinates-without-box', 'hold', number, found.text, 'The text has a coordinate, and no exercise box is set for this project, so every coordinate counts as outside it. A person sets the box in .planning/.near-ai/staff-guard.json.');
       else if (!insidePolygon(found.point, box)) add('outside-exercise-box', 'hold', number, found.text, 'The coordinate is outside the project\'s exercise box.');
+    }
+    // With an exercise box set, an unmarked pair that could be a latitude and longitude outside it goes to the guard to check by hand (a review, not a
+    // block); inside the box it passes, and with no box an unmarked pair is not a coordinate at all.
+    const box = input.config.exerciseBox;
+    if (box && box.length >= 3) {
+      for (const pair of unmarkedPairsIn(raw)) {
+        if (!insidePolygon(pair.point, box)) add('unmarked-pair-outside-box', 'check', number, pair.text, 'Two numbers that read as a latitude and longitude outside the exercise box. If they are a position, the product is outside the exercise; if they are money, scores or measures, say so and clear it.');
+      }
     }
     const grid = MGRS.exec(raw);
     if (grid) add('grid-reference', 'check', number, grid[0], 'The text has a military grid reference, which guard-scan cannot place. Check by hand that it is inside the exercise box.');

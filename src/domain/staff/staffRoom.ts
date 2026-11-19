@@ -197,6 +197,8 @@ export interface J2Input {
   readonly watches?: readonly StandingWatch[];
   /** The watches the file calls armed (or paused, matched, drafting, awaiting review) that no signed arm decision proves: they run nothing (WP-WATCH). */
   readonly unsignedWatches?: readonly string[];
+  /** Every watch whose state comes from the signed decisions rather than the file (unsigned, changed since armed, or retired): the live board never overrides it. */
+  readonly distrustedWatches?: readonly string[];
   /** The observation store's rows the person's clearance covers (the host reads them through the store's reader view). */
   readonly live?: readonly Observation[];
   readonly problems?: readonly string[];
@@ -550,8 +552,10 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
   }));
   const board = new Map<string, WatchBoardEntry>(feedPicture(input.feedEvents ?? []).watches.map((entry) => [entry.watch, entry]));
   const unsigned = new Set(j2.unsignedWatches ?? []);
+  const distrusted = new Set([...(j2.distrustedWatches ?? []), ...unsigned]);
   const watches: Array<J2Workspace['watches'][number]> = (j2.watches ?? []).slice(0, CAP.list).map((watch) => {
-    const live = board.get(watch.id);
+    // A watch with a trust problem shows its trusted state: the live board (events members could also have caused) never makes it look armed again.
+    const live = distrusted.has(watch.id) ? undefined : board.get(watch.id);
     const state = live?.state ?? watch.state;
     const reason = live?.pausedReason ?? watch.pausedReason;
     return {

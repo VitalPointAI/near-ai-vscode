@@ -9,6 +9,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { OBSERVATIONS, OBSERVATIONS_WATCH, OBSERVATIONS_WATCH_GRANTEES } from '../agent/staff/grants';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
+import { grantsStaffTool, memberGranted } from '../agent/staffGrantGate';
+import { staffServerToolsForRun } from '../agent/staffServers';
 import { parseTeam } from '../agent/teams';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { WATCH_TOOL_NAMES, watchTools } from '../agent/watchTools';
@@ -491,6 +493,33 @@ test('the J2 workspace read model: each watch\'s state, queue and drafts from th
   assert.deepEqual(model.j2.watchAlerts?.map((entry) => [entry.person, entry.alertsLastHour, entry.digest]), [['K. Sample (J2)', 2, 0]]);
 });
 
+test('an unsigned watch the file calls armed, matched, drafting or awaiting review shows as proposed, whatever the live board says', async () => {
+  const p = await project();
+  await created(p);
+  await advance(p, 1);
+  await p.store.append({ rows: [row(p.world.clock.now)] });
+  await p.host.evaluate();
+  const file = path.join(p.world.root, STANDING_WATCHES_FILE);
+  const current = parseWatchRegisterText(readFileSync(file, 'utf8'));
+  assert.ok(current.ok);
+  // WATCH-1 is signed and armed (the live board saw it match). A member writes three more by hand, in the busy states, with no signed arm decision.
+  const forged = (['matched', 'drafting', 'awaiting-review'] as const).map((state, index) => watch({
+    id: `WATCH-${index + 2}`, state, match: { at: new Date(p.world.clock.now).toISOString(), observations: [`obs-${'a'.repeat(64)}`], missed: 0 },
+    ...(state === 'drafting' ? { drafting: { run: 'run-x', member: 'watch-officer' } } : {})
+  }));
+  // The file also claims the signed WATCH-1 is something else: a changed watch reads as proposed too, and the live board does not bring it back.
+  const changed = { ...current.entries[0], title: 'Changed by hand after arming' };
+  writeFileSync(file, renderWatchRegister([changed, ...forged]));
+  const model = buildStaffRoomModel(await loadStaffRoomInput(p.world.host, p.world.root, p.world.clock.now));
+  assert.deepEqual(model.j2.watches.map((entry) => [entry.id, entry.state, entry.unsigned]), [
+    ['WATCH-1', 'proposed', true], ['WATCH-2', 'proposed', true], ['WATCH-3', 'proposed', true], ['WATCH-4', 'proposed', true]
+  ]);
+  for (const entry of model.j2.watches) assert.equal(entry.drafts, undefined);
+  // Without a staff host nothing can prove an arm: the same file reads every one as proposed.
+  const hostless = buildStaffRoomModel(await loadStaffRoomInput(undefined, p.world.root, p.world.clock.now));
+  assert.ok(hostless.j2.watches.length >= 4 && hostless.j2.watches.every((entry) => entry.state === 'proposed'), JSON.stringify(hostless.j2.watches.map((entry) => entry.state)));
+});
+
 test('drafts are checked: a product without the draft line, or not in the ledger, is refused; the outputs bound what a watch may draft', async () => {
   const p = await project();
   await created(p, { outputs: ['draft-intrep', 'alert-person'] });
@@ -598,6 +627,30 @@ test('the watch tools go only to the members the design names, for interactive r
     }
     if (template.section === 'j2') assert.ok(seen > 0);
   }
+});
+
+test('a whole-server observations grant written by hand does not grant the file-writing watch tools: only their own grant does', async () => {
+  const handWritten = ['mcp:observations', 'mcp__observations__*', 'mcp__observations__w*', 'mcp__*'];
+  for (const name of WATCH_TOOL_NAMES) {
+    for (const entry of handWritten) assert.equal(grantsStaffTool([entry], name), false, `${entry} must not grant ${name}`);
+    assert.equal(grantsStaffTool([OBSERVATIONS_WATCH], name), true);
+    assert.equal(grantsStaffTool([name], name), true, 'the tool by its own name');
+  }
+  // The read tools still come with the whole server.
+  assert.equal(grantsStaffTool(['mcp:observations'], 'mcp__observations__obs_changes'), true);
+  // In a run: a member whose tools line says mcp:observations gets the reads but is refused every watch tool; the watch tools are not even offered.
+  const team = { members: [{ name: 'osint-analyst', tools: ['mcp:observations'] }, { name: 'watch-officer', tools: [OBSERVATIONS_WATCH] }] };
+  const onlyWhole = { members: [team.members[0]] };
+  const access = { host: () => undefined, store: () => undefined, team: J2_TEAM, run: 'run-1' };
+  const offered = staffServerToolsForRun(onlyWhole, access).map((tool) => tool.name);
+  assert.ok(offered.some((name) => name.startsWith('mcp__observations__obs_')));
+  assert.ok(!offered.some((name) => WATCH_TOOL_NAMES.includes(name)), 'no member is granted the watch tools, so the run has none');
+  const both = staffServerToolsForRun(team, access);
+  const watchTool = both.find((tool) => WATCH_TOOL_NAMES.includes(tool.name))!;
+  const refusal = await watchTool.forbidden!({} as never, { agentLabel: 'osint-analyst' } as ToolContext);
+  assert.match(String(refusal), /mcp__observations__watch_\*/);
+  assert.equal(memberGranted(team, 'osint-analyst', watchTool.name), false);
+  assert.equal(memberGranted(team, 'watch-officer', watchTool.name), true);
 });
 
 test('the contract names every watch event the runtime records', () => {
