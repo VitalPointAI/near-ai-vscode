@@ -3,6 +3,7 @@
 // interface. It makes no network request of its own, its MapLibre style names no tile, glyph or sprite source, and it filters by the shared clock with the
 // same rule as the host's picture. The picture, the synthetic geography and the content security policy are checked beside it.
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -29,6 +30,8 @@ function starter() {
 // ---- A stand-in DOM ---------------------------------------------------------------------------------------------------------------------------
 
 class Node {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tag}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   public children: Node[] = [];
   public parentNode: Node | undefined;
   public attributes = new Map<string, string>();
@@ -647,4 +650,10 @@ test('the synthetic geography lies inside the frame, with the towns on land and 
   for (const [name, e, n] of [['Saltmere', 43.5, 15.5], ['Port Calder', 46.5, 36.5], ['Kell', 49.5, 33.5], ['Ashby Ford', 45.5, 28.5], ['AA OAK', 43.5, 18.5], ['Gull Island', 41.1, 42.1]] as const) assert.ok(onLand(e, n), `${name} is on land`);
   for (const [name, e, n] of [['the command ship off Saltmere', 40.5, 14.5], ['MV ORLA in the Aurel Sea', 49.5, 43.5], ['the Varn Strait', 44, 41]] as const) assert.ok(!onLand(e, n), `${name} is at sea`);
   assert.match(geography.note, /Nothing on this map is a real place/);
+});
+
+// Last in the file on purpose: node:test runs each file in its own process, so this reads the peak resident memory of every test above.
+test('the page tests stay within a 1 GB memory budget (a failure that printed the fake DOM once grew past 20 GB)', () => {
+  const peakBytes = process.resourceUsage().maxRSS * 1024;
+  assert.ok(peakBytes < 1024 * 1024 * 1024, `peak resident memory ${(peakBytes / 1048576).toFixed(0)} MB is over the 1 GB budget`);
 });

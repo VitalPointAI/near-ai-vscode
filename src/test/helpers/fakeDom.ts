@@ -1,5 +1,9 @@
 // A small DOM stand-in shared by the webview card tests (setup nudge, pick-up card): just enough of Document and Element for the helpers in media/chat.
+import { inspect } from 'node:util';
+
 export class FakeNode {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tagName}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   public children: FakeNode[] = [];
   public parent?: FakeNode;
   public className = '';
@@ -31,6 +35,8 @@ export class FakeNode {
 /** An event as a listener sees it: its key (for keydown), its target, and whether a listener already used it. */
 export interface FakeEvent { key?: string; target: FakeNode; defaultPrevented: boolean; preventDefault(): void }
 export class FakeDocument {
+  /** A short form for failure messages (see the node's). */
+  [inspect.custom](): string { return '<document>'; }
   public readonly body: FakeNode = new FakeNode('body', this);
   public activeElement?: FakeNode;
   public readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();

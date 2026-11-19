@@ -2,6 +2,7 @@
 // registers from the fixture files), decision buttons that only post the product and version hash, messages from the host checked before anything is
 // drawn, stillness under reduced motion and Calm, and the keyboard flow.
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -20,6 +21,8 @@ const MEDIA = path.join(__dirname, '..', '..', 'media', 'staffRoom');
 type Animation = { frames: unknown[]; options: Record<string, unknown>; onfinish?: () => void; cancel(): void; finish(): void };
 
 class FakeNode {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tagName}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   children: FakeNode[] = [];
   parent?: FakeNode;
   attributes = new Map<string, string>();
@@ -76,6 +79,8 @@ class FakeNode {
   all(): FakeNode[] { return this.children.flatMap((child) => [child, ...child.all()]); }
 }
 class FakeDoc {
+  /** A short form for failure messages (see the node's). */
+  [inspect.custom](): string { return '<document>'; }
   body = new FakeNode('body', this);
   documentElement = { clientWidth: 1200 };
   activeElement: FakeNode | null = null;
@@ -862,7 +867,11 @@ test('without WebGL the room\'s SVG map uses the same layer drawer and draws the
   const panel = page.byClass('ld-panel')[0];
   assert.equal(panel.hidden, false);
   const hill = panel.all().find((node) => node.getAttribute('data-layer') === 'env-hillshade')!;
-  assert.equal(page.doc.activeElement, panel.all().find((node) => node.getAttribute('role') === 'switch'), 'focus on the first switch');
+  // The drawer opens on its first Tab stop: the base map's chosen radio (one stop per radio group), never an unchosen one.
+  const chosenBase = panel.all().find((node) => node.getAttribute('role') === 'radio' && node.getAttribute('aria-checked') === 'true');
+  assert.ok(chosenBase, 'the base map choice has a chosen radio');
+  assert.ok(page.doc.activeElement === chosenBase, `focus on the chosen base radio, not ${inspect(page.doc.activeElement)}`);
+  assert.ok(!panel.all().some((node) => node.getAttribute('role') === 'radio' && node.getAttribute('aria-checked') !== 'true' && node === page.doc.activeElement), 'never on an unchosen radio');
   hill.click();
   assert.equal(box.all().find((node) => node.getAttribute('data-layer') === 'env-hillshade')!.getAttribute('visibility'), 'hidden');
   assert.ok((page.states.at(-1)!.hiddenLayers as string[]).includes('env-hillshade'), 'remembered like any layer');
@@ -931,4 +940,10 @@ test('while the room bar is folded, Staff teams opens the section cards with foc
   const plainTeams = plain.byClass('roombar')[0].children.find((node) => node.tagName === 'button' && node.textContent === 'Staff teams')!;
   assert.equal(plainTeams.hidden, true);
   assert.doesNotMatch(plain.byClass('roombar-t')[0].textContent, /staff teams/);
+});
+
+// Last in the file on purpose: node:test runs each file in its own process, so this reads the peak resident memory of every test above.
+test('the page tests stay within a 1 GB memory budget (a failure that printed the fake DOM once grew past 20 GB)', () => {
+  const peakBytes = process.resourceUsage().maxRSS * 1024;
+  assert.ok(peakBytes < 1024 * 1024 * 1024, `peak resident memory ${(peakBytes / 1048576).toFixed(0)} MB is over the 1 GB budget`);
 });

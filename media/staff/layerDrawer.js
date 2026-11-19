@@ -55,6 +55,9 @@
       for (const child of node.children || node.childNodes || []) {
         if (!child || child.hidden) continue;
         const tag = String(child.tagName || child.tag || '').toLowerCase();
+        // A radio group is one Tab stop at its chosen radio (roving tabindex): an unchosen radio is reached with the arrow keys, never by Tab or on open.
+        const unchosenRadio = child.getAttribute && child.getAttribute('role') === 'radio' && child.getAttribute('aria-checked') !== 'true';
+        if (unchosenRadio) continue;
         if ((FOCUSABLE[tag] && !child.disabled) || (typeof child.tabIndex === 'number' && child.tabIndex >= 0 && tag !== 'svg' && child.getAttribute && child.getAttribute('tabindex') !== null)) out.push(child);
         walk(child);
       }
@@ -148,6 +151,8 @@
       section.appendChild(list);
       const chosen = group.items.find(function (item) { return item.on; });
       if (chosen && chosen.reason) section.appendChild(el('p', 'ld-reason', chosen.reason));
+      const chosenEntry = radios.find(function (entry) { return entry.item.on; });
+      return chosenEntry ? chosenEntry.radio : undefined;
     }
 
     function render() {
@@ -171,12 +176,9 @@
         }
         section.appendChild(groupHead);
         if (group.choice) {
-          renderChoice(group, section);
+          const chosenRadio = renderChoice(group, section);
           body.appendChild(section);
-          if (focused && focused.indexOf(group.id + ':') === 0) {
-            const again = section.querySelector('[aria-checked="true"]');
-            if (again) refocus = again;
-          }
+          if (focused && focused.indexOf(group.id + ':') === 0 && chosenRadio) refocus = chosenRadio;
           continue;
         }
         const list = el('ul', 'ld-list');

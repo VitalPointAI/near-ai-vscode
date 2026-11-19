@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +13,8 @@ import { parseTeam } from '../agent/teams';
 const SCRIPT = path.join(__dirname, '..', '..', 'media', 'teamLive', 'teamLive.js');
 
 class FakeNode {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tagName}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   children: FakeNode[] = [];
   parent?: FakeNode;
   attributes = new Map<string, string>();
@@ -62,6 +65,8 @@ class FakeNode {
   all(): FakeNode[] { return this.children.flatMap((child) => [child, ...child.all()]); }
 }
 class FakeDoc {
+  /** A short form for failure messages (see the node's). */
+  [inspect.custom](): string { return '<document>'; }
   body = new FakeNode('body', this);
   documentElement = { clientWidth: 1000 };
   activeElement: FakeNode | null = null;
