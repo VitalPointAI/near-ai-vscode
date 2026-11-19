@@ -20,6 +20,7 @@ import type { StaffSettings } from '../domain/staff/profiles';
 import { grantsMcpTool, mcpToolName } from '../mcp/tools';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED, protectedWrite } from './tools';
 import type { AgentTool, ToolContext } from './tools';
+import { grantedToMembers } from './staffGrantGate';
 import { lintTradecraft, sourcesFrom } from '../domain/staff/tradecraftLint';
 import type { PersonDecisionEntry } from '../domain/staff/personDecisions';
 import { withRegisterLock } from '../staff/registerLock';
@@ -462,17 +463,5 @@ export interface IntelTeam { readonly members: ReadonlyArray<{ readonly name: st
  * registers, and neither can a member without the grant. A team where no member is granted any workbench tool gets none.
  */
 export function grantedIntelWorkbenchTools(team: IntelTeam, options: IntelWorkbenchOptions = {}): AgentTool<any>[] {
-  const granted = (member: string | undefined, tool: string): boolean => {
-    const entry = member === undefined ? undefined : team.members.find((candidate) => candidate.name === member);
-    return Boolean(entry && grantsMcpTool([...entry.tools], tool));
-  };
-  return intelWorkbenchTools(options)
-    .filter((tool) => team.members.some((member) => grantsMcpTool([...member.tools], tool.name)))
-    .map((tool) => ({
-      ...tool,
-      forbidden: async (input: unknown, context: ToolContext) => {
-        if (!granted(context.agentLabel, tool.name)) return `${tool.name} is for the team members whose tools line grants it (mcp:${INTEL_WORKBENCH_SERVER}); ${context.agentLabel ?? 'the run\'s lead'} is not one of them. Ask the member that owns the register.`;
-        return tool.forbidden ? tool.forbidden(input as never, context) : undefined;
-      }
-    }));
+  return grantedToMembers(team, INTEL_WORKBENCH_SERVER, intelWorkbenchTools(options), 'Ask the member that owns the register.');
 }

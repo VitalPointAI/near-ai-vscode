@@ -23,7 +23,7 @@ export type ToolStatus = 'runs' | 'asks' | 'auto-checked' | 'off' | 'stopped';
 export interface DirectorySkill { name: string; description: string; argumentHint?: string; group: string; insert: string }
 export interface DirectoryAgent { name: string; description: string; tier: string; model: string; source: 'role setting' | 'project choice' | 'definition' | 'default'; tools: string[] }
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
-export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; /** What the tool's manifest says it can do, in plain words (also the last of `notes`): the team member cards show these. */ words: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
+export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; /** What the tool's manifest says it can do, in plain words (also the last of `notes`): the team member cards show these. */ words: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean; /** The built-in staff server this catalog tool belongs to (staff-products, guard-scan): the Tools page shows it once, under that server. */ staffServer?: string }
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; words: string[]; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
 /** A built-in staff server (staff-products, guard-scan, intel-workbench, observations, logistics): given only to a staff team's run, granted by `grant` or tool by tool. */
 export interface DirectoryStaffServer { id: string; grant: string; name: string; description: string; tools: DirectoryTool[] }
@@ -194,12 +194,15 @@ export function buildToolsDirectory(input: DirectoryInput): ToolsDirectory {
     }).map((tool) => toolEntry(tool, input, GSD_TOOL_NAMES.has(tool.name) ? noGsd : unavailable[tool.name]))
   ];
 
-  // The built-in staff servers, grouped by server with the grant a team file uses. staff-products and guard-scan are also catalog tools (listed above in
-  // run order); the intel-workbench is not, so this is where it shows.
+  // The built-in staff servers, grouped by server with the grant a team file uses (staffServers.ts lists them once). staff-products and guard-scan are
+  // also catalog tools; the other servers' tools are not, so this is where they show.
   const staffServers: DirectoryStaffServer[] = builtInStaffServers().map((server) => ({
     id: server.id, grant: server.grant, name: server.name, description: server.description,
     tools: server.tools.map((tool) => toolEntry(tool, input))
   }));
+  // A catalog tool that belongs to a staff server keeps its place in the catalog (run order) and is marked with its server, so the page draws it once.
+  const serverOfTool = new Map(staffServers.flatMap((server) => server.tools.map((tool) => [tool.name, server.id] as const)));
+  for (const tool of tools) { const server = serverOfTool.get(tool.name); if (server) tool.staffServer = server; }
 
   const mcp: DirectoryMcpServer[] = input.mcp.map((server) => {
     const disabled = new Set(server.config.disabledTools ?? []);

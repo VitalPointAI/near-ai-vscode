@@ -25,9 +25,6 @@ export const STAFF_LINT_TOOL = 'mcp__staff-products__lint';
 export const INTEL_WORKBENCH = 'mcp__intel-workbench__*';
 export const COP_MAP = 'mcp__cop-map__*';
 export const GUARD_SCAN = 'mcp__guard-scan__*';
-/** The orders and battle rhythm servers (design 10, 6.2; WP-ORD). A member's instructions never depend on them: without them it writes Markdown products. */
-export const ORDERS = 'mcp__orders__*';
-export const BATTLE_RHYTHM = 'mcp__battle-rhythm__*';
 
 /**
  * The logistics server (design 10, 6.2; built by WP-LOG), granted by tool family so each J4 member gets only what its job needs. WP-LOG names its tools

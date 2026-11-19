@@ -591,177 +591,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j2-intelligence': [
     {
       version: 1,
-      definition: 'e879d36f96c74e36',
-      guidance: [
-        '8c12c625cdb08b4b',
-        'bd0fd1276a805473',
-        'd3ab8bb578f20342',
-        '610cf2b8c0bb9bcf',
-        '7c25b1f681c87ea3',
-        'a763c353ed731ddf',
-        '27eaf1db9b6b234c',
-        '768e9882b7784261',
-        'c830d57a444578ae',
-        'b20c60d2da90469f',
-        '649121d50eaaf2c2',
-        '1f815670f2b25fc4',
-        '26e228010166b899',
-        'bc432fe88e96cd0e',
-        '0d978fb692aad0ff',
-        'a0d7e4d60e4914af',
-        '6b7472bffe87ba9e',
-        '85b1cc8b3bdda9d7',
-        '9a19baa18052b3eb',
-        'bbcdad39b975225d',
-        '7ecfa64a981b9575',
-        '899b3c1b18813b8c',
-        '80a095a382cb507f',
-        '34115b0914ef0f03'
-      ],
-      members: {
-        'j2-chief': [
-          '89cb58b90ea1bd17',
-          'a93bf1e92683485b',
-          'da13e5459ee50a3d',
-          '6d12ea7267b396d4',
-          '35510e71bba2e6c8',
-          '72992d6a6f796c4a',
-          'da75f75e2a0bfbca',
-          'badc5256a0480e63',
-          '61cc3beb64a3257c',
-          'e5e5c768b1d1c1d1',
-          '56b2a486796b4a4d',
-          '388dfbc099f6203a',
-          '90a0bba3dc8ef090',
-          'bc3f4f1c44fff833',
-          'abad9e1a445d28d3',
-          '78547f172217fedb',
-          'f8eb208565d74da2',
-          'e730f8e9e40b9c9b',
-          'c692459f0ec83dd3',
-          'f0d66751d367f95d'
-        ],
-        'requirements-manager': [
-          'a7505f756deef82a',
-          '8ef0ae1d3d929f3a',
-          'd428d65c584ea89a',
-          '9dfc3d01c1aafbc6',
-          'fb841cee1cefdd39',
-          '777919be1c390fc7'
-        ],
-        'collection-manager': [
-          '0a88c8e7e90e4320',
-          '8efa15e208a9c210',
-          'd2e361bb52ff8d6d',
-          '99705bedee6463e7',
-          'a70e2e0031b819d0',
-          '691696b35973bf50',
-          '2bcd3d144381018d'
-        ],
-        'jipoe-analyst': [
-          '2a844de452466969',
-          '879a46482344d795',
-          '0921867d2319b846',
-          '191108218c0ac839'
-        ],
-        'threat-analyst': [
-          'c0346c6115cb7984',
-          'ea3ae9ec8e73735a',
-          'ca6364c69530605f',
-          'e1aef0c9efcbfd59',
-          '27de34a47bbbb324',
-          '6fec556e3bd590e3',
-          '30de131be00a3596',
-          '2efc7a58dfea6939'
-        ],
-        'warning-analyst': [
-          'f280fee949a9f023',
-          '995eb551e95b0e84',
-          '216c27b5086e9f3f',
-          '08bc3f4d32dfcf99'
-        ],
-        'red-cell': [
-          'e4019a86a5a23a34',
-          '8b8ccad11e70a19a',
-          '55561faadbcef9ae',
-          '037ed07b5a4471f2',
-          '9c56e34b8374a79f',
-          'd5253fe2518043cb',
-          '8e6fdf762b006284',
-          '01d60c9700f1b7c2'
-        ],
-        'tradecraft-reviewer': [
-          'cc9a5893b4ea246a',
-          '15e046b57ef48fc6',
-          'a2777214df176834',
-          '7be7d9526387fcfe',
-          'a0332c137262bcb4',
-          'e76ea8b9bf5885f6',
-          '5a2a7d1088246f17',
-          'b2434c4391441b53'
-        ],
-        'release-guard': [
-          '47e3009e94ddfaa9',
-          '3b740c9d51c85c2a',
-          '8f18d1e78e05e586',
-          '5242d1d96816960b',
-          'd86137390df3084a'
-        ],
-        'geoint-analyst': [
-          'f7d3e68d285a0923',
-          '434418a6259ecb96',
-          'b03ed745f78e9456',
-          'f28ebf4e36d34f8d'
-        ],
-        'osint-analyst': [
-          'e1a4fba2db1db5c4',
-          'ed1a2eb966c123db',
-          '2317abe7bd7a6f0c',
-          '9853fcebfe0b336e'
-        ],
-        'watch-officer': [
-          '55ad8e24e36f570b',
-          'b54000b6a9b76ab5',
-          'b9fe06e5fdb7a90f',
-          'a4b66fb3a1927e00',
-          '39d8d9e5f24af6f5',
-          '7915e4c8e1a52c37',
-          '2b898b3af2facf00',
-          '6e07984ddc5f5635',
-          '32da304c23bf30ee',
-          'ca2275e3b77bdfb0'
-        ],
-        'target-analyst': [
-          '7dab6ff5f9385829',
-          '5d0de8bb43ffc734'
-        ],
-        's2-lead': [
-          'dfefd3e373b63d15',
-          'db8850466734d0b0',
-          'd15007871bc925c8',
-          '88ae01f31f726a77',
-          'b7d79549366330f4',
-          'ad37e56f69f15bf6',
-          '2b51440c99e2bcd1',
-          '044b2a8d33242a18',
-          '4b397703b80f148a',
-          'c4dd10e94c2f31de'
-        ],
-        'ipb-analyst': [
-          '6dc4bc855306848d',
-          '1aee5108ea6bbae6',
-          '1b80f5b6fe4e8357',
-          '11788487e71a871e',
-          '91a2bd0cdda885c8',
-          '9d735d03057953a6',
-          'b99c418d1f78f41e',
-          '25c777fc410454bf'
-        ]
-      }
-    },
-    {
-      version: 2,
-      definition: 'b447921ba777eb49',
+      definition: '5e0c13f1417e6f4a',
       guidance: [
         '8c12c625cdb08b4b',
         'bd0fd1276a805473',
@@ -829,20 +659,20 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'bd16f11cf8568310'
         ],
         'jipoe-analyst': [
-          '494c6cfabbaf9003',
-          'defbc7bc55913d86',
-          '026161ca2ba85e19',
-          '5b9fc901dfc5fe05'
+          '54cf668fcd1bc3d8',
+          '9501e05d67428666',
+          '2fbc056975574fe5',
+          '38d6729f5ab445df'
         ],
         'threat-analyst': [
-          'ea3a27df084aad38',
-          '90ff65b9fdf70a3b',
-          '86d8420be7e8914c',
-          '9c21c15a155ba180',
-          '1b65a52e63269dd8',
-          '0ef99cb9e09d6a03',
-          '9ec171f1cacbb219',
-          '925b8b59ac156894'
+          'e0da731f358d42ca',
+          '5aea44c1fd1b7729',
+          'c3e66c78ac920620',
+          'c46cfc3d41e84d41',
+          '6b30760efeee1e51',
+          'f8c54c760d3f2c18',
+          '2c434decdc19e58d',
+          '5d998d6cf65f5618'
         ],
         'warning-analyst': [
           '2b5b2aeff011ec19',
@@ -878,10 +708,10 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'd86137390df3084a'
         ],
         'geoint-analyst': [
-          '20646ff348ec06b0',
-          '0928a2bdf5b0af9a',
-          '0cd88ef7f17810bf',
-          'bd77d04a41ebd17b'
+          '3328aeffe9842ebc',
+          '1dbf36ed786b83f6',
+          '2e1438175f499dd8',
+          'e9e9d77b53d6459a'
         ],
         'osint-analyst': [
           'b50a5ed605466607',
@@ -890,20 +720,20 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '2ca2278875c85874'
         ],
         'watch-officer': [
-          '462a64e8b245f0c8',
-          '3a93702c59c2d86d',
-          'd8cd6ff8bf307a2e',
-          '4661f7c852cba075',
-          '2982f3b84c4eedf2',
-          '6904e8c9265e6886',
-          '2069878d02535046',
-          '5c6224c47b785694',
-          '6d9c6ef0f59ed742',
-          '5017575bbfaa7aec'
+          '697ccc09d5b04f8e',
+          '02aab2bd8e0ef325',
+          'cd8fca0df0d17354',
+          '2379e8bb9af14d5c',
+          'ffe6d63f0c08c64a',
+          '59f6388e30598f39',
+          '621754b33484241d',
+          '03d23235441542ff',
+          'c88e00ad0d99a928',
+          '84c905e4b5b65091'
         ],
         'target-analyst': [
-          '7dab6ff5f9385829',
-          '5d0de8bb43ffc734'
+          'dec983630cabfaae',
+          'b9e131c32367aa7f'
         ],
         's2-lead': [
           'c8742c5314f57c42',
@@ -918,14 +748,14 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'c9fcdd3ab78e72d1'
         ],
         'ipb-analyst': [
-          'ad0d02b77220c63a',
-          '12bebf0f511fc451',
-          '4189f9d0a9a546e1',
-          'a89663189e7e1d07',
-          'f2eb4ffa6f845bfd',
-          '77312cbc80573824',
-          '5337e4cf3ba016ca',
-          'f3f02a5760a7d9a3'
+          'c58f4bfdf92f9251',
+          'c8956d62dcc1aa96',
+          '2204a17692c787a1',
+          'f6a06e8e52030718',
+          '2004c4c125173a4f',
+          '9a945842ea274a1a',
+          '9d1f69f27fd33cca',
+          'eccdab5547829a51'
         ]
       }
     }
@@ -1068,7 +898,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j3-operations': [
     {
       version: 1,
-      definition: '4dba39dee999a501',
+      definition: '98f043e36a6d5748',
       guidance: [
         '72c995694f3baa60',
         '3be6d6fee96d4cee',
@@ -1091,39 +921,39 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
       ],
       members: {
         'j3-director': [
-          '2b34e48b8f3b89d8',
-          '5b4bc34c6f94d23d',
-          '4b49e92e52108973',
-          '27ad28f50527b06f',
-          'ecf44ea93e653292',
-          '8faf8762a604857e',
-          '91c55e93509dea05',
-          'efbc21afecdd13d2',
-          '14c323fbdadf0208',
-          'e5b9d71d0a7167cb',
-          '961d488222924f30',
-          '945a2abb46d1c8f4'
+          'd56822b3b120896e',
+          '0266a953672979e4',
+          '55fadde29545d79d',
+          '4033a8d577e0862d',
+          '8f6896739d506ff4',
+          '823a562c529c8b1c',
+          'e9a87751248617e8',
+          '03506d2742d1d641',
+          '54f18ca90971dc43',
+          'dcff7da548b22e85',
+          'c7e7a511fdc4edc7',
+          '24a99d8d1a8ac6cc'
         ],
         'joc-chief': [
-          '60482099061ace13',
-          '4b3c26d62534fc7f',
-          'e1643f1eb5d3cd51',
-          'fdc1ebd3781761df'
+          '59a2e266455bdf51',
+          '7c22116dfdc94df4',
+          '89fea5c203d4709b',
+          'd9e1d3b77f355832'
         ],
         'watch-officer': [
-          'f98f8ea9604dfc20',
-          'f2812a0d3720bd5e',
-          '1bbf5543cad5585e',
-          '1b6c507b67817b0d'
+          'f2f3913f65648b6b',
+          '73f0fa25161eba9a',
+          '22daa16b234e0d41',
+          'f9f3791dfe8f1c42'
         ],
         'future-ops-planner': [
-          'b3e5c5b5e5962424',
-          '1ebb26bf703aa45b',
-          'f10d4e5e53f439d6',
-          '63bec1508a4ffdf3',
-          '4f0e374ede868844',
-          '23573ff374d7e1fb',
-          '43f86c06ef11dbc2'
+          '01e9a29780d8f0cd',
+          '132bb99f9c31d890',
+          '9d09f51abcb8f22d',
+          '4d742db28f44ab63',
+          '750e0c2f053c963c',
+          '40c4dbe7438c55cf',
+          'e36347c6c34ae51e'
         ],
         'fires-effects-coordinator': [
           '98f7b5eb46c1c721',
@@ -1142,15 +972,15 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'e5f3b83ac32f6e1a'
         ],
         'information-planner': [
-          'c8cf81854e9628c9',
-          'f61a5ffec5c5dc66'
+          '61b7e2c3159ba851',
+          '5b166b537ada660a'
         ],
         'cyber-space-planner': [
           'b0e64fb3af85fef0'
         ],
         'airspace-maritime-liaison': [
-          '6baff6ec3f1ebac3',
-          '2415af0eeb9ca7a9'
+          '9670976325db3303',
+          '9134287e4f498db1'
         ],
         'assessment-analyst': [
           '078321a2e72e8468',
@@ -1174,27 +1004,29 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '2b247fd5e2b0b79c'
         ],
         's3-lead': [
-          '0eea18268aeee4f3',
-          '0abece0da8393758',
-          '185c7ac22fca041c',
-          'df207e0151c6fa1c',
-          '066547e66355cf7b',
-          '089f64b0b7a601a7'
+          'ac9315d5f60433f1',
+          'b8cb5fb9fcdcaddc',
+          '0844c3dc97364cbc',
+          'fc7c3f502e393703',
+          '41c2a3ee93f48d57',
+          '4dc70c42ec7ad805'
         ],
         'current-ops-chief': [
-          '1a7f50587e7bc12c',
-          '3fa6a37010d76273',
-          '1533cdd5da2bef89'
+          '4e083e85e336ca22',
+          'd74de48ee86433cd',
+          '2885172427718d73'
         ],
         'information-cyber-space-planner': [
-          'd996cd933ba70e10',
-          '226f0de558d03bec',
-          '0602af3edbde525b'
+          'c9e8a7fe1f3f647e',
+          '093ae2d87dde8f1c',
+          '90fab507b21e53ab'
         ]
       }
-    },
+    }
+  ],
+  'j4-logistics': [
     {
-      version: 2,
+      version: 1,
       definition: 'd8277a0530858b88',
       guidance: [
         '43fd3f310afca7c6',

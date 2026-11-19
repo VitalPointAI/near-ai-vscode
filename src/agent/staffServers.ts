@@ -1,13 +1,20 @@
-// The built-in staff servers, as the Tools page and the Team Studio tool picker list them (design 10, 6.2): staff-products, guard-scan, the
-// intel-workbench, observations (research note 11, section 5), cop-map and logistics. They run inside the extension and are given only to a staff
-// team's run (a team file with a `staff:` block); a member reaches them through its `tools:` line, by the whole server (`mcp:<id>`) or one tool at a
-// time (`mcp__<id>__<tool>`). The tool objects here are the very ones a run is given, built without a project, so the lists cannot drift from what a
-// run gets. None of them approves, rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
+// The built-in staff servers, listed once (design 10, 6.2): staff-products, guard-scan, the intel-workbench, observations (research note 11, section
+// 5), cop-map and logistics. The Tools page, the Team Studio tool picker and a staff team's run all read this one list. The servers run inside the
+// extension and are given only to a staff team's run (a team file with a `staff:` block); a member reaches them through its `tools:` line, by the
+// whole server (`mcp:<id>`), a family pattern or one tool at a time (`mcp__<id>__<tool>`). staff-products and guard-scan are gated by role inside the
+// staff tools; every other server is gated on grants (staffGrantGate.ts), so the run's lead and an ungranted member cannot call it. The tool objects
+// the pages show are built by the same factories as a run's, without a project, so the lists cannot drift from what a run gets. None of them approves,
+// rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
+import type { ObservationStore } from '../staff/observationStore';
+import type { StaffHost, StaffTeamInfo } from '../staff/staffHost';
 import { COP_MAP_SERVER, copMapTools } from './copMap';
 import { INTEL_WORKBENCH_SERVER, intelWorkbenchTools } from './intelWorkbench';
 import { LOGISTICS_SERVER, logisticsTools } from './logisticsTools';
 import { OBSERVATIONS_SERVER, observationsTools } from './observationsTools';
+import { grantedToMembers } from './staffGrantGate';
+import type { GrantedTeam } from './staffGrantGate';
 import { GUARD_SCAN_SERVER, STAFF_PRODUCTS_SERVER, staffTools } from './staffTools';
+import type { AgentTool } from './tools';
 
 export interface BuiltInStaffServer {
   readonly id: string;
@@ -18,12 +25,60 @@ export interface BuiltInStaffServer {
   readonly tools: ReturnType<typeof staffTools>;
 }
 
+/** What a staff run's servers need from the project: its staff host and observation store (undefined while not set up), the team and the run. */
+export interface StaffServerAccess {
+  host(): StaffHost | undefined;
+  store(): ObservationStore | undefined;
+  readonly team: StaffTeamInfo;
+  readonly run: string;
+}
+
 /** The grant for a whole built-in server, as a team file writes it. */
 export const staffServerGrant = (id: string): string => `mcp:${id}`;
 
+interface GatedStaffServer {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  /** Who to ask instead, at the end of a refusal. */
+  readonly hint?: string;
+  readonly build: (access: StaffServerAccess) => AgentTool<any>[];
+}
+
+/** The built-in servers beyond staff-products and guard-scan, in the order the pages list them and a run is given them. */
+const GATED_STAFF_SERVERS: readonly GatedStaffServer[] = [
+  {
+    id: INTEL_WORKBENCH_SERVER, name: 'Intel workbench (built in)', hint: 'Ask the member that owns the register.',
+    description: 'The J2 registers: the source register with reliability and credibility graded apart, the PIR register, collection recommendations, INTSUM and INTREP drafts, and the compilation check. It recommends; a person decides.',
+    build: () => intelWorkbenchTools()
+  },
+  {
+    id: OBSERVATIONS_SERVER, name: 'Observations (built in)',
+    description: 'The project\'s feed observations, read only and clamped to your clearances: slices by area, time, grade, discipline and unit, tracks with their decay, what changed since a time, corroboration by independent origin, timelines, feed status, and the picture as known at any time. Every answer says when a limit cut it.',
+    build: (access) => observationsTools({ store: () => access.store() })
+  },
+  {
+    id: COP_MAP_SERVER, name: 'COP map (built in)',
+    description: 'The common operational picture: read the layers, put military symbols, control measures, overlays per adversary course of action and decision points on the layer you write, and propose features for the others. Each product layer has one writer; feed layers are views nobody writes. Nothing is fetched from the network.',
+    build: (access) => copMapTools({ host: () => access.host(), team: access.team, run: access.run })
+  },
+  {
+    id: LOGISTICS_SERVER, name: 'Logistics (built in)',
+    description: 'The J4 tools: the consumption calculator (planning factors a person entered, the formula on every result, each result a signed calculator record), LOGSTAT entry, validation and consolidation, notional movement tables and local routing, and readiness import. It ships no planning factor tables and decides nothing.',
+    build: (access) => logisticsTools({ host: () => access.host()?.logistics(), team: access.team, run: access.run })
+  }
+];
+
+/** The ids of the grant-gated servers, in run order. */
+export const GATED_STAFF_SERVER_IDS: readonly string[] = GATED_STAFF_SERVERS.map((server) => server.id);
+
+const NO_PROJECT = (section: StaffTeamInfo['section']): StaffServerAccess => ({
+  host: () => undefined, store: () => undefined, team: { slug: 'tools-directory', section, members: [], sectionLead: '' }, run: 'tools-directory'
+});
+
 /** The built-in staff servers with their tools, in the order the pages list them. */
 export function builtInStaffServers(): BuiltInStaffServer[] {
-  const products = staffTools({ host: () => undefined, team: { slug: 'tools-directory', section: 'j2', members: [], sectionLead: '' }, run: 'tools-directory' });
+  const products = staffTools({ host: () => undefined, team: NO_PROJECT('j2').team, run: 'tools-directory' });
   const of = (server: string) => products.filter((tool) => tool.name.startsWith(`mcp__${server}__`));
   return [
     {
@@ -34,23 +89,17 @@ export function builtInStaffServers(): BuiltInStaffServer[] {
       id: GUARD_SCAN_SERVER, grant: staffServerGrant(GUARD_SCAN_SERVER), name: 'Guard scan (built in)', tools: of(GUARD_SCAN_SERVER),
       description: 'The release guard\'s deterministic checks on a staff product: markings, the label ceiling, coordinates outside the exercise box, the real-entity list, decisions written as made, personal data, secrets, and J4 numbers with no calculator record the calculator ledger vouches for.'
     },
-    {
-      id: INTEL_WORKBENCH_SERVER, grant: staffServerGrant(INTEL_WORKBENCH_SERVER), name: 'Intel workbench (built in)', tools: intelWorkbenchTools(),
-      description: 'The J2 registers: the source register with reliability and credibility graded apart, the PIR register, collection recommendations, INTSUM and INTREP drafts, and the compilation check. It recommends; a person decides.'
-    },
-    {
-      id: OBSERVATIONS_SERVER, grant: staffServerGrant(OBSERVATIONS_SERVER), name: 'Observations (built in)', tools: observationsTools({ store: () => undefined }),
-      description: 'The project\'s feed observations, read only and clamped to your clearances: slices by area, time, grade, discipline and unit, tracks with their decay, what changed since a time, corroboration by independent origin, timelines, feed status, and the picture as known at any time. Every answer says when a limit cut it.'
-    },
-    {
-      id: COP_MAP_SERVER, grant: staffServerGrant(COP_MAP_SERVER), name: 'COP map (built in)',
-      tools: copMapTools({ host: () => undefined, team: { slug: 'tools-directory', section: 'j2', members: [], sectionLead: '' }, run: 'tools-directory' }),
-      description: 'The common operational picture: read the layers, put military symbols, control measures, overlays per adversary course of action and decision points on the layer you write, and propose features for the others. Each product layer has one writer; feed layers are views nobody writes. Nothing is fetched from the network.'
-    },
-    {
-      id: LOGISTICS_SERVER, grant: staffServerGrant(LOGISTICS_SERVER), name: 'Logistics (built in)',
-      tools: logisticsTools({ host: () => undefined, team: { slug: 'tools-directory', section: 'j4', members: [], sectionLead: '' }, run: 'tools-directory' }),
-      description: 'The J4 tools: the consumption calculator (planning factors a person entered, the formula on every result, each result a signed calculator record), LOGSTAT entry, validation and consolidation, notional movement tables and local routing, and readiness import. It ships no planning factor tables and decides nothing.'
-    }
+    ...GATED_STAFF_SERVERS.map((server) => ({
+      id: server.id, grant: staffServerGrant(server.id), name: server.name, description: server.description,
+      tools: server.build(NO_PROJECT(server.id === LOGISTICS_SERVER ? 'j4' : 'j2'))
+    }))
   ];
+}
+
+/**
+ * The grant-gated servers' tools for one staff team's run: for each server, only the tools some member is granted, each refusing the run's lead and any
+ * member whose own tools line does not grant it. A team with no grant for a server gets none of its tools.
+ */
+export function staffServerToolsForRun(team: GrantedTeam, access: StaffServerAccess): AgentTool<any>[] {
+  return GATED_STAFF_SERVERS.flatMap((server) => grantedToMembers(team, server.id, server.build(access), server.hint));
 }

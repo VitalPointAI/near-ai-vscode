@@ -297,7 +297,7 @@ test('the template files: PROFILE.md and the two skills, each at its path', () =
 test('Staff setup offers J3 with every profile and level it is written for, and writes its team, skills and guidance block', () => {
   assert.ok(STAFF_TEMPLATES.includes(J3_STAFF_TEMPLATE));
   assert.equal(staffTemplate(J3_TEMPLATE_ID), J3_STAFF_TEMPLATE);
-  assert.deepEqual(STAFF_TEMPLATES.map((template) => template.section), ['j2', 'j5', 'j3'], 'demo order');
+  assert.deepEqual(STAFF_TEMPLATES.map((template) => template.section), ['j2', 'j5', 'j3', 'j4'], 'demo order');
   assert.deepEqual(profileChoices(J3_STAFF_TEMPLATE).map((choice) => choice.value), ['us-joint', 'us-army', 'nato-ca']);
   assert.deepEqual(levelChoices(J3_STAFF_TEMPLATE, 'nato-ca').map((choice) => choice.value), ['strategic', 'operational', 'tactical']);
   assert.equal(templateOffers(J3_STAFF_TEMPLATE).length, 9);
