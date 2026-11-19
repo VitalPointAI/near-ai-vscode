@@ -421,9 +421,9 @@ export function buildStaffMap(input: StaffMapInput): StaffMapModel {
   const toMap = (point: Point): Point => [Number(((point[0] - minE) / MAP_UNIT_METRES).toFixed(1)), Number(((maxN - point[1]) / MAP_UNIT_METRES).toFixed(1))];
   const width = (maxE - minE) / MAP_UNIT_METRES;
   const height = (maxN - minN) / MAP_UNIT_METRES;
-  // A landscape picture: a tall area gets sea on both sides so it fills a wide stage.
-  const wide = Math.max(width, height * 1.5);
-  const viewBox: [number, number, number, number] = [Number(((width - wide) / 2).toFixed(1)), 0, Number(wide.toFixed(1)), Number(height.toFixed(1))];
+  // The picture is the exercise area itself; the renderer fills the rest of a wider stage with open sea.
+  const wide = width;
+  const viewBox: [number, number, number, number] = [0, 0, Number(width.toFixed(1)), Number(height.toFixed(1))];
   const gridOf = (point: Point): string => `${gridName} ${String(Math.floor(point[0] / square)).padStart(2, '0')}${String(Math.floor(point[1] / square)).padStart(2, '0')}`;
 
   const drawn: Partial<Record<CopLayerId, number>> = {};
@@ -439,7 +439,7 @@ export function buildStaffMap(input: StaffMapInput): StaffMapModel {
     count('cop-terrain-layer');
   }
   // Sea names sit in the open water above the land, spread across the top.
-  seaLabels.forEach((label, index) => { label.at = [Number((viewBox[0] + (wide * (index + 1)) / (seaLabels.length + 1)).toFixed(1)), 22]; });
+  seaLabels.forEach((label, index) => { label.at = [Number((viewBox[0] + (wide * (index + 1)) / (seaLabels.length + 1)).toFixed(1)), 14 + index * 12]; });
 
   const units: MapUnit[] = [];
   const offMap: Array<{ id: string; designation: string; affiliation: Affiliation; location: string }> = [];
@@ -487,7 +487,7 @@ export function buildStaffMap(input: StaffMapInput): StaffMapModel {
 
   const ecoas: EnemyCoa[] = readEnemyCoas(input.enemyCoaBody).map((entry) => {
     const text = plain(entry.text);
-    const points = resolver.points(entry.text, 'axis').slice(0, 6).map(toMap);
+    const points = resolver.points(entry.text, 'axis').slice(0, 4).map(toMap);
     const language = estimativeLanguage(text);
     const term = entry.id === 'mlcoa' ? ADVERSARY_COA_TERMS.mostLikely : ADVERSARY_COA_TERMS.mostDangerous;
     if (points.length >= 2) count('cop-threat-layer');

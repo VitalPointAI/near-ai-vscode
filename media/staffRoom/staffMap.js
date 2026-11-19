@@ -202,18 +202,18 @@
       const hatch = sv('pattern', { id: 'marsh', width: 4, height: 4, patternUnits: 'userSpaceOnUse' }, defs);
       sv('path', { class: 'marshline', d: 'M0,3 L4,3 M1,1 L2,1' }, hatch);
       sv('rect', { x: f(x - w), y: f(y - h), width: f(w * 3), height: f(h * 3), fill: 'url(#seaGrad)' }, parent);
-      for (let i = 0; i < 7; i += 1) sv('path', { class: 'swell', d: 'M' + f(x - 20) + ',' + f(14 + i * 9) + ' C' + f(x + w * 0.3) + ',' + f(8 + i * 9) + ' ' + f(x + w * 0.6) + ',' + f(20 + i * 9) + ' ' + f(x + w + 20) + ',' + f(12 + i * 9) }, parent);
+      for (let i = 0; i < 7; i += 1) sv('path', { class: 'swell', d: 'M' + f(x - w) + ',' + f(14 + i * 9) + ' C' + f(x + w * 0.3) + ',' + f(8 + i * 9) + ' ' + f(x + w * 0.6) + ',' + f(20 + i * 9) + ' ' + f(x + 2 * w) + ',' + f(12 + i * 9) }, parent);
       if (model.land) { sv('path', { class: 'land-glow', d: model.land }, parent); sv('path', { class: 'land', d: model.land }, parent); }
       // The grid: a line every 5 squares, labelled with its number.
       const step = 50;
       const startX = Math.ceil(x / step) * step;
       for (let gx = startX; gx < x + w; gx += step) {
-        sv('line', { class: 'gridl', x1: gx, y1: y, x2: gx, y2: y + h }, parent);
+        sv('line', { class: 'gridl', x1: gx, y1: y - h, x2: gx, y2: y + 2 * h }, parent);
         const e = Math.round((model.grid.originEasting + gx * model.grid.unitMetres) / model.grid.squareMetres);
         text({ class: 'glab', x: gx + 2, y: f(y + h - 3) }, model.grid.name + ' ' + String(e).padStart(2, '0'), parent);
       }
       for (let gy = step; gy < y + h; gy += step) {
-        sv('line', { class: 'gridl', x1: x, y1: gy, x2: x + w, y2: gy }, parent);
+        sv('line', { class: 'gridl', x1: x - w, y1: gy, x2: x + 2 * w, y2: gy }, parent);
         const n = Math.round((model.grid.originNorthing - gy * model.grid.unitMetres) / model.grid.squareMetres);
         text({ class: 'glab', x: f(x + 3), y: gy - 2 }, String(n).padStart(2, '0'), parent);
       }

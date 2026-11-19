@@ -166,6 +166,7 @@ export interface StaffRoomModel {
   readonly activity: readonly ActivityLine[];
   readonly coming: typeof WORKSPACES_COMING;
   readonly ledgerProblem?: string;
+  readonly eventLogProblem?: string;
 }
 
 // ---- Inputs ------------------------------------------------------------------------------------------------------------------------------------------
@@ -192,6 +193,7 @@ export interface StaffRoomInput {
   readonly decisions: readonly DecisionQueueEntry[];
   readonly cop: CopModel;
   readonly ledgerProblem?: string;
+  readonly eventLogProblem?: string;
   readonly events: readonly StaffEvent[];
   readonly feedEvents?: readonly FeedEvent[];
   readonly run?: string;
@@ -244,6 +246,16 @@ function gradeWords(reliability: string, credibility: string | number): string {
 
 const actorWords = (actor: { kind: string; name?: string; role?: string; member?: string }): string => (actor.kind === 'person' ? `${actor.name ?? 'A person'} (${actor.role ?? 'person'})` : actor.member ?? 'an agent');
 
+/**
+ * Whether a person's decision in the event log is backed by a signed ledger entry: the same product, version, person and outcome in the product's
+ * replayed history. The event log is not signed, so the room shows a decision only when the ledger holds it.
+ */
+export function decisionBacked(event: Extract<StaffEvent, { type: 'staff.decision.recorded' }>, registry: readonly ProductView[]): boolean {
+  const view = registry.find((candidate) => candidate.product === event.product);
+  return Boolean(view?.history.some((item) => item.actor.kind === 'person' && item.version === event.version && item.to === event.decision
+    && item.actor.name === event.person.name && item.actor.role === event.person.role));
+}
+
 // ---- Runs, rail and squads -----------------------------------------------------------------------------------------------------------------------------
 
 /** The runs the event log knows, newest activity first. A person's decisions carry no run of their own and are left out. */
@@ -289,7 +301,6 @@ function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run
   const waitingOn = new Map<string, { on: string; what: string }>();
   const nested = new Map<string, string>();
   const people = new Map<string, string>();
-  const sectionOfProduct = new Map(registry.map((view) => [view.product, view.section]));
   for (const event of events) {
     if (event.type === 'staff.waiting' && event.run === run) waitingOn.set(`${event.section}/${event.member}`, { on: event.waitingOn, what: event.what });
     if (event.type === 'staff.lane.started' && event.run === run) waitingOn.delete(`${event.section}/${event.member}`);
@@ -297,11 +308,10 @@ function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run
       const section = sections.find((candidate) => new RegExp(`(^|-)${candidate}(-|$)`).test(event.team));
       if (section) nested.set(section, event.state);
     }
-    if (event.type === 'staff.decision.recorded') {
-      const section = sectionOfProduct.get(event.product);
-      if (section) people.set(section, `${event.person.name} (${event.person.role})`);
-    }
   }
+  // The named person shown on a section comes from the signed ledger (who approved its products), never from the event log, which anyone can append to.
+  const latest = [...registry].filter((view) => view.approvedBy).sort((a, b) => (a.history[a.history.length - 1]?.seq ?? 0) - (b.history[b.history.length - 1]?.seq ?? 0));
+  for (const view of latest) people.set(view.section, `${view.approvedBy!.name} (${view.approvedBy!.role})`);
   return sections.map((section): Squad => {
     const entry = board?.sections.find((candidate) => candidate.section === section);
     const members: SquadMember[] = (entry?.lanes ?? []).slice(0, 24).map((lane) => {
@@ -428,6 +438,7 @@ export function handoffsFor(settings: StaffSettings, events: readonly StaffEvent
         if (event.to === 'awaiting-decision') cues.push({ kind: 'task', from: `section:${event.section}`, to: 'decisions', label: clip(`${titleOf(event.product)}: needs a person`, 40), workspace: workspaceOf(event.section) });
         break;
       case 'staff.decision.recorded': {
+        if (!decisionBacked(event, registry)) break;
         const section = sectionOf(event.product) ?? 'command';
         cues.push({ kind: 'human', from: 'decisions', to: `section:${section}`, label: clip(`${event.decision[0].toUpperCase()}${event.decision.slice(1)}: ${titleOf(event.product)}`, 40), workspace: workspaceOf(section) });
         break;
@@ -556,7 +567,9 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     ? { label: `${deadlines[0].title} decision due, for the ${deadlines[0].decisionFor}`, at: deadlines[0].deadline!, dtg: formatDtg(Date.parse(deadlines[0].deadline!)) }
     : ltiovs[0] ? { label: `${ltiovs[0].id} latest time of value`, at: ltiovs[0].ltiov, dtg: formatDtg(Date.parse(ltiovs[0].ltiov)) } : undefined;
   const scenario = input.scenario;
-  const activity = input.events.slice(-200).map((event) => activityLine(settings, event)).filter((line): line is ActivityLine => Boolean(line)).slice(-CAP.activity).reverse()
+  const activity = input.events.slice(-200).map((event) => (event.type === 'staff.decision.recorded' && !decisionBacked(event, input.registry)
+    ? { at: event.at, section: '', kind: 'info' as const, text: `The event log names a decision on ${titleOf(event.product)} v${event.version} that the signed ledger does not hold. It is not counted.` }
+    : activityLine(settings, event))).filter((line): line is ActivityLine => Boolean(line)).slice(-CAP.activity).reverse()
     .map((line) => ({ ...line, text: clip(line.text, 300) }));
   return {
     v: STAFF_ROOM_VERSION, now: input.now,
@@ -575,7 +588,8 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     j2: buildJ2(input, map),
     activity,
     coming: WORKSPACES_COMING,
-    ...(input.ledgerProblem ? { ledgerProblem: clip(input.ledgerProblem) } : {})
+    ...(input.ledgerProblem ? { ledgerProblem: clip(input.ledgerProblem) } : {}),
+    ...(input.eventLogProblem ? { eventLogProblem: clip(input.eventLogProblem) } : {})
   };
 }
 

@@ -1,0 +1,8 @@
+{
+  "register": "pir-register",
+  "formatVersion": 1,
+  "entries": [
+    {"id":"PIR-1","requirement":"Will 3-41 ARMD counter-attack west across the Brenn before H+12?","decisionPoint":"DP 2: commit the reserve","ltiov":"2026-11-21T06:00:00.000Z","indicators":[{"id":"IND-1","text":"Armour moving off the south slope of Harrow Ridge"},{"id":"IND-2","text":"Engineers bridging at Kell"}],"status":"candidate","requestedBy":"j3","label":"org/Internal","addedBy":"requirements-manager"},
+    {"id":"PIR-2","requirement":"Are sea mines laid in the Port Calder harbour approaches?","decisionPoint":"DP 1: land at Beach AMBER or by Route IRON","ltiov":"2026-11-20T18:00:00.000Z","indicators":[{"id":"IND-3","text":"Minelaying craft active at night in the eastern channel"}],"status":"candidate","requestedBy":"j2","label":"org/Internal","addedBy":"requirements-manager"}
+  ]
+}

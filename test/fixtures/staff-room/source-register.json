@@ -1,0 +1,8 @@
+{
+  "register": "source-register",
+  "formatVersion": 1,
+  "entries": [
+    {"id":"SRC-1","title":"Patrol report: digging in along PL COPPER","source":"RECCE squadron foot patrol","origin":"Direct observation by the RECCE patrol","discipline":"HUMINT","reportedAt":"2026-11-12T05:40:00.000Z","accessedAt":"2026-11-12T07:00:00.000Z","reliability":"B","credibility":2,"claims":["dug-in-pl-copper"],"deceptionNote":"None seen; positions are consistent with imagery.","label":"org/Internal","addedBy":"osint-analyst"},
+    {"id":"SRC-2","title":"Imagery: tracked vehicles in hides east of Port Calder","source":"Exercise imagery cell","origin":"Overhead imagery pass 4","discipline":"GEOINT","reportedAt":"2026-11-13T10:00:00.000Z","accessedAt":"2026-11-13T11:00:00.000Z","reliability":"B","credibility":3,"claims":["dug-in-pl-copper","armour-harrow-ridge"],"deceptionNote":"Decoys possible under the netting.","label":"org/Internal","addedBy":"geoint-analyst"}
+  ]
+}

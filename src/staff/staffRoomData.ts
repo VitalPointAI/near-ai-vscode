@@ -149,6 +149,7 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
   return {
     now, settings, registry, decisions: snapshot?.decisions ?? [], cop: snapshot?.cop ?? { layers: [], eventTail: [] },
     ...(snapshot?.ledgerProblem ? { ledgerProblem: snapshot.ledgerProblem } : {}),
+    ...(snapshot?.eventLogProblem ? { eventLogProblem: snapshot.eventLogProblem } : {}),
     events, feedEvents, ...(run ? { run } : {}),
     ...(scenario.scenario ? { scenario: scenario.scenario } : {}), ...(scenario.problem ? { scenarioProblem: scenario.problem } : {}),
     j2: {

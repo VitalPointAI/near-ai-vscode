@@ -664,6 +664,7 @@
   function renderActivity(previous) {
     const before = new Set(previous ? previous.activity.map((line) => line.at + line.text) : []);
     nodes.activity.replaceChildren();
+    if (model.eventLogProblem) nodes.activity.append(el('li', 'problem', model.eventLogProblem));
     if (!model.activity.length) {
       nodes.activity.append(el('li', 'empty', model.run ? 'Nothing recorded in this run yet.' : 'No staff run yet. Run a staff team with /team:<name> in the NEAR AI chat and the room fills as it works.'));
       return;

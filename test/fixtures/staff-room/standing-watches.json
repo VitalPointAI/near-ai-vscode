@@ -1,0 +1,27 @@
+{
+  "register": "standing-watches",
+  "formatVersion": 1,
+  "entries": [
+    {
+      "id": "WATCH-1",
+      "title": "Armour leaving Harrow Ridge",
+      "pir": "PIR-1",
+      "indicator": "IND-1",
+      "condition": {},
+      "ltiov": "2026-11-21T06:00:00.000Z",
+      "alert": {
+        "name": "K. Sample",
+        "role": "J2"
+      },
+      "outputs": [
+        "draft-intrep",
+        "alert-person"
+      ],
+      "runMode": "attended",
+      "state": "paused",
+      "pausedReason": "no-attended-run",
+      "missedWhilePaused": 2,
+      "label": "org/Internal"
+    }
+  ]
+}
