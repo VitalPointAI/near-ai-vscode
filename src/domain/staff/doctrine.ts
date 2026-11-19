@@ -505,6 +505,19 @@ export const INTELLIGENCE_DISCIPLINES = ['OSINT', 'GEOINT', 'HUMINT', 'SIGINT', 
 export type IntelligenceDiscipline = (typeof INTELLIGENCE_DISCIPLINES)[number];
 export const PARTNER_ONLY_DISCIPLINES: readonly IntelligenceDiscipline[] = ['HUMINT', 'SIGINT', 'MASINT', 'CI'];
 
+/**
+ * Unit echelons, lowest first, as the echelon amplifiers of the public symbology standards order them (MIL-STD-2525D, 2014, and APP-6(D), 2017, table of
+ * echelon amplifiers: team or crew; squad; section; platoon or detachment; company, battery or troop; battalion or squadron; regiment or group; brigade;
+ * division; corps; army; army group or front; region or theatre). A slice by echelon ("battalion and above") compares positions in this list (note 11,
+ * section 5). The second name of a pair reads as the first through ECHELON_ALIASES; "squadron" is left out on purpose, because a US cavalry squadron is a
+ * battalion and a Commonwealth armour squadron is a company, so a scenario names the echelon it means.
+ */
+export const ECHELONS = ['team', 'squad', 'section', 'platoon', 'company', 'battalion', 'regiment', 'brigade', 'division', 'corps', 'army', 'army-group', 'theatre'] as const;
+export type Echelon = (typeof ECHELONS)[number];
+export const ECHELON_ALIASES: Readonly<Record<string, Echelon>> = {
+  crew: 'team', detachment: 'platoon', battery: 'company', troop: 'company', group: 'regiment', front: 'army-group', region: 'theatre', theater: 'theatre'
+};
+
 /** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
 export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
 
