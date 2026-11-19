@@ -415,10 +415,14 @@ function commonPrefix(before: Prepared, after: Prepared): number {
   return index;
 }
 
-// Folds more entries into a state and returns the next one; the state passed in is never changed. An entry already seen changes nothing. ctx
-// replaces the context for entries delivered from now on, and held entries are looked at again against it.
+// Folds more entries into a state and returns the next one; the state passed in is never changed. An entry already seen changes nothing.
+// A ctx that is not the object the state was folded under replaces the context (CR-03): a key ring, blob store, roster or clock may now answer
+// differently, so held entries are looked at again and what the reducers decided under the old context is decided again under the new one. That
+// is a start from the beginning, counted in refolds, because a reducer reads the context while it applies (a compaction waiting for its blob, a
+// proposal waiting for its text), and so does the snapshot at the end of the final prefix. Pass the same object, or none, when nothing changed.
 export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: ReplicaContext): FoldState {
   const next = ctx ?? state.ctx;
+  const replaced = next !== state.ctx;
   const store = copyStore(state.store);
   let changed = false;
   for (const item of inputs) {
@@ -427,7 +431,7 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
     if (ingest(store, item, next)) changed = true;
   }
   if (retryHeld(store, next)) changed = true;
-  if (!changed) return state;
+  if (!changed && !replaced) return state;
 
   const prepared = prepare(store, next, state.options);
   let run: Run;
@@ -435,14 +439,16 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
   let refolds = state.refolds;
   // An arrival that sorts last can still change an earlier outcome (a compaction whose cover has just been delivered), so it is not a plain append.
   const late = earliestLateEffect(state.prepared, prepared, state.options.reducers ?? DEFAULT_REDUCERS);
-  if (late === undefined && extendsOrder(state.prepared, prepared)) {
+  // Nothing applied yet means nothing was decided under the old context, so a new one needs no start again.
+  const restart = replaced && state.prepared.ordered.length > 0;
+  if (!restart && late === undefined && extendsOrder(state.prepared, prepared)) {
     // Everything new sorts after what was applied: append.
     run = cloneRun(state.run);
     snapshot = applyFrom(run, prepared, next, state.prepared.ordered.length, state.snapshot);
   } else {
     refolds += 1;
     const reusable = Math.min(commonPrefix(state.prepared, prepared), late ?? Infinity);
-    const kept = state.snapshot !== undefined && state.snapshot.count <= reusable ? state.snapshot : undefined;
+    const kept = !restart && state.snapshot !== undefined && state.snapshot.count <= reusable ? state.snapshot : undefined;
     // Start again from the end of the final prefix when nothing at or before it changed, otherwise from the start.
     run = kept === undefined ? freshRun(state.options.reducers ?? DEFAULT_REDUCERS) : cloneRun(kept.run);
     snapshot = applyFrom(run, prepared, next, kept === undefined ? 0 : kept.count, kept);

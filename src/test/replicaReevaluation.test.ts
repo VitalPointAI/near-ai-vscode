@@ -163,3 +163,97 @@ test('CR-02: a compaction inside a checkpoint prefix whose cover is delivered af
   assert.equal(full.refolds, prefix.refolds + 1);
   sameResult(full.result, scratch, 'checkpointed, cover delivered last');
 });
+
+// ---- CR-03: a new context is looked at again by everything that was decided under the old one ------------------------------------------------------
+
+test('CR-03: a compaction held for its blob is applied when a context that holds the blob replaces the old one, with or without new entries, and equals the from-scratch fold', () => {
+  const s = hostileScene();
+  const noBlob = s.world.ctx({ blobs: () => undefined });
+  const withBlob = s.world.ctx();
+  const everything = sealed(...s.all);
+  const reference = foldEntries(everything, withBlob);
+  assert.deepEqual(productOf(reference).compactions.some((item) => item.entry === s.honest.hash && item.verified), true);
+
+  const waiting = addEntries(createFoldState(noBlob), everything);
+  assert.deepEqual(waiting.result.held.filter((item) => item.stage === 'fold').map((item) => [item.hash, item.reason]).sort(), [s.forgedLate, s.forgedGhost, s.honest].map((item): [string, string] => [item.hash, 'missing-blob']).sort());
+  sameResult(waiting.result, foldEntries(everything, noBlob), 'folded without the blob');
+  // The same context object and nothing new: nothing to look at again.
+  assert.equal(addEntries(waiting, [], noBlob), waiting);
+  assert.equal(addEntries(waiting, []), waiting);
+
+  const released = addEntries(waiting, [], withBlob);
+  assert.equal(released.refolds, waiting.refolds + 1, 'the new context makes the fold start again');
+  sameResult(released.result, reference, 'blob arrived, no new entry');
+  assert.deepEqual(released.result.held, []);
+
+  // The new context together with a late entry: delivered one entry at a time, the last delivery brings both.
+  const base = everything.filter((entry) => entry !== s.late.entry);
+  const partial = addEntries(createFoldState(noBlob), base);
+  const both = addEntries(partial, sealed(s.late), withBlob);
+  sameResult(both.result, reference, 'blob and late entry together');
+  // Partial deliveries under the old context, then the new context with nothing else, in 80 random orders.
+  for (let seed = 1; seed <= 80; seed += 1) {
+    const random = rng(seed * 104729);
+    const delivery = shuffled(everything, random);
+    const cut = random.int(delivery.length + 1);
+    let state = createFoldState(noBlob);
+    for (const entry of delivery.slice(0, cut)) state = addEntries(state, [entry]);
+    state = addEntries(state, delivery.slice(cut, cut + 2), withBlob);
+    for (const entry of delivery.slice(cut + 2)) state = addEntries(state, [entry]);
+    sameResult(state.result, reference, `seed ${seed}: context replaced after ${cut} entries`);
+  }
+});
+
+test('CR-03: entries held for a missing key are applied when a context with the key replaces the old one, and the result equals the from-scratch fold', () => {
+  const s = hostileScene();
+  const noKeys = s.world.ctx({ keys: () => undefined });
+  const withKeys = s.world.ctx();
+  const reference = foldEntries(sealed(...s.all), withKeys);
+  const waiting = addEntries(createFoldState(noKeys), sealed(...s.all));
+  assert.equal(waiting.result.order.length, 0);
+  assert.ok(waiting.result.held.length > 0 && waiting.result.held.every((item) => item.reason === 'missing-key'));
+  sameResult(addEntries(waiting, [], withKeys).result, reference, 'key arrived');
+  // Half of the entries arrive after the key does.
+  const half = addEntries(createFoldState(noKeys), sealed(...s.all.slice(0, 5)));
+  sameResult(addEntries(addEntries(half, [], withKeys), sealed(...s.all.slice(5))).result, reference, 'key arrived, rest later');
+});
+
+test('CR-03: a future-dated entry is released when a context with a later clock replaces the old one, and the entries that waited on it fold with it', () => {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const regA = a.register();
+  const first = a.insert(0, 'one ');
+  // 60 minutes after the clock of the first context, and the entry that follows it in A's log, which waits on it.
+  const future = a.insert(4, 'two ', { at: '2026-11-19T13:00:00.000Z' });
+  const next = a.insert(8, 'three');
+  const regB = b.register();
+  const other = b.insert(0, 'other ');
+  const all = sealed(regA, first, future, next, regB, other);
+  const early = world.ctx();
+  const later = world.ctx({ now: new Date('2026-11-19T13:30:00.000Z') });
+  const reference = foldEntries(all, later);
+  assert.equal(productOf(reference).text.includes('two'), true);
+
+  const waiting = addEntries(createFoldState(early), all);
+  assert.deepEqual(waiting.result.held.map((item) => item.reason).sort(), ['future-dated', 'missing-predecessor']);
+  assert.equal(productOf(waiting.result).text.includes('two'), false);
+  sameResult(waiting.result, foldEntries(all, early), 'before the clock moves');
+  assert.equal(addEntries(waiting, [], early), waiting, 'the same clock changes nothing');
+
+  const released = addEntries(waiting, [], later);
+  assert.deepEqual(released.result.held, []);
+  sameResult(released.result, reference, 'the clock moved on');
+  // Only the future-dated entry is waiting: with nothing else applied, the new context is simply taken without starting again.
+  const alone = addEntries(createFoldState(early), sealed(regA, first, future));
+  assert.equal(alone.result.order.length, 2);
+  sameResult(addEntries(alone, [], later).result, foldEntries(sealed(regA, first, future), later), 'a lone future-dated entry');
+  const nothing = addEntries(createFoldState(early), sealed(future));
+  assert.equal(nothing.result.order.length, 0);
+  const onlyFuture = addEntries(nothing, [], later);
+  assert.equal(onlyFuture.refolds, 0, 'nothing was applied, so nothing starts again');
+  assert.equal(onlyFuture.ctx, later);
+  assert.deepEqual(onlyFuture.result.held.map((item) => item.reason), ['missing-predecessor']);
+  // The clock may also go back: the entry that was released is held again.
+  sameResult(addEntries(released, [], early).result, foldEntries(all, early), 'the clock moved back');
+});
