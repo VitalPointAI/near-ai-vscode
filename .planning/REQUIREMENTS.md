@@ -758,6 +758,33 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 |-------------|-------|
 | CLEAN-01 … CLEAN-05 | Phase 29 |
 
+## Phases 30 to 35 requirements: Multi-user staff workspaces (0.4.x, staff collaboration drops A and B)
+
+**Defined:** 2026-11-19 from `.planning/research/multiuser-sync/DESIGN.md` (section 18), added when Phase 30 was planned.
+**Core value:** Several people work one staff project at once from their own machines, co-edit products with every change attributed, and decide with signed, verifiable decisions, online through your organization's sync hub or offline.
+
+- [ ] **MUS-01**: Per-writer signed hash-chained logs, deterministic fold and state digest; equivocation proven and quarantined.
+- [ ] **MUS-02**: Product text co-edited through Yjs inside signed entries, with unforgeable attribution.
+- [ ] **MUS-03**: Versions pin a content hash; contested decisions need a fresh decision; agents never decide.
+- [ ] **MUS-04**: Genesis, linear single-writer roster, join by signed file with a safety code.
+- [ ] **MUS-05**: Per-cell keys wrapped to cleared devices; rekey on removal.
+- [ ] **MUS-06**: Verified, idempotent migration of today's ledgers; unchanged behaviour for projects that stay single-machine.
+- [ ] **MUS-07**: The hub as its own Compose service: append checks, live push, presence, checkpoints, invitations.
+- [ ] **MUS-08**: Malicious-hub detection, rollback refusal, ciphertext only for ungranted cells, operator backup and restore.
+- [ ] **MUS-09**: Live multi-user staff projects in the extension: editor binding, presence, sync states, contested UI, docs.
+- [ ] **MUS-10**: Git per-writer refs, sealed bundle files and LAN peer links, converging with the hub.
+- [ ] **MUS-11**: Shared run summaries and claims; observation slices with coalescing and budgets.
+- [ ] **MUS-12**: Standing watches on the hub under draft-only, rate, spend, route and kill-switch guards.
+
+| Requirement | Phase |
+|-------------|-------|
+| MUS-01 … MUS-03 | Phase 30 |
+| MUS-04 … MUS-06 | Phase 31 |
+| MUS-07, MUS-08 | Phase 32 |
+| MUS-09 | Phase 33 |
+| MUS-10 | Phase 34 |
+| MUS-11, MUS-12 | Phase 35 |
+
 ## Later milestones: draft requirements (not mapped to phases yet)
 
 Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are reserved so the outlines can be cited; each set is reviewed and mapped to phases when its milestone starts. Not counted in any coverage figure above.

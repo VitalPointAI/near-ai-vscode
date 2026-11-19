@@ -160,10 +160,21 @@ These phases ship in the 0.4.x line as two staff collaboration drops, like staff
   2. Two signed entries at one position by one writer produce a proof and quarantine that device on every machine, whatever the arrival order; a changed old entry breaks only that writer's chain. (MUS-01)
   3. Product text is a Yjs document carried in signed entries; random concurrent edits by persons and agents converge, every character's author is the writer that inserted it, and an update under another writer's client id is rejected. Yjs and `lib0` are vendored at pinned versions with licences (owner question 1). (MUS-02)
   4. Versions pin a content hash that must equal the text at the state vector named; concurrent conflicting decisions on one version fold to "contested" and only a fresh decision that has seen them settles it; no agent actor can approve, reject, release or supersede. (MUS-03)
-**Plans:** 0 plans
+**Plans:** 12 plans in 5 waves (1 {01}; 2 {02, 03}; 3 {04, 05, 06, 07, 08, 09}; 4 {10, 11}; 5 {12})
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 30 to break down)
+- [ ] 30-01-PLAN.md — Vendor Yjs 13.6.33 and lib0 0.2.119 (automatic pin gate, hash manifest checked at compile, test and release), the staff-replica purpose, SECURITY.md
+- [ ] 30-02-PLAN.md — Tracer: two writers each sign and seal one doc.update; same text and digest in both orders; every layer of the replica core and its shared contracts
+- [ ] 30-03-PLAN.md — CRDT spike (D-22): update sizes, full state and garbage collection for a 30-page, 20-author product
+- [ ] 30-04-PLAN.md — Entry hardening and closed schemas for the project, roster, registers, watches, runs and obs families; project reducer
+- [ ] 30-05-PLAN.md — Per-writer chains: equivocation proof and quarantine in any order, tamper, withholding, lamport, roster citation, future time
+- [ ] 30-06-PLAN.md — Co-editing core: ownership check, hostile updates, per-character attribution, deletion records, compaction
+- [ ] 30-07-PLAN.md — Decision algebra: effective, contested, settling, pending-confirmation, every table row under all permutations
+- [ ] 30-08-PLAN.md — Products and versions: proposals checked against the text at their snapshot, numbering, owner prompt, gate chain to awaiting-decision
+- [ ] 30-09-PLAN.md — Total order against a topological reference, checkpoints with order tips, incremental fold and refold, transport types
+- [ ] 30-10-PLAN.md — Decisions on versions through the fold: every 15.4 and 15.5 row, forbidden acts, attribution summary, source changed
+- [ ] 30-11-PLAN.md — Canonical vectors for Phases 31 and 32 and the hub; the replica import boundary
+- [ ] 30-12-PLAN.md — Integration: default reducers, convergence properties across every family, full suite and release check once
 
 ### Phase 31: Staff roster, cell keys and migration
 **Goal**: A staff lead turns a staff project multi-user, invites people by signed file, and decides what each person may see, and today's ledgers move into the new format without loss.
