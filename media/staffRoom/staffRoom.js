@@ -325,7 +325,7 @@
     for (const [key, pane] of nodes.panes) pane.hidden = key !== id;
     // The one map moves to the workspace on screen.
     const slot = id === 'j2' ? nodes.j2MapSlot : nodes.warMapSlot;
-    if (map && map.element.parent !== slot && map.element.parentNode !== slot) slot.append(map.element);
+    if (map && map.element.parentNode !== slot) slot.append(map.element);
     if (map && model && changed) { lastMapJson = ''; drawMap(false); }
     moveInk();
     const pane = nodes.panes.get(id);
@@ -570,6 +570,8 @@
     let shown = 0;
     node.textContent = '';
     const timer = setInterval(() => {
+      // A re-render can replace the node; stop rather than keep writing into a detached one.
+      if (!node.isConnected) { clearInterval(timer); if (typing.get(key) === timer) typing.delete(key); return; }
       shown = Math.min(text.length, shown + 3);
       node.textContent = text.slice(0, shown);
       if (shown >= text.length) { clearInterval(timer); typing.delete(key); }

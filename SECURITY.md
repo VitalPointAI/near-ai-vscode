@@ -1196,7 +1196,9 @@ in `vendor/manifest.json` from esbuild's record of what it bundled:
 The COP map page's two libraries are committed under `media/vendor/` byte for
 byte from their published npm packages, each with its license, and
 `media/vendor/VENDORED.json` records their versions, npm integrity and the
-hash of every file (a test checks them); they are never fetched at run time
+hash of every file. `src/test/staffCopSymbols.test.ts` checks every file in the
+working tree against those hashes, and `npm run verify:release` checks the same hashes on the
+bytes inside the packaged VSIX, so a changed or substituted copy fails CI and the release; they are never fetched at run time
 and enter the SBOM from that file:
 
 | Package | Version | License | Used for |

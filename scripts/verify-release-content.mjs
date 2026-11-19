@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -150,6 +151,26 @@ const forbiddenPatterns = [
 ];
 const forbidden = entries.filter((entry) => forbiddenPatterns.some((pattern) => pattern.test(entry)));
 if (forbidden.length > 0) fail(`development or source artifacts are present: ${forbidden.join(', ')}`);
+
+// The COP map's vendored libraries (media/vendor/VENDORED.json): every recorded file must be in the
+// package with exactly the bytes whose SHA-256 the manifest records, so a substituted copy cannot ship.
+// src/test/staffCopSymbols.test.ts checks the same hashes on the working tree.
+const vendored = JSON.parse(readFileSync(resolve(root, 'media/vendor/VENDORED.json'), 'utf8'));
+const vendoredFiles = Object.entries(vendored.files ?? {});
+if (vendoredFiles.length === 0) fail('media/vendor/VENDORED.json records no files');
+for (const [file, hash] of vendoredFiles) {
+  const entry = `extension/media/vendor/${file}`;
+  if (!entrySet.has(entry)) { fail(`vendored file is missing from the package: ${entry}`); continue; }
+  let bytes;
+  try {
+    bytes = execFileSync('unzip', ['-p', vsixPath, entry], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
+  } catch (error) {
+    fail(`could not read ${entry} from the package to check its hash: ${error instanceof Error ? error.message : String(error)}`);
+    continue;
+  }
+  const actual = createHash('sha256').update(bytes).digest('hex');
+  if (actual !== hash) fail(`vendored file ${entry} does not match its recorded hash (${actual} != ${hash})`);
+}
 
 if (packageJson.main !== './dist/extension.js') fail(`package.json main must remain ./dist/extension.js, got ${packageJson.main}`);
 

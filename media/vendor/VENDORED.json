@@ -1,5 +1,5 @@
 {
-  "note": "Third-party code the COP map page loads, copied byte for byte from the published npm packages at exact versions, reviewed before adoption and never fetched at run time. A test checks every file against its hash here.",
+  "note": "Third-party code the COP map page loads, copied byte for byte from the published npm packages at exact versions, reviewed before adoption and never fetched at run time. src/test/staffCopSymbols.test.ts checks every file against its hash here, and verify:release checks the packaged copies.",
   "packages": [
     {
       "name": "maplibre-gl",

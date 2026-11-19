@@ -31,6 +31,7 @@ class FakeNode {
   private text = '';
   constructor(public tagName: string, private readonly doc: FakeDoc) {}
   get parentNode(): FakeNode | undefined { return this.parent; }
+  get isConnected(): boolean { let node: FakeNode | undefined = this; while (node?.parent) node = node.parent; return node === this.doc.body; }
   get classList() {
     const list = () => this.className.split(/\s+/).filter(Boolean);
     return {
@@ -430,4 +431,20 @@ test('the SVG map places every name label so no two overlap near Port Calder, an
   const second = api.create(page.doc.createElement('div'), {});
   second.render(model.map, { mode: 'war-room' });
   assert.deepEqual(JSON.parse(JSON.stringify(second.labels())), labels);
+});
+
+test('a status line that is still typing stops when its node leaves the page', async () => {
+  const { model } = await fixtureModel();
+  const page = await runPage();
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const callout = page.byClass('callout').find((node) => node.parentNode !== undefined)!;
+  assert.ok(callout, 'a squad callout is drawn');
+  callout.remove();
+  const frozen = callout.textContent;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(callout.textContent, frozen, 'no writes into a detached node');
+  // A connected callout still finishes typing its summary.
+  const live = page.byClass('callout')[0];
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.ok(live.textContent.length > 0);
 });
