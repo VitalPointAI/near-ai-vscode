@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalBytes } from '../domain/team/canonical';
-import { docText, snapshotOf } from '../domain/replica/doc';
+import { applyRemote, docText, encodeFullState, snapshotOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
 import type { Actor, Dep, SealedEntry } from '../domain/replica/entry';
 import { checkpointHash, orderTipOf, signCheckpoint } from '../domain/replica/checkpoint';
@@ -582,4 +582,113 @@ test('D24: a decision that saw an entry this machine does not hold is held until
   const withBoth = foldAll(f, [theirs, mine]);
   const view = versionsOf(withBoth)[0];
   assert.deepEqual([view.state, view.decision.status, view.decision.held, view.decision.names], ['approved', 'effective', [], ['Col Cee']]);
+});
+
+// ---- Task 3: attribution, source changed, late proposals after a checkpoint, the working text -------------------------------------------------------
+
+test('D-20: a version carries who shaped its text, persons and agents with their run, counting every character, and later edits never change it', () => {
+  const f = fixture();
+  // The agent run edits on P's device under its own client id, after the person's text.
+  const agent: Actor = { kind: 'agent', member: 'j2-analyst', run: 'r-14' };
+  const agentEditor = f.world.editor('P', PRODUCT, 202);
+  applyRemote(agentEditor.doc, encodeFullState(f.kit.editor.doc));
+  const agentReg = agentEditor.register({ deps: [f.kit.typed], actor: agent });
+  const agentTyped = agentEditor.insert(11, ' (agent)', { deps: [agentReg], actor: agent });
+  applyRemote(f.kit.editor.doc, encodeFullState(agentEditor.doc));
+  assert.equal(f.kit.textNow(), 'Hello world (agent)');
+  const v1 = f.propose(f.kit, 'P', OWNER, [agentTyped]);
+  const first = versionsOf(f.fold())[0];
+  const writer = f.world.writerOf('P');
+  assert.deepEqual(first.attribution.map((row) => [row.writer, row.member, row.actor, row.agentMember ?? null, row.run ?? null, row.characters]), [
+    [writer, 'mbr-p', 'agent', 'j2-analyst', 'r-14', 8],
+    [writer, 'mbr-p', 'person', null, null, 11]
+  ]);
+  assert.equal(first.attribution.reduce((sum, row) => sum + row.characters, 0), 'Hello world (agent)'.length);
+
+  // Another member edits after the proposal; the version's own attribution does not move.
+  const other = f.world.editor('X', PRODUCT, 303);
+  const otherReg = other.register({ deps: [v1] });
+  other.insert(0, 'XX', { deps: [otherReg] });
+  const later = f.fold();
+  assert.deepEqual(versionsOf(later)[0].attribution, first.attribution);
+  assert.equal(versionsOf(later)[0].changesSince, 1);
+});
+
+test('N5: a dependant whose pin names an older hash than the newest released version of its source shows sourceChanged; an approved but unreleased version shows nothing', () => {
+  const f = fixture();
+  const source = toAwaiting(f, f.kit, [f.kit.typed]);
+  const dependant = f.extraKit('ops-order', 202);
+  const pinned = f.propose(dependant, 'P', OWNER, [dependant.typed, source.propose], { pins: [{ product: PRODUCT, hash: source.hash }] });
+  const edit = f.kit.editor.insert(11, '!', { deps: [source.submit] });
+  const newer = toAwaiting(f, f.kit, [edit]);
+  assert.notEqual(newer.hash, source.hash);
+  const dependantOf = (result: FoldResult): VersionView => versionsOf(result, 'ops-order')[0];
+
+  assert.deepEqual(dependantOf(f.fold()).sourceChanged, []);
+  const approve = decide(f, 'C', 'approve', newer, [newer.submit]);
+  const onlyApproved = foldAll(f, [approve]);
+  assert.equal(versionsOf(onlyApproved)[1].state, 'approved');
+  assert.deepEqual(dependantOf(onlyApproved).sourceChanged, []);
+
+  const done = release(f, 'C', newer, [approve], [approve]);
+  const result = foldAll(f, [approve, done]);
+  assert.equal(versionsOf(result)[1].state, 'released');
+  assert.deepEqual(dependantOf(result).sourceChanged, [{ product: PRODUCT, pinned: source.hash, current: newer.hash }]);
+  assert.equal(dependantOf(result).entry, pinned.hash);
+
+  // A dependant that pins the newest released hash has nothing to report.
+  const dependantEdit = dependant.editor.insert(11, '?', { deps: [pinned] });
+  const current = f.propose(dependant, 'P', OWNER, [dependantEdit, done], { pins: [{ product: PRODUCT, hash: newer.hash }] });
+  const again = f.fold();
+  assert.deepEqual(versionsOf(again, 'ops-order').map((view) => [view.entry, view.sourceChanged.length]), [[pinned.hash, 1], [current.hash, 0]]);
+});
+
+test('N6: with a checkpoint covering v1 and v2, a late proposal concurrent with v2 that would sort before it is numbered 3 and marked proposedAtSameTimeAs [2]', () => {
+  const f = fixture();
+  const base = f.kit.snapNow();
+  const v1 = f.propose(f.kit, 'P', OWNER, [f.kit.typed]);
+  const edit = f.kit.editor.insert(11, '!', { deps: [v1] });
+  const v2 = f.propose(f.kit, 'P', OWNER, [edit]);
+  // The late one: the first text again with other pins (so another hash), after v1 only, so it is concurrent with v2 and sorts before it.
+  const late = f.propose(f.kit, 'SL', PERSON, [v1], { text: 'Hello world', snapshot: base, pins: [{ product: 'other', hash: OTHER_HASH }] });
+
+  const free = f.fold();
+  const numberOf = (result: FoldResult, written: Written): number | undefined => versionsOf(result).find((view) => view.entry === written.hash)?.number;
+  assert.deepEqual([numberOf(free, v1), numberOf(free, late), numberOf(free, v2)], [1, 2, 3]);
+
+  const signed = checkpointOf(f, [f.kit.create, f.kit.reg, f.kit.typed, v1, edit, v2]);
+  const result = foldAll(f, [late, v2], f.ctx, { checkpoints: [signed] });
+  assert.equal(result.checkpoint, checkpointHash(signed));
+  assert.deepEqual([numberOf(result, v1), numberOf(result, v2), numberOf(result, late)], [1, 2, 3]);
+  assert.deepEqual(versionsOf(result).find((view) => view.entry === late.hash)?.proposedAtSameTimeAs, [2]);
+  assert.deepEqual(result.refused, []);
+});
+
+test('D-23: the working text is withdrawn exactly when the newest version is withdrawn, and open again when a newer one is proposed', () => {
+  const f = fixture();
+  const single = (written: Written): Chain => ({ propose: written, cleared: written, submit: written, hash: replicaVersionHash(f.kit.textNow(), []) });
+  assert.equal(productOf(f.fold()).working, 'open');
+  const v1 = f.propose(f.kit, 'P', OWNER, [f.kit.typed]);
+  const one = single(v1);
+  const e1 = f.kit.editor.insert(11, '!', { deps: [v1] });
+  const v2 = f.propose(f.kit, 'P', OWNER, [e1]);
+  const two = single(v2);
+  assert.equal(productOf(f.fold()).working, 'open');
+
+  // Withdrawing v1 while v2 is newer leaves the working text open.
+  const w1 = withdraw(f, 'P', one, [v2], [], { actor: OWNER });
+  const stage1 = foldAll(f, [w1]);
+  assert.deepEqual(versionsOf(stage1).map((view) => view.state), ['withdrawn', 'draft']);
+  assert.equal(productOf(stage1).working, 'open');
+
+  const w2 = withdraw(f, 'P', two, [w1], [], { actor: OWNER });
+  const stage2 = foldAll(f, [w1, w2]);
+  assert.deepEqual(versionsOf(stage2).map((view) => view.state), ['withdrawn', 'withdrawn']);
+  assert.equal(productOf(stage2).working, 'withdrawn');
+
+  const e2 = f.kit.editor.insert(12, '?', { deps: [w2] });
+  f.propose(f.kit, 'P', OWNER, [e2]);
+  const stage3 = f.fold();
+  assert.deepEqual(versionsOf(stage3).map((view) => view.state), ['withdrawn', 'withdrawn', 'draft']);
+  assert.equal(productOf(stage3).working, 'open');
 });

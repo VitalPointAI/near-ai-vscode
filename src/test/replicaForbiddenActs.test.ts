@@ -181,11 +181,11 @@ const HUB: Actor = { kind: 'hub', watch: 'w-1' };
 // ---- F1 to F4: no agent or hub actor approves, rejects, releases or supersedes ---------------------------------------------------------------------------
 
 // The version at awaiting-decision, with the act under test written by `actor` on each of the two devices.
-function agentActsOnTwoDevices(make: (f: Fixture, writer: string, actor: Actor) => { written: Written; chain: Chain; before: Written[] }): void {
+function agentActsOnTwoDevices(expected: string, make: (f: Fixture, writer: string, actor: Actor) => { written: Written; chain: Chain }): void {
   for (const actor of [AGENT, HUB]) {
     for (const writer of ['C', 'X']) {
       const f = fixture();
-      const { written, chain, before } = make(f, writer, actor);
+      const { written, chain } = make(f, writer, actor);
       const result = foldAll(f, [written]);
       const view = versionsOf(result)[0];
       if (actor.kind === 'hub') {
@@ -196,7 +196,7 @@ function agentActsOnTwoDevices(make: (f: Fixture, writer: string, actor: Actor) 
         assert.equal(refusalOf(result, written), 'agent-cannot-decide', `${actor.kind} on ${writer}`);
       }
       // Nothing the act asked for happened: the version is where the acts before it left it.
-      assert.equal(before.every((item) => view.decision.effective.includes(item.hash) || !view.decision.effective.includes(written.hash)), true);
+      assert.equal(view.state, expected);
       assert.equal(view.decision.effective.includes(written.hash), false);
       assert.equal(view.hash, chain.hash);
     }
@@ -207,9 +207,9 @@ test('F1 an agent or a hub actor cannot approve, whether or not the signing devi
   const f = fixture();
   assert.equal(f.ctx.roster.hasRole('mbr-c', `decision_for:${COMMANDER}`, f.world.rosterHash), true);
   assert.equal(f.ctx.roster.hasRole('mbr-x', `decision_for:${COMMANDER}`, f.world.rosterHash), false);
-  agentActsOnTwoDevices((g, writer, actor) => {
+  agentActsOnTwoDevices('awaiting-decision', (g, writer, actor) => {
     const chain = toAwaiting(g, g.kit, [g.kit.typed]);
-    return { written: decide(g, writer, 'approve', chain, [chain.submit], [], { actor }), chain, before: [] };
+    return { written: decide(g, writer, 'approve', chain, [chain.submit], [], { actor }), chain };
   });
   const g = fixture();
   const chain = toAwaiting(g, g.kit, [g.kit.typed]);
@@ -218,9 +218,9 @@ test('F1 an agent or a hub actor cannot approve, whether or not the signing devi
 });
 
 test('F2 an agent or a hub actor cannot reject', () => {
-  agentActsOnTwoDevices((g, writer, actor) => {
+  agentActsOnTwoDevices('awaiting-decision', (g, writer, actor) => {
     const chain = toAwaiting(g, g.kit, [g.kit.typed]);
-    return { written: decide(g, writer, 'reject', chain, [chain.submit], [], { actor }), chain, before: [] };
+    return { written: decide(g, writer, 'reject', chain, [chain.submit], [], { actor }), chain };
   });
   const f = fixture();
   const chain = toAwaiting(f, f.kit, [f.kit.typed]);
@@ -230,10 +230,10 @@ test('F2 an agent or a hub actor cannot reject', () => {
 });
 
 test('F3 an agent or a hub actor cannot release an approved version', () => {
-  agentActsOnTwoDevices((g, writer, actor) => {
+  agentActsOnTwoDevices('approved', (g, writer, actor) => {
     const chain = toAwaiting(g, g.kit, [g.kit.typed]);
     const approve = decide(g, 'C', 'approve', chain, [chain.submit]);
-    return { written: release(g, writer, chain, [approve], [approve], { actor }), chain, before: [approve] };
+    return { written: release(g, writer, chain, [approve], [approve], { actor }), chain };
   });
   const f = fixture();
   const chain = toAwaiting(f, f.kit, [f.kit.typed]);
@@ -245,11 +245,11 @@ test('F3 an agent or a hub actor cannot release an approved version', () => {
 });
 
 test('F4 an agent or a hub actor cannot supersede a released version', () => {
-  agentActsOnTwoDevices((g, writer, actor) => {
+  agentActsOnTwoDevices('released', (g, writer, actor) => {
     const { one, two } = twoVersions(g);
     const r1 = released(g, one);
     const r2 = released(g, two);
-    return { written: supersede(g, writer, one, two, [r1.release, r2.release], { actor }), chain: one, before: [r1.approve, r1.release, r2.approve, r2.release] };
+    return { written: supersede(g, writer, one, two, [r1.release, r2.release], { actor }), chain: one };
   });
   const f = fixture();
   const { one, two } = twoVersions(f);
