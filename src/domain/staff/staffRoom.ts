@@ -175,8 +175,6 @@ export interface J2Input {
   readonly sources: readonly SourceEntry[];
   readonly pirs: readonly PirEntry[];
   readonly plan: readonly CollectionEntry[];
-  /** Rows of the shared PIR register (the staff tools' register), for PIRs the intel workbench has not recorded. */
-  readonly pirRows?: readonly RegisterRow[];
   /** Rows of the DST and DSM, to name the decision each PIR supports. */
   readonly dsm?: readonly RegisterRow[];
   /** The J2's adversary COA set (or threat assessment) body, and which product it is. */
@@ -510,15 +508,6 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
       nais: naisFor(entry.id), requestedBy: clip(entry.requestedBy, 60), ...(entry.decision ? { decidedBy: clip(`${entry.decision.decision} by ${entry.decision.by.name} (${entry.decision.by.role})`, CAP.short) } : {})
     };
   });
-  for (const row of j2.pirRows ?? []) {
-    if (row.type !== 'pir' || pirs.some((pir) => pir.id === String(row.id))) continue;
-    const dp = dsm.get(dpKey(String(row.decisionPoint ?? '')));
-    pirs.push({
-      id: clip(row.id, 40), requirement: clip(row.requirement, 400), decisionPoint: clip(row.decisionPoint ?? '', 160), ...(dp ? { dp: { id: clip(dp.id, 40), decision: clip(dp.description, 200), maker: clip(dp.decisionMaker, 80) } } : {}),
-      ltiov: String(row.ltiov ?? ''), ltiovPassed: row.ltiov !== undefined && Date.parse(String(row.ltiov)) < now, status: String(row.status), indicators: row.indicators ? [{ id: '', text: clip(row.indicators, 300) }] : [],
-      nais: naisFor(String(row.id)), requestedBy: ''
-    });
-  }
   const indicatorText = (pir: string, id: string) => j2.pirs.find((entry) => entry.id === pir)?.indicators.find((indicator) => indicator.id === id)?.text ?? id;
   const collection = j2.plan.slice(0, CAP.list).map((entry) => ({
     id: entry.id, pir: entry.pir, indicator: clip(indicatorText(entry.pir, entry.indicator), 200), nai: clip(entry.nai, 80), capability: clip(entry.capability, 160), discipline: entry.discipline,

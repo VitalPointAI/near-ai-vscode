@@ -1004,7 +1004,7 @@ until it runs out aren't shown.
   products through three tool groups its members are granted:
   `mcp:staff-products` (propose a new version, give a gate verdict, submit
   for a decision, withdraw, status, list, the shared registers including the
-  operations centre's event log, the wargame
+  operations centre's event log (read with a read-only tool of its own), the wargame
   ledger and the tradecraft lint) and `mcp:guard-scan` (the release-guard's
   checks for markings, the exercise box, real names, decisions written as
   made, personal data and J4 numbers without a calculation). Every product

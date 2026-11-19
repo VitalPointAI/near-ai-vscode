@@ -155,7 +155,7 @@ const CYBER_TOOLS = ['CyberHttpProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberT
 // A staff section team's run (design 10, 6.2): the staff-products and guard-scan tools, between the cyber and the knowledge tools.
 const STAFF_TOOLS = [
   'mcp__staff-products__propose', 'mcp__staff-products__verdict', 'mcp__staff-products__submit', 'mcp__staff-products__withdraw', 'mcp__staff-products__status',
-  'mcp__staff-products__list', 'mcp__staff-products__register', 'mcp__staff-products__wargame', 'mcp__staff-products__step', 'mcp__staff-products__lint',
+  'mcp__staff-products__list', 'mcp__staff-products__register', 'mcp__staff-products__register_read', 'mcp__staff-products__wargame', 'mcp__staff-products__step', 'mcp__staff-products__lint',
   'mcp__guard-scan__scan'
 ];
 const EXPECTED_ORDER = [
@@ -170,13 +170,13 @@ const EXPECTED_ORDER = [
   'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task'
 ];
 
-test('the catalog holds all 51 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
+test('the catalog holds all 52 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
   const names = builtInTools().map((tool) => tool.name);
-  assert.equal(names.length, 51);
-  assert.equal(new Set(names).size, 51, 'a duplicate name fails the catalog');
+  assert.equal(names.length, 52);
+  assert.equal(new Set(names).size, 52, 'a duplicate name fails the catalog');
   assert.deepEqual(names, EXPECTED_ORDER);
   const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
-  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 51, the cyber, staff, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
+  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 52, the cyber, staff, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
 });
 
 test('the 13 tools a run has only in a special setting are on the Tools page with their manifest words, in catalog order, and say whether they need a person', () => {

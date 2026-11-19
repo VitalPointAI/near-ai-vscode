@@ -193,7 +193,9 @@ export function branchLedgerDetail(check: { readonly reason: 'truncated' | 'repl
 async function decidePirCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, args?: StaffCommandArgs): Promise<void> {
   const host = hostOrSay();
   if (!host) return;
-  const waiting = await host.pirsAwaitingDecision();
+  const queue = await host.pirsAwaitingDecision();
+  if ('unreadable' in queue) { void vscode.window.showWarningMessage(`No PIR can be decided now: ${queue.unreadable}`); return; }
+  const waiting = queue.entries;
   if (!waiting.length) { void vscode.window.showInformationMessage('No PIR is awaiting a decision. A J2 member marks a PIR awaiting-decision with the intel workbench first.'); return; }
   const wanted = (args as { pir?: unknown } | undefined)?.pir;
   let pir = typeof wanted === 'string' ? waiting.find((entry) => entry.id === wanted) : undefined;

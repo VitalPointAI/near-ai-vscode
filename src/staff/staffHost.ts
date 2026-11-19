@@ -475,14 +475,14 @@ export class StaffHost {
     return undefined;
   }
 
-  /** The PIRs a person can decide on now: those awaiting a decision once every written decision is checked against the log. */
-  public async pirsAwaitingDecision(): Promise<PirEntry[]> {
-    const file = path.join(this.options.root, registerPath('pir-register'));
-    const read = await readWhole(file);
-    if (read.kind !== 'text') return [];
-    const parsed = parseRegisterText('pir-register', read.text);
-    if (!parsed.ok) return [];
-    return trustPirDecisions(parsed.value, await this.pirDecisions()).entries.filter((entry) => entry.status === 'awaiting-decision');
+  /**
+   * The PIRs a person can decide on now: those awaiting a decision once every written decision is checked against the log. A register that cannot be
+   * read whole, or does not parse, is never read as having none: the reason comes back, so Decide a PIR says it instead of "no PIR is waiting".
+   */
+  public async pirsAwaitingDecision(): Promise<{ readonly entries: PirEntry[] } | { readonly unreadable: string }> {
+    const register = await this.pirRegister();
+    if ('unreadable' in register) return register;
+    return { entries: (register.entries ?? []).filter((entry) => entry.status === 'awaiting-decision') };
   }
 
   /**
@@ -1042,6 +1042,13 @@ export class StaffHost {
   }
 
   public async registerRead(caller: StaffCaller, register: string): Promise<StaffResult> {
+    // The PIR register is read from its one source, the intel workbench's JSON, with every decision checked against the signed log; never from the
+    // product generated from it.
+    if (register === PIR_REGISTER_PRODUCT) {
+      const pirs = await this.pirRegister();
+      if ('unreadable' in pirs) return refuse(pirs.unreadable);
+      return ok(JSON.stringify({ register, source: registerPath('pir-register'), entries: pirs.entries ?? [], note: PIR_REGISTER_ELSEWHERE }, null, 2));
+    }
     const schema = registerSchema(register);
     if (!schema) return refuse(`There is no register called ${register}.`);
     const replay = await this.replay();
@@ -1059,9 +1066,9 @@ export class StaffHost {
   public async registerWrite(caller: StaffCaller, input: { register: string; rows?: readonly unknown[]; remove?: readonly string[]; part?: string; label?: string }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
-    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     // One writer at a time per register (the intel workbench's lock): two part writers of the CCIR register, the PIR part and the FFIR part, never drop
     // each other's rows, because each re-reads the ledger and the rows inside the lock and writes from what it read there.
     const where = this.registerSection(input.register, caller, await this.replay());
@@ -1148,9 +1155,9 @@ export class StaffHost {
   public async registerPropose(caller: StaffCaller, input: { register: string; rows: readonly unknown[]; note?: string }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
-    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const rows: RegisterRow[] = [];
     for (const raw of input.rows) {
       const checked = checkRow(schema, raw);

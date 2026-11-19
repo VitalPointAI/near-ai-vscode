@@ -139,7 +139,8 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     const read = await productBody(root, staffProductPath(sectionOf(register, fallback), register));
     return read.text === undefined ? undefined : parseRegisterBody(registerSchema(register)!, read.text);
   };
-  const [pirRows, dsm] = await Promise.all([rowsOf('pir-register', 'j2'), rowsOf('dst-dsm', 'j5')]);
+  // The PIRs come from the workbench's JSON register above, their one source; the DSM from its register product.
+  const dsm = await rowsOf('dst-dsm', 'j5');
   let enemyCoaBody: string | undefined;
   let enemyCoaProduct: string | undefined;
   for (const product of ENEMY_COA_PRODUCTS) {
@@ -153,7 +154,7 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     events, feedEvents, ...(run ? { run } : {}),
     ...(scenario.scenario ? { scenario: scenario.scenario } : {}), ...(scenario.problem ? { scenarioProblem: scenario.problem } : {}),
     j2: {
-      ...registers, ...(pirRows ? { pirRows } : {}), ...(dsm ? { dsm } : {}), ...(enemyCoaBody ? { enemyCoaBody } : {}), ...(enemyCoaProduct ? { enemyCoaProduct } : {}),
+      ...registers, ...(dsm ? { dsm } : {}), ...(enemyCoaBody ? { enemyCoaBody } : {}), ...(enemyCoaProduct ? { enemyCoaProduct } : {}),
       watches: watches.watches, problems
     }
   };

@@ -1,10 +1,11 @@
-// The structured staff registers (design 10, 3.1, 4.3 and 4.5; WP-SHARED): the CCIR register, the PIR register, the RFI tracker, the facts and
-// assumptions ledger, the annex tracker, the synchronization matrix, the DST and DSM, the targeting workbook and the operations centre's event log.
+// The structured staff registers (design 10, 3.1, 4.3 and 4.5; WP-SHARED): the CCIR register, the RFI tracker, the facts and assumptions ledger, the
+// annex tracker, the synchronization matrix, the DST and DSM, the targeting workbook and the operations centre's event log. The J2 PIR register is not
+// one of them: its one source is the intel workbench's JSON register (intel.ts; review round 4), which the register tool's read returns as it is.
 // Pure: no I/O, no clock, no vscode.
 //
 // A register is a staff product like any other (a Markdown file with the staff header, through the release state machine). Its body is a table a person
 // reads and, below it, the same rows as a fenced JSON block the tools read, so one file holds one version and one hash. Rows are checked against the
-// register's columns here, which is what lets the gates check them mechanically (02 s3.5): every PIR has a decision point and a latest time of value,
+// register's columns here, which is what lets the gates check them mechanically (02 s3.5): every PIR in the CCIR register has a latest time of value,
 // every assumption an invalidation trigger, every targeting row both review marks.
 import type { StaffSectionId } from './doctrine';
 import { STAFF_SECTION_IDS } from './doctrine';
@@ -55,20 +56,6 @@ export const REGISTER_SCHEMAS: Readonly<Record<string, RegisterSchema>> = {
       { key: 'status', title: 'Status', required: true, values: ['proposed', 'active', 'answered', 'retired'] }
     ],
     rules: [(row) => (row.type === 'pir' && row.ltiov === undefined ? 'A PIR needs a latest time of value.' : undefined)]
-  },
-  'pir-register': {
-    register: 'pir-register', title: 'PIR and IR register', kind: 'register',
-    columns: [
-      { key: 'id', title: 'ID', required: true },
-      { key: 'type', title: 'Type', required: true, values: ['pir', 'ir', 'sir'] },
-      { key: 'requirement', title: 'Requirement', required: true },
-      { key: 'decisionPoint', title: 'Decision point supported' },
-      { key: 'indicators', title: 'Indicators' },
-      { key: 'ltiov', title: 'Latest time of value', form: 'time' },
-      { key: 'status', title: 'Status', required: true, values: ['proposed', 'active', 'answered', 'retired'] }
-    ],
-    // 02 T9: every PIR is tied to a decision point and a latest time of value.
-    rules: [(row) => (row.type === 'pir' && (row.decisionPoint === undefined || row.ltiov === undefined) ? 'A PIR needs a decision point and a latest time of value.' : undefined)]
   },
   'rfi-tracker': {
     register: 'rfi-tracker', title: 'RFI tracker', kind: 'register', partColumn: 'part',

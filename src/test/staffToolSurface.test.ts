@@ -52,7 +52,7 @@ test('the verdict tool takes only gate verdicts: an approval word as a verdict i
 test('the staff tools are in the catalog, read tools read and write tools say what they write', () => {
   const catalog = new Map(builtInTools().map((tool) => [tool.name, tool]));
   for (const tool of tools) assert.ok(catalog.has(tool.name), tool.name);
-  const read = ['mcp__staff-products__status', 'mcp__staff-products__list', 'mcp__staff-products__lint', 'mcp__guard-scan__scan'];
+  const read = ['mcp__staff-products__status', 'mcp__staff-products__list', 'mcp__staff-products__register_read', 'mcp__staff-products__lint', 'mcp__guard-scan__scan'];
   for (const tool of tools) assert.equal(tool.capability, read.includes(tool.name) ? 'read' : 'workspaceWrite', tool.name);
 });
 

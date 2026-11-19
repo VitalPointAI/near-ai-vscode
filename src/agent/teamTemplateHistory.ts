@@ -591,7 +591,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j2-intelligence': [
     {
       version: 1,
-      definition: '5e0c13f1417e6f4a',
+      definition: '74f962e6b4955162',
       guidance: [
         '8c12c625cdb08b4b',
         'bd0fd1276a805473',
@@ -647,7 +647,13 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'd428d65c584ea89a',
           '9dfc3d01c1aafbc6',
           'fb841cee1cefdd39',
-          '777919be1c390fc7'
+          '777919be1c390fc7',
+          '54352c88df675739',
+          '18295782608b96f9',
+          '3b8ace542f35da73',
+          'df1ea2129eba44e5',
+          '7a6f7357f8375cf4',
+          '25ba099d297a7e29'
         ],
         'collection-manager': [
           '3380ce3b5bde98d0',
@@ -763,7 +769,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j5-plans': [
     {
       version: 1,
-      definition: '55919bea6e7bd0be',
+      definition: 'c288552bc28144dc',
       guidance: [
         '1c14ba20f94496a7',
         '104f6e7f44235e52',
@@ -815,7 +821,23 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '9b3d8d945674f9a6',
           '8990269792388fe3',
           '6e7db070199128c8',
-          '777f178953b55808'
+          '777f178953b55808',
+          'dffc8142bafb2270',
+          '357d5d9c41d7bddb',
+          'f8ae854a8315a76b',
+          '5c0e838b66fd6a55',
+          '64658db5e6b4fe2e',
+          'cb1e771a3929fbe8',
+          '5d7ce564823b6e87',
+          'dc2ee7832d896257',
+          'fb381d52464bf2d8',
+          'f3192cbd89fdbf01',
+          '1198d7d3000532d3',
+          '270d8db05a809405',
+          '6d8a5de184181661',
+          '81ef76e971dd5c3c',
+          '3cde5fac33b90dfd',
+          '77b97e027a6859c0'
         ],
         'policy-planner': [
           'eadf49a73a0fa838',
@@ -825,29 +847,51 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '0c489fb755142be1',
           '60b6b0316c406b55',
           'b0181bb121229727',
-          '307c8cb92a40f235'
+          '307c8cb92a40f235',
+          '6cea2186f172b0e5',
+          '53e61001e700df78',
+          'ec5eb9053b4c93f3',
+          'fdf911780cd058a9',
+          'a84d09f2938c7064',
+          'd6e09c8f35754c1d',
+          '01f186b3e1c714d2',
+          '60b02bf7669c7c3f'
         ],
         'design-planner': [
           '360f3b7008baedfb',
           '9987006d625f82af',
           '70d34f0fd04d2587',
-          '7c97a919614fb552'
+          '7c97a919614fb552',
+          'c9221bf1fbefeeb5',
+          '54135cce21966fa0',
+          'bb8363ca69b587cd',
+          '969438a70cb993c9'
         ],
         'coa-cell-a': [
           '94fb7fe6357fe4b5',
           'b44487a227b1bf4d',
-          'da9c4c2624901a2e'
+          'da9c4c2624901a2e',
+          'e9aaeaf21e45d8a2',
+          'f704e89073dcef6c',
+          '0679bf27f3c70c49'
         ],
         'coa-cell-b': [
           '7cf143e23660b2c0',
           '9a2b2f090e56ecf3',
-          '3b02376d5726985f'
+          '3b02376d5726985f',
+          '33f54c77d7ed823b',
+          'fba14ba63a147270',
+          'fd44a998f9dfd224'
         ],
         'red-cell-seat': [
           '9122e994a2ecfee8',
           'da3504b103b3febe',
           '063d8816ffb6f7b5',
-          'cf4b15d66a11ea91'
+          'cf4b15d66a11ea91',
+          '23d19e1f6cac9989',
+          'ed57db1b9c54d36e',
+          '0f2ca3183780d121',
+          'f41de06915973420'
         ],
         'red-team': [
           '33b629c37c13b09f',
@@ -856,25 +900,39 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
         ],
         'component-seat': [
           '6b7c36198153f59b',
-          '37d643fba894d699'
+          '37d643fba894d699',
+          'e72c6c8e9fd2a839',
+          '5af6c113c12666b2'
         ],
         'sustainment-seat': [
           '1f145deb9db8d221',
           '636a0adbe0787cbe',
           'eff58c546d224cc2',
-          '39eaaff922816843'
+          '39eaaff922816843',
+          '36cd445259d7ac2c',
+          '18e1ee0e2475e3ae',
+          '908bdfa6d976a9a1',
+          '25661310d67ff9d6'
         ],
         'legal-support': [
           '16be884a2d269c54',
           '3c7edb7c5970b158',
-          '213d93ede7475ea4'
+          '213d93ede7475ea4',
+          '74d9a2c894afc160',
+          '85ab5fcfd96ef8cf',
+          '5bb55a857e34663a'
         ],
         'plans-writer': [
           'aaf6372f1cf6a6ff',
           'f2a00a330f065b83',
           '3788c966b91c2374',
           '2f6ec3eebc418c09',
-          '906c2047a15fb54f'
+          '906c2047a15fb54f',
+          '91c8158f36a2f317',
+          'a70fabc96e328c65',
+          'e69032b6f78d8eb2',
+          '11c0e47225946250',
+          'a474c71f401b6ca7'
         ],
         'release-guard': [
           'd45ee62cf30769d8'
@@ -883,14 +941,21 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'f7138542a2ddd475',
           'a54c8f136db89a61',
           '77e595ff2c81dd37',
-          '51aef9c113deef5b'
+          '51aef9c113deef5b',
+          'aa49fcd09c64d13a',
+          'e720fe4b0f41d746',
+          '22c05f7867c473a4',
+          '425579d55b18ad52'
         ],
         'fires-seat': [
           '547fabd5cf26d40b',
-          '00d3badbd0700148'
+          '00d3badbd0700148',
+          '6ca5466c5e377569',
+          '7a79c3e10ac626dd'
         ],
         'convergence-planner': [
-          '1d84a150fa9b3634'
+          '1d84a150fa9b3634',
+          '57944400c4c548de'
         ]
       }
     }
@@ -898,7 +963,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j3-operations': [
     {
       version: 1,
-      definition: '98f043e36a6d5748',
+      definition: 'b87646c854e43806',
       guidance: [
         '72c995694f3baa60',
         '3be6d6fee96d4cee',
@@ -932,19 +997,39 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '54f18ca90971dc43',
           'dcff7da548b22e85',
           'c7e7a511fdc4edc7',
-          '24a99d8d1a8ac6cc'
+          '24a99d8d1a8ac6cc',
+          '14a8830ebcfefc04',
+          '5c12d2e5f7d03536',
+          'ad90ce565c1a9cc3',
+          'f7c6502c29511221',
+          'f875b7deedd28468',
+          '5e13bd238790350b',
+          'de5672ee044fe1d9',
+          '41eaa1cca1b789a3',
+          '889514c1c42083ed',
+          'd50ffee663647eb4',
+          'b2e744290e3c44e8',
+          '4ae6066bad7153be'
         ],
         'joc-chief': [
           '59a2e266455bdf51',
           '7c22116dfdc94df4',
           '89fea5c203d4709b',
-          'd9e1d3b77f355832'
+          'd9e1d3b77f355832',
+          'be6400e6e98a3cc1',
+          'de111cc8d2d10b90',
+          '7d29f03e3d12abf9',
+          '00a83bc4e2e06f6d'
         ],
         'watch-officer': [
           'f2f3913f65648b6b',
           '73f0fa25161eba9a',
           '22daa16b234e0d41',
-          'f9f3791dfe8f1c42'
+          'f9f3791dfe8f1c42',
+          '577111c2d3de1fbf',
+          '4a27a63f03bc3295',
+          'ca14b8dd32763718',
+          '6c67ee160a79f128'
         ],
         'future-ops-planner': [
           '01e9a29780d8f0cd',
@@ -953,7 +1038,14 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '4d742db28f44ab63',
           '750e0c2f053c963c',
           '40c4dbe7438c55cf',
-          'e36347c6c34ae51e'
+          'e36347c6c34ae51e',
+          'e4e670011c77116f',
+          '71f9a6ae79885d01',
+          'ce28b15106b4a9de',
+          'a11bb7a827e0c271',
+          '989175aa408abb58',
+          '9994f4b7abb2368d',
+          '71bd18cd0e85b96a'
         ],
         'fires-effects-coordinator': [
           '98f7b5eb46c1c721',
@@ -962,39 +1054,66 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'b6b03ef499807ad5',
           'bd4605e5e1a1571f',
           '28e2b8568d2fd073',
-          '2dee7fd352d7bb5e'
+          '2dee7fd352d7bb5e',
+          '20b0fab66ca26512',
+          '7351f0ae5259f25f',
+          '2aae955f07235a4b',
+          '69dd0a4a02e6983a',
+          '0e05f727e6d3e2ae',
+          'fe623f469fbd6245',
+          'bcacdddd95c37c6f'
         ],
         'targeting-officer': [
           '2d3b30c626c1d09c',
           'c5f6c4ad6cea05f1',
           'f619eeda687716b9',
           '82d54e9ab6f270f3',
-          'e5f3b83ac32f6e1a'
+          'e5f3b83ac32f6e1a',
+          '797933bd5c56e657',
+          'df0b0fae5eebf4f3',
+          'cb7fba794e011d8e',
+          'ef1db0f22f534970',
+          '533e9507aaddd4ba'
         ],
         'information-planner': [
           '61b7e2c3159ba851',
-          '5b166b537ada660a'
+          '5b166b537ada660a',
+          '215d1d154af01ad0',
+          '830071b0edfac954'
         ],
         'cyber-space-planner': [
-          'b0e64fb3af85fef0'
+          'b0e64fb3af85fef0',
+          '34f16a51ef0b26cb'
         ],
         'airspace-maritime-liaison': [
           '9670976325db3303',
-          '9134287e4f498db1'
+          '9134287e4f498db1',
+          'cca768971a306182',
+          '4cff7ae76a42e2ee'
         ],
         'assessment-analyst': [
           '078321a2e72e8468',
           'aa7476a7d678cd7c',
           '8c02aa054d0849f6',
           'd7511365cc933788',
-          '3ef0cfac657b01cc'
+          '3ef0cfac657b01cc',
+          'fc68e563b60a68e9',
+          '6e64d80b7e758538',
+          '349dffda8a1ec1e0',
+          '749c058139424ff5',
+          '8c2569fbcc8762b2'
         ],
         'liaison-coordinator': [
           '8cfb79e9c8ab83cd',
           'c623920955ea6984',
           'ef338df9b8f22719',
           'fc6a08e909f6f269',
-          '2e8736f2d417f1f7'
+          '2e8736f2d417f1f7',
+          'c9732a469bdf54e3',
+          '459e73704618e812',
+          '684dfefbbdda909a',
+          '2891a14452daea12',
+          '80a29a4603ac1803'
         ],
         'release-guard': [
           '0b50ad49cb8dd7e1',
@@ -1009,17 +1128,29 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '0844c3dc97364cbc',
           'fc7c3f502e393703',
           '41c2a3ee93f48d57',
-          '4dc70c42ec7ad805'
+          '4dc70c42ec7ad805',
+          'b093cfa306736a6d',
+          '556b4a11dacbd25b',
+          'f031ff9d8407e66d',
+          'f4a733f75a3e0636',
+          '92827e94db95e5d1',
+          '6db77d14552f0bd9'
         ],
         'current-ops-chief': [
           '4e083e85e336ca22',
           'd74de48ee86433cd',
-          '2885172427718d73'
+          '2885172427718d73',
+          '055c4b78fd74eccf',
+          '23390e53bf08a7a8',
+          '7b3facbcf13d162a'
         ],
         'information-cyber-space-planner': [
           'c9e8a7fe1f3f647e',
           '093ae2d87dde8f1c',
-          '90fab507b21e53ab'
+          '90fab507b21e53ab',
+          'ded166f45d7478be',
+          '577c57598de9510b',
+          '1f7fd5b7517dbe9b'
         ]
       }
     }
@@ -1027,7 +1158,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j4-logistics': [
     {
       version: 1,
-      definition: 'd8277a0530858b88',
+      definition: '103c9119d598420d',
       guidance: [
         '43fd3f310afca7c6',
         'bc1042479c7a898f',
@@ -1058,7 +1189,19 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'e8b0ba3187fbd81e',
           '194b178ba19ae71f',
           'ef850d4cf0cd0942',
-          'b49a06dfbb23e118'
+          'b49a06dfbb23e118',
+          '423d4e51ce35592b',
+          '4aa2ebfdd7d0d7b4',
+          'd639a0a120921569',
+          'af8bbb5cdcfeb4fa',
+          'ebef08b281a0e3a6',
+          '8b9142a73b4c0999',
+          '566baf1397f9d7df',
+          'aa08b75f280e2373',
+          '284be0f60a4cff78',
+          '868bd0f8b9e72135',
+          'e8628fea7c152a8d',
+          '35750762f8b08994'
         ],
         'log-plans-officer': [
           'ee6c24961fa4d4f1',
@@ -1068,7 +1211,15 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '5b3047a9f6c3f25a',
           'a05e0e35efba2a36',
           'ca3244239018ff4e',
-          'd05a5ba1c1bc1ef8'
+          'd05a5ba1c1bc1ef8',
+          '3d75c9dddff00d7c',
+          '19b69a99b86f7c7a',
+          'bec13bfc9318abf5',
+          '5cc720ee40bbfb39',
+          '212ce5fb925d36c1',
+          'e356891ea70738fc',
+          'b4cb6c5985733205',
+          '8897588071bb4e61'
         ],
         'jloc-chief': [
           'dd3154fbbd75ca29',
@@ -1079,14 +1230,28 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '036fa941cd2154aa',
           'e339d7ddae1714ac',
           '1d0718b6283c801a',
-          '624be410ffca3e8e'
+          '624be410ffca3e8e',
+          'e604ecf5f3a8b1a1',
+          '35d852a78939a8ee',
+          '34cb09765dcb25e3',
+          'd2d6dd81dbf31582',
+          '48c1d2abe92aa1fd',
+          'dc79b67cada4f785',
+          '46f872a4ce1d8670',
+          'f9e6ed45cd57a00f',
+          '9aec0a3340894cb9'
         ],
         'supply-planner': [
           'caad25616ddf7cfd',
           '233f4fa3f27db046',
           'edc45d58980fc705',
           'f496b5bdd0081851',
-          'e9fae3e72538270b'
+          'e9fae3e72538270b',
+          'fcbd593b6c18976c',
+          '2b9caa823327abda',
+          '0d51bf856f05fc07',
+          '56a1982bcab66ca6',
+          '36fb9bfdd4108343'
         ],
         'maintenance-planner': [
           'aa332716a813c8b0',
@@ -1097,36 +1262,64 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'b02984c70364c1bd',
           'c8cf7a27997ee6af',
           'd7f9f71267436934',
-          '81ae6538b53a7742'
+          '81ae6538b53a7742',
+          '15ea33bec208b7ef',
+          '88f7963e12dbd0a5',
+          'b85da7b237375ced',
+          'c60e62d724ef7ae8',
+          'd237f6c619a2c777',
+          'd8f1d22b67a5bb48',
+          'e024a2bfbcb4caca',
+          '0b1ecef622119d63',
+          'd030786585e55596'
         ],
         'mobility-planner': [
           '01bdbe0799c6e21c',
           '9367abd2e5dd99af',
           'f45a79f4ca460fdf',
           '792277136707cfcf',
-          '87f2e462e1cf1a04'
+          '87f2e462e1cf1a04',
+          '0e89690879c0e5ba',
+          'b1df1fa389d40b50',
+          '62b907fdd08cea90',
+          '33047c71b3607694',
+          'ad99fc93e73615cb'
         ],
         'engineer-planner': [
           '651b66df5888b41c',
-          'b73e1a08e1e25f79'
+          'b73e1a08e1e25f79',
+          '68912f2a4a58a659',
+          'f64084deafd07387'
         ],
         'ocs-planner': [
           '3b79e1222b39abb1',
           '495fb2ee6e278503',
           '84d5e252269df850',
           'ceabdf12f5e54e63',
-          '4be68adc9f26307a'
+          '4be68adc9f26307a',
+          'a613b474e1b3282d',
+          '51e9ce8ed76ea518',
+          '629255d3052731bf',
+          '543f2219bd39929c',
+          'fa2829714f1707c5'
         ],
         'health-services-planner': [
           '2c5047ddc79ac31a',
           'add499f3287ad949',
           'a486922a81444cbb',
           '722b1118381b40b0',
-          '5cb1c53bd21c069d'
+          '5cb1c53bd21c069d',
+          '7ab071bcf3d30a52',
+          '9f612baf95a6ba75',
+          'ad77f854aae513ba',
+          'e30413327ed27f13',
+          'ee5bc36471a93bc0'
         ],
         'services-mortuary-planner': [
           '7e083dff95524ab2',
-          '3c0f2658f0d5201c'
+          '3c0f2658f0d5201c',
+          'a0df41d230ccf1e3',
+          'b9ffd571e6d695b7'
         ],
         'logstat-analyst': [
           '22bd91d35eae3e88'
@@ -1138,7 +1331,10 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
         's4-lead': [
           'a1139804dac7740a',
           '57a285985e8cd191',
-          '5436206869e90a5a'
+          '5436206869e90a5a',
+          '1c94effa73c662df',
+          '3357746981e7f592',
+          '164dba0b3161787e'
         ]
       }
     }

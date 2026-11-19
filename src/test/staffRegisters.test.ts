@@ -12,11 +12,15 @@ import type { StaffEvent } from '../domain/staff/events';
 import { callTool, J2_TEAM, J3_TEAM, J5_TEAM, readProductFile, staffWorld } from './helpers/staffFixtures';
 
 const REGISTER = 'mcp__staff-products__register';
+const REGISTER_READ = 'mcp__staff-products__register_read';
 const WARGAME = 'mcp__staff-products__wargame';
 
 test('rows are checked against their register: unknown columns, missing ones, values, times and the register\'s own rules', () => {
-  const pir = REGISTER_SCHEMAS['pir-register'];
+  // The PIR register has no schema here (its one source is the intel workbench's JSON); the CCIR register's PIR part carries the same checks.
+  assert.equal(REGISTER_SCHEMAS['pir-register'], undefined);
+  const pir = REGISTER_SCHEMAS['ccir-register'];
   assert.equal(checkRow(pir, { id: 'PIR1', type: 'pir', requirement: 'Where will the reserve go?', status: 'active' }).ok, false, 'a PIR without a decision point and LTIOV');
+  assert.equal(checkRow(pir, { id: 'PIR1', type: 'pir', requirement: 'r', decisionPoint: 'DP1', status: 'active' }).ok, false, 'a PIR without an LTIOV');
   assert.ok(checkRow(pir, { id: 'PIR1', type: 'pir', requirement: 'r', decisionPoint: 'DP1', ltiov: '2026-11-19T06:00Z', status: 'active' }).ok);
   assert.equal(checkRow(pir, { id: 'PIR1', type: 'pir', requirement: 'r', decisionPoint: 'DP1', ltiov: 'tomorrow', status: 'active' }).ok, false);
   assert.equal(checkRow(pir, { id: 'PIR1', colour: 'red' }).ok, false);
@@ -24,8 +28,8 @@ test('rows are checked against their register: unknown columns, missing ones, va
   assert.equal(checkRow(facts, { id: 'A1', kind: 'assumption', statement: 's', status: 'valid' }).ok, false, 'an assumption needs an invalidation trigger');
   const targets = REGISTER_SCHEMAS['targeting-workbook'];
   assert.equal(checkRow(targets, { id: 'T1', system: 'Notional air defence', function: 'Protects the crossing', legalReview: 'LEGAL REVIEW REQUIRED' }).ok, false, 'both review marks');
-  const body = renderRegisterBody(pir, [{ id: 'IR1', type: 'ir', requirement: 'a | b', status: 'active' }]);
-  assert.deepEqual(parseRegisterBody(pir, body), [{ id: 'IR1', type: 'ir', requirement: 'a | b', status: 'active' }]);
+  const body = renderRegisterBody(pir, [{ id: 'F1', type: 'ffir', requirement: 'a | b', decisionPoint: 'DP1', status: 'active' }]);
+  assert.deepEqual(parseRegisterBody(pir, body), [{ id: 'F1', type: 'ffir', requirement: 'a | b', decisionPoint: 'DP1', status: 'active' }]);
 });
 
 test('a part writer may change only its part', () => {
@@ -57,7 +61,7 @@ test('the CCIR register: the J3 director writes it, the J2 requirements manager 
   const proposal = await callTool(world, J3_TEAM, REGISTER, { action: 'propose', register: 'ccir-register', rows: [{ ...ffir, id: 'F9' }], note: 'From the JOC' }, 'joc-chief');
   assert.ok(proposal.ok, proposal.text);
   assert.equal((await readdir(path.join(world.root, '.planning/staff/proposals/ccir-register'))).length, 1);
-  const read = await callTool(world, J3_TEAM, REGISTER, { action: 'read', register: 'ccir-register' }, 'joc-chief');
+  const read = await callTool(world, J3_TEAM, REGISTER_READ, { register: 'ccir-register' }, 'joc-chief');
   assert.equal((JSON.parse(read.text) as { rows: unknown[] }).rows.length, 2);
   const trigger = await callTool(world, J3_TEAM, REGISTER, { action: 'trigger', ccir: 'F1', report: 'Bridge reported down at 0400' }, 'joc-chief');
   assert.ok(trigger.ok, trigger.text);
@@ -73,8 +77,8 @@ test('the RFI tracker: a new RFI is opened, an answer answers it, and one past i
   assert.ok((await callTool(world, J3_TEAM, REGISTER, { action: 'write', register: 'rfi-tracker', rows: [rfi] }, 'liaison-coordinator')).ok);
   assert.deepEqual(heard.filter((event) => event.type.startsWith('staff.rfi')).map((event) => event.type), ['staff.rfi.opened']);
   world.clock.now += 60_000;
-  await callTool(world, J3_TEAM, REGISTER, { action: 'read', register: 'rfi-tracker' }, 'liaison-coordinator');
-  await callTool(world, J3_TEAM, REGISTER, { action: 'read', register: 'rfi-tracker' }, 'liaison-coordinator');
+  await callTool(world, J3_TEAM, REGISTER_READ, { register: 'rfi-tracker' }, 'liaison-coordinator');
+  await callTool(world, J3_TEAM, REGISTER_READ, { register: 'rfi-tracker' }, 'liaison-coordinator');
   assert.equal(heard.filter((event) => event.type === 'staff.rfi.overdue').length, 1, 'overdue is sent once');
   assert.ok((await callTool(world, J3_TEAM, REGISTER, { action: 'write', register: 'rfi-tracker', rows: [{ ...rfi, status: 'answered', answer: 'Class 60' }] }, 'liaison-coordinator')).ok);
   assert.equal(heard.filter((event) => event.type === 'staff.rfi.answered').length, 1);

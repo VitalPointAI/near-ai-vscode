@@ -16,6 +16,10 @@ export const GATE_VERBS: readonly AgentProductVerb[] = ['verdict', 'status', 'li
 
 /** The staff-products tools that are not product-state verbs: the shared registers, the wargame ledger, the step rail and the tradecraft lint. */
 export const STAFF_REGISTER_TOOL = 'mcp__staff-products__register';
+/** Reading a register is its own tool, a read, so a read never asks for a write approval. */
+export const STAFF_REGISTER_READ_TOOL = 'mcp__staff-products__register_read';
+/** Both register tools, granted together to every member that works with the registers. */
+export const STAFF_REGISTER_TOOLS: readonly string[] = [STAFF_REGISTER_TOOL, STAFF_REGISTER_READ_TOOL];
 export const STAFF_WARGAME_TOOL = 'mcp__staff-products__wargame';
 export const STAFF_STEP_TOOL = 'mcp__staff-products__step';
 /** The one tradecraft rule set (ICD 203), for the tradecraft gate: src/domain/staff/tradecraftLint.ts. */

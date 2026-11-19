@@ -732,7 +732,7 @@ and links, so a critique or a verdict can never change a plan file. Such a membe
 is also given no tool that could write elsewhere (shell, document and graphics
 makers, MCP tools, starting other agents), even when its `tools:` line lists one.
 The one exception is the built-in staff tools it is granted (propose, verdict,
-status, list, the register tool, the tradecraft lint and guard-scan): they write
+status, list, the register tools, the tradecraft lint and guard-scan): they write
 only the ledger, product headers, gate reports and register proposals, and the
 extension refuses to let such a member register any product or write any
 register outside its own files.
@@ -814,7 +814,13 @@ ledger refuses puts the register file back as it was, under the same check.
 The J2 PIR register has one source,
 `.planning/staff/products/j2/pir-register.json`: the PIR register product is
 generated from it (`pir_publish`), a differing product cannot be registered,
-and the tradecraft lint reads the register itself.
+and the tradecraft lint reads the register itself. The staff register tools
+keep no second PIR schema: reading `pir-register` returns that JSON register
+with its decisions checked, and writing or proposing PIR rows there is
+refused. Reading any register is its own read-only tool
+(`mcp__staff-products__register_read`), so a read never asks for a write
+approval. **Decide a PIR** says why the PIR register cannot be read when it
+cannot, rather than saying no PIR is waiting.
 
 Approve, reject, release and withdraw-after-a-decision exist only as VS Code
 commands a person runs and confirms in a dialog. No agent tool offers them,

@@ -30,7 +30,7 @@ import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
 import {
-  COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, OWNER_VERBS, STAFF_REGISTER_TOOL, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools
+  COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools
 } from './grants';
 
 export const J3_TEMPLATE_ID = 'j3-operations';
@@ -98,9 +98,9 @@ const DOCS = ['CreateDocument', 'CreatePdf', 'CreatePresentation', 'RenderSvg'];
 // registers; the integrator also submits and withdraws and marks the step; the future operations planner derives the matrices from the wargame record
 // in execution; the release guard runs guard-scan and records verdicts. The watch officer keeps only what its write limit lets through: reading the
 // products, and the register tool to propose event-log rows and report CCIR triggers.
-const OWNER = [...staffProductTools(OWNER_VERBS), STAFF_REGISTER_TOOL];
-const LEAD = [...staffProductTools(LEAD_VERBS), STAFF_REGISTER_TOOL, STAFF_STEP_TOOL];
-const WATCH = [...staffProductTools(['status', 'list']), STAFF_REGISTER_TOOL];
+const OWNER = [...staffProductTools(OWNER_VERBS), ...STAFF_REGISTER_TOOLS];
+const LEAD = [...staffProductTools(LEAD_VERBS), ...STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL];
+const WATCH = [...staffProductTools(['status', 'list']), ...STAFF_REGISTER_TOOLS];
 const GATE = [...staffProductTools(GATE_VERBS), GUARD_SCAN];
 
 const path = (product: string): string => staffProductPath('j3', product);
@@ -233,7 +233,7 @@ function currentOpsChief(ctx: Context): J3Member {
 function watchOfficer(ctx: Context): J3Member {
   const text = [
     preamble(),
-    `Job: you keep the watch in the ${lowerFirst(ctx.centre)}. For each incoming report, log the time (UTC), the source and exactly what was reported, nothing more. Then check it against the CCIR register and the DSM's decision points (read both with the register tool) and flag a match.`,
+    `Job: you keep the watch in the ${lowerFirst(ctx.centre)}. For each incoming report, log the time (UTC), the source and exactly what was reported, nothing more. Then check it against the CCIR register and the DSM's decision points (read both with the register_read tool) and flag a match.`,
     'How you log: you have no Write and the extension refuses any file write, so every entry goes through the register tool: propose it to the event-log register (time, source, what was reported, status logged, and the CCIR or decision point it matched). When a report matches a CCIR, also use the register tool\'s trigger action with the CCIR id and the report in one line. The current operations chief merges your entries and decides what they mean.',
     'Entry form: the time in UTC as YYYY-MM-DDTHH:MMZ, the source as the reporting unit or channel named in the exercise, and the report in its own words, shortened but never reworded into a judgement. Give each entry a new id. A report that repeats an earlier one is logged again with the earlier id in its text, never merged; a report you cannot read in full is logged as far as it goes, with "incomplete" in its text.',
     'Matching: a match means the report answers or touches the wording of a CCIR, or the indicator of a DSM row. When unsure, flag it and let the current operations chief judge; a missed match costs more than a false one. Never give a report a meaning, a likelihood or a recommendation of your own.',
