@@ -58,7 +58,7 @@ test('J5: COA cells with their themes and validity tests, the comparison with we
   assert.ok(j5.annexes.blocking >= 2);
   // Products of the section with their owner, version and state; agent work in the section, newest first.
   assert.ok(j5.products.some((row) => row.product === 'coa-decision-brief' && row.owner === 'lead-planner' && row.version === 1));
-  assert.ok(j5.activity.some((line) => line.member === 'coa-cell-a' && /started on Coa a/.test(line.text)));
+  assert.ok(j5.activity.some((line) => line.member === 'coa-cell-a' && /started on COA A/.test(line.text)));
   assert.ok(j5.activity.every((line) => !/C\. Example/.test(line.text)), 'a person\'s decision is never shown as agent work');
 });
 
@@ -165,4 +165,18 @@ test('after a person approves the transition brief, the DSM and the sync matrix 
   assert.equal(model.j3.sync.owner.phase, 'execution');
   assert.match(model.j3.sync.owner.note, /future-ops-planner since D\. Example \(J3\) approved the transition brief/);
   assert.ok(model.j3.sync.owner.handover?.at);
+});
+
+test('product titles keep staff abbreviations and section codes in capitals on every screen', async () => {
+  const { productTitle } = await import('../domain/staff/productTitle');
+  assert.equal(productTitle('coa-decision-brief'), 'COA decision brief');
+  assert.equal(productTitle('frago-1'), 'FRAGO 1');
+  assert.equal(productTitle('dsm'), 'DSM');
+  assert.equal(productTitle('ccir-register'), 'CCIR register');
+  assert.equal(productTitle('enemy-coas'), 'Enemy COAs');
+  assert.equal(productTitle('j4-logstat-summary'), 'J4 LOGSTAT summary');
+  assert.equal(productTitle('concept-of-operations'), 'Concept of operations');
+  assert.equal(productTitle('facts-assumptions'), 'Facts assumptions');
+  assert.equal(productTitle('coa-a'), 'COA A');
+  assert.equal(productTitle('a-plan'), 'A plan');
 });

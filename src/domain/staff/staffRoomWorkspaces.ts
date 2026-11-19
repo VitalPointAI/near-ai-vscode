@@ -15,6 +15,7 @@ import { writerOf } from './ownership';
 import type { StaffWriter } from './ownership';
 import type { ProductView } from './readModels';
 import type { RegisterRow } from './registers';
+import { productTitle } from './productTitle';
 import { PHASE_SIDE } from './wargame';
 import type { WargameEntry } from './wargame';
 
@@ -24,7 +25,7 @@ const clip = (text: unknown, max: number = CAP.text): string => {
   const value = typeof text === 'string' ? text : text === undefined || text === null ? '' : String(text);
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 };
-const titleOf = (product: string): string => { const text = product.replace(/-/g, ' '); return text.charAt(0).toUpperCase() + text.slice(1); };
+const titleOf = productTitle;
 const PILL: Readonly<Record<string, string>> = {
   draft: 'draft', 'draft (held)': 'held', 'draft (tampered)': 'tampered', 'guard-checked': 'checked', 'awaiting decision': 'awaiting', approved: 'approved',
   rejected: 'rejected', released: 'released', superseded: 'superseded', withdrawn: 'withdrawn'

@@ -23,6 +23,7 @@ import type { RegisterRow } from './registers';
 import type { Scenario } from './scenario';
 import { buildStaffMap } from './staffRoomMap';
 import { buildSectionWorkspaces } from './staffRoomWorkspaces';
+import { productTitle } from './productTitle';
 import type { J3Workspace, J4Workspace, J5Workspace, WorkspacesInput } from './staffRoomWorkspaces';
 import type { StaffMapModel, EnemyCoa } from './staffRoomMap';
 import { staffProductPath } from './writeLimits';
@@ -237,10 +238,7 @@ export function abbreviation(member: string): string {
   return member.slice(0, 2).toUpperCase();
 }
 
-const titleOf = (product: string): string => {
-  const text = product.replace(/-/g, ' ');
-  return text.charAt(0).toUpperCase() + text.slice(1);
-};
+const titleOf = productTitle;
 
 const PILL: Readonly<Record<string, string>> = {
   draft: 'draft', 'draft (held)': 'held', 'draft (tampered)': 'tampered', 'guard-checked': 'checked', 'awaiting decision': 'awaiting', approved: 'approved',

@@ -160,7 +160,7 @@ test('the page asks for the picture, then draws the rail, squads, ledger and dec
   assert.equal(page.byClass('pod').length, 5);
   const token = page.all().find((node) => node.dataset.token === 'j2:threat-analyst')!;
   assert.ok(token.classList.contains('s-working'));
-  assert.match(token.getAttribute('aria-label')!, /working: Drafting Adversary coa set/);
+  assert.match(token.getAttribute('aria-label')!, /working: Drafting Adversary COA set/);
   assert.ok(page.byClass('person').some((node) => node.textContent === 'R. Example (J5 director)'));
   // Ledger: a row per product with the state machine's words.
   assert.equal(page.byClass('prod').length, model.ledger.length);
@@ -504,7 +504,7 @@ test('each section workspace draws its real state from the host\'s model: produc
   for (const expected of ['COA A', 'Seize Port Calder from the sea', 'risk: lift for the second wave is short by one day', 'fail: no sustainment outline yet',
     'Criteria and weights approved by C. Example (commander)', 'Weighted total (recomputed)', '19', '17', 'coa-a', 'against', 'mlcoa', 'Next: turn 1 COUNTERACTION', 'DP2: Commit the reserve (decides: commander)',
     'Staff recommendation, drafted by agents', 'The staff recommends COA A', 'The red team holds COA B is safer: the beach defences are unknown.', 'Who decides: the commander.',
-    'Annex D', 'not released', 'Coa decision brief v1']) assert.ok(j5.textContent.includes(expected), `the J5 workspace shows ${expected}`);
+    'Annex D', 'not released', 'COA decision brief v1']) assert.ok(j5.textContent.includes(expected), `the J5 workspace shows ${expected}`);
   // Gold: the section's decisions with the buttons only a person can press; violet: the agents' work, labelled as agent work.
   const strip = j5.all().find((node) => node.classList.contains('ws-decide'))!;
   assert.equal(strip.hidden, false);
@@ -517,7 +517,7 @@ test('each section workspace draws its real state from the host\'s model: produc
 
   const j3 = view(page, 'pane-j3');
   for (const expected of ['E1', 'escalated', 'CCIR PIR-1', 'Two armoured vehicles moving off the south slope', 'CCIR PIR-1 reported as triggered by joc-chief', 'DP-2', 'Decides: commander', 'trigger reported',
-    'while planning. It passes to the', 'manoeuvre', 'H+6', 'Frago 1', 'Commander\'s update brief', 'RFI-7', 'Past its suspense']) assert.ok(j3.textContent.includes(expected), `the J3 workspace shows ${expected}`);
+    'while planning. It passes to the', 'manoeuvre', 'H+6', 'FRAGO 1', 'Commander\'s update brief', 'RFI-7', 'Past its suspense']) assert.ok(j3.textContent.includes(expected), `the J3 workspace shows ${expected}`);
   const j4 = view(page, 'pane-j4');
   for (const expected of ['1 Bn', 'Red', '2 Bn (bn2-191000z): failed rule 1', 'calc:fuel-phase-1', '3,500 per day', 'Bridging stock', 'lift short', 'generator', 'Data older than a day',
     'Not supportable', 'not vouched for by the calculator ledger', 'Logistics annex', 'Annex D, drafting']) assert.ok(j4.textContent.includes(expected), `the J4 workspace shows ${expected}`);
