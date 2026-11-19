@@ -4,11 +4,14 @@ import type { Actor } from './entry';
 
 // The part of a registration this file needs; textFold's Registration satisfies it.
 export interface AttributionRegistration { clientId: number; writer: string; member: string; actor: Actor }
-// One stretch of visible text typed under one client id; the shape doc.ts's attributionRuns gives.
-export interface AttributionRunInput { client: number; length: number }
+// One stretch of visible text typed under one client id; the shape doc.ts's attributionRuns gives. clock is the clock of its first character; it is
+// only read when attributeText is given a proof (the characters of a run have consecutive clocks).
+export interface AttributionRunInput { client: number; length: number; clock?: number }
 
 // writer is the device key id that signed the entry; member is the roster member of that device (the person whose machine it was). For an agent,
 // agentMember and run name the agent member and the run that typed it.
+// unverified is set on text that no accepted update backs: it came only from a compaction the log cannot check yet (D-21, D-37). Such text is
+// attributed to the writer of that compaction at most, never to anyone else, whatever client id it carries.
 export interface AuthorSpan {
   start: number;
   length: number;
@@ -18,6 +21,7 @@ export interface AuthorSpan {
   actor: 'person' | 'agent';
   agentMember?: string;
   run?: string;
+  unverified?: true;
 }
 export interface AuthorSummary {
   writer: string;
@@ -25,8 +29,15 @@ export interface AuthorSummary {
   actor: 'person' | 'agent';
   agentMember?: string;
   run?: string;
+  unverified?: true;
   characters: number;
 }
+
+// What the log proves about the text (CR-01). A character at (client, clock) is proven when an accepted update holds it, which for a document built
+// from accepted updates alone means clock < proven.get(client). Text that is not proven is shown as unverified. claimant is the writer of the
+// compaction the unproven text came from: unproven text under a client id registered to that writer keeps its attribution (a writer may speak for
+// itself), and unproven text under any other client id is unattributed, because one signed compaction cannot vouch for another device.
+export interface AttributionProof { proven: ReadonlyMap<number, number>; claimant: string }
 
 // The writer of a span whose client has no registration. The ownership check makes this impossible for a folded product, so tests assert that no span
 // carries it; production code shows it as unattributed rather than failing the fold on one odd run.
@@ -49,16 +60,35 @@ function spanOf(start: number, length: number, client: number, registration: Att
   return span;
 }
 
-// Spans cover every character of the text exactly once, in order. Neighbouring runs of one client are joined into one span.
-export function attributeText(runs: readonly AttributionRunInput[], registrations: Iterable<AttributionRegistration> | ReadonlyMap<number, AttributionRegistration>): AuthorSpan[] {
+// Spans cover every character of the text exactly once, in order. Neighbouring runs of one client are joined into one span. Without a proof every
+// character is attributed from the registrations; with one, text the proof does not cover is flagged unverified and attributed as its docs say.
+export function attributeText(
+  runs: readonly AttributionRunInput[],
+  registrations: Iterable<AttributionRegistration> | ReadonlyMap<number, AttributionRegistration>,
+  proof?: AttributionProof
+): AuthorSpan[] {
   const byClient = lookup(registrations);
   const spans: AuthorSpan[] = [];
+  const push = (offset: number, length: number, client: number, unverified: boolean): void => {
+    if (length <= 0) return;
+    const registration = byClient.get(client);
+    const speaks = !unverified || (proof !== undefined && registration !== undefined && registration.writer === proof.claimant);
+    const last = spans[spans.length - 1];
+    if (last !== undefined && last.clientId === client && (last.unverified === true) === unverified) {
+      last.length += length;
+      return;
+    }
+    const span = spanOf(offset, length, client, speaks ? registration : undefined);
+    if (unverified) span.unverified = true;
+    spans.push(span);
+  };
   let offset = 0;
   for (const run of runs) {
     if (run.length > 0) {
-      const last = spans[spans.length - 1];
-      if (last !== undefined && last.clientId === run.client) last.length += run.length;
-      else spans.push(spanOf(offset, run.length, run.client, byClient.get(run.client)));
+      // A run is split where the proof ends: the first `backed` characters are proven, the rest are not.
+      const backed = proof === undefined ? run.length : Math.max(0, Math.min(run.length, (proof.proven.get(run.client) ?? 0) - (run.clock ?? 0)));
+      push(offset, backed, run.client, false);
+      push(offset + backed, run.length - backed, run.client, true);
     }
     offset += run.length;
   }
@@ -71,7 +101,7 @@ const compareText = (a: string | undefined, b: string | undefined): number => ((
 export function summariseAuthors(spans: readonly AuthorSpan[]): AuthorSummary[] {
   const rows = new Map<string, AuthorSummary>();
   for (const span of spans) {
-    const key = JSON.stringify([span.writer, span.actor, span.agentMember ?? null, span.run ?? null]);
+    const key = JSON.stringify([span.writer, span.actor, span.agentMember ?? null, span.run ?? null, span.unverified === true]);
     const row = rows.get(key);
     if (row !== undefined) {
       row.characters += span.length;
@@ -80,7 +110,8 @@ export function summariseAuthors(spans: readonly AuthorSpan[]): AuthorSummary[] 
     const created: AuthorSummary = { writer: span.writer, member: span.member, actor: span.actor, characters: span.length };
     if (span.agentMember !== undefined) created.agentMember = span.agentMember;
     if (span.run !== undefined) created.run = span.run;
+    if (span.unverified === true) created.unverified = true;
     rows.set(key, created);
   }
-  return [...rows.values()].sort((a, b) => compareText(a.writer, b.writer) || compareText(a.actor, b.actor) || compareText(a.agentMember, b.agentMember) || compareText(a.run, b.run));
+  return [...rows.values()].sort((a, b) => compareText(a.writer, b.writer) || compareText(a.actor, b.actor) || compareText(a.agentMember, b.agentMember) || compareText(a.run, b.run) || Number(a.unverified === true) - Number(b.unverified === true));
 }

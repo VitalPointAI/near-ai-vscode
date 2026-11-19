@@ -2,6 +2,7 @@
 // the fold, or make the text depend on the order updates were applied in, and a compaction is a cache that is checked against the log.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { UNATTRIBUTED_WRITER, summariseAuthors } from '../domain/replica/attribution';
 import { applyRemote, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
 import type { Actor, Dep } from '../domain/replica/entry';
@@ -253,7 +254,7 @@ function dep(item: Written): Dep {
   return { writer: item.writer, seq: item.seq, hash: item.hash };
 }
 
-interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string }
+interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string; covers?: Dep[]; writer?: string }
 
 // Each compaction needs its own scene: the writer's chain would otherwise make a second one wait for the first.
 function sceneWith(options: CompactOptions = {}): { scene: Scene; entry: Written } {
@@ -269,8 +270,8 @@ function compaction(scene: Scene, options: CompactOptions = {}): Written {
   applyUpdate(doc, scene.merged);
   const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(options.blobState ?? scene.merged));
   world.blobs.set(blob.hash, blob);
-  const covers = [dep(scene.updA), dep(scene.updB)];
-  return world.write('C', {
+  const covers = options.covers ?? [dep(scene.updA), dep(scene.updB)];
+  return world.write(options.writer ?? 'C', {
     kind: 'doc.compact',
     deps: options.withDeps === false ? [] : [scene.updA, scene.updB],
     data: { product: PRODUCT, covers, stateVector: options.stateVector ?? stateVectorOf(doc), textHash: options.textHash ?? textHashOf(options.blobText ?? scene.text), stateBlob: blob.hash }
@@ -330,8 +331,15 @@ test('a set with the registrations and a compaction but none of the covered upda
   assert.deepEqual(product.accepted, []);
   const full = foldEntries(sealed([scene.regC, scene.regA, scene.regB, scene.updA, scene.updB]), scene.world.ctx());
   assert.deepEqual(product.stateVector, productOf(full).stateVector);
-  assert.deepEqual(product.attribution.map((span) => [span.start, span.length, span.clientId, span.writer]), productOf(full).attribution.map((span) => [span.start, span.length, span.clientId, span.writer]));
+  // CR-01: the text and its places are the full log's, but no accepted update backs it, so nobody is named as its author. Every span is flagged
+  // unverified and carries no writer, even though the client ids are registered to A and B.
+  assert.deepEqual(product.attribution.map((span) => [span.start, span.length, span.clientId]), productOf(full).attribution.map((span) => [span.start, span.length, span.clientId]));
+  assert.ok(product.attribution.length > 0);
+  for (const span of product.attribution) assert.deepEqual([span.writer, span.member, span.unverified], [UNATTRIBUTED_WRITER, '', true]);
   assert.equal(product.incomplete, false);
+  // Once the updates the compaction covers are in the set the text is proven and the attribution is the full log's, with nothing unverified.
+  const withLog = foldEntries(sealed([scene.regC, scene.regA, scene.regB, scene.updA, scene.updB, entry]), scene.world.ctx());
+  assert.deepEqual(productOf(withLog).attribution, productOf(full).attribution);
 });
 
 test('a compaction holding a struct whose client has no registration is refused compact-unregistered-client, and a lost blob is held', () => {
@@ -386,4 +394,52 @@ test('a late joiner loading the compaction in a fold gets the full text, and a h
   assert.deepEqual(reasons(checked), [[hostile.hash, 'compact-mismatch']]);
   assert.equal(productOf(checked).text, scene.text);
   assert.deepEqual(productOf(checked).compactions, []);
+});
+
+// ---- CR-01: a provisional compaction cannot speak for another device ----------------------------------------------------------------------------
+
+// A full state holding what the given client typed, as the blob of a compaction.
+function stateOf(client: number, inserts: Array<[number, string]>): { blobState: Uint8Array; blobText: string; stateVector: Array<[number, number]> } {
+  const local = createLocalDoc(client);
+  for (const [index, text] of inserts) localInsert(local, index, text);
+  const folded = createFoldDoc();
+  applyUpdate(folded, encodeFullState(local));
+  return { blobState: encodeFullState(folded), blobText: docText(folded), stateVector: stateVectorOf(folded) };
+}
+
+test('CR-01: text a provisional compaction holds under another device\'s client id is never attributed to that device, whatever cover hash the compactor names', () => {
+  const scene = compactScene();
+  const writerA = scene.world.writerOf('A');
+  const ghost: Dep = { writer: writerA, seq: 99, hash: 'e'.repeat(64) };
+  // Device C writes "FORGED under A" under A's registered client id 11, citing a cover entry this machine does not hold.
+  const hostile = compaction(scene, { withDeps: false, covers: [ghost], ...stateOf(11, [[0, 'FORGED under A']]) });
+  const result = foldEntries(sealed([scene.regC, scene.regA, scene.regB, hostile]), scene.world.ctx());
+  assert.deepEqual([result.held, result.refused, result.rejected], [[], [], []]);
+  const product = productOf(result);
+  assert.deepEqual(product.compactions, [{ entry: hostile.hash, verified: false }]);
+  assert.equal(product.text, 'FORGED under A');
+  assert.ok(product.attribution.length > 0);
+  for (const span of product.attribution) assert.deepEqual([span.writer, span.member, span.actor, span.unverified], [UNATTRIBUTED_WRITER, '', 'person', true]);
+  assert.equal(summariseAuthors(product.attribution).some((row) => row.writer === writerA || row.member === 'mbr-aaaa'), false);
+  assert.deepEqual(summariseAuthors(product.attribution).map((row) => [row.writer, row.unverified, row.characters]), [[UNATTRIBUTED_WRITER, true, 14]]);
+});
+
+test('CR-01: the log\'s own text keeps its author next to unverified text, the split falls exactly where the accepted updates end, and unverified text of the compactor\'s own client is shown as the compactor\'s', () => {
+  const scene = compactScene();
+  const writerA = scene.world.writerOf('A');
+  const writerC = scene.world.writerOf('C');
+  const ghost: Dep = { writer: writerA, seq: 99, hash: 'e'.repeat(64) };
+  // A really typed "alpha " (clocks 0 to 5 of client 11). C's compaction repeats it and adds "FORGED" after it under client 11.
+  const hostile = compaction(scene, { withDeps: false, covers: [ghost], ...stateOf(11, [[0, 'alpha '], [6, 'FORGED']]) });
+  const mixed = productOf(foldEntries(sealed([scene.regC, scene.regA, scene.regB, scene.updA, hostile]), scene.world.ctx()));
+  assert.equal(mixed.text, 'alpha FORGED');
+  assert.deepEqual(mixed.attribution.map((span) => [span.start, span.length, span.writer, span.unverified]), [[0, 6, writerA, undefined], [6, 6, UNATTRIBUTED_WRITER, true]]);
+  // The same fold in any delivery order says the same thing.
+  const reversed = productOf(foldEntries(sealed([hostile, scene.updA, scene.regB, scene.regA, scene.regC]), scene.world.ctx()));
+  assert.deepEqual(reversed.attribution, mixed.attribution);
+  // Text under the compactor's own client id is its own word: attributed to C, but still flagged because no accepted update backs it.
+  const second = compactScene();
+  const own = compaction(second, { withDeps: false, covers: [ghost], ...stateOf(33, [[0, 'my own words']]) });
+  const ownProduct = productOf(foldEntries(sealed([second.regC, second.regA, second.regB, own]), second.world.ctx()));
+  assert.deepEqual(ownProduct.attribution.map((span) => [span.writer, span.member, span.unverified]), [[writerC, 'mbr-cccc', true]]);
 });

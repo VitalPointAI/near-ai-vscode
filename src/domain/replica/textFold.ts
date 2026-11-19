@@ -5,7 +5,7 @@
 // Later plans add to these types and never rename them: 30-06, 30-08 and 30-10 rely on TextState, ProductText, registrations and accepted.
 import { canonicalize } from '../team/canonical';
 import { attributeText } from './attribution';
-import type { AuthorSpan } from './attribution';
+import type { AttributionProof, AuthorSpan } from './attribution';
 import { blobBytesHash, openBlob } from './entry';
 import type { Actor, Dep } from './entry';
 import { applyUpdate, attributionRuns, buildFromCompaction, cloneDoc, createFoldDoc, docText, inspectUpdate, pendingState, stateVectorOf, textHashOf } from './doc';
@@ -33,8 +33,9 @@ export interface ProductText {
   deletions: DeletionRecord[];
   deletionKeys: Set<string>;
   compactions: CompactionRecord[];
-  // Full states of compactions accepted without all their covered updates, in fold order. The newest one fills in text the log does not hold.
-  provisional: Uint8Array[];
+  // Full states of compactions accepted without all their covered updates, in fold order, with the writer of each. The newest one fills in text the
+  // log does not hold, and speaks for that writer only (CR-01): text no accepted update backs is never attributed to anyone else.
+  provisional: Array<{ update: Uint8Array; writer: string }>;
 }
 export interface TextState { products: Map<string, ProductText> }
 
@@ -46,7 +47,8 @@ export interface ProductTextOutput {
   stateVector: Array<[number, number]>;
   registrations: Registration[];
   accepted: string[];
-  // Every character's author, from the signed registrations only (D-20).
+  // Every character's author, from the signed registrations only (D-20). Text that only an unverified compaction holds is flagged unverified and is
+  // attributed to the compaction's writer at most.
   attribution: AuthorSpan[];
   deletions: DeletionRecord[];
   // True while the text lacks something: an update that starts above the next expected clock, or structs the document cannot place yet.
@@ -213,12 +215,14 @@ function applyCompaction(state: TextState, entry: VerifiedEntry, data: CompactDa
     return { status: 'applied' };
   }
 
-  // Provisional load: the blob must agree with itself and every struct in it must belong to a client some device registered.
+  // Provisional load: the blob must agree with itself and every struct in it must belong to a client some device registered. The text it adds beyond
+  // the accepted updates is shown as unverified, and only ever under this writer's own name (CR-01), because a signed compaction can vouch for
+  // its own writer and for nobody else.
   if (!sameVector(storedVector, data.stateVector) || storedHash !== data.textHash) return refused('compact-mismatch');
   if (inspection.structs.some((struct) => known?.registrations.has(struct.client) !== true)) return refused('compact-unregistered-client');
   const product = known ?? productText(state, stream, data.product);
   product.compactions.push({ entry: entry.hash, verified: false });
-  product.provisional.push(plain);
+  product.provisional.push({ update: plain, writer: entry.header.writer });
   return { status: 'applied' };
 }
 
@@ -228,8 +232,16 @@ function outputDoc(product: ProductText): CrdtDoc {
   const newest = product.provisional[product.provisional.length - 1];
   if (newest === undefined) return product.doc;
   const merged = cloneDoc(product.doc);
-  applyUpdate(merged, newest);
+  applyUpdate(merged, newest.update);
   return merged;
+}
+
+// Who may be named as the author of text that only an unverified compaction holds (CR-01): the compaction's writer, for client ids registered to
+// it, and nobody else. The proof is how far the accepted updates reach for each client; everything above that is the compaction's word alone.
+function attributionProof(product: ProductText): AttributionProof | undefined {
+  const newest = product.provisional[product.provisional.length - 1];
+  if (newest === undefined) return undefined;
+  return { proven: new Map(stateVectorOf(product.doc)), claimant: newest.writer };
 }
 
 export const textReducer: FamilyReducer<TextState, ProductTextOutput[]> = {
@@ -258,7 +270,7 @@ export const textReducer: FamilyReducer<TextState, ProductTextOutput[]> = {
           stateVector,
           registrations: [...product.registrations.values()].sort((a, b) => a.clientId - b.clientId),
           accepted: product.accepted.map((update) => update.hash),
-          attribution: attributeText(attributionRuns(doc), product.registrations),
+          attribution: attributeText(attributionRuns(doc), product.registrations, attributionProof(product)),
           deletions: [...product.deletions],
           incomplete: pendingState(doc) || product.gaps.some((gap) => (reached.get(gap.client) ?? 0) < gap.clock),
           compactions: [...product.compactions]
