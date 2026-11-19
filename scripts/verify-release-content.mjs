@@ -92,6 +92,8 @@ const required = [
   'extension/vendor/manifest.json',
   'extension/vendor/mcp/mcp-client.cjs',
   'extension/vendor/mcp/LICENSES.txt',
+  'extension/vendor/yjs/yjs.cjs',
+  'extension/vendor/yjs/LICENSES.txt',
   'extension/media/shared/base.css',
   'extension/media/activity/activity.js',
   'extension/media/activity/activity.css',
@@ -182,6 +184,17 @@ for (const [file, hash] of vendoredFiles) {
   }
   const actual = createHash('sha256').update(bytes).digest('hex');
   if (actual !== hash) fail(`vendored file ${entry} does not match its recorded hash (${actual} != ${hash})`);
+}
+
+// The built Yjs bundle (scripts/crdt-vendor.json): the packaged vendor/yjs/yjs.cjs must have exactly the bytes whose SHA-256 the manifest records.
+// scripts/vendor-libs.mjs checks the same hash at compile time and src/test/replicaVendor.test.ts on the working tree.
+const crdt = JSON.parse(readFileSync(resolve(root, 'scripts/crdt-vendor.json'), 'utf8'));
+const crdtEntry = 'extension/vendor/yjs/yjs.cjs';
+try {
+  const actual = createHash('sha256').update(execFileSync('unzip', ['-p', vsixPath, crdtEntry], { cwd: root, maxBuffer: 64 * 1024 * 1024 })).digest('hex');
+  if (actual !== crdt.output?.sha256) fail(`vendored file ${crdtEntry} does not match its recorded hash (${actual} != ${crdt.output?.sha256})`);
+} catch (error) {
+  fail(`could not read ${crdtEntry} from the package to check its hash: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 if (packageJson.main !== './dist/extension.js') fail(`package.json main must remain ./dist/extension.js, got ${packageJson.main}`);

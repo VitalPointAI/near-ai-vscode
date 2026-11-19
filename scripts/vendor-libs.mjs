@@ -2,6 +2,7 @@
 // extension is packaged without node_modules), and writes vendor/manifest.json, from which the
 // extension's own SBOM is built. Run as part of `npm run compile`. Every source is a pinned
 // devDependency.
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -48,10 +49,43 @@ async function bundle(entry, target, file, main) {
   return result.metafile;
 }
 
+const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+
+/**
+ * Refuses a build whose Yjs or lib0 source files, esbuild version or output differ from scripts/crdt-vendor.json (D-16, D-33). Input keys are
+ * normalised to the part from the last node_modules/ onward, because esbuild reports the real path when node_modules is a symlink.
+ */
+function checkCrdtManifest(metafile) {
+  const recorded = JSON.parse(readFileSync(path.join(root, 'scripts', 'crdt-vendor.json'), 'utf8'));
+  const problems = [];
+  const compare = (label, file, expected, actual) => { if (expected !== actual) problems.push(`${label} ${file}: expected ${expected ?? '(not recorded)'}, got ${actual ?? '(not present)'}`); };
+  const inputs = {};
+  const packageDirs = new Set();
+  for (const key of Object.keys(metafile.inputs)) {
+    const at = key.replaceAll('\\', '/').lastIndexOf('node_modules/');
+    if (at < 0) continue; // the entry file scripts/entries/yjs.mjs is ours, not a third-party input
+    const normalised = key.replaceAll('\\', '/').slice(at);
+    inputs[normalised] = sha256(path.join(root, normalised));
+    const dir = /^(node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(normalised)?.[1];
+    if (dir) packageDirs.add(dir);
+  }
+  for (const file of new Set([...Object.keys(inputs), ...Object.keys(recorded.inputs)])) compare('source file', file, recorded.inputs[file], inputs[file]);
+  const licenses = {};
+  for (const dir of packageDirs) {
+    const licenseFile = readdirSync(path.join(root, dir)).find((name) => /^(?:licen[cs]e|copying)/i.test(name));
+    if (licenseFile) licenses[`${dir}/${licenseFile}`] = sha256(path.join(root, dir, licenseFile));
+  }
+  for (const file of new Set([...Object.keys(licenses), ...Object.keys(recorded.licenses)])) compare('licence file', file, recorded.licenses[file], licenses[file]);
+  for (const entry of recorded.packages) compare('package version', entry.name, entry.version, version(entry.name));
+  compare('esbuild version', 'esbuild', recorded.esbuild, version('esbuild'));
+  compare('built file', recorded.output.file, recorded.output.sha256, sha256(path.join(root, recorded.output.file)));
+  if (problems.length) throw new Error(`The vendored Yjs build does not match scripts/crdt-vendor.json:\n${problems.join('\n')}\nUpdate scripts/crdt-vendor.json only in a reviewed change that bumps yjs, lib0 or esbuild.`);
+}
+
 await bundle(require.resolve('pptxgenjs'), 'pptxgenjs', 'pptxgen.cjs', 'pptxgenjs');
 await bundle(path.join(root, 'scripts', 'entries', 'mcp-client.mjs'), 'mcp', 'mcp-client.cjs', '@modelcontextprotocol/sdk');
 // Yjs (with lib0) for the replica core; src/domain/replica/doc.ts is the only file that loads vendor/yjs/yjs.cjs (D-17).
-await bundle(path.join(root, 'scripts', 'entries', 'yjs.mjs'), 'yjs', 'yjs.cjs', 'yjs');
+checkCrdtManifest(await bundle(path.join(root, 'scripts', 'entries', 'yjs.mjs'), 'yjs', 'yjs.cjs', 'yjs'));
 
 // The COP map page's libraries are committed under media/vendor/ (not built from node_modules); they enter the SBOM from their provenance file.
 for (const entry of JSON.parse(readFileSync(path.join(root, 'media', 'vendor', 'VENDORED.json'), 'utf8')).packages) {
