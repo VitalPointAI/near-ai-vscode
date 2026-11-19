@@ -377,7 +377,21 @@ decision points they support, the collection plan and the standing watches
 (`.planning/staff/products/j2/standing-watches.json`). The map in both
 workspaces is the COP map: the scenario's synthetic geography, the product
 layers and the observations your clearance covers, in 2D or on the globe, with
-its time slider. Hillshade, contours and the exercise weather (wind, fog, rain
+its time slider. It opens on **Imagery**: photo-like aerial imagery of the
+exercise area with 3D terrain (drag with the right button or Ctrl to tilt;
+the **3D terrain** switch and its height slider are in the drawer), and NASA
+Blue Marble imagery on the globe. **Topographic** is one choice away in the
+drawer's **Base map** (colour relief, land cover, hillshade, contours every
+20 m with labelled index contours every 100 m, red roads and the blue KQ grid;
+Natural Earth on the globe), and **Plain** keeps the flat 2D map. A margin on
+the map gives the datum, the grid, the contour interval and a declination
+diagram (the scenario's magnetic declination is fictional), with scale bars in
+kilometres and nautical miles. On a computer that draws without a graphics
+card, 3D starts off and the drawer says why. On the globe, **Spin** turns it
+slowly until you touch the map (never under Calm or reduced motion); dragging
+spins it too. All of it is bundled with the extension and drawn offline: no
+map server is asked for anything. The exercise imagery and terrain are
+synthetic, made from a seed, and not a real place. Hillshade, contours and the exercise weather (wind, fog, rain
 and rough sea, for the time on the slider) are layers you turn on and off,
 drawn offline from a bundled synthetic terrain and weather pack. Once a
 scenario is loaded the map is the room's main panel: the process rail and the
@@ -394,8 +408,8 @@ slider. The map opens on the land, the named places and the units with a
 margin, inside the exercise frame (its dashed line stays drawn), and units that would cover
 each other draw as one stacked symbol with a count until you zoom in. Nothing
 moves under reduced motion or Calm. Where WebGL or the map library is not available, the room
-draws a 2D map instead, with the same drawer and the terrain pack's land,
-hillshade and contours, and says why in a line on the map. On either map a
+draws a 2D map instead, with the same drawer on its Topographic base (the
+terrain pack's land cover, hillshade and contours), and says why in a line on the map. On either map a
 name that would cover another name or a symbol moves to a free spot nearby,
 is shortened, or is left off; the symbol always stays, and its name is still
 in its description and in **Map as table**. The J2 workspace also lists the

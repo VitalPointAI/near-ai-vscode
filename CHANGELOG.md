@@ -4,6 +4,25 @@
 
 ### Military staff teams
 
+- **The COP map looks like the ground.** The map now opens on photo-like aerial imagery of the
+  exercise area with 3D terrain, and the globe on NASA Blue Marble imagery (credit: NASA Earth
+  Observatory). **Topographic** (colour relief, land cover, hillshade, contours every 20 m with
+  labelled index contours every 100 m, roads and the KQ grid; Natural Earth on the globe) is one
+  choice away in the layer drawer's **Base map**, and **Plain** keeps the flat map. The drawer also
+  has **3D terrain** with a height slider (1 to 3 times, 1.5 to start) and **Grid**. Everything is
+  bundled with the extension and drawn offline; the exercise imagery and terrain are synthetic and
+  not a real place.
+- **Military map margin.** Scale bars in kilometres and nautical miles, the datum, the grid, the
+  contour interval and a declination diagram. IRON LANTERN's magnetic declination, 17 degrees
+  east, is fictional and says so.
+- **3D starts off where it would be slow.** On a computer that draws the map without a graphics
+  card, 3D terrain starts off and the drawer says why; you can still turn it on.
+- **Spin the globe.** On the globe, **Spin** turns it slowly until you touch the map; dragging
+  spins it with momentum. Spin never runs under Calm or reduced motion, and stops when the room is
+  hidden.
+- **The 2D map is topographic.** Where WebGL is not available, the 2D map keeps the drawer and
+  shows the Topographic base, and says why Imagery and 3D are not there.
+
 - **The project knows its staff teams.** Set Up a Staff Team now records each section's team in
   the project's staff settings, so after setting up a J2 the chat no longer says "This project has
   no team yet". A staff project shows a **Staff teams** card instead: each section with its team's
