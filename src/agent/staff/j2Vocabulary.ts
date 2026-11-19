@@ -34,8 +34,19 @@ export interface J2Vocabulary {
   readonly planningLead: string;
   /** The person who leads the section (a role; the run records the name). */
   readonly humanLead: string;
-  readonly prep: 'JIPOE' | 'IPB';
-  readonly prepSteps: readonly [string, string, string, string];
+  /** The intelligence preparation's name: JIPOE, IPOE or IPB. */
+  readonly prep: string;
+  /** Its steps, in order: four, or three under NATO JIPOE. */
+  readonly prepSteps: readonly string[];
+  /** How many steps, as a word: "four", or "three" under NATO JIPOE. */
+  readonly prepCount: string;
+  /** The step numbers that describe the environment and its effects ("steps 1 and 2", or "step 1" under NATO JIPOE). */
+  readonly environmentSteps: string;
+  /** The step that evaluates the other side, and the step that determines its courses of action. */
+  readonly evaluateStep: number;
+  readonly coaStep: number;
+  /** operational environment (US, IPB) or operating environment (NATO JIPOE). */
+  readonly environment: string;
   /** adversary or threat. */
   readonly actor: string;
   /** Adversary or Threat, for headings. */
@@ -58,6 +69,14 @@ export interface J2Vocabulary {
 
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
+const COUNT_WORDS: Readonly<Record<number, string>> = { 3: 'three', 4: 'four' };
+
+/** Step numbers as words: "step 1", "steps 1 and 2", "steps 1 to 3". */
+export function stepsPhrase(first: number, last: number): string {
+  if (first === last) return `step ${first}`;
+  return last === first + 1 ? `steps ${first} and ${last}` : `steps ${first} to ${last}`;
+}
+
 /**
  * The vocabulary for valid settings and a variant that matches their level. The echelon picks G or S codes at tactical level: the battalion and an
  * American or NATO brigade read S; a Canadian brigade reads G, since its intelligence staff is the G2 (Land Operations, 2008; design 10, 3.2).
@@ -69,8 +88,8 @@ export function j2Vocabulary(settings: StaffSettings, variant: J2Variant = j2Var
   const canadian = settings.profile === 'nato-ca' && settings.nation === 'ca';
   const echelon = variant === 'brigade' && canadian ? 'higher' : 'lower';
   const code = (section: StaffSectionId) => sectionCode(settings.profile, settings.level, section, tactical ? echelon : 'higher') as string;
-  const prep = resolved.process.intelligencePreparation as 'JIPOE' | 'IPB';
-  const preparation = INTELLIGENCE_PREPARATION_STEPS[prep];
+  const prep = resolved.process.intelligencePreparation;
+  const preparation = INTELLIGENCE_PREPARATION_STEPS[resolved.process.id];
   const terms = INTELLIGENCE_TERMS[settings.profile];
   const placement = resolved.annexes.find((annex) => annex.subject === 'intelligence')!.placement;
   const ops = code('j3');
@@ -82,6 +101,8 @@ export function j2Vocabulary(settings: StaffSettings, variant: J2Variant = j2Var
     code: code('j2'), ops, plans: code('j5'), logistics: code('j4'), planningLead,
     humanLead: tactical ? `${code('j2')} intelligence officer` : `${code('j2')} director`,
     prep, prepSteps: preparation.steps, actor: preparation.actor, Actor: capital(preparation.actor),
+    prepCount: COUNT_WORDS[preparation.steps.length] ?? String(preparation.steps.length), environmentSteps: stepsPhrase(1, preparation.environmentSteps), evaluateStep: preparation.environmentSteps + 1, coaStep: preparation.environmentSteps + 2,
+    environment: preparation.environment,
     process: terms.process,
     requirements: (settings.nation && terms.nationRequirementsManagement?.[settings.nation]) || terms.requirementsManagement,
     collectionPlan: terms.collectionPlan,

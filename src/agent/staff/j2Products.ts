@@ -70,8 +70,8 @@ export const J2_PRODUCTS: readonly J2Product[] = [
   {
     id: 'oe-evaluation', kind: 'report', tradecraft: true,
     owners: { strategic: 'jipoe-analyst', operational: 'jipoe-analyst', brigade: 'ipb-analyst', battalion: 'ipb-analyst' },
-    title: (v) => `${v.prep} steps 1 and 2 (operational environment and its effects)`,
-    headings: (v) => ['Operational environment limits', v.tactical ? 'Terrain (OAKOC), weather and civil considerations' : 'Systems view', `Effects on ${v.actor} forces`, 'Effects on friendly forces', 'Gaps']
+    title: (v) => `${v.prep} ${v.environmentSteps} (${v.environment} and its effects)`,
+    headings: (v) => [`${v.environment.charAt(0).toUpperCase()}${v.environment.slice(1)} limits`, v.tactical ? 'Terrain (OAKOC), weather and civil considerations' : 'Systems view', `Effects on ${v.actor} forces`, 'Effects on friendly forces', 'Gaps']
   },
   {
     id: 'terrain-weather', kind: 'report', tradecraft: true,
@@ -87,13 +87,13 @@ export const J2_PRODUCTS: readonly J2Product[] = [
   {
     id: 'adversary-evaluation', kind: 'report', tradecraft: true,
     owners: { strategic: 'threat-analyst', operational: 'threat-analyst', brigade: 'ipb-analyst', battalion: 'ipb-analyst' },
-    title: (v) => `${v.prep} step 3 (${v.actor} evaluation)`,
+    title: (v) => `${v.prep} step ${v.evaluateStep} (${v.actor} evaluation)`,
     headings: (v) => ['Order of battle and composition', 'Capabilities and vulnerabilities', `${v.cog.charAt(0).toUpperCase()}${v.cog.slice(1)} analysis`, 'Doctrine and patterns of operation', `${v.Actor} sensing and targeting of friendly forces`, 'Gaps']
   },
   {
     id: 'adversary-coa-set', kind: 'adversary-coa-set', tradecraft: true,
     owners: { strategic: 'threat-analyst', operational: 'threat-analyst', brigade: 'ipb-analyst', battalion: 'ipb-analyst' },
-    title: (v) => `${v.prep} step 4 (${v.actor} course of action set)`,
+    title: (v) => `${v.prep} step ${v.coaStep} (${v.actor} course of action set)`,
     headings: (v) => [`${v.Actor} courses of action in order of probability`, 'Most likely course of action', 'Most dangerous course of action', 'Situation templates', 'High-value target lists', 'Analysis of competing hypotheses', 'What would change the order']
   },
   {

@@ -18,7 +18,7 @@ import { J2_ROSTERS, J2_WEB_TOOLS } from './j2Members';
 import { variantProducts } from './j2Products';
 import { j2SkillFiles } from './j2Skills';
 import type { StaffSkillFile } from './j2Skills';
-import { j2VariantFor, j2Vocabulary, processPhrase, TACTICAL_ECHELONS } from './j2Vocabulary';
+import { j2VariantFor, j2Vocabulary, processPhrase, stepsPhrase, TACTICAL_ECHELONS } from './j2Vocabulary';
 import type { J2Variant, J2Vocabulary, TacticalEchelon } from './j2Vocabulary';
 
 export const J2_TEMPLATE_ID = 'j2-intelligence';
@@ -77,7 +77,7 @@ function workflow(v: J2Vocabulary): WorkflowRow[] {
   switch (v.variant) {
     case 'operational': return [
       { step: 1, lanes: 'j2-chief: direction and time plan ‖ watch-officer: current situation baseline ‖ osint-analyst: first sweep ‖ threat-analyst: existing threat models', merge: 'j2-chief: initial RFIs', gate: 'None; RFIs out' },
-      { step: 2, lanes: `jipoe-analyst ‖ geoint-analyst (steps 1 and 2) ‖ threat-analyst (step 3, then step 4 once steps 1 to 3 are ready) ‖ requirements-manager: gaps to PIR candidates, then collection-manager`, merge: `j2-chief: mission analysis input and ${v.staffEstimate} draft`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
+      { step: 2, lanes: `jipoe-analyst ‖ geoint-analyst (${v.environmentSteps}) ‖ threat-analyst (step ${v.evaluateStep}, then step ${v.coaStep} once ${stepsPhrase(1, v.evaluateStep)} are ready) ‖ requirements-manager: gaps to PIR candidates, then collection-manager`, merge: `j2-chief: mission analysis input and ${v.staffEstimate} draft`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
       { step: 3, lanes: 'threat-analyst: final course of action set ‖ target-analyst: high-value target analysis ‖ red-cell: prepares the adversary play ‖ geoint-analyst: mobility for friendly courses of action', merge: 'j2-chief', gate: `${gates}; to the ${both}` },
       { step: 4, lanes: 'red-cell: plays the adversary in the war game ‖ threat-analyst: refines the event template ‖ requirements-manager: PIRs from decision points ‖ target-analyst: high-payoff target intelligence', merge: `j2-chief with the ${v.ops}: decision support template inputs`, gate: `${gates}; to the ${both}` },
       { step: 5, lanes: `j2-chief: ${v.staffEstimate} per course of action ‖ tradecraft-reviewer: alternatives and assumptions check`, merge: 'j2-chief', gate: `To the ${v.planningLead}` },
@@ -87,7 +87,7 @@ function workflow(v: J2Vocabulary): WorkflowRow[] {
     ];
     case 'strategic': return [
       { step: 1, lanes: 'j2-chief: direction and time plan ‖ warning-analyst: warning problems baseline ‖ threat-analyst: existing threat models ‖ collection-manager: national and partner holdings', merge: 'j2-chief: initial RFIs', gate: 'None; RFIs out' },
-      { step: 2, lanes: 'jipoe-analyst: steps 1 and 2, with terrain, climate and infrastructure ‖ threat-analyst (step 3, then step 4) ‖ requirements-manager: gaps to PIR candidates, then collection-manager', merge: `j2-chief: mission analysis input and ${v.staffEstimate} draft`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
+      { step: 2, lanes: `jipoe-analyst: ${v.environmentSteps}, with terrain, climate and infrastructure ‖ threat-analyst (step ${v.evaluateStep}, then step ${v.coaStep}) ‖ requirements-manager: gaps to PIR candidates, then collection-manager`, merge: `j2-chief: mission analysis input and ${v.staffEstimate} draft`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
       { step: 3, lanes: 'threat-analyst: final course of action set ‖ red-cell: prepares the adversary play', merge: 'j2-chief', gate: `${gates}; to the ${v.planningLead}` },
       { step: 4, lanes: 'red-cell: plays the adversary in the war game ‖ threat-analyst: refines the event template ‖ requirements-manager: PIRs from decision points', merge: `j2-chief with the ${v.ops}: decision support template inputs`, gate: `${gates}; to the ${both}` },
       { step: 5, lanes: `j2-chief: ${v.staffEstimate} per course of action ‖ tradecraft-reviewer: alternatives and assumptions check`, merge: 'j2-chief', gate: `To the ${v.planningLead}` },
@@ -97,7 +97,7 @@ function workflow(v: J2Vocabulary): WorkflowRow[] {
     ];
     case 'brigade': return [
       { step: 1, lanes: 's2-lead: direction and time plan ‖ watch-officer: current situation baseline ‖ ipb-analyst: step 1 and existing threat models', merge: 's2-lead: initial RFIs', gate: 'None; RFIs out' },
-      { step: 2, lanes: 'ipb-analyst: all four steps ‖ collection-manager: PIR candidates, then the plan ‖ target-analyst: high-value target analysis from the threat models', merge: `s2-lead: mission analysis input and ${v.staffEstimate}`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
+      { step: 2, lanes: `ipb-analyst: all ${v.prepCount} steps ‖ collection-manager: PIR candidates, then the plan ‖ target-analyst: high-value target analysis from the threat models`, merge: `s2-lead: mission analysis input and ${v.staffEstimate}`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
       { step: 3, lanes: 'ipb-analyst: final threat courses of action ‖ target-analyst: high-value targets ‖ s2-lead: prepares the threat commander\'s play', merge: 's2-lead', gate: `${gates}; to the ${v.planningLead}` },
       { step: 4, lanes: 's2-lead: plays the threat commander in the war game ‖ ipb-analyst: refines the event template ‖ collection-manager: PIRs from decision points ‖ target-analyst: high-payoff target list inputs', merge: `s2-lead with the ${v.ops}: decision support template inputs`, gate: `${gates}; to the ${v.planningLead}` },
       { step: 5, lanes: `s2-lead: ${v.staffEstimate} per course of action ‖ tradecraft-reviewer: alternatives and assumptions check`, merge: 's2-lead', gate: `To the ${v.planningLead}` },
@@ -107,7 +107,7 @@ function workflow(v: J2Vocabulary): WorkflowRow[] {
     ];
     case 'battalion': return [
       { step: 1, lanes: 's2-lead: direction and time plan ‖ watch-officer: current situation baseline ‖ ipb-analyst: step 1 and existing threat models', merge: 's2-lead: initial RFIs', gate: 'None; RFIs out' },
-      { step: 2, lanes: `ipb-analyst: all four steps ‖ s2-lead: PIR candidates and the ${v.collectionPlan.toLowerCase()} with the ${v.ops}`, merge: `s2-lead: mission analysis input and ${v.staffEstimate}`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
+      { step: 2, lanes: `ipb-analyst: all ${v.prepCount} steps ‖ s2-lead: PIR candidates and the ${v.collectionPlan.toLowerCase()} with the ${v.ops}`, merge: `s2-lead: mission analysis input and ${v.staffEstimate}`, gate: `${gates}; to the ${v.planningLead}; ${pir}` },
       { step: 3, lanes: 'ipb-analyst: final threat courses of action ‖ s2-lead: prepares the threat commander\'s play', merge: 's2-lead', gate: `${gates}; to the ${v.planningLead}` },
       { step: 4, lanes: 's2-lead: plays the threat commander in the war game ‖ ipb-analyst: refines the event template', merge: `s2-lead with the ${v.ops}: decision support template inputs`, gate: `${gates}; to the ${v.planningLead}` },
       { step: 5, lanes: `s2-lead: ${v.staffEstimate} per course of action ‖ tradecraft-reviewer: alternatives and assumptions check`, merge: 's2-lead', gate: `To the ${v.planningLead}` },

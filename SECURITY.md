@@ -817,7 +817,11 @@ key signs for. Members granted the watch tools (`mcp__observations__watch_*`:
 the J2 watch officer, warning analyst and threat or IPB analyst, and no one
 else) can propose a watch, list them, draft for a match and report drafts
 ready; no tool arms, pauses, resumes, acknowledges, retires, approves or
-releases. A watch may only draft and alert a named person: an output that
+releases. The watch tools write files, so only their own grant
+(`mcp__observations__watch_*`, or a watch tool by its name) gives them: a
+tools line that grants the whole observations server (`mcp:observations` or
+`mcp__observations__*`), written by hand or not, gets the read tools and is
+refused every watch tool. A watch may only draft and alert a named person: an output that
 would release, approve or task collection is refused when the watch is read.
 Watches are evaluated only while a person's staff run or the Staff Room is
 open in this window (owner decision: attended runs only until run contracts

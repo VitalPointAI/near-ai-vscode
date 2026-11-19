@@ -513,3 +513,28 @@ test('Staff: Import Feed File... picks a file, shows what will be imported, and 
     uninstall();
   }
 });
+
+test('a parser process that throws at once, from fork() or from send(), resolves to a refusal instead of waiting forever', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'feed-runner-'));
+  const file = path.join(dir, 'feed.csv');
+  await writeFile(file, 'a,b\n');
+  // A bad worker path: the real fork() throws synchronously.
+  const badPath = await parseFeedFile(file, { limits: { workerFile: 'bad\0path.js', timeoutMs: 60_000 } });
+  assert.deepEqual(badPath, { ok: false, message: 'The parser process could not start.' });
+  // A stand-in fork() that throws.
+  const throwingFork = (() => { throw new Error('spawn EAGAIN'); }) as unknown as typeof import('node:child_process').fork;
+  assert.deepEqual(await parseFeedFile(file, { fork: throwingFork, limits: { timeoutMs: 60_000 } }), { ok: false, message: 'The parser process could not start.' });
+  // A process whose send() throws (its channel already closed): refused, and the process is killed.
+  const { EventEmitter } = await import('node:events');
+  let killed = false;
+  const child = Object.assign(new EventEmitter(), {
+    exitCode: null, signalCode: null,
+    kill: () => { killed = true; return true; },
+    send: () => { throw new Error('channel closed'); }
+  });
+  const sendThrows = (() => child) as unknown as typeof import('node:child_process').fork;
+  const started = Date.now();
+  assert.deepEqual(await parseFeedFile(file, { fork: sendThrows, limits: { timeoutMs: 60_000 } }), { ok: false, message: 'The parser process could not be reached.' });
+  assert.ok(Date.now() - started < 5_000, 'at once, not at the time limit');
+  assert.equal(killed, true);
+});

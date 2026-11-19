@@ -249,7 +249,7 @@ test('the level variants: strategic adds the strategic estimate and a component 
     assert.match(fires.instructions, /DECISION FOR: commander or delegate/);
   }
   assert.match(j5Template({ settings: settings({ profile: 'us-army', level: 'tactical' }) }).members.find((member) => member.name === 'fires-seat')!.instructions, /Annex D \(Fires\)/);
-  assert.match(j5Template({ settings: settings({ profile: 'nato-ca', level: 'tactical', nation: 'ca' }) }).members.find((member) => member.name === 'fires-seat')!.instructions, /Part of Annex A/);
+  assert.match(j5Template({ settings: settings({ profile: 'nato-ca', level: 'tactical', nation: 'ca' }) }).members.find((member) => member.name === 'fires-seat')!.instructions, /Annex II \(Joint Targeting\)/);
 });
 
 test('the template files: the team, PROFILE.md and the four skills, each at its path', () => {

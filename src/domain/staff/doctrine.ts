@@ -57,7 +57,10 @@ export interface StaffProcess {
   readonly id: StaffProcessId;
   readonly name: string;
   readonly publication: string;
-  /** The intelligence preparation the process uses: JIPOE at joint levels, IPB with OAKOC at tactical level (design 10, 3.1). */
+  /**
+   * The intelligence preparation the process uses: JIPOE at joint levels; IPOE (US Army) or IPB (APP-28, Canadian Army) with OAKOC at tactical level
+   * (design 10, 3.1). Its steps are INTELLIGENCE_PREPARATION_STEPS[process id].
+   */
   readonly intelligencePreparation: string;
   /** The staff code prefixes at this process's levels, highest echelon first: J at joint levels; G (division, corps) and S (brigade, battalion) at tactical level. */
   readonly codePrefixes: readonly string[];
@@ -90,7 +93,9 @@ export const STAFF_PROCESSES: Readonly<Record<StaffProcessId, StaffProcess>> = {
     id: 'mdmp',
     name: 'Military decision-making process (MDMP)',
     publication: 'FM 5-0, Planning and Orders Production (2024)',
-    intelligencePreparation: 'IPB',
+    // FM 5-0 (Nov 2024) and ADP 2-0 (1 Oct 2026) say IPOE, intelligence preparation of the operational environment; ATP 2-01.3 Change 2 (23 Jan 2024)
+    // retitled the publication, now at Change 3 (15 May 2025).
+    intelligencePreparation: 'IPOE',
     codePrefixes: ['G', 'S'],
     codeSeparator: '-',
     steps: {
@@ -108,7 +113,9 @@ export const STAFF_PROCESSES: Readonly<Record<StaffProcessId, StaffProcess>> = {
     id: 'ajp-5',
     name: 'Operations planning process (AJP-5)',
     publication: 'AJP-5, Allied Joint Doctrine for the Planning of Operations, Edition B',
-    intelligencePreparation: 'JIPOE', // AJP-2 (Edition B, 2016) term for joint intelligence preparation; JIPB is obsolete (CADN 16-01)
+    // Joint intelligence preparation of the operating environment: AJP-5 Edition B (2026) para 2.32 and AJP-10.1 (2023), detailed in AIntP-17. JIPB is
+    // obsolete (CADN 16-01).
+    intelligencePreparation: 'JIPOE',
     codePrefixes: ['J'],
     codeSeparator: '',
     steps: {
@@ -126,7 +133,7 @@ export const STAFF_PROCESSES: Readonly<Record<StaffProcessId, StaffProcess>> = {
     id: 'app-28',
     name: 'Tactical planning (APP-28)',
     publication: 'APP-28, Tactical Planning for Land Forces',
-    intelligencePreparation: 'IPB',
+    intelligencePreparation: 'IPB', // The Canadian Army keeps IPB (CACSC-PUB-500, OPP Handbook, 2018)
     codePrefixes: ['G', 'S'],
     codeSeparator: '',
     steps: {
@@ -170,8 +177,8 @@ export const ANNEX_SUBJECTS = [
 ] as const;
 export type AnnexSubject = (typeof ANNEX_SUBJECTS)[number];
 
-/** Annex letters: one or two upper case letters (A to Z, then AA, EE, FF and the like). */
-export const ANNEX_LETTER_PATTERN = /^[A-Z]{1,2}$/;
+/** Annex letters: one or two upper case letters (A to Z, then AA, EE, FF and the like), with a number for a COPD V3.0 sub-annex (SS2). */
+export const ANNEX_LETTER_PATTERN = /^[A-Z]{1,2}[1-9]?$/;
 
 /**
  * How a profile carries one subject: its own lettered annex, an appendix to another annex, a part of another annex, or no letter in the profile's
@@ -232,7 +239,7 @@ export const RETIRED_SPACE_TERMS: readonly string[] = ['space control', 'space c
 export const CANADIAN_LAND_TERMS = {
   informationActivities: 'Influence activities',
   logistics: 'Combat service support (CSS)',
-  planningCentres: ['Plans centre (long-range and mid-range planning)', 'Operations centre (short-range planning, FRAGOs)'],
+  planningCentres: ['Plans centre (long-range and mid-range planning)', 'Operations centre (short-range planning, Frag Os)'],
   belowStaffLevel: 'Battle procedure',
   intelligenceCycle: ['Direction', 'Collection', 'Processing', 'Dissemination']
 } as const;
@@ -278,26 +285,29 @@ export const DOCTRINE_PROFILES: Readonly<Record<StaffProfileId, DoctrineProfile>
       movements: NO_LETTER('No separate movements annex; movements are part of Annex D (Logistics).'), // JP 5-0 (1 July 2025) annex list
       personnel: { kind: 'annex', letter: 'E', title: 'Personnel' }, // JP 5-0 (1 July 2025) annex list
       'public-affairs': { kind: 'annex', letter: 'F', title: 'Public Affairs' }, // AY26 Campaign Planning Handbook OPORD format
-      fires: { kind: 'appendix', toAnnex: 'C' }, // JP 5-0 (2020) app. A placement
-      'rules-of-engagement': { kind: 'appendix', toAnnex: 'C' }, // JP 5-0 (2020) app. A placement
+      fires: { kind: 'appendix', toAnnex: 'C' }, // JP 5-0 (16 June 2017) app. A: an appendix to Annex C (Operations)
+      // Appendix 6 to Annex C: Army Operational Law Handbook ch. 5 for joint-format orders, which follow CJCSM 3130.03A (cited by title).
+      'rules-of-engagement': { kind: 'appendix', toAnnex: 'C' },
       'health-services': { kind: 'annex', letter: 'Q', title: 'Health Services' }, // AY26 Campaign Planning Handbook OPORD format
-      information: { kind: 'within', annex: 'C' }, // JP 5-0 (2020) app. A placement
-      'communication-strategy': { kind: 'annex', letter: 'Y', title: 'Commander\'s Communication Strategy' }, // AY26 Campaign Planning Handbook OPORD format
+      information: { kind: 'within', annex: 'C' }, // JP 3-13.2 (2011, Change 1): information operations are Appendix 3 to Annex C
+      // JP 5-0 (16 June 2017) app. A annex list; JP 5-0 (1 July 2025) names the process commander's communication synchronization and gives no letter.
+      'communication-strategy': { kind: 'annex', letter: 'Y', title: 'Communication Synchronization' },
       communications: { kind: 'annex', letter: 'K', title: 'Command, Control, Communications, Computer, and Cybersecurity Systems' }, // JP 5-0 (1 July 2025) annex list
       'knowledge-management': { kind: 'annex', letter: 'I', title: 'Knowledge, Information, and Data Management' }, // JP 5-0 (1 July 2025) annex list
       environmental: { kind: 'annex', letter: 'L', title: 'Environmental Considerations' }, // AY26 Campaign Planning Handbook OPORD format
       engineer: NO_LETTER('No lettered engineer annex in the joint list.'), // AY26 Campaign Planning Handbook OPORD format
-      legal: { kind: 'appendix', toAnnex: 'E' }, // JP 5-0 (2020) app. A placement
+      legal: { kind: 'appendix', toAnnex: 'E' }, // JP 1-04, Legal Support: the legal estimate goes with Annex E (Personnel)
       assessment: { kind: 'annex', letter: 'N', title: 'Assessments' }, // JP 5-0 (1 July 2025) annex list
       reports: { kind: 'annex', letter: 'R', title: 'Reports' }, // JP 5-0 (1 July 2025) annex list
-      // O and P follow the JP 5-0 (2020) order; the AY26 handbook has them the other way round (design 10, 2.3 and 2.9).
-      'foreign-disclosure': { kind: 'annex', letter: 'O', title: 'Foreign Disclosure' }, // JP 5-0 (2020) app. A order
-      'host-nation-support': { kind: 'annex', letter: 'P', title: 'Host-Nation Support' }, // JP 5-0 (2020) app. A order
+      // JP 5-0 (16 June 2017) app. A lists M, N, P with no annex O, and no source gives foreign disclosure a letter; JP 5-0 (1 July 2025) names neither
+      // O nor P. The AY26 handbook's "O Host Nation Support, P Foreign Disclosure" is a handbook variant, not the joint list.
+      'foreign-disclosure': NO_LETTER('No lettered foreign disclosure annex in the joint list; the orders tool asks a person where it goes.'),
+      'host-nation-support': { kind: 'annex', letter: 'P', title: 'Host-Nation Support' }, // JP 5-0 (16 June 2017) app. A; CJCSM 3122.03 by title
       'contracting-finance': { kind: 'annex', letter: 'W', title: 'Operational Contract Support' }, // JP 5-0 (1 July 2025) annex list
       interagency: { kind: 'annex', letter: 'V', title: 'Interagency-Interorganizational Coordination' }, // JP 5-0 (1 July 2025) annex list
       'civil-military-cooperation': NOT_IN_LIST // AY26 Campaign Planning Handbook OPORD format
     },
-    annexSource: 'JP 5-0 (July 2025) and the AY26 Campaign Planning Handbook OPORD format; O and P in the JP 5-0 (2020) order; fires, information, ROE and legal placements from JP 5-0 (2020)',
+    annexSource: 'JP 5-0 (July 2025) and the AY26 Campaign Planning Handbook OPORD format; P and Y from the JP 5-0 (2017) annex list, which has no annex O; fires, ROE, information and legal placements from JP 5-0 (2017), JP 3-13.2 (2011) and JP 1-04',
     usesNation: false,
     runningEstimateFunctions: 'joint-functions',
     informationTerm: 'Information'
@@ -311,34 +321,34 @@ export const DOCTRINE_PROFILES: Readonly<Record<StaffProfileId, DoctrineProfile>
       tactical: { offered: true, process: 'mdmp', note: 'MDMP, corps to battalion; troop leading procedures below (05 s2).' }
     },
     coaTests: ['Feasible', 'Acceptable', 'Suitable', 'Distinguishable', 'Complete'],
-    coaTestsSource: 'FM 5-0 (2024)',
+    coaTestsSource: 'FM 5-0 (2024) ch. 5, COA screening criteria',
     annexes: {
-      'task-organization': { kind: 'annex', letter: 'A', title: 'Task Organization' }, // FM 5-0 (Nov 2024) app. E
-      intelligence: { kind: 'annex', letter: 'B', title: 'Intelligence' }, // FM 5-0 (Nov 2024) app. E
-      operations: { kind: 'annex', letter: 'C', title: 'Operations' }, // FM 5-0 (Nov 2024) app. E
-      logistics: { kind: 'annex', letter: 'F', title: 'Sustainment' }, // FM 5-0 (Nov 2024) app. E
-      movements: NO_LETTER('No separate movements annex; movements are part of Annex F (Sustainment).'), // FM 5-0 (Nov 2024) app. E
-      personnel: NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      'public-affairs': { kind: 'annex', letter: 'J', title: 'Public Affairs' }, // FM 5-0 (Nov 2024) app. E
-      fires: { kind: 'annex', letter: 'D', title: 'Fires' }, // FM 5-0 (Nov 2024) app. E
-      'rules-of-engagement': { kind: 'appendix', toAnnex: 'C' }, // FM 5-0 (Nov 2024) app. E
-      'health-services': { kind: 'within', annex: 'F' }, // FM 5-0 (Nov 2024) app. E
-      information: { kind: 'within', annex: 'C' }, // FM 5-0 (Nov 2024) app. E
-      'communication-strategy': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      communications: { kind: 'annex', letter: 'H', title: 'Signal' }, // FM 5-0 (Nov 2024) app. E
-      'knowledge-management': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      environmental: NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      engineer: { kind: 'annex', letter: 'G', title: 'Engineer' }, // FM 5-0 (Nov 2024) app. E
-      legal: { kind: 'within', annex: 'F' }, // FM 6-0 (2022) SJA tab in the sustainment annex
-      assessment: { kind: 'annex', letter: 'M', title: 'Assessment' }, // FM 5-0 (Nov 2024) app. E
-      reports: NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      'foreign-disclosure': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      'host-nation-support': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. E
-      'contracting-finance': { kind: 'annex', letter: 'W', title: 'Operational Contract Support' }, // FM 5-0 (Nov 2024) app. E
-      interagency: { kind: 'annex', letter: 'V', title: 'Interagency Coordination' }, // FM 5-0 (Nov 2024) app. E
-      'civil-military-cooperation': NOT_IN_LIST // FM 5-0 (Nov 2024) app. E
+      'task-organization': { kind: 'annex', letter: 'A', title: 'Task Organization' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      intelligence: { kind: 'annex', letter: 'B', title: 'Intelligence' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      operations: { kind: 'annex', letter: 'C', title: 'Operations' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      logistics: { kind: 'annex', letter: 'F', title: 'Sustainment' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      movements: NO_LETTER('No separate movements annex; movements are part of Annex F (Sustainment).'), // FM 5-0 (Nov 2024) app. D, table D-2
+      personnel: NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      'public-affairs': { kind: 'annex', letter: 'J', title: 'Public Affairs' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      fires: { kind: 'annex', letter: 'D', title: 'Fires' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      'rules-of-engagement': { kind: 'appendix', toAnnex: 'C' }, // FM 5-0 (Nov 2024) app. D, table D-2: Appendix 11 to Annex C
+      'health-services': { kind: 'within', annex: 'F' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      information: { kind: 'within', annex: 'C' }, // FM 5-0 (Nov 2024) app. D, table D-2: Appendices 13 to 15 to Annex C, no information annex
+      'communication-strategy': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      communications: { kind: 'annex', letter: 'H', title: 'Signal' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      'knowledge-management': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      environmental: NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      engineer: { kind: 'annex', letter: 'G', title: 'Engineer' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      legal: { kind: 'within', annex: 'F' }, // FM 5-0 (Nov 2024) app. D, table D-2: Tab C to Appendix 2 (Personnel Services Support) to Annex F
+      assessment: { kind: 'annex', letter: 'M', title: 'Assessment' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      reports: NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      'foreign-disclosure': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      'host-nation-support': NOT_IN_LIST, // FM 5-0 (Nov 2024) app. D, table D-2
+      'contracting-finance': { kind: 'annex', letter: 'W', title: 'Operational Contract Support' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      interagency: { kind: 'annex', letter: 'V', title: 'Interagency Coordination' }, // FM 5-0 (Nov 2024) app. D, table D-2
+      'civil-military-cooperation': NOT_IN_LIST // FM 5-0 (Nov 2024) app. D, table D-2
     },
-    annexSource: 'FM 5-0 (2024) Appendix E (05 s2); legal as the SJA tab in Annex F (note 06, FM 6-0)',
+    annexSource: 'FM 5-0 (2024) Appendix D, table D-2, with the annex formats in Appendix E; legal support as Tab C to Appendix 2 to Annex F',
     usesNation: false,
     runningEstimateFunctions: 'joint-functions',
     informationTerm: 'Information'
@@ -354,32 +364,35 @@ export const DOCTRINE_PROFILES: Readonly<Record<StaffProfileId, DoctrineProfile>
     coaTests: ['Feasibility', 'Acceptability', 'Completeness and compliance', 'Exclusivity', 'Suitability'],
     coaTestsSource: 'AJP-5 3.50',
     annexes: {
-      'task-organization': { kind: 'annex', letter: 'B', title: 'Task Organization and Command Relationships' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      intelligence: { kind: 'annex', letter: 'D', title: 'Intelligence' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      operations: { kind: 'annex', letter: 'A', title: 'Conduct of Operations' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      logistics: { kind: 'annex', letter: 'R', title: 'Logistics' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      movements: { kind: 'annex', letter: 'S', title: 'Movements' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      personnel: NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'public-affairs': { kind: 'annex', letter: 'X', title: 'Public Affairs' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      fires: { kind: 'within', annex: 'A' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'rules-of-engagement': { kind: 'annex', letter: 'E', title: 'Rules of Engagement' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'health-services': { kind: 'annex', letter: 'K', title: 'Health Service Support' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      information: { kind: 'annex', letter: 'O', title: 'Information Operations' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'communication-strategy': NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      communications: { kind: 'annex', letter: 'Q', title: 'Communications and Information Systems' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'knowledge-management': NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      environmental: NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      engineer: { kind: 'annex', letter: 'EE', title: 'Engineer' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      legal: { kind: 'annex', letter: 'AA', title: 'Legal' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      assessment: { kind: 'within', annex: 'A' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      reports: NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'foreign-disclosure': NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'host-nation-support': NOT_IN_LIST, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'contracting-finance': { kind: 'annex', letter: 'FF', title: 'Financial Support' }, // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      interagency: NO_LETTER('No separate interagency annex; civil-military cooperation is Annex W.'), // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
-      'civil-military-cooperation': { kind: 'annex', letter: 'W', title: 'Civil-Military Cooperation' } // CFJP 5.0 (2008) ch. 5 annex E app. 1, from the NATO planning guidelines
+      // The COPD letters (owner decision, 2026-11-19): COPD Interim V2.0 (4 Oct 2013), with the COPD V3.0 (15 Jan 2021) changes published in the ACO
+      // CIMIC Functional Planning Guide (2022), which keep A, B, R, W, II, OO and SS and put Info Ops at SS2 and PsyOps at SS4 under SS (StratCom). Where
+      // the V3.0 placement is not public (Public Affairs among them), the V2.0 letter stands. AJP-5 Edition B (2026) points to the COPD for the list.
+      'task-organization': { kind: 'annex', letter: 'B', title: 'Task Organisation and Command Relationships' }, // COPD V2.0, kept in V3.0
+      intelligence: { kind: 'annex', letter: 'D', title: 'Intelligence' }, // COPD V2.0
+      operations: { kind: 'annex', letter: 'A', title: 'Concept of Operations' }, // COPD V2.0, kept in V3.0
+      logistics: { kind: 'annex', letter: 'R', title: 'Logistics' }, // COPD V2.0, kept in V3.0
+      movements: { kind: 'annex', letter: 'S', title: 'Movements' }, // COPD V2.0
+      personnel: NOT_IN_LIST, // COPD V2.0 annex list
+      'public-affairs': { kind: 'annex', letter: 'TT', title: 'Public Affairs' }, // COPD V2.0 (V3.0 placement not public)
+      fires: { kind: 'annex', letter: 'II', title: 'Joint Targeting' }, // COPD V2.0, kept in V3.0: fires are planned through joint targeting
+      'rules-of-engagement': { kind: 'annex', letter: 'E', title: 'Rules of Engagement' }, // COPD V2.0
+      'health-services': { kind: 'annex', letter: 'QQ', title: 'Medical' }, // COPD V2.0
+      information: { kind: 'annex', letter: 'SS2', title: 'Information Operations' }, // COPD V3.0, under SS (ACO CIMIC Functional Planning Guide, 2022)
+      'communication-strategy': { kind: 'annex', letter: 'SS', title: 'Strategic Communications' }, // COPD V2.0, kept in V3.0
+      communications: { kind: 'annex', letter: 'Q', title: 'Communications and Information Systems' }, // COPD V2.0
+      'knowledge-management': NOT_IN_LIST, // COPD V2.0 annex list
+      environmental: NOT_IN_LIST, // COPD V2.0 annex list
+      engineer: { kind: 'annex', letter: 'EE', title: 'Military Engineering' }, // COPD V2.0
+      legal: { kind: 'annex', letter: 'AA', title: 'Legal' }, // COPD V2.0
+      assessment: { kind: 'annex', letter: 'OO', title: 'Operations Assessment' }, // COPD V2.0, kept in V3.0
+      reports: NOT_IN_LIST, // COPD V2.0 annex list
+      'foreign-disclosure': NOT_IN_LIST, // COPD V2.0 annex list
+      'host-nation-support': NOT_IN_LIST, // COPD V2.0 annex list
+      'contracting-finance': { kind: 'annex', letter: 'FF', title: 'Financial Support' }, // COPD V2.0
+      interagency: NO_LETTER('No separate interagency annex; civil-military cooperation is Annex W.'), // COPD V2.0 annex list
+      'civil-military-cooperation': { kind: 'annex', letter: 'W', title: 'Civil-Military Cooperation' } // COPD V2.0, kept in V3.0
     },
-    annexSource: 'CFJP 5.0 Chapter 5 Annex E Appendix 1, adapted from the NATO planning guidelines; AJP-5 points to the COPD for the list (AJP-5 footnote 50)',
+    annexSource: 'NATO COPD annex letters: Interim V2.0 (2013) with the published V3.0 (2021) StratCom changes (Info Ops SS2, PsyOps SS4); AJP-5 Edition B points to the COPD for the list',
     usesNation: true,
     runningEstimateFunctions: 'joint-functions',
     nationFunctions: { ca: 'canadian-operational-functions' },
@@ -463,7 +476,7 @@ export const RESTRICTED_PUBLICATION_TITLES: readonly string[] = ['JP 2-0', 'JP 3
 
 // ---- Intelligence terms (WP-INT; design 10, 3.2, 4.4 and 6.2; research note 02) --------------------------------------------------------------
 
-/** Source reliability on the NATO Admiralty scale: a grade of the source, never of the information (AJP-2.1 Edition B; 02 T10, S24). */
+/** Source reliability on the NATO Admiralty scale: a grade of the source, never of the information (UK JDP 2-00, 4th edition, 2023, table 3.1; 02 T10). */
 export const SOURCE_RELIABILITY = {
   A: 'Completely reliable',
   B: 'Usually reliable',
@@ -476,12 +489,12 @@ export type SourceReliability = keyof typeof SOURCE_RELIABILITY;
 export const SOURCE_RELIABILITY_GRADES = Object.keys(SOURCE_RELIABILITY) as readonly SourceReliability[];
 
 /**
- * Information credibility on the NATO Admiralty scale: a grade of the information, assessed separately from the source (AJP-2.1 Edition B; 02 T10, S24).
- * The words for grade 1 differ between the grade tables (the older Canadian text and US field manuals read "confirmed by other sources"): a product
- * uses its profile's words, IntelligenceTerms.credibilityOne.
+ * Information credibility on the NATO Admiralty scale: a grade of the information, assessed separately from the source (UK JDP 2-00, 4th edition, 2023,
+ * table 3.1, which publishes the NATO grading; the 2003 CF text reads the same for grade 1; 02 T10). The US Army table labels grade 1 "Confirmed": a
+ * product uses its profile's words, IntelligenceTerms.credibilityOne.
  */
 export const INFORMATION_CREDIBILITY = {
-  1: 'Completely credible',
+  1: 'Confirmed by other sources',
   2: 'Probably true',
   3: 'Possibly true',
   4: 'Doubtful',
@@ -492,8 +505,9 @@ export type InformationCredibility = 1 | 2 | 3 | 4 | 5 | 6;
 export const INFORMATION_CREDIBILITY_GRADES: readonly InformationCredibility[] = [1, 2, 3, 4, 5, 6];
 
 /**
- * Credibility 1 means confirmed by other, independent reporting. The 2003 CF joint intelligence doctrine reads grade 1 as "confirmed by other sources"
- * (B-GJ-005-200/FP-000, 2003; 02 T10, S18); AJP-2.1 Edition B names it "completely credible" (S24). The workbench applies the stricter reading.
+ * Credibility 1 means confirmed by other, independent reporting: NATO grade 1 reads "confirmed by other sources" (UK JDP 2-00, 2023, table 3.1; the 2003
+ * CF joint intelligence doctrine, B-GJ-005-200/FP-000, reads the same), and the US Army descriptor is "confirmed by other independent sources" (FM 2-22.3,
+ * app. B, table B-2). The workbench holds a grade 1 to that: it needs an independent second source.
  */
 export const CONFIRMED_CREDIBILITY: InformationCredibility = 1;
 
@@ -590,36 +604,64 @@ export const STAFF_TEMPLATE_LABELS: readonly string[] = ['org/Public', 'org/Inte
 // The J2 template and its two skills (icd203-standards, source-grading) read these tables, with the likelihood table and the two grading scales above;
 // no other file spells an intelligence process stage, a preparation step, a likelihood term or a grade.
 
-/** The four steps of intelligence preparation, by the name the process uses (design 10, 3.1: JIPOE at joint levels, IPB with OAKOC at tactical level). */
+/** The steps of intelligence preparation for one process (design 10, 3.1: JIPOE at joint levels, IPOE or IPB with OAKOC at tactical level). */
 export interface PreparationSteps {
-  /** The four steps, in order. */
-  readonly steps: readonly [string, string, string, string];
+  /** The steps, in order: four under the US methods and IPB, three under NATO JIPOE. */
+  readonly steps: readonly string[];
+  /**
+   * How many of the first steps describe the environment and its effects (the jipoe-analyst's work at joint levels); the rest evaluate the other side and
+   * its courses of action (the threat-analyst's).
+   */
+  readonly environmentSteps: number;
   /** What the steps call the other side: the adversary at joint levels, the threat at tactical level. */
   readonly actor: string;
+  /** What the method calls the environment: operational (US) or operating (NATO). */
+  readonly environment: string;
   readonly source: string;
 }
 
-export const INTELLIGENCE_PREPARATION_STEPS: Readonly<Record<'JIPOE' | 'IPB', PreparationSteps>> = {
-  // JP 2-0 (2022) is CAC-only and JIPOE is now a joint guide; the public reference edition of the method is JP 2-01.3 (21 May 2014) (02 s1 item 3, T1).
-  // AJP-2 (Edition A, 2016) uses the same four steps for NATO JIPOE as far as the public text shows (02 T6); AJP-2's current edition is in design 2.9.
-  JIPOE: {
+/** The preparation steps per process; the name is the process's intelligencePreparation. */
+export const INTELLIGENCE_PREPARATION_STEPS: Readonly<Record<StaffProcessId, PreparationSteps>> = {
+  // JP 2-01.3 (21 May 2014), the public reference edition of the JIPOE method; JP 2-0 (2022) and the JIPOE joint guide are cited by title only.
+  jpp: {
     steps: ['Define the operational environment', 'Describe the impact of the operational environment', 'Evaluate the adversary and other relevant actors', 'Determine adversary and other relevant actor courses of action'],
+    environmentSteps: 2,
     actor: 'adversary',
+    environment: 'operational environment',
     source: 'JP 2-01.3 (2014), public reference edition of the JIPOE method; JP 2-0 (2022) by title'
   },
-  // ATP 2-01.3 (2019 with Change 1, 2021) ch. 1 (02 s1 item 4). The Canadian Army uses the same IPB steps at land tactical level (Land Operations, 2008).
-  IPB: {
+  // IPOE: the same four steps as IPB under the new name. ADP 2-0 (1 Oct 2026); FM 5-0 (Nov 2024); ATP 2-01.3 (Change 3, 15 May 2025) by title.
+  mdmp: {
     steps: ['Define the operational environment', 'Describe environmental effects on operations', 'Evaluate the threat', 'Determine threat courses of action'],
+    environmentSteps: 2,
     actor: 'threat',
-    source: 'ATP 2-01.3 (2019 with Change 1)'
+    environment: 'operational environment',
+    source: 'ADP 2-0 (2026); FM 5-0 (2024); ATP 2-01.3 (Change 3, 2025)'
+  },
+  // NATO JIPOE has three steps: AJP-10.1 Edition A (26 Jan 2023) paras 2.5, 2.7 and 3.11, detailed in AIntP-17; it feeds the comprehensive understanding
+  // of the operating environment. AJP-5 Edition B (2026) para 2.32.
+  'ajp-5': {
+    steps: ['Describe and evaluate the operating environment', 'Evaluate actors in the operating environment', 'Determine actor courses of action'],
+    environmentSteps: 1,
+    actor: 'adversary',
+    environment: 'operating environment',
+    source: 'AJP-10.1 (2023); AJP-5 Edition B (2026); AIntP-17 by title'
+  },
+  // The Canadian Army keeps IPB with the same four steps (CACSC-PUB-500, OPP Handbook, 2018); APP-28 by title.
+  'app-28': {
+    steps: ['Define the operational environment', 'Describe environmental effects on operations', 'Evaluate the threat', 'Determine threat courses of action'],
+    environmentSteps: 2,
+    actor: 'threat',
+    environment: 'operational environment',
+    source: 'CACSC-PUB-500 (2018); ATP 2-01.3 (2019 with Change 1) for the step names'
   }
 };
 
-/** The intelligence process a profile names (design 10, 3.2: US Joint uses the six categories, NATO/Canadian the four-stage cycle). */
+/** The intelligence process a profile names (design 10, 3.2: US Joint and US Army use six steps, NATO/Canadian the four-stage cycle). */
 export interface IntelligenceProcess {
   readonly name: string;
   readonly stages: readonly string[];
-  /** Activities that run through every stage (US Army only). */
+  /** Activities that run through every stage, where the process names any (none does now; ADP 2-0, 2026, folded them into the six steps). */
   readonly continuing?: readonly string[];
   readonly source: string;
 }
@@ -644,7 +686,7 @@ export interface IntelligenceTerms {
 
 export const INTELLIGENCE_TERMS: Readonly<Record<StaffProfileId, IntelligenceTerms>> = {
   'us-joint': {
-    // The six categories of JP 2-0 (2013), the public reference edition; JP 2-0 (26 May 2022) is the current text and is CAC-only (02 s1 items 1 and 2).
+    // The six categories of JP 2-0 (26 May 2022) p. I-5, as cited in CRS IF10574 (updated 23 Jan 2026); JP 2-0 (2013) is the public reference edition.
     process: {
       name: 'Joint intelligence process',
       stages: ['Planning and direction', 'Collection', 'Processing and exploitation', 'Analysis and production', 'Dissemination and integration', 'Evaluation and feedback'],
@@ -655,24 +697,25 @@ export const INTELLIGENCE_TERMS: Readonly<Record<StaffProfileId, IntelligenceTer
     collectionPlan: 'Collection plan',
     // JP 5-0 (1 July 2025): the J-2 intelligence estimate is appendix 11 to annex B (design 10, 3.2, profile differences).
     estimatePlacement: 'Appendix 11 to Annex B (Intelligence)',
-    // FM 2-22.3 (2006) app. B and ATP 2-22.9 use "confirmed by other sources" for grade 1; US practice follows them (best judgement; 02 T10).
+    // The NATO grade 1 words (UK JDP 2-00, 2023, table 3.1), which the US Army descriptor matches (FM 2-22.3, C1 2025, app. B, table B-2); JP 2-0 (2022)
+    // is cited by title only.
     credibilityOne: 'Confirmed by other sources',
     source: 'JP 2-0 (2013, 2022); JP 2-01 (2017); JP 5-0 (2025)'
   },
   'us-army': {
-    // ADP 2-0 (31 July 2019) ch. 4: four steps and two continuing activities. FM 2-0 (Oct 2023) was seen only second-hand (design 10, 2.4); best judgement.
+    // ADP 2-0, Intelligence (1 Oct 2026) ch. 4, fig. 4-2: six steps in the joint naming, with no separate continuing activities. FM 2-0 (1 Oct 2026)
+    // is cited by title.
     process: {
       name: 'Intelligence process',
-      stages: ['Plan and direct', 'Collect and process', 'Produce', 'Disseminate'],
-      continuing: ['Analyze', 'Assess'],
-      source: 'ADP 2-0 (2019) ch. 4; FM 2-0 (2023) by title'
+      stages: ['Plan and direct', 'Collect', 'Process and exploit', 'Analyze and produce', 'Disseminate and integrate', 'Evaluate and provide feedback'],
+      source: 'ADP 2-0 (2026) ch. 4; FM 2-0 (2026) by title'
     },
     // FM 3-55 (2013): information collection, and its information collection plan; the brigade collection manager writes it (design 10, 3.2 tactical).
     requirementsManagement: 'Information collection: requirements management and collection management',
     collectionPlan: 'Information collection plan',
-    credibilityOne: 'Confirmed by other sources', // FM 2-22.3 (2006) app. B (best judgement; 02 T10)
+    credibilityOne: 'Confirmed', // FM 2-22.3 (6 Sep 2006, Change 1 26 Mar 2025) app. B, table B-2: the grade 1 label
     belowStaffLevel: 'Troop leading procedures', // FM 5-0 (2024); ATP 2-01.3 (2019) ch. 2 (02 T4)
-    source: 'ADP 2-0 (2019); FM 3-55 (2013); FM 5-0 (2024)'
+    source: 'ADP 2-0 (2026); FM 2-22.3 (2006, C1 2025); FM 3-55 (2013); FM 5-0 (2024)'
   },
   'nato-ca': {
     // AJP-2 (Edition A, 2016) and the 2003 CF intelligence doctrine: a four-stage cycle (02 s1 item 2, T2). The same four stages as CANADIAN_LAND_TERMS.
@@ -685,8 +728,8 @@ export const INTELLIGENCE_TERMS: Readonly<Record<StaffProfileId, IntelligenceTer
     requirementsManagement: 'Intelligence requirements management and collection management (IRM and CM, formerly CCIRM)',
     nationRequirementsManagement: { ca: 'CCIRM (collection coordination and intelligence requirements management; NATO now says IRM and CM)' },
     collectionPlan: 'Collection plan',
-    // AJP-2.1 (Edition B) grade 1 is "completely credible"; the 2003 CF text reads "confirmed by other sources" (design 10, 4.4; 02 T10).
-    credibilityOne: 'Completely credible',
+    // NATO grade 1 (UK JDP 2-00, 4th edition, 2023, table 3.1); the 2003 CF text reads the same.
+    credibilityOne: 'Confirmed by other sources',
     belowStaffLevel: CANADIAN_LAND_TERMS.belowStaffLevel, // Land Operations (2008): battle procedure for commanders without a staff
     source: 'AJP-2 (2016); AJP-2.1 (Edition B draft); CFJP 5.0 (2008); Land Operations (2008)'
   }
@@ -887,6 +930,12 @@ export const COMPETITION_CONTINUUM: readonly string[] = ['Cooperation', 'Competi
 // ADP 3-13, Information (27 November 2023) (03 A5). JP 3-04 (2022) is not public and is not used.
 export const INFORMATION_ACTIVITIES: readonly string[] = ['Enable', 'Protect', 'Inform', 'Influence', 'Attack'];
 
+/**
+ * NATO information operations: Info Ops is the staff function that integrates information activities, with its staff home in J10 StratCom and an Info Ops
+ * cell in the J3 (AJP-10 Edition A, 13 Mar 2023, paras 1.56 to 1.57; AJP-10.1 Edition A, 26 Jan 2023, which replaces AJP-3.10).
+ */
+export const NATO_INFORMATION_OPERATIONS = 'Info Ops is the staff function that integrates information activities; its staff home is J10 StratCom, with an Info Ops cell in the J3.';
+
 /** The Canadian Army influence activities, which replace the information operations umbrella in land planning. */
 // CADN 16-01, Land Operations Doctrine: an updated summary (27 May 2016) (design 10, 2.5).
 export const INFLUENCE_ACTIVITIES: readonly string[] = ['Psychological operations (PSYOPS)', 'Key leader engagement', 'Civil support', 'Posture, profile and presence', 'Media relations'];
@@ -895,11 +944,11 @@ export const INFLUENCE_ACTIVITIES: readonly string[] = ['Psychological operation
  * The six phases of the joint targeting cycle, which may run at the same time and serve deliberate and dynamic targeting. Phase 4 is the commander's
  * decision; working groups prepare and boards decide.
  */
-// JP 3-60, Joint Targeting (28 September 2018), released through the DoD FOIA reading room (03 A5). Phase 6: the 2013 edition said "combat assessment";
-// the 2018 renaming could not be read in a primary copy (03 gap 3), so the plain name "Assessment" is used, by best judgement.
+// JP 3-60, Joint Targeting (28 September 2018), released under FOIA 19-F-1399: executive summary and ch. II; its summary of changes renames phase 6
+// "combat assessment". CJCSI 3162.02A agrees.
 export const JOINT_TARGETING_CYCLE: readonly string[] = [
-  'End state and commander\'s objectives', 'Target development and prioritization', 'Capabilities analysis', 'Commander\'s decision and force assignment',
-  'Mission planning and force execution', 'Assessment'
+  'Commander\'s objectives, targeting guidance, and intent', 'Target development and prioritization', 'Capabilities analysis', 'Commander\'s decision and force assignment',
+  'Mission planning and force execution', 'Combat assessment'
 ];
 
 /** What every running estimate holds, and the rule that it always carries recommendations for anticipated decisions. */
@@ -910,11 +959,11 @@ export const RUNNING_ESTIMATE = {
 } as const;
 
 /** The fragmentary order: what it is, and the abbreviation each profile uses. */
-// FM 5-0 (November 2024) definition (03 A6); JP 5-0 (1 July 2025) joint orders list, FRAGORD (design 10, 2.8 item 5); NATO and Canadian usage FRAGO
-// (CFJP 5.0, 2008, art. 406 writes "Frag O"; Land Operations, 2008), by best judgement where AJP-5 gives no abbreviation.
+// FM 5-0 (November 2024) definition (03 A6); JP 5-0 (1 July 2025) joint orders list, FRAGORD (design 10, 2.8 item 5). NATO/Canadian: "Frag O", spaced
+// like Wng O, Op O and Impl O (CACSC-PUB-500, OPP Handbook, 2018, abbreviations list; CFJP 5.0, 2008, annexes A, H and J).
 export const FRAGMENTARY_ORDER = {
   definition: 'An abbreviated order that changes or modifies an order, or executes a branch or sequel; it gives the changes only, in the five-paragraph format.',
-  abbreviation: { 'us-joint': 'FRAGORD', 'us-army': 'FRAGORD', 'nato-ca': 'FRAGO' }
+  abbreviation: { 'us-joint': 'FRAGORD', 'us-army': 'FRAGORD', 'nato-ca': 'Frag O' }
 } as const satisfies { readonly abbreviation: Readonly<Record<StaffProfileId, string>> } & Record<string, unknown>;
 
 /** One kind of order or plan the orders tool assembles: its id, the name a person reads, its abbreviation, and the product kind it is recorded as. */
@@ -922,8 +971,8 @@ export interface OrderKind { readonly id: string; readonly name: string; readonl
 
 /** The orders and plans each profile issues (design 10, 2.1 row 7 and 6.2 `orders`). The FRAGO is FRAGMENTARY_ORDER's, drafted by its own tool. */
 // US Joint: JP 5-0 (1 July 2025) ch. IV, orders and plan levels (design 10, 2.8 item 5). US Army: FM 5-0 (November 2024) ch. on orders production (05 s2).
-// NATO/Canadian: CFJP 5.0 (2008) art. 403 to 405 (Wng O at Stage 2; CONOPS approved first, then the OPLAN; Impl O or Op O at Stage 4), by best
-// judgement for the abbreviations where AJP-5 gives none.
+// NATO/Canadian: CFJP 5.0 (2008) art. 403 to 405 (Wng O at Stage 2; CONOPS approved first, then the OPLAN; Impl O or Op O at Stage 4); the spaced
+// abbreviations from CACSC-PUB-500 (2018), abbreviations list, and CFJP 5.0 (2008) annexes A, H and J.
 export const ORDER_KINDS: Readonly<Record<StaffProfileId, readonly OrderKind[]>> = {
   'us-joint': [
     { id: 'warnord', name: 'Warning order', abbreviation: 'WARNORD', productKind: 'order' },
@@ -950,8 +999,8 @@ export const ORDER_KINDS: Readonly<Record<StaffProfileId, readonly OrderKind[]>>
 
 /** The five paragraphs of an order or plan under each profile, in order. A FRAGO uses the same five, with the changes only. */
 // US Joint: AY26 Campaign Planning Handbook OPORD format (paragraph 4 Administration and Logistics, paragraph 5 Command and Control). US Army: FM 5-0
-// (November 2024) app. E (paragraph 4 Sustainment, paragraph 5 Command and Signal; 05 s2). NATO/Canadian: by best judgement from the NATO five-paragraph
-// order (paragraph 4 Service Support), until a COPD or Canadian staff duties check (design 10, 2.9).
+// (November 2024) app. E (paragraph 4 Sustainment, paragraph 5 Command and Signal; 05 s2). NATO/Canadian: the NATO five-paragraph order, paragraph 4
+// Service Support (confirmed by the owner, 2026-11-19; see the terms register).
 export const ORDER_PARAGRAPHS: Readonly<Record<StaffProfileId, readonly string[]>> = {
   'us-joint': ['Situation', 'Mission', 'Execution', 'Administration and Logistics', 'Command and Control'],
   'us-army': ['Situation', 'Mission', 'Execution', 'Sustainment', 'Command and Signal'],
@@ -963,9 +1012,9 @@ export const BATTLE_RHYTHM_KINDS = ['board', 'bureau', 'centre', 'cell', 'workin
 export type BattleRhythmKind = (typeof BATTLE_RHYTHM_KINDS)[number];
 
 /** How each profile names the battle rhythm bodies: US spelling under the US profiles, Commonwealth spelling under NATO/Canadian. */
-// AY26 Campaign Planning Handbook (boards, bureaus, centers, cells, and working groups, B2C2WG); JP 5-0 (1 July 2025) app. H, figure H-7 notional
-// battle rhythm integration; JP 3-33 (2018) by title for the B2C2WG term. NATO/Canadian spelling by best judgement (Land Operations, 2008, writes
-// "centre").
+// AY26 Campaign Planning Handbook (boards, bureaus, centers, cells, and working groups); JP 5-0 (1 July 2025) app. H, figure H-7 notional battle
+// rhythm integration; JP 3-33 (2018) by title. NATO/Canadian: AJP-3 Edition C (Feb 2019) paras 3.24 and 3.25 define board, bureau, centre, cell and
+// working group with "centre" spelling and no acronym, so NATO/Canadian text writes them out in full.
 export const BATTLE_RHYTHM_NAMES: Readonly<Record<StaffProfileId, Readonly<Record<BattleRhythmKind, string>>>> = {
   'us-joint': { board: 'Board', bureau: 'Bureau', centre: 'Center', cell: 'Cell', 'working-group': 'Working group', meeting: 'Meeting', brief: 'Brief' },
   'us-army': { board: 'Board', bureau: 'Bureau', centre: 'Center', cell: 'Cell', 'working-group': 'Working group', meeting: 'Meeting', brief: 'Brief' },
@@ -981,8 +1030,8 @@ export const SPACE_COMMAND_PRODUCTS: readonly string[] = ['Space operations dire
  * The core logistics functions support planning covers, one J4 member each (design 10, 3.5; 03 Summary 3 and B2). Support planning runs at the same time
  * as force planning, from the first step, not after the COA decision (03 B3).
  */
-// JP 5-0 (2020) ch. IV support planning, as read for note 03 (03 B2); JP 4-0 (20 July 2023) by title, whose core logistic capabilities use the same areas
-// (03 B1; design 10, 2.9). The seven names are unchanged in the JP 5-0 (1 July 2025) the owner supplied (design 10, 2.8: only listed changes apply).
+// JP 4-0 (4 Feb 2019, Change 1) fig. II-1, Core Logistics Functions; JP 5-0 (2020) ch. IV support planning (03 B2); JP 4-0 (20 July 2023) by title,
+// whose contents keep the same areas. The seven names are unchanged in JP 5-0 (1 July 2025) (design 10, 2.8: only listed changes apply).
 export const CORE_LOGISTICS_FUNCTIONS: readonly string[] = [
   'Deployment and distribution', 'Supply', 'Maintenance', 'Logistic services', 'Operational contract support', 'Joint health services', 'Engineering'
 ];
@@ -995,7 +1044,8 @@ export const SUPPORT_PLANNING_RULE = 'Support planning runs at the same time as 
 export const SUSTAINMENT_ELEMENTS: readonly string[] = ['Logistics', 'Financial management', 'Personnel services', 'Health service support'];
 
 /** The Canadian lines of support, by the level that usually provides them (design 10, 2.5; 03 B6, B11). */
-// CFJP 4-0, Support (2016) by title, as quoted by secondary sources (03 B6 [S49][S50]); level mapping 03 B11. Best judgement until CFJP 4-0 is read (design 10, 2.9).
+// CFJP 4-0, Support (B-GJ-005-400/FP-001, 24 Feb 2014), definitions as quoted in RCAF B-GA-402-003/FP-001, Force Sustainment (July 2017), glossary and
+// paras 7 to 9; level mapping 03 B11 (third line can also serve at tactical level).
 export const CANADIAN_LINES_OF_SUPPORT: ReadonlyArray<{ readonly line: string; readonly meaning: string; readonly level: StaffLevel }> = [
   { line: 'First line', meaning: 'Support organic to the ship, unit or squadron', level: 'tactical' },
   { line: 'Second line', meaning: 'Support organic or allocated to a formation', level: 'tactical' },
@@ -1010,7 +1060,7 @@ export interface SupplyClass { readonly class: string; readonly holds: string }
  * The classes of supply each profile uses. US Joint and US Army use the ten US classes; NATO and Canada use the five NATO classes. Members forecast by
  * these classes only, and never with a factor table from a government source (03 B5, B12 items 1 and 2).
  */
-// US: JP 4-09 (public reference edition) and ATP 4-42 series, the ten classes as US practice lists them (03 B2 [S46]; best judgement).
+// US: ATP 3-04.119 (25 Jan 2022) table 4-2, the ten classes of supply; no current joint list is public.
 // NATO/Canadian: AAP-06, NATO Glossary of Terms and Definitions, "class of supply" (five classes); Canada follows NATO terms first (design 10, 2.5).
 export const SUPPLY_CLASSES: Readonly<Record<StaffProfileId, readonly SupplyClass[]>> = {
   'us-joint': [
@@ -1064,18 +1114,18 @@ export interface LogisticsTerms {
 }
 
 // JP 5-0 (2020) ch. IV and app. A (theater logistics overview, logistics estimate, Annex D); JP 4-0 (2023) ch. V JLOC by title (03 B3, B4); FM 5-0 (Nov 2024)
-// running estimates and Annex F (03 B3); ADP 4-0 (2019) (03 B5); AJP-4 by title, CFJP 4-0 (2016) by title and the JTF Support Component (03 B6). Best
-// judgement where a level has no named centre: the plain description, never an invented branch name (03 A8 gap, B12 item 3).
+// running estimates and Annex F (03 B3); ADP 4-0 (2019) (03 B5); AJP-4 by title, CFJP 4-0 (2014) by title and the JTF Support Component (03 B6). Where a
+// level has no named centre in these sources: the plain description, never an invented branch name (03 A8 gap, B12 item 3).
 export const LOGISTICS_TERMS: Readonly<Record<StaffProfileId, LogisticsTerms>> = {
   'us-joint': {
     function: 'Logistics',
     estimate: 'Logistics estimate',
     strategicEstimate: 'Joint logistics estimate',
     overview: 'Theater logistics overview',
-    conceptOfSupport: 'Concept of support',
-    reception: 'Joint reception, staging, onward movement and integration (JRSOI)', // JP 3-35 (2018) (03 B1, B2)
+    conceptOfSupport: 'Concept of logistics support (COLS)', // JP 4-0 (2019, Change 1) p. IV-16; JP 5-0 (2017) p. V-55
+    reception: 'Joint reception, staging, onward movement and integration (JRSOI)', // JP 3-35 (10 Jan 2018) ch. VI
     currentOps: { strategic: 'CCMD J4 joint logistics operations center (CCMD J4 JLOC)', operational: 'JTF J4 joint logistics operations center (JTF J4 JLOC)', tactical: 'Not offered at tactical level' },
-    source: 'JP 5-0 (2020, 2025); JP 4-0 (2023) by title'
+    source: 'JP 5-0 (2020, 2025); JP 4-0 (2019, Change 1); JP 4-0 (2023) by title'
   },
   'us-army': {
     function: 'Sustainment',
@@ -1083,9 +1133,9 @@ export const LOGISTICS_TERMS: Readonly<Record<StaffProfileId, LogisticsTerms>> =
     strategicEstimate: 'Not offered at strategic level',
     overview: 'Sustainment overview',
     conceptOfSupport: 'Concept of support',
-    reception: 'Reception, staging, onward movement and integration (RSOI)', // ATP 3-35 (2015) Army deployment doctrine (best judgement)
+    reception: 'Reception, staging, onward movement and integration (RSOI)', // ATP 3-35, Army Deployment and Redeployment (March 2023)
     currentOps: { strategic: 'Not offered at strategic level', operational: 'Not offered at operational level', tactical: 'Sustainment cell current operations, with the supporting unit\'s support operations officer' },
-    source: 'FM 5-0 (2024); ADP 4-0 (2019)'
+    source: 'FM 5-0 (2024); ADP 4-0 (2019); ATP 3-35 (2023)'
   },
   'nato-ca': {
     function: 'Logistics',
@@ -1093,15 +1143,16 @@ export const LOGISTICS_TERMS: Readonly<Record<StaffProfileId, LogisticsTerms>> =
     strategicEstimate: 'Strategic logistics estimate',
     overview: 'Theatre logistics overview',
     conceptOfSupport: 'Concept of logistic support',
-    reception: 'Reception, staging and onward movement (RSOM)', // AJP-3.13, Deployment and Redeployment of Forces, by title (best judgement)
+    reception: 'Reception, staging and onward movement (RSOM)', // AJP-3.13 Edition A V1 (17 May 2021) para 1.28: integration is a separate stage
     currentOps: { strategic: 'Strategic J4 logistics operations centre', operational: 'JTF J4 joint logistics operations centre (JTF J4 JLOC)', tactical: 'Combat service support (CSS) current operations cell' },
-    source: 'AJP-4 and AJP-5 by title; CFJP 4-0 (2016) by title (03 B6)'
+    source: 'AJP-4 and AJP-5 by title; AJP-3.13 (2021); CFJP 4-0 (2014) by title (03 B6)'
   }
 };
 
 /** The reports a deployed Canadian operation sends to the CJOC J4 desk, alongside the LOGSTAT (design 10, 2.5; 03 B6, B12 item 9). */
 // DND evaluation of CAF operational support (2021) as summarised in 03 B6 [S52]: a weekly logistics report plus equipment, ammunition status and
-// ammunition expenditure reports to the CJOC Joint Support (J4) desk. Report names are plain descriptions until CFJP 4-0 is read (design 10, 2.9).
+// ammunition expenditure reports to the CJOC Joint Support (J4) desk. No public Canadian name for the weekly report exists (NATO's standard report is the
+// LOGREP), so the names are plain descriptions.
 export const CANADIAN_J4_REPORTS = {
   weekly: 'Weekly logistics report',
   others: ['Equipment status report', 'Ammunition status report', 'Ammunition expenditure report'],
