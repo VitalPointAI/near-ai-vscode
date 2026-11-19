@@ -1,9 +1,9 @@
 // NEAR AI: Set Up a Staff Team, without VS Code: what a person can choose for each staff template, the roster they check before anything is written,
 // and the writes themselves. The command in staffSetupCommand.ts asks the questions and confirms; everything here is testable on a temporary folder.
 //
-// What it writes, for one section (J2 or J5) and one set of choices:
+// What it writes, for one section (J2, J5 or J3) and one set of choices:
 // - the team file in the person's team library (`<section>-<profile>-<level>.md`, run as /team:<that name>), private, with its `staff:` block and a
-//   template stamp so Update Team can tell an unchanged member from one the person edited. A J2 and a J5 team can sit side by side; an earlier file of
+//   template stamp so Update Team can tell an unchanged member from one the person edited. J2, J5 and J3 teams can sit side by side; an earlier file of
 //   the same name is moved to the library's archive first, never deleted;
 // - PROFILE.md and the section's skills under .planning/staff/;
 // - the staff settings into .planning/.near-ai/project.json (`staff`), keeping every other field;
@@ -16,6 +16,7 @@ import { defaultStaffSettings, levelOffer, parseStaffSettings, staffSettingsJson
 import type { StaffSettings } from '../domain/staff/profiles';
 import { withStaffGuidance } from '../agent/staff/guidance';
 import { j2Renderings } from '../agent/staff/j2Template';
+import { j3OptionSets } from '../agent/staff/j3Operations';
 import { j5OptionSets } from '../agent/staff/j5Plans';
 import { staffTemplate } from '../agent/staff/templates';
 import type { StaffTemplate, StaffTemplateOptions } from '../agent/staff/templates';
@@ -26,12 +27,13 @@ import { applyTeamUpdate, planTeamUpdate } from '../agent/teamUpdate';
 export const SET_UP_STAFF_TEAM_COMMAND = 'nearAi.setUpStaffTeam';
 export const PROJECT_JSON = '.planning/.near-ai/project.json';
 
-/** The profile, level and nation pairs a template is written for: J2 every offered pair; J5 the pairs its option sets list. */
+/** The profile, level and nation pairs a template is written for: J2 every offered pair; J5 and J3 the pairs their option sets list. */
 export function templateOffers(template: StaffTemplate): Array<{ profile: StaffProfileId; level: StaffLevel; nation?: StaffNation }> {
   const seen = new Map<string, { profile: StaffProfileId; level: StaffLevel; nation?: StaffNation }>();
   const add = (settings: StaffSettings) => seen.set(`${settings.profile}/${settings.level}/${settings.nation ?? ''}`, { profile: settings.profile, level: settings.level, ...(settings.nation ? { nation: settings.nation } : {}) });
   if (template.section === 'j2') for (const rendering of j2Renderings()) add(rendering.settings);
   else if (template.section === 'j5') for (const options of j5OptionSets()) add(options.settings);
+  else if (template.section === 'j3') for (const options of j3OptionSets()) add(options.settings);
   return [...seen.values()];
 }
 

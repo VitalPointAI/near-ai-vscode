@@ -21,9 +21,10 @@ export const STAFF_STEP_TOOL = 'mcp__staff-products__step';
 /** The one tradecraft rule set (ICD 203), for the tradecraft gate: src/domain/staff/tradecraftLint.ts. */
 export const STAFF_LINT_TOOL = 'mcp__staff-products__lint';
 
-/**
- * The other built-in servers, granted by pattern: every tool of each. Only servers that exist are granted: the cop-map server comes in drop 2, and until
- * then map layers are product files the members write directly.
- */
+/** The other built-in servers, granted by pattern: every tool of each. Only servers that exist are granted (a test holds every grant to a server). */
 export const INTEL_WORKBENCH = 'mcp__intel-workbench__*';
+export const COP_MAP = 'mcp__cop-map__*';
 export const GUARD_SCAN = 'mcp__guard-scan__*';
+/** The orders and battle rhythm servers (design 10, 6.2; WP-ORD). A member's instructions never depend on them: without them it writes Markdown products. */
+export const ORDERS = 'mcp__orders__*';
+export const BATTLE_RHYTHM = 'mcp__battle-rhythm__*';

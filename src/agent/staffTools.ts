@@ -27,12 +27,13 @@ export const STAFF_PRODUCT_TOOL_VERBS = [...AGENT_PRODUCT_VERBS, 'register', 'wa
 export const staffToolName = (server: string, verb: string): string => `mcp__${server}__${verb}`;
 
 /**
- * The staff tools a write-limited member (a staff team's red team or release guard, src/domain/staff/writeLimits.ts) keeps when its tools line lists
- * them. They write only through the host, which records the ledger, the header and the gate report, never a product body: propose is refused for any
- * product outside the member's write limit, and verdict only records a gate member's verdict.
+ * The staff tools a write-limited member (a staff team's red team, release guard or J3 watch officer, src/domain/staff/writeLimits.ts) keeps when its
+ * tools line lists them. They write only through the host, which records the ledger, the header and the gate report, never a product body: propose is
+ * refused for any product outside the member's write limit, register writes no register outside it (proposing rows and reporting a CCIR trigger stay
+ * open), and verdict only records a gate member's verdict.
  */
 export const WRITE_LIMITED_STAFF_TOOLS: ReadonlySet<string> = new Set([
-  ...(['propose', 'verdict', 'status', 'list', 'lint'] as const).map((verb) => staffToolName(STAFF_PRODUCTS_SERVER, verb)),
+  ...(['propose', 'verdict', 'status', 'list', 'lint', 'register'] as const).map((verb) => staffToolName(STAFF_PRODUCTS_SERVER, verb)),
   staffToolName(GUARD_SCAN_SERVER, 'scan')
 ]);
 
@@ -223,7 +224,7 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
 
   const register: AgentTool<{ action: 'read' | 'write' | 'propose' | 'trigger'; register: string; rows: unknown[]; remove: string[]; part?: string; note?: string; ccir?: string; report?: string; label?: string }> = {
     name: name('register'),
-    description: '[staff-products] The structured registers: ccir-register, pir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook. action read returns the rows; write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns.',
+    description: '[staff-products] The structured registers: ccir-register, pir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log. action read returns the rows; write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns.',
     parameters: {
       type: 'object',
       properties: {

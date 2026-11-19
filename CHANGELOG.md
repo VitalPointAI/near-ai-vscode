@@ -2,14 +2,14 @@
 
 ## Unreleased
 
-**Military staff teams.** Set up a J2 intelligence or J5 plans staff team for your project in your
+**Military staff teams.** Set up a J2 intelligence, J5 plans or J3 operations staff team for your project in your
 staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian), load a fictional exercise
 scenario, and let the members draft in parallel while every product passes the team's gates and a
 named person makes every decision. Staff teams are private, unclassified and for exercise and
 fictional data only; labels are not accreditation, and no member has a persona name or a rank.
 
 - **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
-  for the section (J2 or J5), the doctrine profile, the level, the nation (NATO/Canadian), the
+  for the section (J2, J5 or J3), the doctrine profile, the level, the nation (NATO/Canadian), the
   planning type and the section's own options, then shows the roster: the person who decides, and
   each member with its role and who it reports to. It saves the private team to your teams, writes
   PROFILE.md and the section's skills under `.planning/staff/`, the staff settings in the
@@ -32,6 +32,20 @@ fictional data only; labels are not accreditation, and no member has a persona n
   release guard. Strategic, operational and tactical variants, a multidomain convergence planner
   under US Army, and the J3 director as planning lead in crisis planning. Four skills: planning
   templates, wargame ledger, centre of gravity analysis and assessment framework.
+- **J3 operations team.** 12 members at strategic and operational level and 10 at tactical level:
+  an integrator who keeps the running estimate (headed by the seven joint functions, or Command,
+  Sense, Act, Shield and Sustain under NATO/Canadian with Canada) and proposes the CCIRs, current
+  operations with the COP and the event log, a watch officer, future operations with branches,
+  FRAGO drafts and the DST and DSM in execution, fires and effects, targeting, information, cyber
+  and space (JP 3-14 (2023) mission areas only), airspace and maritime liaison, assessment,
+  liaison and a release guard. The three horizons come from your staff settings; a plan moves
+  into execution only when a person accepts the transition brief, and from then on the J3 keeps
+  the synchronization matrix, the DST and DSM and the assessment plan. Every FRAGO is a product a
+  person releases, every fires package and targeting row carries both the commander-or-delegate
+  and legal review marks, and in crisis planning the J3 director leads staff planning. The watch
+  officer has no Write: it proposes event-log rows and reports CCIR triggers through the staff
+  tools, and the extension refuses its file writes. Two skills: running estimate and execution
+  loop.
 - **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
   and move from draft through the gates to a person's decision, recorded in a signed, chained
   ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head
@@ -39,7 +53,7 @@ fictional data only; labels are not accreditation, and no member has a persona n
   or register that cannot be read whole is reported as unreadable, never as empty. Members use the built-in `mcp:staff-products` tools by role
   (propose, status and list for owners; submit and withdraw for the section's lead; verdicts for
   the two gates), with the shared CCIR, RFI, assumptions, annex, synchronization, decision support
-  and targeting registers, the wargame ledger and the step rail. Approving, rejecting and
+  and targeting registers, the operations centre's event log, the wargame ledger and the step rail. Approving, rejecting and
   releasing are **NEAR AI: Staff:** commands a person runs, signed with this device's key; no
   agent tool can do them.
 - **Two blocking gates.** The release guard runs `mcp:guard-scan` (classification and caveat
@@ -80,8 +94,9 @@ fictional data only; labels are not accreditation, and no member has a persona n
   ACLED, social media and other sources whose terms restrict this use are off by default, are
   never used for training, and stay off until your organization records a licence; partner
   intelligence enters a staff project only as a fictional simulation kept on this machine.
-- **Red team and release guard held to their own files.** In a staff team the red team may write
-  only its critique and the release guard only its gate reports. Write and Edit refuse every other
+- **Red team, release guard and J3 watch officer held to their own files.** In a staff team the red
+  team may write only its critique, the release guard only its gate reports, and the J3 watch
+  officer nothing at all. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
   tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
 

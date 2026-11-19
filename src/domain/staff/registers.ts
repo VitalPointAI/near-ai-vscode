@@ -1,5 +1,6 @@
 // The structured staff registers (design 10, 3.1, 4.3 and 4.5; WP-SHARED): the CCIR register, the PIR register, the RFI tracker, the facts and
-// assumptions ledger, the annex tracker, the synchronization matrix, the DST and DSM, and the targeting workbook. Pure: no I/O, no clock, no vscode.
+// assumptions ledger, the annex tracker, the synchronization matrix, the DST and DSM, the targeting workbook and the operations centre's event log.
+// Pure: no I/O, no clock, no vscode.
 //
 // A register is a staff product like any other (a Markdown file with the staff header, through the release state machine). Its body is a table a person
 // reads and, below it, the same rows as a fenced JSON block the tools read, so one file holds one version and one hash. Rows are checked against the
@@ -144,6 +145,21 @@ export const REGISTER_SCHEMAS: Readonly<Record<string, RegisterSchema>> = {
       { key: 'legalReview', title: 'Legal review', required: true, values: [STAFF_MARKERS.legalReview] },
       { key: 'commanderReview', title: 'Commander review', required: true, values: [COMMANDER_REVIEW_MARK] }
     ]
+  },
+  // Design 10, 3.4 (joc-chief, watch-officer) and 03 A6, A14 item 7: the watch logs facts in a standard form (time, source, what was reported) and
+  // flags matches against the CCIRs and the DSM's decision points; interpretation is the JOC chief's.
+  'event-log': {
+    register: 'event-log', title: 'Event log (operations centre)', kind: 'register',
+    columns: [
+      { key: 'id', title: 'ID', required: true },
+      { key: 'time', title: 'Time (UTC)', required: true, form: 'time' },
+      { key: 'source', title: 'Source', required: true },
+      { key: 'report', title: 'What was reported', required: true },
+      { key: 'ccir', title: 'CCIR matched' },
+      { key: 'decisionPoint', title: 'Decision point matched' },
+      { key: 'status', title: 'Status', required: true, values: ['logged', 'escalated', 'closed'] }
+    ],
+    rules: [(row) => (row.status === 'escalated' && row.ccir === undefined && row.decisionPoint === undefined ? 'An escalated entry names the CCIR or decision point it matched.' : undefined)]
   }
 };
 

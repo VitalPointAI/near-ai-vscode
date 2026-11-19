@@ -40,17 +40,20 @@ const SECTION = (section: StaffSectionId): StaffWriter => ({ section, member: '*
 
 /** Who keeps the PIRs where a roster has no requirements-manager: the brigade's collection-manager, then the battalion's s2-lead. */
 const J2_REQUIREMENTS_FOLDS = ['collection-manager', 's2-lead'];
+/** The J3 at tactical level: the s3-lead integrates and the current-ops-chief runs the command post (design 10, 3.4 level variants). */
+const J3_DIRECTOR = (): StaffWriter => W('j3', 'j3-director', ['s3-lead']);
+const J3_CURRENT_OPS = (): StaffWriter => W('j3', 'joc-chief', ['current-ops-chief']);
 
 export const SHARED_PRODUCTS: readonly SharedProduct[] = [
-  { product: 'cop', kind: 'map-layer', owners: ALWAYS(W('j3', 'joc-chief')), contributors: [W('j2', 'threat-analyst'), W('j2', 'geoint-analyst'), W('j4', 'jloc-chief'), W('j5', 'lead-planner')], note: 'The published picture: the JOC chief merges the layers. The plans layer never merges into it.' },
-  { product: 'cop-operations-layer', kind: 'map-layer', owners: ALWAYS(W('j3', 'joc-chief')), contributors: [SECTION('j3')] },
+  { product: 'cop', kind: 'map-layer', owners: ALWAYS(J3_CURRENT_OPS()), contributors: [W('j2', 'threat-analyst'), W('j2', 'geoint-analyst'), W('j4', 'jloc-chief'), W('j5', 'lead-planner')], note: 'The published picture: the JOC chief merges the layers. The plans layer never merges into it.' },
+  { product: 'cop-operations-layer', kind: 'map-layer', owners: ALWAYS(J3_CURRENT_OPS()), contributors: [SECTION('j3')] },
   { product: 'cop-threat-layer', kind: 'map-layer', owners: ALWAYS(W('j2', 'threat-analyst', ['ipb-analyst'])), contributors: [W('j2', 'geoint-analyst'), W('j2', 'watch-officer')] },
   { product: 'cop-terrain-layer', kind: 'map-layer', owners: ALWAYS(W('j2', 'geoint-analyst', ['jipoe-analyst', 'ipb-analyst'])), contributors: [W('j2', 'jipoe-analyst')] },
   { product: 'cop-logistics-layer', kind: 'map-layer', owners: ALWAYS(W('j4', 'jloc-chief')), contributors: [SECTION('j4')] },
   { product: 'cop-plans-layer', kind: 'map-layer', owners: ALWAYS(W('j5', 'lead-planner')), contributors: [W('j5', 'coa-cell-a'), W('j5', 'coa-cell-b')] },
   {
-    product: 'ccir-register', kind: 'register', owners: ALWAYS(W('j3', 'j3-director')),
-    parts: { pir: W('j2', 'requirements-manager', J2_REQUIREMENTS_FOLDS), ffir: W('j3', 'j3-director') },
+    product: 'ccir-register', kind: 'register', owners: ALWAYS(J3_DIRECTOR()),
+    parts: { pir: W('j2', 'requirements-manager', J2_REQUIREMENTS_FOLDS), ffir: J3_DIRECTOR() },
     contributors: [W('j4', 'j4-director')], note: 'The commander approves it through the release state machine.'
   },
   {
@@ -73,10 +76,26 @@ export const SHARED_PRODUCTS: readonly SharedProduct[] = [
   { product: 'annex-tracker', kind: 'register', owners: ALWAYS(W('j5', 'plans-writer')), contributors: 'all', note: 'Letters come from the profile.' },
   {
     product: 'battle-rhythm-calendar', kind: 'register',
-    owners: [{ phase: 'any', mode: 'full-staff', writer: W('command', 'chief-of-staff') }, { phase: 'any', mode: 'standalone', writer: W('j3', 'joc-chief') }],
+    owners: [{ phase: 'any', mode: 'full-staff', writer: W('command', 'chief-of-staff') }, { phase: 'any', mode: 'standalone', writer: J3_CURRENT_OPS() }],
     contributors: [SECTION('j4'), SECTION('j2')]
+  },
+  {
+    product: 'event-log', kind: 'register', owners: ALWAYS(J3_CURRENT_OPS()), contributors: [SECTION('j3'), W('j2', 'watch-officer'), W('j4', 'jloc-chief')],
+    note: 'The operations centre\'s log: watch officers propose entries (they have no Write); the JOC chief merges them.'
   }
 ];
+
+/**
+ * The product whose approval by a person moves the staff from planning to execution: the transition brief, accepted by the human J3 (design 10, 3.4
+ * step 7; JP 5-0, 2025: transition between future plans, future operations and current operations is made through a transition brief). The phase is
+ * read from the decision log, so it is a recorded, signed act and never an agent's.
+ */
+export const TRANSITION_PRODUCT = 'transition-brief';
+
+/** The phase a project is in: execution once a person has approved any version of the transition brief, planning until then. */
+export function phaseFrom(transition: { readonly approvedVersions: readonly number[] } | undefined): StaffPhase {
+  return transition && transition.approvedVersions.length > 0 ? 'execution' : 'planning';
+}
 
 export function sharedProduct(product: string): SharedProduct | undefined {
   return SHARED_PRODUCTS.find((entry) => entry.product === product);

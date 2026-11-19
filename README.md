@@ -254,19 +254,22 @@ writes the exact commands and leaves them for you to approve and run.
 
 **NEAR AI: Set Up a Staff Team** (also **Set up a staff team** in Team
 Studio) makes a military staff section team for this project: choose the
-section (J2 intelligence or J5 plans), the doctrine profile (US Joint, US Army
+section (J2 intelligence, J5 plans or J3 operations), the doctrine profile (US Joint, US Army
 MDMP or NATO/Canadian), the level, the nation and the kind of planning, then
 check the roster before anything is written. The team goes to your teams as
 `<section>-<profile>-<level>.md` and runs with `/team:<that name>`; PROFILE.md
 and the section's skills go under `.planning/staff/`, the staff settings into
 `.planning/.near-ai/project.json`, and the section's guidance into `AGENTS.md`
-between markers of its own, so a J2 and a J5 team can share a project. An
+between markers of its own, so J2, J5 and J3 teams can share a project. An
 earlier team file of the same name moves to your teams archive. The team is
 private, its members draft and recommend, and a named person decides: only
 the **NEAR AI: Staff** commands approve, reject or release a product. It then
 offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
-keeping members you changed. The built-in staff servers (`mcp:staff-products`,
+keeping members you changed. A J3 team's plan moves into execution only when
+a person approves its transition brief; from then on the J3 keeps the
+synchronization matrix, the DST and DSM and the assessment plan, and every
+FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
 `mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
 the Team Studio tool picker; only a staff team's run gets them.
 
@@ -611,8 +614,9 @@ until it runs out aren't shown.
   older version that does not know it still reads the member's tools
   correctly; if you write it by hand, put it after `tools:` too.
   In a military staff team (a team file with a `staff:` block), the red team
-  can write only its critique and the release guard only its verdicts: the
-  extension refuses their other writes and gives them no shell.
+  can write only its critique, the release guard only its verdicts, and the J3
+  watch officer nothing at all: the extension refuses their other writes and
+  gives them no shell.
   New research teams have `privacy: private` on every member (and presales
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
@@ -923,7 +927,8 @@ until it runs out aren't shown.
   file with a `staff:` block, for exercise and fictional data only) works on
   products through three tool groups its members are granted:
   `mcp:staff-products` (propose a new version, give a gate verdict, submit
-  for a decision, withdraw, status, list, the shared registers, the wargame
+  for a decision, withdraw, status, list, the shared registers including the
+  operations centre's event log, the wargame
   ledger and the tradecraft lint) and `mcp:guard-scan` (the release-guard's
   checks for markings, the exercise box, real names, decisions written as
   made, personal data and J4 numbers without a calculation). Every product
