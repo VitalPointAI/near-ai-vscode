@@ -14,14 +14,9 @@ import type { SecretStorageLike } from './auth';
 import { configureStaffHosts, describeView, staffHostFor } from '../staff/staffHost';
 import type { StaffHost } from '../staff/staffHost';
 
-export const STAFF_COMMANDS = {
-  approve: 'nearAi.staff.approveProduct',
-  reject: 'nearAi.staff.rejectProduct',
-  release: 'nearAi.staff.releaseProduct',
-  withdraw: 'nearAi.staff.withdrawProduct',
-  show: 'nearAi.staff.showProducts',
-  setAside: 'nearAi.staff.setAsideLedger'
-} as const;
+import { STAFF_COMMANDS } from '../domain/staff/commands';
+
+export { STAFF_COMMANDS };
 
 /** The words every decision dialog shows about who the person is. */
 export const STAFF_IDENTITY_TEXT = `You decide as the name and role you give here, signed with this device's key. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
