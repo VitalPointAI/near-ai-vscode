@@ -36,6 +36,7 @@ import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerGate } from './services/gateCommands';
 import { registerStaffCommands } from './services/staffCommands';
+import { registerStaffSimulation } from './services/staffSimCommand';
 import type { GateHost } from './gate/host';
 import { registerTeamMode, teamModeTestApi } from './services/team/teamCommands';
 import type { TeamModeTestApi } from './services/team/teamCommands';
@@ -219,6 +220,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerResearchVerifiers(context);
   registerStaffScenario(context);
   registerStaffSetup(context);
+  registerStaffSimulation(context);
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));

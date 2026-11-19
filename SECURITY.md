@@ -822,6 +822,21 @@ a folder on the way is a symbolic link. These checks keep the inputs clean;
 they are not an accreditation, and real operational material belongs on
 accredited systems.
 
+**The exercise feed simulation** (**NEAR AI: Staff: Start the Exercise Feed
+Simulation**) opens two Cursor on Target streams and one AIS stream over TCP,
+and one HTTP server for the RSS outlets and the mock partner MCP server, all
+bound to 127.0.0.1 and nothing else. It opens no outbound connection and no
+UDP or multicast socket, and transmits on no radio. The HTTP server answers
+only requests addressed to this machine's own names and refuses requests from
+a web page of any other origin, so a browser page cannot read it by DNS
+rebinding. Request bodies are capped and a client that falls behind is
+dropped. Every message is fictional and marked SIM; ship radio ids come from
+a range below the lowest that the ITU allocates, and RSS links point at the
+reserved `.invalid` domain. The partner reports are labelled, marked
+simulated and routed local-only, and a person must add the mock partner
+server before any team can call it. Stopping the simulation, or closing the
+window, closes every server.
+
 ## The outbound check
 
 Every chat message passes one check before it leaves VS Code, in this order:

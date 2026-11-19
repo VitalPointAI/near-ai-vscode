@@ -78,6 +78,16 @@ fictional data only; labels are not accreditation, and no member has a persona n
   ACLED, social media and other sources whose terms restrict this use are off by default, are
   never used for training, and stay off until your organization records a licence; partner
   intelligence enters a staff project only as a fictional simulation kept on this machine.
+- **IRON LANTERN as live feeds.** **NEAR AI: Staff: Start the Exercise Feed Simulation** replays
+  the starter scenario as live streams on this machine only: friendly and enemy tracks as Cursor on
+  Target, ships in and near the Varn Strait as AIS, fictional news outlets as RSS, and a mock
+  partner server (MCP) standing in for partner-only HUMINT, SIGINT, MASINT and CI with fictional
+  reports, each marked SIM and kept local-only. The timeline follows the J2 demo script beat by
+  beat and holds when the mid-demo report lands, so you can run the change-propagation beat and
+  then resume. **Staff: Simulation Controls** pauses, resumes, steps to the next reports and sets
+  the speed (0.5x, 1x, 2x or 4x); the status bar shows the SIM badge, the speed and the scenario
+  clock, and every feed in the feed picture is badged SIM. At 1x the three days play in about
+  a quarter of an hour.
 - **Red team and release guard held to their own files.** In a staff team the red team may write
   only its critique and the release guard only its gate reports. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
