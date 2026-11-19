@@ -30,6 +30,7 @@ import type { GrantedTeam } from './staffGrantGate';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED } from './tools';
 import type { AgentTool, ToolContext } from './tools';
 import { ToolError } from './workspace';
+import { fenceReadResults } from './staffFence';
 
 export const COP_MAP_SERVER = 'cop-map';
 export const SCENARIO_FILE = `${SCENARIO_DIR}/scenario.json`;
@@ -103,11 +104,6 @@ function textArg(raw: Record<string, unknown>, key: string, max = 500): string {
   const value = raw[key];
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new ToolError(`${key} is required, as text of at most ${max} characters.`);
   return value.trim();
-}
-
-/** Free text an agent reads from a file other members wrote: fenced, so it is read as data, never as instructions. */
-function fenced(lines: readonly string[]): string {
-  return ['<untrusted-data source="cop-map">', ...lines.map((line) => line.replace(/<\/?untrusted-data[^>]*>/gi, '')), '</untrusted-data>'].join('\n');
 }
 
 interface LayerFile { readonly exists: boolean; readonly header: string; readonly body: string; readonly features: readonly CopFeature[]; readonly problems: readonly string[] }
@@ -223,7 +219,7 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
       const head = `${layer}: ${total} feature${total === 1 ? '' : 's'}${input.ecoa ? ` in ${String(input.ecoa)}` : ''}; label ${layerLabel(shown) ?? 'not joinable'}; written by ${access.kind === 'product' ? writerText(access.writer) : 'its owner'}.`;
       const cut = total > shown.length ? [`Showing the first ${shown.length} of ${total}; narrow by ecoa or kind for the rest.`] : [];
       const problems = read.problems.length ? ['Features that could not be read:', ...read.problems.map((line) => `- ${line}`)] : [];
-      return [head, ...cut, fenced([...shown.map(featureLine), ...problems])].join('\n');
+      return [head, ...cut, ...shown.map(featureLine), ...problems].join('\n');
     }
   };
 
@@ -298,7 +294,7 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
           lines.push(`- ${entry.replace(/\.json$/, '')}: from ${value.from?.member ?? 'unknown'}: ${value.summary ?? ''}${value.features ? ` (${value.features.length} features)` : ''}${value.settings ? ` settings: ${value.settings}` : ''}`);
         } catch { lines.push(`- ${entry}: not valid JSON`); }
       }
-      return [`${names.length} proposal${names.length === 1 ? '' : 's'} for ${String(input.layer)}:`, fenced(lines)].join('\n');
+      return [`${names.length} proposal${names.length === 1 ? '' : 's'} for ${String(input.layer)}:`, ...lines].join('\n');
     }
   };
 
@@ -343,14 +339,25 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
         if (!built.ok) throw new ToolError(`${built.message} The proposal was not merged.`);
         return built.value;
       });
-      const out = await ownerWrite(context, allowed.layer, (existing) => {
-        const merged = mergeFeatures(existing, features);
-        if (!merged.ok) throw new ToolError(merged.message);
-        return merged.value;
-      }, `Merged ${by}'s proposal: ${value.summary ?? ''}`);
-      // The proposal moves to merged/ as the bytes that were merged; a proposal edited since stays where it is, to be looked at again.
+      // The proposal moves to merged/ as the bytes that were merged. The copy is written first, and only as a new file: when it cannot be (a copy of that
+      // name is already there), nothing is merged and the proposal stays, so a proposal is never deleted without its kept copy (drop 2 review).
       const kept = path.join(folder, 'merged', path.basename(file));
-      await writeIfUnchanged(kept, { exists: false }, text);
+      if (!(await writeIfUnchanged(kept, { exists: false }, text))) {
+        throw new ToolError(`${layerProposalFolder(layer)}merged/${path.basename(file)} is already there, so the proposal was not merged and stays where it is. Move or rename that copy, then merge again.`);
+      }
+      let out: string;
+      try {
+        out = await ownerWrite(context, allowed.layer, (existing) => {
+          const merged = mergeFeatures(existing, features);
+          if (!merged.ok) throw new ToolError(merged.message);
+          return merged.value;
+        }, `Merged ${by}'s proposal: ${value.summary ?? ''}`);
+      } catch (error) {
+        // Nothing was merged: take back the copy written above (only those bytes), so the proposal is still only in the proposals.
+        await writeIfUnchanged(kept, snapshotOfBytes(Buffer.from(text, 'utf8')), undefined).catch(() => false);
+        throw error;
+      }
+      // A proposal edited since it was read stays where it is, to be looked at again.
       const moved = await writeIfUnchanged(file, snapshotOfBytes(proposalBytes), undefined);
       return `${out}\nMerged ${features.length} feature${features.length === 1 ? '' : 's'} from ${by}.${moved ? '' : ' The proposal file was changed after it was read, so it stays in the proposals for you to look at again.'}`;
     }
@@ -376,7 +383,8 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
     }
   };
 
-  return [layers, layerRead, propose, proposals, merge, symbol];
+  // Every read tool's answer is fenced whole (staffFence.ts): layers and proposals are other members' text, read as data, never as instructions.
+  return fenceReadResults([layers, layerRead, propose, proposals, merge, symbol]);
 }
 
 /**

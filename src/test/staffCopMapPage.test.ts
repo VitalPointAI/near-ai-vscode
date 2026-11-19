@@ -16,6 +16,7 @@ import { COP_MAP_FILES, copMapCsp, copMapResources } from '../staff/copMapWebvie
 
 const REPO = path.resolve(__dirname, '..', '..');
 const SCRIPT = readFileSync(path.join(REPO, 'media', 'staff', 'copMap.js'), 'utf8');
+const DECLUTTER = readFileSync(path.join(REPO, 'media', 'staff', 'declutter.js'), 'utf8');
 
 function starter() {
   const parsed = parseScenarioText(readFileSync(path.join(REPO, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
@@ -76,8 +77,21 @@ class FakeMap {
 
 interface Page { window: Record<string, unknown>; container: Node }
 
+/** The page's timers that have neither fired nor been cleared, with their delay: a timer the page forgets shows up here. */
+const liveTimers = new Map<ReturnType<typeof setTimeout>, number>();
+function pageSetTimeout(fn: () => void, ms?: number): ReturnType<typeof setTimeout> {
+  const handle = setTimeout(() => { liveTimers.delete(handle); fn(); }, ms);
+  liveTimers.set(handle, ms ?? 0);
+  return handle;
+}
+function pageClearTimeout(handle: ReturnType<typeof setTimeout> | undefined): void {
+  if (handle !== undefined) liveTimers.delete(handle);
+  clearTimeout(handle);
+}
+
 function page(): Page {
   requests = [];
+  liveTimers.clear();
   const head = new Node('head');
   const document = {
     head,
@@ -87,7 +101,7 @@ function page(): Page {
   const record = (kind: string) => (url: unknown) => { requests.push(`${kind} ${String(url)}`); return Promise.reject(new Error('offline')); };
   const window: Record<string, unknown> = {};
   const context: Record<string, unknown> = {
-    window, document, console, setTimeout, clearTimeout, Date, Math, JSON, Promise, Map, Object, Array, Number, String, Boolean, Error, isFinite,
+    window, document, console, setTimeout: pageSetTimeout, clearTimeout: pageClearTimeout, Date, Math, JSON, Promise, Map, Object, Array, Number, String, Boolean, Error, isFinite,
     fetch: record('fetch'),
     XMLHttpRequest: class { public open(_method: string, url: string) { requests.push(`xhr ${url}`); } public send() {} },
     WebSocket: class { public constructor(url: string) { requests.push(`websocket ${url}`); } },
@@ -95,6 +109,8 @@ function page(): Page {
     Image: class { public set src(url: string) { requests.push(`image ${url}`); } }
   };
   vm.createContext(context);
+  // The page loads the shared label placement first (staffRoomPanel.ts), then the map.
+  new vm.Script(DECLUTTER, { filename: 'declutter.js' }).runInContext(context);
   new vm.Script(SCRIPT, { filename: 'copMap.js' }).runInContext(context);
   return { window, container: new Node('div') };
 }
@@ -205,6 +221,14 @@ test('with MapLibre the component uses a style with no remote source, switches t
   assert.deepEqual(requests, [], 'no request beyond the libraries the host gave');
 });
 
+test('when MapLibre is ready first, the 15-second "never wait forever" timer is cleared, not left pending behind the view', async () => {
+  const { window, container } = page();
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'auto', libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } } });
+  assert.equal(view.renderer, 'maplibre');
+  assert.deepEqual([...liveTimers.values()].filter((ms) => ms === 15000), [], 'no 15-second timer is left once the map is ready');
+  view.destroy();
+});
+
 test('MapLibre places names with its collision index: symbols always stay, a name that does not fit is dropped, and symbol images carry no text', async () => {
   const { window, container } = page();
   const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'auto', still: true, libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } } });
@@ -272,16 +296,15 @@ test('the SVG map places every name so no two labels overlap near Port Calder, k
   assert.ok(svgRoot.all().some((node) => node.getAttribute('data-for')?.startsWith('~place/') && node.textContent === 'Port Calder'), 'Port Calder is named');
 });
 
-test('the COP map and the Staff Room\'s SVG map share one label placement', () => {
+test('the COP map and the Staff Room\'s SVG map share one label placement, media/staff/declutter.js, and neither keeps a copy', () => {
   const room = readFileSync(path.join(REPO, 'media', 'staffRoom', 'staffMap.js'), 'utf8');
-  const block = (source: string) => {
-    const start = source.indexOf('  /** Where a label may go');
-    const end = source.indexOf('    return out;\n  }\n', start);
-    assert.ok(start > 0 && end > start);
-    return source.slice(start, end);
-  };
-  assert.equal(block(SCRIPT), block(room), 'the same function in both files');
+  for (const [name, source] of [['copMap.js', SCRIPT], ['staffMap.js', room]] as const) {
+    assert.doesNotMatch(source, /function declutter\(|const LABEL_OFFSETS|function shortName\(/, `${name} keeps no copy of the label placement`);
+    assert.match(source, /window\.nearDeclutter && window\.nearDeclutter\.declutter/, `${name} reads the shared routine`);
+  }
+  assert.match(DECLUTTER, /function declutter\(labels, obstacles\)/);
   const { window } = page();
+  assert.equal(window.nearCopMap && (window.nearCopMap as { declutter: unknown }).declutter, (window.nearDeclutter as { declutter: unknown }).declutter, 'the map exports the shared routine itself');
   const declutter = (window.nearCopMap as { declutter: (labels: unknown[], obstacles: unknown[]) => Record<string, { hidden: boolean; text?: string }> }).declutter;
   const crowd = Array.from({ length: 12 }, (_, n) => ({ id: `l${String(n).padStart(2, '0')}`, x: 100 + (n % 3) * 4, y: 100 + Math.floor(n / 3) * 3, w: 60, h: 12, gap: 8, prio: n % 2, text: `Label number ${n}`, size: 10 }));
   const out = JSON.parse(JSON.stringify(declutter(crowd, [{ x: 95, y: 95, w: 10, h: 10, owner: 'l00' }])));

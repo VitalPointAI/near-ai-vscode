@@ -970,8 +970,12 @@ export function processImporters(files: Record<string, string>): string[] {
   return Object.entries(files).filter(([, text]) => form.test(code(text))).map(([file]) => file).sort();
 }
 
-/** The only places a tool's own run is called: the loop's executeCall, the cyber step engine, and the sub-agent wrapper that runs inside executeCall. */
-const TOOL_RUN_SITES: Readonly<Record<string, number>> = { 'src/agent/loop.ts': 1, 'src/services/cyberRun.ts': 1, 'src/services/agentSession.ts': 2 };
+/**
+ * The only places a tool's own run is called: the loop's executeCall, the cyber step engine, the sub-agent wrapper that runs inside executeCall, and
+ * the staff servers' read-answer fence (src/agent/staffFence.ts, drop 2 review), whose wrapper is the tool executeCall runs: it calls the wrapped tool's
+ * run inside that same gated call, keeps every other field (manifest, forbidden, sensitive) and only fences the text that comes back.
+ */
+const TOOL_RUN_SITES: Readonly<Record<string, number>> = { 'src/agent/loop.ts': 1, 'src/services/cyberRun.ts': 1, 'src/services/agentSession.ts': 2, 'src/agent/staffFence.ts': 1 };
 /** Every production `new AgentRun(`: the main run and each sub-agent in the session, and the benchmark runner. */
 const AGENT_RUN_SITES: Readonly<Record<string, number>> = { 'src/services/agentSession.ts': 2, 'src/benchmark/runner.ts': 1 };
 /**

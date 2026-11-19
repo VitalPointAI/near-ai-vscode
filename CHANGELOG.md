@@ -227,6 +227,18 @@ members draft and recommend, and a named person makes every decision.
   longer asks for a write approval, and reading the PIR register returns the intel workbench's
   register. **Decide a PIR** names the reason when the PIR register cannot be read instead of
   saying no PIR is waiting.
+- **Staff tool answers fenced as untrusted.** Every answer a staff read tool gives an agent
+  (products, registers, LOGSTATs, planning factors, map layers and proposals, readiness and
+  movement records) now reaches the model fenced as untrusted text with injection attempts flagged,
+  so text a unit, a person or another member wrote cannot pass as instructions. Before, the
+  logistics LOGSTAT tools returned unit-written text unfenced.
+- **Plain numbers are no longer read as coordinates.** guard-scan holds a two-decimal pair such as
+  "12.50, 3.50" only when it is marked as a position: a hemisphere letter, a minus sign or a degree
+  sign ("51.10 N, 11.10 E", "45.42, -75.69"). Those are still checked against the exercise box.
+- **A COP merge never loses a proposal.** When the merged copy of a proposal cannot be kept, the
+  merge is refused and the proposal stays where it is.
+- **Staff Room notices stay up their full time.** A newer notice is no longer hidden early by the
+  timer of the one before it.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through
