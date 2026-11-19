@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -373,6 +373,22 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       await observer.next('toView', (message) => message.type === 'run-reverted', before);
       assert.equal(existsSync(path.join(workspace, 'notes.txt')), false);
       server?.close();
+    }],
+    ['the Staff Room shows the real COP map for a loaded scenario, with no content security policy violation (real-window check)', async () => {
+      // The starter scenario in this project, as Load Staff Exercise Scenario writes it, so the room has a frame to draw the COP map over.
+      const workspace = vscode.workspace.workspaceFolders![0].uri.fsPath;
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      await mkdir(path.join(workspace, '.planning', 'staff', 'scenario'), { recursive: true });
+      await writeFile(path.join(workspace, '.planning', 'staff', 'scenario', 'scenario.json'), await readFile(path.join(extension.extensionPath, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
+      await vscode.commands.executeCommand('nearAi.openStaffRoom');
+      await waitForProbe('staff-room');
+      let report = await probe('staff-room');
+      for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
+      // Read by the person running the check: which renderer drew, and why when it fell back.
+      console.log(`[real-window] Staff Room map: ${report.map?.maplibre ? 'MapLibre canvas drawn' : `SVG fallback (${report.map?.note || 'no reason shown'})`}; CSP violations: ${(report.cspViolations ?? []).length}`);
+      assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation in the Staff Room');
+      assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }],
     ...teamProjectTests(() => api)
   ];
