@@ -125,7 +125,7 @@ export const OBSERVATION_V06_COLUMNS: Readonly<Record<(typeof OBSERVATION_FIELDS
   error: 'observation.error', how: 'observation.how', subjectRef: 'mention.text', observedType: 'mention.attributes.type',
   claimedIdentity: 'mention.attributes.identity', attributes: 'mention.attributes', source: 'item_card.provenance.source',
   origin: 'item_card.provenance.origin', reliability: 'observation.reliability', credibility: 'observation.credibility',
-  deceptionNote: 'item_card.deception_note', label: 'observation.label_id', handling: 'label.handling', extractor: 'pipeline.extractorVersion',
+  deceptionNote: 'item_card.deception_note', label: 'observation.label_id', handling: 'label (handling flags)', extractor: 'pipeline.extractorVersion',
   trackId: 'entity_link (deterministic, strong key)', about: 'mention_entity (accepted)', supersedes: 'observation.supersedes',
   simulated: 'source.kind = simulated'
 };
