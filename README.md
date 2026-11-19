@@ -264,7 +264,17 @@ between markers of its own, so teams of different sections can share a project. 
 earlier team file of the same name moves to your teams archive. The team is
 private, its members draft and recommend, and a named person decides: only
 the **NEAR AI: Staff** commands approve, reject or release a product. It then
-offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
+offers to load the starter scenario. The project records each section's team
+(`staff.teams` in its settings), and the message when setup finishes names the
+team, with **Task it now** (puts `/team:<name> ` in the chat's message box,
+nothing sent) and **Open the Staff Room**. In a staff project the empty chat
+shows a **Staff teams** card instead of "This project has no team yet": each
+section with its team and a **Task** button, and **Set up** for sections not set
+up yet. The `/team` menu lists the project's staff teams first, labelled by
+section, and each section card in the Staff Room has **Task in chat**. A team
+file deleted or renamed in your teams shows as missing with **Set up again**. A
+project set up before this was recorded is offered the matching teams already in
+your teams to **Link**, after you confirm. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the

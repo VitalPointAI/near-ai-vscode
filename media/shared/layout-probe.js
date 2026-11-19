@@ -24,9 +24,15 @@
     root.style.setProperty('--vscode-font-size', Math.round(size * 1.1) + 'px');
   });
   // On request, does what a person would on the map (D-48 of 0.4.34): opens the visible layer drawer, presses Escape where focus is, or toggles
-  // the full map, so a test can check the drawer and the full map in a real window. Test-only, like the rest of this file.
+  // the full map; or clicks one button by its selector, so a test can drive a card's button in the real page. Test-only, like the rest of this file.
   window.addEventListener('message', (event) => {
-    if (!event.data || event.data.type !== 'layout-act') return;
+    if (!event.data) return;
+    if (event.data.type === 'layout-click' && typeof event.data.selector === 'string') {
+      const node = document.querySelector(event.data.selector);
+      if (node && typeof node.click === 'function') node.click();
+      return;
+    }
+    if (event.data.type !== 'layout-act') return;
     const visible = (node) => node && node.getClientRects().length > 0;
     const act = event.data.act;
     if (act === 'open-layers') { const button = [...document.querySelectorAll('.ld-button')].find(visible); if (button) button.click(); }
@@ -86,6 +92,10 @@
           full: Boolean(box && box.classList.contains('full')),
           drawer: { open: Boolean(panel), focusInside: Boolean(panel && active && panel.contains(active)), buttonFocused: Boolean(active && active.classList && active.classList.contains('ld-button')), switches: panel ? panel.querySelectorAll('[role="switch"]').length : 0 }
         };
+      })(),
+      composer: (function () {
+        const box = document.getElementById('input');
+        return box && typeof box.value === 'string' ? { value: box.value.slice(0, 400), caret: typeof box.selectionStart === 'number' ? box.selectionStart : null } : undefined;
       })()
     };
   };

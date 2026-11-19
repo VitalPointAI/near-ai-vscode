@@ -35,6 +35,8 @@ export interface LayoutReport {
     /** The open layer drawer: open, focus inside it, focus on its Layers button, and how many layer switches it shows. */
     drawer?: { open: boolean; focusInside: boolean; buttonFocused: boolean; switches: number };
   };
+  /** The chat's message box, on the chat page: its text and where the cursor is, so a test can check what a button put there. */
+  composer?: { value: string; caret: number | null };
 }
 
 export function layoutProbeEnabled(): boolean {

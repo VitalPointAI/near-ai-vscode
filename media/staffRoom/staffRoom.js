@@ -35,6 +35,8 @@
   const nodes = {};
   const pods = new Map();
   const tokens = new Map();
+  // The section cards' team buttons (Task in chat, Set up, Set up again) in card order, for the room bar's Staff teams.
+  const teamButtons = [];
   const ledgerRows = new Map();
   let seenLedger = new Map();
   let seenDecisions = new Set();
@@ -151,7 +153,10 @@
     nodes.roomBar.hidden = true;
     nodes.roomBarText = el('span', 'roombar-t', '');
     nodes.roomBarToggle = button('Show the process and sections', 'small ghost', () => setRoomOpen(!saved.roomOpen), { 'aria-expanded': 'false', 'aria-controls': 'room-process room-squads' });
-    nodes.roomBar.append(glyph('M2 4h12M2 8h12M2 12h8'), nodes.roomBarText, nodes.roomBarToggle);
+    // The section cards' Task in chat and Set up stay one click away while folded: Staff teams opens the cards and puts focus on the first team button.
+    nodes.roomBarTeams = button('Staff teams', 'small ghost', () => openStaffTeams(), { 'aria-controls': 'room-squads' });
+    nodes.roomBarTeams.hidden = true;
+    nodes.roomBar.append(glyph('M2 4h12M2 8h12M2 12h8'), nodes.roomBarText, nodes.roomBarToggle, nodes.roomBarTeams);
 
     nodes.squads = el('section', 'squads');
     nodes.squads.setAttribute('aria-label', 'Staff sections and their agents');
@@ -400,12 +405,23 @@
     const squads = model.squads || [];
     const working = squads.filter((squad) => squad.members.some((member) => member.state === 'working')).length;
     const needs = squads.filter((squad) => squad.members.some((member) => member.state === 'needs')).length;
+    const teams = squads.filter((squad) => isObj(squad.team) && ['ready', 'missing', 'none'].includes(squad.team.state) && ['j2', 'j5', 'j3', 'j4'].includes(squad.section));
+    const ready = teams.filter((squad) => squad.team.state === 'ready').length;
     setText(nodes.roomBarText, (current ? 'Step ' + current.step + ' of ' + rail.length + ': ' + current.name + ', ' + current.statusText : 'No step yet')
-      + ' · ' + working + ' of ' + squads.length + ' sections working' + (needs ? ' · ' + needs + ' need a person' : ''));
+      + ' · ' + working + ' of ' + squads.length + ' sections working' + (needs ? ' · ' + needs + ' need a person' : '')
+      + (teams.length ? ' · ' + ready + ' of ' + teams.length + ' staff teams set up' : ''));
+    nodes.roomBarTeams.hidden = !teams.length;
+    nodes.roomBarTeams.setAttribute('aria-label', 'Staff teams, ' + ready + ' of ' + teams.length + ' set up: show the section cards to task or set up a team');
     nodes.roomBarText.className = 'roombar-t' + (current ? ' s-' + current.status : '');
     setText(nodes.roomBarToggle, compact ? 'Show the process and sections' : 'Hide the process and sections');
     nodes.roomBarToggle.setAttribute('aria-expanded', compact ? 'false' : 'true');
     fitMapSoon();
+  }
+  /** Opens the section cards (when folded) and puts focus on the first team button, so Task in chat and Set up are reachable from the room bar. */
+  function openStaffTeams() {
+    if (!saved.roomOpen) setRoomOpen(true);
+    const first = teamButtons[0];
+    if (first) first.focus();
   }
   function setRoomOpen(open) {
     saved.roomOpen = Boolean(open);
@@ -587,6 +603,7 @@
   function renderSquads() {
     const focusedToken = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.token : undefined;
     nodes.squads.replaceChildren();
+    teamButtons.length = 0;
     pods.clear();
     tokens.clear();
     const allTokens = [];
@@ -613,12 +630,36 @@
       }
       const callout = el('div', 'callout' + (squad.members.some((m) => m.state === 'needs') ? ' h' : ''));
       pod.append(tag, head, toks, callout);
+      const teamLine = squadTeamLine(squad);
+      if (teamLine) pod.append(teamLine);
       typeInto(callout, squad.section, squad.summary);
       pods.set(squad.section, pod);
       nodes.squads.append(pod);
     }
     const current = allTokens.find((token) => token.dataset.token === focusedToken) || allTokens[0];
     if (current) { current.tabIndex = 0; if (focusedToken && current.dataset.token === focusedToken) current.focus(); }
+  }
+
+  /**
+   * A set-up section's team and "Task in chat" (the host fills the chat's message box, nothing is sent); a team gone from the library shows as missing
+   * with "Set up again"; a section not set up shows "Set up". The page sends only the section: the host looks the team up in what it last sent.
+   */
+  function squadTeamLine(squad) {
+    const team = squad.team;
+    if (!isObj(team) || !['ready', 'missing', 'none'].includes(team.state) || !['j2', 'j5', 'j3', 'j4'].includes(squad.section)) return undefined;
+    const line = el('div', 'pod-team');
+    let action;
+    if (team.state === 'ready' && typeof team.name === 'string') {
+      const name = el('span', 'mono', '/team:' + team.name);
+      name.title = 'The ' + squad.code + ' team in your teams';
+      line.append(name, action = button('Task in chat', 'ghost', () => vscode.postMessage({ type: 'task-team', section: squad.section }), { 'aria-label': 'Task the ' + squad.code + ' team in the chat', title: 'Puts /team:' + team.name + ' in the NEAR AI chat; nothing is sent' }));
+    } else if (team.state === 'missing' && typeof team.name === 'string') {
+      line.append(el('span', 'faint', team.name + ' is missing from your teams'), action = button('Set up again', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team again' }));
+    } else {
+      line.append(el('span', 'faint', 'No team set up'), action = button('Set up', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team' }));
+    }
+    teamButtons.push(action);
+    return line;
   }
 
   function memberToken(squad, member) {

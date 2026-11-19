@@ -871,3 +871,64 @@ test('without WebGL the room\'s SVG map uses the same layer drawer and draws the
   assert.equal(panel.hidden, true);
   assert.equal(page.doc.activeElement, button);
 });
+
+test('each set-up section card shows its team and "Task in chat"; a missing team shows "Set up again"; a section without one shows "Set up" (D-48 of 0.4.34)', async () => {
+  const { model } = await fixtureModel();
+  const withTeams = { ...model, squads: model.squads.map((squad) => squad.section === 'j2' ? { ...squad, team: { state: 'ready', name: 'j2-us-joint-operational' } }
+    : squad.section === 'j5' ? { ...squad, team: { state: 'missing', name: 'j5-us-joint-operational' } }
+      : squad.section === 'j3' ? { ...squad, team: { state: 'none' } } : squad) };
+  const page = await runPage();
+  page.dispatch({ type: 'staff-room', model: withTeams, cues: [] });
+  const pod = (section: string) => page.byClass('pod').find((node) => node.dataset.section === section)!;
+  const line = (section: string) => pod(section).all().find((node) => node.classList.contains('pod-team'));
+  assert.equal(line('command'), undefined, 'the command group has no team line');
+  assert.equal(line('j4'), undefined, 'no team line without the host\'s record');
+  const buttons = (section: string) => line(section)!.all().filter((node) => node.tagName === 'button');
+  assert.ok(line('j2')!.all().some((node) => node.textContent === '/team:j2-us-joint-operational'));
+  assert.deepEqual(buttons('j2').map((node) => node.textContent), ['Task in chat']);
+  assert.deepEqual(buttons('j5').map((node) => node.textContent), ['Set up again']);
+  assert.ok(line('j5')!.all().some((node) => /missing from your teams/.test(node.textContent)));
+  assert.equal(line('j5')!.all().some((node) => /\/team:/.test(node.textContent)), false, 'a missing team is never shown as a command');
+  assert.deepEqual(buttons('j3').map((node) => node.textContent), ['Set up']);
+  const before = page.posts.length;
+  buttons('j2')[0].click();
+  buttons('j5')[0].click();
+  buttons('j3')[0].click();
+  // The page sends only the section; the host looks the team up in what it last sent.
+  assert.deepEqual(page.posts.slice(before), [{ type: 'task-team', section: 'j2' }, { type: 'set-up-section', section: 'j5' }, { type: 'set-up-section', section: 'j3' }]);
+});
+
+test('while the room bar is folded, Staff teams opens the section cards with focus on the first team button, and Task in chat still works (0.4.35)', async () => {
+  const { model } = await fixtureModel();
+  assert.equal(model.map.available, true, 'the fixture has a scenario on the map, so the room folds');
+  const withTeams = { ...model, squads: model.squads.map((squad) => squad.section === 'j2' ? { ...squad, team: { state: 'ready', name: 'j2-us-joint-operational' } }
+    : squad.section === 'j3' ? { ...squad, team: { state: 'none' } } : squad) };
+  const page = await runPage({ reduced: true });
+  page.dispatch({ type: 'staff-room', model: withTeams, cues: [] });
+  const app = page.doc.getElementById('app')!;
+  assert.ok(app.classList.contains('compact'), 'folded: the cards are out of sight');
+  assert.match(page.byClass('roombar-t')[0].textContent, / · 1 of 2 staff teams set up$/);
+  const bar = page.byClass('roombar')[0];
+  const teams = bar.children.find((node) => node.tagName === 'button' && node.textContent === 'Staff teams')!;
+  assert.ok(teams, 'the room bar offers Staff teams');
+  assert.equal(teams.hidden, false);
+  assert.equal(teams.getAttribute('aria-controls'), 'room-squads');
+  assert.match(teams.getAttribute('aria-label')!, /^Staff teams, 1 of 2 set up/);
+  teams.click();
+  assert.ok(!app.classList.contains('compact'), 'the cards are shown');
+  assert.equal(page.states.at(-1)!.roomOpen, true, 'remembered like the room bar\'s own toggle');
+  const focused = page.doc.activeElement!;
+  assert.equal(focused.textContent, 'Task in chat', 'focus on the J2 card\'s Task in chat');
+  const before = page.posts.length;
+  focused.click();
+  assert.deepEqual(page.posts.slice(before), [{ type: 'task-team', section: 'j2' }]);
+  // Once open, Staff teams only moves focus; it never folds the cards again.
+  teams.click();
+  assert.ok(!app.classList.contains('compact'));
+  // A room without any team record has no Staff teams button and no team count.
+  const plain = await runPage({ reduced: true });
+  plain.dispatch({ type: 'staff-room', model, cues: [] });
+  const plainTeams = plain.byClass('roombar')[0].children.find((node) => node.tagName === 'button' && node.textContent === 'Staff teams')!;
+  assert.equal(plainTeams.hidden, true);
+  assert.doesNotMatch(plain.byClass('roombar-t')[0].textContent, /staff teams/);
+});

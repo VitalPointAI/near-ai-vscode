@@ -62,6 +62,10 @@ import { chatLabelChanged, clearChatInView, onChatNotice, setChatInView, takeCha
 import type { ChatInView } from './chatInView';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
+import { linkStaffTeam, projectStaffTeams, staffMenuEntries } from './staffTeams';
+import type { ProjectStaffTeams } from './staffTeams';
+import type { StaffTeamSection } from '../domain/staff/profiles';
+import { SET_UP_STAFF_TEAM_COMMAND } from './staffSetup';
 
 /** What the chat says when a message, Resume or Continue reaches a conversation that another editor is running right now. */
 export const RUNNING_ELSEWHERE_HOLD = 'This conversation is running in another editor right now. Wait for it to finish there, or start a new conversation here.';
@@ -152,6 +156,13 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   try { attestations(); } catch { /* registered on first use instead */ }
   // The "no team yet" card: only the latest answer is posted, so a slow check never undoes "Not now".
   const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); });
+  // A staff project's "Staff teams" card (in place of the "no team yet" card), and the /team menu, which lists the same teams first.
+  const staffCard = latestOnly(() => staffTeamsCard(), (model) => {
+    if (disposed) return;
+    void panel.webview.postMessage({ type: 'staff-teams', model: model ?? null });
+    void commandList(gsdHostFor(context), workspaceRoot()).then((commands) => { if (!disposed) void panel.webview.postMessage({ type: 'commands', commands }); }, () => undefined);
+  });
+  const refreshTeamCards = async () => { await setupNudge.refresh(); await staffCard.refresh(); };
   const feed = sharedActivityFeed();
   // "Pick up where you left off": the last chat continued in another editor or on another computer. It only offers to reopen that chat.
   const pickupWriter = () => editorWriter(context.globalState as MementoLike | undefined);
@@ -701,6 +712,12 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await vscode.commands.executeCommand('nearAi.newProfile');
       return;
     }
+    if (message.type === 'staff-teams') {
+      if (message.action === 'set-up') { await vscode.commands.executeCommand(SET_UP_STAFF_TEAM_COMMAND, { section: message.section }); await refreshTeamCards(); return; }
+      await linkStaffTeamAsked(message.section, message.team);
+      await refreshTeamCards();
+      return;
+    }
     if (message.type === 'setup-nudge') {
       // Hidden at once; a card worked out before the flag was saved is dropped (latestOnly).
       if (message.action === 'later') { await context.workspaceState?.update(SETUP_NUDGE_DISMISSED_KEY, true); setupNudge.set(false); return; }
@@ -775,7 +792,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'refresh-status') {
       panel.webview.postMessage(await statusMessage({ agents: runningAgents(), account: state.spend }));
       await sendProfileStatus(panel, auth);
-      await setupNudge.refresh();
+      await refreshTeamCards();
       sendSyncStatus();
       await pickup.send();
       await sendArtifacts(panel);
@@ -1085,7 +1102,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   // Back in the window (or its browser tab): prompts that waited unannounced are announced now.
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
-  const teamWatch = watchProjectTeam(() => { if (!disposed) void setupNudge.refresh(); });
+  const teamWatch = watchProjectTeam(() => { if (!disposed) void refreshTeamCards(); });
   const stopNotices = onChatNotice((chatId) => { const tab = tabs.find((each) => each.id === chatId); if (tab !== undefined && chatId === activeId && !disposed) for (const text of takeChatNotices(chatId)) tab.post({ type: 'notice', text }); });
   panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopNotices(); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) if (tab.agent) void closeAgentConversation(tab.agent); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
@@ -1110,7 +1127,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   await ready;
   state.activity = createActivityStore();
   await sendProfileStatus(panel, auth);
-  await setupNudge.refresh();
+  await refreshTeamCards();
   sendSyncStatus();
   refreshSyncHomeHere();
   await pickup.send();
@@ -1211,7 +1228,36 @@ async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthServi
   if (!root) return false;
   const exported = await new ProfileStore(root, auth).exportMetadata().catch(() => undefined);
   const active = exported?.profiles.find((profile) => profile.profileId === exported.activeProfileId);
-  return shouldShowSetupNudge({ workingProfile: active?.validation.status === 'valid', hasTeam: await projectHasTeam(root), dismissed: context.workspaceState?.get(SETUP_NUDGE_DISMISSED_KEY) === true });
+  // A staff project shows its "Staff teams" card instead, which lists its section teams or offers to set one up.
+  const hasTeam = await projectHasTeam(root) || (await staffTeamsOf(root)).staff;
+  return shouldShowSetupNudge({ workingProfile: active?.validation.status === 'valid', hasTeam, dismissed: context.workspaceState?.get(SETUP_NUDGE_DISMISSED_KEY) === true });
+}
+
+/** The project's staff section teams against the person's team library: the record the card, the /team menu and the Staff Room share. */
+async function staffTeamsOf(root: string): Promise<ProjectStaffTeams> {
+  await whenTeamsMoved();
+  return projectStaffTeams(root, new TeamLibrary(teamLibraryDir(homeFolder())).directory).catch(() => ({ staff: false, sections: [] }));
+}
+
+/** The "Staff teams" card's model, or undefined outside a staff project (the card is removed). */
+async function staffTeamsCard(): Promise<ProjectStaffTeams | undefined> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) return undefined;
+  const teams = await staffTeamsOf(root);
+  return teams.staff ? teams : undefined;
+}
+
+/** "Link" on the card: a matching library team becomes the project's team for the section, only after the person confirms. */
+async function linkStaffTeamAsked(section: StaffTeamSection, team: string): Promise<void> {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!root) return;
+  const entry = (await staffTeamsOf(root)).sections.find((candidate) => candidate.section === section);
+  if (!entry || entry.state !== 'none' || !entry.candidates?.includes(team)) { void vscode.window.showWarningMessage(`${team} is no longer offered for this project. Nothing was linked.`); return; }
+  const LINK = 'Link';
+  const answer = await vscode.window.showInformationMessage(`Link ${team} to this project as its ${entry.code} ${entry.role.toLowerCase()} team?`, { modal: true, detail: `It is in your teams and matches this project's profile and level. The project records it in .planning/.near-ai/project.json, so the chat and the Staff Room can task it with /team:${team}. The team file is not changed.` }, LINK);
+  if (answer !== LINK) return;
+  const linked = await linkStaffTeam(root, new TeamLibrary(teamLibraryDir(homeFolder())).directory, section, team);
+  if (!linked.ok) void vscode.window.showErrorMessage(`The team was not linked. ${linked.message}`);
 }
 
 /** Calls `changed` when the team file, project.json, or a folder above them is created or deleted. */
@@ -1220,7 +1266,8 @@ function watchProjectTeam(changed: () => void): vscode.Disposable | undefined {
   if (!root || typeof vscode.workspace.createFileSystemWatcher !== 'function' || typeof vscode.RelativePattern !== 'function') return undefined;
   // Relative to the project folder, so it works before .planning/.near-ai exists.
   const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(root), `{${PROJECT_TEAM_WATCH_PATHS.join(',')}}`));
-  const subscriptions = [watcher.onDidCreate(changed), watcher.onDidDelete(changed), watcher];
+  // A change (not only a create or delete) can add a staff section team to project.json.
+  const subscriptions = [watcher.onDidCreate(changed), watcher.onDidDelete(changed), ...(typeof watcher.onDidChange === 'function' ? [watcher.onDidChange(changed)] : []), watcher];
   return { dispose: () => subscriptions.forEach((subscription) => subscription.dispose()) };
 }
 
@@ -1353,8 +1400,11 @@ export function gsdHostFor(context: vscode.ExtensionContext): GsdHost {
 async function commandList(host: GsdHost, root?: string): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {
   // The same library the send path runs a team from, so every team listed here is one /team: can find.
   await whenTeamsMoved();
-  const teams = (await new TeamLibrary(teamLibraryDir(homeFolder())).list(root).catch(() => [])).flatMap((entry) => entry.team ? [{ command: `team:${entry.project ? 'project' : entry.team.slug}`, title: entry.team.name, description: `Run the "${entry.team.name}" team${entry.team.description ? ` — ${entry.team.description}` : ''}`, argumentHint: '<task for the team>' }] : []);
-  return [...teams, ...await gsdCommandList(host)];
+  const all = (await new TeamLibrary(teamLibraryDir(homeFolder())).list(root).catch(() => [])).flatMap((entry) => entry.team ? [{ command: `team:${entry.project ? 'project' : entry.team.slug}`, title: entry.team.name, description: `Run the "${entry.team.name}" team${entry.team.description ? ` — ${entry.team.description}` : ''}`, argumentHint: '<task for the team>' }] : []);
+  // A staff project's section teams come first, labelled by section, so the team for the J2 (and so on) is the first one offered.
+  const staff = root ? staffMenuEntries(await staffTeamsOf(root)) : [];
+  const listed = new Set(staff.map((entry) => entry.command));
+  return [...staff, ...all.filter((entry) => !listed.has(entry.command)), ...await gsdCommandList(host)];
 }
 
 async function gsdCommandList(host: GsdHost): Promise<Array<{ command: string; title: string; description: string; argumentHint?: string }>> {

@@ -579,3 +579,7 @@ body { background: var(--vscode-editor-background); }
    without scrolling once a scenario is loaded (D-48 of 0.4.34). */
 .wr .mapbox, .j2grid .mapbox { height: var(--map-h, clamp(320px, 58vh, 680px)); min-height: 320px; }
 .grade-chip, .j2side .grid-table td:nth-child(3) { white-space: nowrap; }
+
+/* A section card's team line: the team's command and "Task in chat", or "Set up" for a section without one. */
+.pod-team { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; font-size: var(--fs-xs); color: var(--text2); min-width: 0; }
+.pod-team .mono { overflow-wrap: anywhere; min-width: 0; }

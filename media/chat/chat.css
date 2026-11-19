@@ -489,3 +489,9 @@ body.vscode-high-contrast .trust-badge, body.vscode-high-contrast-light .trust-b
 
 /* The chat's label beside the model (D-33), shown only above the default label. */
 .chat-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+/* The "Staff teams" card of a staff project (media/chat/setup.js renderStaffTeams), styled as the setup card it replaces. */
+.staff-teams-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.staff-team { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.staff-team-name { font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; min-width: 0; }
+.staff-team-title, .staff-team-missing, .staff-teams-none { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; min-width: 0; }
+.staff-team.s-missing .staff-team-missing, .staff-teams-problem { color: var(--vscode-errorForeground); }
