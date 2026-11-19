@@ -650,10 +650,17 @@ function deriveDecisions(product: ProductEntry, version: VersionProposal, start:
     } else if (basis.outcome === 'WITHDRAW') {
       applied = transition(record, { type: 'withdraw', reason: first.act.data.reason as string }, first.actor);
     } else {
+      // A supersede follows a release: the version is taken through the approval and release in its past, which the algebra has already checked exist.
+      const before = candidates.filter((item) => !dropped.has(item.act.entry) && item.entry.confirmed && graph.isBefore(item.act.entry, first.act.entry));
+      const approver = before.filter((item) => item.outcome === 'approve').sort((a, b) => compare(a.act.entry, b.act.entry))[0] ?? before.filter((item) => item.outcome === 'release').sort((a, b) => compare(a.act.entry, b.act.entry))[0];
+      const releaser = before.filter((item) => item.outcome === 'release').sort((a, b) => compare(a.act.entry, b.act.entry))[0];
+      applied = approver === undefined ? undefined : transition(record, { type: 'approve', hash: version.hash }, approver.actor);
+      if (applied !== undefined && applied.ok && releaser !== undefined) applied = transition(applied.record, { type: 'release', hash: version.hash }, releaser.actor);
       const newer = product.versions.find((other) => other.hash === first.act.data.byHash);
-      applied = transition(record, { type: 'supersede', byVersion: newer?.number ?? version.number }, first.actor);
+      if (applied !== undefined && applied.ok) applied = transition(applied.record, { type: 'supersede', byVersion: newer?.number ?? version.number }, first.actor);
     }
-    if (applied.ok) record = applied.record;
+    if (applied === undefined) refusals.push({ entry: first.act.entry, reason: 'no-release' });
+    else if (applied.ok) record = applied.record;
     else refusals.push({ entry: first.act.entry, reason: applied.reason });
   }
 
