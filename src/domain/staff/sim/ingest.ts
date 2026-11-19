@@ -1,153 +1,47 @@
 // The minimal ingest for the simulator's own formats (drop 2 integration; research note 11, 3 and 8): each simulated CoT event, AIS position sentence
 // and RSS item becomes an observation row in the WP-OBS0 contract, so the simulated streams reach the J2 through the observation store like any other
-// feed. It reads only what formats.ts writes: CoT event 2.0 with a point and the simulation's detail, AIS messages 1, 2, 3 and 18 in one sentence (the
-// static messages 5 and 24 only name a vessel), and the structured RSS item. General importers (any CoT producer, multi-part AIS, any RSS or Atom feed)
-// are WP-IMP. Partner reports are not ingested here: the partner feed stays off until a person adds the mock partner server. Pure: no I/O, no clock.
-import { COT_IDENTITY_CODES, STANDARD_IDENTITIES } from '../doctrine';
-import type { StandardIdentity } from '../doctrine';
+// feed. It reads CoT and AIS with the same codecs as the file importers (obs/codecs, WP-IMP: one codec per format), so simulated traffic is read exactly as
+// real traffic is; the static AIS messages 5 and 24 only name a vessel, and the RSS item arrives already structured. Partner reports are not ingested here: the partner feed stays off until a person adds the mock partner server. Pure: no I/O, no clock.
 import { channelHandling, channelLabel } from '../obs/feeds';
 import type { ChannelDescriptor, FeedDescriptor } from '../obs/feeds';
 import { gridToWgs84 } from '../obs/frame';
 import type { ExerciseFrame } from '../obs/frame';
+import { aisAttributes, cotRecord, RSS_AREA_ERROR_METRES } from '../obs/importers';
 import { observationId, OBSERVATION_SCHEMA, segmentId } from '../obs/observation';
+import { AisAssembler, decodeAis, parseAisLine } from '../obs/codecs/ais';
+import type { AisDecoded } from '../obs/codecs/ais';
+import { cotEventFrom } from '../obs/codecs/cot';
+import type { CotEvent } from '../obs/codecs/cot';
+import { readXml } from '../obs/codecs/xml';
 import { SIM_FEED_IDS, SIM_FEEDS } from './feeds';
-import { COT_HOW, COT_UNKNOWN_ERROR, SIM_FORMAT_VERSION } from './formats';
+import { SIM_FORMAT_VERSION } from './formats';
 import type { SimStream } from './script';
 import type { SimMessage } from './timeline';
+
+export { cotIdentity } from '../obs/codecs/cot';
+export type { CotEvent } from '../obs/codecs/cot';
+export { RSS_AREA_ERROR_METRES };
 
 /** The streams this ingest takes into the store. */
 export const SIM_INGESTED_STREAMS: readonly SimStream[] = ['cot-own', 'cot-intel', 'ais', 'rss'];
 
-/** An RSS item names no position: it is placed at the centre of the exercise frame with this error, so a slice by area finds it only across the frame. */
-export const RSS_AREA_ERROR_METRES = 50_000;
-
-const xmlUnescape = (text: string): string => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, '\'').replace(/&amp;/g, '&');
-
-function attribute(tag: string, name: string): string | undefined {
-  const match = new RegExp(`\\s${name}="([^"]*)"`).exec(tag);
-  return match ? xmlUnescape(match[1]) : undefined;
-}
-
-function element(xml: string, name: string): string | undefined {
-  return new RegExp(`<${name}\\b[^>]*/?>`).exec(xml)?.[0];
-}
-
-export interface CotEvent {
-  readonly uid: string;
-  readonly type: string;
-  readonly how: string;
-  readonly time: string;
-  readonly stale: string;
-  readonly lat: number;
-  readonly lon: number;
-  readonly ce: number | null;
-  readonly callsign?: string;
-  readonly remarks?: string;
-  readonly course?: number;
-  readonly speed?: number;
-  /** Footprint corners, `[lat, lon]`, when the event carries a shape. */
-  readonly shape: ReadonlyArray<readonly [number, number]>;
-}
-
-/** One CoT event as the simulator writes it, or undefined when it is not one. */
+/** One CoT event, read by the one CoT codec (obs/codecs/cot.ts) through the strict XML reader, or undefined when it is not one. */
 export function parseCotEvent(xml: string): CotEvent | undefined {
-  const event = element(xml, 'event');
-  const point = element(xml, 'point');
-  if (!event || !point) return undefined;
-  const uid = attribute(event, 'uid');
-  const type = attribute(event, 'type');
-  const how = attribute(event, 'how');
-  const time = attribute(event, 'time');
-  const stale = attribute(event, 'stale');
-  const lat = Number(attribute(point, 'lat'));
-  const lon = Number(attribute(point, 'lon'));
-  if (!uid || !type || !how || !time || !stale || !Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
-  const ceText = Number(attribute(point, 'ce'));
-  const contact = element(xml, 'contact');
-  const track = element(xml, 'track');
-  const remarks = /<remarks>([^<]*)<\/remarks>/.exec(xml)?.[1];
-  const shape = [...xml.matchAll(/<link point="(-?[0-9.]+),(-?[0-9.]+)"\/>/g)].map((match) => [Number(match[1]), Number(match[2])] as const);
-  const callsign = contact ? attribute(contact, 'callsign') : undefined;
-  const course = track ? Number(attribute(track, 'course')) : NaN;
-  const speed = track ? Number(attribute(track, 'speed')) : NaN;
-  return {
-    uid, type, how, time, stale, lat, lon, ce: Number.isFinite(ceText) && ceText !== COT_UNKNOWN_ERROR ? ceText : null, shape,
-    ...(callsign ? { callsign } : {}), ...(remarks !== undefined ? { remarks: xmlUnescape(remarks) } : {}),
-    ...(Number.isFinite(course) ? { course } : {}), ...(Number.isFinite(speed) ? { speed } : {})
-  };
-}
-
-/** The standard identity a CoT atom type claims (`a-h-G` is hostile), or undefined for a non-atom. */
-export function cotIdentity(type: string): StandardIdentity | undefined {
-  const parts = type.split('-');
-  if (parts[0] !== 'a' || parts.length < 2) return undefined;
-  return STANDARD_IDENTITIES.find((identity) => COT_IDENTITY_CODES[identity] === parts[1]);
+  const read = readXml(xml);
+  if (!read.ok) return undefined;
+  const event = cotEventFrom(read.root);
+  return typeof event === 'string' ? undefined : event;
 }
 
 // ---- AIS ----------------------------------------------------------------------------------------------------------------------------------------
 
-export interface AisPosition { readonly type: number; readonly mmsi: number; readonly lat: number; readonly lon: number; readonly speedKnots?: number; readonly courseDegrees?: number; readonly headingDegrees?: number }
-export interface AisStatic { readonly type: number; readonly mmsi: number; readonly name: string }
-
-function payloadBits(payload: string): number[] | undefined {
-  const bits: number[] = [];
-  for (const char of payload) {
-    let value = char.charCodeAt(0) - 48;
-    if (value < 0 || value > 71 || (value > 39 && value < 48)) return undefined;
-    if (value > 40) value -= 8;
-    for (let bit = 5; bit >= 0; bit -= 1) bits.push((value >> bit) & 1);
-  }
-  return bits;
-}
-
-function uint(bits: readonly number[], start: number, width: number): number {
-  let value = 0;
-  for (let index = start; index < start + width; index += 1) value = value * 2 + (bits[index] ?? 0);
-  return value;
-}
-
-function int(bits: readonly number[], start: number, width: number): number {
-  const value = uint(bits, start, width);
-  return bits[start] ? value - 2 ** width : value;
-}
-
-function sixBitText(bits: readonly number[], start: number, chars: number): string {
-  const table = '@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !"#$%&\'()*+,-./0123456789:;<=>?';
-  let out = '';
-  for (let index = 0; index < chars; index += 1) out += table[uint(bits, start + index * 6, 6)] ?? '';
-  return out.replace(/@+$/, '').trim();
-}
-
-function checksumOk(sentence: string): boolean {
-  const match = /^!(.*)\*([0-9A-F]{2})$/.exec(sentence.trim());
-  if (!match) return false;
-  let sum = 0;
-  for (const char of match[1]) sum ^= char.charCodeAt(0);
-  return sum === parseInt(match[2], 16);
-}
-
-/** One `!AIVDM` sentence as the simulator writes it: a position (1, 2, 3, 18), the name of a class B vessel (24 part A), or undefined. */
-export function parseAisSentence(sentence: string): AisPosition | AisStatic | undefined {
-  if (!checksumOk(sentence)) return undefined;
-  const fields = sentence.trim().split('*')[0].split(',');
-  if (fields[0] !== '!AIVDM' || fields.length < 7 || fields[1] !== '1') return undefined;
-  const bits = payloadBits(fields[5]);
-  if (!bits || bits.length < 38) return undefined;
-  const type = uint(bits, 0, 6);
-  const mmsi = uint(bits, 8, 30);
-  if (type === 24 && uint(bits, 38, 2) === 0) return { type, mmsi, name: sixBitText(bits, 40, 20) };
-  if (type !== 1 && type !== 2 && type !== 3 && type !== 18) return undefined;
-  const at = type === 18 ? { sog: 46, lon: 57, lat: 85, cog: 112, hdg: 124 } : { sog: 50, lon: 61, lat: 89, cog: 116, hdg: 128 };
-  const longitude = int(bits, at.lon, 28) / 600_000;
-  const latitude = int(bits, at.lat, 27) / 600_000;
-  if (Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return undefined;
-  const sog = uint(bits, at.sog, 10);
-  const cog = uint(bits, at.cog, 12);
-  const hdg = uint(bits, at.hdg, 9);
-  return {
-    type, mmsi, lat: latitude, lon: longitude,
-    ...(sog !== 1023 ? { speedKnots: sog / 10 } : {}), ...(cog !== 3600 ? { courseDegrees: cog / 10 } : {}), ...(hdg !== 511 ? { headingDegrees: hdg } : {})
-  };
+/** One single-part `!AIVDM` sentence, read by the one AIS codec (obs/codecs/ais.ts), or undefined when it is not a whole message it reads. */
+export function parseAisSentence(sentence: string): AisDecoded | undefined {
+  const line = parseAisLine(sentence);
+  if (!line.ok || line.sentence.fragments !== 1) return undefined;
+  const message = new AisAssembler().add(line.sentence);
+  const decoded = message ? decodeAis(message) : undefined;
+  return typeof decoded === 'object' ? decoded : undefined;
 }
 
 // ---- Rows ---------------------------------------------------------------------------------------------------------------------------------------
@@ -171,6 +65,8 @@ const round = (value: number, places: number): number => Math.round(value * 10 *
  */
 export class SimIngest {
   private readonly names = new Map<number, string>();
+  /** Multi-part messages (type 5) are put back together across sentences by the one AIS codec. */
+  private readonly ais = new AisAssembler();
 
   constructor(private readonly frame: ExerciseFrame) {}
 
@@ -189,43 +85,36 @@ export class SimIngest {
     if (message.stream === 'cot-own' || message.stream === 'cot-intel') {
       const event = parseCotEvent(message.xml);
       if (!event) return [];
-      const footprint = event.shape.length >= 4;
-      const identity = cotIdentity(event.type);
-      const how = event.how === COT_HOW.gps ? 'gps' : event.how === COT_HOW.estimated ? 'estimated' : 'reported';
+      const record = cotRecord(event);
       return [{
-        ...common(`${event.uid}@${event.time}`), validAt: event.time, validUntil: event.stale,
-        geometry: footprint ? { type: 'Polygon', coordinates: [event.shape.map(([lat, lon]) => [round(lon, 7), round(lat, 7)])] } : { type: 'Point', coordinates: [round(event.lon, 7), round(event.lat, 7)] },
-        error: { circularMetres: event.ce, verticalMetres: null }, how, subjectRef: event.uid, observedType: event.type, ...(identity ? { claimedIdentity: identity } : {}),
-        attributes: {
-          ...(event.callsign ? { name: event.callsign } : {}), ...(event.remarks ? { excerpt: event.remarks.slice(0, 500) } : {}),
-          ...(event.course !== undefined ? { courseDegrees: event.course } : {}), ...(event.speed !== undefined ? { speedMetresPerSecond: event.speed } : {})
-        },
+        ...common(record.messageId), validAt: record.validAt ?? known, ...(record.validUntil ? { validUntil: record.validUntil } : {}),
+        geometry: record.geometry, error: record.error, how: record.how,
+        ...(record.subjectRef ? { subjectRef: record.subjectRef } : {}), ...(record.observedType ? { observedType: record.observedType } : {}),
+        ...(record.claimedIdentity ? { claimedIdentity: record.claimedIdentity } : {}), attributes: record.attributes ?? {},
         deceptionNote: message.stream === 'cot-own' ? 'none seen: own-force position report' : 'not assessed yet: a simulated report for the J2 to weigh',
         extractor: { codec: 'sim-cot', version: SIM_FORMAT_VERSION },
-        ...(footprint ? {} : { trackId: `cot:${event.uid}` })
+        ...(record.trackId ? { trackId: record.trackId } : {})
       }];
     }
     if (message.stream === 'ais') {
       const out: Array<Record<string, unknown>> = [];
       for (const sentence of message.sentences) {
-        const parsed = parseAisSentence(sentence);
-        if (!parsed) continue;
-        if ('name' in parsed) { if (parsed.name) this.names.set(parsed.mmsi, parsed.name); continue; }
-        const name = this.names.get(parsed.mmsi);
+        const line = parseAisLine(sentence);
+        if (!line.ok) continue;
+        const whole = this.ais.add(line.sentence);
+        const parsed = whole ? decodeAis(whole) : undefined;
+        if (typeof parsed !== 'object') continue;
+        if (parsed.name) this.names.set(parsed.mmsi, parsed.name);
+        if (parsed.kind !== 'position') continue;
         out.push({
           ...common(`${parsed.mmsi}@${iso(message.at)}`), validAt: known,
           geometry: { type: 'Point', coordinates: [round(parsed.lon, 6), round(parsed.lat, 6)] }, error: { circularMetres: 10, verticalMetres: null }, how: 'reported',
-          subjectRef: String(parsed.mmsi),
-          attributes: {
-            ...(name ? { name } : {}), ...(parsed.speedKnots !== undefined ? { speedMetresPerSecond: round(parsed.speedKnots * 1852 / 3600, 2) } : {}),
-            ...(parsed.courseDegrees !== undefined ? { courseDegrees: parsed.courseDegrees } : {}), ...(parsed.headingDegrees !== undefined ? { headingDegrees: parsed.headingDegrees } : {})
-          },
+          subjectRef: String(parsed.mmsi), attributes: aisAttributes(parsed, this.names.get(parsed.mmsi)),
           deceptionNote: 'not assessed yet: AIS is self-reported by the vessel', extractor: { codec: 'sim-ais', version: SIM_FORMAT_VERSION }, trackId: `mmsi:${parsed.mmsi}`
         });
       }
       return out;
     }
-    if (message.stream !== 'rss') return [];
     if (message.stream !== 'rss') return [];
     const centre = gridToWgs84(this.frame, { eastingMetres: (this.frame.extent.eastings * this.frame.squareMetres) / 2, northingMetres: (this.frame.extent.northings * this.frame.squareMetres) / 2 });
     return [{

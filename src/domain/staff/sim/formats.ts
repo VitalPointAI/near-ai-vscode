@@ -33,6 +33,8 @@
 //        location?: { lat, lon, ceMetres }, bearings?: [{ fromLat, fromLon, bearingDegrees, station }], marking, simulated: true,
 //        handling: ['local-only'], label, partner }
 import { COT_IDENTITY_CODES } from '../doctrine';
+import { nmeaChecksum } from '../obs/codecs/ais';
+import { COT_UNKNOWN } from '../obs/codecs/cot';
 import type { InformationCredibility, IntelligenceDiscipline, SourceReliability, StandardIdentity } from '../doctrine';
 
 /** The marking every simulated message carries, in whatever field its format has for it. */
@@ -68,7 +70,7 @@ export function isoTime(millis: number): string {
 export const COT_HOW = { gps: 'm-g', estimated: 'h-e', transcribed: 'h-t' } as const;
 export type CotHow = (typeof COT_HOW)[keyof typeof COT_HOW];
 /** CoT writes this for an error it does not know. */
-export const COT_UNKNOWN_ERROR = 9_999_999;
+export const COT_UNKNOWN_ERROR = COT_UNKNOWN;
 
 export interface CotEventSpec {
   /** Stable per tracked thing, so updates replace each other (CoT `uid`). The writer adds SIM_UID_PREFIX. */
@@ -192,12 +194,8 @@ class BitWriter {
   }
 }
 
-/** The NMEA checksum: the XOR of every character between `!` and `*`, as two upper-case hex digits. */
-export function nmeaChecksum(body: string): string {
-  let sum = 0;
-  for (let index = 0; index < body.length; index += 1) sum ^= body.charCodeAt(index);
-  return sum.toString(16).toUpperCase().padStart(2, '0');
-}
+/** The NMEA checksum lives with the one AIS codec (obs/codecs/ais.ts); the writer uses the same function the readers check with. */
+export { nmeaChecksum };
 
 /**
  * The `!AIVDM` sentences for one message. A message over AIS_MAX_PAYLOAD_CHARS is split into parts that share a sequential message id (0 to 9); fill bits

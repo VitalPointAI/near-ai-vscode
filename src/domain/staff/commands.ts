@@ -17,3 +17,9 @@ export const PERSON_DECISION_COMMANDS: readonly string[] = [STAFF_COMMANDS.appro
 
 /** The command that opens the Staff Room. */
 export const OPEN_STAFF_ROOM_COMMAND = 'nearAi.openStaffRoom';
+
+/**
+ * The person-run feed file import (WP-IMP): it picks a file, shows what will be imported and asks before writing. It is a VS Code command only: no agent
+ * tool runs a VS Code command, so a member can never import a file into the observation store.
+ */
+export const STAFF_IMPORT_FEED_COMMAND = 'nearAi.staff.importFeedFile';

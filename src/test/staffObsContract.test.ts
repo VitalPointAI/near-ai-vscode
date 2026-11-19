@@ -540,7 +540,8 @@ test('the observations tools: the names note 11 lists, local with no hosts, and 
 
 test('the contract is pure: no vscode, no file system, no network in src/domain/staff/obs', () => {
   const folder = path.join(__dirname, '..', '..', 'src', 'domain', 'staff', 'obs');
-  for (const file of readdirSync(folder).filter((name) => name.endsWith('.ts'))) {
+  // The codecs (WP-IMP) are in a subfolder and are held to the same rules.
+  for (const file of readdirSync(folder, { recursive: true }).map(String).filter((name) => name.endsWith('.ts'))) {
     const source = readFileSync(path.join(folder, file), 'utf8');
     assert.ok(!/from 'vscode'|require\('vscode'\)/.test(source), `${file} imports vscode`);
     assert.ok(!/from 'node:(fs|net|http|https|dgram|child_process)'/.test(source), `${file} does I/O`);

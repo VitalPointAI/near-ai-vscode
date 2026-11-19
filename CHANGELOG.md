@@ -179,6 +179,19 @@ members draft and recommend, and a named person makes every decision.
   time if asked. Every answer shows only what your clearances cover, raises the chat's label to
   what it showed, says when a limit cut it, and fences the feeds' text as untrusted. Feed events go
   into the staff event log beside the staff events.
+- **Import feed files.** **NEAR AI: Staff: Import Feed File...** takes a GeoJSON, KML, Cursor on
+  Target, RSS, Atom or AIS (NMEA) file into the project's observation store. You pick the file and
+  the label; the file is read in a separate process with its own memory, size (16 MB) and time
+  (20 seconds) limits, never in the editor itself; then you see how many reports would be
+  imported, the format, the label and the time span, what is held back because it lies outside
+  the exercise frame, and what was skipped and why, and nothing is written until you choose
+  Import. Files that declare a document type are refused outright, so XML entity attacks cannot
+  start. AIS logs are checked sentence by sentence (bad checksums and missing parts of multi-part
+  messages are counted and skipped), and vessel names from the static messages are applied to the
+  positions. Imported reports name the file and the time they were imported and are never marked
+  simulated; importing the same file again adds nothing. Agents cannot run the import. Cursor on
+  Target tracks now show their military symbol on the COP from one CoT-type table, drawn as
+  unknown unless they are own-force positions, because a feed's affiliation is a claim.
 - **The COP map.** Staff team members granted `mcp:cop-map` read the COP layers and put military
   symbols (MIL-STD-2525D and APP-6(D), drawn by milsymbol), control measures, overlays per
   adversary course of action and decision points on the layer they write, in grid references on
