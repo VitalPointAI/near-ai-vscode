@@ -12,6 +12,8 @@ import type { CollectionEntry, PirEntry, SourceEntry } from './intel';
 import type { FeedEvent, WatchBoardEntry } from './obs/events';
 import { feedPicture } from './obs/events';
 import type { StandingWatch } from './obs/watches';
+import type { Observation } from './obs/observation';
+import { formatGridReference, wgs84ToGrid } from './obs/frame';
 import { STAFF_SLUG } from './parse';
 import { levelOffer, resolveProfile, sectionCode } from './profiles';
 import type { StaffSettings } from './profiles';
@@ -146,6 +148,11 @@ export interface J2Workspace {
   readonly collection: ReadonlyArray<{ readonly id: string; readonly pir: string; readonly indicator: string; readonly nai: string; readonly capability: string; readonly discipline: string; readonly from: string; readonly to: string; readonly needs: string; readonly note: string }>;
   readonly watches: ReadonlyArray<{ readonly id: string; readonly title: string; readonly pir: string; readonly indicator: string; readonly ltiov: string; readonly state: string; readonly stateText: string; readonly alert: string; readonly missed: number; readonly lastMatch?: string }>;
   readonly findings: ReadonlyArray<{ readonly severity: string; readonly subject: string; readonly message: string }>;
+  /**
+   * Live feed reports from the observation store, newest first, already clamped to the person's clearance by the host: what a running simulation (or any
+   * feed) delivers. `simulated` rows carry the SIM badge. `total` counts every visible row, `shown` how many are listed.
+   */
+  readonly live: { readonly total: number; readonly reports: ReadonlyArray<{ readonly id: string; readonly feed: string; readonly channel: string; readonly simulated: boolean; readonly known: string; readonly what: string; readonly where: string; readonly grade: string; readonly gradeWords: string }> };
   readonly problems: readonly string[];
 }
 
@@ -181,6 +188,8 @@ export interface J2Input {
   readonly enemyCoaBody?: string;
   readonly enemyCoaProduct?: string;
   readonly watches?: readonly StandingWatch[];
+  /** The observation store's rows the person's clearance covers (the host reads them through the store's reader view). */
+  readonly live?: readonly Observation[];
   readonly problems?: readonly string[];
 }
 
@@ -529,7 +538,23 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
     watches.push({ id: clip(id, 40), title: 'A standing watch with no definition in this project', pir: '', indicator: '', ltiov: '', state: live.state, stateText: WATCH_STATE_TEXT[live.state] ?? live.state, alert: '', missed: live.missed, ...(live.lastMatch ? { lastMatch: live.lastMatch } : {}) });
   }
   const findings = registerFindings({ sources: j2.sources, pirs: j2.pirs, plan: j2.plan }, now).slice(0, 12).map((finding) => ({ severity: finding.severity, subject: clip(finding.subject, 80), message: clip(finding.message, 300) }));
-  return { ecoas, enemy, sources, reports, pirs, collection, watches, findings, problems: (j2.problems ?? []).slice(0, 10).map((problem) => clip(problem, 300)) };
+  const frame = scenario?.region.frame;
+  const whereOf = (row: Observation): string => {
+    const point = row.geometry.type === 'Point' ? row.geometry.coordinates : row.geometry.type === 'LineString' ? row.geometry.coordinates[0] : row.geometry.coordinates[0]?.[0];
+    if (!point) return 'No position';
+    if (frame) { try { return formatGridReference(frame, wgs84ToGrid(frame, { latitude: point[1], longitude: point[0] }), 6); } catch { /* outside the frame: fall through */ } }
+    return `${point[1].toFixed(4)}, ${point[0].toFixed(4)}`;
+  };
+  const visible = [...(j2.live ?? [])].sort((a, b) => b.knownAt.localeCompare(a.knownAt) || a.obsId.localeCompare(b.obsId));
+  const live = {
+    total: visible.length,
+    reports: visible.slice(0, CAP.list).map((row) => ({
+      id: row.obsId.slice(0, 16), feed: clip(row.feed, 60), channel: clip(row.channel, 60), simulated: row.simulated, known: row.knownAt,
+      what: clip([row.attributes?.name, row.attributes?.excerpt ?? row.subjectRef].filter(Boolean).join(': ') || row.feed, 300), where: whereOf(row),
+      grade: `${row.reliability}${row.credibility}`, gradeWords: gradeWords(row.reliability, String(row.credibility))
+    }))
+  };
+  return { ecoas, enemy, sources, reports, pirs, collection, watches, findings, live, problems: (j2.problems ?? []).slice(0, 10).map((problem) => clip(problem, 300)) };
 }
 
 // ---- The whole model ---------------------------------------------------------------------------------------------------------------------------------------

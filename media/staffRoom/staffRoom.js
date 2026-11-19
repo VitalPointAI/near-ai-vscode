@@ -735,7 +735,7 @@
     const j2 = model.j2;
     nodes.j2Problems.replaceChildren();
     for (const problem of j2.problems) nodes.j2Problems.append(el('p', 'problem', problem));
-    const counts = { threat: j2.ecoas.length + j2.enemy.length, pirs: j2.pirs.length, collection: j2.collection.length, sources: j2.sources.length + j2.reports.length, watches: j2.watches.length };
+    const counts = { threat: j2.ecoas.length + j2.enemy.length, pirs: j2.pirs.length, collection: j2.collection.length, sources: j2.sources.length + j2.reports.length + (j2.live && typeof j2.live.total === 'number' ? j2.live.total : 0), watches: j2.watches.length };
     for (const [id, tab] of nodes.j2TabButtons) setText(tab.children[1], String(counts[id]));
 
     // Threat: the adversary COAs, in probability order, then the enemy with their grades.
@@ -809,6 +809,14 @@
     sources.append(el('h3', 'kicker', 'Source register'));
     if (!j2.sources.length) sources.append(el('p', 'faint', 'No sources in the register yet. The OSINT and GEOINT analysts add them through the intel workbench.'));
     else sources.append(table(['Id', 'Title', 'Discipline', 'Grade', 'Origin', 'Confirmed'], j2.sources.map((s) => [s.id, s.title, s.discipline, gradeChip(s.grade, s.gradeWords), s.origin, s.confirmed ? 'By an independent origin' : 'Not independently']), 'Source register'));
+    // Live feed reports from the observation store, newest first, clamped to the person's clearance by the extension. A simulated row carries SIM.
+    const live = j2.live && Array.isArray(j2.live.reports) ? j2.live : { total: 0, reports: [] };
+    sources.append(el('h3', 'kicker', 'Live feed reports'));
+    if (!live.reports.length) sources.append(el('p', 'faint', 'No feed reports yet. Start the exercise feed simulation, or connect a feed, and its reports arrive here.'));
+    else {
+      if (live.total > live.reports.length) sources.append(el('p', 'faint', 'Showing the newest ' + live.reports.length + ' of ' + live.total + ' reports.'));
+      sources.append(table(['Received', 'Feed', 'Report', 'Where', 'Grade'], live.reports.map((r) => [r.known, (r.simulated ? 'SIM ' : '') + r.feed + ' / ' + r.channel, r.what, r.where, gradeChip(r.grade, r.gradeWords)]), 'Live feed reports'));
+    }
     if (j2.reports.length) {
       sources.append(el('h3', 'kicker', 'Exercise reports in the scenario'));
       sources.append(table(['Id', 'Report', 'Kind', 'Received', 'Grade', 'About'], j2.reports.map((r) => [r.id, r.title, r.kind, r.received, gradeChip(r.grade, r.gradeWords), r.about]), 'Scenario reports'));

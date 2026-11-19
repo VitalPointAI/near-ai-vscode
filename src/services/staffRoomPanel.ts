@@ -26,6 +26,10 @@ import { observationStoreFor } from '../staff/observationStore';
 import type { ObsReader } from '../staff/observationStore';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { staffRoomPicture } from '../staff/staffRoomPicture';
+import { currentFeedRuntime } from './staffSimCommand';
+
+/** How often the open Staff Room runs the store's track decay, in milliseconds. */
+export const ROOM_TICK_EVERY_MS = 10_000;
 import { handleStaffRoomMessage } from '../staff/staffRoomHost';
 import { staffHostFor } from '../staff/staffHost';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
@@ -86,10 +90,13 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
     const fresh = pending;
     pending = [];
     try {
-      const input = await loadStaffRoomInput(host, root, Date.now(), wantedRun);
-      model = buildStaffRoomModel(input);
       const store = observationStoreFor(root);
-      const cop = await staffRoomPicture(root, { ...(store ? { store } : {}), reader: await personReader(gate, root) });
+      const reader = await personReader(gate, root);
+      // The J2 workspace's live reports: the store's rows the person's clearance covers, read through the same reader view as the map's.
+      const view = store && reader ? await store.view(reader).catch(() => undefined) : undefined;
+      const input = await loadStaffRoomInput(host, root, Date.now(), wantedRun, view?.ok ? { live: view.value.rows } : {});
+      model = buildStaffRoomModel(input);
+      const cop = await staffRoomPicture(root, { ...(store ? { store } : {}), reader });
       const text = cop.picture ? JSON.stringify(cop.picture) : `problem:${cop.problem ?? ''}`;
       const changed = text !== lastPicture;
       lastPicture = text;
@@ -113,6 +120,14 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '.planning/{staff/**,.near-ai/project.json}'));
     watcher.onDidChange(schedule); watcher.onDidCreate(schedule); watcher.onDidDelete(schedule);
     listening.push(watcher);
+    // Track decay while the room is open: tracks go stale, then lost, even when no report arrives. A running simulation's feed runtime ticks the same
+    // store on its own timer; a decay pass records each change once, so two passes never double an event.
+    const ticker = setInterval(() => {
+      const runtime = currentFeedRuntime();
+      const store = observationStoreFor(root);
+      void (runtime ? runtime.tick() : store?.tick())?.then(() => schedule(), () => undefined);
+    }, ROOM_TICK_EVERY_MS);
+    listening.push({ dispose: () => clearInterval(ticker) });
     void send();
   };
   const stop = () => {

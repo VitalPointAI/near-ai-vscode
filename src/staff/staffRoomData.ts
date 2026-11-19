@@ -11,6 +11,7 @@ import { INTEL_REGISTER_NAMES, parseRegisterText, registerPath } from '../domain
 import type { CollectionEntry, PirEntry, SourceEntry } from '../domain/staff/intel';
 import { FEED_EVENT_TYPES } from '../domain/staff/obs/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
+import type { Observation } from '../domain/staff/obs/observation';
 import { parseWatch } from '../domain/staff/obs/watches';
 import type { StandingWatch } from '../domain/staff/obs/watches';
 import { splitProductFile } from '../domain/staff/products';
@@ -113,7 +114,7 @@ export async function standingWatchesOf(root: string): Promise<{ watches: Standi
 }
 
 /** Everything the Staff Room model is built from, read now. */
-export async function loadStaffRoomInput(host: StaffHost | undefined, root: string, now: number, run?: string): Promise<StaffRoomInput> {
+export async function loadStaffRoomInput(host: StaffHost | undefined, root: string, now: number, run?: string, options: { readonly live?: readonly Observation[] } = {}): Promise<StaffRoomInput> {
   const [snapshot, events, feedEvents, settings, scenario, watches] = await Promise.all([
     host ? host.snapshot() : Promise.resolve(undefined),
     host ? host.events() : Promise.resolve([] as StaffEvent[]),
@@ -155,7 +156,7 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     ...(scenario.scenario ? { scenario: scenario.scenario } : {}), ...(scenario.problem ? { scenarioProblem: scenario.problem } : {}),
     j2: {
       ...registers, ...(dsm ? { dsm } : {}), ...(enemyCoaBody ? { enemyCoaBody } : {}), ...(enemyCoaProduct ? { enemyCoaProduct } : {}),
-      watches: watches.watches, problems
+      watches: watches.watches, ...(options.live ? { live: options.live } : {}), problems
     }
   };
 }
