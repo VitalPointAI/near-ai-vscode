@@ -37,7 +37,8 @@ import {
   productHash, projectHeader, RELEASE_GUARD_SLUG, replayLedger, RESERVED_MEMBER_SLUGS, TAMPER_REASONS, TRADECRAFT_REVIEWER_SLUG, TRADECRAFT_SECTIONS
 } from '../domain/staff/ledger';
 import type { DecisionRequestInput, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState, TamperReason } from '../domain/staff/ledger';
-import { mayWrite, proposalFolder, sharedProduct, writerIn, writerOf } from '../domain/staff/ownership';
+import { mayWrite, phaseFrom, proposalFolder, sharedProduct, TRANSITION_PRODUCT, writerIn, writerOf } from '../domain/staff/ownership';
+import type { StaffPhase } from '../domain/staff/ownership';
 import { isOneLine, STAFF_SLUG } from '../domain/staff/parse';
 import { LABEL_PATTERN, parseProductHeader, PRODUCT_KINDS, renderProductHeader, splitProductFile, STAFF_MARKERS } from '../domain/staff/products';
 import type { ProductDependency, ProductHeader, ProductKind } from '../domain/staff/products';
@@ -367,10 +368,19 @@ export class StaffHost {
     return { owner, sectionLead: team.sectionLead, releaseGuard: RELEASE_GUARD_SLUG, ...(tradecraft ? { tradecraftReviewer: TRADECRAFT_REVIEWER_SLUG } : {}) };
   }
 
+  /**
+   * The phase the project is in, read from the decision log: execution once a person has approved the transition brief (ownership.ts phaseFrom), so the
+   * shared products that pass from the planners to the J3 at transition (the synchronization matrix, the DST and DSM, the assessment plan) have their
+   * execution writer from then on. A section team runs on its own here; a full staff's writers are the integration's.
+   */
+  private writerContext(replay: LedgerReplay): { readonly phase: StaffPhase; readonly mode: 'standalone' } {
+    return { phase: phaseFrom(replay.products.get(TRANSITION_PRODUCT)), mode: 'standalone' };
+  }
+
   /** A shared product has one writer (design 10, 4.3): anyone else proposes an entry. */
-  private sharedWriterProblem(product: string, caller: StaffCaller, member: string): StaffResult | undefined {
+  private sharedWriterProblem(product: string, caller: StaffCaller, member: string, replay: LedgerReplay): StaffResult | undefined {
     if (!sharedProduct(product)) return undefined;
-    const context = { phase: 'planning' as const, mode: 'standalone' as const };
+    const context = this.writerContext(replay);
     if (mayWrite(product, { section: caller.team.section, member }, context, undefined, caller.team.members)) return undefined;
     const writer = writerIn(product, context, caller.team);
     return refuse(`${product} is a shared product with one writer (${writer ? `${writer.member} in ${writer.section}` : 'its owner'}). Propose your change as an entry in ${proposalFolder(product)} with the register tool's propose action, and the writer merges it.`);
@@ -389,9 +399,9 @@ export class StaffHost {
     // A write-limited member (the red team, the release guard) registers only a product inside its limit: the red team its critique, the guard nothing.
     const limit = staffWriteLimit({ section: caller.team.section }, member);
     if (limit && !writeAllowedBy(limit, productPath(caller.team.section, input.product))) return refuse(`${member} may register only ${limit.join(', ')}; report what should change instead.`);
-    const shared = this.sharedWriterProblem(input.product, caller, member);
-    if (shared) return shared;
     const before = await this.replay();
+    const shared = this.sharedWriterProblem(input.product, caller, member, before);
+    if (shared) return shared;
     const existing = before.products.get(input.product);
     if (existing?.tampered) return refuse(`${input.product} cannot be changed: ${existing.tampered}`);
     const section = existing?.record.section ?? caller.team.section;
@@ -632,7 +642,7 @@ export class StaffHost {
   private registerSection(register: string, caller: StaffCaller, replay: LedgerReplay): StaffSectionId {
     const existing = replay.products.get(register);
     if (existing) return existing.record.section;
-    const writer = sharedProduct(register) ? writerOf(register, { phase: 'planning', mode: 'standalone' }) : undefined;
+    const writer = sharedProduct(register) ? writerOf(register, this.writerContext(replay)) : undefined;
     return writer?.section ?? caller.team.section;
   }
 
@@ -658,8 +668,11 @@ export class StaffHost {
     if (!schema) return refuse(`There is no register called ${input.register}.`);
     const replay = await this.replay();
     const section = this.registerSection(input.register, caller, replay);
+    // A write-limited member (the red team, the release guard, the J3 watch officer) writes no register outside its limit; it proposes rows instead.
+    const limit = staffWriteLimit({ section: caller.team.section }, member);
+    if (limit && !writeAllowedBy(limit, productPath(section, input.register))) return refuse(`${member} does not write registers; propose your rows with the propose action and the register's writer merges them.`);
     const state = replay.products.get(input.register);
-    const context = { phase: 'planning' as const, mode: 'standalone' as const };
+    const context = this.writerContext(replay);
     const partWriter = input.part !== undefined ? writerIn(input.register, context, caller.team, input.part) : undefined;
     if (input.part !== undefined && (!partWriter || partWriter.member !== member || partWriter.section !== caller.team.section)) return refuse(`You do not write the ${input.part} part of ${input.register}.`);
     const owner = state?.record.roles.owner;
@@ -799,7 +812,7 @@ export class StaffHost {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     const derived = deriveFromWargame(await this.wargameEntries());
-    const context = { phase: 'planning' as const, mode: 'standalone' as const };
+    const context = this.writerContext(await this.replay());
     const writes: string[] = [];
     for (const [register, rows] of [['sync-matrix', derived.sync], ['dst-dsm', derived.dsm]] as const) {
       if (!rows.length) continue;

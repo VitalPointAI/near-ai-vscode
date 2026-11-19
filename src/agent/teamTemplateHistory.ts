@@ -894,5 +894,134 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
         ]
       }
     }
+  ],
+  'j3-operations': [
+    {
+      version: 1,
+      definition: '4dba39dee999a501',
+      guidance: [
+        '72c995694f3baa60',
+        '3be6d6fee96d4cee',
+        '797c038c232a033b',
+        '57b8a257c221d5ad',
+        'e2017d503767cdfd',
+        'b742fd76ab34bc8d',
+        'b7301a4e2a3a1ee0',
+        'd3a47016b6ada2e7',
+        '915fae05e56db6f6',
+        '3b2b96b63b1276f8',
+        '1c3eb07772931024',
+        'c544971e97c42b64',
+        '7c2fce27bc1ae1c4',
+        '82ff62c3520badc6',
+        '6bae95fd2d1b6d33',
+        '7bf5de8b52f1b99c',
+        '44fc8588bd435af5',
+        'bb1da87c44653da9'
+      ],
+      members: {
+        'j3-director': [
+          '2b34e48b8f3b89d8',
+          '5b4bc34c6f94d23d',
+          '4b49e92e52108973',
+          '27ad28f50527b06f',
+          'ecf44ea93e653292',
+          '8faf8762a604857e',
+          '91c55e93509dea05',
+          'efbc21afecdd13d2',
+          '14c323fbdadf0208',
+          'e5b9d71d0a7167cb',
+          '961d488222924f30',
+          '945a2abb46d1c8f4'
+        ],
+        'joc-chief': [
+          '60482099061ace13',
+          '4b3c26d62534fc7f',
+          'e1643f1eb5d3cd51',
+          'fdc1ebd3781761df'
+        ],
+        'watch-officer': [
+          'f98f8ea9604dfc20',
+          'f2812a0d3720bd5e',
+          '1bbf5543cad5585e',
+          '1b6c507b67817b0d'
+        ],
+        'future-ops-planner': [
+          'b3e5c5b5e5962424',
+          '1ebb26bf703aa45b',
+          'f10d4e5e53f439d6',
+          '63bec1508a4ffdf3',
+          '4f0e374ede868844',
+          '23573ff374d7e1fb',
+          '43f86c06ef11dbc2'
+        ],
+        'fires-effects-coordinator': [
+          '98f7b5eb46c1c721',
+          '517cf5563e7d3989',
+          '6d2c063b8f1c2ead',
+          'b6b03ef499807ad5',
+          'bd4605e5e1a1571f',
+          '28e2b8568d2fd073',
+          '2dee7fd352d7bb5e'
+        ],
+        'targeting-officer': [
+          '2d3b30c626c1d09c',
+          'c5f6c4ad6cea05f1',
+          'f619eeda687716b9',
+          '82d54e9ab6f270f3',
+          'e5f3b83ac32f6e1a'
+        ],
+        'information-planner': [
+          'c8cf81854e9628c9',
+          'f61a5ffec5c5dc66'
+        ],
+        'cyber-space-planner': [
+          'b0e64fb3af85fef0'
+        ],
+        'airspace-maritime-liaison': [
+          '6baff6ec3f1ebac3',
+          '2415af0eeb9ca7a9'
+        ],
+        'assessment-analyst': [
+          '078321a2e72e8468',
+          'aa7476a7d678cd7c',
+          '8c02aa054d0849f6',
+          'd7511365cc933788',
+          '3ef0cfac657b01cc'
+        ],
+        'liaison-coordinator': [
+          '8cfb79e9c8ab83cd',
+          'c623920955ea6984',
+          'ef338df9b8f22719',
+          'fc6a08e909f6f269',
+          '2e8736f2d417f1f7'
+        ],
+        'release-guard': [
+          '0b50ad49cb8dd7e1',
+          'c1a060d19d6bebb8',
+          '8f7d4337e171530c',
+          'c891e67d1b41b099',
+          '2b247fd5e2b0b79c'
+        ],
+        's3-lead': [
+          '0eea18268aeee4f3',
+          '0abece0da8393758',
+          '185c7ac22fca041c',
+          'df207e0151c6fa1c',
+          '066547e66355cf7b',
+          '089f64b0b7a601a7'
+        ],
+        'current-ops-chief': [
+          '1a7f50587e7bc12c',
+          '3fa6a37010d76273',
+          '1533cdd5da2bef89'
+        ],
+        'information-cyber-space-planner': [
+          'd996cd933ba70e10',
+          '226f0de558d03bec',
+          '0602af3edbde525b'
+        ]
+      }
+    }
   ]
 };

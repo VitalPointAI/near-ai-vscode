@@ -710,19 +710,21 @@ other agent's. That policy is the only limit: nothing confines the red team's
 writes to `.planning/`, and Bash can reach anywhere the policy allows.
 
 **Staff team write limits.** In a team file with a `staff:` block (the military
-staff templates), two members are held to their own files by the extension, not
+staff templates), three members are held to their own files by the extension, not
 only by their instructions: the `red-team` may write only
-`.planning/staff/products/<section>/red-team-critique.md`, and the
+`.planning/staff/products/<section>/red-team-critique.md`, the
 `release-guard` only its section's gate reports,
-`.planning/staff/products/<section>/guard/`. Write and Edit refuse
+`.planning/staff/products/<section>/guard/`, and the J3 `watch-officer` no file
+at all (it logs by proposing event-log rows through the staff tools). Write and Edit refuse
 any other path outright (no approval card), after resolving `..`, absolute paths
 and links, so a critique or a verdict can never change a plan file. Such a member
 is also given no tool that could write elsewhere (shell, document and graphics
 makers, MCP tools, starting other agents), even when its `tools:` line lists one.
 The one exception is the built-in staff tools it is granted (propose, verdict,
-status, list, the tradecraft lint and guard-scan): they write only the ledger,
-product headers and gate reports, and the extension refuses to let such a
-member register any product outside its own files.
+status, list, the register tool, the tradecraft lint and guard-scan): they write
+only the ledger, product headers, gate reports and register proposals, and the
+extension refuses to let such a member register any product or write any
+register outside its own files.
 Teams without a `staff:` block are unaffected.
 
 **Update Team** rewrites a team file (and, for a project, the extension's own
@@ -749,6 +751,12 @@ commands a person runs and confirms in a dialog. No agent tool offers them,
 and the state machine refuses them from any agent whatever calls it. A
 person's decision names them and their role and is signed with this device's
 key. Until verified credentials arrive, that name and role are self-declared.
+
+A project moves from planning to execution only when a person approves the
+transition brief (`transition-brief`); the phase is read from the signed
+ledger, so no agent can start execution, and from then on the J3 members, not
+the planners, write the synchronization matrix, the DST and DSM and the
+assessment plan.
 
 The tools record what they do inside the project only and send nothing out.
 guard-scan's checks are deterministic text rules: they catch markings,
