@@ -785,6 +785,7 @@
       addBasemap: function () {},
       spin: function () { return false; },
       look: function () {},
+      snapshot: function () { return Promise.resolve(''); },
       terrainHeight: function () { return undefined; },
       destroy: function () { if (root.parentNode) root.parentNode.removeChild(root); }
     };
@@ -1246,6 +1247,15 @@
       },
       /** Moves the camera to a view (centre, zoom, pitch, bearing), a flight when motion is allowed. */
       look: function (camera) { ready.then(function () { move(camera); }); },
+      /** A PNG data URL of the map as drawn, taken in the next frame (the drawing buffer is only readable while it is drawn). For the e2e check. */
+      snapshot: function () {
+        return ready.then(function () {
+          return new Promise(function (resolve) {
+            map.once('render', function () { try { resolve(map.getCanvas().toDataURL('image/png')); } catch (error) { resolve(''); } });
+            if (typeof map.triggerRepaint === 'function') map.triggerRepaint();
+          });
+        });
+      },
       /** The 3D surface's height in metres at a [longitude, latitude], or undefined (no 3D, or not loaded there). For the e2e check. */
       terrainHeight: function (lngLat) {
         if (typeof map.queryTerrainElevation !== 'function' || !(typeof map.getTerrain === 'function' && map.getTerrain())) return undefined;
@@ -1515,6 +1525,8 @@
       for (const key of ['zoom', 'pitch', 'bearing']) if (typeof camera[key] === 'number' && isFinite(camera[key])) out[key] = camera[key];
       renderer.look(out);
     };
+    /** A picture of the map as drawn (a PNG data URL; '' on the SVG map), for the real-window check's screenshots. */
+    view.snapshot = function () { return renderer.snapshot(); };
     /** For the real-window check (layout probe): the ground's state and the 3D height at a point. */
     view.inspect = function (lngLat) { return Object.assign(view.state(), { renderer: view.renderer, height: lngLat ? renderer.terrainHeight(lngLat) : undefined }); };
     if (options.clock && options.clock.subscribe) unsubscribe = options.clock.subscribe(function (t) { view.setTime(t); });

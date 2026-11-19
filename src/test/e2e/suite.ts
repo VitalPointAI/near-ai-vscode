@@ -420,6 +420,62 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }],
+    ['the Staff Room\'s map draws the bundled imagery and 3D terrain from the extension alone: no policy violation, no other origin, Harrow Ridge stands over 150 m (real-window check)', async () => {
+      // The scenario the test above wrote is still in the project; the real host sends the room with its checked tile addresses.
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+      const shots = process.env.NEAR_AI_E2E_SHOTS;
+      samples.delete('staff-room');
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
+        await waitForProbe('staff-room');
+        let report = await probe('staff-room');
+        for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
+        if (!report.map?.maplibre) {
+          // Without WebGL (the default run) the room's 2D map says why; NEAR_AI_E2E_WEBGL=1 runs the rest.
+          console.log(`[real-window] imagery check skipped: ${report.map?.note || 'no WebGL'}`);
+          assert.match(report.map?.note ?? '', /2D map/);
+          return;
+        }
+        for (let waited = 0; waited < 10_000 && !report.map?.ground; waited += 500) { await pause(500); report = await probe('staff-room'); }
+        assert.equal(report.map?.ground?.base, 'imagery', 'Imagery is the default base');
+        await postToPage('staff-room', { type: 'layout-act', act: 'map-terrain', on: true });
+        await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { center: [-123.45, -49.1], zoom: 11.4, pitch: 62, bearing: -25 } });
+        let height: number | undefined;
+        for (let waited = 0; waited < 40_000; waited += 1000) {
+          await pause(1000);
+          report = await probe('staff-room');
+          height = report.map?.ground?.height;
+          if (typeof height === 'number' && height > 150) break;
+        }
+        console.log(`[real-window] 3D terrain at Harrow Ridge: ${height === undefined ? 'no height' : `${Math.round(height)} m`}; origins: ${(report.map?.origins ?? []).join(', ')}`);
+        assert.ok(typeof height === 'number' && height > 150, `Harrow Ridge stands over 150 m in 3D (${height})`);
+        assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation');
+        const foreign = (report.map?.origins ?? []).filter((origin) => !/vscode-resource|vscode-cdn\.net|^vscode-webview:|^null$/.test(origin));
+        assert.deepEqual(foreign, [], 'every request goes to the extension');
+        if (shots) {
+          const snap = async (name: string) => {
+            await postToPage('staff-room', { type: 'layout-act', act: 'map-snapshot' });
+            for (let waited = 0; waited < 10_000; waited += 500) {
+              await pause(500);
+              const shot = (await probe('staff-room')).map?.snapshot;
+              if (shot && shot.startsWith('data:image/png;base64,')) { await mkdir(shots, { recursive: true }); await writeFile(path.join(shots, `${name}.png`), Buffer.from(shot.slice(22), 'base64')); return; }
+            }
+          };
+          await snap('e2e-imagery-3d');
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-base', base: 'topo' });
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { pitch: 0, bearing: 0, zoom: 11 } });
+          await pause(6000);
+          await snap('e2e-topographic');
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-base', base: 'imagery' });
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-projection', projection: 'globe' });
+          await pause(8000);
+          await snap('e2e-globe');
+        }
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      }
+    }],
     ['the Staff Room\'s map is the main panel once a scenario is loaded: in view without scrolling, most of the panel\'s height, with a working layer drawer and full map, at a normal and a narrow width (D-48 of 0.4.34)', async () => {
       // The scenario the test above wrote is still in the project. The real host sends the room, so no sample model is posted over it.
       samples.delete('staff-room');
