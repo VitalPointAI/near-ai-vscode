@@ -1,24 +1,79 @@
-/* The COP map component (media/staff/copMap.js). Colours that carry meaning follow the UX concept 5.10; every state also has words. */
-.cop-map { display: grid; grid-template-rows: auto auto 1fr auto; gap: 4px; height: 100%; min-height: 320px; position: relative; font: 12px var(--vscode-font-family, sans-serif); color: var(--vscode-foreground, #ddd); }
-.cop-map-bar, .cop-map-layers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.cop-map-marking { font-weight: 600; letter-spacing: 0.02em; margin-right: auto; }
-.cop-map-button, .cop-map-select { font: inherit; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0e639c); border: 1px solid transparent; padding: 2px 8px; border-radius: 2px; }
-.cop-map-button:disabled { opacity: 0.5; }
-.cop-map-button:focus-visible, .cop-map-select:focus-visible, .cop-map-range:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
-.cop-map-sim { font-weight: 700; padding: 0 6px; border: 1px solid currentColor; border-radius: 2px; }
-.cop-map-budget { opacity: 0.85; }
-.cop-map-layer { display: inline-flex; gap: 4px; align-items: center; }
-.cop-map-layer-separate { font-style: italic; }
-.cop-map-canvas { position: relative; min-height: 240px; overflow: hidden; background: #0e2a47; }
+/* The COP map component (media/staff/copMap.js) and the layer drawer both maps share (media/staff/layerDrawer.js). Colours that carry meaning follow
+   the UX concept 5.10; every state also has words. The map fills its box and every control floats over it (D-48 of 0.4.34). Only transform and
+   opacity animate, and nothing moves under reduced motion (the drawer's slide is the Web Animations API, which the scripts skip when still). */
+.cop-map {
+  --cop-glass: color-mix(in srgb, var(--vscode-editorWidget-background, #1f2633) 86%, transparent);
+  --cop-glass-line: color-mix(in srgb, var(--vscode-editorWidget-border, #454545) 80%, transparent);
+  --cop-ink: var(--vscode-foreground, #ddd);
+  position: relative; height: 100%; min-height: 320px; overflow: hidden; font: 12px var(--vscode-font-family, sans-serif); color: var(--cop-ink);
+}
+.cop-map-canvas { position: absolute; inset: 0; overflow: hidden; background: #050b16; }
 .cop-map-canvas .maplibregl-map { position: absolute; inset: 0; }
 .cop-map-svg { width: 100%; height: 100%; display: block; }
+
+/* Floating chrome: a slim strip top left, the controls top right, the time along the bottom. */
+.cop-map-top, .cop-map-foot, .cop-map-notice, .cop-map-card { position: absolute; z-index: 2; }
+.cop-map-top { left: 8px; right: 8px; top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; justify-content: space-between; pointer-events: none; }
+.cop-map-strip { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; padding: 3px 8px; border-radius: 6px; background: var(--cop-glass); border: 1px solid var(--cop-glass-line); pointer-events: none; font-size: 11px; line-height: 1.3; }
+.cop-map-marking { font-weight: 700; letter-spacing: .04em; overflow-wrap: anywhere; min-width: 0; }
+.cop-map-sim, .ld-sim { font: 700 10px/1.2 var(--vscode-editor-font-family, monospace); padding: 0 4px; border: 1px solid currentColor; border-radius: 3px; color: var(--vscode-editorWarning-foreground, #cca700); }
+.cop-map-budget { opacity: .85; font-variant-numeric: tabular-nums; }
+.cop-map-tools { flex: 0 1 auto; margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; pointer-events: auto; min-width: 0; }
+.cop-map-button, .cop-map-select, .ld-button, .cop-map-tools .btn {
+  font: inherit; font-size: 11px; color: var(--cop-ink); background: var(--cop-glass); border: 1px solid var(--cop-glass-line); padding: 2px 8px; min-height: 24px;
+  border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  transition: background-color 150ms, border-color 150ms;
+}
+.cop-map-button:hover, .ld-button:hover, .cop-map-tools .btn:hover { border-color: var(--vscode-focusBorder, #007fd4); }
+.cop-map-button[aria-pressed="true"], .ld-button[aria-expanded="true"], .cop-map-tools .btn[aria-pressed="true"] { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-color: transparent; }
+.cop-map-button:disabled, .ld-button:disabled { opacity: .5; cursor: default; }
+.cop-map-select { max-width: 180px; }
+.cop-map-button:focus-visible, .cop-map-select:focus-visible, .cop-map-range:focus-visible, .ld-button:focus-visible, .ld-switch:focus-visible, .ld-close:focus-visible, .cop-map-env:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
+.cop-map-foot { left: 8px; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 2px; padding: 3px 8px; border-radius: 6px; background: var(--cop-glass); border: 1px solid var(--cop-glass-line); max-width: min(640px, calc(100% - 16px)); }
+.cop-map-time { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.cop-map-range { flex: 1 1 auto; min-width: 60px; margin: 0; }
+.cop-map-time-text { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cop-map-env { font-size: 10.5px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; cursor: default; }
+.cop-map-env:hover, .cop-map-env:focus { white-space: normal; overflow-wrap: anywhere; }
+.cop-map-notice { left: 8px; bottom: 64px; max-width: calc(100% - 16px); padding: 3px 8px; background: var(--cop-glass); border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
+.cop-map-card { right: 8px; bottom: 64px; max-width: min(320px, calc(100% - 16px)); max-height: 50%; overflow: auto; padding: 8px; background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .3); }
+.cop-map .maplibregl-ctrl-bottom-right { bottom: 64px; }
 .cop-map-svg-text, .cop-map-svg-place { font-size: 12px; paint-order: stroke; stroke-width: 3px; }
 .cop-map-svg-place { font-style: italic; }
 .cop-map-hilite { outline: none; filter: drop-shadow(0 0 4px #ffd23f); }
 .cop-map-feature { cursor: pointer; }
-.cop-map-time { display: flex; gap: 8px; align-items: center; }
-.cop-map-range { flex: 1; }
-.cop-map-card { position: absolute; right: 8px; bottom: 40px; max-width: min(320px, calc(100% - 16px)); padding: 8px; background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, #454545); }
-.cop-map-env { opacity: 0.9; font-size: 11px; }
-.cop-map-notice { padding: 4px 8px; border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
-@media (prefers-reduced-motion: reduce) { .cop-map * { transition: none !important; animation: none !important; } }
+
+/* The layer drawer: slides in from the map's right edge, over the map, never beside it. */
+.ld-icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; flex: none; }
+.ld-count { font: 700 10px/1 var(--vscode-editor-font-family, monospace); min-width: 16px; padding: 2px 4px; border-radius: 999px; text-align: center; background: color-mix(in srgb, currentColor 18%, transparent); }
+.ld-panel {
+  position: absolute; z-index: 5; top: 0; right: 0; bottom: 0; width: min(310px, 88%); display: flex; flex-direction: column;
+  background: var(--vscode-editorWidget-background, #1f2633); color: var(--vscode-foreground, #ddd); border-left: 1px solid var(--vscode-editorWidget-border, #454545);
+  box-shadow: -10px 0 28px rgba(0, 0, 0, .32); font: 12px var(--vscode-font-family, sans-serif);
+}
+.ld-panel[hidden] { display: none; }
+.ld-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 12px; border-bottom: 1px solid var(--vscode-editorWidget-border, #454545); }
+.ld-title { font-size: 13px; font-weight: 600; margin: 0; }
+.ld-summary { font-size: 11px; opacity: .75; margin-right: auto; }
+.ld-close { all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 6px; text-align: center; line-height: 24px; font-size: 16px; }
+.ld-close:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.ld-body { flex: 1 1 auto; overflow: auto; padding: 4px 0 8px; }
+.ld-group { padding: 6px 12px 4px; }
+.ld-group + .ld-group { border-top: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, #454545) 60%, transparent); }
+.ld-group-head { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
+.ld-group-title { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .8; }
+.ld-tally { font-size: 11px; opacity: .7; margin-left: auto; font-variant-numeric: tabular-nums; }
+.ld-list { list-style: none; margin: 0; padding: 0; }
+.ld-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; min-width: 0; }
+.ld-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ld-row:not(.on) .ld-name { opacity: .7; }
+.ld-separate .ld-name { font-style: italic; }
+.ld-n { font: 11px var(--vscode-editor-font-family, monospace); opacity: .75; font-variant-numeric: tabular-nums; }
+.ld-switch { all: unset; cursor: pointer; flex: none; position: relative; width: 30px; height: 16px; border-radius: 999px; background: color-mix(in srgb, currentColor 22%, transparent); transition: background-color 180ms; }
+.ld-knob { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--vscode-foreground, #ddd); transition: transform 180ms cubic-bezier(.2, 0, 0, 1); }
+.ld-switch[aria-checked="true"] { background: var(--vscode-button-background, #0e639c); }
+.ld-switch[aria-checked="true"] .ld-knob { transform: translateX(14px); background: #fff; }
+.ld-foot { margin: 0; padding: 8px 12px 10px; font-size: 11px; opacity: .75; border-top: 1px solid var(--vscode-editorWidget-border, #454545); }
+
+@media (prefers-reduced-motion: reduce) { .cop-map *, .ld-panel *, .ld-button { transition: none !important; animation: none !important; } }
+@media (forced-colors: active) { .ld-switch[aria-checked="true"] { background: Highlight; } .ld-knob { background: CanvasText; } }

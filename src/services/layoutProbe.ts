@@ -26,7 +26,15 @@ export interface LayoutReport {
   /** Content security policy violations the page met since the probe loaded. */
   cspViolations?: string[];
   /** The COP map, on pages with one: MapLibre drew into a canvas, the room shows the COP map, and the fallback line if any. */
-  map?: { maplibre: boolean; cop: boolean; note: string };
+  map?: {
+    maplibre: boolean; cop: boolean; note: string;
+    /** The map's box in the page's viewport (CSS pixels), the viewport's height and how far the page is scrolled. */
+    box?: { top: number; bottom: number; height: number; viewport: number; scrollY: number };
+    /** The full map is on. */
+    full?: boolean;
+    /** The open layer drawer: open, focus inside it, focus on its Layers button, and how many layer switches it shows. */
+    drawer?: { open: boolean; focusInside: boolean; buttonFocused: boolean; switches: number };
+  };
 }
 
 export function layoutProbeEnabled(): boolean {

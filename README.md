@@ -366,8 +366,21 @@ workspaces is the COP map: the scenario's synthetic geography, the product
 layers and the observations your clearance covers, in 2D or on the globe, with
 its time slider. Hillshade, contours and the exercise weather (wind, fog, rain
 and rough sea, for the time on the slider) are layers you turn on and off,
-drawn offline from a bundled synthetic terrain and weather pack. Where WebGL or the map library is not available, the room
-draws a 2D map instead and says why in a line on the map. On either map a
+drawn offline from a bundled synthetic terrain and weather pack. Once a
+scenario is loaded the map is the room's main panel: the process rail and the
+section cards fold into one line (**Show the process and sections** opens
+them), and the map fills the rest of the panel. Its controls float over it:
+the classification line, **Layers** (a drawer that slides in from the map's
+edge, with the layers grouped as Picture, Environment and Reference, each
+with its count and a SIM badge where the data is simulated), **Globe** (flies
+out until the curve of the earth shows, with the exercise frame ringed in
+gold; **Map** flies back), **As happened** or **As known**, **Map as table**,
+**Full map** (the map over the whole Staff Room; Escape returns) and the time
+slider. The map opens on the whole exercise frame, and units that would cover
+each other draw as one stacked symbol with a count until you zoom in. Nothing
+moves under reduced motion or Calm. Where WebGL or the map library is not available, the room
+draws a 2D map instead, with the same drawer and the terrain pack's land,
+hillshade and contours, and says why in a line on the map. On either map a
 name that would cover another name or a symbol moves to a free spot nearby,
 is shortened, or is left off; the symbol always stays, and its name is still
 in its description and in **Map as table**. The J2 workspace also lists the

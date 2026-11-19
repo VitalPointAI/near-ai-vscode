@@ -420,6 +420,56 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }],
+    ['the Staff Room\'s map is the main panel once a scenario is loaded: in view without scrolling, most of the panel\'s height, with a working layer drawer and full map, at a normal and a narrow width (D-48 of 0.4.34)', async () => {
+      // The scenario the test above wrote is still in the project. The real host sends the room, so no sample model is posted over it.
+      samples.delete('staff-room');
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+      const problems: string[] = [];
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
+        await waitForProbe('staff-room');
+        await editorAreaOnly();
+        const { room, editor } = await editorRoom('staff-room');
+        for (const target of [editor, room >= 800 ? 420 : Math.max(380, Math.min(420, room))]) {
+          let report = target === editor ? await settled('staff-room') : await sizeEditor('staff-room', target, editor);
+          for (let waited = 0; waited < 20_000 && !(report.map?.box && (report.map.maplibre || report.map.note)); waited += 500) { await pause(500); report = await probe('staff-room'); }
+          await pause(800);
+          report = await probe('staff-room');
+          const where = `staff-room war room at ${report.width}px (${report.map?.maplibre ? 'MapLibre' : 'SVG map'})`;
+          const box = report.map?.box;
+          console.log(`  ${where}: map ${box ? `${box.top}-${box.bottom} (${box.height}px) of ${box.viewport}px, scrolled ${box.scrollY}` : 'not found'}; page ${report.scrollWidth}/${report.clientWidth}`);
+          if (!box) { problems.push(`${where}: no map box`); continue; }
+          if (box.scrollY !== 0 || box.top < 0 || box.bottom > box.viewport + 1) problems.push(`${where}: the map is not in view without scrolling (${JSON.stringify(box)})`);
+          if (box.height < 0.55 * box.viewport) problems.push(`${where}: the map covers ${Math.round((100 * box.height) / box.viewport)}% of the panel's height, under 55%`);
+          if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${where}: scrolls sideways (${report.scrollWidth} in ${report.clientWidth})`);
+          for (const offender of report.offenders) problems.push(`${where}: ${offender}`);
+          // The layer drawer opens with focus inside, and Escape closes it with focus back on its button.
+          await postToPage('staff-room', { type: 'layout-act', act: 'open-layers' });
+          await pause(700);
+          const opened = await probe('staff-room');
+          if (!opened.map?.drawer?.open || !opened.map.drawer.focusInside || !opened.map.drawer.switches) problems.push(`${where}: the layer drawer did not open with focus inside (${JSON.stringify(opened.map?.drawer)})`);
+          if (opened.scrollWidth > opened.clientWidth + 1) problems.push(`${where}: the open drawer scrolls the page sideways`);
+          await postToPage('staff-room', { type: 'layout-act', act: 'escape' });
+          await pause(700);
+          const closed = await probe('staff-room');
+          if (closed.map?.drawer?.open || !closed.map?.drawer?.buttonFocused) problems.push(`${where}: Escape did not close the drawer back to its button (${JSON.stringify(closed.map?.drawer)})`);
+          // Full map covers the whole panel, and Escape brings the room back.
+          await postToPage('staff-room', { type: 'layout-act', act: 'full-map' });
+          await pause(700);
+          const full = await probe('staff-room');
+          if (!full.map?.full || !full.map.box || full.map.box.top > 1 || full.map.box.height < full.map.box.viewport - 2) problems.push(`${where}: Full map does not fill the panel (${JSON.stringify(full.map?.box)})`);
+          await postToPage('staff-room', { type: 'layout-act', act: 'escape' });
+          await pause(700);
+          if ((await probe('staff-room')).map?.full) problems.push(`${where}: Escape did not leave the full map`);
+        }
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+        await vscode.commands.executeCommand('workbench.view.explorer');
+      }
+      assert.deepEqual(problems, []);
+    }],
     ...teamProjectTests(() => api)
   ];
 }

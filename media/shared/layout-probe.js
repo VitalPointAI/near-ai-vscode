@@ -23,6 +23,16 @@
     root.style.setProperty('--vscode-font-family', 'monospace');
     root.style.setProperty('--vscode-font-size', Math.round(size * 1.1) + 'px');
   });
+  // On request, does what a person would on the map (D-48 of 0.4.34): opens the visible layer drawer, presses Escape where focus is, or toggles
+  // the full map, so a test can check the drawer and the full map in a real window. Test-only, like the rest of this file.
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'layout-act') return;
+    const visible = (node) => node && node.getClientRects().length > 0;
+    const act = event.data.act;
+    if (act === 'open-layers') { const button = [...document.querySelectorAll('.ld-button')].find(visible); if (button) button.click(); }
+    if (act === 'full-map') { const button = [...document.querySelectorAll('.map-full')].find(visible); if (button) button.click(); }
+    if (act === 'escape') (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
   // Every content security policy violation the page meets from the moment this script loads, so a test can tell a page that works under its
   // policy from one the policy quietly broke.
   const violations = [];
@@ -65,7 +75,17 @@
       map: (function () {
         const canvas = document.querySelector('canvas.maplibregl-canvas');
         const note = document.querySelector('.mapnote:not([hidden])');
-        return { maplibre: Boolean(canvas && canvas.width > 0 && canvas.height > 0), cop: Boolean(document.querySelector('.has-cop')), note: note ? (note.textContent || '').trim().slice(0, 200) : '' };
+        // Where the map's box is in the page's viewport, the open layer drawer and where focus is, and whether the full map is on.
+        const box = [...document.querySelectorAll('.mapbox')].find((node) => node.getClientRects().length > 0);
+        const rect = box ? box.getBoundingClientRect() : undefined;
+        const panel = [...document.querySelectorAll('.ld-panel')].find((node) => !node.hidden && node.getClientRects().length > 0);
+        const active = document.activeElement;
+        return {
+          maplibre: Boolean(canvas && canvas.width > 0 && canvas.height > 0), cop: Boolean(document.querySelector('.has-cop')), note: note ? (note.textContent || '').trim().slice(0, 200) : '',
+          box: rect ? { top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height), viewport: window.innerHeight, scrollY: Math.round(window.scrollY) } : undefined,
+          full: Boolean(box && box.classList.contains('full')),
+          drawer: { open: Boolean(panel), focusInside: Boolean(panel && active && panel.contains(active)), buttonFocused: Boolean(active && active.classList && active.classList.contains('ld-button')), switches: panel ? panel.querySelectorAll('[role="switch"]').length : 0 }
+        };
       })()
     };
   };

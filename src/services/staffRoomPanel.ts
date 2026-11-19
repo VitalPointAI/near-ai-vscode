@@ -180,6 +180,7 @@ export function staffRoomHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cs
 <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>
 <div id="alert" class="visually-hidden" role="alert" aria-live="assertive"></div>
 ${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.declutter}"></script>
+<script nonce="${nonce}" src="${cop.drawer}"></script>
 <script nonce="${nonce}" src="${cop.script}"></script>
 <script nonce="${nonce}" src="${asset('staffMap.js')}"></script>
 <script nonce="${nonce}" src="${asset('staffWorkspaces.js')}"></script>

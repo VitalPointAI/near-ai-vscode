@@ -13,10 +13,12 @@ import { gridToWgs84, insideFrame, wgs84ToGrid } from '../domain/staff/obs/frame
 import type { Observation } from '../domain/staff/obs/observation';
 import { parseScenarioText } from '../domain/staff/scenario';
 import { COP_MAP_FILES, copMapCsp, copMapResources } from '../staff/copMapWebview';
+import { scenarioEnvironment } from '../staff/envPack';
 
 const REPO = path.resolve(__dirname, '..', '..');
 const SCRIPT = readFileSync(path.join(REPO, 'media', 'staff', 'copMap.js'), 'utf8');
 const DECLUTTER = readFileSync(path.join(REPO, 'media', 'staff', 'declutter.js'), 'utf8');
+const DRAWER = readFileSync(path.join(REPO, 'media', 'staff', 'layerDrawer.js'), 'utf8');
 
 function starter() {
   const parsed = parseScenarioText(readFileSync(path.join(REPO, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
@@ -38,7 +40,7 @@ class Node {
   public get firstChild(): Node | undefined { return this.children[0]; }
   public get lastChild(): Node | undefined { return this.children[this.children.length - 1]; }
   public get childNodes(): Node[] { return this.children; }
-  public appendChild(child: Node): Node { child.parentNode = this; this.children.push(child); if (this.tag === 'head' && child.tag === 'script') requests.push(String(child.src)); return child; }
+  public appendChild(child: Node): Node { if (child.parentNode) child.parentNode.removeChild(child); child.parentNode = this; this.children.push(child); if (this.tag === 'head' && child.tag === 'script') requests.push(String(child.src)); return child; }
   public removeChild(child: Node): Node { this.children = this.children.filter((item) => item !== child); child.parentNode = undefined; return child; }
   public setAttribute(key: string, value: string): void { this.attributes.set(key, value); }
   public getAttribute(key: string): string | undefined { return this.attributes.get(key); }
@@ -46,9 +48,36 @@ class Node {
   public dispatch(type: string): void { for (const listener of this.listeners.get(type) ?? []) listener({}); }
   public getContext(): null { return null; }
   public all(): Node[] { return [this, ...this.children.flatMap((child) => child.all())]; }
+  // What the layer drawer (media/staff/layerDrawer.js) uses: classes, focus and the Web Animations API.
+  public className = '';
+  public get classList() {
+    const list = () => this.className.split(/\s+/).filter(Boolean);
+    return {
+      contains: (name: string) => list().includes(name),
+      add: (name: string) => { if (!list().includes(name)) this.className = [...list(), name].join(' '); },
+      remove: (name: string) => { this.className = list().filter((item) => item !== name).join(' '); },
+      toggle: (name: string, force?: boolean) => { const on = force ?? !list().includes(name); this.className = on ? [...new Set([...list(), name])].join(' ') : list().filter((item) => item !== name).join(' '); return on; }
+    };
+  }
+  public focus(): void { focused = this; }
+  public get tagName(): string { return this.tag.toUpperCase(); }
+  public animations: Array<{ frames: Array<Record<string, unknown>>; onfinish?: () => void; finish(): void; cancel(): void }> = [];
+  public animate(frames: Array<Record<string, unknown>>): { frames: Array<Record<string, unknown>>; onfinish?: () => void; finish(): void; cancel(): void } {
+    const animation = { frames, onfinish: undefined as undefined | (() => void), finish() { this.onfinish?.(); }, cancel() {} };
+    this.animations.push(animation);
+    return animation;
+  }
+  public key(key: string, shiftKey = false): boolean {
+    let prevented = false;
+    for (const listener of this.listeners.get('keydown') ?? []) listener({ key, shiftKey, preventDefault: () => { prevented = true; }, stopPropagation() {} });
+    return prevented;
+  }
+  public click(): void { for (const listener of this.listeners.get('click') ?? []) listener({}); }
 }
 
 let requests: string[] = [];
+let focused: Node | undefined;
+let documentListeners = new Map<string, Array<(event: unknown) => void>>();
 
 class FakeMap {
   public static last: FakeMap | undefined;
@@ -62,7 +91,11 @@ class FakeMap {
   public fire(type: string, event?: unknown): void { for (const handler of this.handlers.get(type) ?? []) handler(event); }
   public getSource(id: string) { return { setData: (data: unknown) => { this.data.set(id, data); } }; }
   public setProjection(projection: unknown): void { this.projections.push(projection); }
-  public fitBounds(): void {}
+  public camera: Array<[string, Record<string, unknown>]> = [];
+  public fitBounds(bounds: unknown, options: Record<string, unknown>): void { this.camera.push(['fitBounds', { bounds, ...options }]); }
+  public flyTo(options: Record<string, unknown>): void { this.camera.push(['flyTo', options]); }
+  public jumpTo(options: Record<string, unknown>): void { this.camera.push(['jumpTo', options]); }
+  public getContainer() { return { clientWidth: 800, clientHeight: 600 }; }
   public hasImage(): boolean { return false; }
   public addImage(): void {}
   public queryRenderedFeatures(): unknown[] { return []; }
@@ -89,19 +122,25 @@ function pageClearTimeout(handle: ReturnType<typeof setTimeout> | undefined): vo
   clearTimeout(handle);
 }
 
-function page(): Page {
+function page(options: { reduced?: boolean } = {}): Page {
   requests = [];
   liveTimers.clear();
+  focused = undefined;
+  documentListeners = new Map();
   const head = new Node('head');
   const document = {
     head,
     createElement: (tag: string) => new Node(tag),
-    createElementNS: (_ns: string, tag: string) => new Node(tag)
+    createElementNS: (_ns: string, tag: string) => new Node(tag),
+    get activeElement() { return focused; },
+    addEventListener: (type: string, listener: (event: unknown) => void) => { documentListeners.set(type, [...(documentListeners.get(type) ?? []), listener]); },
+    removeEventListener: (type: string, listener: (event: unknown) => void) => { documentListeners.set(type, (documentListeners.get(type) ?? []).filter((item) => item !== listener)); }
   };
   const record = (kind: string) => (url: unknown) => { requests.push(`${kind} ${String(url)}`); return Promise.reject(new Error('offline')); };
   const window: Record<string, unknown> = {};
   const context: Record<string, unknown> = {
     window, document, console, setTimeout: pageSetTimeout, clearTimeout: pageClearTimeout, Date, Math, JSON, Promise, Map, Object, Array, Number, String, Boolean, Error, isFinite,
+    matchMedia: (query: string) => ({ matches: Boolean(options.reduced) && /reduce/.test(query) }),
     fetch: record('fetch'),
     XMLHttpRequest: class { public open(_method: string, url: string) { requests.push(`xhr ${url}`); } public send() {} },
     WebSocket: class { public constructor(url: string) { requests.push(`websocket ${url}`); } },
@@ -111,6 +150,7 @@ function page(): Page {
   vm.createContext(context);
   // The page loads the shared label placement first (staffRoomPanel.ts), then the map.
   new vm.Script(DECLUTTER, { filename: 'declutter.js' }).runInContext(context);
+  new vm.Script(DRAWER, { filename: 'layerDrawer.js' }).runInContext(context);
   new vm.Script(SCRIPT, { filename: 'copMap.js' }).runInContext(context);
   return { window, container: new Node('div') };
 }
@@ -254,8 +294,12 @@ test('MapLibre places names with its collision index: symbols always stay, a nam
   view.setTime(Date.parse('2026-11-18T13:00:00.000Z'));
   view.setEcoa('ECOA-2');
   await wait();
-  const cop = map.data.get('cop') as { features: Array<{ properties: Record<string, unknown> }> };
-  const mech = cop.features.find((feature) => feature.properties.fid === 'cop-threat-layer/e-1-41')!;
+  // Point symbols are on their own clustered source (units); lines and areas stay on the cop source.
+  const units = map.data.get('units') as { features: Array<{ geometry: { type: string }; properties: Record<string, unknown> }> };
+  const cop = map.data.get('cop') as { features: Array<{ geometry: { type: string }; properties: Record<string, unknown> }> };
+  assert.ok(units.features.every((feature) => feature.geometry.type === 'Point') && cop.features.every((feature) => feature.geometry.type !== 'Point'));
+  const mech = units.features.find((feature) => feature.properties.fid === 'cop-threat-layer/e-1-41')!;
+  assert.equal(mech.properties.aff, 'H', 'the affiliation a stacked symbol counts');
   assert.equal(mech.properties.icon, 'sym|10061000161211020000|live', 'the symbol image is keyed without its name');
   assert.equal(mech.properties.text, '1-41 MECH', 'the name is a label of its own');
   view.highlight(['mdcoa']);
@@ -315,6 +359,196 @@ test('the COP map and the Staff Room\'s SVG map share one label placement, media
   assert.equal(band.b.text, 'Alpha\u2026');
   assert.equal(declutter([{ id: 'c', x: 100, y: 100, w: 300, h: 10, gap: 25, prio: 1, text: 'Alpha', size: 10 }], [{ x: -1000, y: -1000, w: 3000, h: 3000, owner: 'x' }]).c.hidden, true, 'a name with no room at all is hidden');
   assert.deepEqual(JSON.parse(JSON.stringify(declutter(crowd, []))), JSON.parse(JSON.stringify(declutter(crowd.slice().reverse(), []))), 'the same input in any order places the same way');
+});
+
+// ---- The layer drawer and the map's room (owner direction, D-48 of 0.4.34) -----------------------------------------------------------------
+
+type Drawer = { button: Node; panel: Node; setGroups(groups: unknown[]): void; open(): void; close(returnFocus?: boolean): void; isOpen(): boolean; destroy(): void };
+const drawerApi = (window: Record<string, unknown>) => window.nearLayerDrawer as { create: (host: Node, options: unknown) => Drawer; grouped: (items: unknown[]) => unknown[] };
+const switches = (root: Node) => root.all().filter((node) => node.getAttribute('role') === 'switch');
+const sampleGroups = (on: Record<string, boolean>) => [
+  { id: 'picture', title: 'Picture', items: [{ id: 'ops', title: 'Operations', count: 4, on: on.ops ?? true, sim: false, owner: 'j3 current-ops' }, { id: 'plans', title: 'Plans (COA sketches)', count: 0, on: on.plans ?? false, sim: false, separate: true }] },
+  { id: 'environment', title: 'Environment', items: [{ id: 'hill', title: 'Hillshade', count: 166, on: on.hill ?? true, sim: true }] },
+  { id: 'reference', title: 'Reference', items: [] }
+];
+
+test('the layer drawer: a compact Layers button with how many are on, groups with counts and SIM, a switch per layer, and Escape back to the button', () => {
+  const { window } = page();
+  const host = new Node('div');
+  const toggled: Array<[string, boolean]> = [];
+  const drawer = drawerApi(window).create(host, { onToggle: (id: string, on: boolean) => toggled.push([id, on]) });
+  host.appendChild(drawer.button);
+  drawer.setGroups(sampleGroups({}));
+  assert.equal(drawer.button.all().find((node) => node.className === 'ld-count')!.textContent, '2');
+  assert.equal(drawer.button.getAttribute('aria-label'), 'Layers, 2 of 3 on');
+  assert.equal(drawer.button.getAttribute('aria-expanded'), 'false');
+  assert.equal(drawer.panel.hidden, true, 'closed until asked');
+  assert.equal(drawer.panel.getAttribute('role'), 'dialog');
+  const titles = drawer.panel.all().filter((node) => node.className === 'ld-group-title').map((node) => node.textContent);
+  assert.deepEqual(titles, ['Picture', 'Environment'], 'an empty group is left out');
+  assert.deepEqual(drawer.panel.all().filter((node) => node.className === 'ld-tally').map((node) => node.textContent), ['1 of 2 on', '1 of 1 on']);
+  assert.ok(drawer.panel.all().some((node) => node.className === 'ld-sim'), 'the SIM badge where a layer is simulated');
+  assert.match(switches(drawer.panel).find((node) => node.getAttribute('data-layer') === 'hill')!.getAttribute('aria-label')!, /^Hillshade, 166, simulated$/);
+  assert.match(switches(drawer.panel)[0].getAttribute('aria-label')!, /written by j3 current-ops/);
+
+  drawer.button.click();
+  assert.equal(drawer.isOpen(), true);
+  assert.equal(drawer.panel.hidden, false);
+  assert.equal(drawer.button.getAttribute('aria-expanded'), 'true');
+  assert.equal(focused, switches(drawer.panel)[0], 'focus moves to the first switch');
+  switches(drawer.panel)[1].click();
+  assert.deepEqual(toggled, [['plans', true]], 'a switch asks for the opposite of its state');
+  assert.equal(drawer.panel.key('Escape'), true);
+  assert.equal(drawer.isOpen(), false);
+  assert.equal(drawer.panel.hidden, true, 'still: hidden at once');
+  assert.equal(focused, drawer.button, 'focus returns to the Layers button');
+  assert.equal(drawer.panel.animations.length, 0, 'nothing moves when motion is off');
+});
+
+test('the layer drawer keeps Tab inside while open, closes on a click outside without taking focus, and keeps focus on a switch when it redraws', () => {
+  const { window } = page();
+  const host = new Node('div');
+  let groups = sampleGroups({});
+  const drawer = drawerApi(window).create(host, { onToggle: (id: string, on: boolean) => { groups = sampleGroups({ [id]: on }); drawer.setGroups(groups); } });
+  host.appendChild(drawer.button);
+  drawer.setGroups(groups);
+  drawer.open();
+  const inside = (window.nearLayerDrawer as { focusables: (root: Node) => Node[] }).focusables(drawer.panel);
+  const close = inside[0];
+  assert.equal(close.className, 'ld-close');
+  const last = inside[inside.length - 1];
+  last.focus();
+  assert.equal(drawer.panel.key('Tab'), true, 'Tab on the last control wraps');
+  assert.equal(focused, inside[0]);
+  assert.equal(drawer.panel.key('Tab', true), true, 'Shift+Tab on the first control wraps back');
+  assert.equal(focused, last);
+  // A redraw (the person turned a layer on) keeps focus on the same layer's switch.
+  const plans = switches(drawer.panel).find((node) => node.getAttribute('data-layer') === 'plans')!;
+  plans.focus();
+  plans.click();
+  const again = switches(drawer.panel).find((node) => node.getAttribute('data-layer') === 'plans')!;
+  assert.notEqual(again, plans);
+  assert.equal(again.getAttribute('aria-checked'), 'true');
+  assert.equal(focused, again);
+  assert.equal(drawer.button.getAttribute('aria-label'), 'Layers, 3 of 3 on');
+  // A click outside closes it; focus stays where the person clicked.
+  const elsewhere = new Node('div');
+  elsewhere.focus();
+  for (const listener of documentListeners.get('pointerdown') ?? []) listener({ target: drawer.panel.children[1] });
+  assert.equal(drawer.isOpen(), true, 'a click inside keeps it open');
+  for (const listener of documentListeners.get('pointerdown') ?? []) listener({ target: elsewhere });
+  assert.equal(drawer.isOpen(), false);
+  assert.equal(focused, elsewhere);
+  drawer.destroy();
+  assert.equal((documentListeners.get('pointerdown') ?? []).length, 0, 'the outside-click listener is let go');
+});
+
+test('the layer drawer slides with transform and opacity only when motion is allowed, and hides after its exit animation', () => {
+  const { window } = page();
+  const host = new Node('div');
+  let moving = true;
+  const drawer = drawerApi(window).create(host, { motion: () => moving });
+  drawer.setGroups(sampleGroups({}));
+  drawer.open();
+  drawer.close(true);
+  assert.equal(drawer.panel.animations.length, 2);
+  for (const animation of drawer.panel.animations) for (const frame of animation.frames) assert.deepEqual(Object.keys(frame).sort(), ['opacity', 'transform']);
+  assert.equal(drawer.panel.hidden, false, 'shown until the exit animation ends');
+  drawer.panel.animations[1].finish();
+  assert.equal(drawer.panel.hidden, true);
+  moving = false;
+  drawer.open();
+  drawer.close();
+  assert.equal(drawer.panel.animations.length, 2, 'reduced motion or Calm: no new animation');
+  assert.equal(drawer.panel.hidden, true);
+});
+
+test('the COP map floats its controls over the map, groups its layers in the drawer, fits the whole frame and flies to the globe and back', async () => {
+  const { window, container } = page();
+  const layerCalls: Array<[string, boolean]> = [];
+  let motion = true;
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
+    renderer: 'auto', still: true, motion: () => motion, onLayer: (id: string, on: boolean) => layerCalls.push([id, on]),
+    libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } }
+  });
+  const map = FakeMap.last!;
+  const scenario = starter();
+  const read = await scenarioEnvironment(scenario);
+  const picture = buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [], environment: read!.environment });
+  view.setPicture(picture);
+  await wait();
+  // Layout: the canvas has the box; a strip, the tools and the time float over it; no list of checkboxes sits above the map any more.
+  const root = container.children[0];
+  assert.deepEqual(root.children.map((node) => node.className).slice(0, 3), ['cop-map-canvas', 'cop-map-top', 'cop-map-foot']);
+  assert.ok(!container.all().some((node) => node.tag === 'input' && node.type === 'checkbox'), 'no checkbox block');
+  const strip = container.all().find((node) => node.className === 'cop-map-strip')!;
+  assert.equal(strip.children[0].textContent, picture.marking, 'the classification line on the map');
+  // The drawer: three groups, environment with hillshade and contours, the scenario for reference.
+  const titles = container.all().filter((node) => node.className === 'ld-group-title').map((node) => node.textContent);
+  assert.deepEqual(titles, ['Picture', 'Environment', 'Reference']);
+  const ids = switches(root).map((node) => node.getAttribute('data-layer'));
+  assert.ok(['env-hillshade', 'env-contours', 'env-weather', 'cop-terrain-layer'].every((id) => ids.includes(id)));
+  const hill = switches(root).find((node) => node.getAttribute('data-layer') === 'env-hillshade')!;
+  hill.click();
+  await wait();
+  assert.deepEqual(layerCalls, [['env-hillshade', false]], 'the host hears of the change');
+  assert.equal(view.state().visible['env-hillshade'], false);
+  assert.equal(switches(root).find((node) => node.getAttribute('data-layer') === 'env-hillshade')!.getAttribute('aria-checked'), 'false');
+  // The first view fits the whole exercise frame, with room for the floating chrome.
+  const fit = map.camera.find(([kind]) => kind === 'fitBounds')!;
+  const b = picture.frame!.bounds;
+  assert.deepEqual(JSON.parse(JSON.stringify(fit[1].bounds)), [[b[0], b[1]], [b[2], b[3]]]);
+  assert.equal(fit[1].animate, false);
+  // Hillshade drawn stronger than the pack's own tones, in the theme's colours; units clustered on their own source.
+  const style = map.options.style as { sources: Record<string, Record<string, unknown>>; layers: Array<{ id: string; paint?: Record<string, unknown>; minzoom?: number }> };
+  assert.match(JSON.stringify(style.layers.find((layer) => layer.id === 'env-hillshade')!.paint!['fill-opacity']), /1\.8/);
+  assert.equal(style.sources.units.cluster, true);
+  assert.ok(style.layers.some((layer) => layer.id === 'clusters'));
+  assert.equal(style.layers.find((layer) => layer.id === 'points')!.minzoom, 5, 'the globe shows the frame ring, not the units');
+  assert.ok((map.data.get('frame') as { features: unknown[] }).features.length === 2, 'the frame and its centre');
+  // Globe flies out to a zoom where the curve is plain; Map flies back to the frame.
+  view.setProjection('globe');
+  await wait(10);
+  const out = map.camera.at(-1)!;
+  assert.equal(out[0], 'flyTo');
+  assert.ok(Number(out[1].zoom) < 3, `zoomed out to ${String(out[1].zoom)}`);
+  assert.deepEqual(JSON.parse(JSON.stringify(out[1].center)), JSON.parse(JSON.stringify(picture.frame!.centre)));
+  view.setProjection('map');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![0], 'fitBounds');
+  assert.equal(map.camera.at(-1)![1].animate, true);
+  // Under reduced motion or Calm the same moves are instant.
+  motion = false;
+  view.setProjection('globe');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![0], 'jumpTo');
+  view.setProjection('map');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![1].animate, false);
+  // A host's tool joins the map's own controls; the drawer opens and closes through the view.
+  const extra = new Node('button');
+  view.addTool(extra);
+  assert.ok(container.all().find((node) => node.className === 'cop-map-tools')!.children.includes(extra));
+  assert.equal(view.layers(true), true);
+  assert.equal(view.layers(false), false);
+  view.destroy();
+  assert.equal((documentListeners.get('pointerdown') ?? []).length, 0);
+  assert.deepEqual(requests, []);
+});
+
+test('the COP map is still under the system\'s reduced-motion setting when the host gives no rule of its own', async () => {
+  const { window, container } = page({ reduced: true });
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'auto', libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } } });
+  const map = FakeMap.last!;
+  view.setPicture(timedPicture());
+  await wait();
+  view.setProjection('globe');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![0], 'jumpTo');
+  view.layers(true);
+  view.layers(false);
+  const panel = container.all().find((node) => node.className.startsWith('ld-panel'))!;
+  assert.equal(panel.animations.length, 0);
 });
 
 test('the page script names no remote address and the CSP allows no eval, no inline script and no remote source', () => {
