@@ -123,7 +123,7 @@ test('one changed count fails with bad-signature, and a changed signer name fail
   assert.deepEqual((verifyCheckpoint(renamed, s.ctx.roster) as { reason: string }).reason, 'bad-signature');
   const stranger = { ...signed, payload: { ...signed.payload, signer: 'f'.repeat(64) } };
   assert.deepEqual((verifyCheckpoint(stranger, s.ctx.roster) as { reason: string }).reason, 'unknown-signer');
-  for (const reason of Object.keys(CHECKPOINT_REFUSALS)) assert.ok(!CHECKPOINT_REFUSALS[reason as keyof typeof CHECKPOINT_REFUSALS].includes('—'));
+  for (const reason of Object.keys(CHECKPOINT_REFUSALS)) assert.ok(!CHECKPOINT_REFUSALS[reason as keyof typeof CHECKPOINT_REFUSALS].includes('\u2014'));
 });
 
 test('a signer the roster does not allow to sign checkpoints fails with not-a-checkpoint-signer, even with a good signature', () => {
