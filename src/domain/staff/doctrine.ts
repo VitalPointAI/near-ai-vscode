@@ -922,7 +922,7 @@ export const LOGISTICS_TERMS: Readonly<Record<StaffProfileId, LogisticsTerms>> =
     overview: 'Theatre logistics overview',
     conceptOfSupport: 'Concept of logistic support',
     reception: 'Reception, staging and onward movement (RSOM)', // AJP-3.13, Deployment and Redeployment of Forces, by title (best judgement)
-    currentOps: { strategic: 'Strategic J4 logistics operations centre', operational: 'JTF J4 joint logistics operations centre (JTF J4 JLOC)', tactical: 'Combat service support current operations' },
+    currentOps: { strategic: 'Strategic J4 logistics operations centre', operational: 'JTF J4 joint logistics operations centre (JTF J4 JLOC)', tactical: 'Combat service support (CSS) current operations cell' },
     source: 'AJP-4 and AJP-5 by title; CFJP 4-0 (2016) by title (03 B6)'
   }
 };
