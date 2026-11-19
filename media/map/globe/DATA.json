@@ -1,0 +1,76 @@
+{
+  "note": "Third-party world imagery the COP map's globe draws, as 256 px Web Mercator WebP tiles made by scripts/build-globe-tiles.mjs from the source files below (checked by SHA-256) and never fetched at run time. index.json lists every tile with its bytes, SHA-256 and a digest of its pixels; a test checks the folder against it and indexSha256 here.",
+  "sets": [
+    {
+      "id": "blue-marble",
+      "name": "NASA Blue Marble: Next Generation, topography and bathymetry, August 2004",
+      "page": "https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/",
+      "sourceUrl": "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-topography-bathymetry/august/world.topo.bathy.200408.3x21600x10800.jpg",
+      "sourceFile": "world.topo.bathy.200408.3x21600x10800.jpg",
+      "sourceSha256": "05d984f723776f3d44fc473cc3d9eb67a48c425e82a56d7133e3761b2e231e86",
+      "terms": "NASA content is generally not subject to copyright in the United States (https://www.nasa.gov/nasa-brand-center/images-and-media/). It must not be used to explicitly or implicitly convey NASA's endorsement, and NASA logos are not used. The Blue Marble page asks: \"Anyone using or republishing Blue Marble: Next Generation please credit 'NASA Earth Observatory.'\"",
+      "credit": "NASA Earth Observatory",
+      "generator": {
+        "script": "scripts/build-globe-tiles.mjs",
+        "tileSize": 256,
+        "minzoom": 0,
+        "maxzoom": 5,
+        "quality": 75,
+        "topQuality": 75,
+        "method": 6,
+        "resampling": "box-filtered halvings of the source, then bilinear at each pixel centre (Web Mercator, latitudes to +/-85.051129)",
+        "decoder": {
+          "name": "@jsquash/jpeg",
+          "version": "1.6.0",
+          "license": "Apache-2.0"
+        },
+        "encoder": {
+          "name": "@jsquash/webp",
+          "version": "1.5.0",
+          "license": "Apache-2.0"
+        }
+      },
+      "tiles": 1365,
+      "bytes": 3119030
+    },
+    {
+      "id": "natural-earth",
+      "name": "Natural Earth cross-blended hypsometric tints with shaded relief, ocean bottom and drainages (10m, large size)",
+      "page": "https://www.naturalearthdata.com/downloads/10m-raster-data/10m-cross-blend-hypso/",
+      "sourceUrl": "https://naciscdn.org/naturalearth/10m/raster/HYP_LR_SR_OB_DR.zip",
+      "sourceFile": "HYP_LR_SR_OB_DR.q95.jpg",
+      "sourceSha256": "79a768faf881a4ef963b1e0ab2331dc5f3e7d0025699a571af69094929ff1b68",
+      "conversion": {
+        "from": "HYP_LR_SR_OB_DR.tif in HYP_LR_SR_OB_DR.zip (16200x8100 RGB)",
+        "zipSha256": "016924509def418d79e048f40434daed84d9848829813a54063333f8b68b9af9",
+        "tifSha256": "7bcc529c3f1148b05c4b6b78427fe3a68921c4e745068f5ab42d72c8087a230d",
+        "how": "converted to JPEG quality 95 (4:4:4) with Pillow 12.1.1, once, on a developer machine; the JPEG is the source checked here"
+      },
+      "terms": "Natural Earth terms of use (https://www.naturalearthdata.com/about/terms-of-use/): \"All versions of Natural Earth raster + vector map data found on this website are in the public domain.\" Crediting the authors is unnecessary.",
+      "credit": "Made with Natural Earth",
+      "generator": {
+        "script": "scripts/build-globe-tiles.mjs",
+        "tileSize": 256,
+        "minzoom": 0,
+        "maxzoom": 4,
+        "quality": 75,
+        "topQuality": 75,
+        "method": 6,
+        "resampling": "box-filtered halvings of the source, then bilinear at each pixel centre (Web Mercator, latitudes to +/-85.051129)",
+        "decoder": {
+          "name": "@jsquash/jpeg",
+          "version": "1.6.0",
+          "license": "Apache-2.0"
+        },
+        "encoder": {
+          "name": "@jsquash/webp",
+          "version": "1.5.0",
+          "license": "Apache-2.0"
+        }
+      },
+      "tiles": 341,
+      "bytes": 953776
+    }
+  ],
+  "indexSha256": "7f5b04eca929cd70c47ae276fad8c0523ceb87dc191df88084db28fc2dac29ff"
+}
