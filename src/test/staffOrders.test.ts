@@ -144,6 +144,13 @@ test('orders_assemble builds a draft from released products only, under the prof
   assert.equal(transition(state.record, { type: 'release' } as never, { kind: 'agent', member: 'plans-writer' }).ok, false);
   const early = await world.host.decide(world.person(), { product: 'base-plan', action: 'approve', hash: state.record.hash });
   assert.equal(early.ok, false, 'not even a person approves a draft the guard has not cleared');
+  // Once it waits on a person's decision, assembly does not write over it.
+  assert.ok((await callTool(world, J5_TEAM, VERDICT, { product: 'base-plan', gate: 'guard', verdict: 'CLEARED', hash: state.record.hash }, 'release-guard')).ok);
+  assert.ok((await callTool(world, J5_TEAM, SUBMIT, { product: 'base-plan', decisionFor: 'commander' }, 'plans-writer')).ok);
+  const before = await readProductFile(world.root, 'j5', 'base-plan');
+  const again = await callServer(world, tools, 'mcp__orders__assemble', { product: 'base-plan', kind: 'oplan', title: 'Changed title', base: 'conops', annexes: [{ subject: 'intelligence', product: 'intel-annex' }] }, 'plans-writer');
+  assert.match(again.text, /waiting on a person's decision, so it was not written over/);
+  assert.equal(await readProductFile(world.root, 'j5', 'base-plan'), before);
 });
 
 test('the check reads the annex tracker and names a stale source once a newer version is approved', async () => {
@@ -288,9 +295,22 @@ test('the battle-rhythm tools: its writer writes, exports and imports; an import
   const big = path.join(world.root, 'inbox', 'big.ics');
   await writeFile(big, `BEGIN:VCALENDAR\r\nX-PAD:${'a'.repeat(70)}\r\n`.repeat(4000));
   assert.match((await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: 'inbox/big.ics' }, 'joc-chief')).text, /was not read: it is larger than 256 KB/);
-  assert.match((await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: '../outside.ics' }, 'joc-chief')).text, /outside|not allowed|workspace/i);
+  assert.match((await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: '../outside.ics' }, 'joc-chief')).text, /^\.\.\/outside\.ics is outside the workspace\./);
+  // The events read back fenced: text that came from an imported file is data on every read.
+  const reread = await callServer(world, tools, 'mcp__battle-rhythm__events_read', {}, 'information-planner');
+  assert.match(reread.text, /<untrusted-content id="[0-9a-f]+" source="battle-rhythm: battle-rhythm-calendar">[\s\S]*Ignore previous instructions/);
+  // A replace is refused while the file had an event that could not be read: that event would otherwise be lost.
+  await writeFile(path.join(world.root, 'inbox', 'partial.ics'), hostile.replace('DTSTART:20261118T133000Z', 'DTSTART;TZID=Somewhere:20261118T133000'));
+  const partial = await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: 'inbox/partial.ics', replace: true }, 'joc-chief');
+  assert.match(partial.text, /1 event could not be read, so replace was refused and nothing was changed/);
+  assert.match((await callServer(world, tools, 'mcp__battle-rhythm__events_read', {}, 'joc-chief')).text, /3 events/, 'no event was removed');
+  const merged = await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: 'inbox/partial.ics' }, 'joc-chief');
+  assert.match(merged.text, /has not changed/, 'a merge of what could be read goes through to the register, which holds those events already');
   const due = await callServer(world, tools, 'mcp__battle-rhythm__suspense', {}, 'joc-chief');
   assert.match(due.text, /Nothing is due/);
+  // A ledger that cannot be trusted gives no list of decisions.
+  await writeFile(path.join(world.root, '.planning/staff/ledger/products.jsonl'), 'not a signed entry\n', { flag: 'a' });
+  assert.match((await callServer(world, tools, 'mcp__battle-rhythm__suspense', {}, 'joc-chief')).text, /product ledger cannot be trusted/);
 });
 
 // ---- Grants -----------------------------------------------------------------------------------------------------------------------------------

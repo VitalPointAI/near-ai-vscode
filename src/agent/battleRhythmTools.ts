@@ -87,9 +87,11 @@ export function battleRhythmTools(access: BattleRhythmToolAccess): AgentTool<any
     async run(_input, context) {
       const { rows, section } = await rowsOf(context, BATTLE_RHYTHM_REGISTER);
       const sorted = [...rows].sort((a, b) => String(a.start).localeCompare(String(b.start)));
+      // The events' text may have come from an imported .ics file, so it is returned fenced as data on every read, not only on the import.
+      if (!sorted.length) return `Battle rhythm (${section}): no events yet. ${await words()}`;
       return [
         `Battle rhythm (${section}): ${sorted.length} event${sorted.length === 1 ? '' : 's'}. ${await words()}`,
-        ...sorted.map((row) => `- ${String(row.id)}: ${String(row.title)} (${String(row.kind)}), ${String(row.start)} for ${String(row.durationMinutes)} min, ${String(row.repeat)}; owner ${String(row.chair)}${row.inputs ? `; inputs: ${String(row.inputs)}` : ''}${row.outputs ? `; outputs: ${String(row.outputs)}` : ''}${row.attendees ? `; attendees: ${String(row.attendees)}` : ''}`)
+        fenceUntrusted(`battle-rhythm: ${BATTLE_RHYTHM_REGISTER}`, sorted.map((row) => `- ${String(row.id)}: ${String(row.title)} (${String(row.kind)}), ${String(row.start)} for ${String(row.durationMinutes)} min, ${String(row.repeat)}; owner ${String(row.chair)}${row.inputs ? `; inputs: ${String(row.inputs)}` : ''}${row.outputs ? `; outputs: ${String(row.outputs)}` : ''}${row.attendees ? `; attendees: ${String(row.attendees)}` : ''}`).join('\n')).text
       ].join('\n');
     }
   };
@@ -168,6 +170,10 @@ export function battleRhythmTools(access: BattleRhythmToolAccess): AgentTool<any
       const parsed = parseIcs(read.text, read.bytes.length);
       if (!parsed.ok) throw new ToolError(`${shown}: ${parsed.message} Nothing was changed.`);
       if (!parsed.rows.length) throw new ToolError(`${shown} holds no event the battle rhythm can keep. Nothing was changed.${parsed.problems.length ? `\n${fenceUntrusted(`battle-rhythm: ${shown}`, parsed.problems.join('\n')).text}` : ''}`);
+      // A replace removes every event the file does not hold, so it is refused while any event of the file was skipped: a skipped event would be lost.
+      if (input.replace && parsed.problems.length) {
+        throw new ToolError(`${shown}: ${parsed.problems.length} event${parsed.problems.length === 1 ? '' : 's'} could not be read, so replace was refused and nothing was changed. Fix the file, or import without replace to merge the events that could be read.\n${fenceUntrusted(`battle-rhythm: ${shown}`, parsed.problems.join('\n')).text}`);
+      }
       const existing = input.replace ? (await rowsOf(context, BATTLE_RHYTHM_REGISTER)).rows.map((row) => String(row.id)) : [];
       const keep = new Set(parsed.rows.map((row) => String(row.id)));
       const written = await write(context, parsed.rows, existing.filter((id) => !keep.has(id)));
@@ -192,13 +198,14 @@ export function battleRhythmTools(access: BattleRhythmToolAccess): AgentTool<any
       const at = now();
       const rfis = (await rowsOf(context, 'rfi-tracker')).rows.filter((row) => row.status === 'open');
       const replay = await hostOf().replay();
+      if (replay.broken) throw new ToolError(`The product ledger cannot be trusted (${replay.broken.reason}), so no list of decisions waiting on a person can be given from it.`);
       const decisions = [...replay.products.values()].filter((state) => state.record.state === 'awaiting-decision' && !state.tampered);
       const due = [
         ...rfis.map((row) => ({ when: String(row.suspense), text: `RFI ${String(row.id)} from ${String(row.from)} to ${String(row.to)}: ${String(row.question)}` })),
         ...decisions.map((state) => ({ when: state.request?.deadline ?? '', text: `Decision for the ${state.record.decisionFor ?? 'person'}: ${state.record.product} version ${state.record.version}` }))
       ].sort((a, b) => (a.when || '9999').localeCompare(b.when || '9999'));
       if (!due.length) return 'Nothing is due: no open RFI and no product waiting on a decision.';
-      return [`${due.length} suspense${due.length === 1 ? '' : 's'}:`, ...due.map((item) => `- ${item.when ? `${item.when}${Date.parse(item.when) < at ? ' (OVERDUE)' : ''}` : 'no deadline'}: ${item.text}`)].join('\n');
+      return [`${due.length} suspense${due.length === 1 ? '' : 's'}:`, ...due.map((item) => `- ${!item.when ? 'no deadline' : Number.isNaN(Date.parse(item.when)) ? `${item.when} (NOT A TIME: check it)` : `${item.when}${Date.parse(item.when) < at ? ' (OVERDUE)' : ''}`}: ${item.text}`)].join('\n');
     }
   };
 

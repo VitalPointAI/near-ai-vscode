@@ -151,6 +151,10 @@ export function ordersTools(access: OrdersToolAccess): AgentTool<any>[] {
     if (existing && existing.record.section !== access.team.section) throw new ToolError(`${name} belongs to ${existing.record.section}, not to this team's section. Choose another product name.`);
     if (existing && existing.record.roles.owner !== member) throw new ToolError(`${name} is owned by ${existing.record.roles.owner}. Only its owner writes it; choose another product name.`);
     if (existing?.tampered) throw new ToolError(`${name} cannot be changed: ${existing.tampered}`);
+    // A version a person is deciding on, or has approved and not yet released, is not written over: the decision and the release hold to its hash.
+    if (existing && (existing.record.state === 'awaiting-decision' || existing.record.state === 'approved')) {
+      throw new ToolError(`${name} version ${existing.record.version} is ${existing.record.state === 'approved' ? 'approved and waiting for a person to release it' : 'waiting on a person\'s decision'}, so it was not written over. Choose another product name, or ${existing.record.state === 'approved' ? 'wait for the release' : 'withdraw that version first'}.`);
+    }
     if (Buffer.byteLength(body, 'utf8') > MAX_STAFF_FILE_BYTES - 64 * 1024) throw new ToolError('The assembled text is larger than a staff product may be (2 MB). Split the plan into products of their own. Nothing was written.');
     const relative = productPath(access.team.section, name);
     const absolute = await resolveInWorkspace(context.root, relative);
