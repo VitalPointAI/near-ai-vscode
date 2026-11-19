@@ -526,6 +526,28 @@ export const ECHELON_ALIASES: Readonly<Record<string, Echelon>> = {
 export const STANDARD_IDENTITIES = ['pending', 'unknown', 'assumed-friend', 'friend', 'neutral', 'suspect', 'hostile', 'joker', 'faker'] as const;
 export type StandardIdentity = (typeof STANDARD_IDENTITIES)[number];
 
+/**
+ * The symbol sets of the public symbology standards a COP symbol may use (MIL-STD-2525D, 2014, and APP-6(D), 2017, the 20-digit symbol identification
+ * code, positions 5 and 6): air, land unit, land equipment, land installation, sea surface and sea subsurface. Control measures are drawn as graphics
+ * (COP_CONTROL_MEASURES), not with a code.
+ */
+export const SYMBOL_SETS = { air: '01', 'land-unit': '10', 'land-equipment': '15', 'land-installation': '20', 'sea-surface': '30', 'sea-subsurface': '35' } as const;
+export type SymbolSet = keyof typeof SYMBOL_SETS;
+
+/**
+ * The control measures a COP layer draws (UX concept 5.10, after the tactical graphics of FM 1-02.2, 2022, and APP-6(D), 2017): the scenario's own kinds
+ * (phase line, objective, assembly area, NAI, boundary, landing area, route), plus the target area of interest, the axes of advance (the main attack has a
+ * filled head, a supporting attack an open one; an adversary axis is dashed), an obstacle and the decision point, drawn as a gold star (UX 5.10; JP 5-0,
+ * 2025: a point in space and time when the commander or staff anticipates making a key decision about a specific course of action). Each names the
+ * geometry it is drawn with.
+ */
+export const COP_CONTROL_MEASURES = {
+  'phase-line': 'line', boundary: 'line', route: 'line', 'axis-main': 'line', 'axis-supporting': 'line', 'axis-adversary': 'line',
+  objective: 'area', 'assembly-area': 'area', 'landing-area': 'area', nai: 'area', tai: 'area', obstacle: 'area',
+  'decision-point': 'point'
+} as const;
+export type CopControlMeasure = keyof typeof COP_CONTROL_MEASURES;
+
 /** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
 export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
 
