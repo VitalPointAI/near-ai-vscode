@@ -48,7 +48,7 @@ const PIR = { requirement: 'Will the adversary cross at Ashby Ford?', decisionPo
 
 test('every workbench tool declares a manifest the format accepts, under its own name, frozen, on this machine, with no host', () => {
   const tools = intelWorkbenchTools();
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 13);
   assert.deepEqual(tools.map((tool) => tool.name), INTEL_WORKBENCH_TOOL_NAMES);
   for (const tool of tools) {
     const parsed = parseToolManifest(JSON.parse(JSON.stringify(tool.manifest)));
@@ -85,6 +85,7 @@ test('each tool names exactly the register files it touches, so the gate\'s labe
     pir_add: { reads: [REGISTERS[1]], writes: [REGISTERS[1]] },
     pir_update: { reads: [REGISTERS[1], REGISTERS[0]], writes: [REGISTERS[1]] },
     pir_list: { reads: [REGISTERS[1], REGISTERS[2]], writes: [] },
+    pir_publish: { reads: [REGISTERS[1], '.planning/staff/products/j2/pir-register.md'], writes: ['.planning/staff/products/j2/pir-register.md'] },
     collection_recommend: { reads: [REGISTERS[2], REGISTERS[1]], writes: [REGISTERS[2]] },
     collection_plan: { reads: [REGISTERS[2], REGISTERS[1]], writes: [] },
     intsum_draft: { reads: [REGISTERS[0], REGISTERS[1], '.planning/.near-ai/project.json'], writes: [] },

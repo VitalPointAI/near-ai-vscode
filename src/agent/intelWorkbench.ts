@@ -11,8 +11,10 @@ import * as path from 'node:path';
 import {
   buildCollectionEntry, buildPirEntry, buildSourceEntry, changePir, claimsOf, compilationItems, compilationRisk, COMPILATION_NONE_TEXT, corroboration,
   DEFAULT_INTEL_LABEL, draftIntrep, draftIntsum, formatDtg, gradeText, INTEL_RULES, isTemplateLabel, parseRegisterText, readTime, registerFindings,
-  registerPath, renderCollectionPlan, renderPirRegister, renderRegister, trustPirDecisions
+  pirRegisterProductBody, registerPath, renderCollectionPlan, renderPirRegister, renderRegister, trustPirDecisions
 } from '../domain/staff/intel';
+import { splitProductFile } from '../domain/staff/products';
+import { staffProductPath } from '../domain/staff/writeLimits';
 import type { IntelFinding, IntelRegisterName, IntelRegisters, IntelResult, PirEntry, RegisterTypes, SourceEntry } from '../domain/staff/intel';
 import { STAFF_TEMPLATE_LABELS } from '../domain/staff/doctrine';
 import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profiles';
@@ -24,6 +26,7 @@ import { grantedToMembers } from './staffGrantGate';
 import { lintTradecraft, sourcesFrom } from '../domain/staff/tradecraftLint';
 import type { PersonDecisionEntry } from '../domain/staff/personDecisions';
 import { withRegisterLock } from '../staff/registerLock';
+import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
 import { staffHostFor } from '../staff/staffHost';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
@@ -35,6 +38,8 @@ export const STAFF_SETTINGS_PATH = '.planning/.near-ai/project.json';
 const SOURCES = registerPath('source-register');
 const PIRS = registerPath('pir-register');
 const PLAN = registerPath('collection-plan');
+/** The generated J2 PIR register product. */
+const PIR_PRODUCT = staffProductPath('j2', 'pir-register');
 
 export function intelToolName(tool: string): string {
   return mcpToolName(INTEL_WORKBENCH_SERVER, tool);
@@ -43,13 +48,11 @@ export function intelToolName(tool: string): string {
 /** One writer at a time per register file inside this extension host (src/staff/registerLock.ts, shared with the staff host). */
 const withFileLock = withRegisterLock;
 
+/** A register read whole through the staff reader (src/staff/staffFiles.ts): missing reads as undefined, and one that cannot be read whole stops the tool. */
 async function readText(absolute: string): Promise<string | undefined> {
-  try {
-    return await readFile(absolute, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
+  const read = await readWhole(absolute);
+  if (read.kind === 'unreadable') throw new ToolError(`${path.basename(absolute)} cannot be read: ${read.reason}. Nothing was changed.`);
+  return read.kind === 'text' ? read.text : undefined;
 }
 
 function unwrap<T>(result: IntelResult<T>): T {
@@ -82,15 +85,17 @@ async function loadAll(context: ToolContext, trust: PirTrust, sink?: IntelFindin
 async function updateRegister<N extends IntelRegisterName, R>(context: ToolContext, name: N, change: (entries: RegisterTypes[N][]) => Promise<{ entries: RegisterTypes[N][]; result: R }>, trust?: PirTrust): Promise<R> {
   const absolute = await resolveInWorkspace(context.root, registerPath(name));
   return withFileLock(absolute, async () => {
-    const read = unwrap(parseRegisterText(name, await readText(absolute)));
+    const whole = await readWhole(absolute);
+    if (whole.kind === 'unreadable') throw new ToolError(`${path.basename(absolute)} cannot be read: ${whole.reason}. Nothing was changed.`);
+    const read = unwrap(parseRegisterText(name, whole.kind === 'text' ? whole.text : undefined));
     if (name === 'pir-register' && !trust) throw new ToolError('The PIR register is changed only with its decisions checked.');
     const entries = name === 'pir-register' ? (await trust!(context.root, read as PirEntry[])).entries as RegisterTypes[N][] : read;
     const next = await change(entries);
     await context.checkpoints.capture(absolute);
-    await mkdir(path.dirname(absolute), { recursive: true });
-    const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporary, renderRegister(name, next.entries), 'utf8');
-    await rename(temporary, absolute);
+    // Only over the bytes read: a member's Write in between stands, and this change is refused to be made again on it.
+    if (!(await writeIfUnchanged(absolute, snapshotOfBytes(whole.kind === 'text' ? whole.bytes : undefined), renderRegister(name, next.entries)))) {
+      throw new ToolError(`${path.basename(absolute)} changed while this change was being written, so nothing was written. Read it again and repeat the change.`);
+    }
     return next.result;
   });
 }
@@ -447,7 +452,31 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     }
   };
 
-  return [sourceAdd, sourceList, independence, pirAdd, pirUpdate, pirList, collectionRecommend, collectionPlan, intsumDraft, intrepDraft, compilationCheck, check];
+  const pirPublish: AgentTool<Record<string, unknown>> = {
+    name: intelToolName('pir_publish'),
+    description: `Write the J2 PIR register product (${PIR_PRODUCT}) from the PIR register, the one source of PIRs. The product is generated: never write it by hand, and change PIRs in the register with pir_add and pir_update. Then propose the product as usual.`,
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    capability: 'workspaceWrite',
+    manifest: declareManifest({ tool: intelToolName('pir_publish'), effects: [readEffect(PIRS, PIR_PRODUCT), writeEffect(PIR_PRODUCT)], contexts: INTERACTIVE_AND_UNATTENDED }),
+    parse: asObject,
+    title: () => 'Publish the PIR register product',
+    async run(_input, context) {
+      const pirs = await loadRegister(context, 'pir-register', trust);
+      const absolute = await resolveInWorkspace(context.root, PIR_PRODUCT);
+      return withFileLock(absolute, async () => {
+        const whole = await readWhole(absolute);
+        if (whole.kind === 'unreadable') throw new ToolError(`${PIR_PRODUCT} cannot be read: ${whole.reason}. Nothing was changed.`);
+        // The staff header the host keeps stays as it is; only the body is generated.
+        const parts = whole.kind === 'text' ? splitProductFile(whole.text) : undefined;
+        await context.checkpoints.capture(absolute);
+        const text = `${parts ? `${whole.kind === 'text' ? whole.text.slice(0, whole.text.length - parts.body.length) : ''}` : ''}${pirRegisterProductBody(pirs)}`;
+        if (!(await writeIfUnchanged(absolute, snapshotOfBytes(whole.kind === 'text' ? whole.bytes : undefined), text))) throw new ToolError(`${PIR_PRODUCT} changed while it was being written, so nothing was written. Run pir_publish again.`);
+        return `Wrote ${PIR_PRODUCT} from the PIR register (${pirs.length} PIR${pirs.length === 1 ? '' : 's'}). Propose it with mcp__staff-products__propose.`;
+      });
+    }
+  };
+
+  return [sourceAdd, sourceList, independence, pirAdd, pirUpdate, pirList, pirPublish, collectionRecommend, collectionPlan, intsumDraft, intrepDraft, compilationCheck, check];
 }
 
 /** The names of the workbench's tools, for the tests and the team templates. */

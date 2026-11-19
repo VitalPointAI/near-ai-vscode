@@ -792,9 +792,22 @@ decision block in a register file without a matching entry (same PIR, same
 decision, same person, same wording) reads as awaiting a decision, whoever
 wrote it; a broken or unverifiable log proves nothing from that point, which
 leaves decisions untaken, never taken. The staff event log is a notice board,
-never the record of any decision. A
-register write that the ledger refuses puts the register file back exactly as
-it was.
+never the record of any decision.
+
+**NEAR AI never overwrites bytes it did not read.** Members write project
+files with Write and Edit, which take no lock, so every write NEAR AI makes to
+a file a member can also write (product headers, register rewrites, the J2
+registers, gate reports, the generated PIR register product, the staff setup's
+project files and their rollback) is a compare-and-swap: it reads the file,
+builds the new text from those bytes, and renames it into place only if the
+file still holds exactly those bytes, checked again immediately before the
+rename. Otherwise nothing is written: the member's write stands and reads as
+the next edit. The window left is the rename itself. A register write that the
+ledger refuses puts the register file back as it was, under the same check.
+The J2 PIR register has one source,
+`.planning/staff/products/j2/pir-register.json`: the PIR register product is
+generated from it (`pir_publish`), a differing product cannot be registered,
+and the tradecraft lint reads the register itself.
 
 Approve, reject, release and withdraw-after-a-decision exist only as VS Code
 commands a person runs and confirms in a dialog. No agent tool offers them,

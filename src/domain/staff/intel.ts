@@ -661,6 +661,14 @@ export function renderCollectionPlan(plan: readonly CollectionEntry[], pirs: rea
 }
 
 /** The PIR register as the Markdown table the staff reads. */
+/**
+ * The PIR register product's body (`.planning/staff/products/j2/pir-register.md`), generated from the one PIR register, the JSON the workbench keeps
+ * (review round 4): the product is never hand-written, and the host refuses to register one that differs from this.
+ */
+export function pirRegisterProductBody(register: readonly PirEntry[]): string {
+  return `# PIR register\n\nGenerated from ${registerPath('pir-register')} by the intel workbench (pir_publish). Change the register, not this file.\n\n${renderPirRegister(register)}\n`;
+}
+
 export function renderPirRegister(register: readonly PirEntry[]): string {
   const cell = (text: string) => text.replace(/\|/g, '/');
   const rows = register.map((entry) => `| ${entry.id}: ${cell(entry.requirement)} | ${cell(entry.decisionPoint)} | ${entry.indicators.map((indicator) => `${indicator.id} ${cell(indicator.text)}`).join('; ') || 'none'} | ${formatDtg(Date.parse(entry.ltiov))} | ${entry.status}${entry.decision ? ` (${entry.decision.by.role}, ${entry.decision.by.name})` : ''} |`);
