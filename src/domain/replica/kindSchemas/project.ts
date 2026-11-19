@@ -1,7 +1,7 @@
 // Data schemas for the project family: project.genesis and project.import (DESIGN 7.1, 14; D-07). Hub-side: pure, no Yjs; it must not import kinds.ts.
 // Owner: 30-04. It also exports the small checks the other family files of this plan share (closed keys with a named path, one-line text, own reads).
 import { isRecord, isSafeIntegerInRange } from '../../team/validate';
-import { exactKeys, invalidAt, isHash, isSlug } from './shared';
+import { exactKeys, invalidAt, isHash, isIsoTime, isSlug } from './shared';
 
 export const STREAM_HEX = /^[0-9a-f]{32}$/;
 
@@ -41,6 +41,52 @@ export function isCount(value: unknown, max = Number.MAX_SAFE_INTEGER): value is
 
 export function isStreamHex(value: unknown): value is string {
   return typeof value === 'string' && STREAM_HEX.test(value);
+}
+
+// ---- a small table-driven checker the family files of this plan share ----
+
+export type Check = (value: unknown, path: string) => string | undefined;
+export interface Shape { required: Record<string, Check>; optional?: Record<string, Check>; atLeastOneOf?: readonly string[] }
+
+export const slugCheck: Check = (value, path) => (isSlug(value) ? undefined : invalidAt(path));
+export const hashCheck: Check = (value, path) => (isHash(value) ? undefined : invalidAt(path));
+export const streamCheck: Check = (value, path) => (isStreamHex(value) ? undefined : invalidAt(path));
+export const countCheck: Check = (value, path) => (isCount(value) ? undefined : invalidAt(path));
+export const timeCheck: Check = (value, path) => (isIsoTime(value) ? undefined : invalidAt(path));
+export const lineCheck = (max: number): Check => (value, path) => (isLine(value, max) ? undefined : invalidAt(path));
+export const oneOf = (words: readonly string[]): Check => (value, path) => (typeof value === 'string' && words.includes(value) ? undefined : invalidAt(path));
+export const flagCheck: Check = (value, path) => (typeof value === 'boolean' ? undefined : invalidAt(path));
+export const countBelow = (max: number): Check => (value, path) => (isCount(value, max) ? undefined : invalidAt(path));
+export const listOf = (item: Check, max: number): Check => (value, path) => {
+  if (!Array.isArray(value) || value.length > max) return invalidAt(path);
+  for (let index = 0; index < value.length; index += 1) {
+    const problem = item(value[index], `${path}[${index}]`);
+    if (problem !== undefined) return problem;
+  }
+  return undefined;
+};
+
+// Checks one record against the table of its kind: exact keys, then each field in table order, so the first wrong field is the one named. The kind is
+// looked up by own name, because it is chosen by whoever wrote the entry.
+export function validateShape(shapes: Readonly<Record<string, Shape>>, kind: string, data: unknown, path: string): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(shapes, kind)) return invalidAt(`${path}.kind`);
+  if (!isRecord(data)) return invalidAt(path);
+  const shape = shapes[kind];
+  const required = Object.keys(shape.required);
+  const optional = Object.keys(shape.optional ?? {});
+  const keys = keyProblem(data, path, required, optional);
+  if (keys !== undefined) return keys;
+  for (const key of required) {
+    const problem = shape.required[key](own(data, key), `${path}.${key}`);
+    if (problem !== undefined) return problem;
+  }
+  for (const key of optional) {
+    if (!hasOwn(data, key)) continue;
+    const problem = (shape.optional as Record<string, Check>)[key](own(data, key), `${path}.${key}`);
+    if (problem !== undefined) return problem;
+  }
+  if (shape.atLeastOneOf !== undefined && !shape.atLeastOneOf.some((key) => hasOwn(data, key))) return invalidAt(path, 'nothing to change');
+  return undefined;
 }
 
 // Returns a reason, or undefined when the data is valid.

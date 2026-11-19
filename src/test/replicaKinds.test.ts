@@ -9,7 +9,7 @@ import { projectReducer } from '../domain/replica/projectFold';
 import type { ProjectOutput } from '../domain/replica/projectFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { textReducer } from '../domain/replica/textFold';
-import { createWorld, fixedSigner, streamId } from './helpers/replicaWorld';
+import { createWorld, fixedSigner, streamId, updateData } from './helpers/replicaWorld';
 import type { World } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
@@ -280,4 +280,221 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
 test('the closed kind list still has 50 kinds and the 19 project and roster samples are all of them', () => {
   const owned = REPLICA_KINDS.filter((kind) => kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy)\./.test(kind));
   assert.deepEqual([...owned].sort(), PROJECT_AND_ROSTER.map((sample) => sample.kind).sort());
+});
+
+// ---- registers, watches, runs and observations ----
+
+// Microdegrees: whole numbers only, because canonical JSON in a signed body has no fractions.
+const AREA = { west: -75_900_000, south: 44_900_000, east: -75_400_000, north: 45_500_000 };
+
+const LATER_PHASE: Sample[] = [
+  { kind: 'register.row', data: { register: 'rfi', row: 'RFI-014', fields: { title: 'Bridge status', priority: 2, urgent: true } }, required: ['register', 'row', 'fields'] },
+  { kind: 'pir.decide', data: { pir: 'PIR-3', outcome: 'accepted', reasons: ['Collection is possible'], decisionsSeen: [HASH('1')] }, required: ['pir', 'outcome', 'reasons', 'decisionsSeen'] },
+  { kind: 'watch.decide', data: { watch: 'bridge-watch', outcome: 'armed' }, required: ['watch', 'outcome'] },
+  { kind: 'watch.define', data: { watch: 'bridge-watch', title: 'Bridge activity', criteria: 'Any vehicle track within 2 km of the bridge', feeds: ['adsb', 'ais'] }, required: ['watch', 'title', 'criteria', 'feeds'] },
+  { kind: 'watch.assign', data: { watch: 'bridge-watch', runner: 'hub' }, required: ['watch', 'runner'] },
+  { kind: 'watch.match', data: { watch: 'bridge-watch', matchId: HASH('2'), observations: ['obs-1', 'obs-2'], window: { from: '2026-11-19T10:00:00.000Z', to: '2026-11-19T11:00:00.000Z' } }, required: ['watch', 'matchId', 'observations', 'window'] },
+  { kind: 'watch.state', data: { watch: 'bridge-watch', state: 'awaiting-review' }, required: ['watch', 'state'] },
+  { kind: 'watch.killSwitch', data: { scope: 'project', on: true, reason: 'Drill: all hub watches off' }, required: ['scope', 'on', 'reason'] },
+  { kind: 'run.start', data: { run: 'run-1', team: 'j2', section: 'enemy-coas', startedBy: 'mbr-ada', target: 'Adversary courses of action' }, required: ['run', 'team', 'section', 'startedBy', 'target'] },
+  { kind: 'run.lane', data: { run: 'run-1', member: 'analyst', state: 'working' }, required: ['run', 'member', 'state'] },
+  { kind: 'run.claim', data: { run: 'run-1', member: 'analyst', target: 'Enemy courses of action', purpose: 'Draft the section', leaseSeconds: 1200 }, required: ['run', 'member', 'target', 'purpose', 'leaseSeconds'] },
+  { kind: 'run.release', data: { run: 'run-1', target: 'Enemy courses of action' }, required: ['run', 'target'] },
+  { kind: 'run.summary', data: { run: 'run-1', proposals: 2, verdicts: 1, registerRows: 4, spendMicros: 125000, durationSeconds: 900 }, required: ['run', 'proposals', 'verdicts', 'registerRows', 'spendMicros', 'durationSeconds'] },
+  { kind: 'run.end', data: { run: 'run-1', outcome: 'done' }, required: ['run', 'outcome'] },
+  { kind: 'obs.segment', data: { cell: streamId('cell-1'), feed: 'adsb', area: AREA, from: '2026-11-19T10:00:00.000Z', to: '2026-11-19T11:00:00.000Z', rows: 1200, blob: HASH('3') }, required: ['cell', 'feed', 'area', 'from', 'to', 'rows', 'blob'] },
+  { kind: 'obs.coalesced', data: { cell: streamId('cell-1'), feed: 'adsb', area: AREA, from: '2026-11-19T10:00:00.000Z', to: '2026-11-19T10:05:00.000Z', tracks: 40, points: 400, blob: HASH('4') }, required: ['cell', 'feed', 'area', 'from', 'to', 'tracks', 'points', 'blob'] },
+  { kind: 'obs.pruned', data: { cell: streamId('cell-1'), feed: 'adsb', from: '2026-11-18T00:00:00.000Z', to: '2026-11-18T06:00:00.000Z', segments: 6, reason: 'window' }, required: ['cell', 'feed', 'from', 'to', 'segments', 'reason'] }
+];
+
+test('one valid sample per registers, watches, runs and obs kind (17 kinds) passes, and a missing field, an extra field and a __proto__ key each fail', () => {
+  assert.equal(LATER_PHASE.length, 17);
+  for (const sample of LATER_PHASE) {
+    assert.deepEqual(validateData(sample.kind, sample.data), { ok: true }, sample.kind);
+    for (const key of sample.required) {
+      const reason = reasonOf(sample.kind, without(sample.data, key));
+      assert.ok(reason.startsWith('bad-data:') && reason.includes(`data.${key}`), `${sample.kind} without ${key}: ${reason}`);
+    }
+    assert.ok(reasonOf(sample.kind, withKey(sample.data, 'extra', 1)).includes('data.extra'), sample.kind);
+    const proto = reasonOf(sample.kind, withPrototypeKey(sample.data));
+    assert.ok(proto.startsWith('bad-data:') && proto.includes('__proto__'), `${sample.kind}: ${proto}`);
+    for (const wrong of [null, 5, 'text', [], [sample.data]]) assert.equal(validateData(sample.kind, wrong).ok, false, `${sample.kind} ${JSON.stringify(wrong)}`);
+  }
+  const owned = REPLICA_KINDS.filter((kind) => /^(register|pir|watch|run|obs)\./.test(kind));
+  assert.deepEqual([...owned].sort(), LATER_PHASE.map((sample) => sample.kind).sort());
+});
+
+test('registers: unknown register, bad row ids, too many or ill-named fields, prototype field names and big values are refused at their path', () => {
+  const row = LATER_PHASE[0].data;
+  const many = Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`field${index}`, index]));
+  const refusals: Array<[string, Data, string]> = [
+    ['register.row', withKey(row, 'register', 'diary'), 'data.register'],
+    ['register.row', withKey(row, 'row', 'bad id'), 'data.row'],
+    ['register.row', withKey(row, 'fields', many), 'data.fields'],
+    ['register.row', withKey(row, 'fields', { Title: 'x' }), 'data.fields.Title'],
+    ['register.row', withKey(row, 'fields', JSON.parse('{"__proto__":"x"}')), 'data.fields.__proto__'],
+    ['register.row', withKey(row, 'fields', { title: 'x'.repeat(2001) }), 'data.fields.title'],
+    ['register.row', withKey(row, 'fields', { title: { nested: 1 } }), 'data.fields.title'],
+    ['register.row', withKey(row, 'fields', { count: Number.POSITIVE_INFINITY }), 'data.fields.count'],
+    ['register.row', withKey(row, 'fields', [1]), 'data.fields'],
+    ['register.row', withKey(row, 'fields', { ratio: 0.5 }), 'data.fields.ratio'],
+    ['register.row', withKey(row, 'basedOn', 'abc'), 'data.basedOn'],
+    ['pir.decide', { pir: 'PIR-3', outcome: 'Accepted!', reasons: [], decisionsSeen: [] }, 'data.outcome'],
+    ['pir.decide', { pir: 'PIR-3', outcome: 'accepted', reasons: Array.from({ length: 9 }, () => 'r'), decisionsSeen: [] }, 'data.reasons'],
+    ['pir.decide', { pir: 'PIR-3', outcome: 'accepted', reasons: [], decisionsSeen: Array.from({ length: 17 }, () => HASH('1')) }, 'data.decisionsSeen'],
+    ['pir.decide', { pir: 'PIR-3', outcome: 'accepted', reasons: [], decisionsSeen: ['nope'] }, 'data.decisionsSeen[0]'],
+    ['watch.decide', { watch: 'bridge-watch', outcome: 'armed', runner: 'cloud' }, 'data.runner']
+  ];
+  for (const [kind, data, path] of refusals) {
+    const reason = reasonOf(kind, data);
+    assert.ok(reason.includes(path), `${kind} should name ${path}: ${reason}`);
+  }
+  assert.deepEqual(validateData('register.row', withKey(row, 'basedOn', HASH('5'))), { ok: true });
+  assert.deepEqual(validateData('register.row', withKey(row, 'fields', {})), { ok: true });
+  assert.deepEqual(validateData('watch.decide', { watch: 'bridge-watch', outcome: 'armed', runner: 'attended' }), { ok: true });
+});
+
+test('watches: states, runners, scopes, match windows and ids each refuse the wrong value, and the 15.6 states are all accepted', () => {
+  const define = LATER_PHASE[3].data;
+  const match = LATER_PHASE[5].data;
+  const refusals: Array<[string, Data, string]> = [
+    ['watch.define', withKey(define, 'feeds', Array.from({ length: 17 }, () => 'adsb')), 'data.feeds'],
+    ['watch.define', withKey(define, 'criteria', 'two\nlines'), 'data.criteria'],
+    ['watch.define', withKey(define, 'expiresAt', 'tomorrow'), 'data.expiresAt'],
+    ['watch.assign', { watch: 'bridge-watch', runner: 'cloud' }, 'data.runner'],
+    ['watch.assign', { watch: 'bridge-watch', runner: 'hub', fallback: 'hub' }, 'data.fallback'],
+    ['watch.match', withKey(match, 'matchId', 'abc'), 'data.matchId'],
+    ['watch.match', withKey(match, 'observations', ['bad id']), 'data.observations[0]'],
+    ['watch.match', withKey(match, 'observations', Array.from({ length: 65 }, (_, index) => `obs-${index}`)), 'data.observations'],
+    ['watch.match', withKey(match, 'window', { from: '2026-11-19T10:00:00.000Z' }), 'data.window'],
+    ['watch.match', withKey(match, 'window', { from: 'x', to: 'y' }), 'data.window.from'],
+    ['watch.state', { watch: 'bridge-watch', state: 'exploding' }, 'data.state'],
+    ['watch.killSwitch', { scope: 'everything', on: true, reason: 'x' }, 'data.scope'],
+    ['watch.killSwitch', { scope: 'project', on: 'yes', reason: 'x' }, 'data.on'],
+    ['watch.killSwitch', { scope: 'project', on: true, reason: '' }, 'data.reason']
+  ];
+  for (const [kind, data, path] of refusals) {
+    const reason = reasonOf(kind, data);
+    assert.ok(reason.includes(path), `${kind} should name ${path}: ${reason}`);
+  }
+  for (const state of ['proposed', 'armed', 'rejected', 'matched', 'drafting', 'awaiting-review', 'paused', 'expired', 'disarmed']) {
+    assert.deepEqual(validateData('watch.state', { watch: 'bridge-watch', state }), { ok: true }, state);
+  }
+  assert.deepEqual(validateData('watch.killSwitch', { scope: 'watch:bridge-watch', on: false, reason: 'Back on' }), { ok: true });
+  assert.deepEqual(validateData('watch.assign', { watch: 'bridge-watch', runner: 'hub', fallback: 'attended' }), { ok: true });
+});
+
+test('runs: lease caps, lane and outcome words, counts and money (whole micro-dollars only) are checked', () => {
+  const claim = LATER_PHASE[10].data;
+  const summary = LATER_PHASE[12].data;
+  const refusals: Array<[string, Data, string]> = [
+    ['run.claim', withKey(claim, 'leaseSeconds', 59), 'data.leaseSeconds'],
+    ['run.claim', withKey(claim, 'leaseSeconds', 86401), 'data.leaseSeconds'],
+    ['run.claim', withKey(claim, 'leaseSeconds', 1200.5), 'data.leaseSeconds'],
+    ['run.claim', withKey(claim, 'leaseSeconds', '1200'), 'data.leaseSeconds'],
+    ['run.claim', withKey(claim, 'run', 'run 1'), 'data.run'],
+    ['run.lane', { run: 'run-1', member: 'analyst', state: 'sleeping' }, 'data.state'],
+    ['run.end', { run: 'run-1', outcome: 'lost' }, 'data.outcome'],
+    ['run.summary', withKey(summary, 'spendMicros', 0.5), 'data.spendMicros'],
+    ['run.summary', withKey(summary, 'spendMicros', -1), 'data.spendMicros'],
+    ['run.summary', withKey(summary, 'proposals', 1e12), 'data.proposals'],
+    ['run.summary', withKey(summary, 'durationSeconds', Number.NaN), 'data.durationSeconds'],
+    ['run.start', { run: 'run-1', team: 'j2', section: 'enemy-coas', startedBy: 'mbr-ada', target: '' }, 'data.target'],
+    ['run.release', { run: 'run-1', target: 'x', reason: 'a\nb' }, 'data.reason']
+  ];
+  for (const [kind, data, path] of refusals) {
+    const reason = reasonOf(kind, data);
+    assert.ok(reason.includes(path), `${kind} should name ${path}: ${reason}`);
+  }
+  for (const lease of [60, 1200, 86400]) assert.deepEqual(validateData('run.claim', withKey(claim, 'leaseSeconds', lease)), { ok: true }, String(lease));
+  for (const state of ['working', 'waiting', 'done', 'failed']) assert.deepEqual(validateData('run.lane', { run: 'run-1', member: 'analyst', state, target: 'Key terrain' }), { ok: true }, state);
+  for (const outcome of ['done', 'failed', 'cancelled']) assert.deepEqual(validateData('run.end', { run: 'run-1', outcome, reason: 'ok' }), { ok: true }, outcome);
+});
+
+test('observations: slices need a real area and window, and large payloads are blob hashes, never inline points', () => {
+  const segment = LATER_PHASE[14].data;
+  const area = segment.area as Data;
+  const refusals: Array<[string, Data, string]> = [
+    ['obs.segment', withKey(segment, 'area', { ...area, west: -181_000_000 }), 'data.area.west'],
+    ['obs.segment', withKey(segment, 'area', { ...area, north: 91_000_000 }), 'data.area.north'],
+    ['obs.segment', withKey(segment, 'area', { ...area, south: 46_000_000, north: 45_000_000 }), 'data.area'],
+    ['obs.segment', withKey(segment, 'area', { ...area, east: 1.5 }), 'data.area.east'],
+    ['obs.segment', withKey(segment, 'area', { ...area, extra: 1 }), 'data.area'],
+    ['obs.segment', withKey(segment, 'area', [1, 2, 3, 4]), 'data.area'],
+    ['obs.segment', withKey(segment, 'from', '2026-11-19'), 'data.from'],
+    ['obs.segment', withKey(segment, 'to', '2026-11-19T09:00:00.000Z'), 'data.to'],
+    ['obs.segment', withKey(segment, 'blob', 'abc'), 'data.blob'],
+    ['obs.segment', withKey(segment, 'cell', HASH('a')), 'data.cell'],
+    ['obs.segment', withKey(segment, 'points', [[1, 2]]), 'data.points'],
+    ['obs.segment', withKey(segment, 'rows', -1), 'data.rows'],
+    ['obs.pruned', { cell: streamId('c'), feed: 'adsb', from: '2026-11-18T00:00:00.000Z', to: '2026-11-18T06:00:00.000Z', segments: 6, reason: 'whim' }, 'data.reason']
+  ];
+  for (const [kind, data, path] of refusals) {
+    const reason = reasonOf(kind, data);
+    assert.ok(reason.includes(path), `${kind} should name ${path}: ${reason}`);
+  }
+  // A box that crosses the antimeridian (east below west) is allowed, and so is a fraction-free time next to one with milliseconds.
+  assert.deepEqual(validateData('obs.segment', withKey(segment, 'area', { west: 170_000_000, south: -10_000_000, east: -170_000_000, north: 10_000_000 })), { ok: true });
+  assert.deepEqual(validateData('obs.segment', { ...segment, from: '2026-11-19T10:00:00Z', to: '2026-11-19T10:00:00.500Z', channel: 'primary' }), { ok: true });
+});
+
+// ---- kept families: later-phase kinds, unknown kinds, hub actors ----
+
+test('registers, watches, runs and obs entries are kept folded-in-later-phase, change no families output and no digest, and stay chain nodes', () => {
+  const world = projectWorld();
+  const ada = world.editor('A', PRODUCT, 101);
+  const register = ada.register();
+  const first = ada.insert(0, 'Hello');
+  const baseline = foldEntries([register.entry, first.entry], world.ctx(), REDUCERS);
+  const keptEntries = LATER_PHASE.map((sample) => world.write('A', { kind: sample.kind, data: sample.data }));
+  const after = ada.insert(5, ' world');
+  const result = foldEntries([register, first, ...keptEntries, after].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(result.kept.map((item) => [item.hash, item.reason, item.family]).sort(), keptEntries.map((item, index) => [item.hash, 'folded-in-later-phase', kindFamilyName(LATER_PHASE[index].kind)]).sort());
+  assert.deepEqual([result.refused, result.held, result.rejected], [[], [], []]);
+  assert.equal((result.families.doc as ProductTextOutput[])[0].text, 'Hello world');
+  const keptOnly = foldEntries([register, first, ...keptEntries].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(keptOnly.digests, baseline.digests);
+  assert.deepEqual(keptOnly.families, baseline.families);
+  assert.deepEqual(keptOnly.applied, baseline.applied);
+});
+
+function kindFamilyName(kind: string): string {
+  if (kind === 'register.row' || kind === 'pir.decide' || kind === 'watch.decide') return 'registers';
+  const word = kind.split('.')[0];
+  return word === 'watch' ? 'watches' : word === 'run' ? 'runs' : 'obs';
+}
+
+test('an entry of an unknown kind is kept newer-version, changes no state, and the same writer next entry is applied', () => {
+  const world = projectWorld();
+  const ada = world.editor('A', PRODUCT, 101);
+  const register = ada.register();
+  const first = ada.insert(0, 'Hello');
+  const baseline = foldEntries([register.entry, first.entry], world.ctx(), REDUCERS);
+  const future = world.write('A', { kind: 'staff.futureThing', data: { anything: [1, 2, { deep: true }], note: 'from a newer version' } });
+  const huge = world.write('A', { kind: 'staff.anotherThing', data: 'plain text instead of an object' });
+  const after = ada.insert(5, ' world');
+  const result = foldEntries([register, first, future, huge, after].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(result.kept.map((item) => [item.hash, item.reason]).sort(), [[future.hash, 'newer-version'], [huge.hash, 'newer-version']].sort());
+  assert.deepEqual([result.refused, result.held, result.rejected], [[], [], []]);
+  assert.equal((result.families.doc as ProductTextOutput[])[0].text, 'Hello world');
+  assert.ok(result.applied.includes(after.hash));
+  const without = foldEntries([register, first, future, huge].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(without.digests, baseline.digests);
+  assert.deepEqual(without.families, baseline.families);
+});
+
+test('a doc.update written by a hub actor is kept hub-actor and changes no text, and a hub actor on a roster kind is kept the same way', () => {
+  const world = projectWorld();
+  const ada = world.editor('A', PRODUCT, 101);
+  const register = ada.register();
+  const first = ada.insert(0, 'Hello');
+  const baseline = foldEntries([register.entry, first.entry], world.ctx(), REDUCERS);
+  const hubText = world.write('A', { kind: 'doc.update', data: updateData(PRODUCT, ada.insertUpdate(5, ' from the hub')), actor: { kind: 'hub', watch: 'bridge-watch' } });
+  const hubGenesis = world.write('A', { kind: 'project.genesis', data: genesisData(world), actor: { kind: 'hub', watch: 'bridge-watch' } });
+  const result = foldEntries([register, first, hubText, hubGenesis].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(result.kept.map((item) => [item.hash, item.reason]).sort(), [[hubText.hash, 'hub-actor'], [hubGenesis.hash, 'hub-actor']].sort());
+  assert.equal((result.families.doc as ProductTextOutput[])[0].text, 'Hello');
+  assert.deepEqual(projectOf(result), []);
+  assert.deepEqual(result.digests, baseline.digests);
+  assert.deepEqual([result.refused, result.held, result.rejected], [[], [], []]);
 });

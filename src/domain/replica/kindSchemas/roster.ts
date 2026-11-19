@@ -8,7 +8,8 @@ import { isRecord, isSafeIntegerInRange } from '../../team/validate';
 import { writerIdOf } from '../entry';
 import { ROSTER_ROLE_PATTERNS } from '../rosterView';
 import { invalidAt, isBase64urlBytes, isHash, isIsoTime, isSlug } from './shared';
-import { hasOwn, isCount, isLine, isStreamHex, keyProblem, own } from './project';
+import { countCheck, hashCheck, hasOwn, keyProblem, lineCheck, oneOf, slugCheck, streamCheck, timeCheck, validateShape } from './project';
+import type { Check, Shape } from './project';
 
 const ED25519_PUBLIC_BYTES = 32;
 const X25519_PUBLIC_BYTES = 32;
@@ -87,18 +88,9 @@ function deviceProblem(value: unknown, path: string): string | undefined {
   return undefined;
 }
 
-type Check = (value: unknown, path: string) => string | undefined;
-const slugCheck: Check = (value, path) => (isSlug(value) ? undefined : invalidAt(path));
-const hashCheck: Check = (value, path) => (isHash(value) ? undefined : invalidAt(path));
-const nameCheck: Check = (value, path) => (isLine(value, 120) ? undefined : invalidAt(path));
-const reasonCheck: Check = (value, path) => (isLine(value, 200) ? undefined : invalidAt(path));
-const streamCheck: Check = (value, path) => (isStreamHex(value) ? undefined : invalidAt(path));
-const countCheck: Check = (value, path) => (isCount(value) ? undefined : invalidAt(path));
-const timeCheck: Check = (value, path) => (isIsoTime(value) ? undefined : invalidAt(path));
+const nameCheck = lineCheck(120);
+const reasonCheck = lineCheck(200);
 const epochCheck: Check = (value, path) => (isSafeIntegerInRange(value, 1, Number.MAX_SAFE_INTEGER) ? undefined : invalidAt(path));
-const oneOf = (words: readonly string[]): Check => (value, path) => (typeof value === 'string' && words.includes(value) ? undefined : invalidAt(path));
-
-interface Shape { required: Record<string, Check>; optional?: Record<string, Check>; atLeastOneOf?: readonly string[] }
 
 // The 17 roster kinds. The key order of a record is the order the checks run in, so the first wrong field is the one named.
 const SHAPES: Readonly<Record<string, Shape>> = {
@@ -123,22 +115,5 @@ const SHAPES: Readonly<Record<string, Shape>> = {
 
 // Returns a reason, or undefined when the data is valid.
 export function validateRosterData(kind: string, data: unknown, path: string): string | undefined {
-  if (!Object.prototype.hasOwnProperty.call(SHAPES, kind)) return invalidAt(`${path}.kind`);
-  if (!isRecord(data)) return invalidAt(path);
-  const shape = SHAPES[kind];
-  const required = Object.keys(shape.required);
-  const optional = Object.keys(shape.optional ?? {});
-  const keys = keyProblem(data, path, required, optional);
-  if (keys !== undefined) return keys;
-  for (const key of required) {
-    const problem = shape.required[key](own(data, key), `${path}.${key}`);
-    if (problem !== undefined) return problem;
-  }
-  for (const key of optional) {
-    if (!hasOwn(data, key)) continue;
-    const problem = (shape.optional as Record<string, Check>)[key](own(data, key), `${path}.${key}`);
-    if (problem !== undefined) return problem;
-  }
-  if (shape.atLeastOneOf !== undefined && !shape.atLeastOneOf.some((key) => hasOwn(data, key))) return invalidAt(path, 'nothing to change');
-  return undefined;
+  return validateShape(SHAPES, kind, data, path);
 }
