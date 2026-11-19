@@ -35,6 +35,10 @@ export interface FamilyReducer<S, O> {
   family: KindFamily;
   init(): S;
   apply(state: S, entry: VerifiedEntry, view: FoldView): ReduceOutcome;
+  // The hashes of other entries whose arrival can change this entry's outcome, even when they sort after it (CR-02). A reducer that looks at the
+  // graph for entries it does not cite in its own past must list them here: the incremental fold appends only while no later arrival changes an
+  // earlier outcome, and starts again from this entry when one does. Leave it out when the outcome depends on earlier entries only.
+  lateDependencies?(entry: VerifiedEntry): readonly string[];
   finish(state: S, view: FoldView): O;
   canonical(output: O, stream: string): unknown;
   clone(state: S): S;

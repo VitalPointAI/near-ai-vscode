@@ -383,6 +383,26 @@ function extendsOrder(before: Prepared, after: Prepared): boolean {
   return true;
 }
 
+// The place of the first entry of the old order that a newly admitted entry can change the outcome of, or undefined when none can (CR-02). A reducer
+// names such entries with lateDependencies. Without this check the incremental fold would keep an outcome the from-scratch fold, which sees every
+// entry from the start, would not give.
+function earliestLateEffect(before: Prepared, after: Prepared, reducers: readonly AnyReducer[]): number | undefined {
+  if (before.ordered.length === 0) return undefined;
+  const known = new Set(before.ordered.map((entry) => entry.hash));
+  const arrived = new Set<string>();
+  for (const entry of after.ordered) if (!known.has(entry.hash)) arrived.add(entry.hash);
+  if (arrived.size === 0) return undefined;
+  const byFamily = new Map<KindFamily, AnyReducer>();
+  for (const reducer of reducers) byFamily.set(reducer.family, reducer);
+  for (let index = 0; index < before.ordered.length; index += 1) {
+    const entry = before.ordered[index];
+    const family = kindFamily(entry.body.kind);
+    const dependencies = family === undefined ? undefined : byFamily.get(family)?.lateDependencies?.(entry);
+    if (dependencies !== undefined && dependencies.some((hash) => arrived.has(hash))) return index;
+  }
+  return undefined;
+}
+
 // How many leading entries are the same in both orders, with the same ones skipped as quarantined.
 function commonPrefix(before: Prepared, after: Prepared): number {
   const limit = Math.min(before.ordered.length, after.ordered.length);
@@ -413,13 +433,16 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
   let run: Run;
   let snapshot: Snapshot | undefined;
   let refolds = state.refolds;
-  if (extendsOrder(state.prepared, prepared)) {
+  // An arrival that sorts last can still change an earlier outcome (a compaction whose cover has just been delivered), so it is not a plain append.
+  const late = earliestLateEffect(state.prepared, prepared, state.options.reducers ?? DEFAULT_REDUCERS);
+  if (late === undefined && extendsOrder(state.prepared, prepared)) {
     // Everything new sorts after what was applied: append.
     run = cloneRun(state.run);
     snapshot = applyFrom(run, prepared, next, state.prepared.ordered.length, state.snapshot);
   } else {
     refolds += 1;
-    const kept = state.snapshot !== undefined && state.snapshot.count <= commonPrefix(state.prepared, prepared) ? state.snapshot : undefined;
+    const reusable = Math.min(commonPrefix(state.prepared, prepared), late ?? Infinity);
+    const kept = state.snapshot !== undefined && state.snapshot.count <= reusable ? state.snapshot : undefined;
     // Start again from the end of the final prefix when nothing at or before it changed, otherwise from the start.
     run = kept === undefined ? freshRun(state.options.reducers ?? DEFAULT_REDUCERS) : cloneRun(kept.run);
     snapshot = applyFrom(run, prepared, next, kept === undefined ? 0 : kept.count, kept);

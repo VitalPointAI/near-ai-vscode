@@ -254,6 +254,13 @@ export const textReducer: FamilyReducer<TextState, ProductTextOutput[]> = {
     if (entry.body.kind === 'doc.compact') return applyCompaction(state, entry, entry.data as CompactData, view);
     return refused('unsupported-kind');
   },
+  // A compaction branches on whether the entries it covers are held at all (the log checks it, or it stands in for them), and a cover may sort after
+  // the compaction or arrive long after it (CR-02), so a later arrival of any cover can change the outcome.
+  lateDependencies(entry) {
+    if (entry.body.kind !== 'doc.compact') return [];
+    const covers = (entry.data as CompactData).covers;
+    return Array.isArray(covers) ? covers.map((cover) => cover.hash) : [];
+  },
   finish(state) {
     return [...state.products.values()]
       .sort((a, b) => (a.stream === b.stream ? (a.product < b.product ? -1 : a.product > b.product ? 1 : 0) : a.stream < b.stream ? -1 : 1))
