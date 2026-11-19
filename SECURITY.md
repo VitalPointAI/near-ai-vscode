@@ -986,6 +986,30 @@ WebGL is not available in this window.", and no two of its 44 name labels
 overlap as the browser measures them. Map names are drawn by MapLibre from
 the system's own font, so no glyph is fetched.
 
+### Environment packs
+
+The COP map's terrain and weather (hillshade, contours, coastline, forecast)
+come only from environment packs on disk (`docs/staff-env-packs.md`), never
+from a tile, raster or forecast server, so drawing them reveals no area of
+interest. The extension reads only the four file names of the format, each a
+regular file of at most 8 MB, checks every file's size and SHA-256 against the
+manifest before parsing it, and refuses a pack with any coordinate outside its
+bounding box or, when drawn in a scenario, outside the exercise frame. A
+real-data pack must carry its attribution and every source's licence. The
+contours and hillshade are computed on the host and sent to the page as
+GeoJSON inside the picture, so the page's policy is unchanged and the page
+makes no request for them. The bundled IRON LANTERN pack is synthetic, made
+from a seed, and a test makes it again and compares the bytes.
+
+`scripts/build-env-pack.mjs` turns real elevation and forecast files into a
+pack on a developer machine. It refuses to run when `CI` is set or GDAL is not
+installed, runs only the GDAL command-line tools (`gdalinfo`, `gdalwarp`,
+`gdal_translate`, `gdal_contour`) without a shell on the files named on its
+command line, makes no network request of its own, writes only into a new or
+empty output folder, and validates the result before writing it. It never
+runs in the extension or in CI, and GRIB2, NetCDF and GeoTIFF decoding stays
+in GDAL, outside the extension. No agent tool reads or writes packs.
+
 ## The outbound check
 
 Every chat message passes one check before it leaves VS Code, in this order:

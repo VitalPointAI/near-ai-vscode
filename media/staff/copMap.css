@@ -19,5 +19,6 @@
 .cop-map-time { display: flex; gap: 8px; align-items: center; }
 .cop-map-range { flex: 1; }
 .cop-map-card { position: absolute; right: 8px; bottom: 40px; max-width: min(320px, calc(100% - 16px)); padding: 8px; background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, #454545); }
+.cop-map-env { opacity: 0.9; font-size: 11px; }
 .cop-map-notice { padding: 4px 8px; border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
 @media (prefers-reduced-motion: reduce) { .cop-map * { transition: none !important; animation: none !important; } }

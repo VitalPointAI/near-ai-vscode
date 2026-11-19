@@ -15,6 +15,7 @@ import type { CopPicture, PictureFeeds } from '../domain/staff/cop';
 import { splitProductFile } from '../domain/staff/products';
 import { parseScenarioText, SCENARIO_DIR } from '../domain/staff/scenario';
 import type { StaffSectionId } from '../domain/staff/doctrine';
+import { scenarioEnvironment } from './envPack';
 
 /** The vendored files the page loads, relative to the extension's media folder. */
 export const COP_MAP_FILES = {
@@ -59,7 +60,7 @@ async function readOptional(file: string): Promise<string | undefined> {
  * The picture for a project: the loaded scenario (its frame, synthetic geography and reference layer), every product layer's features with its writer,
  * and the feed observations when a store gives them. `section` and `roster` resolve each layer's writer for the team whose Staff Room this is.
  */
-export async function loadCopPicture(root: string, options: { readonly section: StaffSectionId; readonly roster: readonly string[]; readonly feeds?: PictureFeeds } = { section: 'j3', roster: [] }): Promise<CopPicture> {
+export async function loadCopPicture(root: string, options: { readonly section: StaffSectionId; readonly roster: readonly string[]; readonly feeds?: PictureFeeds; readonly envDir?: string } = { section: 'j3', roster: [] }): Promise<CopPicture> {
   const text = await readOptional(path.join(root, SCENARIO_DIR, 'scenario.json'));
   const parsed = text === undefined ? undefined : parseScenarioText(text);
   const scenario = parsed?.ok ? parsed.value : undefined;
@@ -72,8 +73,12 @@ export async function loadCopPicture(root: string, options: { readonly section: 
     const read = body === undefined ? { features: [], problems: [] } : readLayerBody(layer, splitProductFile(body)?.body ?? body, frame);
     layers.push({ layer, features: read.features, problems: read.problems, writer: access.writer });
   }
-  const geography = scenario ? syntheticGeography(scenario) : undefined;
+  // The scenario's environment pack (WP-ENV), when it has one: its DEM's contours replace the hand-drawn contour rings of the synthetic geography.
+  const env = scenario ? await scenarioEnvironment(scenario, options.envDir) : undefined;
+  const drawn = scenario ? syntheticGeography(scenario) : undefined;
+  const geography = drawn && env?.environment ? { ...drawn, features: drawn.features.filter((feature) => feature.properties.kind !== 'contour') } : drawn;
   return buildCopPicture({
+    ...(env?.environment ? { environment: env.environment } : {}), ...(env?.problem ? { environmentProblem: env.problem } : {}),
     marking: scenario?.marking ?? 'UNCLASSIFIED // EXERCISE', ...(frame ? { frame } : {}), ...(geography ? { geography } : {}), layers,
     ...(options.feeds ? { feeds: options.feeds } : {}), ...(scenario ? { scenario } : {})
   });

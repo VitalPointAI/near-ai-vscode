@@ -1,0 +1,44 @@
+{
+  "format": "near-env-pack",
+  "version": 1,
+  "id": "iron-lantern-synthetic",
+  "title": "Exercise IRON LANTERN: synthetic terrain and weather",
+  "data": "synthetic",
+  "crs": "EPSG:4326",
+  "bounds": [
+    -124.077038,
+    -49.326327,
+    -122.70963,
+    -48.427007
+  ],
+  "frame": {
+    "scenario": "iron-lantern",
+    "grid": "KQ"
+  },
+  "generator": {
+    "script": "scripts/generate-env-pack.mjs",
+    "seed": 20270524,
+    "version": 1
+  },
+  "attribution": [
+    "Synthetic exercise terrain and weather, generated from a seed. Nothing in this pack is a real place or a real forecast."
+  ],
+  "licence": "MIT, the same licence as this extension",
+  "files": {
+    "dem": {
+      "path": "dem.json",
+      "sha256": "77863470de64e1551c3b157ebbb8df75706e9ec616c0323243b680290e558f97",
+      "bytes": 51818
+    },
+    "coastline": {
+      "path": "coastline.geojson",
+      "sha256": "a821bf1e5f856b7c582d95102e22e99a926e57f9d2efb220527bfdae8e082e56",
+      "bytes": 1432
+    },
+    "weather": {
+      "path": "weather.json",
+      "sha256": "f1fcf51deafed07c8c4c7717fd459a20af7b74d20988e762b218717d6dbf3911",
+      "bytes": 30850
+    }
+  }
+}

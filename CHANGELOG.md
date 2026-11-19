@@ -189,6 +189,14 @@ members draft and recommend, and a named person makes every decision.
   on the shared clock, "as happened" and "as known" replay, symbol cards in words, and a track
   budget of 2,000; without WebGL it falls back to a 2D SVG map behind the same interface. The J2
   members that draw the threat and terrain layers are granted it again.
+- **Terrain and weather on the COP map.** The map draws hillshade, contours every 50 m with the
+  coastline, and the weather (wind arrows, fog, rain and rough sea) for Exercise IRON LANTERN from
+  a bundled, synthetic environment pack, offline, as layers you turn on and off. The time slider
+  picks the forecast for the time shown, with its model run and lead time, and shows no weather
+  outside the forecast. A pack whose files do not match its recorded hashes, that strays outside
+  the exercise frame, or that holds real data without its attribution and licences is refused,
+  with the reason on the map. Developers with GDAL can build a pack from a real elevation model or
+  forecast with `scripts/build-env-pack.mjs`; the format is in `docs/staff-env-packs.md`.
 - **J3 watch officer held to its own files.** Like the red team and the release guard, the J3 watch
   officer is held to a write limit: it may write nothing at all. Write and Edit refuse every path,
   and it gets no shell, document, agent-starting or other MCP tool, only the staff tools it is
