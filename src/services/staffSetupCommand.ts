@@ -1,6 +1,7 @@
 // NEAR AI: Set Up a Staff Team. Asks the section, the doctrine profile, the level, the nation, the planning type and what the template offers on top,
 // shows the roster (who drafts and who decides), then writes the team, its skills, PROFILE.md, the staff settings and the section's guidance, and offers
 // to load the starter exercise scenario. The planning and writing live in staffSetup.ts; this file only asks and confirms.
+import { OPEN_STAFF_ROOM_COMMAND } from '../domain/staff/commands';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
@@ -93,7 +94,8 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   try {
     const result = await applyStaffSetup(root, library, plan, { replace: target.exists });
     const slug = path.basename(result.teamFile, '.md');
-    void vscode.window.showInformationMessage(`${plan.roster.teamName} is ready: run it with /team:${slug} in the NEAR AI chat.${result.archived ? ' The earlier file is in your teams archive.' : ''}`);
+    void Promise.resolve(vscode.window.showInformationMessage(`${plan.roster.teamName} is ready: run it with /team:${slug} in the NEAR AI chat.${result.archived ? ' The earlier file is in your teams archive.' : ''}`, OPEN_STAFF_ROOM_ACTION))
+      .then((choice) => { if (choice === OPEN_STAFF_ROOM_ACTION) void vscode.commands.executeCommand(OPEN_STAFF_ROOM_COMMAND); }, () => undefined);
     await offerStarterScenario(root);
     return result.teamFile;
   } catch (error) {
@@ -113,6 +115,9 @@ async function offerStarterScenario(root: string): Promise<void> {
   if (!loaded.ok) { void vscode.window.showErrorMessage(`Scenario not loaded. ${loaded.message}`); return; }
   void vscode.window.showInformationMessage(`${loaded.scenario.title} loaded into .planning/staff/scenario/, with demo scripts in .planning/staff/demo/.`);
 }
+
+/** The action on the "team is ready" message that opens the Staff Room. */
+export const OPEN_STAFF_ROOM_ACTION = 'Open the Staff Room';
 
 export function registerStaffSetup(context: vscode.ExtensionContext): void {
   context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, () => setUpStaffTeam()));

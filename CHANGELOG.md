@@ -8,6 +8,22 @@ scenario, and let the members draft in parallel while every product passes the t
 named person makes every decision. Staff teams are private, unclassified and for exercise and
 fictional data only; labels are not accreditation, and no member has a persona name or a rank.
 
+- **The Staff Room.** **NEAR AI: Open Staff Room**, also a button in Team Studio and on the
+  message after staff setup, shows a staff run as a war room: the planning process across the
+  top in your profile's own step names, the staff sections as squads with each agent's state in
+  words and icons, the product ledger where every product opens its provenance (owner, version,
+  gates on that version, who approved it, what it depends on, its history), and the gold human
+  decisions panel. Its buttons run only the person-only staff commands, which ask who you are,
+  confirm in a dialog and sign; the room shows a decision only once the signed ledger holds it.
+  Workspaces share one map, the ledger, the decisions and one clock: the war room for the whole
+  staff, and the J2 workspace with the threat picture on the exercise map (adversary units with
+  their grades, the MLCOA and MDCOA as dashed red axes, NAIs and control measures, map layers
+  each with its one writer, and a table view of all of it), the source register with reliability
+  and credibility graded separately, PIRs linked to the decision points they support, the
+  collection plan and the standing watches. J5, J3 and J4 workspaces arrive in drop 2 and say
+  what they will hold. Night, day and high contrast themes follow VS Code; Calm and the system's
+  reduced-motion setting stop all movement; the whole room works from the keyboard, with
+  single-key shortcuts you can turn off; Follow the action moves the view to where the work is.
 - **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
   for the section (J2, J5, J3 or J4), the doctrine profile, the level, the nation (NATO/Canadian), the
   planning type and the section's own options, then shows the roster: the person who decides, and

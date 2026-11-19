@@ -330,6 +330,27 @@ follows the J2 demo script and holds when the mid-demo report lands.
 resumes, steps and sets the speed: 0.5x, 1x, 2x or 4x. The inject script that
 drives it, `resources/staff/scenarios/iron-lantern.sim.jsonl`, and the message
 shapes are described in `src/domain/staff/sim/`.
+**NEAR AI: Open Staff Room** (also **Open the Staff Room** in Team Studio once
+you have a staff team) shows the project's staff run as a war room. The process
+rail across the top shows each step in your profile's own words and whether it
+is done, working now, next, or waiting for a named person. Below it, each staff
+section is a squad of agents, each with its state in words; a token opens the
+agent's card. On the right, **Human decisions** (in gold) lists every product
+waiting for a person: **Approve…**, **Reject…** and **Release…** run the
+**NEAR AI: Staff** commands, which ask who you are, confirm in a dialog and
+sign, so nothing is decided in the page itself. Below it, the **Product
+ledger** lists every product with its state; a row opens its provenance. The
+workspaces share one map, the ledger, the decisions and one clock: **War room**
+for the whole staff with what each section is doing, and **J2** with the
+threat picture on the exercise map (adversary units with their grades, the
+most likely and most dangerous courses of action as dashed red axes, NAIs and
+control measures, layers each with the one section that writes it, and **Map
+as table** for all of it in words), the source register, the PIRs with the
+decision points they support, the collection plan and the standing watches
+(`.planning/staff/products/j2/standing-watches.json`). The J5, J3 and J4
+workspaces arrive in drop 2. **Calm** stops all movement, as the system's
+reduced-motion setting does; **Follow the action** moves the view to where the
+work is; press **?** for the keys.
 
 ### MCP connections
 

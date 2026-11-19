@@ -807,6 +807,16 @@ transition brief (`transition-brief`); the phase is read from the signed
 ledger, so no agent can start execution, and from then on the J3 members, not
 the planners, write the synchronization matrix, the DST and DSM and the
 assessment plan.
+The Staff Room panel only reads: the ledger, the event log and the files
+under `.planning/staff/`. Its page gets display data only, through
+`textContent`, under a content security policy with no inline script. Every
+message from the page is checked for its type, exact keys and the form of
+each value. A decision button sends only the product and the version hash the
+person saw; the extension then runs the same person-only command, which asks
+who they are, confirms in a dialog and signs, and refuses a product that
+changed. The event log is not signed, so the room shows a person's decision,
+and names a person on a section, only when the signed ledger holds it; a
+decision in the log that the ledger does not hold is shown as not counted.
 
 The tools record what they do inside the project only and send nothing out.
 They declare every project file they read (the staff folder, the project's

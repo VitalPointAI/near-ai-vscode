@@ -24,6 +24,7 @@ import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
 import { registerAgentActivity } from './services/activityView';
 import { registerTeamLive } from './services/teamLiveView';
+import { registerStaffRoom } from './services/staffRoomPanel';
 import { registerRunReport } from './services/runReportCommand';
 import { registerResearchVerifiers } from './services/researchProfileCommand';
 import { registerStaffScenario } from './services/staffScenario';
@@ -139,6 +140,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
+  registerStaffRoom(context);
   registerUsageExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);

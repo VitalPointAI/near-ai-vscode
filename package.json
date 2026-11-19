@@ -240,6 +240,12 @@
         "icon": "$(pulse)"
       },
       {
+        "command": "nearAi.openStaffRoom",
+        "title": "Open Staff Room",
+        "category": "NEAR AI",
+        "icon": "$(shield)"
+      },
+      {
         "command": "nearAi.openTeamLive",
         "title": "Watch the Team Live",
         "category": "NEAR AI",
