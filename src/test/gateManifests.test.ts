@@ -476,7 +476,7 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
     security: { consented: () => true, scan: async () => undefined },
     cyber: { engagement: {}, tools: () => [...cyberProbes({ inScope: () => false }), ...cyberExploitTools({ inScope: () => false, engagementId: 'e', sandboxTier: 'disabled' })], limiter: () => undefined, grant: () => undefined },
     webSearch: { name: 'searxng', label: 'x', host: 'search.example', search: async () => [] },
-    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [{ name: 'j2-chief', tools: ['mcp:intel-workbench', 'mcp:observations', 'mcp:cop-map', 'mcp:logistics'], instructions: 'x' }], staff: { section: 'j2' } }
+    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [{ name: 'j2-chief', tools: ['mcp:intel-workbench', 'mcp:observations', 'mcp__observations__watch_*', 'mcp:cop-map', 'mcp:logistics'], instructions: 'x' }], staff: { section: 'j2' } }
   } as unknown as AgentTurnRequest;
   const toolsFor = (conversation as unknown as { toolsFor(...args: unknown[]): AgentTool<any>[] }).toolsFor.bind(conversation);
   return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1');
@@ -485,7 +485,7 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
 test('a run with every option on is given exactly the catalog\'s tools, in the catalog\'s order, so a tool added to a run but not to the catalog fails here', () => {
   const given = toolsOfARunWithEverythingOn().map((tool) => tool.name);
   // The run is a staff team's, so it also gets the built-in local staff servers a member is granted: the intel-workbench, observations, cop-map and
-  // logistics (with the observations server's standing watch tools, WP-WATCH). Their tools, like a connected server's, are not catalog entries (intelWorkbench.test.ts, staffObservations.test.ts, staffCopMap.test.ts,
+  // logistics (with the observations server's standing watch tools, WP-WATCH, which only their own grant gives). Their tools, like a connected server's, are not catalog entries (intelWorkbench.test.ts, staffObservations.test.ts, staffCopMap.test.ts,
   // staffLogistics.test.ts). They come right after the staff tools; everything else is exactly the catalog.
   const catalog = builtInTools().map((tool) => tool.name);
   const after = catalog.indexOf('mcp__guard-scan__scan') + 1;

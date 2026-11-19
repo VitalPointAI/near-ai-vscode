@@ -281,6 +281,11 @@ persona name or a rank.
   merge is refused and the proposal stays where it is.
 - **Staff Room notices stay up their full time.** A newer notice is no longer hidden early by the
   timer of the one before it.
+- **Standing watches and the release guard, tightened.** A watch nobody signed shows as proposed in
+  the Staff Room whatever the file says, and only the watch grant (`mcp__observations__watch_*`)
+  gives the watch tools. With an exercise box set, two plain numbers that read as a position outside
+  it go to the release guard to check. A stray merged copy no longer blocks a COP merge, and a
+  feed import whose parser cannot start is refused at once.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

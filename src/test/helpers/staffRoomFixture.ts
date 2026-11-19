@@ -2,9 +2,11 @@
 // test/fixtures/staff-room, a run under way, a J5 plan awaiting the commander's decision and a second plan a person approved. No file of this folder is
 // a test suite.
 import assert from 'node:assert/strict';
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { registerPath } from '../../domain/staff/intel';
+import { parseWatch } from '../../domain/staff/obs/watches';
+import { watchWording } from '../../domain/staff/obs/watchRun';
 import { buildStaffRoomModel } from '../../domain/staff/staffRoom';
 import type { StaffRoomModel } from '../../domain/staff/staffRoom';
 import { loadStaffRoomInput, SCENARIO_FILE, STANDING_WATCHES_FILE } from '../../staff/staffRoomData';
@@ -27,6 +29,14 @@ export async function project(): Promise<{ world: StaffWorld; awaitingHash: stri
   await place(world.root, SCENARIO, SCENARIO_FILE);
   for (const name of ['source-register', 'pir-register', 'collection-plan'] as const) await place(world.root, path.join(FIXTURES, `${name}.json`), registerPath(name));
   await place(world.root, path.join(FIXTURES, 'standing-watches.json'), STANDING_WATCHES_FILE);
+  // The named person armed the fixture's watch (a signed decision), so the room shows it as the file says: paused, with its matches kept.
+  const register = JSON.parse(await readFile(path.join(FIXTURES, 'standing-watches.json'), 'utf8')) as { entries: unknown[] };
+  for (const entry of register.entries) {
+    const watch = parseWatch(entry);
+    assert.ok(watch.ok, watch.ok ? '' : watch.message);
+    const signed = await world.host.signWatchDecision(world.person('K. Sample', 'J2'), { watch: watch.value.id, decision: 'approved', wording: watchWording(watch.value), reasons: [] });
+    assert.ok(signed.ok, signed.ok ? '' : signed.message);
+  }
   await place(world.root, path.join(FIXTURES, 'adversary-coa-set.md'), '.planning/staff/products/j2/adversary-coa-set.md');
   // The run: the J2 and J5 enter step 3, two members start work, one waits on a person.
   assert.ok((await callTool(world, J2_TEAM, 'mcp__staff-products__step', { step: 3 }, 'j2-chief')).ok);
