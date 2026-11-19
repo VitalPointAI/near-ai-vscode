@@ -25,7 +25,8 @@ export function canonicalProof(a: EntryHeader, b: EntryHeader, publicKey: string
   return entryHash(a) <= entryHash(b) ? { a, b, publicKey } : { a: b, b: a, publicKey };
 }
 
-function readProof(value: unknown): EquivocationProof | undefined {
+// The proof as a plain value with parsed headers, or undefined when the input is not shaped like a proof. Whether it proves anything is verifyProof's job.
+export function parseProof(value: unknown): EquivocationProof | undefined {
   try {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
     const record = value as Record<string, unknown>;
@@ -45,7 +46,7 @@ function readProof(value: unknown): EquivocationProof | undefined {
 // differ. It never throws and takes any input, because a proof arrives inside an entry from outside.
 export function verifyProof(proof: unknown): boolean {
   try {
-    const read = readProof(proof);
+    const read = parseProof(proof);
     if (read === undefined) return false;
     const { a, b, publicKey } = read;
     if (!isStrictBase64url(publicKey, PUBLIC_KEY_BYTES)) return false;
@@ -68,7 +69,7 @@ export function proofHash(proof: EquivocationProof): string {
 // A proof the fold may act on: it checks out alone, and its key is the key this roster knows for the named writer.
 export function acceptableProof(proof: unknown, roster: RosterView): boolean {
   try {
-    const read = readProof(proof);
+    const read = parseProof(proof);
     if (read === undefined || !verifyProof(read)) return false;
     return roster.deviceKey(read.a.writer)?.publicKey === read.publicKey;
   } catch {

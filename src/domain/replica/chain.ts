@@ -9,7 +9,7 @@
 //   nodes, so other writers' entries that cite them are admitted too ("satisfied by absence"): one forked device never stalls the project.
 import { buildCausalGraph } from './causal';
 import { GENESIS_PREV } from './entry';
-import { findEquivocations, forkChosen, proofHash, quarantineRecords } from './equivocation';
+import { acceptableProof, canonicalProof, findEquivocations, forkChosen, parseProof, proofHash, quarantineRecords } from './equivocation';
 import type { EquivocationProof, QuarantineRecord } from './equivocation';
 import { totalOrder } from './order';
 import type { ReplicaContext } from './rosterView';
@@ -233,7 +233,19 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
     held.push({ ...where(entry), stage: 'chain', reason });
   }
 
-  const proofs = findEquivocations(sorted, ctx.roster);
+  // The forks this machine can see itself, plus the proofs other machines sent as entries: a machine that holds one branch only still learns of the
+  // fork. A proof counts only when it checks out alone and names a device the roster knows under that key. Duplicates count once.
+  const known = new Map<string, EquivocationProof>();
+  for (const proof of findEquivocations(sorted, ctx.roster)) known.set(proofHash(proof), proof);
+  for (const entry of sorted) {
+    if (entry.keep !== undefined || entry.body.actor.kind === 'hub' || entry.body.kind !== 'equivocation.proof') continue;
+    const carried = parseProof(entry.data);
+    if (carried !== undefined && acceptableProof(carried, ctx.roster)) {
+      const proof = canonicalProof(carried.a, carried.b, carried.publicKey);
+      known.set(proofHash(proof), proof);
+    }
+  }
+  const proofs = [...known.values()];
   const excluded = excludedEntries(admitted, proofs, ctx);
 
   const byText = (a: { hash?: string }, b: { hash?: string }): number => compareText(a.hash ?? '', b.hash ?? '');

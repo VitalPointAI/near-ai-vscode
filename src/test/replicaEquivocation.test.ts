@@ -2,15 +2,18 @@
 // whatever the arrival order, while every other writer carries on.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { entryHash, signHeader } from '../domain/replica/entry';
+import { GENESIS_PREV, buildEntry, entryHash, signHeader } from '../domain/replica/entry';
 import type { SealedEntry } from '../domain/replica/entry';
 import { canonicalProof, findEquivocations, proofHash, quarantineRecords, verifyProof } from '../domain/replica/equivocation';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { staticRosterView } from '../domain/replica/rosterView';
+import { integrityReducer } from '../domain/replica/integrityFold';
+import type { IntegrityOutput } from '../domain/replica/integrityFold';
+import { textReducer } from '../domain/replica/textFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { forkAt, resealAt } from './helpers/replicaForks';
-import { createWorld, permutations, streamId, updateData } from './helpers/replicaWorld';
+import { createWorld, epochKey, fixedSigner, permutations, streamId, updateData } from './helpers/replicaWorld';
 import type { Editor, Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
@@ -180,4 +183,101 @@ test('exclusion reaches other streams only for entries that follow a forked entr
   assert.equal(result.applied.includes(unrelated.hash), true, 'another writer\'s entry citing an excluded one stands');
   assert.deepEqual(result.quarantined, [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 1 }], 'the quarantine record names the forked stream only');
   assert.equal(Object.keys(result.digests).length, 2);
+});
+
+const REDUCERS = { reducers: [textReducer, integrityReducer] };
+const integrityOf = (result: FoldResult): IntegrityOutput => result.families.integrity as IntegrityOutput;
+
+// The machine M of the tracer: it holds W0, W1a, W2 and X's entries but never saw W1b. X, who did, writes the proof as an entry.
+function proofWorld(): ForkWorld & { proofEntry: Written; machine: SealedEntry[] } {
+  const forked = forkWorld();
+  const found = foldEntries(forked.world.entries, forked.world.ctx()).proofs[0];
+  const proofEntry = forked.world.write('X', { kind: 'equivocation.proof', data: found });
+  return { ...forked, proofEntry, machine: sealed(forked.w0, forked.x0, forked.x1, forked.w1a, forked.w2) };
+}
+
+test('a proof sent as an entry quarantines the forked device on a machine that holds only one branch; without it that machine applies both entries', () => {
+  const { world, w0, w1a, w2, x0, x1, proofEntry, machine } = proofWorld();
+  const ctx = world.ctx();
+  const without = foldEntries(machine, ctx, REDUCERS);
+  assert.deepEqual(without.quarantined, []);
+  assert.deepEqual(without.proofs, []);
+  assert.deepEqual([...without.applied].sort(), [w0.hash, w1a.hash, w2.hash, x0.hash, x1.hash].sort());
+
+  const withProof = foldEntries([...machine, proofEntry.entry], ctx, REDUCERS);
+  assert.deepEqual(withProof.quarantined, [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 1 }]);
+  assert.equal(withProof.proofs.length, 1);
+  assert.equal(verifyProof(withProof.proofs[0]), true);
+  assert.deepEqual(withProof.excluded, [w1a.hash, w2.hash].sort());
+  assert.deepEqual([...withProof.applied].sort(), [w0.hash, x0.hash, x1.hash, proofEntry.hash].sort());
+  assert.equal(textOf(withProof), 'xx');
+  assert.equal(integrityOf(withProof).length, 1);
+  assert.equal(integrityOf(withProof)[0].proofs.length, 1);
+  // The same machine, now holding both branches, reaches the same quarantine and the same digest.
+  const everything = foldEntries(world.entries, ctx, REDUCERS);
+  assert.deepEqual(everything.quarantined, withProof.quarantined);
+  assert.deepEqual(everything.digests, withProof.digests);
+});
+
+test('a proof with a header altered, or signed by a key the roster does not know, is refused invalid-proof and quarantines nothing', () => {
+  const { world, w0, w1a, w1b, w2, x0, x1 } = forkWorld();
+  const machine = sealed(w0, x0, x1, w1a, w2);
+  const key = world.signerOf('W').publicKey;
+  const altered = world.write('X', { kind: 'equivocation.proof', data: { ...canonicalProof(w1a.entry.header, w1b.entry.header, key), a: { ...w1a.entry.header, epoch: 9 } } });
+
+  // A stranger forks its own key. The pair checks out alone, but the project does not know that device.
+  const stranger = fixedSigner('stranger');
+  const forkedBy = (text: string): SealedEntry['header'] => buildEntry({
+    signer: stranger.signer, key: epochKey('stranger'), stream: world.stream, seq: 0, prev: GENESIS_PREV, epoch: 0,
+    body: { deps: [], roster: world.rosterHash, lamport: 1, at: '2026-11-19T11:00:00.000Z', actor: { kind: 'person' }, kind: 'doc.client', data: { product: PRODUCT, clientId: 900 + text.length, actor: { kind: 'person' } } }
+  }).entry.header;
+  const pair = canonicalProof(forkedBy('a'), forkedBy('bb'), stranger.publicKey);
+  assert.equal(verifyProof(pair), true, 'it is a real fork of a real key');
+  const unknown = world.write('X', { kind: 'equivocation.proof', data: pair });
+
+  const result = foldEntries([...machine, altered.entry, unknown.entry], world.ctx(), REDUCERS);
+  assert.deepEqual(result.refused.map((record) => record.reason), ['invalid-proof', 'invalid-proof']);
+  assert.deepEqual(result.refused.map((record) => record.hash).sort(), [altered.hash, unknown.hash].sort());
+  assert.deepEqual([result.quarantined, result.proofs, result.excluded], [[], [], []]);
+  assert.equal(result.applied.includes(w1a.hash) && result.applied.includes(w2.hash), true);
+  assert.equal(integrityOf(result).length, 0);
+});
+
+test('a digest.report entry is applied and listed in families.integrity for its stream; a malformed report is rejected by the schema', () => {
+  const { world, w0, x0, x1 } = forkWorld();
+  const report = world.write('X', { kind: 'digest.report', data: { stream: world.stream, heads: [{ writer: w0.writer, seq: 0, hash: w0.hash }], digest: 'a'.repeat(64) } });
+  const withCheckpoint = world.write('X', { kind: 'digest.report', data: { stream: world.stream, heads: [], digest: 'b'.repeat(64), checkpoint: 'c'.repeat(64) } });
+  const result = foldEntries([w0.entry, x0.entry, x1.entry, report.entry, withCheckpoint.entry], world.ctx(), REDUCERS);
+  assert.deepEqual([...result.applied].sort(), [w0.hash, x0.hash, x1.hash, report.hash, withCheckpoint.hash].sort());
+  const rows = integrityOf(result);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].stream, world.stream);
+  assert.deepEqual(rows[0].reports.map((entry) => entry.entry).sort(), [report.hash, withCheckpoint.hash].sort());
+  assert.equal(rows[0].reports.find((entry) => entry.entry === withCheckpoint.hash)?.checkpoint, 'c'.repeat(64));
+
+  const tooMany = world.write('X', { kind: 'digest.report', data: { stream: world.stream, heads: Array.from({ length: 65 }, () => ({ writer: w0.writer, seq: 0, hash: w0.hash })), digest: 'a'.repeat(64) } });
+  const badDigest = world.write('X', { kind: 'digest.report', data: { stream: world.stream, heads: [], digest: 'zz' } });
+  const extra = world.write('X', { kind: 'digest.report', data: { stream: world.stream, heads: [], digest: 'a'.repeat(64), note: 'x' } });
+  const bad = foldEntries([w0.entry, x0.entry, tooMany.entry, badDigest.entry, extra.entry], world.ctx(), REDUCERS);
+  assert.deepEqual(bad.rejected.map((record) => record.reason), ['bad-data', 'bad-data', 'bad-data']);
+  assert.equal(integrityOf(bad).length, 0);
+});
+
+test('the integrity output and the digests are the same under all 24 arrival orders of the proof entry, W1a, W2 and X1', () => {
+  const { world, w0, w1a, w2, x0, x1, proofEntry } = proofWorld();
+  const ctx = world.ctx();
+  const start = sealed(w0, x0);
+  const reference = foldEntries([...start, ...sealed(w1a, w2, x1, proofEntry)], ctx, REDUCERS);
+  assert.equal(reference.quarantined.length, 1);
+  let count = 0;
+  for (const order of permutations(sealed(proofEntry, w1a, w2, x1))) {
+    count += 1;
+    const result = foldEntries([...start, ...order], ctx, REDUCERS);
+    assert.deepEqual(result.families.integrity, reference.families.integrity);
+    assert.deepEqual(result.digests, reference.digests);
+    assert.deepEqual(result.quarantined, reference.quarantined);
+    assert.deepEqual(result.excluded, reference.excluded);
+    assert.deepEqual([...result.applied].sort(), [...reference.applied].sort());
+  }
+  assert.equal(count, 24);
 });
