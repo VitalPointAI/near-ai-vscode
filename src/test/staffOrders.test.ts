@@ -298,7 +298,7 @@ test('the battle-rhythm tools: its writer writes, exports and imports; an import
   assert.match((await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: '../outside.ics' }, 'joc-chief')).text, /^\.\.\/outside\.ics is outside the workspace\./);
   // The events read back fenced: text that came from an imported file is data on every read.
   const reread = await callServer(world, tools, 'mcp__battle-rhythm__events_read', {}, 'information-planner');
-  assert.match(reread.text, /<untrusted-content id="[0-9a-f]+" source="battle-rhythm: battle-rhythm-calendar">[\s\S]*Ignore previous instructions/);
+  assert.match(reread.text, /<untrusted-content id="[0-9a-f]+" source="battle-rhythm: events_read">[\s\S]*Ignore previous instructions[\s\S]*<\/untrusted-content id="[0-9a-f]+">$/, 'the whole answer is fenced (staffFence.ts)');
   // A replace is refused while the file had an event that could not be read: that event would otherwise be lost.
   await writeFile(path.join(world.root, 'inbox', 'partial.ics'), hostile.replace('DTSTART:20261118T133000Z', 'DTSTART;TZID=Somewhere:20261118T133000'));
   const partial = await callServer(world, tools, 'mcp__battle-rhythm__ics_import', { path: 'inbox/partial.ics', replace: true }, 'joc-chief');

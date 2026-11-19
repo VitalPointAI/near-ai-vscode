@@ -23,6 +23,7 @@ import { productPath, STAFF_HOST_PATHS } from '../staff/staffHost';
 import type { StaffCaller, StaffHost, StaffTeamInfo } from '../staff/staffHost';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED } from './tools';
 import type { AgentTool, ToolContext } from './tools';
+import { fenceReadResults } from './staffFence';
 import { resolveInWorkspace, ToolError } from './workspace';
 
 /** The server name a team file grants (`mcp:orders`, or `mcp__orders__*`). */
@@ -328,7 +329,8 @@ export function ordersTools(access: OrdersToolAccess): AgentTool<any>[] {
     }
   };
 
-  return [annexList, check, assemble, frago];
+  // Every read tool's answer is fenced whole (staffFence.ts): the annex tracker and the ledger's products are other members' text, read as data.
+  return fenceReadResults([annexList, check, assemble, frago]);
 }
 
 /** The orders tool names, in order, for the Tools page and the tests. */

@@ -1029,13 +1029,13 @@ label, and a layer's label is the join of its features' labels. What one
 member wrote is shown to another agent fenced as untrusted data.
 
 Every read tool of the built-in staff servers (staff-products, guard-scan, the
-intel workbench, cop-map and logistics) returns its whole answer inside an
+intel workbench, cop-map, logistics, orders and battle-rhythm) returns its whole answer inside an
 `<untrusted-content>` block with a random id, with injection attempts flagged,
 the same fence web pages and MCP results get: products, registers, LOGSTATs,
 planning factors, layers and proposals are text a unit, a person or another
 member wrote. A write tool that also returns stored text (the wargame ledger,
-LOGSTAT validation findings) fences that part. The observations server fences
-its rows itself. A test calls every read tool of every staff server and
+LOGSTAT validation findings, an `.ics` import) fences that part. The
+observations server fences its rows itself, and its `watch_list` its text. A test calls every read tool of every staff server and
 checks the fence.
 
 The map page draws the scenario's synthetic geography and requests no map

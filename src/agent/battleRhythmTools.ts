@@ -5,7 +5,7 @@
 // It is a built-in local server named `mcp__battle-rhythm__<tool>`, given only to the members whose tools line grants it (staffGrantGate.ts). The
 // calendar is a shared product with one writer (the chief of staff in a full staff, the JOC chief in a standalone J3; ownership.ts): writes go through
 // the staff-products host's register write, so anyone else is told to propose. Nothing is fetched or sent: the .ics file is written in the project and
-// read from the project, and text read from an imported file is returned fenced as untrusted data.
+// read from the project, text read from an imported file is returned fenced as untrusted data, and every read tool's answer is fenced whole.
 import * as path from 'node:path';
 import { BATTLE_RHYTHM_REGISTER, MAX_ICS_BYTES, parseIcs, toIcs } from '../domain/staff/battleRhythm';
 import { BATTLE_RHYTHM_KINDS, BATTLE_RHYTHM_NAMES, DOCTRINE_PROFILES } from '../domain/staff/doctrine';
@@ -18,6 +18,7 @@ import type { StaffCaller, StaffHost, StaffTeamInfo } from '../staff/staffHost';
 import { declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED } from './tools';
 import type { AgentTool, ToolContext } from './tools';
 import { fenceUntrusted } from './untrusted';
+import { fenceReadResults } from './staffFence';
 import { resolveInWorkspace, ToolError } from './workspace';
 
 export const BATTLE_RHYTHM_SERVER = 'battle-rhythm';
@@ -87,11 +88,11 @@ export function battleRhythmTools(access: BattleRhythmToolAccess): AgentTool<any
     async run(_input, context) {
       const { rows, section } = await rowsOf(context, BATTLE_RHYTHM_REGISTER);
       const sorted = [...rows].sort((a, b) => String(a.start).localeCompare(String(b.start)));
-      // The events' text may have come from an imported .ics file, so it is returned fenced as data on every read, not only on the import.
+      // The events' text may have come from an imported .ics file: the whole answer is fenced as data on every read (fenceReadResults below).
       if (!sorted.length) return `Battle rhythm (${section}): no events yet. ${await words()}`;
       return [
         `Battle rhythm (${section}): ${sorted.length} event${sorted.length === 1 ? '' : 's'}. ${await words()}`,
-        fenceUntrusted(`battle-rhythm: ${BATTLE_RHYTHM_REGISTER}`, sorted.map((row) => `- ${String(row.id)}: ${String(row.title)} (${String(row.kind)}), ${String(row.start)} for ${String(row.durationMinutes)} min, ${String(row.repeat)}; owner ${String(row.chair)}${row.inputs ? `; inputs: ${String(row.inputs)}` : ''}${row.outputs ? `; outputs: ${String(row.outputs)}` : ''}${row.attendees ? `; attendees: ${String(row.attendees)}` : ''}`).join('\n')).text
+        ...sorted.map((row) => `- ${String(row.id)}: ${String(row.title)} (${String(row.kind)}), ${String(row.start)} for ${String(row.durationMinutes)} min, ${String(row.repeat)}; owner ${String(row.chair)}${row.inputs ? `; inputs: ${String(row.inputs)}` : ''}${row.outputs ? `; outputs: ${String(row.outputs)}` : ''}${row.attendees ? `; attendees: ${String(row.attendees)}` : ''}`)
       ].join('\n');
     }
   };
@@ -209,7 +210,8 @@ export function battleRhythmTools(access: BattleRhythmToolAccess): AgentTool<any
     }
   };
 
-  return [eventsRead, eventsWrite, icsExport, icsImport, suspense];
+  // Every read tool's answer is fenced whole (staffFence.ts): events may come from an imported file, RFIs and decisions are other members' text.
+  return fenceReadResults([eventsRead, eventsWrite, icsExport, icsImport, suspense]);
 }
 
 /** The battle-rhythm tool names, in order, for the Tools page and the tests. */
