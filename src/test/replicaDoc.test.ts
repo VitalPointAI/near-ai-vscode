@@ -220,3 +220,170 @@ test('encodeDiff gives the structs a peer lacks, and buildFromCompaction rebuild
   assert.equal(rebuilt === undefined ? '' : docText(rebuilt), 'one two three');
   assert.equal(buildFromCompaction(Uint8Array.from([255, 255]), []), undefined);
 });
+
+// ---- Task 3: compaction as a verified cache -------------------------------------------------------------------------------------------------
+
+interface Scene {
+  world: World;
+  regA: Written; regB: Written; regC: Written;
+  updA: Written; updB: Written;
+  merged: Uint8Array;
+  text: string;
+}
+
+// A and B each register and type, B after seeing A. C registers and later writes the compaction.
+function compactScene(): Scene {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['C'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const c = world.editor('C', PRODUCT, 33);
+  const regC = c.register();
+  const regA = a.register();
+  const regB = b.register();
+  const updA = a.insert(0, 'alpha ');
+  applyRemote(b.doc, encodeFullState(a.doc));
+  const updB = b.insert(6, 'beta');
+  const fold = createFoldDoc();
+  applyUpdate(fold, encodeFullState(a.doc));
+  applyUpdate(fold, encodeFullState(b.doc));
+  return { world, regA, regB, regC, updA, updB, merged: encodeFullState(fold), text: docText(fold) };
+}
+
+function dep(item: Written): Dep {
+  return { writer: item.writer, seq: item.seq, hash: item.hash };
+}
+
+interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string }
+
+// Each compaction needs its own scene: the writer's chain would otherwise make a second one wait for the first.
+function sceneWith(options: CompactOptions = {}): { scene: Scene; entry: Written } {
+  const scene = compactScene();
+  return { scene, entry: compaction(scene, options) };
+}
+
+// A doc.compact entry written by C. With its covered heads as dependencies it sorts after them (a verified compaction); without, it can be
+// held by a joiner that does not have them (a provisional one).
+function compaction(scene: Scene, options: CompactOptions = {}): Written {
+  const { world } = scene;
+  const doc = createFoldDoc();
+  applyUpdate(doc, scene.merged);
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(options.blobState ?? scene.merged));
+  world.blobs.set(blob.hash, blob);
+  const covers = [dep(scene.updA), dep(scene.updB)];
+  return world.write('C', {
+    kind: 'doc.compact',
+    deps: options.withDeps === false ? [] : [scene.updA, scene.updB],
+    data: { product: PRODUCT, covers, stateVector: options.stateVector ?? stateVectorOf(doc), textHash: options.textHash ?? textHashOf(options.blobText ?? scene.text), stateBlob: blob.hash }
+  });
+}
+
+test('the doc.compact schema checks its fields and refuses more than 64 covers, an unsorted state vector and a bad hash', () => {
+  const good = { product: PRODUCT, covers: [], stateVector: [[11, 6], [22, 4]], textHash: 'a'.repeat(64), stateBlob: 'b'.repeat(64) };
+  assert.equal(validateDocData('doc.compact', good, 'data'), undefined);
+  const covers = Array.from({ length: 65 }, (_, index) => ({ writer: 'c'.repeat(64), seq: index, hash: 'd'.repeat(64) }));
+  for (const bad of [{ ...good, covers }, { ...good, stateVector: [[22, 4], [11, 6]] }, { ...good, stateVector: [[11, -1]] }, { ...good, textHash: 'xyz' }, { ...good, extra: 1 }, { ...good, stateBlob: 5 }]) {
+    assert.match(validateDocData('doc.compact', bad, 'data') ?? '', /^bad-data/);
+  }
+  assert.doesNotMatch(validateDocData('doc.compact', good, 'data') ?? '', /schema not yet defined/);
+});
+
+test('a compaction whose covered updates are all present and match is recorded verified, changes neither text nor digest, and removes no update', () => {
+  const scene = compactScene();
+  const base = [scene.regC, scene.regA, scene.regB, scene.updA, scene.updB];
+  const without = foldEntries(sealed(base), scene.world.ctx());
+  const entry = compaction(scene);
+  const withCompaction = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual([withCompaction.held, withCompaction.refused, withCompaction.rejected], [[], [], []]);
+  const product = productOf(withCompaction);
+  assert.deepEqual(product.compactions, [{ entry: entry.hash, verified: true }]);
+  assert.equal(product.text, scene.text);
+  assert.deepEqual(withCompaction.digests, without.digests);
+  assert.deepEqual(product.accepted.slice().sort(), [scene.updA.hash, scene.updB.hash].sort());
+  assert.deepEqual(product.attribution, productOf(without).attribution);
+});
+
+test('a compaction with a wrong text hash, a wrong state vector, or a blob that holds different text is refused compact-mismatch', () => {
+  const other = createLocalDoc(11);
+  localInsert(other, 0, 'something else');
+  const otherFold = createFoldDoc();
+  applyUpdate(otherFold, encodeFullState(other));
+  const cases: CompactOptions[] = [{ textHash: textHashOf('not the text') }, { stateVector: [[11, 6]] }, { blobState: encodeFullState(otherFold) }];
+  for (const options of cases) {
+    const { scene, entry } = sceneWith(options);
+    const base = [scene.regC, scene.regA, scene.regB, scene.updA, scene.updB];
+    const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+    assert.deepEqual(reasons(result), [[entry.hash, 'compact-mismatch']]);
+    const product = productOf(result);
+    assert.deepEqual(product.compactions, []);
+    assert.equal(product.text, scene.text);
+  }
+});
+
+test('a set with the registrations and a compaction but none of the covered updates loads the compaction provisionally, marked unverified', () => {
+  const scene = compactScene();
+  const entry = compaction(scene, { withDeps: false });
+  const joiner = foldEntries(sealed([scene.regC, scene.regA, scene.regB, entry]), scene.world.ctx());
+  assert.deepEqual([joiner.held, joiner.refused, joiner.rejected], [[], [], []]);
+  const product = productOf(joiner);
+  assert.equal(product.text, scene.text);
+  assert.deepEqual(product.compactions, [{ entry: entry.hash, verified: false }]);
+  assert.deepEqual(product.accepted, []);
+  const full = foldEntries(sealed([scene.regC, scene.regA, scene.regB, scene.updA, scene.updB]), scene.world.ctx());
+  assert.deepEqual(product.stateVector, productOf(full).stateVector);
+  assert.deepEqual(product.attribution.map((span) => [span.start, span.length, span.clientId, span.writer]), productOf(full).attribution.map((span) => [span.start, span.length, span.clientId, span.writer]));
+  assert.equal(product.incomplete, false);
+});
+
+test('a compaction holding a struct whose client has no registration is refused compact-unregistered-client, and a lost blob is held', () => {
+  const scene = compactScene();
+  const entry = compaction(scene, { withDeps: false });
+  const result = foldEntries(sealed([scene.regC, scene.regA, entry]), scene.world.ctx());
+  assert.deepEqual(reasons(result), [[entry.hash, 'compact-unregistered-client']]);
+  assert.equal(productOf(result).text, '');
+  const noBlob = foldEntries(sealed([scene.regC, scene.regA, scene.regB, entry]), scene.world.ctx({ blobs: () => undefined }));
+  assert.deepEqual(noBlob.held.map((item) => item.reason), ['missing-blob']);
+});
+
+test('loading the newest compaction plus later updates gives the same text, state vector and attribution as the full log, over random histories', () => {
+  for (let seed = 1; seed <= 25; seed += 1) {
+    const random = rng(seed);
+    const docs = [11, 22, 33, 44].map((client) => createLocalDoc(client));
+    const updates: Uint8Array[] = [];
+    for (let step = 0; step < 30; step += 1) {
+      const doc = random.pick(docs);
+      if (random.chance(0.3)) {
+        applyRemote(doc, encodeFullState(random.pick(docs)));
+        continue;
+      }
+      const length = docText(doc).length;
+      updates.push(length > 3 && random.chance(0.3) ? localDelete(doc, random.int(length - 2), 1 + random.int(2)) : localInsert(doc, random.int(length + 1), `w${random.int(100)} `));
+    }
+    const midpoint = Math.floor(updates.length / 2);
+    const head = createFoldDoc();
+    for (const update of updates.slice(0, midpoint)) applyUpdate(head, update);
+    const full = createFoldDoc();
+    for (const update of updates) applyUpdate(full, update);
+    const loaded = buildFromCompaction(encodeFullState(head), updates.slice(midpoint));
+    assert.ok(loaded !== undefined, `seed ${seed}`);
+    assert.equal(docText(loaded), docText(full), `seed ${seed}: text`);
+    assert.deepEqual(stateVectorOf(loaded), stateVectorOf(full), `seed ${seed}: state vector`);
+    assert.deepEqual(attributionRuns(loaded), attributionRuns(full), `seed ${seed}: attribution`);
+    assert.equal(pendingState(loaded), false);
+  }
+});
+
+test('a late joiner loading the compaction in a fold gets the full text, and a hostile compaction under a registered client is unverified until the log can check it', () => {
+  const forged = createLocalDoc(11);
+  localInsert(forged, 0, 'forged under client eleven');
+  const forgedFold = createFoldDoc();
+  applyUpdate(forgedFold, encodeFullState(forged));
+  const { scene, entry: hostile } = sceneWith({ withDeps: false, blobState: encodeFullState(forgedFold), blobText: docText(forgedFold), stateVector: stateVectorOf(forgedFold) });
+  const result = foldEntries(sealed([scene.regC, scene.regA, scene.regB, hostile]), scene.world.ctx());
+  assert.deepEqual(productOf(result).compactions, [{ entry: hostile.hash, verified: false }]);
+  assert.notEqual(productOf(result).text, scene.text);
+  // Once the real updates are in the set, the same hostile compaction is checked against them and refused, and the text is the log's.
+  const checked = foldEntries(sealed([scene.regC, scene.regA, scene.regB, scene.updA, scene.updB, hostile]), scene.world.ctx());
+  assert.deepEqual(reasons(checked), [[hostile.hash, 'compact-mismatch']]);
+  assert.equal(productOf(checked).text, scene.text);
+  assert.deepEqual(productOf(checked).compactions, []);
+});

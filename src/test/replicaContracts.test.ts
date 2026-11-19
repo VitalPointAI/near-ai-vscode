@@ -16,9 +16,9 @@ import type { Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
 
-test('every known kind except doc.client and doc.update fails closed with the schema-pending reason', () => {
-  const others = REPLICA_KINDS.filter((kind) => kind !== 'doc.client' && kind !== 'doc.update');
-  assert.equal(others.length, 48);
+test('every known kind except the doc kinds fails closed with the schema-pending reason', () => {
+  const others = REPLICA_KINDS.filter((kind) => !kind.startsWith('doc.'));
+  assert.equal(others.length, 47);
   for (const kind of others) {
     const check = validateData(kind, {});
     assert.equal(check.ok, false, kind);
@@ -57,7 +57,7 @@ test('valid doc.client and doc.update samples still validate, and the invalid on
 
 test('validateData dispatches each family to its own file: the reason names the family of the kind', () => {
   const expected: Array<[string, string]> = [
-    ['project.genesis', 'project'], ['member.admit', 'roster'], ['doc.compact', 'doc'], ['product.create', 'versions'], ['register.row', 'registers'],
+    ['project.genesis', 'project'], ['member.admit', 'roster'], ['product.create', 'versions'], ['register.row', 'registers'],
     ['watch.define', 'watches'], ['run.start', 'runs'], ['obs.segment', 'obs'], ['digest.report', 'integrity']
   ];
   for (const [kind, family] of expected) {

@@ -118,3 +118,81 @@ test('attributionAtSnapshot names the authors of the text as it was, and is unde
   for (const update of [u1, u2, u3]) applyUpdate(now, update);
   assert.deepEqual(attributionRuns(now).map((run) => [run.client, run.text]), [[32, 'two']]);
 });
+
+// ---- Property: random concurrent edits by persons and agents (D-20, D-28) --------------------------------------------------------------------
+
+interface Slot { editor: Editor; actor: Actor; writerName: string; member: string }
+
+interface Seeded { world: ReturnType<typeof createWorld>; slots: Slot[]; entries: Written[] }
+
+function seededHistory(seed: number): Seeded {
+  const random = rng(seed);
+  const writers = 2 + random.int(4);
+  const names = Array.from({ length: writers }, (_, index) => `D${index}`);
+  const world = createWorld({ members: names.map((name, index) => ({ member: `mbr-${index}`, name, devices: [name] })) });
+  const slots: Slot[] = [];
+  names.forEach((name, index) => {
+    slots.push({ editor: world.editor(name, PRODUCT, 100 + index * 2), actor: { kind: 'person' }, writerName: name, member: `mbr-${index}` });
+    if (random.chance(0.5)) slots.push({ editor: world.editor(name, PRODUCT, 101 + index * 2), actor: { kind: 'agent', member: `agent-${index}`, run: `run-${index}` }, writerName: name, member: `mbr-${index}` });
+  });
+  const entries: Written[] = slots.map((slot) => slot.editor.register({ actor: slot.actor }));
+  const steps = 8 + random.int(25);
+  for (let step = 0; step < steps; step += 1) {
+    const slot = random.pick(slots);
+    if (random.chance(0.35)) {
+      const other = random.pick(slots);
+      applyRemote(slot.editor.doc, encodeFullState(other.editor.doc));
+      continue;
+    }
+    const length = docText(slot.editor.doc).length;
+    if (length > 0 && random.chance(0.3)) {
+      const index = random.int(length);
+      entries.push(slot.editor.remove(index, 1 + random.int(Math.min(5, length - index)), { actor: slot.actor }));
+    } else {
+      const text = Array.from({ length: 1 + random.int(8) }, () => random.pick([...'abcdefghij '])).join('');
+      entries.push(slot.editor.insert(random.int(length + 1), text, { actor: slot.actor }));
+    }
+  }
+  return { world, slots, entries };
+}
+
+// One entry per character: who the fold says typed it.
+function perCharacter(spans: readonly AuthorSpan[]): string[] {
+  return spans.flatMap((span) => Array.from({ length: span.length }, () => JSON.stringify([span.clientId, span.writer, span.member, span.actor, span.agentMember ?? null, span.run ?? null])));
+}
+
+test('150 seeds of random concurrent edits by persons and agents converge in every delivery order and every character is attributed to the client that typed it', () => {
+  for (let seed = 1; seed <= 150; seed += 1) {
+    const { world, slots, entries } = seededHistory(seed);
+    const ctx = world.ctx();
+    const random = rng(seed * 7919);
+    const all = entries.map((item) => item.entry);
+    const reference = foldEntries(all, ctx);
+    const refProduct = productOf(reference);
+    const say = (what: string): string => `seed ${seed}: ${what}`;
+    assert.deepEqual([reference.held, reference.rejected, reference.refused, reference.kept], [[], [], [], []], say('nothing may be held, rejected or refused'));
+    assert.equal(refProduct.incomplete, false, say('complete'));
+
+    // Ground truth: every editor's document merged. The text must be the same, and each character's client must map to the right author.
+    const truth = createFoldDoc();
+    for (const slot of slots) applyUpdate(truth, encodeFullState(slot.editor.doc));
+    assert.equal(refProduct.text, docText(truth), say('the fold text equals the merge of every editor'));
+    const owners = new Map(slots.map((slot) => [slot.editor.client, slot]));
+    const expected = attributionRuns(truth).flatMap((run) => Array.from({ length: run.length }, () => {
+      const slot = owners.get(run.client) as Slot;
+      const isAgent = slot.actor.kind === 'agent';
+      return JSON.stringify([run.client, world.writerOf(slot.writerName), slot.member, isAgent ? 'agent' : 'person', isAgent ? (slot.actor as { member: string }).member : null, isAgent ? (slot.actor as { run: string }).run : null]);
+    }));
+    assert.deepEqual(perCharacter(refProduct.attribution), expected, say('per-character authors'));
+
+    for (let round = 0; round < 4; round += 1) {
+      const duplicated = shuffled([...all, ...Array.from({ length: 5 }, () => random.pick(all))], random);
+      const result = foldEntries(duplicated, ctx);
+      const product = productOf(result);
+      assert.deepEqual(result.digests, reference.digests, say('one digest'));
+      assert.equal(product.text, refProduct.text, say('one text'));
+      assert.deepEqual(product.stateVector, refProduct.stateVector, say('one state vector'));
+      assert.deepEqual(product.attribution, refProduct.attribution, say('one attribution'));
+    }
+  }
+});
