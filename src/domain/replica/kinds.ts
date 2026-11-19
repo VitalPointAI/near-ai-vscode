@@ -2,12 +2,22 @@
 //
 // An unknown kind from a newer client is kept and relayed ("made by a newer version") and never changes state. A known kind whose data schema is
 // not written yet is refused with SCHEMA_PENDING, so it fails closed.
-import { AT_PATTERN, MAX_LAMPORT, isRecord, isSafeIntegerInRange, matches } from '../team/validate';
-import { HASH_PATTERN, MAX_DEPS, isActorShape } from './entry';
+import { MAX_LAMPORT, isRecord, isSafeIntegerInRange, matches } from '../team/validate';
+import { HASH_PATTERN, MAX_DEPS } from './entry';
 import type { Dep, EntryBody } from './entry';
 import { validateDocData } from './kindSchemas/doc';
+import { validateIntegrityData } from './kindSchemas/integrity';
+import { validateObsData } from './kindSchemas/obs';
+import { validateProjectData } from './kindSchemas/project';
+import { validateRegistersData } from './kindSchemas/registers';
+import { validateRosterData } from './kindSchemas/roster';
+import { validateRunsData } from './kindSchemas/runs';
+import { SCHEMA_PENDING, isActor, isDep, isIsoTime } from './kindSchemas/shared';
+import { validateVersionsData } from './kindSchemas/versions';
+import { validateWatchesData } from './kindSchemas/watches';
 
-export const SCHEMA_PENDING = 'schema not yet defined';
+// Re-exported so existing imports keep working; the constant lives in kindSchemas/shared.ts.
+export { SCHEMA_PENDING };
 
 const KINDS_BY_FAMILY = {
   project: ['project.genesis', 'project.import'],
@@ -46,19 +56,6 @@ function invalidAt(path: string): string {
   return `bad-body: ${path.replace(/[^A-Za-z0-9_.[\]-]/g, '?').slice(0, 120)}`;
 }
 
-function isDep(value: unknown): value is Dep {
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value);
-  return keys.length === 3 && keys.includes('writer') && keys.includes('seq') && keys.includes('hash')
-    && matches(value.writer, HASH_PATTERN) && isSafeIntegerInRange(value.seq, 0, Number.MAX_SAFE_INTEGER) && matches(value.hash, HASH_PATTERN);
-}
-
-function isIsoAt(value: unknown): value is string {
-  if (!matches(value, AT_PATTERN)) return false;
-  const millis = Date.parse(value);
-  return !Number.isNaN(millis) && new Date(millis).toISOString().slice(0, 19) === value.slice(0, 19);
-}
-
 export type BodyCheck = { ok: true; body: EntryBody; known: boolean } | { ok: false; reason: string };
 
 // Reads the parsed JSON once, into a fresh object. Never throws.
@@ -81,8 +78,8 @@ export function validateBody(raw: unknown): BodyCheck {
     }
     if (!matches(roster, HASH_PATTERN)) return { ok: false, reason: invalidAt('body.roster') };
     if (!isSafeIntegerInRange(lamport, 1, MAX_LAMPORT)) return { ok: false, reason: invalidAt('body.lamport') };
-    if (!isIsoAt(at)) return { ok: false, reason: invalidAt('body.at') };
-    if (!isActorShape(actor)) return { ok: false, reason: invalidAt('body.actor') };
+    if (!isIsoTime(at)) return { ok: false, reason: invalidAt('body.at') };
+    if (!isActor(actor)) return { ok: false, reason: invalidAt('body.actor') };
     if (!matches(kind, KIND_PATTERN)) return { ok: false, reason: invalidAt('body.kind') };
     const base = { deps: cleanDeps, roster, lamport, at, actor: copyActor(actor), kind };
     if (hasData) return { ok: true, body: { ...base, data: raw.data }, known: KIND_FAMILIES.has(kind) };
@@ -102,12 +99,23 @@ function copyActor(actor: EntryBody['actor']): EntryBody['actor'] {
 
 export type DataCheck = { ok: true } | { ok: false; reason: string };
 
+// One validator per family, each in its own file so each owning plan edits only its own (D-07). Each returns a reason or undefined.
+const FAMILY_VALIDATORS: Readonly<Record<KindFamily, (kind: string, data: unknown, path: string) => string | undefined>> = {
+  project: validateProjectData,
+  roster: validateRosterData,
+  doc: validateDocData,
+  versions: validateVersionsData,
+  registers: validateRegistersData,
+  watches: validateWatchesData,
+  runs: validateRunsData,
+  obs: validateObsData,
+  integrity: validateIntegrityData
+};
+
 // Validates the data of a known kind. Unknown kinds are not checked here (the caller keeps them).
 export function validateData(kind: string, data: unknown): DataCheck {
   const family = kindFamily(kind);
-  if (family === undefined) return { ok: false, reason: `bad-data: unknown kind` };
-  const reason = family === 'doc' && kind !== 'doc.compact'
-    ? validateDocData(kind, data, 'data')
-    : `${SCHEMA_PENDING}: ${family} ${kind}`;
+  if (family === undefined) return { ok: false, reason: 'bad-data: unknown kind' };
+  const reason = FAMILY_VALIDATORS[family](kind, data, 'data');
   return reason === undefined ? { ok: true } : { ok: false, reason };
 }
