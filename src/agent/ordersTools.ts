@@ -11,9 +11,11 @@ import * as path from 'node:path';
 import { ANNEX_SUBJECTS, DOCTRINE_PROFILES, FRAGMENTARY_ORDER, ORDER_KINDS, ORDER_PARAGRAPHS } from '../domain/staff/doctrine';
 import type { StaffProfileId } from '../domain/staff/doctrine';
 import { productHash, RESERVED_MEMBER_SLUGS } from '../domain/staff/ledger';
-import type { LedgerReplay, ProductState } from '../domain/staff/ledger';
-import { assembleOrder, blocking, checkAnnexes, compareLetters, filedUnder, fragoBody, isAnnexSubject, orderKind, profileAnnexes } from '../domain/staff/orders';
-import type { AnnexEntry, AssemblyAnnex, OrderFinding, OrderProductFacts } from '../domain/staff/orders';
+import type { LedgerReplay } from '../domain/staff/ledger';
+import { assembleOrder, blocking, checkAnnexes, compareLetters, filedUnder, fragoBody, isAnnexSubject, orderKind, productFacts, profileAnnexes } from '../domain/staff/orders';
+import type { AnnexEntry, AssemblyAnnex, OrderFinding } from '../domain/staff/orders';
+// What the check knows about every product in the ledger (moved to the domain so the Staff Room's annex tracker runs the same check).
+export { productFacts } from '../domain/staff/orders';
 import { STAFF_SLUG } from '../domain/staff/parse';
 import { splitProductFile } from '../domain/staff/products';
 import { describePlacement } from '../domain/staff/profiles';
@@ -85,25 +87,6 @@ function entries(raw: Record<string, unknown>, required: boolean): AnnexEntry[] 
     const owner = text('owner', 64);
     return { subject, ...(product ? { product } : {}), ...(letter ? { letter } : {}), ...(owner ? { owner } : {}) };
   });
-}
-
-/** The newest version of a product a person approved, across its lines. */
-function latestApproved(state: ProductState): number | undefined {
-  const versions = [state, ...state.older].flatMap((line) => line.approvedVersions);
-  return versions.length ? Math.max(...versions) : undefined;
-}
-
-/** What the check knows about every product in the ledger. */
-export function productFacts(replay: LedgerReplay): Map<string, OrderProductFacts> {
-  const facts = new Map<string, OrderProductFacts>();
-  for (const [name, state] of replay.products) {
-    const approved = latestApproved(state);
-    facts.set(name, {
-      state: state.record.state, version: state.record.version, owner: state.record.roles.owner, section: state.record.section, dependsOn: state.meta.dependsOn,
-      ...(approved !== undefined ? { latestApproved: approved } : {}), ...(state.tampered ? { tampered: state.tampered } : {})
-    });
-  }
-  return facts;
 }
 
 function findingsText(findings: readonly OrderFinding[]): string {

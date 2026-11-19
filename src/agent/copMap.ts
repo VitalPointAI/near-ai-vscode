@@ -339,11 +339,19 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
         if (!built.ok) throw new ToolError(`${built.message} The proposal was not merged.`);
         return built.value;
       });
-      // The proposal moves to merged/ as the bytes that were merged. The copy is written first, and only as a new file: when it cannot be (a copy of that
-      // name is already there), nothing is merged and the proposal stays, so a proposal is never deleted without its kept copy (drop 2 review).
+      // The proposal moves to merged/ as the bytes that were merged. The copy is written first, so a proposal is never deleted without its kept copy
+      // (drop 2 review). A copy of that name already there is recognized: the same bytes (left by an earlier merge that stopped) are kept as they are; other
+      // bytes (a stray copy) are replaced only as the bytes read here, so nothing written meanwhile is lost and a stray never blocks every later merge.
       const kept = path.join(folder, 'merged', path.basename(file));
-      if (!(await writeIfUnchanged(kept, { exists: false }, text))) {
-        throw new ToolError(`${layerProposalFolder(layer)}merged/${path.basename(file)} is already there, so the proposal was not merged and stays where it is. Move or rename that copy, then merge again.`);
+      const keptName = `${layerProposalFolder(layer)}merged/${path.basename(file)}`;
+      const before = await readSmallBytes(kept);
+      const keptAlready = before !== undefined && before.equals(proposalBytes);
+      // A stray copy that is not plain text could not be put back byte for byte, so it is left alone and named.
+      if (before !== undefined && !keptAlready && !Buffer.from(before.toString('utf8'), 'utf8').equals(before)) {
+        throw new ToolError(`${keptName} is already there and is not plain text, so the proposal was not merged and stays where it is. Move or rename that copy, then merge again.`);
+      }
+      if (!keptAlready && !(await writeIfUnchanged(kept, snapshotOfBytes(before), text))) {
+        throw new ToolError(`${keptName} changed while the merge was writing it, so the proposal was not merged and stays where it is. Merge again.`);
       }
       let out: string;
       try {
@@ -353,8 +361,20 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
           return merged.value;
         }, `Merged ${by}'s proposal: ${value.summary ?? ''}`);
       } catch (error) {
-        // Nothing was merged: take back the copy written above (only those bytes), so the proposal is still only in the proposals.
-        await writeIfUnchanged(kept, snapshotOfBytes(Buffer.from(text, 'utf8')), undefined).catch(() => false);
+        // Nothing was merged: put the kept copy back as it was (only over the bytes written above), so the proposal is still only in the proposals. A
+        // rollback that fails is reported, never swallowed.
+        if (!keptAlready) {
+          let rolledBack: boolean;
+          let why = 'it was changed after the merge wrote it';
+          try { rolledBack = await writeIfUnchanged(kept, snapshotOfBytes(Buffer.from(text, 'utf8')), before?.toString('utf8')); } catch (rollback) {
+            rolledBack = false;
+            why = `it could not be written (${(rollback as NodeJS.ErrnoException).code ?? (rollback as Error).message})`;
+          }
+          if (!rolledBack) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new ToolError(`${message} The kept copy ${keptName} was not taken back, because ${why}: the proposal was not merged, so look at that copy before merging again.`);
+          }
+        }
         throw error;
       }
       // A proposal edited since it was read stays where it is, to be looked at again.

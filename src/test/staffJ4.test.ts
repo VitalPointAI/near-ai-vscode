@@ -144,7 +144,7 @@ test('the annex letters follow the profile: joint D, Army F (Sustainment), NATO/
   const director = memberOf(US_JOINT, 'j4-director').instructions;
   assert.match(director, /The logistics annex is Annex D \(Logistics\)\. Health services are Annex Q \(Health Services\); contracting is Annex W \(Operational Contract Support\)/);
   assert.match(memberOf(US_ARMY, 's4-lead').instructions, /The logistics annex is Annex F \(Sustainment\)\. Health services are Part of Annex F/);
-  assert.match(memberOf(CA_OPERATIONAL, 'j4-director').instructions, /Annex R \(Logistics\); movements are Annex S \(Movements\), which the mobility-planner drafts\. Health services are Annex K \(Health Service Support\); contracting is Annex FF \(Financial Support\)/);
+  assert.match(memberOf(CA_OPERATIONAL, 'j4-director').instructions, /Annex R \(Logistics\); movements are Annex S \(Movements\), which the mobility-planner drafts\. Health services are Annex QQ \(Medical\); contracting is Annex FF \(Financial Support\)/);
   assert.equal(j4VariantProducts(j4Vocabulary(CA_OPERATIONAL)).find((product) => product.id === 'movements-annex')?.owners.operational, 'mobility-planner');
   assert.ok(!j4VariantProducts(j4Vocabulary(US_JOINT)).some((product) => product.id === 'movements-annex'));
   assert.match(memberOf(CA_OPERATIONAL, 'mobility-planner').instructions, /movements have their own annex, Annex S \(Movements\): you draft it/);

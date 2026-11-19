@@ -1,0 +1,30 @@
+{
+  "dst-dsm": [
+    {"id":"DP-2","description":"commit the reserve","indicator":"Armour moving off Harrow Ridge","nai":"NAI 2","pir":"PIR-1","recommendedAction":"Reserve to Route IRON","decisionMaker":"commander","coa":"coa-a"}
+  ],
+  "sync-matrix": [
+    {"id":"s1","row":"manoeuvre","hHourOffsetMinutes":0,"entry":"1-41 MECH lands at Beach AMBER","section":"j3","coa":"coa-a"},
+    {"id":"s2","row":"enemy","hHourOffsetMinutes":90,"entry":"3-41 ARMD counter-attacks","section":"j2","coa":"coa-a"},
+    {"id":"s3","row":"decision-points","hHourOffsetMinutes":120,"entry":"DP 2: commit the reserve","coa":"coa-a"},
+    {"id":"s4","row":"sustainment","hHourOffsetMinutes":360,"entry":"Fuel resupply over the beach","section":"j4","coa":"coa-a"}
+  ],
+  "annex-tracker": [
+    {"id":"A1","subject":"logistics","letter":"D","owner":"j4-director","status":"drafting","product":"logistics-annex"},
+    {"id":"A2","subject":"intelligence","letter":"D","owner":"j2-chief","status":"not-started"}
+  ],
+  "event-log": [
+    {"id":"E1","time":"2026-11-19T11:10:00Z","source":"Feed SIM-1","report":"Two armoured vehicles moving off the south slope of Harrow Ridge","ccir":"PIR-1","decisionPoint":"DP-2","status":"escalated"},
+    {"id":"E2","time":"2026-11-19T11:20:00Z","source":"Liaison officer","report":"Bridge at Kell reported intact","status":"logged"}
+  ],
+  "ccir-register": [
+    {"id":"PIR-1","type":"pir","requirement":"Will 3-41 ARMD counter-attack west across the Brenn before H+12?","decisionPoint":"DP-2","ltiov":"2026-11-21T06:00:00Z","status":"active"}
+  ],
+  "rfi-tracker": [
+    {"id":"RFI-7","from":"j3","to":"j2","question":"Is the Kell bridge load class known?","suspense":"2026-11-19T09:00:00Z","status":"open"},
+    {"id":"RFI-8","from":"j4","to":"higher","question":"Second landing craft squadron available?","suspense":"2026-11-20T09:00:00Z","status":"open"}
+  ],
+  "battle-rhythm-calendar": [
+    {"id":"BR1","title":"Commander's update brief","kind":"brief","start":"2026-11-18T13:00:00Z","durationMinutes":30,"repeat":"daily","chair":"chief of staff","inputs":"Running estimates","outputs":"Commander's guidance"},
+    {"id":"BR2","title":"Assessment working group","kind":"working-group","start":"2026-11-25T09:00:00Z","durationMinutes":60,"repeat":"weekly","chair":"assessment-analyst"}
+  ]
+}

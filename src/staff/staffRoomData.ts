@@ -1,6 +1,6 @@
 // What the Staff Room reads from a staff project (WP-ROOM): the product ledger and staff events through the staff host, and the files under
-// .planning/staff/ the J2 workspace draws: the scenario, the intel workbench registers, the shared PIR register, the DST and DSM, the adversary COA set and
-// the standing watches. Node I/O only, read-only: nothing here writes a file or records an event. No vscode, so the tests drive it directly.
+// .planning/staff/ the workspaces draw: for the J2 the scenario, the intel workbench registers, the shared PIR register, the DST and DSM, the adversary COA
+// set and the standing watches; for the J5, J3 and J4 their product tables, registers, the wargame ledger and the logistics records. Node I/O only, read-only: nothing here writes a file or records an event. No vscode, so the tests drive it directly.
 //
 // A file that is missing is simply not drawn. A file that is there but cannot be read (damaged, too large, refused by the scenario reader) is named in
 // the J2 workspace's problems, so a person sees why something is absent rather than an empty panel.
@@ -24,6 +24,11 @@ import type { RegisterRow } from '../domain/staff/registers';
 import { parseScenarioText, SCENARIO_DIR } from '../domain/staff/scenario';
 import type { Scenario } from '../domain/staff/scenario';
 import type { StaffRoomInput } from '../domain/staff/staffRoom';
+import type { WorkspacesInput } from '../domain/staff/staffRoomWorkspaces';
+import type { StaffSectionId } from '../domain/staff/doctrine';
+import { parseBandSettings } from '../domain/staff/logistics';
+import { productFacts } from '../domain/staff/orders';
+import type { ProductView } from '../domain/staff/readModels';
 import { staffProductPath } from '../domain/staff/writeLimits';
 import { readRealEntities } from './realEntities';
 import { EVENTS_FILE, LEDGER_DIR } from './staffHost';
@@ -101,14 +106,14 @@ export async function scenarioOf(root: string): Promise<{ scenario?: Scenario; p
  * the file calls armed that no signed arm decision proves is named in `unsigned` (it runs nothing until a person arms it), and a retired one is shown
  * retired whatever the file says.
  */
-export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<string, PersonDecisionEntry>): Promise<{ watches: StandingWatch[]; problems: string[]; unsigned: string[] }> {
+export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<string, PersonDecisionEntry>): Promise<{ watches: StandingWatch[]; problems: string[]; unsigned: string[]; distrusted: string[] }> {
   const read = await readSmall(path.join(root, STANDING_WATCHES_FILE));
-  if (read.problem) return { watches: [], problems: [read.problem], unsigned: [] };
-  if (read.text === undefined) return { watches: [], problems: [], unsigned: [] };
+  if (read.problem) return { watches: [], problems: [read.problem], unsigned: [], distrusted: [] };
+  if (read.text === undefined) return { watches: [], problems: [], unsigned: [], distrusted: [] };
   let value: unknown;
-  try { value = JSON.parse(read.text); } catch { return { watches: [], problems: ['The standing watches file is not JSON.'], unsigned: [] }; }
+  try { value = JSON.parse(read.text); } catch { return { watches: [], problems: ['The standing watches file is not JSON.'], unsigned: [], distrusted: [] }; }
   const entries = value && typeof value === 'object' && !Array.isArray(value) ? (value as { register?: unknown; entries?: unknown }) : undefined;
-  if (!entries || entries.register !== 'standing-watches' || !Array.isArray(entries.entries)) return { watches: [], problems: ['The standing watches file is not a standing-watches register.'], unsigned: [] };
+  if (!entries || entries.register !== 'standing-watches' || !Array.isArray(entries.entries)) return { watches: [], problems: ['The standing watches file is not a standing-watches register.'], unsigned: [], distrusted: [] };
   const watches: StandingWatch[] = [];
   const problems: string[] = [];
   entries.entries.slice(0, 200).forEach((entry, index) => {
@@ -116,17 +121,73 @@ export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<st
     if (parsed.ok) watches.push(parsed.value);
     else problems.push(`Standing watch ${index + 1} was not read: ${parsed.message}`);
   });
-  // Read through the signed decisions: a retired watch shows as retired whatever the file says; one the file calls armed with no signed arm decision is
-  // flagged on its card (it runs nothing until a person arms it).
+  // Read through the signed decisions, and show the trusted state for every trust problem: a watch the file calls armed, matched, drafting or the like
+  // with no signed arm decision (or changed since) shows as proposed and is flagged on its card (it runs nothing until a person arms it); a retired one
+  // shows as retired whatever the file says. Without the decisions (no staff host) nothing can prove an arm, so every armed-family watch reads as proposed.
   const unsigned: string[] = [];
+  const distrusted: string[] = [];
+  const signed = decisions ?? new Map<string, PersonDecisionEntry>();
   const shown = watches.map((watch) => {
-    if (!decisions) return watch;
-    const trusted = trustWatch(watch, decisions.get(watch.id));
+    const trusted = trustWatch(watch, signed.get(watch.id));
     if (!trusted.problem) return watch;
-    if (trusted.watch.state === 'proposed') { unsigned.push(watch.id); return watch; }
+    distrusted.push(watch.id);
+    if (trusted.watch.state === 'proposed') unsigned.push(watch.id);
     return trusted.watch;
   });
-  return { watches: shown, problems, unsigned };
+  return { watches: shown, problems, unsigned, distrusted };
+}
+
+/** The product bodies the J5, J3 and J4 workspaces read their tables from, with the section each lives in when the ledger does not say. */
+export const WORKSPACE_BODIES: ReadonlyArray<readonly [string, StaffSectionId]> = [
+  ['coa-themes', 'j5'], ['coa-validity', 'j5'], ['comparison-matrix', 'j5'], ['coa-decision-brief', 'j5'], ['coa-supportability', 'j4']
+];
+/** The registers the workspaces draw, each with the section its file lives in when the ledger does not say (the battle rhythm is the J3's standalone). */
+const WORKSPACE_REGISTERS = [
+  ['syncMatrix', 'sync-matrix', 'j5'], ['eventLog', 'event-log', 'j3'], ['ccir', 'ccir-register', 'j3'], ['rfi', 'rfi-tracker', 'j3'],
+  ['battleRhythm', 'battle-rhythm-calendar', 'j3'], ['annexTracker', 'annex-tracker', 'j5']
+] as const;
+
+/**
+ * What the J5, J3 and J4 workspaces are built from: product tables, registers, the wargame ledger, the orders check's facts and the logistics records.
+ * A register or ledger that is there but cannot be read is named in the problems, never drawn as empty.
+ */
+export async function workspacesInputOf(host: StaffHost | undefined, root: string, registry: readonly ProductView[]): Promise<WorkspacesInput> {
+  const problems: string[] = [];
+  const sectionOf = (product: string, fallback: StaffSectionId) => registry.find((view) => view.product === product)?.section ?? fallback;
+  const bodies: Record<string, string> = {};
+  for (const [product, section] of WORKSPACE_BODIES) {
+    const read = await productBody(root, staffProductPath(sectionOf(product, section), product));
+    if (read.problem) problems.push(read.problem);
+    if (read.text !== undefined) bodies[product] = read.text;
+  }
+  const registers: Partial<Record<(typeof WORKSPACE_REGISTERS)[number][0], RegisterRow[]>> = {};
+  for (const [key, register, section] of WORKSPACE_REGISTERS) {
+    const read = await productBody(root, staffProductPath(sectionOf(register, section), register));
+    if (read.problem) { problems.push(read.problem); continue; }
+    if (read.text === undefined) continue;
+    const rows = parseRegisterBody(registerSchema(register)!, read.text);
+    if (rows) registers[key] = rows;
+    else problems.push(`The ${registerSchema(register)!.title.toLowerCase()} could not be read: its rows do not fit the register, so it is not shown.`);
+  }
+  let wargame: WorkspacesInput['wargame'];
+  let facts: WorkspacesInput['facts'];
+  let logistics: WorkspacesInput['logistics'];
+  if (host) {
+    try { wargame = { entries: await host.wargameEntries() }; } catch (error) { wargame = { unreadable: error instanceof Error ? error.message : String(error) }; }
+    // The annex tracker is held to the ledger by the orders tool's own check, so the facts come from the same replay it uses.
+    if (registers.annexTracker?.length) {
+      try { facts = productFacts(await host.replay()); } catch (error) { problems.push(`The annex tracker could not be checked against the ledger: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    try {
+      const logisticsHost = host.logistics();
+      const [check, reports, definitions] = await Promise.all([logisticsHost.records(), logisticsHost.reports(), logisticsHost.definitionsText()]);
+      logistics = {
+        records: [...check.records.values()], recordProblems: [...check.problems.values()], ...(check.ledgerProblem ? { ledgerProblem: check.ledgerProblem } : {}),
+        reports, bands: definitions ? parseBandSettings(definitions) : []
+      };
+    } catch (error) { problems.push(`The logistics records could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  return { bodies, registers, ...(wargame ? { wargame } : {}), ...(facts ? { facts } : {}), ...(logistics ? { logistics } : {}), problems };
 }
 
 /** Everything the Staff Room model is built from, read now. */
@@ -164,15 +225,16 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     const read = await productBody(root, staffProductPath(sectionOf(product, 'j2'), product));
     if (read.text !== undefined && /most (likely|dangerous)|\bML ?COA\b|\bMD ?COA\b/i.test(read.text)) { enemyCoaBody = read.text; enemyCoaProduct = product; break; }
   }
+  const workspaces = await workspacesInputOf(host, root, registry);
   return {
-    now, settings, registry, decisions: snapshot?.decisions ?? [], cop: snapshot?.cop ?? { layers: [], eventTail: [] },
+    now, settings, registry, decisions: snapshot?.decisions ?? [], workspaces, cop: snapshot?.cop ?? { layers: [], eventTail: [] },
     ...(snapshot?.ledgerProblem ? { ledgerProblem: snapshot.ledgerProblem } : {}),
     ...(snapshot?.eventLogProblem ? { eventLogProblem: snapshot.eventLogProblem } : {}),
     events, feedEvents, ...(run ? { run } : {}),
     ...(scenario.scenario ? { scenario: scenario.scenario } : {}), ...(scenario.problem ? { scenarioProblem: scenario.problem } : {}),
     j2: {
       ...registers, ...(dsm ? { dsm } : {}), ...(enemyCoaBody ? { enemyCoaBody } : {}), ...(enemyCoaProduct ? { enemyCoaProduct } : {}),
-      watches: watches.watches, ...(watches.unsigned.length ? { unsignedWatches: watches.unsigned } : {}), ...(options.live ? { live: options.live } : {}), problems
+      watches: watches.watches, ...(watches.unsigned.length ? { unsignedWatches: watches.unsigned } : {}), ...(watches.distrusted.length ? { distrustedWatches: watches.distrusted } : {}), ...(options.live ? { live: options.live } : {}), problems
     }
   };
 }

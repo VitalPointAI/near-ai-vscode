@@ -1,4 +1,4 @@
-// The Staff Room (UX concept 4.1, 5 and 12; owner direction 2026-11-18; WP-ROOM): the one picture of a staff run the page draws, built from the drop 1
+// The Staff Room (UX concept 4.1, 5 and 12; owner directions 2026-11-18 and 2026-11-19; WP-ROOM): the one picture of a staff run the page draws, built from the drop 1
 // read models (step board, product registry, decision queue, COP), the staff events, the scenario and the J2's registers and products. Pure: no I/O, no
 // clock (the time is passed in), no vscode. The page lays this out and animates it; it never decides state, and it never receives anything it could
 // approve, release or decide with. A person's decision goes back as a message naming the product and the version hash they saw, and the host runs the
@@ -22,6 +22,9 @@ import { currentSteps, stepBoard } from './readModels';
 import type { RegisterRow } from './registers';
 import type { Scenario } from './scenario';
 import { buildStaffMap } from './staffRoomMap';
+import { buildSectionWorkspaces } from './staffRoomWorkspaces';
+import { productTitle } from './productTitle';
+import type { J3Workspace, J4Workspace, J5Workspace, WorkspacesInput } from './staffRoomWorkspaces';
 import type { StaffMapModel, EnemyCoa } from './staffRoomMap';
 import { staffProductPath } from './writeLimits';
 
@@ -32,24 +35,10 @@ export const STAFF_ROOM_VERSION = 1;
 export const STAFF_ROOM_WORKSPACES = ['war-room', 'j2', 'j5', 'j3', 'j4'] as const;
 export type StaffRoomWorkspace = (typeof STAFF_ROOM_WORKSPACES)[number];
 
-/** What each section workspace will hold when it arrives in drop 2, named on its own tab now (owner direction 2026-11-18). */
-export const WORKSPACES_COMING: Readonly<Record<'j5' | 'j3' | 'j4', { readonly title: string; readonly lines: readonly string[] }>> = {
-  j5: {
-    title: 'J5 plans workspace',
-    lines: ['COA cells side by side, each with its sketch on its own copy of the map', 'The profile\'s validity tests on every COA, with the reason for any risk',
-      'J3 and J4 supportability arriving as each sketch is drawn', 'The distinctness check that flags two COAs drifting together', 'The comparison against the commander\'s approved criteria, with the dissent unedited']
-  },
-  j3: {
-    title: 'J3 operations workspace',
-    lines: ['The wargame on the shared map: action, reaction and counteraction, with the red cell playing to win', 'The synchronization matrix filling under one time cursor',
-      'Decision points as gold stars, each tied to its PIR, becoming the DST and DSM', 'The current operations picture and the CCIR watch', 'Orders and annexes assembling in parallel, letters from the profile']
-  },
-  j4: {
-    title: 'J4 logistics workspace',
-    lines: ['Supportability of each COA, with every number from a calculator that shows its formula', 'Days of supply and fuel over time, with the culmination warning',
-      'Lines of communication and the logistics layer on the shared map', 'Logistics decision points straight into the commander\'s decision support', 'The sustainment row of the synchronization matrix']
-  }
-};
+/** A workspace named by the open command's argument, or undefined for anything that is not one. */
+export function staffRoomWorkspaceOf(value: unknown): StaffRoomWorkspace | undefined {
+  return typeof value === 'string' && (STAFF_ROOM_WORKSPACES as readonly string[]).includes(value) ? value as StaffRoomWorkspace : undefined;
+}
 
 /** Display caps: the page receives display data only, and never more of it than it can show. */
 const CAP = { text: 600, short: 160, ledger: 80, history: 10, activity: 40, cues: 6, list: 200 } as const;
@@ -178,7 +167,10 @@ export interface StaffRoomModel {
   readonly map: StaffMapModel;
   readonly j2: J2Workspace;
   readonly activity: readonly ActivityLine[];
-  readonly coming: typeof WORKSPACES_COMING;
+  /** The J5, J3 and J4 workspaces (staffRoomWorkspaces.ts): each section's real state, read from its products, registers and records. */
+  readonly j5: J5Workspace;
+  readonly j3: J3Workspace;
+  readonly j4: J4Workspace;
   readonly ledgerProblem?: string;
   readonly eventLogProblem?: string;
 }
@@ -197,6 +189,8 @@ export interface J2Input {
   readonly watches?: readonly StandingWatch[];
   /** The watches the file calls armed (or paused, matched, drafting, awaiting review) that no signed arm decision proves: they run nothing (WP-WATCH). */
   readonly unsignedWatches?: readonly string[];
+  /** Every watch whose state comes from the signed decisions rather than the file (unsigned, changed since armed, or retired): the live board never overrides it. */
+  readonly distrustedWatches?: readonly string[];
   /** The observation store's rows the person's clearance covers (the host reads them through the store's reader view). */
   readonly live?: readonly Observation[];
   readonly problems?: readonly string[];
@@ -216,6 +210,8 @@ export interface StaffRoomInput {
   readonly scenario?: Scenario;
   readonly scenarioProblem?: string;
   readonly j2: J2Input;
+  /** What the J5, J3 and J4 workspaces read; missing parts are simply not drawn yet. */
+  readonly workspaces?: WorkspacesInput;
 }
 
 // ---- Small helpers -----------------------------------------------------------------------------------------------------------------------------------
@@ -244,10 +240,8 @@ export function abbreviation(member: string): string {
   return member.slice(0, 2).toUpperCase();
 }
 
-const titleOf = (product: string): string => {
-  const text = product.replace(/-/g, ' ');
-  return text.charAt(0).toUpperCase() + text.slice(1);
-};
+/** A product's title in the profile's words (a FRAGO reads as the profile writes it). */
+const titleOf = (settings: Pick<StaffSettings, 'profile'>, product: string): string => productTitle(product, settings.profile);
 
 const PILL: Readonly<Record<string, string>> = {
   draft: 'draft', 'draft (held)': 'held', 'draft (tampered)': 'tampered', 'guard-checked': 'checked', 'awaiting decision': 'awaiting', approved: 'approved',
@@ -338,7 +332,7 @@ function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run
       else if (lane.status === 'done') state = 'done';
       else if (lane.status === 'failed') state = 'failed';
       else state = 'stopped';
-      const product = lane.product ? titleOf(lane.product) : undefined;
+      const product = lane.product ? titleOf(settings, lane.product) : undefined;
       const task = state === 'working' ? (product ? `Drafting ${product}` : 'Working')
         : state === 'needs' ? `Needs a person: ${wait?.what ?? 'a decision'}`
           : state === 'waiting' ? `Waiting on ${wait ? (wait.on === 'human' ? 'a person' : codeOf(settings, wait.on as StaffSectionId)) : 'another member'}${wait ? `: ${wait.what}` : ''}`
@@ -370,7 +364,7 @@ function buildLedger(settings: StaffSettings, registry: readonly ProductView[]):
       ...(view.guard ? [{ gate: 'Release-guard', verdict: view.guard.verdict, version: view.guard.version }] : [])
     ];
     return {
-      product: view.product, title: titleOf(view.product), section: view.section, code: codeOf(settings, view.section), kind: view.kind, version: view.version,
+      product: view.product, title: titleOf(settings, view.product), section: view.section, code: codeOf(settings, view.section), kind: view.kind, version: view.version,
       display: view.display, pill: PILL[view.display] ?? 'draft', owner: clip(view.owner, 60), at: last?.at ?? '', hash: view.hash, label: clip(view.label, 60),
       path: staffProductPath(view.section, view.product), gates,
       ...(view.approvedBy ? { approvedBy: clip(`${view.approvedBy.name} (${view.approvedBy.role})`, CAP.short) } : {}),
@@ -398,7 +392,7 @@ function buildDecisions(settings: StaffSettings, now: number, queue: readonly De
     const view = byProduct.get(entry.product);
     if (!view || view.tampered) continue;
     cards.push({
-      product: entry.product, title: titleOf(entry.product), version: entry.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'decide',
+      product: entry.product, title: titleOf(settings, entry.product), version: entry.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'decide',
       decisionFor: clip(entry.decisionFor, 80), options: entry.options.slice(0, 10).map((option) => ({ label: clip(option.label, 200), risk: clip(option.risk, 500) })),
       dissent: entry.dissent.slice(0, 20).map((line) => clip(line, 500)), requestedAt: entry.requestedAt, ...(entry.deadline ? { deadline: entry.deadline } : {}),
       overdue: entry.deadline !== undefined && Date.parse(entry.deadline) < now, gates: gatesText(view)
@@ -407,7 +401,7 @@ function buildDecisions(settings: StaffSettings, now: number, queue: readonly De
   for (const view of registry) {
     if (view.state !== 'approved' || view.tampered) continue;
     cards.push({
-      product: view.product, title: titleOf(view.product), version: view.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'release',
+      product: view.product, title: titleOf(settings, view.product), version: view.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'release',
       decisionFor: clip(view.decisionFor ?? view.approvedBy?.role ?? 'approver', 80), options: [], dissent: [], requestedAt: view.history[view.history.length - 1]?.at ?? '',
       overdue: false, gates: view.approvedBy ? `Approved by ${clip(`${view.approvedBy.name} (${view.approvedBy.role})`, CAP.short)}. Not released yet.` : 'Approved. Not released yet.'
     });
@@ -422,12 +416,12 @@ export function activityLine(settings: StaffSettings, event: StaffEvent): Activi
   const code = (section: StaffSectionId) => codeOf(settings, section);
   switch (event.type) {
     case 'staff.step.entered': return { at: event.at, section: code(event.section), kind: 'info', text: `${code(event.section)} entered step ${event.step}${event.stepName ? `, ${event.stepName}` : ''}.` };
-    case 'staff.lane.started': return { at: event.at, section: code(event.section), kind: 'task', text: `${event.member} started${event.product ? ` on ${titleOf(event.product)}` : ''}.` };
-    case 'staff.lane.finished': return { at: event.at, section: code(event.section), kind: event.outcome === 'done' ? 'prod' : 'info', text: `${event.member} ${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'failed' : 'was stopped'}${event.product ? `: ${titleOf(event.product)}` : ''}.` };
-    case 'staff.product.state': return { at: event.at, section: code(event.section), kind: event.actor.kind === 'person' ? 'human' : event.to === 'guard-checked' ? 'gate' : 'prod', text: `${titleOf(event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}, by ${actorWords(event.actor)}.` };
-    case 'staff.gate.verdict': return { at: event.at, section: '', kind: 'gate', text: `${event.gate === 'tradecraft' ? 'Tradecraft' : 'Release-guard'} ${event.verdict} on ${titleOf(event.product)} v${event.version}.` };
-    case 'staff.decision.requested': return { at: event.at, section: '', kind: 'human', text: `${titleOf(event.product)} v${event.version} waits for the ${event.role}. Agents stop here.` };
-    case 'staff.decision.recorded': return { at: event.at, section: '', kind: 'human', text: `${event.person.name} (${event.person.role}) ${event.decision} ${titleOf(event.product)} v${event.version}, signed.` };
+    case 'staff.lane.started': return { at: event.at, section: code(event.section), kind: 'task', text: `${event.member} started${event.product ? ` on ${titleOf(settings, event.product)}` : ''}.` };
+    case 'staff.lane.finished': return { at: event.at, section: code(event.section), kind: event.outcome === 'done' ? 'prod' : 'info', text: `${event.member} ${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'failed' : 'was stopped'}${event.product ? `: ${titleOf(settings, event.product)}` : ''}.` };
+    case 'staff.product.state': return { at: event.at, section: code(event.section), kind: event.actor.kind === 'person' ? 'human' : event.to === 'guard-checked' ? 'gate' : 'prod', text: `${titleOf(settings, event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}, by ${actorWords(event.actor)}.` };
+    case 'staff.gate.verdict': return { at: event.at, section: '', kind: 'gate', text: `${event.gate === 'tradecraft' ? 'Tradecraft' : 'Release-guard'} ${event.verdict} on ${titleOf(settings, event.product)} v${event.version}.` };
+    case 'staff.decision.requested': return { at: event.at, section: '', kind: 'human', text: `${titleOf(settings, event.product)} v${event.version} waits for the ${event.role}. Agents stop here.` };
+    case 'staff.decision.recorded': return { at: event.at, section: '', kind: 'human', text: `${event.person.name} (${event.person.role}) ${event.decision} ${titleOf(settings, event.product)} v${event.version}, signed.` };
     case 'staff.waiting': return { at: event.at, section: code(event.section), kind: event.waitingOn === 'human' ? 'human' : 'info', text: `${event.member} waits on ${event.waitingOn === 'human' ? 'a person' : code(event.waitingOn)}: ${event.what}` };
     case 'staff.cop.updated': return { at: event.at, section: code(event.owner.section), kind: 'prod', text: `${event.owner.member} updated the ${event.layer.replace(/^cop-|-layer$/g, '')} layer: ${event.summary}` };
     case 'staff.merge.conflict': return { at: event.at, section: code(event.section), kind: 'info', text: `${code(event.section)} has a merge conflict in ${event.files.length} file${event.files.length === 1 ? '' : 's'}.` };
@@ -447,16 +441,16 @@ export function handoffsFor(settings: StaffSettings, events: readonly StaffEvent
   for (const event of events) {
     switch (event.type) {
       case 'staff.lane.started':
-        cues.push({ kind: 'task', from: 'section:command', to: `member:${event.section}:${event.member}`, label: clip(event.product ? titleOf(event.product) : `Task for ${event.member}`, 40), workspace: workspaceOf(event.section) });
+        cues.push({ kind: 'task', from: 'section:command', to: `member:${event.section}:${event.member}`, label: clip(event.product ? titleOf(settings, event.product) : `Task for ${event.member}`, 40), workspace: workspaceOf(event.section) });
         break;
       case 'staff.product.state':
-        if (event.actor.kind === 'agent' && (event.to === 'guard-checked' || (event.to === 'draft' && event.from === null))) cues.push({ kind: 'prod', from: `section:${event.section}`, to: `ledger:${event.product}`, label: clip(`${titleOf(event.product)} v${event.version}`, 40), workspace: workspaceOf(event.section) });
-        if (event.to === 'awaiting-decision') cues.push({ kind: 'task', from: `section:${event.section}`, to: 'decisions', label: clip(`${titleOf(event.product)}: needs a person`, 40), workspace: workspaceOf(event.section) });
+        if (event.actor.kind === 'agent' && (event.to === 'guard-checked' || (event.to === 'draft' && event.from === null))) cues.push({ kind: 'prod', from: `section:${event.section}`, to: `ledger:${event.product}`, label: clip(`${titleOf(settings, event.product)} v${event.version}`, 40), workspace: workspaceOf(event.section) });
+        if (event.to === 'awaiting-decision') cues.push({ kind: 'task', from: `section:${event.section}`, to: 'decisions', label: clip(`${titleOf(settings, event.product)}: needs a person`, 40), workspace: workspaceOf(event.section) });
         break;
       case 'staff.decision.recorded': {
         if (!decisionBacked(event, registry)) break;
         const section = sectionOf(event.product) ?? 'command';
-        cues.push({ kind: 'human', from: 'decisions', to: `section:${section}`, label: clip(`${event.decision[0].toUpperCase()}${event.decision.slice(1)}: ${titleOf(event.product)}`, 40), workspace: workspaceOf(section) });
+        cues.push({ kind: 'human', from: 'decisions', to: `section:${section}`, label: clip(`${event.decision[0].toUpperCase()}${event.decision.slice(1)}: ${titleOf(settings, event.product)}`, 40), workspace: workspaceOf(section) });
         break;
       }
       case 'staff.cop.updated':
@@ -550,8 +544,10 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
   }));
   const board = new Map<string, WatchBoardEntry>(feedPicture(input.feedEvents ?? []).watches.map((entry) => [entry.watch, entry]));
   const unsigned = new Set(j2.unsignedWatches ?? []);
+  const distrusted = new Set([...(j2.distrustedWatches ?? []), ...unsigned]);
   const watches: Array<J2Workspace['watches'][number]> = (j2.watches ?? []).slice(0, CAP.list).map((watch) => {
-    const live = board.get(watch.id);
+    // A watch with a trust problem shows its trusted state: the live board (events members could also have caused) never makes it look armed again.
+    const live = distrusted.has(watch.id) ? undefined : board.get(watch.id);
     const state = live?.state ?? watch.state;
     const reason = live?.pausedReason ?? watch.pausedReason;
     return {
@@ -615,7 +611,7 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     : ltiovs[0] ? { label: `${ltiovs[0].id} latest time of value`, at: ltiovs[0].ltiov, dtg: formatDtg(Date.parse(ltiovs[0].ltiov)) } : undefined;
   const scenario = input.scenario;
   const activity = input.events.slice(-200).map((event) => (event.type === 'staff.decision.recorded' && !decisionBacked(event, input.registry)
-    ? { at: event.at, section: '', kind: 'info' as const, text: `The event log names a decision on ${titleOf(event.product)} v${event.version} that the signed ledger does not hold. It is not counted.` }
+    ? { at: event.at, section: '', kind: 'info' as const, text: `The event log names a decision on ${titleOf(settings, event.product)} v${event.version} that the signed ledger does not hold. It is not counted.` }
     : activityLine(settings, event))).filter((line): line is ActivityLine => Boolean(line)).slice(-CAP.activity).reverse()
     .map((line) => ({ ...line, text: clip(line.text, 300) }));
   return {
@@ -634,7 +630,10 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     map,
     j2: buildJ2(input, map),
     activity,
-    coming: WORKSPACES_COMING,
+    ...buildSectionWorkspaces({
+      now: input.now, profile: settings.profile, coaTests: resolved.coaTests, registry: input.registry, decisions: input.decisions, events: input.events,
+      ...(input.j2.dsm ? { dsm: input.j2.dsm } : {}), code: (section) => codeOf(settings, section), input: input.workspaces ?? {}
+    }),
     ...(input.ledgerProblem ? { ledgerProblem: clip(input.ledgerProblem) } : {}),
     ...(input.eventLogProblem ? { eventLogProblem: clip(input.eventLogProblem) } : {})
   };

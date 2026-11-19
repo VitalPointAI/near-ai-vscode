@@ -271,6 +271,36 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       console.log(`  Widths measured: chat ${SIDEBAR_WIDTHS.join(', ')}px; pages ${[...EDITOR_WIDTHS, ...WIDER_EDITOR_WIDTHS].join(', ')}px${unmeasured.length ? ` except ${unmeasured.length} too wide for this window` : ''}; text set in a wider stand-in font.`);
       assert.deepEqual(problems, []);
     }],
+    ['the Staff Room\'s J5, J3 and J4 workspaces fit a narrow and a normal width without scrolling sideways (owner direction 2026-11-19)', async () => {
+      // Each section workspace opened through the open command's argument (the real host path), with a full sample room, measured by the layout probe.
+      const problems: string[] = [];
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom');
+        await waitForProbe('staff-room');
+        samples.set('staff-room', sampleData('staff-room', []));
+        await editorAreaOnly();
+        const { room, editor } = await editorRoom('staff-room');
+        const widths = [320, room >= 800 ? 800 : Math.max(470, Math.min(600, room))];
+        for (const workspace of ['j5', 'j3', 'j4']) {
+          await vscode.commands.executeCommand('nearAi.openStaffRoom', workspace);
+          for (const target of widths) {
+            const report = await sizeEditor('staff-room', target, editor);
+            const where = `staff-room ${workspace} at ${report.width}px`;
+            console.log(`  ${where} (asked ${target}px): page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
+            if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${where} scrolls sideways: page ${report.scrollWidth} in ${report.clientWidth}`);
+            for (const offender of report.offenders) problems.push(`${where}: ${offender}`);
+            for (const scroller of report.scrollers) problems.push(`${where}: ${scroller}`);
+            for (const cut of report.clipped) problems.push(`${where}: clipped ${cut}`);
+            if (Math.abs(report.width - target) > 40) problems.push(`${where}: could not size the panel to ${target}px`);
+          }
+        }
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+        await vscode.commands.executeCommand('workbench.view.explorer');
+      }
+      assert.deepEqual(problems, []);
+    }],
     ['an image waiting for review shows its card in the narrow chat without overflow, and its answer goes back through the view (0.4.23)', async () => {
       const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
       const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
@@ -924,9 +954,31 @@ function staffRoomSample(): Message {
     { type: 'staff.lane.finished', run: 'run-e2e', at: at(4), section: 'j2', member: 'watch-officer', product: 'intsum', outcome: 'done' }
   ];
   const coaBody = '## Most likely course of action\n\n41 CSTL BDE defends Port Calder from PL COPPER, holding Ashby Ford with 1-41 MECH at KQ 4532. We assess this is likely. We have moderate confidence.\n\n## Most dangerous course of action\n\n3-41 ARMD counter-attacks from KQ 4726 west to Ashby Ford KQ 4528 and on towards AA OAK. This is unlikely. We have low confidence.\n';
+  const { checkMovementTable } = require(path.join(extension.extensionPath, 'dist/domain/staff/logistics')) as typeof import('../../domain/staff/logistics');
+  // The J5, J3 and J4 workspaces with long words in every place a person reads, so each width is measured with a full section.
+  const long = 'a long entry that wraps across several lines at narrow widths without pushing anything past the edge of the panel';
+  const move = checkMovementTable({ id: 'move-with-a-long-identifier', title: `Notional reception with ${long}`, serials: [{ serial: 'SERIAL-0001-LONG', what: `Bridging stock, ${long}`, mode: 'road', from: 'port-alpha-with-a-long-name', to: 'depot-bravo-with-a-long-name', load: 100, loadUnit: 'short tons', lift: { asset: 'heavy equipment transporters', count: 4, capacityEach: 20 }, distanceKm: 120, speedKmh: 40, handlingHours: 2, ready: '2026-11-19T06:00:00Z', required: '2026-11-19T10:00:00Z' }] }, { computedBy: 'mobility-planner-with-a-long-name', run: 'run-e2e', at: at(5) });
+  const workspaces = {
+    bodies: {
+      'coa-themes': `| COA | Owner | Theme in one sentence | What must differ |\n|---|---|---|---|\n| COA A | coa-cell-a-with-a-long-member-name | Seize the port from the sea, ${long} | ${long} |\n| COA B | coa-cell-b | Cross the ford, ${long} | ${long} |\n`,
+      'coa-validity': `| COA | Suitable | Feasible | Acceptable | Distinguishable | Complete | Distinct from |\n|---|---|---|---|---|---|---|\n| COA A | pass | risk: ${long} | pass | pass | fail: ${long} | COA B |\n`,
+      'comparison-matrix': `| Criterion | Definition | Weight | COA A score and rationale | COA B score and rationale |\n|---|---|---|---|---|\n| Tempo with a long criterion name | ${long} | 3 | 4: ${long} | 2: ${long} |\n`,
+      'coa-decision-brief': `## Recommendation\n\nThe staff recommends COA A, ${long}.\n`,
+      'coa-supportability': `| Course of action | Function | Judgement | Where and when support runs out | Calculator record |\n|---|---|---|---|---|\n| COA A | Supply | Supportable with risk: ${long} | ${long} | calc:move-with-a-long-identifier |\n`
+    },
+    registers: {
+      eventLog: [{ id: 'E1-LONG-IDENTIFIER', time: '2026-11-19T11:10:00Z', source: `Feed with ${long}`, report: `Armour moving, ${long}`, ccir: 'PIR-1-LONG', decisionPoint: 'DP-2-LONG', status: 'escalated' }],
+      syncMatrix: [{ id: 's1', row: 'decision-points', hHourOffsetMinutes: 2880, entry: `DP 2, ${long}`, coa: 'coa-a' }, { id: 's2', row: 'enemy', hHourOffsetMinutes: -360, entry: long, section: 'j2' }],
+      battleRhythm: [{ id: 'BR1', title: `Commander's update brief, ${long}`, kind: 'working-group', start: '2026-11-19T13:00:00Z', durationMinutes: 30, repeat: 'daily', chair: 'chief-of-staff-with-a-long-name', inputs: long, outputs: long }],
+      rfi: [{ id: 'RFI-7-LONG', from: 'j3', to: 'higher', question: long, suspense: '2026-11-19T09:00:00Z', status: 'open' }],
+      annexTracker: [{ id: 'A1', subject: 'logistics', letter: 'Q', owner: 'j4-director-with-a-long-name', status: 'drafting', product: 'logistics-annex' }]
+    },
+    wargame: { entries: [{ coa: 'coa-a-with-a-long-name', enemyCoa: 'mdcoa-with-a-long-name', turn: 1, phase: 'action', hHourOffsetMinutes: 0, moves: [{ unit: `1-41 MECH ${long}`, side: 'friendly', path: [] }], results: [long], decisionPoints: [{ id: 'DP2', description: long, decisionMaker: 'commander' }], sync: [], branches: [], recordedBy: 'plans-writer', at: at(6) }] },
+    logistics: { records: move.ok ? [move.value] : [], recordProblems: [`calc:forged ${long}`], reports: [{ id: 'bn1-report-with-a-long-identifier', unit: `1st Battalion, ${long}`, reportedAt: '2026-11-19T10:00:00Z', lines: [{ commodity: `Class III (bulk), ${long}`, uom: 'litres', onHand: 6000, received: 0, consumed: 0, capacity: 30000, forecast: 100 }] }], bands: [] }
+  };
   const model = buildStaffRoomModel({
     now: Date.UTC(2026, 10, 19, 12, 0), settings: defaultStaffSettings(), registry: [], decisions: [], cop: { layers: [], eventTail: [] }, events: events as never,
-    ...(scenario.ok ? { scenario: scenario.value } : {}), j2: { sources: [], pirs: [], plan: [], enemyCoaBody: coaBody, enemyCoaProduct: 'adversary-coa-set' }
+    ...(scenario.ok ? { scenario: scenario.value } : {}), j2: { sources: [], pirs: [], plan: [], enemyCoaBody: coaBody, enemyCoaProduct: 'adversary-coa-set' }, workspaces: workspaces as never
   });
   return { type: 'staff-room', model, cues: [] };
 }
