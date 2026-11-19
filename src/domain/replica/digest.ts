@@ -2,7 +2,9 @@
 //
 // perStream maps each stream to { [family]: canonical value }, built by the fold from each reducer's canonical output for that stream. The canonical
 // values are arrays and plain objects only, because canonical JSON refuses Maps. Texts are represented by state vector and text hash.
-// Same entries, same digest, whatever the order, the duplication or the partition (and, once checkpoints exist, the same checkpoint set).
+// Same entries, same digest, whatever the order, the duplication or the partition, for the same checkpoint set. A machine that holds a checkpoint and
+// one that does not can number versions differently when a late concurrent entry exists (the checkpoint makes the covered order final), so digests are
+// compared only between results with the same FoldResult.checkpoint (the hash of the last checkpoint used, or null). The formula is unchanged.
 import { createHash } from 'node:crypto';
 import { canonicalBytes } from '../team/canonical';
 import type { QuarantineRecord } from './chain';
