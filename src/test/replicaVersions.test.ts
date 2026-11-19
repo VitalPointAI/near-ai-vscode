@@ -329,3 +329,134 @@ test('the version data shapes are closed and bounded', () => {
   assert.ok(bad('version.supersede', { product: PRODUCT, hash }));
   assert.ok(bad('version.propose', 'text'));
 });
+
+// ---- Task 3: the gate chain per version ---------------------------------------------------------------------------------------------------------
+
+test('G2: a guard HOLD or a tradecraft NOT READY with reasons holds the version; no reasons, a non-guard agent and another hash are refused', () => {
+  const f = fixture();
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'HOLD', ['no source for the figure']), [v1]);
+  const held = versionsOf(f.fold())[0];
+  assert.deepEqual([held.state, held.held], ['draft', { gate: 'guard', reasons: ['no source for the figure'] }]);
+
+  const g = fixture();
+  const w1 = g.propose('P', OWNER, [g.typed]);
+  g.act('SL', TRADECRAFT, 'version.verdict', verdict(PRODUCT, hash, 'tradecraft', 'NOT READY', ['assessment not sourced']), [w1]);
+  assert.deepEqual(versionsOf(g.fold())[0].held, { gate: 'tradecraft', reasons: ['assessment not sourced'] });
+
+  const h = fixture();
+  const x1 = h.propose('P', OWNER, [h.typed]);
+  const noReasons = h.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'HOLD', []), [x1]);
+  const notGuard = h.act('SL', SECTION_LEAD_AGENT, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [x1]);
+  const stale = h.act('SL', GUARD, 'version.verdict', verdict(PRODUCT, OTHER_HASH, 'guard', 'HOLD', ['x']), [x1]);
+  const result = h.fold();
+  assert.equal(versionsOf(result)[0].held, undefined);
+  assert.deepEqual(gateRefusals(result).sort(), ([[noReasons.hash, 'reasons-required'], [notGuard.hash, 'not-gate-member'], [stale.hash, 'stale-version']] as Array<[string, string]>).sort());
+});
+
+test('G3: a guard CLEARED moves a version to guard-checked; with a tradecraft reviewer, CLEARED before SIGN-OFF is refused tradecraft-required and after it is accepted', () => {
+  const plain = fixture({ tradecraft: false });
+  const p1 = plain.propose('P', OWNER, [plain.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  plain.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [p1]);
+  assert.equal(versionsOf(plain.fold())[0].state, 'guard-checked');
+
+  const f = fixture();
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const early = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [v1]);
+  const refusedFirst = f.fold();
+  assert.equal(versionsOf(refusedFirst)[0].state, 'draft');
+  assert.deepEqual(gateRefusals(refusedFirst), [[early.hash, 'tradecraft-required']]);
+  const signOff = f.act('SL', TRADECRAFT, 'version.verdict', verdict(PRODUCT, hash, 'tradecraft', 'SIGN-OFF'), [v1]);
+  f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [signOff]);
+  const accepted = f.fold();
+  assert.equal(versionsOf(accepted)[0].state, 'guard-checked');
+  assert.deepEqual(gateRefusals(accepted), [[early.hash, 'tradecraft-required']]);
+});
+
+test('G4: after a HOLD the owner proposes v2 with a new hash; v1 stays held and v2 is proposed', () => {
+  const f = fixture();
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  const hold = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'HOLD', ['fix the header']), [v1]);
+  const edit = f.editor.insert(11, ' again', { deps: [hold] });
+  const v2 = f.propose('P', OWNER, [edit]);
+  const views = versionsOf(f.fold());
+  assert.deepEqual(views.map((version) => [version.number, version.state, version.held?.gate ?? null, version.entry]), [[1, 'draft', 'guard', v1.hash], [2, 'draft', null, v2.hash]]);
+});
+
+test('G5: version.submit naming a decision role moves a guard-checked version to awaiting-decision; a submit on a version that is not guard-checked is refused wrong-state', () => {
+  const f = fixture({ tradecraft: false });
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  const tooSoon = f.act('P', OWNER, 'version.submit', { product: PRODUCT, hash, decisionFor: 'commander' }, [v1]);
+  const cleared = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [tooSoon]);
+  const stranger = f.act('Q', { kind: 'person' }, 'version.submit', { product: PRODUCT, hash, decisionFor: 'commander' }, [cleared]);
+  f.act('P', OWNER, 'version.submit', { product: PRODUCT, hash, decisionFor: 'commander' }, [cleared]);
+  const result = f.fold();
+  const view = versionsOf(result)[0];
+  assert.deepEqual([view.state, view.decisionFor], ['awaiting-decision', 'commander']);
+  assert.deepEqual(gateRefusals(result).sort(), ([[tooSoon.hash, 'wrong-state'], [stranger.hash, 'not-owner-or-lead']] as Array<[string, string]>).sort());
+
+  // The owner side's person can submit too: a person who answers for the section is presented to the machine as the owner seat.
+  const g = fixture({ tradecraft: false });
+  const w1 = g.propose('P', OWNER, [g.typed]);
+  const c = g.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [w1]);
+  g.act('SL', { kind: 'person' }, 'version.submit', { product: PRODUCT, hash, decisionFor: 'commander' }, [c]);
+  assert.equal(versionsOf(g.fold())[0].state, 'awaiting-decision');
+});
+
+test('D-37: concurrent HOLD and CLEARED leave a version held in every delivery order, until a fresh CLEARED that saw both', () => {
+  const f = fixture({ tradecraft: false });
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'HOLD', ['figure unsourced']), [v1]);
+  const cleared = f.act('SL', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [v1]);
+  const random = rng(30_08);
+  const orders = [[...f.world.entries], [...f.world.entries].reverse(), ...Array.from({ length: 12 }, () => shuffled(f.world.entries, random))];
+  const reference = f.fold(orders[0]);
+  for (const order of orders) {
+    const result = f.fold(order);
+    assert.deepEqual(versionsOf(result), versionsOf(reference));
+    assert.deepEqual(result.digests, reference.digests);
+  }
+  const view = versionsOf(reference)[0];
+  assert.deepEqual([view.state, view.held?.gate, view.verdictConflict], ['draft', 'guard', true]);
+
+  f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [cleared]);
+  const settled = versionsOf(f.fold())[0];
+  assert.deepEqual([settled.state, settled.held, settled.verdictConflict], ['guard-checked', undefined, undefined]);
+});
+
+test('every one of the 24 delivery orders of propose, SIGN-OFF, CLEARED and submit gives the same versions and the same digest', () => {
+  const f = fixture();
+  const hash = replicaVersionHash('Hello world', []);
+  const base = [...f.world.entries];
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const signOff = f.act('SL', TRADECRAFT, 'version.verdict', verdict(PRODUCT, hash, 'tradecraft', 'SIGN-OFF'), [v1]);
+  const cleared = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [signOff]);
+  const submit = f.act('SL', OWNER, 'version.submit', { product: PRODUCT, hash, decisionFor: 'commander' }, [cleared]);
+  const reference = f.fold();
+  const view = versionsOf(reference)[0];
+  assert.deepEqual([view.state, view.decisionFor], ['awaiting-decision', 'commander']);
+  assert.deepEqual(reference.refused, []);
+  for (const order of permutations([v1.entry, signOff.entry, cleared.entry, submit.entry])) {
+    const result = f.fold([...base, ...order]);
+    assert.deepEqual(versionsOf(result), versionsOf(reference));
+    assert.deepEqual(result.digests, reference.digests);
+  }
+});
+
+test('release.ts and its tests are not part of this change: the gate steps all run through transition()', () => {
+  // The module under test imports the machine and never copies it: a gate step that release.ts refuses must be refused here with its reason.
+  const f = fixture();
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  const person = f.act('P', { kind: 'person' }, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [v1]);
+  const noGate = fixture({ tradecraft: false });
+  const w1 = noGate.propose('P', OWNER, [noGate.typed]);
+  const none = noGate.act('SL', TRADECRAFT, 'version.verdict', verdict(PRODUCT, hash, 'tradecraft', 'SIGN-OFF'), [w1]);
+  assert.deepEqual(gateRefusals(f.fold()), [[person.hash, 'not-gate-member']]);
+  assert.deepEqual(gateRefusals(noGate.fold()), [[none.hash, 'no-tradecraft-gate']]);
+});
