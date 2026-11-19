@@ -114,6 +114,11 @@
       composer: (function () {
         const box = document.getElementById('input');
         return box && typeof box.value === 'string' ? { value: box.value.slice(0, 400), caret: typeof box.selectionStart === 'number' ? box.selectionStart : null } : undefined;
+      })(),
+      cards: (function () {
+        if (!document.getElementById('welcome')) return undefined;
+        const staff = document.getElementById('staff-teams');
+        return { staffTeams: staff ? (staff.textContent || '').slice(0, 400) : undefined, setupNudge: Boolean(document.getElementById('setup-nudge')) };
       })()
     };
   };

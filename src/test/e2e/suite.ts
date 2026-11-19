@@ -578,18 +578,24 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       process.env.NEAR_AI_TEAMS_DIR = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-teams-'));
       try {
         // What the command writes once the person has chosen J2, US Joint, operational: the same plan and write, without the quick picks.
+        // The chat is open on an empty conversation before the setup, as in code-server (D-48 of 0.4.35). The card must come by itself: no refresh is asked
+        // for here. (Until 0.4.35 this step asked for one, so it passed while the real flow, which relies on the setup's own notice, did not.)
+        await api.sidebar.newChat();
+        const before = observer.toView.length;
+        const asked = observer.fromView.length;
         const inputs = await setup.readStaffSetupInputs(workspace);
-        const settings = setup.settingsFrom(setup.existingStaffSettings(inputs.projectJson), { profile: 'us-joint', level: 'operational', planningType: 'campaign' });
+        const settings = setup.settingsFrom(setup.existingStaffSettings(inputs.projectJson), { profile: 'us-joint', level: 'operational', planningType: 'contingency' });
         const plan = setup.planStaffSetup({ templateId: 'j2-intelligence', options: { settings, locality: 'local' }, ...inputs });
         await setup.applyStaffSetup(workspace, new TeamLibrary(storage.teamLibraryDir(storage.homeFolder())), plan);
         const project = JSON.parse(await readFile(path.join(workspace, '.planning', '.near-ai', 'project.json'), 'utf8')) as { staff: { teams: Record<string, string> } };
         assert.deepEqual(project.staff.teams, { j2: 'j2-us-joint-operational' }, 'the project records its J2 team');
-        await api.sidebar.newChat();
-        const before = observer.toView.length;
-        const asked = observer.fromView.length;
-        await api.sidebar.refresh();
-        await observer.next('fromView', (message) => message.type === 'refresh-status', asked);
         const card = await observer.next('toView', (message) => message.type === 'staff-teams' && Boolean(message.model), before);
+        assert.deepEqual(observer.fromView.slice(asked).filter((message) => message.type === 'refresh-status'), [], 'the card came without the view asking for a refresh');
+        // And it is drawn in the real page, with J2 and its Task button, and without the "no team yet" card.
+        let drawn = await probe('chat');
+        for (let waited = 0; waited < 5_000 && !drawn.cards?.staffTeams?.includes('j2-us-joint-operational'); waited += 250) { await pause(250); drawn = await probe('chat'); }
+        assert.match(drawn.cards?.staffTeams ?? '', /J-2.*j2-us-joint-operational.*Task/, JSON.stringify(drawn.cards));
+        assert.equal(drawn.cards?.setupNudge, false, 'no "no team yet" card on the page');
         const j2 = (card.model as { sections: Array<{ section: string; state: string; team?: string }> }).sections.find((entry) => entry.section === 'j2');
         assert.deepEqual([j2?.state, j2?.team], ['ready', 'j2-us-joint-operational'], JSON.stringify(card.model));
         const nudges = observer.toView.slice(before).filter((message) => message.type === 'setup-nudge');

@@ -14,7 +14,8 @@ import type { StaffRoomModel } from '../domain/staff/staffRoom';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { projectHasStaffTeam, projectHasTeam } from '../services/setupSteps';
 import { applyStaffSetup, planStaffSetup, PROJECT_JSON, requestedSection, staffTeamCandidates } from '../services/staffSetup';
-import { linkStaffTeam, projectStaffTeams, staffMenuEntries } from '../services/staffTeams';
+import { linkStaffTeam, projectStaffTeams, projectStaffTeamsReported, staffMenuEntries } from '../services/staffTeams';
+import { onStaffTeamsChanged } from '../services/staffSetup';
 import { setCasProbe } from '../staff/staffFiles';
 import { handleStaffRoomMessage } from '../staff/staffRoomHost';
 import type { StaffRoomEffects } from '../staff/staffRoomHost';
@@ -379,4 +380,53 @@ test('"Task in chat" fills the chat only for the team the host last sent as read
   // Without a chat to fill, the room says so rather than doing something else.
   const { taskInChat: _unused, ...noChat } = effects;
   assert.equal(await handleStaffRoomMessage({ type: 'task-team', section: 'j2' }, noChat), 'refused');
+});
+
+test('the chat\'s read of the staff teams never fails in silence: an error is logged and becomes the card\'s reason, a bad record is logged (D-48 of 0.4.35)', async () => {
+  const { root, library } = await folders();
+  const logged: string[] = [];
+  // Not a staff project: nothing logged, no card.
+  assert.deepEqual(await projectStaffTeamsReported(root, () => library.directory, (line) => logged.push(line)), { staff: false, sections: [] });
+  assert.equal(logged.length, 0);
+  await setUp(root, library, J2_STAFF_TEMPLATE.id);
+  assert.equal((await projectStaffTeamsReported(root, () => library.directory, (line) => logged.push(line))).sections[0].state, 'ready');
+  assert.equal(logged.length, 0);
+  // An unexpected error (here, working out the library folder): logged with its stack, and the card says why instead of turning into "no team yet".
+  const failed = await projectStaffTeamsReported(root, () => { throw new Error('HOME is not set'); }, (line) => logged.push(line));
+  assert.deepEqual([failed.staff, failed.sections, failed.problem], [true, [], 'HOME is not set. The NEAR AI output has the details.']);
+  assert.match(logged.at(-1) ?? '', /^Staff teams could not be read: Error: HOME is not set/);
+  // A record that does not read: the reason is on the card and in the log.
+  await writeFile(path.join(root, PROJECT_JSON), JSON.stringify({ staff: { profile: 'nobody' } }));
+  const bad = await projectStaffTeamsReported(root, () => library.directory, (line) => logged.push(line));
+  assert.equal(bad.staff, true);
+  assert.match(bad.problem ?? '', /are not valid/);
+  assert.equal(logged.at(-1), `Staff teams: ${bad.problem}`);
+});
+
+test('Set Up a Staff Team and Link tell the chat they wrote the project\'s staff teams; a refused or failed write does not, and a listener that throws stops nothing', async () => {
+  const { root, library } = await folders();
+  const told: string[] = [];
+  const throwing = onStaffTeamsChanged(() => { throw new Error('listener'); });
+  const listening = onStaffTeamsChanged((changed) => told.push(changed));
+  try {
+    await setUp(root, library, J2_STAFF_TEMPLATE.id);
+    assert.deepEqual(told, [root], 'the setup tells once, after everything is written');
+    await assert.rejects(setUp(root, library, J2_STAFF_TEMPLATE.id), /already in your teams/);
+    assert.deepEqual(told, [root], 'a refused setup tells nothing');
+    // Link: the J5 team in the library, the record without it.
+    await setUp(root, library, J5_STAFF_TEMPLATE.id);
+    const config = await projectJsonOf(root);
+    config.staff.teams = { j2: 'j2-us-joint-operational' };
+    await writeFile(path.join(root, PROJECT_JSON), JSON.stringify(config, null, 2));
+    told.length = 0;
+    assert.match((await linkStaffTeam(root, library.directory, 'j5', 'j2-us-joint-operational') as { message: string }).message, /not a J5 team/);
+    assert.deepEqual(told, [], 'a refused link tells nothing');
+    assert.deepEqual(await linkStaffTeam(root, library.directory, 'j5', 'j5-us-joint-operational'), { ok: true });
+    assert.deepEqual(told, [root]);
+  } finally {
+    throwing.dispose();
+    listening.dispose();
+  }
+  await setUp(root, library, J2_STAFF_TEMPLATE.id, { settings: settings({ level: 'strategic' }), locality: 'local' });
+  assert.deepEqual(told, [root], 'nothing after the listener is disposed');
 });

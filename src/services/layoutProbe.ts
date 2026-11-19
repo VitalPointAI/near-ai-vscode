@@ -43,6 +43,8 @@ export interface LayoutReport {
   };
   /** The chat's message box, on the chat page: its text and where the cursor is, so a test can check what a button put there. */
   composer?: { value: string; caret: number | null };
+  /** The empty chat's cards, on the chat page: the "Staff teams" card's text and whether the "no team yet" card is there. */
+  cards?: { staffTeams?: string; setupNudge: boolean };
 }
 
 export function layoutProbeEnabled(): boolean {
