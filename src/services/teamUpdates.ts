@@ -1,6 +1,8 @@
 import { lstat, readFile, realpath, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { applyGuidanceUpdate, applyTeamUpdate, planGuidanceUpdate, planTeamUpdate, type GuidancePlan, type TeamUpdatePlan, type UpdateDecisions } from '../agent/teamUpdate';
+import { applyGuidanceUpdate, applyTeamUpdate, planGuidanceUpdate, planStaffGuidanceUpdate, planTeamUpdate, type GuidancePlan, type TeamUpdatePlan, type UpdateDecisions } from '../agent/teamUpdate';
+import { staffBlockOf } from '../agent/staffTeamUpdate';
+import { parseStaffSettings, type StaffSettings } from '../domain/staff/profiles';
 import { parseTeam, TeamLibrary } from '../agent/teams';
 import { guidanceFingerprint } from '../agent/teamFingerprints';
 import { readProjectGuidance, templateVersion } from '../agent/projectTypes';
@@ -56,11 +58,30 @@ export class TeamUpdater {
    * `write` is replaceable so a test can make one write fail; `busy` says whether a run is in progress. It is checked synchronously right
    * before every write, so no run can start between the check and the write, and a run that starts part-way rolls the update back.
    */
-  public constructor(private readonly library: TeamLibrary, private readonly write: (file: string, content: string) => Promise<void> = (file, content) => writeFile(file, content, 'utf8'), private readonly busy: () => boolean = runInProgress) {}
+  /**
+   * `staffProject`: the project a staff section team in the library works in (the open folder), for its staff settings and its block in AGENTS.md. A
+   * staff team is kept in the team library, so its file does not say which project it belongs to.
+   */
+  public constructor(private readonly library: TeamLibrary, private readonly write: (file: string, content: string) => Promise<void> = (file, content) => writeFile(file, content, 'utf8'), private readonly busy: () => boolean = runInProgress, private readonly staffProject: () => string | undefined = () => undefined) {}
+
+  /** The staff settings in a project's project.json, or undefined when it has none (or they do not parse). */
+  private async staffSettings(root: string | undefined): Promise<StaffSettings | undefined> {
+    if (!root) return undefined;
+    const raw = await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8').catch(() => undefined);
+    try {
+      const parsed = raw === undefined ? undefined : JSON.parse(raw) as { staff?: unknown };
+      if (!parsed || typeof parsed !== 'object' || parsed.staff === undefined) return undefined;
+      const read = parseStaffSettings(parsed.staff);
+      return read.ok ? read.value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /** What an update would change in a team file (and, for a project team, its AGENTS.md guidance); undefined when it is not from a built-in type. */
   public async preview(file: string): Promise<TeamUpdatePreview | undefined> {
     const text = await readFile(file, 'utf8');
+    if (staffBlockOf(text)) return this.staffPreview(file, text);
     const plan = planTeamUpdate(text);
     if (!plan) return undefined;
     const name = parseTeam(text, file).name;
@@ -78,6 +99,20 @@ export class TeamUpdater {
     // Only guidance this extension wrote for the same type is updated.
     if (config.type !== undefined && config.type !== plan.template.id) return { file, name, plan, text };
     const guidance = planGuidanceUpdate(agents, plan.template.id, typeof config.guidanceBase === 'string' ? config.guidanceBase : undefined);
+    return { file, name, plan, text, ...(guidance.action === 'none' ? {} : { guidance, agentsFile, agents }) };
+  }
+
+  /** A staff section team: planned against today's rendering for the project's staff settings, with its own block in that project's AGENTS.md. */
+  private async staffPreview(file: string, text: string): Promise<TeamUpdatePreview | undefined> {
+    const root = projectRoot(file) ?? this.staffProject();
+    const plan = planTeamUpdate(text, { staffSettings: await this.staffSettings(root) });
+    if (!plan) return undefined;
+    const name = parseTeam(text, file).name;
+    if (!root) return { file, name, plan, text };
+    const agentsFile = path.join(root, 'AGENTS.md');
+    const agents = await readFile(agentsFile, 'utf8').catch(() => undefined);
+    if (agents === undefined) return { file, name, plan, text };
+    const guidance = planStaffGuidanceUpdate(agents, plan);
     return { file, name, plan, text, ...(guidance.action === 'none' ? {} : { guidance, agentsFile, agents }) };
   }
 
@@ -110,7 +145,7 @@ export class TeamUpdater {
       const configFile = path.join(path.dirname(preview.agentsFile), '.planning', '.near-ai', 'project.json');
       const raw = await readFile(configFile, 'utf8').catch(() => undefined);
       const config = raw === undefined ? undefined : (() => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return undefined; } })();
-      if (raw !== undefined && config) writes.push({ file: configFile, before: raw, after: `${JSON.stringify({ ...config, templateVersion: templateVersion(preview.plan.template.id), guidanceBase: guidanceFingerprint(guidance.proposed!) }, null, 2)}\n`, label: 'project.json' });
+      if (raw !== undefined && config && !guidance.staffTemplate) writes.push({ file: configFile, before: raw, after: `${JSON.stringify({ ...config, templateVersion: templateVersion(preview.plan.template.id), guidanceBase: guidanceFingerprint(guidance.proposed!) }, null, 2)}\n`, label: 'project.json' });
       result.agentsFile = preview.agentsFile;
     }
     // Backups first, so a failure part-way can always be undone.

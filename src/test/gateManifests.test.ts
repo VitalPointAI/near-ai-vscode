@@ -11,6 +11,7 @@ import { braveSearch, searxngSearch, tavilySearch } from '../agent/webSearch';
 import { webSearchTool } from '../agent/webTools';
 import { imageTool } from '../agent/extraTools';
 import type { NearAiClient } from '../services/nearAiClient';
+import { INTEL_WORKBENCH_TOOL_NAMES } from '../agent/intelWorkbench';
 import { builtInTools, CATALOG_TOOL_FILES, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { buildStudioContext, reviewDraft } from '../services/teamStudioPage';
@@ -145,26 +146,34 @@ test('the page\'s status still comes from the settings layer\'s shorthand, not f
 });
 
 // The order `agentSession.toolsFor` gives them to a run: the core, web, graphics, image and scan tools, a cyber engagement's probes and exploit steps, a team's
-// knowledge graph, memory, and last the gsd tools (MCP tools sit between the cyber and knowledge tools in a run and are not built-in).
+// staff team's staff-products and guard-scan tools, its knowledge graph, memory, and last the gsd tools (MCP tools sit between the staff and knowledge tools
+// in a run and are not built-in).
 const CYBER_TOOLS = ['CyberHttpProbe', 'CyberTlsProbe', 'CyberDnsProbe', 'CyberTcpProbe', 'CyberRobotsProbe', 'CyberSecretsProbe', 'CyberIacProbe', 'CyberDependencyProbe', 'CyberFingerprintProbe', 'CyberExploitTool', 'CyberPostExploitTool'];
+// A staff section team's run (design 10, 6.2): the staff-products and guard-scan tools, between the cyber and the knowledge tools.
+const STAFF_TOOLS = [
+  'mcp__staff-products__propose', 'mcp__staff-products__verdict', 'mcp__staff-products__submit', 'mcp__staff-products__withdraw', 'mcp__staff-products__status',
+  'mcp__staff-products__list', 'mcp__staff-products__register', 'mcp__staff-products__wargame', 'mcp__staff-products__step', 'mcp__staff-products__lint',
+  'mcp__guard-scan__scan'
+];
 const EXPECTED_ORDER = [
   'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'BashOutput', 'KillShell', 'TodoWrite',
   'WebFetch', 'WebSearch', 'CheckCitations', 'CheckOriginality',
   'VectorizeImage', 'RenderSvg', 'CreatePresentation', 'CreatePdf', 'CreateDocument',
   'GenerateImage', 'SecurityScan',
   ...CYBER_TOOLS,
+  ...STAFF_TOOLS,
   'TeamKnowledge', 'Learn',
   'Remember', 'Recall',
   'Skill', 'SlashCommand', 'AskUserQuestion', 'Agent', 'Task'
 ];
 
-test('the catalog holds all 40 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
+test('the catalog holds all 51 built-in tools, once each, in the order a run is given them, and the page lists every one of them in that order', () => {
   const names = builtInTools().map((tool) => tool.name);
-  assert.equal(names.length, 40);
-  assert.equal(new Set(names).size, 40, 'a duplicate name fails the catalog');
+  assert.equal(names.length, 51);
+  assert.equal(new Set(names).size, 51, 'a duplicate name fails the catalog');
   assert.deepEqual(names, EXPECTED_ORDER);
   const listed = buildToolsDirectory(directoryInput()).tools.map((entry) => entry.name);
-  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 40, the cyber, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
+  assert.deepEqual(listed, EXPECTED_ORDER, 'the page lists all 51, the cyber, staff, TeamKnowledge and Learn tools included (owner-confirmed, PR #70 review)');
 });
 
 test('the 13 tools a run has only in a special setting are on the Tools page with their manifest words, in catalog order, and say whether they need a person', () => {
@@ -197,7 +206,9 @@ test('the 13 tools a run has only in a special setting are on the Tools page wit
 test('the team studio pickers offer the 13 tools with their words, and TeamKnowledge is no longer warned about as not built in', () => {
   const studio = buildStudioContext(directoryInput(), { hasProject: true, knowledgeBase: false });
   const names = studio.tools.map((tool) => tool.name);
-  assert.deepEqual(names, EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
+  assert.deepEqual(names.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
+  // After the catalog: each built-in staff server's whole-server grant, and the staff tools that are not catalog tools (the intel-workbench's).
+  assert.ok(names.slice(EXPECTED_ORDER.length).every((name) => /^mcp:(?:staff-products|guard-scan|intel-workbench)$/.test(name) || name.startsWith('mcp__intel-workbench__')), 'only staff server entries follow the catalog');
   const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
   for (const name of [...CYBER_TOOLS, 'TeamKnowledge', 'Learn']) assert.deepEqual(studio.tools.find((tool) => tool.name === name)!.words, describeManifest(byName.get(name)!.manifest!), `${name} words in the picker`);
   const draft = { name: 'k', description: '', members: [{ name: 'a', role: '', model: '', tools: ['TeamKnowledge', 'Learn', 'CyberHttpProbe', 'Teleport'], instructions: 'x' }] } as unknown as Parameters<typeof reviewDraft>[0];
@@ -460,7 +471,7 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
     security: { consented: () => true, scan: async () => undefined },
     cyber: { engagement: {}, tools: () => [...cyberProbes({ inScope: () => false }), ...cyberExploitTools({ inScope: () => false, engagementId: 'e', sandboxTier: 'disabled' })], limiter: () => undefined, grant: () => undefined },
     webSearch: { name: 'searxng', label: 'x', host: 'search.example', search: async () => [] },
-    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [] }
+    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [{ name: 'j2-chief', tools: ['mcp:intel-workbench'], instructions: 'x' }], staff: { section: 'j2' } }
   } as unknown as AgentTurnRequest;
   const toolsFor = (conversation as unknown as { toolsFor(...args: unknown[]): AgentTool<any>[] }).toolsFor.bind(conversation);
   return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1');
@@ -468,7 +479,12 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
 
 test('a run with every option on is given exactly the catalog\'s tools, in the catalog\'s order, so a tool added to a run but not to the catalog fails here', () => {
   const given = toolsOfARunWithEverythingOn().map((tool) => tool.name);
-  assert.deepEqual(given, builtInTools().map((tool) => tool.name));
+  // The run is a staff team's, so it also gets the intel-workbench: a built-in local server whose tools, like a connected server's, are not catalog
+  // entries (intelWorkbench.test.ts). They come right after the staff tools; everything else is exactly the catalog.
+  const catalog = builtInTools().map((tool) => tool.name);
+  const after = catalog.indexOf('mcp__guard-scan__scan') + 1;
+  assert.ok(after > 0);
+  assert.deepEqual(given, [...catalog.slice(0, after), ...INTEL_WORKBENCH_TOOL_NAMES, ...catalog.slice(after)]);
 });
 
 function sourceFilesUnder(folder: string): string[] {

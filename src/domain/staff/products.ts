@@ -1,7 +1,7 @@
 // Staff products (design 10, 4.1; UX concept 11 and 12.5; WP-0): product kinds and the renderers they declare, the header at the top of every product
 // file, and the fixed markers members write. Pure: no I/O, no clock, no vscode.
 //
-// A product is a Markdown file at `products/<section>/<product>.md` that opens with a `---` header block. The header carries the product's identity,
+// A product is a Markdown file at `.planning/staff/products/<section>/<product>.md` that opens with a `---` header block. The header carries the product's identity,
 // owner, the profile and level it was written under, its version and release state, its label, the human role it waits on, what it depends on, and the
 // gate verdicts on the current version. The header is a projection of the decision log: WP-SHARED compares the two, and a header that claims a state
 // the log does not hold reads as tampered. This file only parses and writes the header, strictly.

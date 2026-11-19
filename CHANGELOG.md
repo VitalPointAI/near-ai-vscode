@@ -2,6 +2,73 @@
 
 ## Unreleased
 
+**Military staff teams.** Set up a J2 intelligence or J5 plans staff team for your project in your
+staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian), load a fictional exercise
+scenario, and let the members draft in parallel while every product passes the team's gates and a
+named person makes every decision. Staff teams are private, unclassified and for exercise and
+fictional data only; labels are not accreditation, and no member has a persona name or a rank.
+
+- **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
+  for the section (J2 or J5), the doctrine profile, the level, the nation (NATO/Canadian), the
+  planning type and the section's own options, then shows the roster: the person who decides, and
+  each member with its role and who it reports to. It saves the private team to your teams, writes
+  PROFILE.md and the section's skills under `.planning/staff/`, the staff settings in the
+  project's settings and the section's guidance in `AGENTS.md` between markers of its own, then
+  offers to load the starter scenario. An existing team file is archived after you confirm, never
+  deleted. **Update Team** brings a staff team up to date for the project's current staff
+  settings and keeps the members you changed. Staff team cards show a violet badge for the
+  section's agent work and a gold badge naming the person who decides.
+- **J2 intelligence team.** 9 members at strategic level, 12 at operational level, 7 for a
+  brigade and 5 for a battalion, each with its doctrinal job, the products it owns with their
+  required headings, a "your output is X, not Y" boundary, what it hands back and to whom, and
+  what it never decides: PIRs, collection allocation and every release stay with people. The words
+  follow the profile (JIPOE or IPB, Annex B or Annex D, J-2, J2, G2 or S-2). Two skills come with
+  it: ICD 203 analytic standards, and source grading with reliability and credibility graded
+  separately.
+- **J5 plans team.** A lead planner who runs the planning steps and the wargame, design before the
+  steps, two COA cells given distinct themes and run at the same time, the lead planner alone
+  applying the profile's COA tests, a red cell seat, an independent red team that reports to the
+  human chief of staff, future operations, sustainment, legal support, a plans writer and a
+  release guard. Strategic, operational and tactical variants, a multidomain convergence planner
+  under US Army, and the J3 director as planning lead in crisis planning. Four skills: planning
+  templates, wargame ledger, centre of gravity analysis and assessment framework.
+- **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
+  and move from draft through the gates to a person's decision, recorded in a signed, chained
+  ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head
+  outside the project, so a ledger cut short, deleted or replaced reads as tampered, and a ledger
+  or register that cannot be read whole is reported as unreadable, never as empty. Members use the built-in `mcp:staff-products` tools by role
+  (propose, status and list for owners; submit and withdraw for the section's lead; verdicts for
+  the two gates), with the shared CCIR, RFI, assumptions, annex, synchronization, decision support
+  and targeting registers, the wargame ledger and the step rail. Approving, rejecting and
+  releasing are **NEAR AI: Staff:** commands a person runs, signed with this device's key; no
+  agent tool can do them.
+- **Two blocking gates.** The release guard runs `mcp:guard-scan` (classification and caveat
+  markings, the exercise box, your real-entity list, publications with no public copy, decisions
+  written as made, personal data, secrets and J4 numbers without a calculation) and records
+  CLEARED or HOLD on the exact version. J2 products first need the tradecraft reviewer's SIGN-OFF,
+  held to the one ICD 203 tradecraft lint. An edit voids both verdicts.
+- **Intel workbench.** A J2 team's members granted `mcp:intel-workbench` keep the source register,
+  the PIR register and the collection plan in `.planning/staff/products/j2/`. Reliability (A to F)
+  and credibility (1 to 6) are two fields, reports that share an origin never count as
+  corroboration, every PIR names its decision point and latest time of value and only a named
+  person approves one, with **NEAR AI: Staff: Decide a PIR**, which signs the decision (a decision
+  written into the register file alone never counts), and the collection plan holds recommendations
+  only. Only members granted `mcp:intel-workbench` can use it. It drafts INTSUM and
+  INTREP skeletons and checks a product for compilation risk, which always ends with a question
+  for a person. It reaches no network and takes exercise labels only.
+- **Exercise scenarios.** **NEAR AI: Load Staff Exercise Scenario** loads Exercise IRON LANTERN, a
+  fictional, unclassified starter (a peninsula, a coast and a strait, both orders of battle, a
+  mission with the higher commander's intent, graded and ungraded reports), or a scenario file of
+  your own, into `.planning/staff/scenario/` with J2 and J5 demo scripts. Files with
+  classification markings, names on your real-entity list or stray coordinates are refused, and an
+  earlier scenario is archived rather than deleted. The real-entity list is one list, in
+  `.planning/.near-ai/staff-guard.json` and `.planning/staff/real-entities.txt`, used by both the
+  scenario import and guard-scan.
+- **Red team and release guard held to their own files.** In a staff team the red team may write
+  only its critique and the release guard only its gate reports. Write and Edit refuse every other
+  path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
+  tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
+
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through
   NEAR AI: Edit Policy). A call to that server from a chat whose label is above it is refused before

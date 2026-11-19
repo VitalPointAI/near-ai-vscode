@@ -1,0 +1,255 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { DEFAULT_RULES } from '../agent/permissions';
+import { staffGuidanceIn, withStaffGuidance } from '../agent/staff/guidance';
+import { J2_STAFF_TEMPLATE, J5_STAFF_TEMPLATE } from '../agent/staff/templates';
+import { builtInStaffServers } from '../agent/staffServers';
+import { applyGuidanceUpdate, applyTeamUpdate, detectTemplate, planStaffGuidanceUpdate, planTeamUpdate } from '../agent/teamUpdate';
+import { parseTeam, TeamLibrary } from '../agent/teams';
+import { PROJECT_TYPES, projectTypeTeam } from '../agent/projectTypes';
+import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profiles';
+import type { StaffSettings } from '../domain/staff/profiles';
+import { applyStaffSetup, levelChoices, nationChoices, planStaffSetup, profileChoices, settingsFrom, staffTeamFileName, staffTeamTarget, templateQuestions } from '../services/staffSetup';
+import { buildStudioContext, parseStudioMessage } from '../services/teamStudioPage';
+import { TeamUpdater } from '../services/teamUpdates';
+import { buildToolsDirectory, type DirectoryInput } from '../services/toolsDirectory';
+
+// Drop 1 integration: the staff servers on the Tools page and in the Team Studio picker, NEAR AI: Set Up a Staff Team, and Update Team for staff teams.
+
+const input: DirectoryInput = {
+  gsd: { version: '1.40.0', skills: [], agents: [] }, teams: [], policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, webSearch: false, securityConsented: true, mcp: [],
+  models: [{ id: 'z-ai/glm-5.3', privacyBoundary: 'tee' }],
+  settings: { mainModel: 'z-ai/glm-5.3', tiers: { deep: 'z-ai/glm-5.3', standard: 'z-ai/glm-5.3', fast: 'z-ai/glm-5.3' }, roleModels: {}, visionModel: 'x', transcriptionModel: 'x', imageModel: 'y', safetyModel: 'x' }
+};
+const settings = (overrides: Partial<StaffSettings> = {}): StaffSettings => ({ ...defaultStaffSettings(), ...overrides });
+const DECISION_VERBS = /__(?:approve|reject|release|supersede|decide|sign)\b/;
+
+// ---- Item 9: the tools show up ----------------------------------------------------------------------------------------------------------------
+
+test('the Tools page lists the three built-in staff servers with every tool and grant, and no decision verb', () => {
+  const directory = buildToolsDirectory(input);
+  assert.deepEqual(directory.staffServers.map((server) => server.grant), ['mcp:staff-products', 'mcp:guard-scan', 'mcp:intel-workbench']);
+  const names = directory.staffServers.flatMap((server) => server.tools.map((tool) => tool.name));
+  for (const tool of builtInStaffServers().flatMap((server) => server.tools)) assert.ok(names.includes(tool.name), tool.name);
+  assert.ok(names.includes('mcp__staff-products__lint') && names.includes('mcp__guard-scan__scan') && names.includes('mcp__intel-workbench__source_add'));
+  for (const name of names) assert.doesNotMatch(name, DECISION_VERBS);
+  for (const server of directory.staffServers) assert.ok(server.tools.every((tool) => tool.name.startsWith(`mcp__${server.id}__`)), server.id);
+  // The intel-workbench is not a catalog tool, so the staff servers are where the page shows it.
+  assert.ok(!directory.tools.some((tool) => tool.name.startsWith('mcp__intel-workbench__')));
+});
+
+test('the Tools page script draws the staff servers', () => {
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'tools', 'tools.js'), 'utf8');
+  assert.match(script, /renderStaffServers\(root, data\.staffServers \|\| \[\]\)/);
+  assert.match(script, /Built-in staff servers/);
+});
+
+test('the Team Studio tool picker offers each staff server as a grant and tool by tool, grouped by server', () => {
+  const context = buildStudioContext(input, { hasProject: true, knowledgeBase: false });
+  for (const server of builtInStaffServers()) {
+    const grant = context.tools.find((tool) => tool.name === server.grant);
+    assert.ok(grant?.server && grant.server.id === server.id, server.grant);
+    for (const tool of server.tools) {
+      const found = context.tools.filter((entry) => entry.name === tool.name);
+      assert.equal(found.length, 1, `${tool.name} is offered once`);
+      assert.equal(found[0].server?.id, server.id, tool.name);
+    }
+  }
+  for (const tool of context.tools) assert.doesNotMatch(tool.name, DECISION_VERBS);
+  // Plain tools carry no server.
+  assert.equal(context.tools.find((tool) => tool.name === 'Read')?.server, undefined);
+  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.js'), 'utf8');
+  assert.match(page, /tool\.status !== 'off' && !tool\.server/, '"Everything" leaves the staff servers out');
+});
+
+// ---- Item 10: Set Up a Staff Team --------------------------------------------------------------------------------------------------------------
+
+test('the setup offers only what each template is written for', () => {
+  assert.deepEqual(profileChoices(J2_STAFF_TEMPLATE).map((choice) => choice.value), ['us-joint', 'us-army', 'nato-ca']);
+  assert.deepEqual(levelChoices(J2_STAFF_TEMPLATE, 'us-joint').map((choice) => choice.value), ['strategic', 'operational']);
+  assert.deepEqual(levelChoices(J5_STAFF_TEMPLATE, 'us-army').map((choice) => choice.value), ['tactical']);
+  assert.deepEqual(nationChoices('us-joint'), []);
+  assert.deepEqual(nationChoices('nato-ca').map((choice) => choice.value), ['ca', 'nato']);
+  assert.deepEqual(templateQuestions(J2_STAFF_TEMPLATE, { profile: 'us-army', level: 'tactical' }).echelon?.map((choice) => choice.value), ['brigade', 'battalion']);
+  assert.deepEqual(templateQuestions(J2_STAFF_TEMPLATE, { profile: 'us-joint', level: 'operational' }), {});
+  assert.ok(templateQuestions(J5_STAFF_TEMPLATE, { profile: 'us-army', level: 'tactical' }).variant);
+  assert.equal(templateQuestions(J5_STAFF_TEMPLATE, { profile: 'us-joint', level: 'operational' }).variant, undefined);
+  assert.ok(templateQuestions(J5_STAFF_TEMPLATE, { profile: 'nato-ca', level: 'operational' }).redTeam);
+  assert.equal(templateQuestions(J5_STAFF_TEMPLATE, { profile: 'us-joint', level: 'operational' }).redTeam, undefined);
+  // Horizons and phases the project already set are kept; a nation is only kept under NATO/Canadian.
+  const kept = settingsFrom(settings({ profile: 'nato-ca', nation: 'ca', phases: ['Shape'] }), { profile: 'us-joint', level: 'operational', planningType: 'crisis' });
+  assert.equal(kept.nation, undefined);
+  assert.deepEqual(kept.phases, ['Shape']);
+  assert.equal(settingsFrom(undefined, { profile: 'nato-ca', level: 'tactical', planningType: 'campaign' }).nation, 'nato');
+});
+
+test('the setup plan shows the roster and writes the team, skills, PROFILE.md, settings and guidance, keeping the rest', () => {
+  const options = { settings: settings(), locality: 'cloud' as const };
+  const agents = '# Agent instructions\n\nMy own notes.\n';
+  const projectJson = JSON.stringify({ type: 'research', templateVersion: 3 });
+  const plan = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options, agents, projectJson });
+  const team = parseTeam(plan.team, `${plan.roster.fileName}.md`);
+  assert.equal(team.staff?.section, 'j2');
+  assert.equal(team.private, true);
+  assert.equal(plan.roster.members.length, team.members.length);
+  assert.ok(plan.roster.humanLead, 'the roster names who decides');
+  assert.ok(plan.roster.members.some((member) => member.name === 'release-guard'));
+  assert.equal(plan.roster.fileName, 'j2-us-joint-operational');
+  assert.match(plan.team, /^---[\s\S]*template: j2-intelligence\ntemplateVersion: \d+\ntemplateBase:/);
+  const byPath = new Map(plan.writes.map((write) => [write.path, write.content]));
+  assert.ok(byPath.has('.planning/staff/PROFILE.md') && byPath.has('.planning/staff/skills/icd203-standards.md'));
+  const config = JSON.parse(byPath.get('.planning/.near-ai/project.json')!);
+  assert.equal(config.type, 'research');
+  assert.equal(config.templateVersion, 3);
+  assert.ok(parseStaffSettings(config.staff).ok);
+  const written = byPath.get('AGENTS.md')!;
+  assert.match(written, /My own notes\./);
+  assert.equal(staffGuidanceIn(written, J2_STAFF_TEMPLATE.id), J2_STAFF_TEMPLATE.render(options).guidance);
+  assert.throws(() => planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options, projectJson: '[1]' }), /not a JSON object/);
+  assert.throws(() => planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options, projectJson: '{oops' }), /not valid JSON/);
+  // A J5 team for the same project keeps the J2 block and adds its own.
+  const j5 = planStaffSetup({ templateId: J5_STAFF_TEMPLATE.id, options, agents: written });
+  const both = j5.writes.find((write) => write.path === 'AGENTS.md')!.content;
+  assert.ok(staffGuidanceIn(both, J2_STAFF_TEMPLATE.id) && staffGuidanceIn(both, J5_STAFF_TEMPLATE.id));
+  assert.notEqual(staffTeamFileName(J5_STAFF_TEMPLATE, options), plan.roster.fileName);
+  assert.equal(staffTeamFileName(J2_STAFF_TEMPLATE, { settings: settings({ profile: 'us-army', level: 'tactical' }), echelon: 'battalion' }), 'j2-us-army-tactical-battalion');
+});
+
+test('applying the setup writes into the project and the team library, archives an earlier team, and refuses symbolic links', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'staff-setup-'));
+  const library = new TeamLibrary(path.join(root, 'store'));
+  const project = path.join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const plan = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options: { settings: settings(), locality: 'local' } });
+  const first = await applyStaffSetup(project, library, plan);
+  assert.equal(parseTeam(await readFile(first.teamFile, 'utf8'), first.teamFile).staff?.section, 'j2');
+  assert.ok((await library.list()).some((entry) => entry.file === first.teamFile && entry.team?.staff));
+  assert.ok(first.written.includes('AGENTS.md'));
+  assert.match(await readFile(path.join(project, '.planning', 'staff', 'PROFILE.md'), 'utf8'), /\S/);
+  // A second setup of the same team needs the person's yes, and keeps the earlier file in the archive.
+  await assert.rejects(applyStaffSetup(project, library, plan), /already in your teams/);
+  assert.equal((await staffTeamTarget(library, plan)).exists, true);
+  const second = await applyStaffSetup(project, library, plan, { replace: true });
+  assert.ok(second.archived && (await library.archived()).includes(second.archived));
+  // A link on the way into the project is refused before anything is written.
+  const linked = path.join(root, 'linked');
+  await mkdir(path.join(linked, '.planning'), { recursive: true });
+  await mkdir(path.join(root, 'elsewhere'), { recursive: true });
+  await symlink(path.join(root, 'elsewhere'), path.join(linked, '.planning', 'staff'));
+  const before = await readdir(library.directory);
+  await assert.rejects(applyStaffSetup(linked, library, { ...plan, roster: { ...plan.roster, fileName: 'another' } }), /symbolic link/);
+  assert.deepEqual(await readdir(library.directory), before);
+  assert.deepEqual(await readdir(path.join(root, 'elsewhere')), []);
+});
+
+test('Team Studio accepts the staff setup message and offers the button', () => {
+  assert.deepEqual(parseStudioMessage({ type: 'staff-setup' }), { type: 'staff-setup' });
+  assert.equal(parseStudioMessage({ type: 'staff-setup', extra: 1 }), undefined);
+  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.js'), 'utf8');
+  assert.match(page, /'Set up a staff team'/);
+  assert.match(page, /type: 'staff-setup'/);
+  const css = readFileSync(path.join(__dirname, '..', '..', 'media', 'teams', 'teams.css'), 'utf8');
+  assert.match(css, /\.staff-person \{ color: var\(--vscode-charts-yellow\)/);
+  assert.match(css, /\.staff-agent \{ color: var\(--vscode-charts-purple\)/);
+  const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string }> } };
+  assert.ok(manifest.contributes.commands.some((command) => command.command === 'nearAi.setUpStaffTeam' && command.title === 'Set Up a Staff Team'));
+});
+
+// ---- Update Team recognises staff templates ----------------------------------------------------------------------------------------------------
+
+test('Update Team recognises a staff team, replaces unchanged members and keeps edited ones', () => {
+  const options = { settings: settings(), locality: 'cloud' as const };
+  const plan = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options });
+  const ref = detectTemplate(plan.team);
+  assert.equal(ref?.id, J2_STAFF_TEMPLATE.id);
+  assert.equal(ref?.stamped, true);
+  // A fresh team is the current rendering: every member is the same.
+  const fresh = planTeamUpdate(plan.team, { staffSettings: options.settings })!;
+  assert.ok(fresh.staff);
+  assert.ok(fresh.members.every((member) => member.action === 'same'), JSON.stringify(fresh.members.map((member) => [member.name, member.action])));
+  // The person edits one member; the settings move to crisis planning, so the rendering changes for others.
+  const edited = plan.team.replace(/(## release-guard\n[\s\S]*?\n\n)/, '$1My own rule: check twice.\n\n');
+  assert.notEqual(edited, plan.team);
+  const crisis = settings({ planningType: 'crisis' });
+  const update = planTeamUpdate(edited, { staffSettings: crisis })!;
+  const guard = update.members.find((member) => member.name === 'release-guard')!;
+  assert.equal(guard.action, 'choice');
+  const changed = update.members.filter((member) => member.action === 'auto');
+  assert.ok(changed.length > 0, 'unchanged members whose rendering moved are replaced');
+  const applied = applyTeamUpdate(edited, update);
+  const team = parseTeam(applied, 'team.md');
+  assert.equal(team.staff?.section, 'j2');
+  assert.match(applied, /My own rule: check twice\./);
+  const rendered = parseTeam(J2_STAFF_TEMPLATE.render({ ...options, settings: crisis }).team, 't.md');
+  for (const member of changed) assert.equal(team.members.find((entry) => entry.name === member.name)?.instructions, rendered.members.find((entry) => entry.name === member.name)?.instructions);
+  // Applied again with the same settings, nothing is left to do except the member the person kept.
+  const again = planTeamUpdate(applied, { staffSettings: crisis })!;
+  assert.ok(again.members.every((member) => member.action === 'same' || member.action === 'kept'), JSON.stringify(again.members.map((member) => [member.name, member.action])));
+});
+
+test('Update Team picks the staff rendering that fits the file: local, battalion, J5 without a red team', () => {
+  const local = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options: { settings: settings(), locality: 'local' } });
+  assert.equal(planTeamUpdate(local.team, { staffSettings: settings() })?.local, true);
+  const army = settings({ profile: 'us-army', level: 'tactical' });
+  const battalion = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options: { settings: army, echelon: 'battalion', locality: 'cloud' } });
+  const battalionPlan = planTeamUpdate(battalion.team, { staffSettings: army })!;
+  assert.equal(battalionPlan.staff?.echelon, 'battalion');
+  assert.ok(battalionPlan.members.every((member) => member.action === 'same'));
+  const nato = settings({ profile: 'nato-ca', nation: 'ca' });
+  const noRed = planStaffSetup({ templateId: J5_STAFF_TEMPLATE.id, options: { settings: nato, redTeam: false, locality: 'cloud' } });
+  const noRedPlan = planTeamUpdate(noRed.team, { staffSettings: nato })!;
+  assert.equal(noRedPlan.staff?.redTeam, false);
+  assert.ok(!noRedPlan.members.some((member) => member.action === 'new'), 'the red team the person left out is not offered back');
+});
+
+test('Update Team refreshes a staff section\'s own AGENTS.md block, never the project-type block', () => {
+  const options = { settings: settings(), locality: 'cloud' as const };
+  const plan = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options });
+  const crisis = settings({ planningType: 'crisis' });
+  const update = planTeamUpdate(plan.team, { staffSettings: crisis })!;
+  const agents = withStaffGuidance('# Agent instructions\n\n<!-- near-ai:project-type:start -->\nproject text\n<!-- near-ai:project-type:end -->\n', J2_STAFF_TEMPLATE.id, J2_STAFF_TEMPLATE.render(options).guidance);
+  const guidance = planStaffGuidanceUpdate(agents, update);
+  assert.equal(guidance.staffTemplate, J2_STAFF_TEMPLATE.id);
+  const after = applyGuidanceUpdate(agents, guidance);
+  assert.equal(staffGuidanceIn(after, J2_STAFF_TEMPLATE.id), J2_STAFF_TEMPLATE.render({ ...options, settings: crisis }).guidance);
+  assert.match(after, /project text/);
+  // A block the person edited is their choice.
+  const edited = agents.replace('## Staff section', '## Staff section (ours)');
+  assert.equal(planStaffGuidanceUpdate(edited, update).action, 'choice');
+});
+
+test('a plain team is unchanged by the staff support', () => {
+  const type = PROJECT_TYPES[0];
+  const text = projectTypeTeam(type, 'Build it', 'cloud');
+  const plan = planTeamUpdate(text)!;
+  assert.equal(plan.template.id, type.id);
+  assert.equal(plan.staff, undefined);
+  assert.ok(!/staff:/.test(applyTeamUpdate(text, plan)));
+});
+
+test('TeamUpdater previews a library staff team against the open project\'s settings and guidance', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'staff-update-'));
+  const library = new TeamLibrary(path.join(root, 'store'));
+  const project = path.join(root, 'project');
+  await mkdir(project, { recursive: true });
+  const options = { settings: settings(), locality: 'cloud' as const };
+  const setup = await applyStaffSetup(project, library, planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options }));
+  // The person moves the project to crisis planning.
+  const configFile = path.join(project, '.planning', '.near-ai', 'project.json');
+  const config = JSON.parse(await readFile(configFile, 'utf8'));
+  await writeFile(configFile, JSON.stringify({ ...config, staff: { ...config.staff, planningType: 'crisis' } }));
+  const updater = new TeamUpdater(library, undefined, () => false, () => project);
+  const preview = (await updater.preview(setup.teamFile))!;
+  assert.equal(preview.plan.staff?.settings.planningType, 'crisis');
+  assert.equal(preview.guidance?.action, 'auto');
+  const applied = await updater.apply(preview, {});
+  assert.equal(applied.configFile, undefined, 'project.json is not rewritten for a staff block');
+  assert.equal(staffGuidanceIn(await readFile(path.join(project, 'AGENTS.md'), 'utf8'), J2_STAFF_TEMPLATE.id), J2_STAFF_TEMPLATE.render({ ...options, settings: settings({ planningType: 'crisis' }) }).guidance);
+  // Without an open project it still plans the team, with the defaults, and leaves AGENTS.md alone.
+  const alone = await new TeamUpdater(library).preview(setup.teamFile);
+  assert.ok(alone && !alone.guidance);
+});

@@ -422,3 +422,383 @@ export const STAFF_SECTIONS: Readonly<Record<StaffSectionId, StaffSection>> = {
   j9: { id: 'j9', number: 9, function: 'Civil-military cooperation' },
   'special-staff': { id: 'special-staff', function: 'Special staff' }
 };
+
+// ---- Analytic standards and restricted publications (design 10, 4.2, 4.4 and 7; WP-SHARED) -----------------------------------------------------------
+
+/**
+ * The ICD 203 expressions of likelihood, lowest first: the term, the alternative ICD 203 allows, other word forms of the same two (adverbs), and the range
+ * of probability in percent (ICD 203, Analytic Standards, 2 January 2015, amended 2022, section D.6.b.(2)(a); 02 T10). A judgement uses one of these words,
+ * never another estimative word. NATO/Canadian products use the same table (design 10, 4.4). The one copy of the table: the tradecraft lint, the J2
+ * skills and the demo acceptance fixtures all read it.
+ */
+export const ICD203_LIKELIHOOD: ReadonlyArray<{ readonly term: string; readonly alternative: string; readonly forms: readonly string[]; readonly range: readonly [number, number] }> = [
+  { term: 'almost no chance', alternative: 'remote', forms: [], range: [1, 5] },
+  { term: 'very unlikely', alternative: 'highly improbable', forms: [], range: [5, 20] },
+  { term: 'unlikely', alternative: 'improbable', forms: ['improbably'], range: [20, 45] },
+  { term: 'roughly even chance', alternative: 'roughly even odds', forms: [], range: [45, 55] },
+  { term: 'likely', alternative: 'probable', forms: ['probably'], range: [55, 80] },
+  { term: 'very likely', alternative: 'highly probable', forms: [], range: [80, 95] },
+  { term: 'almost certain', alternative: 'nearly certain', forms: ['almost certainly'], range: [95, 99] }
+];
+
+/**
+ * Confidence levels for a judgement, said in a sentence of its own, never with a likelihood term (ICD 203, 2015, tradecraft standard 2 and section
+ * D.6.b.(2)(a); the three levels are ATP 2-33.4, 2020, usage; 02 T10). Written in a product as "<level> confidence".
+ */
+export const ICD203_CONFIDENCE_LEVELS: readonly string[] = ['high', 'moderate', 'low'];
+
+/**
+ * Estimative words outside the ICD 203 table, which a key judgement must not use because a reader cannot tell what probability they mean (ICD 203, section
+ * D.6.b.(2)(a), "analytic products should use the terms in the table"; 02 T10). The list is the common offenders, not every word in English.
+ */
+export const NON_STANDARD_ESTIMATIVE_WORDS: readonly string[] = [
+  'possible', 'possibly', 'maybe', 'perhaps', 'conceivable', 'conceivably', 'might', 'could well', 'chances are', 'in all likelihood', 'doubtful', 'presumably', 'plausibly'
+];
+
+/**
+ * Publications with no public copy, cited by title and edition only (design 10, 2.4 and 7 item 7; 02 T1; 03 A1, B1, B6). A product that names one is checked
+ * by the release-guard for text taken from it beyond a citation. APP-28 and the COPD are not here: the NATO/Canadian profile names them as its process.
+ */
+export const RESTRICTED_PUBLICATION_TITLES: readonly string[] = ['JP 2-0', 'JP 3-04', 'JP 4-0', 'CJCSM 3130.03', 'JIPOE Joint Guide', 'CFJP 2-0', 'CFJP 4-0'];
+
+// ---- Intelligence terms (WP-INT; design 10, 3.2, 4.4 and 6.2; research note 02) --------------------------------------------------------------
+
+/** Source reliability on the NATO Admiralty scale: a grade of the source, never of the information (AJP-2.1 Edition B; 02 T10, S24). */
+export const SOURCE_RELIABILITY = {
+  A: 'Completely reliable',
+  B: 'Usually reliable',
+  C: 'Fairly reliable',
+  D: 'Not usually reliable',
+  E: 'Unreliable',
+  F: 'Reliability cannot be judged'
+} as const;
+export type SourceReliability = keyof typeof SOURCE_RELIABILITY;
+export const SOURCE_RELIABILITY_GRADES = Object.keys(SOURCE_RELIABILITY) as readonly SourceReliability[];
+
+/**
+ * Information credibility on the NATO Admiralty scale: a grade of the information, assessed separately from the source (AJP-2.1 Edition B; 02 T10, S24).
+ * The words for grade 1 differ between the grade tables (the older Canadian text and US field manuals read "confirmed by other sources"): a product
+ * uses its profile's words, IntelligenceTerms.credibilityOne.
+ */
+export const INFORMATION_CREDIBILITY = {
+  1: 'Completely credible',
+  2: 'Probably true',
+  3: 'Possibly true',
+  4: 'Doubtful',
+  5: 'Improbable',
+  6: 'Truth cannot be judged'
+} as const;
+export type InformationCredibility = 1 | 2 | 3 | 4 | 5 | 6;
+export const INFORMATION_CREDIBILITY_GRADES: readonly InformationCredibility[] = [1, 2, 3, 4, 5, 6];
+
+/**
+ * Credibility 1 means confirmed by other, independent reporting. The 2003 CF joint intelligence doctrine reads grade 1 as "confirmed by other sources"
+ * (B-GJ-005-200/FP-000, 2003; 02 T10, S18); AJP-2.1 Edition B names it "completely credible" (S24). The workbench applies the stricter reading.
+ */
+export const CONFIRMED_CREDIBILITY: InformationCredibility = 1;
+
+/**
+ * Intelligence disciplines (JP 2-0, 2022, as summarised in 02, S4). HUMINT, SIGINT, MASINT and CI collection needs legal authority and partner systems,
+ * so a template never collects them itself and a collection recommendation for them always needs a partner (02 Summary 8).
+ */
+export const INTELLIGENCE_DISCIPLINES = ['OSINT', 'GEOINT', 'HUMINT', 'SIGINT', 'MASINT', 'TECHINT', 'CI'] as const;
+export type IntelligenceDiscipline = (typeof INTELLIGENCE_DISCIPLINES)[number];
+export const PARTNER_ONLY_DISCIPLINES: readonly IntelligenceDiscipline[] = ['HUMINT', 'SIGINT', 'MASINT', 'CI'];
+
+/** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
+export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
+
+/** Intelligence requirement terms (JP 2-0; design 10, 3.2): priority intelligence requirement, named area of interest, latest time of value. */
+export const INTELLIGENCE_REQUIREMENT_TERMS = { pir: 'PIR', nai: 'NAI', ltiov: 'Latest time of value' } as const;
+
+/** PIR register headings: every PIR names the decision point it supports and a latest time of value (design 10, 3.2; 02 T9, S15). */
+export const PIR_REGISTER_HEADINGS: readonly string[] = ['Requirement', 'Decision point supported', 'Indicators', INTELLIGENCE_REQUIREMENT_TERMS.ltiov, 'Status'];
+
+/** Collection plan headings and its rule: the J2 recommends, the J3 approves asset allocation (design 10, 3.2; 02 T10, S15). */
+export const COLLECTION_PLAN_HEADINGS: readonly string[] = ['Requirement', 'Indicator', 'NAI', 'Recommended capability', 'Timing', 'Needs J3 approval or partner'];
+export const COLLECTION_PLAN_RULE = 'The J2 recommends; the J3 approves the allocation of collection assets.';
+
+/**
+ * The two standard NATO intelligence reports the CAF also uses (02, S18): the INTSUM, a periodic summary with an assessment of future intent, and the
+ * INTREP, a spontaneous report needing urgent attention, with deductions. Headings from design 10, 3.2 (watch-officer).
+ */
+export const INTEL_REPORTS = {
+  intsum: { name: 'Intelligence summary (INTSUM)', headings: ['Period', 'Significant activity', 'Assessment of intent', 'Changes since last', 'Gaps'] },
+  intrep: { name: 'Intelligence report (INTREP)', headings: ['Event', 'Deduction'] }
+} as const;
+
+/** The date-time group form `DDHHMMZ MON YY`, in UTC (ACP 121, Communication Instructions General; 02 T11 "DTG helpers"). */
+export const DTG_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
+
+/**
+ * The template ceiling (design 10, 6): staff templates hold exercise and fictional data at org/Internal, NATO Unclassified or Protected A at most, whatever
+ * the device allows, because labels are not accreditation. Labels are `scale/level` keys from the Phase 70 scale presets.
+ */
+export const STAFF_TEMPLATE_LABELS: readonly string[] = ['org/Public', 'org/Internal', 'nato/NATO Unclassified', 'ca-protected/Protected A'];
+
+// ---- Intelligence terms (design 10, 3.2, 4.4 and 6.2 skills; research note 02, tables 2, 6 and 10; WP-J2) ----------------------------------------
+// The J2 template and its two skills (icd203-standards, source-grading) read these tables, with the likelihood table and the two grading scales above;
+// no other file spells an intelligence process stage, a preparation step, a likelihood term or a grade.
+
+/** The four steps of intelligence preparation, by the name the process uses (design 10, 3.1: JIPOE at joint levels, IPB with OAKOC at tactical level). */
+export interface PreparationSteps {
+  /** The four steps, in order. */
+  readonly steps: readonly [string, string, string, string];
+  /** What the steps call the other side: the adversary at joint levels, the threat at tactical level. */
+  readonly actor: string;
+  readonly source: string;
+}
+
+export const INTELLIGENCE_PREPARATION_STEPS: Readonly<Record<'JIPOE' | 'IPB', PreparationSteps>> = {
+  // JP 2-0 (2022) is CAC-only and JIPOE is now a joint guide; the public reference edition of the method is JP 2-01.3 (21 May 2014) (02 s1 item 3, T1).
+  // AJP-2 (Edition A, 2016) uses the same four steps for NATO JIPOE as far as the public text shows (02 T6); AJP-2's current edition is in design 2.9.
+  JIPOE: {
+    steps: ['Define the operational environment', 'Describe the impact of the operational environment', 'Evaluate the adversary and other relevant actors', 'Determine adversary and other relevant actor courses of action'],
+    actor: 'adversary',
+    source: 'JP 2-01.3 (2014), public reference edition of the JIPOE method; JP 2-0 (2022) by title'
+  },
+  // ATP 2-01.3 (2019 with Change 1, 2021) ch. 1 (02 s1 item 4). The Canadian Army uses the same IPB steps at land tactical level (Land Operations, 2008).
+  IPB: {
+    steps: ['Define the operational environment', 'Describe environmental effects on operations', 'Evaluate the threat', 'Determine threat courses of action'],
+    actor: 'threat',
+    source: 'ATP 2-01.3 (2019 with Change 1)'
+  }
+};
+
+/** The intelligence process a profile names (design 10, 3.2: US Joint uses the six categories, NATO/Canadian the four-stage cycle). */
+export interface IntelligenceProcess {
+  readonly name: string;
+  readonly stages: readonly string[];
+  /** Activities that run through every stage (US Army only). */
+  readonly continuing?: readonly string[];
+  readonly source: string;
+}
+
+/** Intelligence terms that change with the profile (research note 02, tables 2, 6 and 10; design 10, 3.2 and 4.4). */
+export interface IntelligenceTerms {
+  readonly process: IntelligenceProcess;
+  /** How requirements and collection are managed under the profile. */
+  readonly requirementsManagement: string;
+  /** A nation setting that names requirements management differently. */
+  readonly nationRequirementsManagement?: Readonly<Partial<Record<StaffNation, string>>>;
+  /** What the collection plan is called. */
+  readonly collectionPlan: string;
+  /** Where the intelligence estimate sits in the plan, where the profile's sources say. */
+  readonly estimatePlacement?: string;
+  /** The words for credibility grade 1 (the grade tables differ on it: design 10, 4.4). */
+  readonly credibilityOne: string;
+  /** What units below staff level plan with at tactical level, where the profile offers that level. */
+  readonly belowStaffLevel?: string;
+  readonly source: string;
+}
+
+export const INTELLIGENCE_TERMS: Readonly<Record<StaffProfileId, IntelligenceTerms>> = {
+  'us-joint': {
+    // The six categories of JP 2-0 (2013), the public reference edition; JP 2-0 (26 May 2022) is the current text and is CAC-only (02 s1 items 1 and 2).
+    process: {
+      name: 'Joint intelligence process',
+      stages: ['Planning and direction', 'Collection', 'Processing and exploitation', 'Analysis and production', 'Dissemination and integration', 'Evaluation and feedback'],
+      source: 'JP 2-0 (2022) by title; categories from JP 2-0 (2013), public reference edition'
+    },
+    // JP 2-01 (5 July 2017), public reference edition: collection requirements management and collection operations management (02 T6).
+    requirementsManagement: 'Collection requirements management and collection operations management (CRM and COM)',
+    collectionPlan: 'Collection plan',
+    // JP 5-0 (1 July 2025): the J-2 intelligence estimate is appendix 11 to annex B (design 10, 3.2, profile differences).
+    estimatePlacement: 'Appendix 11 to Annex B (Intelligence)',
+    // FM 2-22.3 (2006) app. B and ATP 2-22.9 use "confirmed by other sources" for grade 1; US practice follows them (best judgement; 02 T10).
+    credibilityOne: 'Confirmed by other sources',
+    source: 'JP 2-0 (2013, 2022); JP 2-01 (2017); JP 5-0 (2025)'
+  },
+  'us-army': {
+    // ADP 2-0 (31 July 2019) ch. 4: four steps and two continuing activities. FM 2-0 (Oct 2023) was seen only second-hand (design 10, 2.4); best judgement.
+    process: {
+      name: 'Intelligence process',
+      stages: ['Plan and direct', 'Collect and process', 'Produce', 'Disseminate'],
+      continuing: ['Analyze', 'Assess'],
+      source: 'ADP 2-0 (2019) ch. 4; FM 2-0 (2023) by title'
+    },
+    // FM 3-55 (2013): information collection, and its information collection plan; the brigade collection manager writes it (design 10, 3.2 tactical).
+    requirementsManagement: 'Information collection: requirements management and collection management',
+    collectionPlan: 'Information collection plan',
+    credibilityOne: 'Confirmed by other sources', // FM 2-22.3 (2006) app. B (best judgement; 02 T10)
+    belowStaffLevel: 'Troop leading procedures', // FM 5-0 (2024); ATP 2-01.3 (2019) ch. 2 (02 T4)
+    source: 'ADP 2-0 (2019); FM 3-55 (2013); FM 5-0 (2024)'
+  },
+  'nato-ca': {
+    // AJP-2 (Edition A, 2016) and the 2003 CF intelligence doctrine: a four-stage cycle (02 s1 item 2, T2). The same four stages as CANADIAN_LAND_TERMS.
+    process: {
+      name: 'Intelligence cycle',
+      stages: [...CANADIAN_LAND_TERMS.intelligenceCycle],
+      source: 'AJP-2 (Edition A, 2016); CFJP 2-0 (2003), superseded but the latest public text'
+    },
+    // AJP-2.1 (Edition B, ratification draft): IRM and CM, formerly CCIRM (02 T6). Canadian plans still name CCIRM (CFJP 5.0 ch. 5 annex E, Annex D).
+    requirementsManagement: 'Intelligence requirements management and collection management (IRM and CM, formerly CCIRM)',
+    nationRequirementsManagement: { ca: 'CCIRM (collection coordination and intelligence requirements management; NATO now says IRM and CM)' },
+    collectionPlan: 'Collection plan',
+    // AJP-2.1 (Edition B) grade 1 is "completely credible"; the 2003 CF text reads "confirmed by other sources" (design 10, 4.4; 02 T10).
+    credibilityOne: 'Completely credible',
+    belowStaffLevel: CANADIAN_LAND_TERMS.belowStaffLevel, // Land Operations (2008): battle procedure for commanders without a staff
+    source: 'AJP-2 (2016); AJP-2.1 (Edition B draft); CFJP 5.0 (2008); Land Operations (2008)'
+  }
+};
+
+/** The five analytic standards (ICD 203, 2015, section D.6.a). */
+export const ICD203_ANALYTIC_STANDARDS: readonly string[] = [
+  'Objective', 'Independent of political consideration', 'Timely', 'Based on all available sources of intelligence information', 'Implements and exhibits the analytic tradecraft standards'
+];
+
+/** The nine analytic tradecraft standards (ICD 203, 2015, section D.6.b). */
+export const ICD203_TRADECRAFT_STANDARDS: readonly string[] = [
+  'Properly describes quality and credibility of underlying sources, data, and methodologies',
+  'Properly expresses and explains uncertainties associated with major analytic judgments',
+  'Properly distinguishes between underlying intelligence information and analysts\' assumptions and judgments',
+  'Incorporates analysis of alternatives',
+  'Demonstrates customer relevance and addresses implications',
+  'Uses clear and logical argumentation',
+  'Explains change to or consistency of analytic judgments',
+  'Makes accurate judgments and assessments',
+  'Incorporates effective visual information where appropriate'
+];
+
+/** The aspects of terrain at tactical level, OAKOC (ATP 2-01.3, 2019, ch. 4; design 10, 3.1). */
+export const TERRAIN_ASPECTS: readonly string[] = ['Observation and fields of fire', 'Avenues of approach', 'Key terrain', 'Obstacles', 'Cover and concealment'];
+
+/** The operational variables, PMESII (JP 2-01.3, 2014, ch. II; JP 5-0, 2025, systems view). */
+export const OPERATIONAL_VARIABLES: readonly string[] = ['Political', 'Military', 'Economic', 'Social', 'Information', 'Infrastructure'];
+
+/** The civil considerations, ASCOPE (ATP 2-01.3, 2019, ch. 3; JP 3-57 uses the same six). */
+export const CIVIL_CONSIDERATIONS: readonly string[] = ['Areas', 'Structures', 'Capabilities', 'Organizations', 'People', 'Events'];
+
+// ---- J5 planning terms (design 10, 2.6 and 3.3; research note 05; WP-J5) ----
+// The J5 plans template, its skills and its tests read these tables; none of them spells a planning term of its own.
+
+/** The eight steps of the operational design method. Design runs before the JPP and alongside mission analysis. */
+// JP 5-0 (1 July 2025) ch. III, as recorded in design 10, 2.6 (the 2020 edition had five steps).
+export const OPERATIONAL_DESIGN_METHOD: readonly string[] = [
+  'Understand the strategic direction and guidance', 'Understand the operational environment', 'Define the problem', 'Identify assumptions',
+  'Develop operational approaches', 'Identify decisions and decision points', 'Refine the operational approach', 'Prepare planning guidance'
+];
+
+/** The elements of operational design in their groups. Not every element applies to every plan. */
+// JP 5-0 (1 July 2025) ch. III; AY26 Campaign Planning Handbook ch. 3 (design 10, 2.6 and 2.8 item 10).
+export const OPERATIONAL_DESIGN_ELEMENTS: ReadonlyArray<{ readonly group: string; readonly elements: readonly string[] }> = [
+  { group: 'Overarching', elements: ['Objective', 'Transitions', 'Center of gravity', 'Effects', 'Culmination'] },
+  { group: 'Organizing the operation', elements: ['Lines of operation', 'Lines of effort', 'Decisive points', 'Direct and indirect approach', 'Operational reach'] },
+  { group: 'Time', elements: ['Arranging operations', 'Anticipation'] },
+  { group: 'Forces and functions', elements: ['Forces and functions'] },
+  { group: 'Balancing', elements: ['Balancing'] }
+];
+
+/** The Army design methodology's activities, used at tactical level under US Army when the problem is ill-structured. */
+// FM 5-0 (Nov 2024) 1-54 to 1-56 and ch. 4 introduction (05 s2).
+export const ARMY_DESIGN_METHODOLOGY_ACTIVITIES: readonly string[] = [
+  'Frame the operational environment', 'Frame the problem', 'Develop an operational approach', 'Transition to detailed planning', 'Reframe when the situation changes'
+];
+
+/** How each process does design: its name, when it runs, and its source. */
+export const DESIGN_APPROACHES: Readonly<Record<StaffProcessId, { readonly name: string; readonly when: string; readonly source: string }>> = {
+  jpp: { name: 'Operational design', when: 'before the JPP starts and alongside mission analysis', source: 'JP 5-0 (1 July 2025) ch. III' },
+  mdmp: { name: 'Army design methodology (ADM)', when: 'before or alongside mission analysis when the problem is ill-structured; the commander may start the MDMP without it when time is short', source: 'FM 5-0 (Nov 2024) 1-54 to 1-56, ch. 4' },
+  'ajp-5': { name: 'Operations design', when: 'inside mission analysis', source: 'AJP-5 Edition B 3.19' },
+  // APP-28 has no formal operational design step (05 s3 and s4, from a NATO centre-of-excellence handbook).
+  'app-28': { name: 'Problem framing (no formal operational design step)', when: 'only when the commander asks for it on an ill-structured problem', source: 'APP-28 Edition A as summarised in 05 (S7, S15)' }
+};
+
+/** The centre of gravity analysis terms, spelled as each profile spells them. */
+// JP 5-0 (2020) IV-23 to IV-25 and JP 5-0 (1 July 2025) ch. III (US); AJP-5 Edition B annex B (NATO spelling) (05 T4).
+export const COG_TERMS: Readonly<Record<StaffProfileId, { readonly cog: string; readonly capabilities: string; readonly requirements: string; readonly vulnerabilities: string }>> = {
+  'us-joint': { cog: 'Center of gravity', capabilities: 'Critical capabilities', requirements: 'Critical requirements', vulnerabilities: 'Critical vulnerabilities' },
+  'us-army': { cog: 'Center of gravity', capabilities: 'Critical capabilities', requirements: 'Critical requirements', vulnerabilities: 'Critical vulnerabilities' },
+  'nato-ca': { cog: 'Centre of gravity', capabilities: 'Critical capabilities', requirements: 'Critical requirements', vulnerabilities: 'Critical vulnerabilities' }
+};
+
+/** What design aims at, per profile. JP 5-0 (2025) no longer uses "military end state"; US Army and NATO/Canadian still do. */
+// JP 5-0 (1 July 2025) ch. III; FM 5-0 (Nov 2024); AJP-5 Edition B; design 10, 2.6 and 2.8 item 4.
+export const END_STATE_TERMS: Readonly<Record<StaffProfileId, { readonly term: string; readonly usesMilitaryEndState: boolean }>> = {
+  'us-joint': { term: 'objectives and the conditions that achieve them', usesMilitaryEndState: false },
+  'us-army': { term: 'military end state', usesMilitaryEndState: true },
+  'nato-ca': { term: 'military end state', usesMilitaryEndState: true }
+};
+
+/** What each COA test asks, in plain words. Every test a profile lists has an entry (the J5 tests hold this). */
+// US tests: JP 5-0 (1 July 2025) ch. IV and FM 5-0 (Nov 2024) ch. 5 COA screening criteria. NATO tests: AJP-5 Edition B 3.50, paraphrased.
+export const COA_TEST_MEANINGS: Readonly<Record<string, string>> = {
+  Suitable: 'It accomplishes the mission within the commander\'s intent and planning guidance.',
+  Feasible: 'It can be done with the forces, resources and time available, in the operational environment as it is.',
+  Acceptable: 'The expected result is worth the cost in forces, resources, time and risk, and it stays inside the limitations.',
+  Distinguishable: 'It differs clearly from every other COA in main effort, scheme, task organization, timing or use of forces.',
+  Complete: 'It answers who, what, when, where, why and how, and covers the operation to its end, including sustainment and risk.',
+  Feasibility: 'It can be done with the forces, resources and time available.',
+  Acceptability: 'The expected result is worth its cost and risk, and it stays inside the limitations.',
+  'Completeness and compliance': 'It answers who, what, when, where, why and how, and it complies with the commander\'s planning guidance.',
+  Exclusivity: 'It differs clearly from every other COA.',
+  Suitability: 'It accomplishes the mission and achieves the commander\'s intent.'
+};
+
+/** The wargame turn and the order adversary COAs are played in. */
+// FM 5-0 (Nov 2024) 5-133 to 5-165 (action, reaction, counteraction); AJP-5 Edition B 3.58 (most likely, then most dangerous).
+export const WARGAME_TURN: readonly string[] = ['Action', 'Reaction', 'Counteraction'];
+export const ADVERSARY_COA_ORDER: readonly string[] = [`Most likely adversary COA (${ADVERSARY_COA_TERMS.mostLikely})`, `Most dangerous adversary COA (${ADVERSARY_COA_TERMS.mostDangerous})`];
+
+/** Branches and sequels, kept apart: branches belong to future operations, sequels to the planners. */
+// JP 5-0 (2020) IV-39; JP 3-33 (2018) IX-1 (05 T7).
+export const BRANCH_AND_SEQUEL = {
+  branch: 'A branch is a contingency option inside the current operation, with the trigger that starts it.',
+  sequel: 'A sequel is a later operation or phase that follows from a possible outcome of the current one.'
+} as const;
+
+/** Measures of performance and effectiveness, kept in separate tables. */
+// JP 5-0 (2020) K-19; JP 5-0 (1 July 2025) app. H; AY26 Campaign Planning Handbook (design 10, 2.8 item 10).
+export const ASSESSMENT_TERMS = {
+  moe: 'Measure of effectiveness (MOE): are we doing the right things, creating the effects and changing the conditions we need?',
+  mop: 'Measure of performance (MOP): are we doing things right, completing the tasks we were given?',
+  indicator: 'Indicator: a specific, observable and collectable item of information that shows progress toward an MOE or MOP.'
+} as const;
+
+/** The joint plan levels (level 3T when a TPFDD is needed). */
+// JP 5-0 (1 July 2025) ch. I (design 10, 2.8 item 5).
+export const JOINT_PLAN_LEVELS: readonly string[] = [
+  'Level 1: commander\'s estimate', 'Level 2: base plan', 'Level 3: concept plan (CONPLAN); 3T when a TPFDD is needed', 'Level 4: operation plan (OPLAN)'
+];
+
+/** Time allocation at tactical level: the planners use at most a third of the time and leave two thirds to subordinates. */
+// FM 5-0 (Nov 2024) 1-118, 5-21 to 5-22 (05 s2).
+export const TIME_RULE = 'One-third, two-thirds rule';
+
+/** Who leads planning at tactical level: never "S-5" unless the person sets it. */
+// FM 5-0 (Nov 2024) 1-76 (05 T7); Land Operations (2008) plans centre (design 10, 2.5).
+export const TACTICAL_PLANS_CELL = {
+  division: 'plans cell led by the G-5',
+  brigade: 'plans cell led by the operations officer (S-3)',
+  battalion: 'no dedicated plans cell; planning and operations are combined'
+} as const;
+
+/** Multidomain operations, the US Army operational concept. It changes what a COA must show, not the planning steps. */
+// FM 3-0 (March 2025) 1-9, 3-7, 3-13 to 3-14; FM 5-0 (Nov 2024) introduction (05 s2).
+export const MDO_TERMS = {
+  concept: 'Multidomain operations',
+  tenets: ['Agility', 'Convergence', 'Endurance', 'Depth'],
+  domains: ['Air', 'Land', 'Maritime', 'Space', 'Cyberspace'],
+  dimensions: ['Physical', 'Informational', 'Human'],
+  convergence: 'Convergence synchronizes joint and Army capabilities against combinations of decisive points across domains to create windows of opportunity.',
+  profiles: ['us-army']
+} as const satisfies { readonly profiles: readonly StaffProfileId[] } & Record<string, unknown>;
+
+/** Profile-specific gates in the J5 workflow, beyond the commander's COA decision. */
+// AJP-5 Edition B 3.51 and Stage 4; CFJP 5.0 art. 405 (design 10, 3.3 workflow table).
+export const J5_PROFILE_GATES: Readonly<Record<StaffProfileId, { readonly afterCoaDevelopment: string; readonly beforeFullPlan?: string }>> = {
+  'us-joint': { afterCoaDevelopment: 'The commander gives guidance on which COAs to analyse.' },
+  'us-army': { afterCoaDevelopment: 'The commander gives guidance on which COAs to analyse.' },
+  'nato-ca': {
+    afterCoaDevelopment: 'The commander gives guidance for the refinement of the tentative COAs (AJP-5 3.51).',
+    beforeFullPlan: 'The CONOPS is approved by the higher commander before the full plan is written (AJP-5 Stage 4; CFJP 5.0 art. 405).'
+  }
+};
+
+/** The red team under each profile. Under NATO/Canadian it is a UK national element, optional, on by default (owner decision Q11). */
+// JP 5-0 (1 July 2025) app. G (red team separate from the J-2 red cell); FM 5-0 (Nov 2024); AJP-5 Edition B UK 2.15.
+export const RED_TEAM_NOTES: Readonly<Record<StaffProfileId, { readonly note: string; readonly optional: boolean }>> = {
+  'us-joint': { note: 'The red team is an independent group, separate from the J-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
+  'us-army': { note: 'The red team is an independent group, separate from the S-2 or G-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
+  'nato-ca': { note: 'Red teaming is a UK national element in AJP-5, not NATO doctrine. It is on by default; the commander may switch it off.', optional: true }
+};

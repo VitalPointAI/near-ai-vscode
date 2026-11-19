@@ -28,6 +28,8 @@ export interface GsdAgent {
   model?: string;
   /** `private`: this agent runs only on a model in a NEAR TEE or on this machine (a team member's `privacy: private` line). */
   privacy?: 'private';
+  /** Workspace-relative paths this agent alone may write (a folder ends in `/`); every other write is refused. Set for a staff team's red team and guard. */
+  writeOnly?: readonly string[];
   body: string;
   file: string;
 }

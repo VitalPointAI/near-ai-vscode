@@ -157,6 +157,16 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.setUpStaffTeam",
+        "title": "Set Up a Staff Team",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.loadStaffScenario",
+        "title": "Load Staff Exercise Scenario",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.removeProfile",
         "title": "Remove Profile…",
         "category": "NEAR AI"
@@ -311,6 +321,41 @@
       {
         "command": "nearAi.policy.reset",
         "title": "Reset Policy to Defaults",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.approveProduct",
+        "title": "Staff: Approve a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.rejectProduct",
+        "title": "Staff: Reject a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.releaseProduct",
+        "title": "Staff: Release a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.withdrawProduct",
+        "title": "Staff: Withdraw a Product",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.showProducts",
+        "title": "Staff: Show Products",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.setAsideLedger",
+        "title": "Staff: Set Aside the Product Ledger",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.decidePir",
+        "title": "Staff: Decide a PIR",
         "category": "NEAR AI"
       },
       {
@@ -991,6 +1036,7 @@
     "generate:icon": "node scripts/generate-near-ai-icon.mjs",
     "install:global": "node scripts/install-global-extension.mjs",
     "verify:release": "npm run package && node scripts/verify-release-content.mjs",
+    "smoke:staff": "npm run compile && node scripts/staff-smoke.mjs",
     "check": "npm run lint && npm test",
     "test:e2e": "npm run compile && env -u ELECTRON_RUN_AS_NODE xvfb-run -a -s \"-screen 0 1920x1080x24\" node dist/test/e2e/run.js",
     "generate:screenshots": "npm run compile && node scripts/generate-marketplace-screenshots.mjs",

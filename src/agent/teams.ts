@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { readStaffTeamBlock, renderStaffTeamBlock } from '../domain/staff/teamBlock';
 import type { StaffTeamBlock } from '../domain/staff/teamBlock';
+import { staffWriteLimit } from '../domain/staff/writeLimits';
 import { parseFrontmatter, type GsdAgent } from '../gsd/library';
 import { recommendAgentTeam } from '../services/agentTeams';
 import { checkTeamIcon, iconReference, MAX_TEAM_ICON_BYTES, TEAM_ICON_SUFFIX, TeamIconError, TeamIconPartialError, withIconReference } from './teamIcon';
@@ -186,16 +187,21 @@ export function newTeamTemplate(name: string): string {
 
 /** A team's members as sub-agent definitions for the runner. */
 export function teamAgents(team: TeamDefinition): GsdAgent[] {
-  return team.members.map((member) => ({
-    name: member.name,
-    description: member.role ?? member.name,
-    tools: member.tools,
-    model: member.model,
-    // A team marked private keeps every member private, as if each had its own privacy: private line.
-    ...(member.privacy || team.private ? { privacy: 'private' as const } : {}),
-    body: `You are ${member.name}${member.role ? `, the ${member.role},` : ''} on the "${team.name}" team.\n\n${member.instructions}`,
-    file: team.file
-  }));
+  return team.members.map((member) => {
+    // A staff team's red team and release guard may write only their own files (src/domain/staff/writeLimits.ts); the runtime refuses the rest.
+    const writeOnly = staffWriteLimit(team.staff, member.name);
+    return {
+      name: member.name,
+      description: member.role ?? member.name,
+      tools: member.tools,
+      model: member.model,
+      // A team marked private keeps every member private, as if each had its own privacy: private line.
+      ...(member.privacy || team.private ? { privacy: 'private' as const } : {}),
+      ...(writeOnly ? { writeOnly } : {}),
+      body: `You are ${member.name}${member.role ? `, the ${member.role},` : ''} on the "${team.name}" team.\n\n${member.instructions}`,
+      file: team.file
+    };
+  });
 }
 
 /**
