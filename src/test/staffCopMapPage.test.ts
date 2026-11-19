@@ -288,7 +288,8 @@ test('MapLibre places names with its collision index: symbols always stay, a nam
   assert.ok(Number(names.layout!['text-padding']) >= 2);
   assert.ok(Number(names.layout!['text-radial-offset']) >= 1.5, 'clear of its own symbol');
   const textLayers = layers.filter((layer) => layer.type === 'symbol' && layer.layout && 'text-field' in layer.layout);
-  assert.deepEqual(JSON.parse(JSON.stringify(textLayers.map((layer) => layer.id))), ['area-labels', 'line-labels', 'place-labels', 'point-labels'], 'then names of symbols, then places, then control measures');
+  // The ground's own labels (index contour heights, grid numbers) are the lowest: any picture name wins a crowded spot over them.
+  assert.deepEqual(JSON.parse(JSON.stringify(textLayers.map((layer) => layer.id))), ['contour-labels', 'grid-labels-10', 'grid-labels-1', 'area-labels', 'line-labels', 'place-labels', 'point-labels'], 'then names of symbols, then places, then control measures, then the ground');
   for (const layer of textLayers) assert.equal(layer.layout!['text-allow-overlap'], false, `${layer.id} never covers another label`);
   view.setPicture(timedPicture());
   view.setTime(Date.parse('2026-11-18T13:00:00.000Z'));
@@ -483,9 +484,10 @@ test('the COP map floats its controls over the map, groups its layers in the dra
   assert.ok(!container.all().some((node) => node.tag === 'input' && node.type === 'checkbox'), 'no checkbox block');
   const strip = container.all().find((node) => node.className === 'cop-map-strip')!;
   assert.equal(strip.children[0].textContent, picture.marking, 'the classification line on the map');
-  // The drawer: three groups, environment with hillshade and contours, the scenario for reference.
+  // The drawer: the base map (Topographic and Plain here: no tiles were given), then three groups, environment with hillshade and contours, the
+  // scenario for reference.
   const titles = container.all().filter((node) => node.className === 'ld-group-title').map((node) => node.textContent);
-  assert.deepEqual(titles, ['Picture', 'Environment', 'Reference']);
+  assert.deepEqual(titles, ['Base map', 'Picture', 'Environment', 'Reference']);
   const ids = switches(root).map((node) => node.getAttribute('data-layer'));
   assert.ok(['env-hillshade', 'env-contours', 'env-weather', 'cop-terrain-layer'].every((id) => ids.includes(id)));
   const hill = switches(root).find((node) => node.getAttribute('data-layer') === 'env-hillshade')!;

@@ -275,6 +275,9 @@
       onEmptyAction: () => vscode.postMessage({ type: 'open', target: 'load-scenario' }),
       hiddenLayers: saved.hiddenLayers || [],
       onLayers: (hidden) => { saved.hiddenLayers = hidden; save(); },
+      // The person's base map, 3D, height and grid choices, kept like the hidden layers (webview state).
+      mapSettings: isObj(saved.mapSettings) ? saved.mapSettings : undefined,
+      onMapSettings: (settings) => { saved.mapSettings = settings; save(); },
       onTable: (on) => { saved.table = on; save(); },
       onFull: (on) => { announce(on ? 'Full map. Escape returns to the room.' : 'Back to the room.'); if (!on) fitMapSoon(); },
       cop: { resources: copResources() }
@@ -1247,6 +1250,8 @@
       if (!validModel(message.model)) return;
       render(message.model, isArr(message.cues) ? message.cues : []);
       // The COP picture comes with the model when it changed (or the page asked for everything); the time comes every time.
+      // The checked tile addresses of the globe and the scenario's terrain (src/staff/mapTiles.ts) come when they changed; the map checks their shape again.
+      if (map && isObj(message.basemap) && map.setBasemap) map.setBasemap(message.basemap);
       if (map && ('picture' in message || 'pictureProblem' in message || 'pictureNow' in message)) {
         map.setPicture(validPicture(message.picture) ? message.picture : undefined, {
           now: typeof message.pictureNow === 'number' ? message.pictureNow : undefined,

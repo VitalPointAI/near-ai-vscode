@@ -171,9 +171,11 @@
   /** What the environment layers draw now: the terrain features of the visible layers, the weather frame at the clock, and the words under the map. */
   function environmentNow(state) {
     const env = state.picture && state.picture.environment;
-    if (!env) return { terrain: [], weather: [], line: '' };
+    const credits = baseCredits(state);
+    if (!env) return { terrain: [], weather: [], line: credits.join(' ') };
     const terrain = [];
-    if (state.visible[ENV_LAYER_IDS.hillshade]) terrain.push.apply(terrain, (env.hillshade && env.hillshade.features) || []);
+    // Over Imagery and Topographic with height tiles, the hillshade is MapLibre's own (from the relief heights); the pack's shaded shapes are for Plain.
+    if (state.visible[ENV_LAYER_IDS.hillshade] && !state.rasterHillshade) terrain.push.apply(terrain, (env.hillshade && env.hillshade.features) || []);
     if (state.visible[ENV_LAYER_IDS.contours]) terrain.push.apply(terrain, (env.contours && env.contours.features) || []);
     let weather = [];
     const words = [];
@@ -189,7 +191,142 @@
     }
     const on = [ENV_LAYER_IDS.hillshade, ENV_LAYER_IDS.contours, ENV_LAYER_IDS.weather].some(function (id) { return state.visible[id]; });
     if (on && env.pack) words.push(env.pack.title + ': ' + (env.pack.attribution || []).join(' ') + (env.pack.licence ? ' Licence: ' + env.pack.licence + '.' : ''));
-    return { terrain: terrain, weather: weather, line: words.join(' ') };
+    return { terrain: terrain, weather: weather, line: credits.concat(words).join(' ') };
+  }
+
+  /** The credit lines of the base on show: the world imagery's, and the frame's own words that it is synthetic. Never a logo, never an endorsement. */
+  function baseCredits(state) {
+    const b = state.basemap;
+    if (!b || state.base === 'plain') return [];
+    const out = [];
+    if (state.base === 'imagery') {
+      if (b.globe.imagery && b.credit.imagery) out.push('Blue Marble: ' + b.credit.imagery + '.');
+      if (b.frame.imagery) out.push(b.synthetic ? 'Synthetic imagery and terrain generated from a seed: not a real place.' : 'Imagery and terrain from the terrain pack.');
+    } else if (state.base === 'topo') {
+      if (b.globe.topo && b.credit.topo) out.push(b.credit.topo + '.');
+      if (b.frame.relief) out.push(b.synthetic ? 'Synthetic terrain and land cover generated from a seed: not a real place.' : 'Terrain from the terrain pack.');
+    }
+    return out;
+  }
+
+  // ---- Base maps, 3D terrain, the grid and the margin ---------------------------------------------------------------------------------------
+  //
+  // The map draws on one of three bases (owner direction, 0.4.35: "the map and globe would already have 3d and topographic textures... those are
+  // important layers"): Imagery (the world's Blue Marble on the globe and the pack's photo-like imagery in the frame, with 3D terrain), Topographic
+  // (Natural Earth on the globe; colour relief, land cover, hillshade, contours, roads and the grid in the frame) and Plain (the flat land and sea).
+  // Every tile comes from the extension, after the host checked it against its index (src/staff/mapTiles.ts); nothing is fetched from a server.
+  //
+  // The state machine (each transition has a page test in src/test/staffCopMapPage.test.ts):
+  //   base       imagery | topo | plain       Imagery needs tiles; the SVG map offers Topographic and Plain. A switch only changes which style layers
+  //                                           show (sources, images and the picture's layers stay), and sets the base's hillshade and contour defaults:
+  //                                           off over Imagery (its light is baked in), on over Topographic.
+  //   terrain    on | off | unavailable       Unavailable without height tiles or on the SVG map. Starts on, except on a software renderer (SwiftShader,
+  //                                           llvmpipe), where it starts off with the reason shown; the person can still turn it on.
+  //   projection map | globe
+  //   spin       off | on                     Off until the person presses Spin; only on the globe, never while motion() is false (Calm, reduced
+  //                                           motion), stopped by any input on the map, and when the page is hidden.
+  const BASES = ['imagery', 'topo', 'plain'];
+  const BASE_TITLES = { imagery: 'Imagery', topo: 'Topographic', plain: 'Plain' };
+  const EXAGGERATION = { min: 1, max: 3, step: 0.25, start: 1.5 };
+  const MAP_ITEMS = { terrain: 'map-terrain', grid: 'map-grid' };
+  const BASE_LAYERS = {
+    imagery: ['globe-imagery', 'frame-imagery', 'frame-imagery-detail'],
+    topo: ['globe-topo', 'color-relief', 'landcover-fill', 'landcover-built-edge', 'landcover-tracks', 'landcover-roads-case', 'landcover-roads'],
+    plain: ['land', 'marsh']
+  };
+  /** A topographic map's colours: land cover tints over colour relief, red roads, brown contours, a blue grid. */
+  const TOPO = {
+    sea: '#a9cce3', forest: '#a6cf8a', scrub: '#d8e4b2', farmland: '#f4f0d4', beach: '#f3e3b2', rock: '#d8d1c4', 'built-up': '#d9cbbd', marsh: '#bcdcd2',
+    road: '#d9553a', roadCase: '#6f2617', track: '#7d5530', contour: '#9b6a3a', grid: '#2a67a8', coast: '#3b6f96'
+  };
+  const RELIEF_STOPS = [-80, '#4c83b6', -40, '#6b9dc9', -15, '#8fb9da', -4, '#b0d0e7', -0.01, '#c6e0ef', 0, '#c5dca9', 30, '#d5e2ad', 80, '#e7e3a9', 150, '#e8d39a', 220, '#d8b88a', 300, '#c39f7d', 380, '#ae8d72'];
+  /** The deep-ocean colour under the world imagery, so the frame's sea and the globe's meet. */
+  const IMAGERY_SEA = '#0c1e3a';
+  /** How far the first 3D view leans back, in degrees. */
+  const FIRST_PITCH = 50;
+  const SKY = { 'sky-color': '#0b1d3a', 'horizon-color': '#9cc3e6', 'fog-color': '#c9dcef', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6, 'fog-ground-blend': 0.4, 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] };
+
+  /** One tile source the host sent, or undefined: a {z}/{x}/{y} template with no quote, space or angle bracket, and sane zooms and bounds. */
+  function tileSource(value) {
+    if (!value || typeof value !== 'object') return undefined;
+    const t = value.tiles;
+    if (typeof t !== 'string' || t.length > 2000 || !/\{z\}/.test(t) || !/\{x\}/.test(t) || !/\{y\}/.test(t) || /["'<>\s\\]/.test(t)) return undefined;
+    const zoom = function (n) { return Number.isInteger(n) && n >= 0 && n <= 22; };
+    const b = value.bounds;
+    if (!zoom(value.minzoom) || !zoom(value.maxzoom) || value.minzoom > value.maxzoom) return undefined;
+    if (!Array.isArray(b) || b.length !== 4 || !b.every(function (n) { return typeof n === 'number' && isFinite(n); })) return undefined;
+    return { tiles: t, minzoom: value.minzoom, maxzoom: value.maxzoom, bounds: [b[0], b[1], b[2], b[3]] };
+  }
+
+  /** The host's basemap (src/staff/mapTiles.ts CopBasemap), keeping only well-formed sources. */
+  function validBasemap(value) {
+    if (!value || typeof value !== 'object') return undefined;
+    const out = { globe: {}, frame: {}, credit: { imagery: '', topo: '' }, synthetic: true, problems: [] };
+    const g = value.globe || {}, f = value.frame || {};
+    out.globe.imagery = tileSource(g.imagery); out.globe.topo = tileSource(g.topo);
+    if (g.credit && typeof g.credit === 'object') {
+      if (typeof g.credit.imagery === 'string') out.credit.imagery = g.credit.imagery.slice(0, 120);
+      if (typeof g.credit.topo === 'string') out.credit.topo = g.credit.topo.slice(0, 120);
+    }
+    out.frame.imagery = tileSource(f.imagery); out.frame.imageryDetail = tileSource(f.imageryDetail); out.frame.terrain = tileSource(f.terrain); out.frame.relief = tileSource(f.relief);
+    if (typeof f.landcover === 'string' && f.landcover.length < 2000 && !/["'<>\s\\]/.test(f.landcover) && /\.geojson$/.test(f.landcover)) out.frame.landcover = f.landcover;
+    out.synthetic = f.synthetic !== false;
+    if (Array.isArray(value.problems)) out.problems = value.problems.filter(function (p) { return typeof p === 'string'; }).slice(0, 4).map(function (p) { return p.slice(0, 300); });
+    return out;
+  }
+
+  /** The renderer's name when WebGL is drawn in software (SwiftShader, llvmpipe and the like), else ''. */
+  function softwareRenderer(options) {
+    const injected = options && options.libraries && options.libraries.renderer;
+    const name = typeof injected === 'string' ? injected : (function () {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext && (canvas.getContext('webgl2') || canvas.getContext('webgl'));
+        if (!gl) return '';
+        const info = gl.getExtension('WEBGL_debug_renderer_info');
+        return String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+      } catch (error) { return ''; }
+    })();
+    return /swiftshader|llvmpipe|softpipe|lavapipe|software/i.test(name) ? name : '';
+  }
+
+  /**
+   * The frame's grid as GeoJSON: a line every square (1 km for KQ) and every ten, each with its two-digit number. The frame is linear in latitude and
+   * longitude (src/domain/staff/obs/frame.ts), so the lines are straight between the frame's edges.
+   */
+  function gridFeatures(frame) {
+    if (!frame || !Array.isArray(frame.bounds) || !Array.isArray(frame.squares)) return [];
+    const b = frame.bounds, e = Math.min(500, Math.floor(frame.squares[0])), n = Math.min(500, Math.floor(frame.squares[1]));
+    if (!(e > 0) || !(n > 0)) return [];
+    const out = [];
+    const two = function (i) { return String(i % 100).padStart(2, '0'); };
+    for (let i = 0; i <= e; i += 1) {
+      const lon = b[0] + (i / e) * (b[2] - b[0]);
+      out.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[lon, b[1]], [lon, b[3]]] }, properties: { ten: i % 10 === 0, label: two(i), axis: 'e' } });
+    }
+    for (let j = 0; j <= n; j += 1) {
+      const lat = b[1] + (j / n) * (b[3] - b[1]);
+      out.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[b[0], lat], [b[2], lat]] }, properties: { ten: j % 10 === 0, label: two(j), axis: 'n' } });
+    }
+    return out;
+  }
+
+  /** The words for a declination: "17° E" or "4° W". */
+  function declinationWords(degrees) { return Math.abs(degrees).toFixed(Math.abs(degrees) % 1 ? 1 : 0) + '° ' + (degrees >= 0 ? 'E' : 'W'); }
+
+  /** The declination diagram: true north (a star), grid north (GN) and magnetic north (a half arrow) at its angle, drawn in DOM SVG. */
+  function declinationDiagram(degrees) {
+    const box = svg('svg', { viewBox: '0 0 44 52', width: 44, height: 52, class: 'cop-map-decl', 'aria-hidden': 'true', focusable: 'false' });
+    const foot = [22, 48];
+    const line = function (angle, length) { const a = (angle * Math.PI) / 180; return [foot[0] + Math.sin(a) * length, foot[1] - Math.cos(a) * length]; };
+    const top = line(0, 40);
+    box.appendChild(svg('line', { x1: foot[0], y1: foot[1], x2: top[0], y2: top[1], class: 'decl-true' }));
+    box.appendChild(svg('text', { x: top[0], y: top[1] - 1, 'text-anchor': 'middle', class: 'decl-star' })).textContent = '★';
+    const mag = line(Math.max(-60, Math.min(60, degrees)), 36);
+    box.appendChild(svg('line', { x1: foot[0], y1: foot[1], x2: mag[0], y2: mag[1], class: 'decl-mag' }));
+    box.appendChild(svg('text', { x: mag[0] + (degrees >= 0 ? 2 : -2), y: mag[1] + 3, 'text-anchor': degrees >= 0 ? 'start' : 'end', class: 'decl-label' })).textContent = 'MN';
+    box.appendChild(svg('text', { x: foot[0] - 2, y: 18, 'text-anchor': 'end', class: 'decl-label' })).textContent = 'GN';
+    return box;
   }
 
   function el(tag, className, text) {
@@ -257,10 +394,21 @@
     const drawerApi = window.nearLayerDrawer;
     const drawer = drawerApi ? drawerApi.create(root, {
       motion: state.motion, title: 'Map layers', footnote: 'Each layer has one writer. Plans stay apart from the current picture.',
-      onToggle: function (id, on) { view.setLayerVisible(id, on); if (options.onLayer) options.onLayer(id, on); }
+      onToggle: function (id, on) {
+        if (id === MAP_ITEMS.terrain) { view.setTerrain(on); return; }
+        if (id === MAP_ITEMS.grid) { view.setGrid(on); return; }
+        view.setLayerVisible(id, on); if (options.onLayer) options.onLayer(id, on);
+      },
+      onChoose: function (group, id) { if (group === 'base') view.setBase(id); },
+      onSlide: function (id, value) { if (id === MAP_ITEMS.terrain) view.setExaggeration(value); }
     }) : undefined;
     if (drawer) tools.appendChild(drawer.button);
-    tools.appendChild(projection); tools.appendChild(mode); tools.appendChild(ecoa);
+    // Spin (owner decision, 0.4.35): off until pressed; the globe also spins by dragging, with momentum.
+    const spin = el('button', 'cop-map-button cop-map-spin', 'Spin');
+    spin.type = 'button';
+    spin.setAttribute('aria-pressed', 'false');
+    spin.hidden = true;
+    tools.appendChild(projection); tools.appendChild(spin); tools.appendChild(mode); tools.appendChild(ecoa);
     const foot = el('div', 'cop-map-foot');
     const slider = el('div', 'cop-map-time');
     const range = el('input', 'cop-map-range');
@@ -280,13 +428,18 @@
     card.hidden = true;
     const notice = el('div', 'cop-map-notice');
     notice.hidden = true;
+    // The map's margin (military map conventions): datum, grid, contour interval and the declination diagram, in DOM so it reads at any zoom.
+    const margin = el('div', 'cop-map-margin');
+    margin.hidden = true;
+    let marginKey;
     const top = el('div', 'cop-map-top');
     top.appendChild(strip); top.appendChild(tools);
-    root.appendChild(canvas); root.appendChild(top); root.appendChild(foot); root.appendChild(card); root.appendChild(notice);
+    root.appendChild(canvas); root.appendChild(top); root.appendChild(foot); root.appendChild(card); root.appendChild(notice); root.appendChild(margin);
     if (drawer) root.appendChild(drawer.panel);
     container.appendChild(root);
 
     projection.addEventListener('click', function () { view.setProjection(state.projection === 'globe' ? 'map' : 'globe'); });
+    spin.addEventListener('click', function () { view.spin(!state.spinning); });
     mode.addEventListener('click', function () { view.setMode(state.mode === 'valid' ? 'known' : 'valid'); });
     ecoa.addEventListener('change', function () { view.setEcoa(ecoa.value || undefined); });
     range.addEventListener('input', function () {
@@ -310,6 +463,29 @@
         projection.setAttribute('aria-pressed', state.projection === 'globe' ? 'true' : 'false');
         projection.disabled = view.renderer !== 'maplibre';
         if (view.renderer !== 'maplibre') projection.title = 'The globe needs the MapLibre map: ' + (view.reason || 'not loaded');
+        spin.hidden = !(view.renderer === 'maplibre' && state.projection === 'globe');
+        spin.textContent = state.spinning ? 'Stop' : 'Spin';
+        spin.setAttribute('aria-pressed', state.spinning ? 'true' : 'false');
+        spin.disabled = !state.motion();
+        spin.title = state.motion() ? (state.spinning ? 'Stop the globe (any touch on the map stops it too)' : 'Spin the globe slowly; drag it to spin it yourself') : 'Spin is off while motion is off (Calm or reduced motion)';
+        const frameInfo = picture && picture.frame;
+        const nextMargin = JSON.stringify([state.projection, frameInfo && frameInfo.grid, frameInfo && frameInfo.declination, state.base, Boolean(picture && picture.environment)]);
+        if (nextMargin !== marginKey) {
+          marginKey = nextMargin;
+          while (margin.firstChild) margin.removeChild(margin.firstChild);
+          margin.hidden = !frameInfo || state.projection === 'globe';
+          if (frameInfo) {
+            const words = el('div', 'cop-map-margin-words');
+            words.appendChild(el('div', '', 'WGS 84 \u00b7 Grid ' + frameInfo.grid + ' 1 km' + (picture.environment ? ' \u00b7 Contours 20 m, index 100 m' : '')));
+            const d = frameInfo.declination;
+            if (d && typeof d.degreesEast === 'number') {
+              words.appendChild(el('div', '', 'MN ' + declinationWords(d.degreesEast) + ' of GN (fictional)'));
+              margin.appendChild(declinationDiagram(d.degreesEast));
+              margin.title = String(d.note || '');
+            }
+            margin.appendChild(words);
+          }
+        }
         mode.textContent = state.mode === 'valid' ? 'As happened' : 'As known';
         mode.setAttribute('aria-pressed', state.mode === 'known' ? 'true' : 'false');
         // The overlay list and the layer list are rebuilt only when they changed, so a control keeps its focus while the clock moves the map.
@@ -333,12 +509,28 @@
         budget.title = b && b.note ? b.note : 'At most ' + (b ? b.limit : 0) + ' tracks are drawn at once';
         sim.hidden = !(picture && picture.layers.some(function (layer) { return layer.simulated && state.visible[layer.id]; }));
         const items = [];
+        const ground = view.ground();
+        if (ground.terrain !== 'none') {
+          items.push({
+            id: MAP_ITEMS.terrain, title: '3D terrain', count: '', on: ground.terrain === 'on', disabled: ground.terrain === 'unavailable', reason: ground.terrainReason || '', group: 'environment',
+            note: 'Heights from the terrain pack, raised ' + state.exaggeration + ' times; drag with the right button or Ctrl to tilt.',
+            slider: { min: EXAGGERATION.min, max: EXAGGERATION.max, step: EXAGGERATION.step, value: state.exaggeration, label: 'Height', prefix: '×' }
+          });
+        }
         for (const layer of (picture && picture.layers) || []) {
           if (layer.kind === 'feed' && !layer.count) continue;
           items.push({ id: layer.id, title: layer.title, count: layer.count, on: Boolean(state.visible[layer.id]), sim: Boolean(layer.simulated), owner: layer.owner || '', note: layer.label + (layer.note ? '. ' + layer.note : ''), separate: Boolean(layer.separate), group: drawerApi ? drawerApi.groupOf(layer) : 'picture' });
         }
-        const nextLayers = JSON.stringify(items);
-        if (drawer && nextLayers !== layerKey) { layerKey = nextLayers; drawer.setGroups(drawerApi.grouped(items)); }
+        if (picture && picture.frame && view.renderer === 'maplibre') items.push({ id: MAP_ITEMS.grid, title: 'Grid (' + picture.frame.grid + ')', count: '', on: state.grid, group: 'environment', note: 'Grid lines every square and every ten, with their numbers.' });
+        const groups = drawerApi ? drawerApi.grouped(items) : [];
+        if (ground.bases.length > 1) {
+          groups.unshift({ id: 'base', title: 'Base map', choice: true, items: BASES.map(function (id) {
+            const available = ground.bases.indexOf(id) >= 0;
+            return { id: id, title: BASE_TITLES[id], on: state.base === id, disabled: !available, reason: available ? '' : (id === 'imagery' ? 'Imagery needs the WebGL map' + (view.reason ? ': ' + view.reason : '') + '.' : 'Not available here.') };
+          }) });
+        }
+        const nextLayers = JSON.stringify(groups);
+        if (drawer && nextLayers !== layerKey) { layerKey = nextLayers; drawer.setGroups(groups); }
         const span = picture && picture.time;
         slider.hidden = !span;
         if (span) {
@@ -587,6 +779,13 @@
       setColours: function () { renderer.draw(); },
       focus: function () { if (typeof root.focus === 'function') root.focus(); },
       setProjection: function () { return false; },
+      // The SVG map is 2D: no tiles, no 3D, no spin. Its Topographic base is the pack's hillshade and contours over the land.
+      applyGround: function () { renderer.draw(); },
+      applyTerrain: function () {},
+      addBasemap: function () {},
+      spin: function () { return false; },
+      look: function () {},
+      terrainHeight: function () { return undefined; },
       destroy: function () { if (root.parentNode) root.parentNode.removeChild(root); }
     };
     return renderer;
@@ -650,19 +849,82 @@
     return { type: 'FeatureCollection', features: features };
   }
 
+
+  /** The tile sources of a basemap, for the style. */
+  function basemapSources(B) {
+    const out = {};
+    if (!B) return out;
+    const raster = function (src) { return { type: 'raster', tiles: [src.tiles], tileSize: 256, minzoom: src.minzoom, maxzoom: src.maxzoom, bounds: src.bounds }; };
+    const dem = function (src) { return { type: 'raster-dem', tiles: [src.tiles], tileSize: 256, minzoom: src.minzoom, maxzoom: src.maxzoom, bounds: src.bounds, encoding: 'terrarium' }; };
+    if (B.globe.imagery) out['globe-imagery'] = raster(B.globe.imagery);
+    if (B.globe.topo) out['globe-topo'] = raster(B.globe.topo);
+    if (B.frame.imagery) out['frame-imagery'] = raster(B.frame.imagery);
+    if (B.frame.imageryDetail) out['frame-imagery-detail'] = raster(B.frame.imageryDetail);
+    // Two height sources from two tile sets, as MapLibre's own 3D example does: the 3D surface (sea at 0 m) and the relief (sea floor included).
+    if (B.frame.terrain) out['terrain-dem'] = dem(B.frame.terrain);
+    if (B.frame.relief) out['relief-dem'] = dem(B.frame.relief);
+    return out;
+  }
+
+  /** The tile layers that go just under the style layer `before`, for the sources the basemap has. */
+  function rasterLayers(B, before, vis) {
+    if (!B) return [];
+    const all = [
+      ['graticule', B.globe.imagery, { id: 'globe-imagery', type: 'raster', source: 'globe-imagery', paint: { 'raster-resampling': 'linear' } }],
+      ['graticule', B.globe.topo, { id: 'globe-topo', type: 'raster', source: 'globe-topo' }],
+      ['land', B.frame.imagery, { id: 'frame-imagery', type: 'raster', source: 'frame-imagery' }],
+      ['land', B.frame.imageryDetail, { id: 'frame-imagery-detail', type: 'raster', source: 'frame-imagery-detail', minzoom: 10 }],
+      ['land', B.frame.relief, { id: 'color-relief', type: 'color-relief', source: 'relief-dem', paint: { 'color-relief-color': ['interpolate', ['linear'], ['elevation']].concat(RELIEF_STOPS), 'color-relief-opacity': 1 } }],
+      ['env-hillshade', B.frame.relief, { id: 'hillshade', type: 'hillshade', source: 'relief-dem', paint: { 'hillshade-method': 'multidirectional', 'hillshade-exaggeration': 0.55, 'hillshade-shadow-color': '#3d3324', 'hillshade-highlight-color': '#fffdf5' } }]
+    ];
+    return all.filter(function (entry) { return entry[0] === before && entry[1]; }).map(function (entry) { return Object.assign({}, entry[2], { layout: vis(entry[2].id) }); });
+  }
+
+  /** Which ground layers show for the base and the toggles: the one rule the style starts from and every switch applies. */
+  function groundVisibility(state) {
+    const out = {};
+    for (const base of BASES) for (const id of BASE_LAYERS[base]) out[id] = state.base === base;
+    out.hillshade = Boolean(state.visible[ENV_LAYER_IDS.hillshade]) && state.base !== 'plain';
+    // The imagery has its rivers and roads in it; Topographic draws the pack's roads and tracks, and the rivers from the ground.
+    out['ground-lines'] = state.base !== 'imagery';
+    out['contour-labels'] = Boolean(state.visible[ENV_LAYER_IDS.contours]);
+    for (const id of ['grid-10', 'grid-1', 'grid-labels-10', 'grid-labels-1']) out[id] = Boolean(state.grid);
+    return out;
+  }
+
+  function groundLinesFilter(base) {
+    return base === 'topo' ? ['all', ['==', ['geometry-type'], 'LineString'], ['!=', ['get', 'kind'], 'road']] : ['==', ['geometry-type'], 'LineString'];
+  }
+
+  function seaColour(state) { return state.base === 'imagery' ? IMAGERY_SEA : state.base === 'topo' ? TOPO.sea : state.colours.ocean; }
+  function gridColour(state) { return state.base === 'topo' ? TOPO.grid : state.base === 'imagery' ? 'rgba(255,255,255,0.85)' : state.colours.line; }
+  function contourLabelColour(state) { return state.base === 'imagery' ? '#ffe9c4' : state.base === 'topo' ? '#7a4f25' : state.colours.label; }
+
   function mapLibreRenderer(chrome, state, maplibregl, ms, options) {
     const empty = { type: 'FeatureCollection', features: [] };
     const C = state.colours;
     const none = ['literal', ['']];
     const textPaint = function () { return { 'text-color': C.label, 'text-halo-color': C.halo, 'text-halo-width': 1.5 }; };
     const hillPaint = function () { return ['match', ['get', 'tone'], 'light', C.hillLight, C.hillShadow]; };
-    const contourPaint = function () { return ['match', ['get', 'kind'], 'coastline', C.line, C.relief]; };
+    const contourPaint = function () {
+      if (state.base === 'topo') return ['match', ['get', 'kind'], 'coastline', TOPO.coast, TOPO.contour];
+      if (state.base === 'imagery') return ['match', ['get', 'kind'], 'coastline', 'rgba(255,255,255,0.55)', 'rgba(255,236,200,0.7)'];
+      return ['match', ['get', 'kind'], 'coastline', C.line, C.relief];
+    };
     const notCluster = ['!', ['has', 'point_count']];
+    const B = state.basemap;
+    // Whether a style layer shows for the current base and toggles (the same rule applyGround uses after a switch).
+    const shows = function (id) { return groundVisibility(state)[id] !== false; };
+    const vis = function (id) { return { visibility: shows(id) ? 'visible' : 'none' }; };
     const map = new maplibregl.Map({
-      container: chrome.canvas, attributionControl: false, renderWorldCopies: false, maxPitch: 0, fadeDuration: options.still ? 0 : 300,
+      container: chrome.canvas, attributionControl: false, renderWorldCopies: false, maxPitch: 85, fadeDuration: options.still ? 0 : 300,
       style: {
         version: 8, projection: { type: state.projection === 'globe' ? 'globe' : 'mercator' },
+        sky: SKY,
+        ...(state.terrain === 'on' && B && B.frame.terrain ? { terrain: { source: 'terrain-dem', exaggeration: state.exaggeration } } : {}),
         sources: {
+          ...basemapSources(B), grid: { type: 'geojson', data: empty },
+          landcover: { type: 'geojson', data: B && B.frame.landcover ? B.frame.landcover : empty },
           ground: { type: 'geojson', data: empty }, cop: { type: 'geojson', data: empty }, terrain: { type: 'geojson', data: empty }, weather: { type: 'geojson', data: empty },
           // Point symbols on their own source, clustered: at the frame view, units that would cover each other draw as one stacked symbol with a count.
           units: {
@@ -672,13 +934,29 @@
           frame: { type: 'geojson', data: empty }, graticule: { type: 'geojson', data: graticule() }
         },
         layers: [
-          { id: 'ocean', type: 'background', paint: { 'background-color': C.ocean } },
+          { id: 'ocean', type: 'background', paint: { 'background-color': seaColour(state) } },
+          // The bases under everything else: the world imagery and the frame's on the Imagery base, the world's and the frame's topographic layers on
+          // Topographic, the flat land and marsh on Plain. Only visibility changes when the person switches.
+          ...rasterLayers(B, 'graticule', vis),
           { id: 'graticule', type: 'line', source: 'graticule', maxzoom: 6, paint: { 'line-color': C.line, 'line-opacity': 0.18, 'line-width': 0.6 } },
-          { id: 'land', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'land'], paint: { 'fill-color': C.land } },
-          { id: 'marsh', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'marsh'], paint: { 'fill-color': C.marsh } },
+          ...rasterLayers(B, 'land', vis),
+          { id: 'land', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'land'], layout: vis('land'), paint: { 'fill-color': C.land } },
+          { id: 'marsh', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'marsh'], layout: vis('marsh'), paint: { 'fill-color': C.marsh } },
+          { id: 'landcover-fill', type: 'fill', source: 'landcover', filter: ['==', ['geometry-type'], 'Polygon'], layout: vis('landcover-fill'), paint: { 'fill-color': ['match', ['get', 'kind'], 'forest', TOPO.forest, 'scrub', TOPO.scrub, 'farmland', TOPO.farmland, 'beach', TOPO.beach, 'rock', TOPO.rock, 'built-up', TOPO['built-up'], 'marsh', TOPO.marsh, TOPO.scrub], 'fill-opacity': ['match', ['get', 'kind'], 'farmland', 0.55, 'built-up', 0.9, 0.75] } },
+          { id: 'landcover-built-edge', type: 'line', source: 'landcover', filter: ['==', ['get', 'kind'], 'built-up'], layout: vis('landcover-built-edge'), paint: { 'line-color': '#8c7b6a', 'line-width': 0.8 } },
+          ...rasterLayers(B, 'env-hillshade', vis),
           { id: 'env-hillshade', type: 'fill', source: 'terrain', filter: ['==', ['get', 'kind'], 'hillshade'], paint: { 'fill-color': hillPaint(), 'fill-opacity': ['min', 0.85, ['*', RELIEF, ['get', 'opacity']]], 'fill-antialias': false } },
-          { id: 'env-contours', type: 'line', source: 'terrain', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': contourPaint(), 'line-opacity': 0.9, 'line-width': ['case', ['==', ['get', 'kind'], 'coastline'], 1.4, ['to-boolean', ['get', 'index']], 1.5, 0.8] } },
-          { id: 'ground-lines', type: 'line', source: 'ground', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour], 'line-width': ['match', ['get', 'kind'], 'contour', 0.8, 2] } },
+          { id: 'env-contours', type: 'line', source: 'terrain', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': contourPaint(), 'line-opacity': 0.9, 'line-width': ['case', ['==', ['get', 'kind'], 'coastline'], 1.4, ['to-boolean', ['get', 'index']], 1.4, 0.6] } },
+          { id: 'ground-lines', type: 'line', source: 'ground', filter: groundLinesFilter(state.base), layout: vis('ground-lines'), paint: { 'line-color': ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour], 'line-width': ['match', ['get', 'kind'], 'contour', 0.8, 2] } },
+          { id: 'landcover-tracks', type: 'line', source: 'landcover', filter: ['==', ['get', 'kind'], 'track'], layout: vis('landcover-tracks'), paint: { 'line-color': TOPO.track, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.6, 14, 1.6], 'line-dasharray': [3, 2] } },
+          { id: 'landcover-roads-case', type: 'line', source: 'landcover', filter: ['==', ['get', 'kind'], 'road'], layout: Object.assign({ 'line-cap': 'round', 'line-join': 'round' }, vis('landcover-roads-case')), paint: { 'line-color': TOPO.roadCase, 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.4, 14, ['case', ['to-boolean', ['get', 'minor']], 4.5, 6.5]] } },
+          { id: 'landcover-roads', type: 'line', source: 'landcover', filter: ['==', ['get', 'kind'], 'road'], layout: Object.assign({ 'line-cap': 'round', 'line-join': 'round' }, vis('landcover-roads')), paint: { 'line-color': ['case', ['to-boolean', ['get', 'minor']], '#f2c14e', TOPO.road], 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 14, ['case', ['to-boolean', ['get', 'minor']], 3, 4.5]] } },
+          // The grid (KQ): every ten squares from afar, every square close in, with two-digit numbers along the lines.
+          { id: 'grid-10', type: 'line', source: 'grid', minzoom: 6, filter: ['==', ['get', 'ten'], true], layout: vis('grid-10'), paint: { 'line-color': gridColour(state), 'line-opacity': 0.75, 'line-width': 1.1 } },
+          { id: 'grid-1', type: 'line', source: 'grid', minzoom: 10.5, filter: ['==', ['get', 'ten'], false], layout: vis('grid-1'), paint: { 'line-color': gridColour(state), 'line-opacity': 0.55, 'line-width': 0.6 } },
+          { id: 'contour-labels', type: 'symbol', source: 'terrain', minzoom: 10, filter: ['all', ['==', ['get', 'kind'], 'contour'], ['to-boolean', ['get', 'index']]], layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['concat', ['to-string', ['get', 'height']], ' m'], 'text-font': LABEL_FONT, 'text-size': 10, 'text-max-angle': 25, 'symbol-spacing': 300, 'text-allow-overlap': false, 'text-padding': 2 }, vis('contour-labels')), paint: { 'text-color': contourLabelColour(state), 'text-halo-color': state.base === 'imagery' ? '#1a1a1a' : '#fbf7ee', 'text-halo-width': 1.2 } },
+          { id: 'grid-labels-10', type: 'symbol', source: 'grid', minzoom: 7, maxzoom: 11, filter: ['==', ['get', 'ten'], true], layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'label'], 'text-font': LABEL_FONT, 'text-size': 10, 'symbol-spacing': 420, 'text-allow-overlap': false, 'text-padding': 2 }, vis('grid-labels-10')), paint: { 'text-color': gridColour(state), 'text-halo-color': state.base === 'imagery' ? '#0b0b0b' : '#ffffff', 'text-halo-width': 1.4 } },
+          { id: 'grid-labels-1', type: 'symbol', source: 'grid', minzoom: 11, layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'label'], 'text-font': LABEL_FONT, 'text-size': 10, 'symbol-spacing': 360, 'text-allow-overlap': false, 'text-padding': 2 }, vis('grid-labels-1')), paint: { 'text-color': gridColour(state), 'text-halo-color': state.base === 'imagery' ? '#0b0b0b' : '#ffffff', 'text-halo-width': 1.4 } },
           { id: 'env-weather-cells', type: 'fill', source: 'weather', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': ['match', ['get', 'kind'], 'fog', WEATHER_COLOURS.fog, 'rain', WEATHER_COLOURS.rain, WEATHER_COLOURS['rough-sea']], 'fill-opacity': ['get', 'opacity'] } },
           { id: 'env-weather-wind', type: 'line', source: 'weather', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': WEATHER_COLOURS.wind, 'line-width': 1.2 } },
           // The exercise frame: a quiet dashed box at the frame view, and on the globe a gold ring round it, so the eye finds it from orbit.
@@ -692,7 +970,7 @@
           // Labels, lowest priority first: MapLibre places the layers on top first, so symbols win a crowded spot, then place names, then control measures.
           { id: 'area-labels', type: 'symbol', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['has', 'name']], layout: { 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-allow-overlap': false, 'text-padding': 3 }, paint: textPaint() },
           { id: 'line-labels', type: 'symbol', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['has', 'name']], layout: { 'symbol-placement': 'line-center', 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-allow-overlap': false, 'text-padding': 3, 'text-max-angle': 35 }, paint: textPaint() },
-          { id: 'place-labels', type: 'symbol', source: 'ground', filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'name']], layout: { 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-variable-anchor': ['top', 'bottom', 'left', 'right'], 'text-radial-offset': 0.5, 'text-allow-overlap': false, 'text-padding': 3 }, paint: textPaint() },
+          { id: 'place-labels', type: 'symbol', source: 'ground', minzoom: UNITS_MIN_ZOOM, filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'name']], layout: { 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-variable-anchor': ['top', 'bottom', 'left', 'right'], 'text-radial-offset': 0.5, 'text-allow-overlap': false, 'text-padding': 3 }, paint: textPaint() },
           // A name tries eight places around its symbol and is dropped when none is free; the symbols (the layer above) are placed first, so a name
           // never covers a symbol, its own or another's. A stacked symbol has no name: its count is drawn into it, and its card lists the names.
           {
@@ -720,7 +998,12 @@
         ]
       }
     });
-    if (maplibregl.NavigationControl) map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'bottom-right');
+    if (maplibregl.NavigationControl) map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
+    // Scale bars in kilometres and in nautical miles (the maritime picture), bottom left.
+    if (maplibregl.ScaleControl) {
+      map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-left');
+      map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'nautical' }), 'bottom-left');
+    }
 
     function iconFor(p) {
       if (p.kind === 'decision-point') return 'dp-star';
@@ -840,6 +1123,7 @@
 
     const ready = new Promise(function (resolve) { map.once('load', resolve); });
     let framed = false;
+    let lastGrid;
     let shown = [];
 
     function markHighlight() {
@@ -862,6 +1146,8 @@
           map.getSource('terrain').setData({ type: 'FeatureCollection', features: env.terrain });
           map.getSource('weather').setData({ type: 'FeatureCollection', features: env.weather });
           map.getSource('frame').setData({ type: 'FeatureCollection', features: frameFeatures(picture) });
+          const gridKey = JSON.stringify(picture.frame || null);
+          if (gridKey !== lastGrid && map.getSource('grid')) { lastGrid = gridKey; map.getSource('grid').setData({ type: 'FeatureCollection', features: gridFeatures(picture.frame) }); }
           shown = drawn(state);
           const points = [];
           const others = [];
@@ -877,14 +1163,19 @@
           markHighlight();
           if (!framed && picture.frame) {
             framed = true;
-            if (state.projection === 'globe') move({ center: picture.frame.centre, zoom: globeZoom() }); else fitFrame(false);
+            if (state.projection === 'globe') move({ center: picture.frame.centre, zoom: globeZoom() });
+            else {
+              fitFrame(false);
+              // With 3D terrain on, the first view leans back a little so the relief reads at once.
+              if (state.terrain === 'on' && typeof map.jumpTo === 'function') map.jumpTo({ pitch: FIRST_PITCH });
+            }
           }
         });
       },
       highlight: markHighlight,
       setColours: function () {
         ready.then(function () {
-          map.setPaintProperty('ocean', 'background-color', C.ocean);
+          map.setPaintProperty('ocean', 'background-color', seaColour(state));
           map.setPaintProperty('land', 'fill-color', C.land);
           map.setPaintProperty('marsh', 'fill-color', C.marsh);
           map.setPaintProperty('ground-lines', 'line-color', ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour]);
@@ -899,6 +1190,7 @@
       focus: function () { const canvas = map.getCanvas && map.getCanvas(); if (canvas && typeof canvas.focus === 'function') canvas.focus(); },
       // The globe flies out until the curve is plain, the frame ringed in gold; Map flies back to the frame. Under reduced motion and Calm, it jumps.
       setProjection: function (projection) {
+        if (projection !== 'globe') stopSpin();
         ready.then(function () {
           map.setProjection({ type: projection === 'globe' ? 'globe' : 'mercator' });
           const picture = state.picture;
@@ -909,8 +1201,98 @@
         return true;
       },
       fitFrame: function () { ready.then(function () { fitFrame(state.motion()); }); },
-      destroy: function () { map.remove(); }
+      /** Shows the base's layers and applies the toggles (a switch changes visibility only), the sea colour, the grid and contour colours. */
+      applyGround: function () {
+        ready.then(function () {
+          const shown = groundVisibility(state);
+          for (const id of Object.keys(shown)) {
+            if (typeof map.getLayer === 'function' && !map.getLayer(id)) continue;
+            if (typeof map.setLayoutProperty === 'function') map.setLayoutProperty(id, 'visibility', shown[id] ? 'visible' : 'none');
+          }
+          map.setFilter('ground-lines', groundLinesFilter(state.base));
+          map.setPaintProperty('ocean', 'background-color', seaColour(state));
+          map.setPaintProperty('env-contours', 'line-color', contourPaint());
+          for (const id of ['grid-10', 'grid-1']) map.setPaintProperty(id, 'line-color', gridColour(state));
+          for (const id of ['grid-labels-10', 'grid-labels-1']) { map.setPaintProperty(id, 'text-color', gridColour(state)); map.setPaintProperty(id, 'text-halo-color', state.base === 'imagery' ? '#0b0b0b' : '#ffffff'); }
+          map.setPaintProperty('contour-labels', 'text-color', contourLabelColour(state));
+          map.setPaintProperty('contour-labels', 'text-halo-color', state.base === 'imagery' ? '#1a1a1a' : '#fbf7ee');
+        });
+      },
+      /** Sets or clears the 3D surface. `lean` tilts the view when 3D comes on flat (or flattens it when 3D goes off), moving only when motion is allowed. */
+      applyTerrain: function (lean) {
+        ready.then(function () {
+          const on = state.terrain === 'on' && state.basemap && state.basemap.frame.terrain;
+          if (typeof map.setTerrain === 'function') map.setTerrain(on ? { source: 'terrain-dem', exaggeration: state.exaggeration } : null);
+          if (!lean || typeof map.getPitch !== 'function') return;
+          if (on && map.getPitch() < 10) move({ pitch: FIRST_PITCH });
+          else if (!on && map.getPitch() > 0) move({ pitch: 0 });
+        });
+      },
+      /** Starts or stops the globe's slow spin; true when it is spinning after the call. */
+      spin: function (on) { if (on) startSpin(); else stopSpin(); return state.spinning; },
+      /** Adds a basemap that came after the map started: its sources and layers, then the ground rules. */
+      addBasemap: function () {
+        ready.then(function () {
+          const B = state.basemap;
+          if (!B || typeof map.addSource !== 'function' || typeof map.addLayer !== 'function') return;
+          const sources = basemapSources(B);
+          for (const id of Object.keys(sources)) if (!map.getSource(id)) map.addSource(id, sources[id]);
+          const vis = function (id) { return { visibility: groundVisibility(state)[id] !== false ? 'visible' : 'none' }; };
+          for (const before of ['graticule', 'land', 'env-hillshade']) for (const layer of rasterLayers(B, before, vis)) if (!map.getLayer(layer.id)) map.addLayer(layer, before);
+          if (B.frame.landcover && map.getSource('landcover')) map.getSource('landcover').setData(B.frame.landcover);
+          renderer.applyGround();
+          renderer.applyTerrain(false);
+        });
+      },
+      /** Moves the camera to a view (centre, zoom, pitch, bearing), a flight when motion is allowed. */
+      look: function (camera) { ready.then(function () { move(camera); }); },
+      /** The 3D surface's height in metres at a [longitude, latitude], or undefined (no 3D, or not loaded there). For the e2e check. */
+      terrainHeight: function (lngLat) {
+        if (typeof map.queryTerrainElevation !== 'function' || !(typeof map.getTerrain === 'function' && map.getTerrain())) return undefined;
+        const h = map.queryTerrainElevation(lngLat);
+        return typeof h === 'number' && isFinite(h) ? h / (state.exaggeration || 1) : undefined;
+      },
+      destroy: function () { stopSpin(); if (typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', onHidden); map.remove(); }
     };
+
+    // ---- Spin (owner decision, 0.4.35): off until the person presses Spin. One turn in about two minutes, by moving the centre each frame; never
+    // while motion() is false; stopped by any input of the person's (our own jumpTo carries no originalEvent), by leaving the globe or zooming in,
+    // and when the page is hidden. Dragging the globe spins it too, with MapLibre's own momentum.
+    const SPIN_DEGREES_PER_SECOND = 3;
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function (fn) { return setTimeout(function () { fn(Date.now()); }, 16); };
+    const caf = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
+    let spinFrame, spinLast = 0;
+    function spinStep(t) {
+      spinFrame = undefined;
+      if (!state.spinning) return;
+      if (!state.motion() || state.projection !== 'globe' || (typeof document !== 'undefined' && document.hidden) || (typeof map.getZoom === 'function' && map.getZoom() > 4)) { stopSpin(); return; }
+      const dt = spinLast ? Math.min(0.1, (t - spinLast) / 1000) : 0;
+      spinLast = t;
+      if (typeof map.getCenter === 'function') {
+        const c = map.getCenter();
+        map.jumpTo({ center: [((c.lng - SPIN_DEGREES_PER_SECOND * dt + 540) % 360) - 180, c.lat] });
+      }
+      spinFrame = raf(spinStep);
+    }
+    function startSpin() {
+      if (state.spinning || !state.motion() || state.projection !== 'globe') return;
+      state.spinning = true;
+      spinLast = 0;
+      spinFrame = raf(spinStep);
+      chrome.render();
+    }
+    function stopSpin() {
+      const was = state.spinning;
+      state.spinning = false;
+      if (spinFrame !== undefined) caf(spinFrame);
+      spinFrame = undefined;
+      if (was) chrome.render();
+    }
+    for (const type of ['mousedown', 'touchstart', 'wheel', 'dragstart', 'rotatestart', 'pitchstart', 'zoomstart']) map.on(type, function (event) { if (event && event.originalEvent) stopSpin(); });
+    const canvasNode = map.getCanvas && map.getCanvas();
+    if (canvasNode && typeof canvasNode.addEventListener === 'function') canvasNode.addEventListener('keydown', function () { stopSpin(); });
+    const onHidden = function () { if (typeof document !== 'undefined' && document.hidden) stopSpin(); };
+    if (typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', onHidden);
     if (chrome.canvas.style) chrome.canvas.style.background = C.space;
     return renderer;
   }
@@ -932,8 +1314,14 @@
     const state = {
       picture: undefined, time: options.clock ? options.clock.now() : Date.now(), mode: options.mode === 'known' ? 'known' : 'valid',
       projection: options.projection === 'globe' ? 'globe' : 'map', ecoa: undefined, visible: {}, selected: undefined, clock: options.clock,
-      colours: Object.assign({}, COLOURS, themeColours(options.colours)), highlight: []
+      colours: Object.assign({}, COLOURS, themeColours(options.colours)), highlight: [],
+      // The ground (see "Base maps" above): chosen from the person's saved settings when given, else from what the host's tiles allow.
+      basemap: validBasemap(options.basemap), base: 'plain', terrain: 'off', terrainReason: '', exaggeration: EXAGGERATION.start, grid: true, spinning: false,
+      rasterHillshade: false, chosen: false
     };
+    const saved = options.mapSettings && typeof options.mapSettings === 'object' ? options.mapSettings : {};
+    if (typeof saved.exaggeration === 'number' && isFinite(saved.exaggeration)) state.exaggeration = Math.max(EXAGGERATION.min, Math.min(EXAGGERATION.max, Math.round(saved.exaggeration / EXAGGERATION.step) * EXAGGERATION.step));
+    if (typeof saved.grid === 'boolean') state.grid = saved.grid;
     // Whether anything may move (the drawer's slide, the globe's flight): the host's own rule when it gives one (the Staff Room's Calm), otherwise not
     // when the host asked for a still map and not under the system's reduced-motion setting.
     const reduced = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : undefined;
@@ -950,9 +1338,12 @@
       } else {
         try {
           const maplibregl = await loadMapLibre(options);
-          renderer = mapLibreRenderer(chrome, state, maplibregl, ms, options);
+          // The ground is settled first, so the style starts on the right base with 3D already set.
           view.renderer = 'maplibre';
+          settleGround();
+          renderer = mapLibreRenderer(chrome, state, maplibregl, ms, options);
         } catch (error) {
+          view.renderer = 'svg';
           view.reason = 'the map library could not start (' + (error && error.message ? error.message : String(error)) + ')';
         }
       }
@@ -963,6 +1354,53 @@
       if (wanted === 'svg') view.reason = 'the SVG map was asked for';
       if (view.reason && wanted !== 'svg') chrome.notice('Showing the 2D SVG map: ' + view.reason + '.');
     }
+
+    /** The bases this map can draw now: Imagery needs MapLibre and imagery tiles; Topographic needs MapLibre with tiles, or a terrain pack. */
+    function availableBases() {
+      const B = state.basemap;
+      const out = [];
+      if (view.renderer === 'maplibre' && B && (B.globe.imagery || B.frame.imagery)) out.push('imagery');
+      if ((view.renderer === 'maplibre' && B && (B.globe.topo || B.frame.relief)) || (state.picture && state.picture.environment)) out.push('topo');
+      out.push('plain');
+      return out;
+    }
+    /** The person's settings, for the host to keep (the Staff Room keeps them with the rest of the page's state). */
+    function saveSettings() {
+      if (options.onMapSettings) options.onMapSettings({ base: state.base, terrain: state.terrain === 'on', exaggeration: state.exaggeration, grid: state.grid });
+    }
+    /** Sets the hillshade and contour toggles to a base's defaults: off over Imagery, on over Topographic; Plain keeps the host's own. */
+    function baseDefaults(base) {
+      const picture = state.picture;
+      if (!picture) return;
+      for (const id of [ENV_LAYER_IDS.hillshade, ENV_LAYER_IDS.contours]) {
+        const layer = picture.layers.find(function (entry) { return entry.id === id; });
+        if (!layer) continue;
+        state.visible[id] = base === 'topo' ? true : base === 'imagery' ? false : Boolean(layer.visible);
+      }
+    }
+    /** Picks the base (and 3D) once tiles or a picture arrive, unless the person already chose. */
+    function settleGround() {
+      const bases = availableBases();
+      const wantedBase = !state.chosen && typeof saved.base === 'string' && bases.indexOf(saved.base) >= 0 ? saved.base : undefined;
+      const next = state.chosen && bases.indexOf(state.base) >= 0 ? state.base : wantedBase || bases[0];
+      const changed = next !== state.base;
+      state.base = next;
+      if (changed) baseDefaults(next);
+      const B = state.basemap;
+      const canTerrain = view.renderer === 'maplibre' && B && B.frame.terrain;
+      if (!canTerrain) { state.terrain = 'off'; state.terrainReason = view.renderer !== 'maplibre' && state.picture && state.picture.environment ? '3D terrain needs the WebGL map' + (view.reason ? ': ' + view.reason : '') + '.' : ''; }
+      else if (!state.terrainSettled) {
+        state.terrainSettled = true;
+        const software = softwareRenderer(options);
+        if (typeof saved.terrain === 'boolean') state.terrain = saved.terrain ? 'on' : 'off';
+        else state.terrain = software ? 'off' : 'on';
+        state.terrainReason = software && state.terrain === 'off' ? '3D terrain is off: this computer draws the map without a graphics card. Turn it on if the map stays smooth.' : '';
+        state.renderer = software;
+      }
+      state.rasterHillshade = Boolean(view.renderer === 'maplibre' && B && B.frame.relief && state.base !== 'plain');
+      return changed;
+    }
+    settleGround();
 
     let pending;
     let last = 0;
@@ -984,8 +1422,59 @@
       const first = !state.picture;
       state.picture = picture;
       for (const layer of picture.layers) if (!(layer.id in state.visible) || first) state.visible[layer.id] = layer.visible;
+      if (first && state.base !== 'plain') baseDefaults(state.base);
       if (state.ecoa && !picture.ecoas.some(function (entry) { return entry.id === state.ecoa; })) state.ecoa = undefined;
+      if (settleGround() || first) renderer.applyGround();
       redraw();
+    };
+    /** The host's checked tile addresses (src/staff/mapTiles.ts); a basemap that comes after the map started is added to it. */
+    view.setBasemap = function (basemap) {
+      const next = validBasemap(basemap);
+      if (JSON.stringify(next) === JSON.stringify(state.basemap)) return;
+      state.basemap = next;
+      settleGround();
+      renderer.addBasemap();
+      renderer.applyGround();
+      chrome.render();
+      redraw();
+    };
+    /** Switches the base by layer visibility; false when this map cannot draw that base. */
+    view.setBase = function (base) {
+      if (BASES.indexOf(base) < 0 || availableBases().indexOf(base) < 0) return false;
+      state.chosen = true;
+      if (base !== state.base) { state.base = base; baseDefaults(base); }
+      state.rasterHillshade = Boolean(view.renderer === 'maplibre' && state.basemap && state.basemap.frame.relief && base !== 'plain');
+      renderer.applyGround();
+      saveSettings();
+      chrome.render();
+      redraw();
+      return true;
+    };
+    /** Turns 3D terrain on or off; false when there is no 3D here (no height tiles, or the SVG map). */
+    view.setTerrain = function (on) {
+      if (!(view.renderer === 'maplibre' && state.basemap && state.basemap.frame.terrain)) return false;
+      state.terrain = on ? 'on' : 'off';
+      state.terrainReason = '';
+      renderer.applyTerrain(true);
+      saveSettings();
+      chrome.render();
+      return true;
+    };
+    /** How many times the heights are raised in 3D: 1 to 3 in quarter steps. */
+    view.setExaggeration = function (value) {
+      if (typeof value !== 'number' || !isFinite(value)) return;
+      state.exaggeration = Math.max(EXAGGERATION.min, Math.min(EXAGGERATION.max, Math.round(value / EXAGGERATION.step) * EXAGGERATION.step));
+      renderer.applyTerrain(false);
+      saveSettings();
+    };
+    view.setGrid = function (on) { state.grid = Boolean(on); renderer.applyGround(); saveSettings(); chrome.render(); };
+    /** Starts or stops the globe's spin; true when spinning after the call (never on the map, never while motion is off). */
+    view.spin = function (on) { const result = renderer.spin(Boolean(on)); chrome.render(); return result; };
+    /** What the ground offers now, for the drawer: the bases this map can draw, and 3D on, off, unavailable (with why) or none at all. */
+    view.ground = function () {
+      const B = state.basemap;
+      const terrain = view.renderer === 'maplibre' && B && B.frame.terrain ? state.terrain : (state.picture && state.picture.environment ? 'unavailable' : 'none');
+      return { bases: availableBases(), terrain: terrain, terrainReason: state.terrainReason };
     };
     view.setTime = function (t) { if (typeof t === 'number' && isFinite(t)) { state.time = t; redraw(); } };
     view.setMode = function (mode) { state.mode = mode === 'known' ? 'known' : 'valid'; redraw(); };
@@ -1009,13 +1498,25 @@
     view.layers = function (open) { if (!chrome.drawer) return false; if (open === true) chrome.drawer.open(); else if (open === false) chrome.drawer.close(true); return chrome.drawer.isOpen(); };
     let unsubscribe;
     view.destroy = function () {
+      const at = live.indexOf(view);
+      if (at >= 0) live.splice(at, 1);
       if (pending) clearTimeout(pending);
       if (unsubscribe) unsubscribe();
       chrome.destroy();
       renderer.destroy();
       if (chrome.root.parentNode) chrome.root.parentNode.removeChild(chrome.root);
     };
-    view.state = function () { return { time: state.time, mode: state.mode, projection: state.projection, ecoa: state.ecoa, visible: Object.assign({}, state.visible), drawn: drawn(state).map(function (feature) { return feature.id; }), labels: renderer.lastLabels }; };
+    view.state = function () { return { time: state.time, mode: state.mode, projection: state.projection, ecoa: state.ecoa, visible: Object.assign({}, state.visible), drawn: drawn(state).map(function (feature) { return feature.id; }), labels: renderer.lastLabels, base: state.base, terrain: state.terrain, terrainReason: state.terrainReason, exaggeration: state.exaggeration, grid: state.grid, spinning: state.spinning }; };
+    /** Moves the camera: { center, zoom, pitch, bearing }, each optional and checked (the SVG map ignores it). */
+    view.look = function (camera) {
+      if (!camera || typeof camera !== 'object') return;
+      const out = {};
+      if (Array.isArray(camera.center) && camera.center.length === 2 && camera.center.every(function (n) { return typeof n === 'number' && isFinite(n); })) out.center = [camera.center[0], camera.center[1]];
+      for (const key of ['zoom', 'pitch', 'bearing']) if (typeof camera[key] === 'number' && isFinite(camera[key])) out[key] = camera[key];
+      renderer.look(out);
+    };
+    /** For the real-window check (layout probe): the ground's state and the 3D height at a point. */
+    view.inspect = function (lngLat) { return Object.assign(view.state(), { renderer: view.renderer, height: lngLat ? renderer.terrainHeight(lngLat) : undefined }); };
     if (options.clock && options.clock.subscribe) unsubscribe = options.clock.subscribe(function (t) { view.setTime(t); });
     // Never wait forever for the map: after 15 seconds the view is returned and the map finishes loading behind it. When the map is ready first, the
     // 15-second timer is cleared, so nothing is left pending after the view is returned (or destroyed).
@@ -1024,9 +1525,13 @@
       const timeout = new Promise(function (resolve) { giveUp = setTimeout(resolve, 15000); });
       try { await Promise.race([renderer.ready, timeout]); } finally { clearTimeout(giveUp); }
     }
+    live.push(view);
     chrome.render();
     return view;
   }
 
-  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures, declutter: declutter, weatherFrameAt: weatherFrameAt, weatherFeatures: weatherFeatures, contentBounds: contentBounds };
+  /** The views mounted on this page, for the real-window check's probe (media/shared/layout-probe.js). */
+  const live = [];
+
+  window.nearCopMap = { version: 1, mount: mount, views: function () { return live.slice(); }, validBasemap: validBasemap, gridFeatures: gridFeatures, visibleFeatures: visibleFeatures, declutter: declutter, weatherFrameAt: weatherFrameAt, weatherFeatures: weatherFeatures, contentBounds: contentBounds };
 })();

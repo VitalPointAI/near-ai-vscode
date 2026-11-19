@@ -5,6 +5,7 @@
   --cop-glass: color-mix(in srgb, var(--vscode-editorWidget-background, #1f2633) 86%, transparent);
   --cop-glass-line: color-mix(in srgb, var(--vscode-editorWidget-border, #454545) 80%, transparent);
   --cop-ink: var(--vscode-foreground, #ddd);
+  container: cop-map / inline-size;
   position: relative; height: 100%; min-height: 320px; overflow: hidden; font: 12px var(--vscode-font-family, sans-serif); color: var(--cop-ink);
 }
 .cop-map-canvas { position: absolute; inset: 0; overflow: hidden; background: #050b16; }
@@ -38,6 +39,18 @@
 .cop-map-notice { left: 8px; bottom: 64px; max-width: calc(100% - 16px); padding: 3px 8px; background: var(--cop-glass); border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700); }
 .cop-map-card { right: 8px; bottom: 64px; max-width: min(320px, calc(100% - 16px)); max-height: 50%; overflow: auto; padding: 8px; background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .3); }
 .cop-map .maplibregl-ctrl-bottom-right { bottom: 64px; }
+/* The scale bars (kilometres and nautical miles) bottom left, above the time line; the margin (datum, grid, contours, declination) above them. */
+.cop-map .maplibregl-ctrl-bottom-left { bottom: 64px; }
+.cop-map .maplibregl-ctrl-scale { background: var(--cop-glass); color: var(--cop-ink); border-color: var(--cop-ink); font-size: 10px; line-height: 1.3; }
+.cop-map-margin { position: absolute; z-index: 2; left: 8px; bottom: 116px; display: flex; gap: 6px; align-items: flex-end; max-width: min(240px, calc(100% - 80px)); padding: 4px 8px; border-radius: 6px; background: var(--cop-glass); border: 1px solid var(--cop-glass-line); font-size: 10.5px; line-height: 1.35; pointer-events: auto; }
+.cop-map-margin[hidden] { display: none; }
+.cop-map-margin-words { min-width: 0; overflow-wrap: anywhere; }
+.cop-map-decl { flex: none; overflow: visible; }
+.cop-map-decl line { stroke: currentColor; stroke-width: 1.2; }
+.cop-map-decl .decl-mag { stroke-dasharray: 3 2; }
+.cop-map-decl text { fill: currentColor; font-size: 8px; }
+.cop-map-decl .decl-star { font-size: 9px; }
+@container cop-map (max-width: 620px) { .cop-map-margin { display: none; } }
 .cop-map-svg-text, .cop-map-svg-place { font-size: 12px; paint-order: stroke; stroke-width: 3px; }
 .cop-map-svg-place { font-style: italic; }
 .cop-map-hilite { outline: none; filter: drop-shadow(0 0 4px #ffd23f); }
@@ -73,6 +86,18 @@
 .ld-knob { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--vscode-foreground, #ddd); transition: transform 180ms cubic-bezier(.2, 0, 0, 1); }
 .ld-switch[aria-checked="true"] { background: var(--vscode-button-background, #0e639c); }
 .ld-switch[aria-checked="true"] .ld-knob { transform: translateX(14px); background: #fff; }
+.ld-choice { display: flex; gap: 0; margin: 2px 0 4px; border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 6px; overflow: hidden; }
+.ld-radio { all: unset; cursor: pointer; flex: 1 1 0; text-align: center; padding: 5px 4px; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.ld-radio + .ld-radio { border-left: 1px solid var(--vscode-editorWidget-border, #454545); }
+.ld-radio[aria-checked="true"] { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); }
+.ld-radio:disabled { opacity: .45; cursor: default; }
+.ld-radio:focus-visible, .ld-range:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: -2px; }
+.ld-reason { list-style: none; margin: 0 0 4px; padding: 0 0 0 38px; font-size: 11px; opacity: .8; }
+.ld-group-base .ld-reason { padding-left: 0; }
+.ld-slider { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 0 6px 38px; font-size: 11px; }
+.ld-slider-label { opacity: .8; }
+.ld-range { flex: 1 1 auto; min-width: 60px; accent-color: var(--vscode-button-background, #0e639c); }
+.ld-value { font: 11px var(--vscode-editor-font-family, monospace); min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 .ld-foot { margin: 0; padding: 8px 12px 10px; font-size: 11px; opacity: .75; border-top: 1px solid var(--vscode-editorWidget-border, #454545); }
 
 @media (prefers-reduced-motion: reduce) { .cop-map *, .ld-panel *, .ld-button { transition: none !important; animation: none !important; } }

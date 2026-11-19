@@ -248,6 +248,11 @@ body { background: var(--vscode-editor-background); }
 .ld-switch[aria-checked="true"] .ld-knob { box-shadow: 0 0 0 1px rgba(0, 0, 0, .2); }
 .copslot .cop-map-tools .btn[aria-pressed="true"] { background: var(--ai-soft); color: var(--ai-text); border-color: var(--ai); }
 /* The terrain pack on the SVG map: the same tones as the COP map, so the ground reads in every theme. */
+/* The 2D map's Topographic base: land cover in a topographic map's tints (the COP map's TOPO colours), roads and tracks. */
+.lc { stroke: none; opacity: .8; }
+.lc-forest { fill: #a6cf8a; } .lc-scrub { fill: #d8e4b2; } .lc-farmland { fill: #f4f0d4; opacity: .55; } .lc-beach { fill: #f3e3b2; }
+.lc-rock { fill: #d8d1c4; } .lc-built-up { fill: #d9cbbd; stroke: #8c7b6a; stroke-width: .4; opacity: .9; } .lc-marsh { fill: #bcdcd2; }
+.lc-road { fill: none; stroke: #d9553a; stroke-width: 2px; } .lc-track { fill: none; stroke: #7d5530; stroke-width: 1px; stroke-dasharray: 3 2; }
 .env-hill.shadow { fill: var(--map-hill-shadow); }
 .env-hill.light { fill: var(--map-hill-light); }
 .env-contour { fill: none; stroke: var(--map-relief); stroke-width: .8px; opacity: .9; }

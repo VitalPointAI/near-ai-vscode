@@ -21,7 +21,8 @@ import { buildStaffRoomModel, handoffsFor, STAFF_ROOM_MESSAGE, staffRoomWorkspac
 import type { StaffRoomModel, StaffRoomWorkspace } from '../domain/staff/staffRoom';
 import { labelRecordFilter } from '../agent/gateLabels';
 import type { GateHost } from '../gate/host';
-import { copMapCsp, copMapResources } from '../staff/copMapWebview';
+import { copMapCsp, copMapResources, loadScenarioOf } from '../staff/copMapWebview';
+import { copBasemap } from '../staff/mapTiles';
 import { observationStoreFor } from '../staff/observationStore';
 import type { ObsReader } from '../staff/observationStore';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
@@ -56,9 +57,15 @@ export function registerStaffRoom(context: vscode.ExtensionContext, gate?: Pick<
   context.subscriptions.push(vscode.commands.registerCommand(OPEN_STAFF_ROOM_COMMAND, (workspace?: unknown) => openStaffRoom(context, gate, staffRoomWorkspaceOf(workspace))));
 }
 
-/** The folders the page may load from: its own, the shared stylesheet, the COP map component and the vendored map libraries. Nothing else. */
+/**
+ * The folders the page may load from: its own, the shared stylesheet, the COP map component, the vendored map libraries, the globe's bundled world
+ * tiles (media/map) and the bundled environment packs' tiles (resources/staff/env). Nothing else, and nothing from a server.
+ */
 export function staffRoomResourceRoots(extensionUri: vscode.Uri): vscode.Uri[] {
-  return [vscode.Uri.joinPath(extensionUri, 'media', 'staffRoom'), sharedMedia(extensionUri), vscode.Uri.joinPath(extensionUri, 'media', 'staff'), vscode.Uri.joinPath(extensionUri, 'media', 'vendor')];
+  return [
+    vscode.Uri.joinPath(extensionUri, 'media', 'staffRoom'), sharedMedia(extensionUri), vscode.Uri.joinPath(extensionUri, 'media', 'staff'), vscode.Uri.joinPath(extensionUri, 'media', 'vendor'),
+    vscode.Uri.joinPath(extensionUri, 'media', 'map'), vscode.Uri.joinPath(extensionUri, 'resources', 'staff', 'env')
+  ];
 }
 
 /**
@@ -91,9 +98,12 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
   let listening: Array<{ dispose(): void }> = [];
   /** The picture last sent, as text: an unchanged picture is not sent again until the page asks for everything. */
   let lastPicture: string | undefined;
+  /** The basemap last sent (tile addresses checked against their indexes), as text: sent again only when it changed or the page asked for everything. */
+  let lastBasemap: string | undefined;
   /** The workspace the open command asked for, shown once the page has its first picture. */
   let showFirst = workspace;
-  const post = (message: Record<string, unknown>) => { staffRoomTap.toView?.(message); void view.webview.postMessage(message); };
+  const webview = view.webview;
+  const post = (message: Record<string, unknown>) => { staffRoomTap.toView?.(message); void webview.postMessage(message); };
 
   const send = async () => {
     timer = undefined;
@@ -116,9 +126,15 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
       const text = cop.picture ? JSON.stringify(cop.picture) : `problem:${cop.problem ?? ''}`;
       const changed = text !== lastPicture;
       lastPicture = text;
+      // The world imagery and the scenario's terrain tiles, each folder checked against its index before the page gets an address in it.
+      const basemap = await copBasemap((dir) => webview.asWebviewUri(vscode.Uri.file(dir)).toString(), await loadScenarioOf(root).catch(() => undefined)).catch(() => undefined);
+      const basemapText = basemap ? JSON.stringify(basemap) : undefined;
+      const basemapChanged = basemapText !== undefined && basemapText !== lastBasemap;
+      if (basemapChanged) lastBasemap = basemapText;
       post({
         type: STAFF_ROOM_MESSAGE, model, cues: handoffsFor(input.settings, fresh, input.registry), pictureNow: cop.now,
-        ...(changed ? (cop.picture ? { picture: cop.picture } : { pictureProblem: cop.problem }) : {})
+        ...(changed ? (cop.picture ? { picture: cop.picture } : { pictureProblem: cop.problem }) : {}),
+        ...(basemapChanged ? { basemap } : {})
       });
       if (showFirst) { post({ type: 'show-workspace', workspace: showFirst }); showFirst = undefined; }
     } catch (error) {
@@ -131,6 +147,7 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
   };
   const start = () => {
     lastPicture = undefined;
+    lastBasemap = undefined;
     if (listening.length || !root) { if (!root) void send(); return; }
     const host = staffHostFor(root);
     if (host) listening.push({ dispose: host.onEvent((event) => { pending.push(event); if (pending.length > 50) pending = pending.slice(-50); schedule(); }) });
@@ -165,7 +182,7 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
         try { await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true }); } catch { post({ type: 'notice', text: `${relative} is not there.` }); }
       },
       selectRun: (run) => { wantedRun = run; void send(); },
-      refresh: () => { lastPicture = undefined; if (!listening.length) start(); else void send(); },
+      refresh: () => { lastPicture = undefined; lastBasemap = undefined; if (!listening.length) start(); else void send(); },
       notice: (text) => post({ type: 'notice', text }),
       ...(roomChat ? { taskInChat: (team: string) => roomChat!.prefill(`/team:${team}`) } : {})
     });

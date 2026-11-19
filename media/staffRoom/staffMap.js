@@ -129,7 +129,15 @@
     fullButton.title = 'Fill the Staff Room with the map (Escape returns)';
     // The layer drawer (media/staff/layerDrawer.js), the same one the COP map uses: it slides in from the map's right edge.
     const drawerApi = typeof window !== 'undefined' ? window.nearLayerDrawer : undefined;
-    const drawer = drawerApi ? drawerApi.create(box, { motion, footnote: 'Each layer has one writer, named on its row.', onToggle: (id, on) => setLayer(id, on) }) : undefined;
+    const drawer = drawerApi ? drawerApi.create(box, {
+      motion, footnote: 'Each layer has one writer, named on its row.', onToggle: (id, on) => setLayer(id, on),
+      // The 2D map's base: Topographic (the pack's land cover, hillshade and contours) or Plain; Imagery needs the WebGL map.
+      onChoose: (group, id) => { if (group === 'base' && (id === 'topo' || id === 'plain') && id !== svgBase) { svgBase = id; if (options.onMapSettings) options.onMapSettings(Object.assign({}, options.mapSettings || {}, { base: id })); if (model) render(model); } }
+    }) : undefined;
+    let svgBase = options.mapSettings && options.mapSettings.base === 'plain' ? 'plain' : 'topo';
+    /** The pack's land cover for the 2D Topographic base, fetched once from the address the host checked; undefined until it arrives. */
+    let landcover;
+    let landcoverFrom;
     if (drawer) { drawer.button.classList.add('layers-toggle'); tools.append(drawer.button); }
     tools.append(tableButton, fullButton);
     box.append(tools);
@@ -164,6 +172,8 @@
     let copView;
     let copReason;
     let picture;
+    /** The host's checked tile addresses (src/staff/mapTiles.ts), for the COP map and the SVG map's land cover. */
+    let basemap;
     let destroyed = false;
     const subscribers = new Set();
     const clock = {
@@ -276,8 +286,17 @@
           if (layer.kind !== 'environment' || !ENV_DRAWN[layer.id]) continue;
           items.push({ id: layer.id, title: layer.title, count: layer.count, on: !hidden.has(layer.id), sim: Boolean(layer.simulated), owner: layer.owner || '', note: layer.note || '', group: 'environment' });
         }
+        items.unshift({ id: 'map-terrain', title: '3D terrain', count: '', on: false, disabled: true, reason: '3D terrain needs the WebGL map' + (copReason ? ': ' + copReason : '') + '.', group: 'environment' });
       }
-      drawer.setGroups(drawerApi.grouped(items));
+      const groups = drawerApi.grouped(items);
+      if (env && env.environment) {
+        groups.unshift({ id: 'base', title: 'Base map', choice: true, items: [
+          { id: 'imagery', title: 'Imagery', on: false, disabled: true, reason: 'Imagery needs the WebGL map' + (copReason ? ': ' + copReason : '') + '.' },
+          { id: 'topo', title: 'Topographic', on: svgBase === 'topo' },
+          { id: 'plain', title: 'Plain', on: svgBase === 'plain' }
+        ] });
+      }
+      drawer.setGroups(groups);
     }
 
     function setLayer(id, on) {
@@ -322,6 +341,22 @@
       });
     }
 
+    /** The land cover the host's checked address points at, fetched once (connect-src allows only the extension); redraws when it arrives. */
+    function landcoverData() {
+      const from = basemap && basemap.frame && typeof basemap.frame.landcover === 'string' && /\.geojson$/.test(basemap.frame.landcover) ? basemap.frame.landcover : undefined;
+      if (!from || typeof fetch !== 'function') return undefined;
+      if (landcoverFrom !== from) {
+        landcoverFrom = from;
+        landcover = undefined;
+        fetch(from).then((r) => r.json()).then((json) => {
+          if (landcoverFrom !== from || !json || json.type !== 'FeatureCollection' || !Array.isArray(json.features)) return;
+          landcover = json;
+          if (model && copState !== 'on') render(model);
+        }, () => { /* the 2D map stays without land cover */ });
+      }
+      return landcover;
+    }
+
     /** The picture whose terrain the SVG map draws: one with a frame, while the COP map is not the one on screen. */
     function envPicture() {
       return picture && picture.frame && Array.isArray(picture.frame.bounds) && copState !== 'on' && !copView ? picture : undefined;
@@ -349,6 +384,21 @@
         sv('path', { class: g.properties.kind === 'marsh' ? 'land env-marsh' : 'land', d }, parent);
       }
       if (!terrain) return land.length > 0;
+      // Topographic: the pack's land cover in a topographic map's tints, under the hillshade and contours.
+      const cover = svgBase === 'topo' ? landcoverData() : undefined;
+      if (cover) {
+        const fills = sv('g', { class: 'env-landcover' }, parent);
+        for (const g of cover.features || []) {
+          if (!g || !g.geometry || g.geometry.type !== 'Polygon' || !g.properties) continue;
+          const kind = String(g.properties.kind);
+          if (!/^(forest|scrub|farmland|beach|rock|built-up|marsh)$/.test(kind)) continue;
+          sv('path', { class: 'lc lc-' + kind, d: g.geometry.coordinates.map((ring) => path(ring, true)).join(' '), 'fill-rule': 'evenodd' }, fills);
+        }
+        for (const g of cover.features || []) {
+          if (!g || !g.geometry || g.geometry.type !== 'LineString' || !g.properties) continue;
+          sv('path', { class: g.properties.kind === 'road' ? 'lc-road' : 'lc-track', d: path(g.geometry.coordinates, false), 'vector-effect': 'non-scaling-stroke' }, fills);
+        }
+      }
       const shade = sv('g', { class: 'layer env-hillshade', 'data-layer': 'env-hillshade' }, parent);
       for (const g of (terrain.hillshade && terrain.hillshade.features) || []) {
         if (!g.geometry || g.geometry.type !== 'Polygon') continue;
@@ -672,6 +722,7 @@
       try {
         mounting = api.mount(copSlot, {
           resources: cop.resources, nonce: cop.nonce || NONCE, renderer: 'auto', projection: 'map', clock, still: true, motion, colours: themeColours(),
+          basemap, mapSettings: options.mapSettings, onMapSettings: options.onMapSettings,
           // A layer turned on or off in the map's drawer is remembered like one turned in the SVG map's.
           onLayer: (id, on) => { if (on) hidden.delete(id); else hidden.add(id); if (options.onLayers) options.onLayers([...hidden]); }
         });
@@ -727,6 +778,13 @@
       if (copState === 'off' && model && model.available && JSON.stringify([next.frame, next.geography, next.environment]) !== groundBefore) render(model);
     }
 
+    /** The host's checked tile addresses: kept for the COP map's mount, and given to a running map. */
+    function setBasemap(next) {
+      basemap = next;
+      if (copView && copView.setBasemap) { try { copView.setBasemap(next); } catch (error) { /* the map keeps what it had */ } }
+      if (copState === 'off' && model && model.available) render(model);
+    }
+
     /** The theme changed: the COP map takes the page's map colours (the SVG map follows the CSS by itself). */
     function setTheme() {
       const colours = themeColours();
@@ -736,7 +794,7 @@
     return {
       element: box,
       render, highlight, showTable, focusFirst,
-      setLayer, setPicture, setTheme,
+      setLayer, setPicture, setTheme, setBasemap,
       renderer: () => ({ kind: copView ? 'maplibre' : 'svg', state: copState, reason: copReason }),
       labels: () => Object.values(placement),
       tableShown: () => tableOn,

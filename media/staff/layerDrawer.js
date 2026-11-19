@@ -5,7 +5,11 @@
 //
 //   const drawer = nearLayerDrawer.create(host, { motion, onToggle(id, on), title, footnote });
 //   drawer.button                     // the compact "Layers" button with how many layers are on; the caller places it over the map
-//   drawer.setGroups(groups)          // [{ id, title, items: [{ id, title, count, on, sim, owner, note, separate }] }]; empty groups are left out
+//   drawer.setGroups(groups)          // [{ id, title, choice?, items: [{ id, title, count, on, sim, owner, note, separate, disabled, reason, slider }] }];
+//                                     // empty groups are left out. A `choice` group is one radio group (the base map: Imagery, Topographic, Plain);
+//                                     // its rows call onChoose(groupId, itemId) and are not counted as layers. A row's `reason` is shown under it in
+//                                     // words (why 3D terrain is off, why a base is not available). A row's `slider` ({ min, max, step, value, label,
+//                                     // unit }) adds a range under it that calls onSlide(itemId, value).
 //   drawer.open() / drawer.close(returnFocus) / drawer.isOpen() / drawer.destroy()
 //
 // The drawer slides in from the map's right edge as a dialog. Escape, its close button, the Layers button and a click outside close it; while it is
@@ -106,8 +110,44 @@
 
     function counts() {
       let on = 0, all = 0;
-      for (const group of groups) for (const item of group.items) { all += 1; if (item.on) on += 1; }
+      for (const group of groups) {
+        if (group.choice) continue;
+        for (const item of group.items) { all += 1; if (item.on) on += 1; }
+      }
       return { on: on, all: all };
+    }
+
+    /** A choice group: one radio button per item, arrow keys move the choice within the group (the usual radio group keys). */
+    function renderChoice(group, section) {
+      const list = el('div', 'ld-choice');
+      list.setAttribute('role', 'radiogroup');
+      list.setAttribute('aria-labelledby', id + '-' + group.id);
+      const radios = [];
+      for (const item of group.items) {
+        const radio = el('button', 'ld-radio' + (item.on ? ' on' : ''), item.title);
+        radio.type = 'button';
+        radio.setAttribute('role', 'radio');
+        radio.setAttribute('aria-checked', item.on ? 'true' : 'false');
+        radio.setAttribute('data-layer', group.id + ':' + item.id);
+        radio.tabIndex = item.on ? 0 : -1;
+        if (item.disabled) { radio.disabled = true; radio.setAttribute('aria-disabled', 'true'); }
+        if (item.note || item.reason) radio.title = item.reason || item.note;
+        radio.addEventListener('click', function () { if (!item.disabled && !item.on && options.onChoose) options.onChoose(group.id, item.id); });
+        radios.push({ radio: radio, item: item });
+        list.appendChild(radio);
+      }
+      list.addEventListener('keydown', function (event) {
+        const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+        if (!(event.key in keys)) return;
+        if (event.preventDefault) event.preventDefault();
+        const usable = radios.filter(function (entry) { return !entry.item.disabled; });
+        const at = usable.findIndex(function (entry) { return entry.radio === document.activeElement; });
+        const next = usable[(Math.max(0, at) + keys[event.key] + usable.length) % usable.length];
+        if (next && options.onChoose) options.onChoose(group.id, next.item.id);
+      });
+      section.appendChild(list);
+      const chosen = group.items.find(function (item) { return item.on; });
+      if (chosen && chosen.reason) section.appendChild(el('p', 'ld-reason', chosen.reason));
     }
 
     function render() {
@@ -123,14 +163,22 @@
         name.id = id + '-' + group.id;
         const on = group.items.filter(function (item) { return item.on; }).length;
         groupHead.appendChild(name);
-        const tally = el('span', 'ld-tally', on + ' of ' + group.items.length + ' on');
-        groupHead.appendChild(tally);
+        if (!group.choice) groupHead.appendChild(el('span', 'ld-tally', on + ' of ' + group.items.length + ' on'));
         if (group.items.some(function (item) { return item.sim; })) {
           const sim = el('span', 'ld-sim', 'SIM');
           sim.title = 'Simulated exercise data feeds at least one layer here';
           groupHead.appendChild(sim);
         }
         section.appendChild(groupHead);
+        if (group.choice) {
+          renderChoice(group, section);
+          body.appendChild(section);
+          if (focused && focused.indexOf(group.id + ':') === 0) {
+            const again = section.querySelector('[aria-checked="true"]');
+            if (again) refocus = again;
+          }
+          continue;
+        }
         const list = el('ul', 'ld-list');
         for (const item of group.items) {
           const row = el('li', 'ld-row' + (item.on ? ' on' : '') + (item.separate ? ' ld-separate' : ''));
@@ -139,14 +187,15 @@
           toggle.setAttribute('role', 'switch');
           toggle.setAttribute('aria-checked', item.on ? 'true' : 'false');
           toggle.setAttribute('data-layer', item.id);
-          const words = item.title + ', ' + item.count + (item.sim ? ', simulated' : '') + (item.owner ? ', written by ' + item.owner : '');
+          if (item.disabled) toggle.disabled = true;
+          const words = item.title + (item.count !== undefined && item.count !== '' ? ', ' + item.count : '') + (item.sim ? ', simulated' : '') + (item.owner ? ', written by ' + item.owner : '');
           toggle.setAttribute('aria-label', words);
           const knob = el('span', 'ld-knob');
           knob.setAttribute('aria-hidden', 'true');
           toggle.appendChild(knob);
           toggle.addEventListener('click', function () { if (options.onToggle) options.onToggle(item.id, !item.on); });
           const label = el('span', 'ld-name', item.title);
-          const number = el('span', 'ld-n', String(item.count));
+          const number = el('span', 'ld-n', item.count === undefined ? '' : String(item.count));
           number.setAttribute('aria-hidden', 'true');
           row.appendChild(toggle); row.appendChild(label); row.appendChild(number);
           if (item.sim) { const sim = el('span', 'ld-sim', 'SIM'); sim.setAttribute('aria-hidden', 'true'); row.appendChild(sim); }
@@ -154,6 +203,20 @@
           if (note) row.title = note;
           list.appendChild(row);
           if (focused && focused === item.id) refocus = toggle;
+          if (item.reason) { const reason = el('li', 'ld-reason', item.reason); list.appendChild(reason); }
+          if (item.slider && item.on) {
+            const s = item.slider;
+            const holder = el('li', 'ld-slider');
+            const range = el('input', 'ld-range');
+            range.type = 'range'; range.min = String(s.min); range.max = String(s.max); range.step = String(s.step); range.value = String(s.value);
+            range.setAttribute('data-layer', item.id + ':slider');
+            range.setAttribute('aria-label', s.label);
+            const shown = el('output', 'ld-value', (s.prefix || '') + Number(s.value).toFixed(2).replace(/0$/, '') + (s.unit || ''));
+            range.addEventListener('input', function () { shown.textContent = (s.prefix || '') + Number(range.value).toFixed(2).replace(/0$/, '') + (s.unit || ''); if (options.onSlide) options.onSlide(item.id, Number(range.value)); });
+            holder.appendChild(el('span', 'ld-slider-label', s.label)); holder.appendChild(range); holder.appendChild(shown);
+            list.appendChild(holder);
+            if (focused && focused === item.id + ':slider') refocus = range;
+          }
         }
         section.appendChild(list);
         body.appendChild(section);
@@ -217,7 +280,7 @@
     return {
       button: button, panel: panel,
       setGroups: function (next) {
-        groups = (next || []).map(function (group) { return { id: String(group.id), title: String(group.title), items: (group.items || []).slice() }; });
+        groups = (next || []).map(function (group) { return { id: String(group.id), title: String(group.title), choice: Boolean(group.choice), items: (group.items || []).slice() }; });
         render();
       },
       open: show,
