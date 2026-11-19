@@ -2,30 +2,14 @@
 
 ## Unreleased
 
-**Military staff teams.** Set up a J2 intelligence, J5 plans, J3 operations or J4 logistics staff team for your project in your
+**Military staff teams.** Set up a J2 intelligence or J5 plans staff team for your project in your
 staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian), load a fictional exercise
 scenario, and let the members draft in parallel while every product passes the team's gates and a
 named person makes every decision. Staff teams are private, unclassified and for exercise and
 fictional data only; labels are not accreditation, and no member has a persona name or a rank.
 
-- **The Staff Room.** **NEAR AI: Open Staff Room**, also a button in Team Studio and on the
-  message after staff setup, shows a staff run as a war room: the planning process across the
-  top in your profile's own step names, the staff sections as squads with each agent's state in
-  words and icons, the product ledger where every product opens its provenance (owner, version,
-  gates on that version, who approved it, what it depends on, its history), and the gold human
-  decisions panel. Its buttons run only the person-only staff commands, which ask who you are,
-  confirm in a dialog and sign; the room shows a decision only once the signed ledger holds it.
-  Workspaces share one map, the ledger, the decisions and one clock: the war room for the whole
-  staff, and the J2 workspace with the threat picture on the exercise map (adversary units with
-  their grades, the MLCOA and MDCOA as dashed red axes, NAIs and control measures, map layers
-  each with its one writer, and a table view of all of it), the source register with reliability
-  and credibility graded separately, PIRs linked to the decision points they support, the
-  collection plan and the standing watches. J5, J3 and J4 workspaces arrive in drop 2 and say
-  what they will hold. Night, day and high contrast themes follow VS Code; Calm and the system's
-  reduced-motion setting stop all movement; the whole room works from the keyboard, with
-  single-key shortcuts you can turn off; Follow the action moves the view to where the work is.
 - **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
-  for the section (J2, J5, J3 or J4), the doctrine profile, the level, the nation (NATO/Canadian), the
+  for the section (J2 or J5), the doctrine profile, the level, the nation (NATO/Canadian), the
   planning type and the section's own options, then shows the roster: the person who decides, and
   each member with its role and who it reports to. It saves the private team to your teams, writes
   PROFILE.md and the section's skills under `.planning/staff/`, the staff settings in the
@@ -48,6 +32,48 @@ fictional data only; labels are not accreditation, and no member has a persona n
   release guard. Strategic, operational and tactical variants, a multidomain convergence planner
   under US Army, and the J3 director as planning lead in crisis planning. Four skills: planning
   templates, wargame ledger, centre of gravity analysis and assessment framework.
+- **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
+  and move from draft through the gates to a person's decision, recorded in a signed, chained
+  ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head
+  outside the project, so a ledger cut short, deleted or replaced reads as tampered, and a ledger
+  or register that cannot be read whole is reported as unreadable, never as empty. Members use the built-in `mcp:staff-products` tools by role
+  (propose, status and list for owners; submit and withdraw for the section's lead; verdicts for
+  the two gates), with the shared CCIR, RFI, assumptions, annex, synchronization, decision support
+  and targeting registers, the wargame ledger and the step rail. Approving, rejecting and
+  releasing are **NEAR AI: Staff:** commands a person runs, signed with this device's key; no
+  agent tool can do them.
+- **Two blocking gates.** The release guard runs `mcp:guard-scan` (classification and caveat
+  markings, the exercise box, your real-entity list, publications with no public copy, decisions
+  written as made, personal data, secrets and J4 numbers without a calculation) and records
+  CLEARED or HOLD on the exact version. J2 products first need the tradecraft reviewer's SIGN-OFF,
+  held to the one ICD 203 tradecraft lint. An edit voids both verdicts.
+- **Intel workbench.** A J2 team's members granted `mcp:intel-workbench` keep the source register,
+  the PIR register and the collection plan in `.planning/staff/products/j2/`. Reliability (A to F)
+  and credibility (1 to 6) are two fields, reports that share an origin never count as
+  corroboration, every PIR names its decision point and latest time of value and only a named
+  person approves one, with **NEAR AI: Staff: Decide a PIR**, which signs the decision (a decision
+  written into the register file alone never counts), and the collection plan holds recommendations
+  only. Only members granted `mcp:intel-workbench` can use it. It drafts INTSUM and
+  INTREP skeletons and checks a product for compilation risk, which always ends with a question
+  for a person. It reaches no network and takes exercise labels only.
+- **Exercise scenarios.** **NEAR AI: Load Staff Exercise Scenario** loads Exercise IRON LANTERN, a
+  fictional, unclassified starter (a peninsula, a coast and a strait, both orders of battle, a
+  mission with the higher commander's intent, graded and ungraded reports), or a scenario file of
+  your own, into `.planning/staff/scenario/` with J2 and J5 demo scripts. Files with
+  classification markings, names on your real-entity list or stray coordinates are refused, and an
+  earlier scenario is archived rather than deleted. The real-entity list is one list, in
+  `.planning/.near-ai/staff-guard.json` and `.planning/staff/real-entities.txt`, used by both the
+  scenario import and guard-scan.
+- **Red team and release guard held to their own files.** In a staff team the red team may write
+  only its critique and the release guard only its gate reports. Write and Edit refuse every other
+  path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
+  tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
+
+**Military staff teams, drop 2.** Set up a J3 operations or J4 logistics staff team beside the J2
+and J5, open the Staff Room to watch the staff at work, replay Exercise IRON LANTERN as live
+simulated feeds on this machine, and see them on the COP map and in the J2 workspace. As in drop 1,
+members draft and recommend, and a named person makes every decision.
+
 - **J3 operations team.** 12 members at strategic and operational level and 10 at tactical level:
   an integrator who keeps the running estimate (headed by the seven joint functions, or Command,
   Sense, Act, Shield and Sustain under NATO/Canadian with Canada) and proposes the CCIRs, current
@@ -90,38 +116,26 @@ fictional data only; labels are not accreditation, and no member has a persona n
   comes from a CSV you import. Every calculation, movement check and readiness import is a
   calculator record entered in a signed calculator ledger, and the release guard now holds a
   product that cites a record the calculator did not write or that changed since.
-- **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
-  and move from draft through the gates to a person's decision, recorded in a signed, chained
-  ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head
-  outside the project, so a ledger cut short, deleted or replaced reads as tampered, and a ledger
-  or register that cannot be read whole is reported as unreadable, never as empty. Members use the built-in `mcp:staff-products` tools by role
-  (propose, status and list for owners; submit and withdraw for the section's lead; verdicts for
-  the two gates), with the shared CCIR, RFI, assumptions, annex, synchronization, decision support
-  and targeting registers, the operations centre's event log, the wargame ledger and the step rail. Approving, rejecting and
-  releasing are **NEAR AI: Staff:** commands a person runs, signed with this device's key; no
-  agent tool can do them.
-- **Two blocking gates.** The release guard runs `mcp:guard-scan` (classification and caveat
-  markings, the exercise box, your real-entity list, publications with no public copy, decisions
-  written as made, personal data, secrets and J4 numbers without a calculation) and records
-  CLEARED or HOLD on the exact version. J2 products first need the tradecraft reviewer's SIGN-OFF,
-  held to the one ICD 203 tradecraft lint. An edit voids both verdicts.
-- **Intel workbench.** A J2 team's members granted `mcp:intel-workbench` keep the source register,
-  the PIR register and the collection plan in `.planning/staff/products/j2/`. Reliability (A to F)
-  and credibility (1 to 6) are two fields, reports that share an origin never count as
-  corroboration, every PIR names its decision point and latest time of value and only a named
-  person approves one, with **NEAR AI: Staff: Decide a PIR**, which signs the decision (a decision
-  written into the register file alone never counts), and the collection plan holds recommendations
-  only. Only members granted `mcp:intel-workbench` can use it. It drafts INTSUM and
-  INTREP skeletons and checks a product for compilation risk, which always ends with a question
-  for a person. It reaches no network and takes exercise labels only.
-- **Exercise scenarios.** **NEAR AI: Load Staff Exercise Scenario** loads Exercise IRON LANTERN, a
-  fictional, unclassified starter (a peninsula, a coast and a strait, both orders of battle, a
-  mission with the higher commander's intent, graded and ungraded reports), or a scenario file of
-  your own, into `.planning/staff/scenario/` with J2 and J5 demo scripts. Files with
-  classification markings, names on your real-entity list or stray coordinates are refused, and an
-  earlier scenario is archived rather than deleted. The real-entity list is one list, in
-  `.planning/.near-ai/staff-guard.json` and `.planning/staff/real-entities.txt`, used by both the
-  scenario import and guard-scan.
+- **The Staff Room.** **NEAR AI: Open Staff Room**, also a button in Team Studio and on the
+  message after staff setup, shows a staff run as a war room: the planning process across the
+  top in your profile's own step names, the staff sections as squads with each agent's state in
+  words and icons, the product ledger where every product opens its provenance (owner, version,
+  gates on that version, who approved it, what it depends on, its history), and the gold human
+  decisions panel. Its buttons run only the person-only staff commands, which ask who you are,
+  confirm in a dialog and sign; the room shows a decision only once the signed ledger holds it.
+  Workspaces share one map, the ledger, the decisions and one clock: the war room for the whole
+  staff, and the J2 workspace with the threat picture on the exercise map (adversary units with
+  their grades, the MLCOA and MDCOA as dashed red axes, NAIs and control measures, map layers
+  each with its one writer, and a table view of all of it), the source register with reliability
+  and credibility graded separately, PIRs linked to the decision points they support, the
+  collection plan, the standing watches and the live feed reports the observation store holds
+  (newest first, only what your clearances cover, simulated ones marked SIM). The map is the real
+  COP map (MapLibre, 2D or globe, offline) when the window has WebGL, and the room's own SVG map
+  otherwise, with the reason shown; on both, names never cover each other. While the room is open
+  it runs track decay every few seconds, so tracks go stale and then lost on screen. The J5, J3
+  and J4 workspaces say what they will hold. Night, day and high contrast themes follow VS Code; Calm and the system's
+  reduced-motion setting stop all movement; the whole room works from the keyboard, with
+  single-key shortcuts you can turn off; Follow the action moves the view to where the work is.
 - **IRON LANTERN on the globe, and its directions fixed.** The starter scenario's grid references
   now grow northward, so "north of Saltmere", "along PL COPPER north of Ashby Ford", "south of
   Kell" and the artillery reach statements all hold on the map. Scenario files gain version 2
@@ -138,9 +152,6 @@ fictional data only; labels are not accreditation, and no member has a persona n
   ACLED, social media and other sources whose terms restrict this use are off by default, are
   never used for training, and stay off until your organization records a licence; partner
   intelligence enters a staff project only as a fictional simulation kept on this machine.
-- **Red team, release guard and J3 watch officer held to their own files.** In a staff team the red
-  team may write only its critique, the release guard only its gate reports, and the J3 watch
-  officer nothing at all. Write and Edit refuse every other
 - **IRON LANTERN as live feeds.** **NEAR AI: Staff: Start the Exercise Feed Simulation** replays
   the starter scenario as live streams on this machine only: friendly and enemy tracks as Cursor on
   Target, ships in and near the Varn Strait as AIS, fictional news outlets as RSS, and a mock
@@ -151,6 +162,11 @@ fictional data only; labels are not accreditation, and no member has a persona n
   the speed (0.5x, 1x, 2x or 4x); the status bar shows the SIM badge, the speed and the scenario
   clock, and every feed in the feed picture is badged SIM. At 1x the three days play in about
   a quarter of an hour.
+  With a project folder open, the simulated CoT, AIS and RSS reports also go into the project's
+  observation store and the feed changes into the staff event log, so the J2 workspace, the
+  observations tools and the COP show them live; the store keeps the exercise clock while the
+  simulation runs and decays tracks on a timer. Stopping the simulation pauses its feeds, and the
+  next run resumes them. The partner feed stays off until a person adds the mock partner server.
 - **Observation store and the observations server.** Feed reports are kept in your project under
   `.planning/staff/observations/` (not committed: the folder ignores itself), one append-only file
   per feed, channel and hour. A report delivered twice is kept once. Each report keeps the label its
@@ -173,10 +189,36 @@ fictional data only; labels are not accreditation, and no member has a persona n
   on the shared clock, "as happened" and "as known" replay, symbol cards in words, and a track
   budget of 2,000; without WebGL it falls back to a 2D SVG map behind the same interface. The J2
   members that draw the threat and terrain layers are granted it again.
-- **Red team and release guard held to their own files.** In a staff team the red team may write
-  only its critique and the release guard only its gate reports. Write and Edit refuse every other
-  path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
-  tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
+- **J3 watch officer held to its own files.** Like the red team and the release guard, the J3 watch
+  officer is held to a write limit: it may write nothing at all. Write and Edit refuse every path,
+  and it gets no shell, document, agent-starting or other MCP tool, only the staff tools it is
+  granted and the read-only observations server.
+- **J3 takes over the plan's DSM and sync matrix in execution.** Once a person approves the
+  transition brief, the J3 writes the decision support matrix and the synchronization matrix the
+  J5 made in planning, in place, and the J5 proposes changes instead. Status names the new writer
+  and the approval that moved it. A version still open under the J5 at that moment is withdrawn
+  by a person, or by its J5 owner, before the J3 writes the next one.
+- **Staff: Use This Branch's Ledger.** After switching to a git branch with an older product
+  ledger, the ledger reads as tampered, because this computer remembers a later head. This person
+  only command checks that the branch's ledger verifies on its own (every signature and the whole
+  chain), shows what changes in a dialog, records a signed entry with your name and role, and then
+  remembers this ledger's head. A ledger that does not verify is refused; Set Aside stays the way
+  out for that. No agent can run it.
+- **Built-in staff servers listed once and given only to granted members.** staff-products,
+  guard-scan, the intel workbench, observations, the COP map and logistics are listed once on the
+  Tools page (no tool appears twice) and in the Team Studio picker. A run gets the intel workbench,
+  observations, COP map and logistics tools only when a member's tools line grants them, and the
+  run's lead can call none of them. J3 integrator, current operations, watch officer and the
+  maritime and air liaison are granted the observations server.
+- **Never writing over a member's bytes.** Every write the drop 2 servers make to a file a member
+  can also write (COP layers, their proposals and merges, calculator records, the LOGSTAT
+  validation log, the observation store's indexes) replaces only the bytes the server read; a
+  member's write that lands in between stands, and the server refuses instead.
+- **Smaller fixes.** guard-scan now holds and geofences coordinates written with two decimals.
+  Reading a register is its own read-only tool (`mcp__staff-products__register_read`), so a read no
+  longer asks for a write approval, and reading the PIR register returns the intel workbench's
+  register. **Decide a PIR** names the reason when the PIR register cannot be read instead of
+  saying no PIR is waiting.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

@@ -355,8 +355,11 @@ its time slider. Where WebGL or the map library is not available, the room
 draws a 2D map instead and says why in a line on the map. On either map a
 name that would cover another name or a symbol moves to a free spot nearby,
 is shortened, or is left off; the symbol always stays, and its name is still
-in its description and in **Map as table**. The J5, J3 and J4
-workspaces arrive in drop 2. **Calm** stops all movement, as the system's
+in its description and in **Map as table**. The J2 workspace also lists the
+live feed reports the project's observation store holds, newest first and
+only what your clearances cover; a running exercise feed simulation fills it.
+While the room is open it runs track decay, so tracks go stale and then lost.
+The J5, J3 and J4 workspaces say what they will hold. **Calm** stops all movement, as the system's
 reduced-motion setting does; **Follow the action** moves the view to where the
 work is; press **?** for the keys.
 
