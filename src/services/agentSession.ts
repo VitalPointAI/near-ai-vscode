@@ -28,6 +28,7 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
+import { grantedIntelWorkbenchTools } from '../agent/intelWorkbench';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -72,6 +73,8 @@ import type { ContextGraphMemory } from './contextGraphMemory';
 import type { ReputationStore } from './reputation';
 import { SpendAccount } from './spendAccount';
 import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
+import { staffTeamInfo, staffTools, WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
+import { staffHostFor } from '../staff/staffHost';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -174,6 +177,21 @@ export interface AgentTurnRequest {
 }
 
 /** The spend account of a client, when spend tracking is on for it. */
+/**
+ * A staff team member's lane on the step board (design 10, 4.5): `staff.lane.started` when it starts and `staff.lane.finished` when it ends. Only for a
+ * member of a staff section team; a lane that cannot be recorded never stops the agent.
+ */
+function staffLane(request: Pick<AgentTurnRequest, 'team'>, root: string, run: string, member: string, teamMember: boolean, status: 'started' | 'done' | 'failed' | 'cancelled'): void {
+  const team = request.team ? staffTeamInfo(request.team) : undefined;
+  const host = team && teamMember && team.members.includes(member) ? staffHostFor(root) : undefined;
+  if (!team || !host) return;
+  const at = new Date().toISOString();
+  const event = status === 'started'
+    ? { type: 'staff.lane.started' as const, run, at, section: team.section, member }
+    : { type: 'staff.lane.finished' as const, run, at, section: team.section, member, outcome: status };
+  void host.record(event).catch(() => undefined);
+}
+
 export function spendAccountOf(client: unknown): SpendAccount | undefined {
   const spend = (client as { spend?: unknown } | undefined)?.spend;
   return spend instanceof SpendAccount ? spend : undefined;
@@ -228,6 +246,8 @@ const headCommit = (root: string): Promise<string | undefined> => new Promise((r
 });
 /** The text of the last assistant message in a transcript, or an empty string when there is none. */
 const lastAssistantText = (transcript: AgentMessage[]): string => { for (let index = transcript.length - 1; index >= 0; index -= 1) { const message = transcript[index]; if (message.role === 'assistant') return message.content ?? ''; } return ''; };
+/** Tool capabilities that change files or run programs: an agent with a write limit keeps none of them except Write and Edit, which check the limit. */
+const WRITING_CAPABILITIES: ReadonlySet<string> = new Set(['workspaceWrite', 'sharedWrite', 'shell', 'mediaGeneration', 'mediaPublication']);
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 /**
@@ -1446,7 +1466,14 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the intel-workbench, a built-in local
+    // server. Members reach them only through their `mcp:staff-products`, `mcp:guard-scan` and `mcp:intel-workbench` grants, like any connected
+    // server's tools. None of them can approve, reject or release anything, and the workbench reads and writes only the J2 registers, never the network.
+    const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
+    const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
+    // Only to members whose own tools line grants it, never to the run's lead (grantedIntelWorkbenchTools refuses any other caller).
+    const intel = request.team?.staff ? grantedIntelWorkbenchTools(request.team) : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
@@ -1506,7 +1533,12 @@ export class AgentConversation {
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
         const pool = [...all.filter((tool) => tool.name !== 'Remember' && tool.name !== 'Recall'), ...privateMemory];
         // A listed tool, Task for Agent, and MCP tools by name, mcp:<server>, or a trailing-* pattern.
-        const allowed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        const listed = spawn.agent?.tools.length ? pool.filter((tool) => spawn.agent!.tools.includes(tool.name) || (tool.name === 'Task' && spawn.agent!.tools.includes('Agent')) || (tool.name.startsWith('mcp__') && grantsMcpTool(spawn.agent!.tools, tool.name))) : pool.filter((tool) => tool.name !== 'Agent' && tool.name !== 'Task');
+        // An agent with a write limit (a staff team's red team or guard) keeps only Write and Edit among the tools that change files, since those two
+        // refuse every path outside the limit; a shell, an MCP tool or a document maker could write anywhere, and starting other agents could too. The
+        // built-in staff tools it is granted stay (WRITE_LIMITED_STAFF_TOOLS): they write only the ledger, headers and gate reports, through the host.
+        const writeOnly = spawn.agent?.writeOnly;
+        const allowed = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
@@ -1588,11 +1620,12 @@ export class AgentConversation {
             // Its own shell, so parallel agents neither queue behind each other's commands nor share a cwd.
             shell = new ShellSession(agentRoot, undefined, request.gsd?.shellEnv ?? {}, request.shellEnvAllow ?? []);
             // Research agents gather outside content; their writes belong in .planning/ (others ask).
-            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), agentId: agent.id, agentLabel: label, ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}) };
+            const agentContext = { ...context, root: agentRoot, shell, readFiles: new Set<string>(), pages: new Map<string, string>(), agentId: agent.id, agentLabel: label, ...(/research|synthesi|red-team/i.test(label) ? { writeScope: '.planning' } : {}), ...(writeOnly ? { writeOnly } : {}) };
             const isolationNote = worktree ? `\n\n# Isolation\nYou are working in an isolated git worktree at ${worktree.path} on branch ${worktree.branch}${worktree.root !== worktree.path ? `, in its copy of the workspace folder, ${worktree.root}` : ''}.${worktree.rootUnmatched ? ` The workspace folder (${this.root}) could not be placed inside the worktree, so you start at its top level: change into the matching subfolder before working.` : ''}${worktree.rootCreatedEmpty ? ` git does not track that folder, so its copy here is empty: files you need from it are only in the main checkout.` : ''} Commit your work on this branch; do not switch branches or touch the main checkout at ${this.root}.` : '';
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted(identity, spawn.prompt, system);
+            staffLane(request, this.root, runId, label, teamMember, 'started');
             // Paused while it waited for a slot: it starts paused.
             if (agent.paused) this.activity?.setPaused(agent.id, true);
             this.inboxes.set(agent.id, inbox);
@@ -1659,6 +1692,7 @@ export class AgentConversation {
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
             this.activity?.agentEnded(agent.id, result.outcome);
+            staffLane(request, this.root, runId, label, teamMember, result.outcome === 'cancelled' ? 'cancelled' : result.outcome === 'completed' ? 'done' : 'failed');
             await this.persistAgent(request, agent.id);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
@@ -1677,6 +1711,7 @@ export class AgentConversation {
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
             this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
+            staffLane(request, this.root, runId, label, teamMember, 'failed');
             await this.persistAgent(request, agent.id);
             await this.recordReputation(request.reputation, label, -1, agent.id);
             void record({ status: 'failed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });

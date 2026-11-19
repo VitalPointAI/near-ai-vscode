@@ -252,6 +252,40 @@ It never asks for or stores a token, and it never changes settings outside
 the repository itself: for branch protection, environments, or secrets it
 writes the exact commands and leaves them for you to approve and run.
 
+**NEAR AI: Set Up a Staff Team** (also **Set up a staff team** in Team
+Studio) makes a military staff section team for this project: choose the
+section (J2 intelligence or J5 plans), the doctrine profile (US Joint, US Army
+MDMP or NATO/Canadian), the level, the nation and the kind of planning, then
+check the roster before anything is written. The team goes to your teams as
+`<section>-<profile>-<level>.md` and runs with `/team:<that name>`; PROFILE.md
+and the section's skills go under `.planning/staff/`, the staff settings into
+`.planning/.near-ai/project.json`, and the section's guidance into `AGENTS.md`
+between markers of its own, so a J2 and a J5 team can share a project. An
+earlier team file of the same name moves to your teams archive. The team is
+private, its members draft and recommend, and a named person decides: only
+the **NEAR AI: Staff** commands approve, reject or release a product. It then
+offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
+staff team and brings it up to date for the project's current staff settings,
+keeping members you changed. The built-in staff servers (`mcp:staff-products`,
+`mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
+the Team Studio tool picker; only a staff team's run gets them.
+
+For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
+exercise scenario into `.planning/staff/scenario/` for the team to read. The
+starter scenario, Exercise IRON LANTERN, is fictional and unclassified: a
+peninsula with a coast and a strait, friendly and adversary orders of battle,
+a mission with the higher commander's intent, and reports graded for
+reliability and credibility (one left ungraded). You can load a scenario file
+of your own instead; it must be marked as fictional, unclassified exercise
+data, and anything with a classification marking, a name on your real-entity
+list (the one guard-scan uses: `.planning/staff/real-entities.txt` and the
+names in `.planning/.near-ai/staff-guard.json`), or coordinates outside the
+exercise area is refused. Beside the starter scenario the command writes J2 and J5
+demo scripts in `.planning/staff/demo/`: the prompts for each step in your
+staff profile's own terms, with a checklist of the headings, terms and
+citations each product must contain. Loading again moves the earlier
+scenario to `.planning/staff/archive/` rather than deleting it.
+
 ### MCP connections
 
 **NEAR AI: Manage MCP Connections** adds Model Context Protocol servers, remote
@@ -276,6 +310,22 @@ may delete or reach the open world, or says neither way, keeps asking.
 The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
 with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+
+**The intel workbench** is a built-in local server for military staff J2 teams
+(a team whose file has a `staff:` block). It runs inside the extension, not as
+a separate program, and reaches no network. A member uses it only when its
+`tools:` line lists `mcp:intel-workbench`. It keeps the source register, the
+PIR register and the collection plan as JSON files in
+`.planning/staff/products/j2/`, one
+entry per line. Reliability and credibility are graded separately; reports
+that share an origin count once; every PIR names the decision point it
+supports and its latest time of value; the collection plan holds
+recommendations only, because the J3 approves asset allocation; and a PIR is
+approved or rejected only by a named person, never by a tool. It also drafts
+INTSUM and INTREP skeletons and checks a product for compilation risk, which
+always ends with a question for a person and never with a clearance. Entries
+take exercise labels only: org/Public, org/Internal, NATO Unclassified or
+Protected A.
 
 A server's tool descriptions are its own words, so they reach the model fenced
 as untrusted text, cut to 1,024 characters, the way its results are, and a
@@ -557,6 +607,9 @@ until it runs out aren't shown.
   writes `privacy:` as the member's last line before its instructions, so an
   older version that does not know it still reads the member's tools
   correctly; if you write it by hand, put it after `tools:` too.
+  In a military staff team (a team file with a `staff:` block), the red team
+  can write only its critique and the release guard only its verdicts: the
+  extension refuses their other writes and gives them no shell.
   New research teams have `privacy: private` on every member (and presales
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
@@ -862,6 +915,30 @@ until it runs out aren't shown.
   up with Recall, and starts each run with the facts relevant to your request.
   Memory stays on this machine and refuses secret-looking content. Review,
   correct, retract, export, or reset it with **Manage Project Memory**.
+
+- **Staff products for military staff teams.** A staff section team (a team
+  file with a `staff:` block, for exercise and fictional data only) works on
+  products through three tool groups its members are granted:
+  `mcp:staff-products` (propose a new version, give a gate verdict, submit
+  for a decision, withdraw, status, list, the shared registers, the wargame
+  ledger and the tradecraft lint) and `mcp:guard-scan` (the release-guard's
+  checks for markings, the exercise box, real names, decisions written as
+  made, personal data and J4 numbers without a calculation). Every product
+  follows one path: draft, guard-checked, awaiting decision, then approved or
+  rejected, then released. No agent can approve, reject or release anything:
+  only a named person can, with **NEAR AI: Staff: Approve a Product**,
+  **Reject a Product**, **Release a Product** or **Withdraw a Product**,
+  signed with this device's key. Your name and role are self-declared until
+  verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
+  product, what waits for you, and its history. **NEAR AI: Staff: Decide a
+  PIR** approves or rejects a PIR awaiting a decision, signed the same way; a
+  decision written into the PIR register any other way does not count. The
+  exercise box and the
+  real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
+  and `.planning/staff/real-entities.txt`. Everything a staff team writes
+  lives under `.planning/staff/`: products in
+  `.planning/staff/products/<section>/`, with each gate's report beside them,
+  and the signed ledger in `.planning/staff/ledger/`.
 
 ### Cybersecurity scans
 

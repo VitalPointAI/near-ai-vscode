@@ -26,6 +26,8 @@ import { registerAgentActivity } from './services/activityView';
 import { registerTeamLive } from './services/teamLiveView';
 import { registerRunReport } from './services/runReportCommand';
 import { registerResearchVerifiers } from './services/researchProfileCommand';
+import { registerStaffScenario } from './services/staffScenario';
+import { registerStaffSetup } from './services/staffSetupCommand';
 import { registerUsageExport } from './services/usageExport';
 import { closeAllConversations } from './services/agentSession';
 import { registerSecurityScanning } from './services/securityScan';
@@ -33,6 +35,7 @@ import { registerWebSearchSetup } from './services/webSearchSetup';
 import { registerSpendingLimits } from './services/spendingLimits';
 import { registerSpendTracking } from './services/spendTracking';
 import { registerGate } from './services/gateCommands';
+import { registerStaffCommands } from './services/staffCommands';
 import type { GateHost } from './gate/host';
 import { registerTeamMode, teamModeTestApi } from './services/team/teamCommands';
 import type { TeamModeTestApi } from './services/team/teamCommands';
@@ -130,6 +133,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   // The one gate starts before anything that could run a tool, and before Team Mode; the chat gives each conversation its runtime from it (GATE-04).
   const gate = registerGate(context);
+  // A person's decisions on staff products (approve, reject, release, withdraw) are these commands only; no agent tool reaches them.
+  registerStaffCommands(context);
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
@@ -212,6 +217,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
 
   registerRunReport(context);
   registerResearchVerifiers(context);
+  registerStaffScenario(context);
+  registerStaffSetup(context);
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));
   registerProjectSetup(context, { secrets: context.secrets, chatVisible: () => sidebar.visible });
   registerNewProfile(context, () => configureApiKey(context, auth, sidebar));

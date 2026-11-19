@@ -2,7 +2,12 @@ import { parseFrontmatter } from '../gsd/library';
 import { PROJECT_TYPES, projectGuidanceBlock, readProjectGuidance, replaceProjectGuidance, templateVersion, type ProjectType } from './projectTypes';
 import { guidanceFingerprint, memberFingerprint, splitGoal } from './teamFingerprints';
 import { lineDiff, splitTeam, type DiffLine, type Section } from './teamMarkdown';
-import { TEMPLATE_HISTORY } from './teamTemplateHistory';
+import { TEMPLATE_HISTORY, type TemplateSnapshot } from './teamTemplateHistory';
+import type { StaffSettings } from '../domain/staff/profiles';
+import { renderStaffTeamBlock, type StaffTeamBlock } from '../domain/staff/teamBlock';
+import { staffGuidanceIn, withStaffGuidance } from './staff/guidance';
+import { staffTemplate, type StaffTemplateOptions } from './staff/templates';
+import { bestStaffRendering, staffBlockOf, staffRenderingFor, staffSettingsFor, staffTemplateOf, type StaffRendering } from './staffTeamUpdate';
 
 // Update Team: bring a team file made from a built-in project type up to the current definition
 // without losing the user's own work. Each member is merged three ways: the base is the definition
@@ -34,7 +39,54 @@ export interface TemplateRef {
  */
 export type MemberAction = 'auto' | 'same' | 'choice' | 'kept' | 'new' | 'removed' | 'custom';
 export interface MemberPlan { name: string; action: MemberAction; reason: string; current?: string; proposed?: string; merged?: string; diff?: DiffLine[]; permanent?: boolean }
-export interface TeamUpdatePlan { template: TemplateRef; upToDate: boolean; local: boolean; goal?: string; members: MemberPlan[] }
+/** `staff`: a military staff section team, planned against today's rendering of its staff template for these options (the project's staff settings). */
+export interface TeamUpdatePlan { template: TemplateRef; upToDate: boolean; local: boolean; goal?: string; members: MemberPlan[]; staff?: StaffTemplateOptions }
+
+/** What a plan compares a team file with: a project type's members, or a staff template's rendering. */
+interface UpdateSource {
+  readonly id: string;
+  readonly label: string;
+  readonly version: number;
+  readonly history: readonly TemplateSnapshot[];
+  /** The built-in members in their built-in order. */
+  readonly order: readonly string[];
+  section(name: string, goal?: string): Omit<Section, 'raw'> | undefined;
+  fingerprint(name: string): string;
+  permanent(name: string): boolean;
+  /** For a staff team: the `staff:` block today's rendering writes. */
+  readonly block?: StaffTeamBlock;
+}
+
+function projectSource(type: ProjectType, local: boolean): UpdateSource {
+  return {
+    id: type.id, label: type.label, version: templateVersion(type.id), history: TEMPLATE_HISTORY[type.id] ?? [], order: type.members.map((member) => member.name),
+    section: (name, goal) => builtInSection(type, name, local, goal),
+    fingerprint: (name) => builtInFingerprint(type, name, local),
+    permanent: (name) => Boolean(type.members.find((member) => member.name === name)?.permanent)
+  };
+}
+
+function staffSource(id: string, label: string, rendering: StaffRendering): UpdateSource {
+  const byName = new Map(rendering.sections.map((section) => [section.name, section]));
+  return {
+    id, label, version: templateVersion(id), history: TEMPLATE_HISTORY[id] ?? [], order: rendering.sections.map((section) => section.name),
+    section: (name) => byName.get(name),
+    fingerprint: (name) => fingerprintOf(byName.get(name)!),
+    permanent: () => false,
+    ...(rendering.block ? { block: rendering.block } : {})
+  };
+}
+
+/** The source a plan was made against, made again for applying it. */
+function sourceOf(plan: TeamUpdatePlan): UpdateSource {
+  if (plan.staff) {
+    const template = staffTemplate(plan.template.id);
+    const rendering = template ? staffRenderingFor(template, plan.staff) : undefined;
+    if (!template || !rendering) throw new Error(`The staff template ${plan.template.id} cannot be rendered for this project's staff settings.`);
+    return staffSource(template.id, plan.template.label, rendering);
+  }
+  return projectSource(PROJECT_TYPES.find((entry) => entry.id === plan.template.id)!, plan.local);
+}
 export type MemberDecision = 'take' | 'keep' | 'merge';
 export interface UpdateDecisions { members?: Record<string, MemberDecision>; add?: string[] }
 
@@ -70,6 +122,17 @@ function withFrontmatter(text: string, lines: string[]): string {
   return `---\n${[...kept, ...lines].join('\n')}\n---\n${text.slice(match[0].length)}`;
 }
 
+/** A frontmatter head with its `staff:` block replaced by today's (the settings may have moved the profile or level); other lines are kept. */
+function withStaffBlock(head: string, block: StaffTeamBlock | undefined): string {
+  if (!block || !head) return head;
+  const lines = head.split('\n');
+  const start = lines.findIndex((line) => /^staff:\s*$/.test(line));
+  if (start < 0) return head;
+  let end = start + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end])) end += 1;
+  return [...lines.slice(0, start), ...renderStaffTeamBlock(block), ...lines.slice(end)].join('\n');
+}
+
 function builtInSection(type: ProjectType, name: string, local: boolean, goal?: string): Omit<Section, 'raw'> | undefined {
   const member = type.members.find((entry) => entry.name === name);
   if (!member) return undefined;
@@ -99,6 +162,15 @@ function renderSection(section: Omit<Section, 'raw'>): string {
 /** The project type a team file comes from: its stamp, or else the type whose member names it shares most (at least three, and half the type). */
 export function detectTemplate(text: string): TemplateRef | undefined {
   const { data } = parseFrontmatter(text);
+  // A staff section team: its stamp, or the template for its block's section (it is never matched to a project type by member names).
+  const staff = staffTemplateOf(text, typeof data.template === 'string' ? data.template : undefined);
+  if (staff) {
+    const stamped = data.template === staff.id;
+    const base: Record<string, string> = {};
+    if (stamped) for (const entry of Array.isArray(data.templateBase) ? data.templateBase : []) { const [name, print] = String(entry).split('='); if (name && print) base[name.trim()] = print.trim(); }
+    const from = Number(data.templateVersion);
+    return { id: staff.id, label: `${staff.label} (staff)`, stamped, ...(stamped && Number.isFinite(from) && from > 0 ? { fromVersion: from } : {}), toVersion: templateVersion(staff.id), ...(stamped ? { base } : {}) };
+  }
   const stampedType = typeof data.template === 'string' ? PROJECT_TYPES.find((type) => type.id === data.template) : undefined;
   if (stampedType) {
     const base: Record<string, string> = {};
@@ -134,17 +206,32 @@ function mergeNewLines(mine: Omit<Section, 'raw'>, theirs: Omit<Section, 'raw'>)
 }
 
 /** What Update Team would do to each member, without writing anything. Undefined when the file is not from a built-in type. */
-export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
+export function planTeamUpdate(text: string, context: { staffSettings?: StaffSettings } = {}): TeamUpdatePlan | undefined {
   const template = detectTemplate(text);
   if (!template) return undefined;
-  const type = PROJECT_TYPES.find((entry) => entry.id === template.id)!;
   const sections = splitTeam(text).sections;
-  const history = TEMPLATE_HISTORY[type.id] ?? [];
   const goal = sections.map((section) => splitGoal(section.instructions).goal).find(Boolean);
-  const local = isLocalVariant(sections, type);
+  let source: UpdateSource;
+  let local: boolean;
+  let staff: StaffTemplateOptions | undefined;
+  const staffTemplateFound = staffTemplate(template.id);
+  if (staffTemplateFound) {
+    // Today's rendering for the project's staff settings, in the shape that fits the file (roster, variant, red team, local or cloud).
+    const block = staffBlockOf(text)!;
+    const rendering = bestStaffRendering(staffTemplateFound, staffSettingsFor(block, context.staffSettings), sections);
+    if (!rendering) return undefined;
+    source = staffSource(staffTemplateFound.id, template.label, rendering);
+    local = rendering.local;
+    staff = rendering.options;
+  } else {
+    const type = PROJECT_TYPES.find((entry) => entry.id === template.id)!;
+    local = isLocalVariant(sections, type);
+    source = projectSource(type, local);
+  }
+  const history = source.history;
   const members: MemberPlan[] = [];
   for (const section of sections) {
-    const proposedSection = builtInSection(type, section.name, local, goal);
+    const proposedSection = source.section(section.name, goal);
     const current = renderSection(section);
     if (!proposedSection) {
       const historical = history.some((version) => section.name in version.members);
@@ -159,7 +246,7 @@ export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
     // "kept:<their fingerprint>:<built-in fingerprint>" records an earlier keep or merge against that built-in definition.
     const kept = /^kept:([0-9a-f]+):([0-9a-f]+)$/.exec(recorded ?? '');
     if (kept) {
-      if (kept[2] === builtInFingerprint(type, section.name, local)) { members.push({ name: section.name, action: 'kept', reason: 'You chose to keep your version; not asked again until the built-in definition changes.', current, proposed }); continue; }
+      if (kept[2] === source.fingerprint(section.name)) { members.push({ name: section.name, action: 'kept', reason: 'You chose to keep your version; not asked again until the built-in definition changes.', current, proposed }); continue; }
       const merged = renderSection(mergeNewLines(section, withPlace));
       members.push({ name: section.name, action: 'choice', reason: 'You kept your own version before, and the built-in definition has changed since; choose what to keep.', current, proposed, merged, diff: lineDiff(current, proposed) });
       continue;
@@ -173,27 +260,27 @@ export function planTeamUpdate(text: string): TeamUpdatePlan | undefined {
       members.push({ name: section.name, action: 'choice', reason: base || template.stamped ? 'You changed this member; choose what to keep.' : 'This member does not match any built-in version, so it is treated as changed by you; choose what to keep.', current, proposed, merged, diff: lineDiff(current, proposed) });
     }
   }
-  for (const member of type.members) {
-    if (sections.some((section) => section.name === member.name)) continue;
+  for (const name of source.order) {
+    if (sections.some((section) => section.name === name)) continue;
     // A member the stamp recorded but the file no longer has was removed on purpose; do not offer it back, unless the team cannot work without it.
-    const removed = Boolean(template.base && member.name in template.base);
-    const proposed = renderSection(builtInSection(type, member.name, local, goal)!);
-    if (member.permanent) {
-      members.push({ name: member.name, action: 'new', permanent: true, proposed, reason: removed
-        ? `REMOVED from this file, but ${member.name} is a permanent member of the ${type.label.toLowerCase()} team that its workflow depends on; added back automatically.`
-        : `MISSING from this file: ${member.name} is a permanent member of the ${type.label.toLowerCase()} team; added automatically.` });
+    const removed = Boolean(template.base && name in template.base);
+    const proposed = renderSection(source.section(name, goal)!);
+    if (source.permanent(name)) {
+      members.push({ name, action: 'new', permanent: true, proposed, reason: removed
+        ? `REMOVED from this file, but ${name} is a permanent member of the ${source.label.toLowerCase()} team that its workflow depends on; added back automatically.`
+        : `MISSING from this file: ${name} is a permanent member of the ${source.label.toLowerCase()} team; added automatically.` });
       continue;
     }
     if (removed) continue;
-    members.push({ name: member.name, action: 'new', reason: 'A new member of the built-in team; add it?', proposed });
+    members.push({ name, action: 'new', reason: 'A new member of the built-in team; add it?', proposed });
   }
   const upToDate = members.every((member) => member.action === 'same' || member.action === 'kept' || member.action === 'custom' || member.action === 'removed') && template.stamped && template.fromVersion === template.toVersion;
-  return { template, upToDate, local, ...(goal ? { goal } : {}), members };
+  return { template, upToDate, local, ...(goal ? { goal } : {}), members, ...(staff ? { staff } : {}) };
 }
 
 /** The team file after the update, stamped with the current version. Members without a decision keep the user's copy. */
 export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: UpdateDecisions = {}): string {
-  const type = PROJECT_TYPES.find((entry) => entry.id === plan.template.id)!;
+  const source = sourceOf(plan);
   const parts = splitTeam(text);
   const byName = new Map(plan.members.map((member) => [member.name, member]));
   const out: string[] = [];
@@ -210,12 +297,12 @@ export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: U
   for (const name of adding) {
     const member = byName.get(name);
     if (member?.action !== 'new') continue;
-    const order = type.members.map((entry) => entry.name);
+    const order = [...source.order];
     const after = order.slice(0, order.indexOf(name)).reverse().find((previous) => out.some((block) => block.startsWith(`## ${previous}\n`)));
     const at = after ? out.findIndex((block) => block.startsWith(`## ${after}\n`)) + 1 : out.length;
     out.splice(at, 0, member.proposed!);
   }
-  const head = (/^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text)?.[0] ?? '').replace(/\r?\n?$/, '\n');
+  const head = withStaffBlock((/^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text)?.[0] ?? '').replace(/\r?\n?$/, '\n'), source.block);
   const preamble = parts.preamble.trim() ? parts.preamble.replace(/\s*$/, '\n\n') : '\n';
   const body = `${head}${preamble}${out.join('\n')}`;
   // A member now matching the built-in records the built-in fingerprint, so a later update replaces it if the user leaves it alone. A
@@ -223,14 +310,14 @@ export function applyTeamUpdate(text: string, plan: TeamUpdatePlan, decisions: U
   // until the built-in definition changes.
   const present = new Map(splitTeam(body).sections.map((section) => [section.name, section]));
   const entry = (name: string) => {
-    const builtIn = builtInFingerprint(type, name, plan.local);
+    const builtIn = source.fingerprint(name);
     const mine = fingerprintOf(present.get(name)!);
     const action = byName.get(name)?.action;
     const decision = decisions.members?.[name] ?? 'keep';
     const keptMine = mine !== builtIn && (action === 'kept' || (action === 'choice' && decision !== 'take'));
     return keptMine ? `kept:${mine}:${builtIn}` : builtIn;
   };
-  const stamp = [`template: ${type.id}`, `templateVersion: ${templateVersion(type.id)}`, 'templateBase:', ...type.members.filter((member) => present.has(member.name)).map((member) => `  - ${member.name}=${entry(member.name)}`)];
+  const stamp = [`template: ${source.id}`, `templateVersion: ${source.version}`, 'templateBase:', ...source.order.filter((name) => present.has(name)).map((name) => `  - ${name}=${entry(name)}`)];
   return withFrontmatter(body, stamp);
 }
 
@@ -243,7 +330,25 @@ export function describePlan(plan: TeamUpdatePlan): string {
 
 // ---- AGENTS.md guidance -------------------------------------------------------------------------
 
-export interface GuidancePlan { action: 'none' | 'same' | 'auto' | 'choice'; current?: string; proposed?: string; diff?: DiffLine[] }
+/** `staffTemplate`: the plan is for a staff section's block (between its own markers), not the project-type block. */
+export interface GuidancePlan { action: 'none' | 'same' | 'auto' | 'choice'; current?: string; proposed?: string; diff?: DiffLine[]; staffTemplate?: string }
+
+/**
+ * What Update Team would do to a staff section's guidance in AGENTS.md: the block between that template's markers, against today's rendering for the
+ * plan's options. A block equal to any released version is replaced; one the person edited is their choice. No block, no change.
+ */
+export function planStaffGuidanceUpdate(agents: string, plan: TeamUpdatePlan): GuidancePlan {
+  const template = staffTemplate(plan.template.id);
+  if (!template || !plan.staff) return { action: 'none' };
+  const current = staffGuidanceIn(agents, template.id);
+  if (current === undefined) return { action: 'none' };
+  const proposed = template.render(plan.staff).guidance;
+  const tag = { staffTemplate: template.id };
+  const mine = guidanceFingerprint(current);
+  if (mine === guidanceFingerprint(proposed)) return { action: 'same', current, proposed, ...tag };
+  const unchanged = (TEMPLATE_HISTORY[template.id] ?? []).some((version) => version.guidance.includes(mine));
+  return { action: unchanged ? 'auto' : 'choice', current, proposed, ...tag, ...(unchanged ? {} : { diff: lineDiff(current, proposed) }) };
+}
 
 /** What Update Team would do to the project-type guidance in AGENTS.md. `base` is the fingerprint recorded in project.json, if any. */
 export function planGuidanceUpdate(agents: string, typeId: string, base?: string): GuidancePlan {
@@ -263,6 +368,10 @@ export function planGuidanceUpdate(agents: string, typeId: string, base?: string
  */
 export function applyGuidanceUpdate(agents: string, plan: GuidancePlan): string {
   if (!plan.proposed || plan.current === undefined) return agents;
+  if (plan.staffTemplate) {
+    if (staffGuidanceIn(agents, plan.staffTemplate) !== plan.current) throw new Error('The staff section guidance in AGENTS.md changed since the update was planned.');
+    return withStaffGuidance(agents, plan.staffTemplate, plan.proposed);
+  }
   if (readProjectGuidance(agents)?.inner !== plan.current) throw new Error('The project-type guidance in AGENTS.md changed since the update was planned.');
   return replaceProjectGuidance(agents, plan.proposed) ?? agents;
 }
