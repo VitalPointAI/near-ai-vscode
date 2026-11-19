@@ -254,13 +254,13 @@ writes the exact commands and leaves them for you to approve and run.
 
 **NEAR AI: Set Up a Staff Team** (also **Set up a staff team** in Team
 Studio) makes a military staff section team for this project: choose the
-section (J2 intelligence or J5 plans), the doctrine profile (US Joint, US Army
+section (J2 intelligence, J5 plans or J4 logistics), the doctrine profile (US Joint, US Army
 MDMP or NATO/Canadian), the level, the nation and the kind of planning, then
 check the roster before anything is written. The team goes to your teams as
 `<section>-<profile>-<level>.md` and runs with `/team:<that name>`; PROFILE.md
 and the section's skills go under `.planning/staff/`, the staff settings into
 `.planning/.near-ai/project.json`, and the section's guidance into `AGENTS.md`
-between markers of its own, so a J2 and a J5 team can share a project. An
+between markers of its own, so teams of different sections can share a project. An
 earlier team file of the same name moves to your teams archive. The team is
 private, its members draft and recommend, and a named person decides: only
 the **NEAR AI: Staff** commands approve, reject or release a product. It then
@@ -269,6 +269,12 @@ staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. The built-in staff servers (`mcp:staff-products`,
 `mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
 the Team Studio tool picker; only a staff team's run gets them.
+A J4 logistics team starts support planning at the first step, alongside force
+planning, and every number in its products cites the calculator record that
+produced it (`calc:<id>`, a record in `.planning/staff/calculator/`); the
+release guard cannot clear a number without one. Its members reach the
+logistics tools (`mcp__logistics__calc*`, `logstat*`, `movement*`,
+`readiness*`) once that server is installed.
 
 For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
 exercise scenario into `.planning/staff/scenario/` for the team to read. The
