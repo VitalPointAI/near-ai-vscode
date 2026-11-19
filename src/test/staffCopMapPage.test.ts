@@ -109,9 +109,26 @@ class FakeMap {
   public focused = 0;
   public getCanvas() { return { focus: () => { this.focused += 1; } }; }
   public remove(): void {}
+  // The ground (base maps, 3D terrain, spin): visibility, terrain and the camera, recorded.
+  public layout: Array<[string, string, unknown]> = [];
+  public terrains: unknown[] = [];
+  public pitch = 0;
+  public setLayoutProperty(layer: string, name: string, value: unknown): void { this.layout.push([layer, name, value]); }
+  public getLayer(id: string) { return (this.options.style as { layers: Array<{ id: string }> }).layers.find((layer) => layer.id === id); }
+  public setTerrain(terrain: unknown): void { this.terrains.push(terrain); }
+  public getPitch(): number { return this.pitch; }
+  public getCenter() { return { lng: -123.4, lat: -48.9 }; }
+  public getZoom(): number { return 2; }
+  /** The visibility a layer has now: its last setLayoutProperty, else its style layout. */
+  public visibility(id: string): string {
+    const set = this.layout.filter(([layer, name]) => layer === id && name === 'visibility').at(-1);
+    if (set) return String(set[2]);
+    const layer = this.getLayer(id) as { layout?: { visibility?: string } } | undefined;
+    return layer?.layout?.visibility ?? 'visible';
+  }
 }
 
-interface Page { window: Record<string, unknown>; container: Node }
+interface Page { window: Record<string, unknown>; container: Node; document: { hidden: boolean } }
 
 /** The page's timers that have neither fired nor been cleared, with their delay: a timer the page forgets shows up here. */
 const liveTimers = new Map<ReturnType<typeof setTimeout>, number>();
@@ -132,7 +149,7 @@ function page(options: { reduced?: boolean } = {}): Page {
   documentListeners = new Map();
   const head = new Node('head');
   const document = {
-    head,
+    head, hidden: false,
     createElement: (tag: string) => new Node(tag),
     createElementNS: (_ns: string, tag: string) => new Node(tag),
     get activeElement() { return focused; },
@@ -155,7 +172,7 @@ function page(options: { reduced?: boolean } = {}): Page {
   new vm.Script(DECLUTTER, { filename: 'declutter.js' }).runInContext(context);
   new vm.Script(DRAWER, { filename: 'layerDrawer.js' }).runInContext(context);
   new vm.Script(SCRIPT, { filename: 'copMap.js' }).runInContext(context);
-  return { window, container: new Node('div') };
+  return { window, container: new Node('div'), document };
 }
 
 const wait = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -650,6 +667,169 @@ test('the synthetic geography lies inside the frame, with the towns on land and 
   for (const [name, e, n] of [['Saltmere', 43.5, 15.5], ['Port Calder', 46.5, 36.5], ['Kell', 49.5, 33.5], ['Ashby Ford', 45.5, 28.5], ['AA OAK', 43.5, 18.5], ['Gull Island', 41.1, 42.1]] as const) assert.ok(onLand(e, n), `${name} is on land`);
   for (const [name, e, n] of [['the command ship off Saltmere', 40.5, 14.5], ['MV ORLA in the Aurel Sea', 49.5, 43.5], ['the Varn Strait', 44, 41]] as const) assert.ok(!onLand(e, n), `${name} is at sea`);
   assert.match(geography.note, /Nothing on this map is a real place/);
+});
+
+// ---- Base maps, 3D terrain, spin (research note: photo-realistic imagery, 3D terrain and topographic base) ------------------------------------
+
+/** deepEqual across the page's own realm (objects made in the vm context have other prototypes). */
+const same = (actual: unknown, expected: unknown, message?: string) => assert.deepEqual(JSON.parse(JSON.stringify(actual ?? null)), expected, message);
+const TILES = (set: string, ext = 'webp') => `https://file+.vscode-resource.vscode-cdn.net/ext/${set}/{z}/{x}/{y}.${ext}`;
+const BASEMAP = {
+  globe: { imagery: { tiles: TILES('media/map/globe/blue-marble'), minzoom: 0, maxzoom: 5, bounds: [-180, -85.051129, 180, 85.051129] }, topo: { tiles: TILES('media/map/globe/natural-earth'), minzoom: 0, maxzoom: 4, bounds: [-180, -85.051129, 180, 85.051129] }, credit: { imagery: 'NASA Earth Observatory', topo: 'Made with Natural Earth' } },
+  frame: {
+    imagery: { tiles: TILES('tiles/imagery'), minzoom: 5, maxzoom: 10, bounds: [-124.08, -49.33, -122.7, -48.42] }, imageryDetail: { tiles: TILES('tiles/imagery-detail'), minzoom: 11, maxzoom: 13, bounds: [-123.8, -49.33, -123.0, -48.8] },
+    terrain: { tiles: TILES('tiles/terrain', 'png'), minzoom: 5, maxzoom: 11, bounds: [-123.8, -49.33, -123.0, -48.8] }, relief: { tiles: TILES('tiles/relief', 'png'), minzoom: 5, maxzoom: 11, bounds: [-123.8, -49.33, -123.0, -48.8] }, synthetic: true
+  },
+  problems: []
+};
+
+async function groundMap(options: { renderer?: string; motion?: () => boolean; basemap?: unknown; mapSettings?: unknown } = {}) {
+  const { window, container, document } = page();
+  const settings: unknown[] = [];
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
+    renderer: 'auto', still: true, motion: options.motion ?? (() => true), basemap: 'basemap' in options ? options.basemap : BASEMAP, mapSettings: options.mapSettings, onMapSettings: (s: unknown) => settings.push(s),
+    libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class {} }, renderer: options.renderer ?? 'ANGLE (NVIDIA GeForce)' }
+  });
+  const scenario = starter();
+  const read = await scenarioEnvironment(scenario);
+  view.setPicture(buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [], environment: read!.environment }));
+  await wait();
+  return { view, map: FakeMap.last!, container, settings, document, window };
+}
+
+test('the style draws the host\'s checked tiles: world and frame imagery, two height sources (3D surface and relief), sky, tilt to 85 degrees, and still no remote address', async () => {
+  const { map, view } = await groundMap();
+  const options = map.options as unknown as { maxPitch: number; style: { sources: Record<string, any>; layers: Array<{ id: string; type: string }>; sky?: unknown; terrain?: { source: string; exaggeration: number } } };
+  assert.equal(options.maxPitch, 85);
+  assert.ok(options.style.sky, 'sky and atmosphere');
+  const sources = options.style.sources;
+  same(sources['globe-imagery'].tiles, [BASEMAP.globe.imagery.tiles]);
+  assert.equal(sources['frame-imagery-detail'].minzoom, 11);
+  same(sources['frame-imagery'].bounds, BASEMAP.frame.imagery.bounds, 'bounds, so MapLibre never asks for a tile that is not there');
+  for (const id of ['terrain-dem', 'relief-dem']) { assert.equal(sources[id].type, 'raster-dem'); assert.equal(sources[id].encoding, 'terrarium'); }
+  same(options.style.terrain, { source: 'terrain-dem', exaggeration: 1.5 }, '3D on from the start on a graphics card, raised 1.5 times');
+  for (const source of Object.values(sources)) for (const url of (source.tiles ?? []) as string[]) assert.match(url, /^https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\//, 'tiles only from the extension');
+  assert.equal(view.state().base, 'imagery', 'Imagery is the default base');
+  assert.equal(options.style.layers.at(-1)!.id, 'points', 'the picture stays on top');
+  assert.equal(map.visibility('globe-imagery'), 'visible');
+  assert.equal(map.visibility('land'), 'none');
+  assert.equal(map.visibility('color-relief'), 'none');
+  assert.equal(view.state().visible['env-hillshade'], false, 'no hillshade over imagery (its light is baked in)');
+  assert.ok(map.camera.some(([kind, camera]) => kind === 'jumpTo' && camera.pitch === 50), 'the first 3D view leans back');
+  view.destroy();
+});
+
+test('switching the base only changes layer visibility and the base\'s defaults; the attribution follows the base; the choice is kept', async () => {
+  const { map, view, container, settings } = await groundMap();
+  const layersBefore = JSON.stringify((map.options as unknown as { style: { layers: unknown[] } }).style.layers.map((layer) => (layer as { id: string }).id));
+  const words = () => container.all().find((node) => node.className === 'cop-map-env')!.textContent;
+  assert.match(words(), /Blue Marble: NASA Earth Observatory/);
+  assert.match(words(), /not a real place/);
+  assert.equal(view.setBase('topo'), true);
+  await wait();
+  assert.equal(map.visibility('color-relief'), 'visible');
+  assert.equal(map.visibility('globe-topo'), 'visible');
+  assert.equal(map.visibility('globe-imagery'), 'none');
+  assert.equal(map.visibility('hillshade'), 'visible');
+  assert.equal(view.state().visible['env-contours'], true, 'contours on over Topographic');
+  assert.match(words(), /Made with Natural Earth/);
+  assert.doesNotMatch(words(), /NASA/);
+  assert.equal(view.setBase('plain'), true);
+  await wait();
+  assert.equal(map.visibility('land'), 'visible');
+  assert.equal(map.visibility('color-relief'), 'none');
+  assert.doesNotMatch(words(), /NASA|Natural Earth/);
+  assert.equal(view.setBase('satellite'), false, 'an unknown base is refused');
+  assert.equal(JSON.stringify((map.options as unknown as { style: { layers: unknown[] } }).style.layers.map((layer) => (layer as { id: string }).id)), layersBefore, 'the style was never rebuilt');
+  same(settings.at(-1), { base: 'plain', terrain: true, exaggeration: 1.5, grid: true });
+  // The drawer: one radio group for the base, the chosen one checked.
+  const radios = container.all().filter((node) => node.getAttribute('role') === 'radio');
+  same(radios.map((node) => [node.textContent, node.getAttribute('aria-checked')]), [['Imagery', 'false'], ['Topographic', 'false'], ['Plain', 'true']]);
+  view.destroy();
+});
+
+test('3D terrain turns on and off with setTerrain(null), its height is 1 to 3 in quarter steps, and a saved choice wins', async () => {
+  const { map, view } = await groundMap();
+  assert.equal(view.setTerrain(false), true);
+  await wait();
+  assert.equal(map.terrains.at(-1), null);
+  assert.equal(view.setTerrain(true), true);
+  await wait();
+  same(map.terrains.at(-1), { source: 'terrain-dem', exaggeration: 1.5 });
+  view.setExaggeration(2.6);
+  await wait();
+  same(map.terrains.at(-1), { source: 'terrain-dem', exaggeration: 2.5 });
+  view.setExaggeration(9);
+  assert.equal(view.state().exaggeration, 3);
+  view.destroy();
+  const kept = await groundMap({ mapSettings: { base: 'topo', terrain: false, exaggeration: 2, grid: false } });
+  assert.equal(kept.view.state().base, 'topo');
+  assert.equal(kept.view.state().terrain, 'off');
+  assert.equal(kept.view.state().grid, false);
+  kept.view.destroy();
+  const none = await groundMap({ basemap: undefined });
+  assert.equal(none.view.setTerrain(true), false, 'no height tiles: no 3D');
+  assert.notEqual(none.view.state().base, 'imagery', 'no imagery tiles: no Imagery base');
+  none.view.destroy();
+});
+
+test('on a software renderer 3D starts off with the reason in the drawer, and the person can still turn it on', async () => {
+  const { view, container } = await groundMap({ renderer: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))' });
+  assert.equal(view.state().terrain, 'off');
+  assert.match(view.state().terrainReason, /without a graphics card/);
+  assert.ok(container.all().some((node) => node.className === 'ld-reason' && /without a graphics card/.test(node.textContent)), 'the reason is shown in words');
+  assert.equal(view.setTerrain(true), true);
+  assert.equal(view.state().terrain, 'on');
+  assert.equal(view.state().terrainReason, '');
+  view.destroy();
+});
+
+test('spin: only on the globe, never while motion is off, stopped by the person\'s input or a hidden page, and off again on the map', async () => {
+  let motion = true;
+  const { map, view, document } = await groundMap({ motion: () => motion });
+  assert.equal(view.spin(true), false, 'not on the flat map');
+  view.setProjection('globe');
+  await wait();
+  assert.equal(view.spin(true), true);
+  await wait(60);
+  assert.ok(map.camera.some(([kind, camera]) => kind === 'jumpTo' && Array.isArray(camera.center)), 'the centre moves');
+  map.fire('mousedown', { originalEvent: {} });
+  assert.equal(view.state().spinning, false, 'the person\'s input stops it');
+  assert.equal(view.spin(true), true);
+  map.fire('zoomstart', {});
+  assert.equal(view.state().spinning, true, 'our own camera moves (no originalEvent) do not stop it');
+  document.hidden = true;
+  for (const listener of documentListeners.get('visibilitychange') ?? []) listener({});
+  assert.equal(view.state().spinning, false, 'a hidden page stops it');
+  document.hidden = false;
+  motion = false;
+  assert.equal(view.spin(true), false, 'never while motion is off (Calm, reduced motion)');
+  motion = true;
+  view.spin(true);
+  view.setProjection('map');
+  assert.equal(view.state().spinning, false, 'leaving the globe stops it');
+  view.destroy();
+  assert.equal([...liveTimers.values()].filter((ms) => ms === 16).length, 0, 'no spin frame left pending');
+});
+
+test('the SVG map offers Topographic and Plain, says why there is no Imagery or 3D, and the basemap shape is checked before use', async () => {
+  const { window, container } = page();
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'svg', basemap: BASEMAP });
+  const scenario = starter();
+  const read = await scenarioEnvironment(scenario);
+  view.setPicture(buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [], environment: read!.environment }));
+  await wait();
+  same(view.ground().bases, ['topo', 'plain']);
+  assert.equal(view.ground().terrain, 'unavailable');
+  assert.equal(view.state().base, 'topo', 'the 2D map shows Topographic');
+  assert.equal(view.setBase('imagery'), false);
+  view.destroy();
+  const check = (window.nearCopMap as { validBasemap: (b: unknown) => any }).validBasemap;
+  const bad = (tiles: string) => check({ globe: { imagery: { ...BASEMAP.globe.imagery, tiles } } }).globe.imagery;
+  assert.ok(bad(BASEMAP.globe.imagery.tiles));
+  assert.equal(bad('https://x/"onload=1/{z}/{x}/{y}.webp'), undefined, 'no quote');
+  assert.equal(bad('https://x/tiles.webp'), undefined, 'a template');
+  assert.equal(check({ frame: { terrain: { ...BASEMAP.frame.terrain, minzoom: 12, maxzoom: 3 } } }).frame.terrain, undefined, 'sane zooms');
 });
 
 // Last in the file on purpose: node:test runs each file in its own process, so this reads the peak resident memory of every test above.
