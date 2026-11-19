@@ -254,7 +254,8 @@
       onEmptyAction: () => vscode.postMessage({ type: 'open', target: 'load-scenario' }),
       hiddenLayers: saved.hiddenLayers || [],
       onLayers: (hidden) => { saved.hiddenLayers = hidden; save(); },
-      onTable: (on) => { saved.table = on; save(); }
+      onTable: (on) => { saved.table = on; save(); },
+      cop: { resources: copResources() }
     });
     if (saved.table) map.showTable(true);
   }
@@ -381,6 +382,7 @@
     app.classList.toggle('calm', Boolean(saved.calm));
     setText(nodes.theme, 'Theme: ' + ({ auto: 'auto', night: 'Night', day: 'Day', hc: 'High contrast' }[saved.theme]));
     nodes.calm.setAttribute('aria-pressed', saved.calm ? 'true' : 'false');
+    if (map && map.setTheme) map.setTheme();
   }
   function cycleTheme() {
     const order = ['auto', 'night', 'day', 'hc'];
@@ -397,6 +399,18 @@
     announce(saved.calm ? 'Calm on: nothing moves.' : 'Calm off.');
   }
 
+  /** The webview addresses of the COP map's vendored files, which the host writes into the page (src/staff/copMapWebview.ts copMapResources). */
+  function copResources() {
+    try {
+      const raw = $('app') && $('app').dataset ? $('app').dataset.copResources : undefined;
+      const parsed = raw ? JSON.parse(raw) : undefined;
+      if (!parsed || typeof parsed !== 'object') return undefined;
+      const out = {};
+      for (const key of ['maplibre', 'worker', 'milsymbol']) if (typeof parsed[key] === 'string') out[key] = parsed[key];
+      return out;
+    } catch (error) { return undefined; }
+  }
+
   // ---------- validation of what the host sends ----------
   const isObj = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
   const isArr = Array.isArray;
@@ -408,6 +422,9 @@
       && m.decisions.every((d) => isObj(d) && typeof d.product === 'string' && typeof d.hash === 'string' && (d.kind === 'decide' || d.kind === 'release'))
       && m.ledger.every((row) => isObj(row) && typeof row.product === 'string' && isArr(row.history));
   }
+  /** The COP picture's shape (src/domain/staff/cop/picture.ts, version 1); the map component checks it again before drawing. */
+  const validPicture = (p) => isObj(p) && p.version === 1 && typeof p.marking === 'string' && isArr(p.layers) && isArr(p.features) && isArr(p.ecoas) && isObj(p.budget)
+    && (p.frame === undefined || (isObj(p.frame) && isArr(p.frame.bounds) && p.frame.bounds.length === 4 && p.frame.bounds.every((n) => typeof n === 'number')));
   const validCue = (cue) => isObj(cue) && ['task', 'prod', 'human'].includes(cue.kind) && typeof cue.from === 'string' && typeof cue.to === 'string' && typeof cue.label === 'string' && WORKSPACES.includes(cue.workspace);
 
   // ---------- drawing the picture ----------
@@ -1094,7 +1111,18 @@
     const message = event.data;
     if (!isObj(message)) return;
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
-    if (message.type === 'staff-room') { if (validModel(message.model)) render(message.model, isArr(message.cues) ? message.cues : []); return; }
+    if (message.type === 'staff-room') {
+      if (!validModel(message.model)) return;
+      render(message.model, isArr(message.cues) ? message.cues : []);
+      // The COP picture comes with the model when it changed (or the page asked for everything); the time comes every time.
+      if (map && ('picture' in message || 'pictureProblem' in message || 'pictureNow' in message)) {
+        map.setPicture(validPicture(message.picture) ? message.picture : undefined, {
+          now: typeof message.pictureNow === 'number' ? message.pictureNow : undefined,
+          problem: typeof message.pictureProblem === 'string' ? message.pictureProblem.slice(0, 300) : undefined
+        });
+      }
+      return;
+    }
     if (message.type === 'staff-room-empty' && typeof message.reason === 'string') {
       nodes.empty.hidden = false;
       nodes.empty.replaceChildren(el('h2', '', 'The Staff Room'), el('p', 'muted', message.reason));

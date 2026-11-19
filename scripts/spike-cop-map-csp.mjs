@@ -4,6 +4,12 @@
 // and reports CSP violations, every request the page made, whether the globe and Mercator render, and frame times with N moving tracks.
 //
 //   npm run compile && node scripts/spike-cop-map-csp.mjs <path to chrome or chrome-headless-shell> [tracks=2000]
+//   npm run compile && node scripts/spike-cop-map-csp.mjs <chrome> --room [screenshot.png] [--no-webgl]
+//
+// --room loads the Staff Room page itself, as src/services/staffRoomPanel.ts writes it (its HTML, policy and scripts, with a stand-in for the webview
+// API), sends it the IRON LANTERN room model and COP picture, and reports violations, requests, which map runs and the line it shows, and whether any
+// two name labels the SVG map placed overlap, measured with the browser's own text boxes. It can save a screenshot. --no-webgl starts the browser
+// without WebGL, so the room must fall back to its SVG map and say why.
 //
 // Developer tool only: not run by npm test and not shipped. It listens on 127.0.0.1 only and resolves no other host.
 import http from 'node:http';
@@ -22,7 +28,10 @@ const { parseScenarioText } = require(path.join(ROOT, 'dist', 'domain', 'staff',
 const { copMapCsp } = require(path.join(ROOT, 'dist', 'staff', 'copMapWebview.js'));
 
 const CHROME = process.argv[2];
-const TRACKS = Number(process.argv[3] ?? 2000);
+const ROOM = process.argv[3] === '--room';
+const NO_WEBGL = process.argv.includes('--no-webgl');
+const SHOT = ROOM && process.argv[4] && process.argv[4] !== '--no-webgl' ? process.argv[4] : undefined;
+const TRACKS = ROOM ? 0 : Number(process.argv[3] ?? 2000);
 if (!CHROME || !existsSync(CHROME)) { console.error('Give the path to a Chrome or chrome-headless-shell binary.'); process.exit(2); }
 
 const parsed = parseScenarioText(readFileSync(path.join(ROOT, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
@@ -73,10 +82,39 @@ document.addEventListener('securitypolicyviolation', (e) => window.__out.violati
   window.__out.done = true;
 })();
 </script></body></html>`;
-const page = await listen((request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end(html); });
+const roomPage = ROOM ? staffRoomPage() : undefined;
+const page = await listen((request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end(roomPage ? roomPage.html : html); });
+
+/** The Staff Room page as the panel writes it, with the webview API stood in for by a nonced script, and the message its host would send. */
+function staffRoomPage() {
+  const Module = require('node:module');
+  const uri = (value) => ({ path: value, toString: () => value });
+  const vscode = { Uri: { joinPath: (base, ...parts) => uri(path.posix.normalize([base.path, ...parts].join('/'))) }, ViewColumn: { Active: -1 }, window: {}, workspace: {}, commands: {} };
+  const load = Module._load;
+  Module._load = (request, parent, isMain) => (request === 'vscode' ? vscode : load(request, parent, isMain));
+  let panel;
+  try { panel = require(path.join(ROOT, 'dist', 'services', 'staffRoomPanel.js')); } finally { Module._load = load; }
+  const { buildStaffRoomModel } = require(path.join(ROOT, 'dist', 'domain', 'staff', 'staffRoom.js'));
+  const { defaultStaffSettings } = require(path.join(ROOT, 'dist', 'domain', 'staff', 'profiles.js'));
+  const webview = { cspSource: R, asWebviewUri: (value) => uri(R + value.path.replace(/^\/media/, '')) };
+  let text = panel.staffRoomHtml(webview, uri('/media/staffRoom'));
+  const pageNonce = /script-src 'nonce-([^']+)'/.exec(text)[1];
+  const stand = `<script nonce="${pageNonce}">window.__out = { violations: [], posts: [] };
+document.addEventListener('securitypolicyviolation', (e) => window.__out.violations.push(e.violatedDirective + ' ' + e.blockedURI));
+window.acquireVsCodeApi = () => ({ postMessage: (m) => window.__out.posts.push(m && m.type), getState: () => ({ workspace: 'j2', calm: true }), setState: () => undefined });</script>`;
+  text = text.replace('<body>', '<body>' + stand);
+  const at = (minute) => new Date(Date.UTC(2026, 10, 19, 11, minute)).toISOString();
+  const coaBody = '## Most likely course of action\n\n41 CSTL BDE defends Port Calder from PL COPPER, holding Ashby Ford with 1-41 MECH at KQ 4532. We assess this is likely. We have moderate confidence.\n\n## Most dangerous course of action\n\n3-41 ARMD counter-attacks from KQ 4726 west to Ashby Ford KQ 4528 and on towards AA OAK. This is unlikely. We have low confidence.\n';
+  const model = buildStaffRoomModel({
+    now: Date.UTC(2026, 10, 19, 12, 0), settings: defaultStaffSettings(), registry: [], decisions: [], cop: { layers: [], eventTail: [] },
+    events: [{ type: 'staff.step.entered', run: 'run-spike', at: at(0), section: 'j2', step: 3, stepName: 'COA development' }], scenario,
+    j2: { sources: [], pirs: [], plan: [], enemyCoaBody: coaBody, enemyCoaProduct: 'adversary-coa-set' }
+  });
+  return { html: text, message: { type: 'staff-room', model, cues: [], picture, pictureNow: Date.UTC(2026, 10, 19, 12, 0) } };
+}
 const P = `http://127.0.0.1:${page.address().port}`;
 const profile = mkdtempSync(path.join(os.tmpdir(), 'cop-spike-'));
-const chrome = spawn(CHROME, ['--headless', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-first-run', '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+const chrome = spawn(CHROME, ['--headless', `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-first-run', ...(NO_WEBGL ? ['--disable-webgl', '--disable-3d-apis'] : []), '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 const wsUrl = await new Promise((resolve) => { let buffer = ''; chrome.stderr.on('data', (data) => { buffer += data; const match = /DevTools listening on (ws:\S+)/.exec(buffer); if (match) resolve(match[1]); }); });
 const browser = new WebSocket(wsUrl);
 await new Promise((resolve) => browser.addEventListener('open', resolve));
@@ -94,7 +132,33 @@ const { result: { sessionId } } = await send('Target.attachToTarget', { targetId
 await send('Network.enable', {}, sessionId);
 await send('Page.navigate', { url: P }, sessionId);
 let out;
-for (let i = 0; i < 240; i += 1) {
+if (ROOM) {
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1400, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await send('Runtime.evaluate', { expression: `window.postMessage(${JSON.stringify(roomPage.message)}, '*')` }, sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+  const probe = `(() => {
+    const box = document.querySelector('.mapbox');
+    const note = document.querySelector('.mapnote');
+    const labels = [...document.querySelectorAll('svg.map text[data-label="placed"], svg.map text[data-label="short"]')].filter((t) => t.getAttribute('visibility') !== 'hidden' && t.getBBox().width > 0).map((t) => { const r = t.getBoundingClientRect(); return { text: t.textContent, x: r.x, y: r.y, w: r.width, h: r.height }; });
+    let overlaps = 0; const pairs = [];
+    for (let i = 0; i < labels.length; i += 1) for (let j = i + 1; j < labels.length; j += 1) { const a = labels[i], b = labels[j]; if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) { overlaps += 1; pairs.push(a.text + ' / ' + b.text); } }
+    return JSON.stringify(Object.assign(window.__out, { done: true, hasCop: box ? box.classList.contains('has-cop') : null, note: note && !note.hidden ? note.textContent : '', canvases: document.querySelectorAll('.copslot canvas').length, sizes: ['.copslot', '.cop-map', '.cop-map-canvas', '.copslot canvas'].map((q) => { const n = document.querySelector(q); if (!n) return q + ' none'; const r = n.getBoundingClientRect(); return q + ' ' + Math.round(r.width) + 'x' + Math.round(r.height); }), svgLabels: labels.length, svgLabelOverlaps: overlaps, overlapping: pairs, pageWidth: document.documentElement.scrollWidth, viewport: innerWidth }));
+  })()`;
+  const evaluated = await send('Runtime.evaluate', { expression: probe, returnByValue: true }, sessionId);
+  out = JSON.parse(evaluated.result.result.value);
+  if (SHOT) {
+    const rect = JSON.parse((await send('Runtime.evaluate', { expression: 'JSON.stringify(document.querySelector(".mapbox").getBoundingClientRect())', returnByValue: true }, sessionId)).result.result.value);
+    const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scale: 1 } }, sessionId);
+    (await import('node:fs')).writeFileSync(SHOT, Buffer.from(shot.result.data, 'base64'));
+  }
+  // The narrowest panel the layout checks measure: nothing may reach past the right edge.
+  await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 900, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const narrow = await send('Runtime.evaluate', { expression: 'JSON.stringify({ viewport: innerWidth, pageWidth: document.documentElement.scrollWidth, mapWidth: document.querySelector(".mapbox").getBoundingClientRect().width })', returnByValue: true }, sessionId);
+  out.narrow = JSON.parse(narrow.result.result.value);
+}
+for (let i = 0; !ROOM && i < 240; i += 1) {
   await new Promise((resolve) => setTimeout(resolve, 500));
   const evaluated = await send('Runtime.evaluate', { expression: 'JSON.stringify(window.__out)', returnByValue: true }, sessionId);
   out = evaluated.result?.result?.value && JSON.parse(evaluated.result.result.value);
@@ -103,4 +167,4 @@ for (let i = 0; i < 240; i += 1) {
 console.log(JSON.stringify({ csp: csp.replaceAll(R, 'RESOURCES'), result: out, requests: [...requests] }, null, 1));
 chrome.kill(); resources.close(); page.close(); browser.close();
 rmSync(profile, { recursive: true, force: true });
-process.exit(out?.done && !out.error && out.violations.length === 0 && out.renderer === 'maplibre' ? 0 : 1);
+process.exit(out?.done && !out.error && out.violations.length === 0 && (ROOM ? (NO_WEBGL ? out.hasCop === false && /^2D map: /.test(out.note) && out.svgLabelOverlaps === 0 : out.hasCop === true) : out.renderer === 'maplibre') ? 0 : 1);

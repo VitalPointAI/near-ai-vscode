@@ -65,6 +65,12 @@ class FakeMap {
   public hasImage(): boolean { return false; }
   public addImage(): void {}
   public queryRenderedFeatures(): unknown[] { return []; }
+  public filters = new Map<string, unknown>();
+  public paints: Array<[string, string, unknown]> = [];
+  public setFilter(layer: string, filter: unknown): void { this.filters.set(layer, filter); }
+  public setPaintProperty(layer: string, name: string, value: unknown): void { this.paints.push([layer, name, value]); }
+  public focused = 0;
+  public getCanvas() { return { focus: () => { this.focused += 1; } }; }
   public remove(): void {}
 }
 
@@ -197,6 +203,95 @@ test('with MapLibre the component uses a style with no remote source, switches t
   await wait(10);
   assert.deepEqual(JSON.parse(JSON.stringify(map.projections[1])), { type: 'mercator' });
   assert.deepEqual(requests, [], 'no request beyond the libraries the host gave');
+});
+
+test('MapLibre places names with its collision index: symbols always stay, a name that does not fit is dropped, and symbol images carry no text', async () => {
+  const { window, container } = page();
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'auto', still: true, libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } } });
+  const map = FakeMap.last!;
+  const options = map.options as { style: { layers: Array<{ id: string; type: string; layout?: Record<string, unknown> }>; glyphs?: unknown }; fadeDuration?: number };
+  assert.equal(options.fadeDuration, 0, 'still: no label fades (Calm and reduced motion)');
+  assert.equal(options.style.glyphs, undefined, 'no glyph server: MapLibre draws the letters locally');
+  const layers = options.style.layers;
+  const points = layers.find((layer) => layer.id === 'points')!;
+  assert.equal(points.layout!['icon-allow-overlap'], true, 'a symbol is never dropped');
+  assert.equal(points.layout!['icon-ignore-placement'], false, 'a symbol claims its room, so no name covers it');
+  assert.equal(layers.at(-1)!.id, 'points', 'the symbols are the top layer, so MapLibre places them first');
+  const names = layers.find((layer) => layer.id === 'point-labels')!;
+  assert.equal(names.layout!['text-allow-overlap'], false);
+  assert.equal(names.layout!['text-optional'], true);
+  assert.ok((names.layout!['text-variable-anchor'] as string[]).length >= 4, 'a name tries several places around its symbol');
+  assert.ok(Number(names.layout!['text-padding']) >= 2);
+  assert.ok(Number(names.layout!['text-radial-offset']) >= 1.5, 'clear of its own symbol');
+  const textLayers = layers.filter((layer) => layer.type === 'symbol' && layer.layout && 'text-field' in layer.layout);
+  assert.deepEqual(JSON.parse(JSON.stringify(textLayers.map((layer) => layer.id))), ['area-labels', 'line-labels', 'place-labels', 'point-labels'], 'then names of symbols, then places, then control measures');
+  for (const layer of textLayers) assert.equal(layer.layout!['text-allow-overlap'], false, `${layer.id} never covers another label`);
+  view.setPicture(timedPicture());
+  view.setTime(Date.parse('2026-11-18T13:00:00.000Z'));
+  view.setEcoa('ECOA-2');
+  await wait();
+  const cop = map.data.get('cop') as { features: Array<{ properties: Record<string, unknown> }> };
+  const mech = cop.features.find((feature) => feature.properties.fid === 'cop-threat-layer/e-1-41')!;
+  assert.equal(mech.properties.icon, 'sym|10061000161211020000|live', 'the symbol image is keyed without its name');
+  assert.equal(mech.properties.text, '1-41 MECH', 'the name is a label of its own');
+  view.highlight(['mdcoa']);
+  await wait(10);
+  assert.match(JSON.stringify(map.filters.get('hilite-lines')), /cop-threat-layer\/ecoa-2/, 'an adversary COA is highlighted by its role');
+  view.highlight([]);
+  await wait(10);
+  assert.doesNotMatch(JSON.stringify(map.filters.get('hilite-lines')), /ecoa-2/);
+  view.setColours({ ocean: '#123456', land: 'url(https://example.invalid/x.png)', label: 'rgba(1, 2, 3, .5)' });
+  await wait(10);
+  assert.ok(map.paints.some(([layer, name, value]) => layer === 'ocean' && name === 'background-color' && value === '#123456'));
+  assert.ok(map.paints.some(([layer, name, value]) => layer === 'point-labels' && name === 'text-color' && value === 'rgba(1, 2, 3, .5)'));
+  assert.ok(!JSON.stringify(map.paints).includes('url('), 'only colours reach the style');
+  view.focus();
+  assert.equal(map.focused, 1, 'focus goes to the map canvas, which MapLibre drives from the keyboard');
+  assert.deepEqual(requests, []);
+});
+
+test('the SVG map places every name so no two labels overlap near Port Calder, keeping every symbol', async () => {
+  const { window, container } = page();
+  const scenario = starter();
+  const picture = buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [] });
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'svg' });
+  view.setPicture(picture);
+  await wait();
+  const labels = JSON.parse(JSON.stringify(view.state().labels)) as Record<string, { hidden: boolean; box?: { x: number; y: number; w: number; h: number }; text?: string }>;
+  const placed = Object.entries(labels).filter(([, label]) => !label.hidden);
+  assert.ok(placed.length >= 10, `${placed.length} labels placed`);
+  for (let i = 0; i < placed.length; i += 1) {
+    for (let j = i + 1; j < placed.length; j += 1) {
+      const a = placed[i][1].box!; const b = placed[j][1].box!;
+      assert.ok(!(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h), `${placed[i][0]} and ${placed[j][0]} overlap`);
+    }
+  }
+  const svgRoot = container.all().find((node) => node.tag === 'svg')!;
+  const symbols = picture.features.filter((feature) => feature.properties.kind === 'symbol').map((feature) => feature.id);
+  for (const id of symbols) assert.ok(svgRoot.all().some((node) => node.getAttribute('data-id') === id), `${id} keeps its symbol`);
+  assert.ok(svgRoot.all().some((node) => node.getAttribute('data-for')?.startsWith('~place/') && node.textContent === 'Port Calder'), 'Port Calder is named');
+});
+
+test('the COP map and the Staff Room\'s SVG map share one label placement', () => {
+  const room = readFileSync(path.join(REPO, 'media', 'staffRoom', 'staffMap.js'), 'utf8');
+  const block = (source: string) => {
+    const start = source.indexOf('  /** Where a label may go');
+    const end = source.indexOf('    return out;\n  }\n', start);
+    assert.ok(start > 0 && end > start);
+    return source.slice(start, end);
+  };
+  assert.equal(block(SCRIPT), block(room), 'the same function in both files');
+  const { window } = page();
+  const declutter = (window.nearCopMap as { declutter: (labels: unknown[], obstacles: unknown[]) => Record<string, { hidden: boolean; text?: string }> }).declutter;
+  const crowd = Array.from({ length: 12 }, (_, n) => ({ id: `l${String(n).padStart(2, '0')}`, x: 100 + (n % 3) * 4, y: 100 + Math.floor(n / 3) * 3, w: 60, h: 12, gap: 8, prio: n % 2, text: `Label number ${n}`, size: 10 }));
+  const out = JSON.parse(JSON.stringify(declutter(crowd, [{ x: 95, y: 95, w: 10, h: 10, owner: 'l00' }])));
+  const shown = Object.values(out).filter((entry) => !(entry as { hidden: boolean }).hidden);
+  assert.ok(shown.length >= 4 && shown.length < crowd.length, 'some names fit, the rest are hidden');
+  // A name too long for the only free band is shortened before it is dropped.
+  const band = declutter([{ id: 'b', x: 100, y: 100, w: 300, h: 10, gap: 25, prio: 1, text: 'Alpha Bravo', size: 10 }], [{ x: 130, y: 0, w: 1000, h: 300, owner: 'x' }, { x: -1000, y: 0, w: 1070, h: 300, owner: 'x' }]);
+  assert.equal(band.b.text, 'Alpha\u2026');
+  assert.equal(declutter([{ id: 'c', x: 100, y: 100, w: 300, h: 10, gap: 25, prio: 1, text: 'Alpha', size: 10 }], [{ x: -1000, y: -1000, w: 3000, h: 3000, owner: 'x' }]).c.hidden, true, 'a name with no room at all is hidden');
+  assert.deepEqual(JSON.parse(JSON.stringify(declutter(crowd, []))), JSON.parse(JSON.stringify(declutter(crowd.slice().reverse(), []))), 'the same input in any order places the same way');
 });
 
 test('the page script names no remote address and the CSP allows no eval, no inline script and no remote source', () => {

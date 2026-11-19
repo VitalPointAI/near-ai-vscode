@@ -6,10 +6,13 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
+import { buildCopPicture, syntheticGeography } from '../domain/staff/cop';
+import type { CopPicture } from '../domain/staff/cop';
+import { parseScenarioText } from '../domain/staff/scenario';
 import { handoffsFor } from '../domain/staff/staffRoom';
 import type { StaffRoomModel } from '../domain/staff/staffRoom';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
-import { modelOf, NOW, project } from './helpers/staffRoomFixture';
+import { modelOf, NOW, project, SCENARIO } from './helpers/staffRoomFixture';
 
 const MEDIA = path.join(__dirname, '..', '..', 'media', 'staffRoom');
 
@@ -47,6 +50,12 @@ class FakeNode {
       this.children.push(child);
     }
   }
+  // The DOM calls the COP map component (media/staff/copMap.js) uses.
+  appendChild(child: FakeNode) { this.append(child); return child; }
+  removeChild(child: FakeNode) { child.remove(); return child; }
+  get firstChild(): FakeNode | undefined { return this.children[0]; }
+  get lastChild(): FakeNode | undefined { return this.children[this.children.length - 1]; }
+  get childNodes(): FakeNode[] { return this.children; }
   remove() { if (this.parent) { this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = undefined; } }
   replaceChildren(...nodes: FakeNode[]) { for (const child of this.children) child.parent = undefined; this.children = []; this.text = ''; this.append(...nodes); }
   setAttribute(name: string, value: string) { this.attributes.set(name, String(value)); if (name === 'class') this.className = String(value); }
@@ -83,25 +92,27 @@ class FakeDoc {
   key(key: string, target?: FakeNode) { for (const listener of this.listeners.get('keydown') ?? []) listener({ key, target: target ?? this.activeElement ?? this.body, preventDefault() {} }); }
 }
 
-async function runPage(options: { reduced?: boolean; state?: Record<string, unknown>; theme?: string } = {}) {
+async function runPage(options: { reduced?: boolean; state?: Record<string, unknown>; theme?: string; window?: Record<string, unknown>; copMap?: boolean; styles?: Record<string, string> } = {}) {
   const doc = new FakeDoc(options.theme ?? 'vscode-dark');
   const posts: Array<Record<string, any>> = [];
   const states: Array<Record<string, unknown>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
-  const window: Record<string, unknown> = { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); } };
+  const window: Record<string, unknown> = { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); }, ...options.window };
   const sandbox = vm.createContext({
     document: doc, window,
     matchMedia: (query: string) => ({ matches: Boolean(options.reduced) && /reduce/.test(query), addEventListener() {} }),
     acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => options.state, setState: (state: Record<string, unknown>) => states.push(JSON.parse(JSON.stringify(state))) }),
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms).unref(), clearTimeout, setInterval: (fn: () => void, ms: number) => setInterval(fn, ms).unref(), clearInterval,
-    JSON, Map, Set, Date, String, Number, Boolean, Object, Array, Math, RegExp
+    JSON, Map, Set, Date, String, Number, Boolean, Object, Array, Math, RegExp,
+    ...(options.styles ? { getComputedStyle: () => ({ getPropertyValue: (name: string) => options.styles![name] ?? '' }) } : {})
   });
+  if (options.copMap) vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'copMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffRoom.js'), 'utf8'), sandbox, { timeout: 1000 });
   const all = () => doc.body.all();
   const byClass = (cls: string) => all().filter((node) => node.classList.contains(cls));
   const byText = (text: string | RegExp) => all().filter((node) => (typeof text === 'string' ? node.textContent === text : text.test(node.textContent)) && node.tagName !== '#text');
-  return { doc, posts, states, all, byClass, byText, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data: JSON.parse(JSON.stringify(data)) })) };
+  return { doc, window, posts, states, all, byClass, byText, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data: JSON.parse(JSON.stringify(data)) })) };
 }
 
 let fixture: { model: StaffRoomModel; cues: unknown[] } | undefined;
@@ -279,4 +290,144 @@ test('Follow the action moves to the workspace where the work is', async () => {
   quiet.dispatch({ type: 'staff-room', model, cues: [{ kind: 'task', from: 'section:command', to: 'member:j2:threat-analyst', label: 'Adversary coa set', workspace: 'j2' }] });
   assert.equal(quiet.doc.getElementById('pane-j2')!.hidden, true);
   assert.ok(quiet.doc.getElementById('tab-j2')!.classList.contains('live'), 'a dot says something is happening there');
+});
+
+// ---- The map: the COP map when it can run, the SVG map with the reason when it cannot, and labels that never cover each other ----------------
+
+async function ironLanternPicture(): Promise<CopPicture> {
+  const parsed = parseScenarioText(await readFile(SCENARIO, 'utf8'));
+  assert.ok(parsed.ok);
+  return buildCopPicture({ marking: parsed.value.marking, frame: parsed.value.region.frame, geography: syntheticGeography(parsed.value), scenario: parsed.value, layers: [] });
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+/** A stand-in for window.nearCopMap that answers with the renderer it is given and records every call through the interface. */
+function fakeCopMap(renderer: 'maplibre' | 'svg', reason?: string) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const api = {
+    version: 1,
+    mount: async (_container: unknown, options: Record<string, any>) => {
+      calls.push(['mount', { renderer: options.renderer, still: options.still, nonce: options.nonce, hasClock: typeof options.clock?.now === 'function' && typeof options.clock?.set === 'function' }]);
+      return {
+        renderer, reason,
+        setPicture: (picture: { version: number }) => calls.push(['setPicture', picture.version]),
+        setLayerVisible: (id: string, on: boolean) => calls.push(['setLayerVisible', id, on]),
+        highlight: (names: string[]) => calls.push(['highlight', [...names]]),
+        setColours: () => calls.push(['setColours']),
+        focus: () => calls.push(['focus']),
+        destroy: () => calls.push(['destroy'])
+      };
+    }
+  };
+  return { api, calls, count: (name: string) => calls.filter((call) => call[0] === name).length };
+}
+
+test('the room mounts the COP map through its interface when it can run, and sends it the picture only when it changed', async () => {
+  const { model } = await fixtureModel();
+  const picture = await ironLanternPicture();
+  const cop = fakeCopMap('maplibre');
+  const page = await runPage({ state: { workspace: 'j2', hiddenLayers: ['cop-plans-layer'] }, window: { nearCopMap: cop.api }, styles: { '--map-sea': '#0A1830', '--map-ink': '#E8EEF7' } });
+  page.dispatch({ type: 'staff-room', model, cues: [], picture, pictureNow: NOW });
+  await settle();
+  assert.deepEqual(cop.calls[0], ['mount', { renderer: 'auto', still: true, nonce: undefined, hasClock: true }], 'mounted still (no label fades), with the room\'s clock');
+  const box = page.byClass('mapbox')[0];
+  assert.ok(box.classList.contains('has-cop'), 'the COP map replaces the SVG map');
+  assert.equal(page.byClass('copslot')[0].hidden, false);
+  assert.equal(page.byClass('mapnote')[0].hidden, true, 'no fallback line while the COP map runs');
+  assert.equal(cop.count('setPicture'), 1);
+  assert.ok(cop.calls.some((call) => call[0] === 'setLayerVisible' && call[1] === 'cop-plans-layer' && call[2] === false), 'a layer the person hid stays hidden');
+  // The model again without a picture (unchanged): nothing is sent to the map; a changed picture is.
+  page.dispatch({ type: 'staff-room', model: { ...model, now: model.now + 1 }, cues: [], pictureNow: NOW + 1 });
+  await settle();
+  assert.equal(cop.count('setPicture'), 1);
+  page.dispatch({ type: 'staff-room', model, cues: [], picture: { ...picture, marking: 'EXERCISE' }, pictureNow: NOW + 2 });
+  await settle();
+  assert.equal(cop.count('setPicture'), 2);
+  // A picture that does not fit is never passed on.
+  page.dispatch({ type: 'staff-room', model, cues: [], picture: { ...picture, version: 2 } });
+  await settle();
+  assert.equal(cop.count('setPicture'), 2);
+  // A PIR card points at its NAIs on the COP map too.
+  const pirCard = page.byClass('pir').find((node) => node.listeners.has('mouseenter'))!;
+  pirCard.fire('mouseenter');
+  const lit = cop.calls.filter((call) => call[0] === 'highlight').at(-1)!;
+  assert.ok((lit[1] as string[]).some((name) => /^NAI /.test(name)), 'the highlight reaches the COP map');
+  // Map as table still works, and hides the map from assistive tech.
+  page.doc.key('m', page.doc.body);
+  assert.equal(page.byClass('listview')[0].hidden, false);
+  assert.equal(page.byClass('copslot')[0].getAttribute('aria-hidden'), 'true');
+  page.doc.key('m', page.doc.body);
+  assert.equal(page.byClass('copslot')[0].getAttribute('aria-hidden'), 'false');
+  // The theme reaches the map.
+  const before = cop.count('setColours');
+  page.doc.key('t', page.doc.body);
+  assert.equal(cop.count('setColours'), before + 1);
+});
+
+test('without WebGL or the library the room keeps its SVG map and says why', async () => {
+  const { model } = await fixtureModel();
+  const picture = await ironLanternPicture();
+  const cop = fakeCopMap('svg', 'WebGL is not available in this window');
+  const page = await runPage({ state: { workspace: 'j2' }, window: { nearCopMap: cop.api } });
+  page.dispatch({ type: 'staff-room', model, cues: [], picture, pictureNow: NOW });
+  await settle();
+  assert.equal(cop.count('destroy'), 1, 'the component\'s own fallback is let go');
+  assert.ok(!page.byClass('mapbox')[0].classList.contains('has-cop'));
+  assert.equal(page.byClass('mapnote')[0].hidden, false);
+  assert.equal(page.byClass('mapnote')[0].textContent, '2D map: WebGL is not available in this window.');
+  assert.ok(page.byClass('aff-H').length >= 5, 'the SVG map is drawn');
+  // Later pictures do not try again.
+  page.dispatch({ type: 'staff-room', model, cues: [], picture: { ...picture, marking: 'X' }, pictureNow: NOW });
+  await settle();
+  assert.equal(cop.count('mount'), 1);
+
+  // The real component in a window with no WebGL: the same fallback, with its reason.
+  const real = await runPage({ state: { workspace: 'j2' }, copMap: true });
+  real.dispatch({ type: 'staff-room', model, cues: [], picture, pictureNow: NOW });
+  await settle();
+  assert.match(real.byClass('mapnote')[0].textContent, /^2D map: WebGL is not available in this window\.$/);
+  assert.equal(real.byClass('copslot')[0].children.length, 0, 'nothing of the component is left behind');
+  assert.ok(real.byClass('aff-H').length >= 5);
+
+  // No component script at all, and a picture the host could not build.
+  const none = await runPage({ state: { workspace: 'j2' } });
+  none.dispatch({ type: 'staff-room', model, cues: [], pictureProblem: 'the COP picture could not be read (bad layer)', pictureNow: NOW });
+  assert.equal(none.byClass('mapnote')[0].textContent, '2D map: the COP picture could not be read (bad layer).');
+  none.dispatch({ type: 'staff-room', model, cues: [], picture, pictureNow: NOW });
+  await settle();
+  assert.equal(none.byClass('mapnote')[0].textContent, '2D map: the COP map script did not load.');
+});
+
+test('the SVG map places every name label so no two overlap near Port Calder, and keeps every symbol (IRON LANTERN)', async () => {
+  const { model } = await fixtureModel();
+  const page = await runPage();
+  const api = page.window.NearAiStaffMap as { create: (container: unknown, options: unknown) => Record<string, any> };
+  const container = page.doc.createElement('div');
+  const map = api.create(container, {});
+  map.render(model.map, { mode: 'war-room' });
+  type Placed = { id: string; layer?: string; hidden: boolean; text?: string; box?: { x: number; y: number; w: number; h: number }; usual?: boolean };
+  const labels = JSON.parse(JSON.stringify(map.labels())) as Placed[];
+  const placed = labels.filter((label) => !label.hidden);
+  const overlap = (a: Placed['box'], b: Placed['box']) => a!.x < b!.x + b!.w && b!.x < a!.x + a!.w && a!.y < b!.y + b!.h && b!.y < a!.y + a!.h;
+  for (let i = 0; i < placed.length; i += 1) for (let j = i + 1; j < placed.length; j += 1) assert.ok(!overlap(placed[i].box, placed[j].box), `${placed[i].id} (${placed[i].text}) and ${placed[j].id} (${placed[j].text}) overlap`);
+  // Near the port the usual spots collide, so the pass had work to do there, and the port keeps its name.
+  const port = model.map.features.find((feature) => feature.name === 'Port Calder')!.points[0];
+  const near = placed.filter((label) => Math.hypot(label.box!.x + label.box!.w / 2 - port[0], label.box!.y + label.box!.h / 2 - port[1]) < 40);
+  assert.ok(near.length >= 3, `${near.length} labels near Port Calder`);
+  assert.ok(labels.some((label) => label.hidden || label.usual === false), 'at least one label moved, was shortened or was hidden');
+  assert.ok(placed.some((label) => label.text === 'Port Calder'), 'Port Calder keeps its name');
+  // Every unit keeps its symbol and its name in words, even when its label had to go.
+  const symbols = container.all().filter((node: FakeNode) => node.classList.contains('sym'));
+  assert.equal(symbols.length, model.map.units.length);
+  for (const unit of model.map.units) assert.ok(symbols.some((node: FakeNode) => (node.getAttribute('aria-label') ?? '').includes(unit.designation)), unit.designation);
+  // Hiding a layer frees its room: the placement runs again and still nothing overlaps.
+  map.setLayer('cop-threat-layer', false);
+  const again = (JSON.parse(JSON.stringify(map.labels())) as Placed[]).filter((label) => !label.hidden);
+  assert.ok(again.every((label) => label.layer !== 'cop-threat-layer'));
+  for (let i = 0; i < again.length; i += 1) for (let j = i + 1; j < again.length; j += 1) assert.ok(!overlap(again[i].box, again[j].box));
+  // The same model places the same way every time.
+  const second = api.create(page.doc.createElement('div'), {});
+  second.render(model.map, { mode: 'war-room' });
+  assert.deepEqual(JSON.parse(JSON.stringify(second.labels())), labels);
 });

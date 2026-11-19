@@ -140,7 +140,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
-  registerStaffRoom(context);
+  registerStaffRoom(context, gate);
   registerUsageExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);

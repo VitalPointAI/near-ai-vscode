@@ -2,9 +2,14 @@
 // read from fixture files), every message from the page validated, decision buttons that reach only the person-only staff commands, and a person's
 // decision shown only when the signed ledger holds it.
 import assert from 'node:assert/strict';
+import { copyFileSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { appendFile, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
+import { labelRecordFilter } from '../agent/gateLabels';
+import { gridCentre, gridToWgs84, observationId, parseGridReference, segmentId } from '../domain/staff';
+import type { ExerciseFrame } from '../domain/staff';
 import { PERSON_DECISION_COMMANDS, STAFF_COMMANDS } from '../domain/staff/commands';
 import type { StaffEvent } from '../domain/staff/events';
 import { parseScenarioText } from '../domain/staff/scenario';
@@ -13,6 +18,9 @@ import { buildStaffMap, estimativeLanguage, unitIcon } from '../domain/staff/sta
 import { EVENTS_FILE, LEDGER_DIR } from '../staff/staffHost';
 import { ENEMY_COA_PRODUCTS, loadStaffRoomInput } from '../staff/staffRoomData';
 import { handleStaffRoomMessage, STAFF_ROOM_OPEN_COMMANDS } from '../staff/staffRoomHost';
+import { ObservationStore } from '../staff/observationStore';
+import { labelVisible, staffRoomPicture } from '../staff/staffRoomPicture';
+import { testGateRuntime } from './helpers/gatedRuns';
 import { staffWorld } from './helpers/staffFixtures';
 import { modelOf, NOW, project, SCENARIO } from './helpers/staffRoomFixture';
 
@@ -215,4 +223,97 @@ test('a project with nothing staff in it still builds a calm, empty room', async
   assert.equal(model.decisions.length, 0);
   assert.ok(model.rail.every((step) => step.status === 'todo' || step.status === 'next'));
   assert.equal(model.squads.length, 5);
+});
+
+// ---- The COP picture beside the room, and the page's policy ------------------------------------------------------------------------------
+
+test('the room\'s COP picture carries only the observations the person\'s clearance covers, and none without a reader', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-room-cop-'));
+  mkdirSync(path.join(root, '.planning', 'staff', 'scenario'), { recursive: true });
+  copyFileSync(SCENARIO, path.join(root, '.planning', 'staff', 'scenario', 'scenario.json'));
+  const frame: ExerciseFrame = JSON.parse(await readFile(SCENARIO, 'utf8')).region.frame;
+  const at = (reference: string): [number, number] => { const point = gridToWgs84(frame, gridCentre(parseGridReference(reference, frame.grid, frame.squareMetres)!)); return [point.longitude, point.latitude]; };
+  const T0 = Date.parse('2026-11-18T12:00:00.000Z');
+  const store = new ObservationStore({ root, now: () => T0 + 60_000 });
+  const feed = {
+    id: 'ais-sim', title: 'Simulated AIS', category: 'intelligence', feedClass: 'positions', format: 'ais-nmea', transport: 'loopback', licenceClass: 'simulated', trainingRights: 'no', simulated: true,
+    channels: [{ id: 'receiver-north', title: 'North receiver', discipline: null, reliability: 'C', credibility: 3 }, { id: 'receiver-nato', title: 'Coalition receiver', discipline: null, label: 'nato/NATO Unclassified' }]
+  };
+  const person = { kind: 'person', name: 'A. Demo', role: 'J2 watch officer', deviceFingerprint: 'dev-0123456789abcdef' } as const;
+  assert.ok((await store.registerFeed(feed)).ok);
+  assert.ok((await store.transitionFeed('ais-sim', 'approve', person)).ok);
+  assert.ok((await store.transitionFeed('ais-sim', 'start-live', { kind: 'system' })).ok);
+  const row = (channel: string, messageId: string, track: string, label: string, reference: string) => {
+    const knownAt = new Date(T0).toISOString();
+    return {
+      schema: 1, obsId: observationId('ais-sim', channel, messageId), messageId, segment: segmentId('ais-sim', channel, knownAt), feed: 'ais-sim', channel, discipline: null,
+      validAt: knownAt, knownAt, geometry: { type: 'Point', coordinates: at(reference) }, error: { circularMetres: 50, verticalMetres: null }, how: 'gps', subjectRef: track,
+      source: 'AIS receiver', origin: `Transponder ${track}`, reliability: 'C', credibility: 3, deceptionNote: 'none seen', label, handling: [], extractor: { codec: 'ais', version: '1.0.0' },
+      simulated: true, trackId: `mmsi:${track}`
+    };
+  };
+  const appended = await store.append({ rows: [row('receiver-north', 'n1', '316000001', 'org/Internal', 'KQ 4636'), row('receiver-nato', 'x1', '316000002', 'nato/NATO Unclassified', 'KQ 4736')] });
+  assert.equal(appended.appended, 2, JSON.stringify(appended));
+  const tracksIn = (picture: Awaited<ReturnType<typeof staffRoomPicture>>['picture']) => (picture?.features ?? []).map((feature) => feature.properties.track).filter(Boolean).sort();
+
+  // The default policy's clearance: no NATO clearance, so the coalition track is never in the picture.
+  const reader = labelRecordFilter(testGateRuntime());
+  const cleared = await staffRoomPicture(root, { store, reader });
+  assert.equal(cleared.problem, undefined);
+  assert.deepEqual(tracksIn(cleared.picture), ['mmsi:316000001']);
+  assert.ok(!JSON.stringify(cleared.picture).includes('316000002'), 'nothing of the hidden row reaches the page');
+  assert.equal(cleared.now, T0 + 60_000, 'the store\'s clock');
+  assert.ok(cleared.picture!.frame, 'the scenario\'s frame');
+  // With a reader that covers everything both are there, so the clamp is the reader's doing; with no reader nothing labelled is read.
+  assert.deepEqual(tracksIn((await staffRoomPicture(root, { store, reader: () => true })).picture), ['mmsi:316000001', 'mmsi:316000002']);
+  const unread = await staffRoomPicture(root, { store });
+  assert.deepEqual(tracksIn(unread.picture), []);
+  assert.ok(unread.picture!.layers.filter((layer) => layer.kind === 'feed').every((layer) => layer.count === 0));
+  // The picture's label check is the same reader, and a label it cannot parse is not visible.
+  assert.equal(labelVisible(reader)('org/Internal'), true);
+  assert.equal(labelVisible(reader)('nato/NATO Unclassified'), false);
+  assert.equal(labelVisible(() => true)('no-scale'), false);
+  assert.equal(labelVisible(() => { throw new Error('no gate'); })('org/Internal'), false);
+  // No scenario: a picture without a frame (the room keeps its SVG map), never a throw.
+  const bare = await staffRoomPicture(mkdtempSync(path.join(tmpdir(), 'near-ai-room-cop-')), { now: () => 5 });
+  assert.equal(bare.now, 5);
+  assert.equal(bare.picture!.frame, undefined);
+});
+
+test('the Staff Room page loads only the vendored map files, under a policy with no eval, no inline code and no remote source', () => {
+  const uri = (value: string) => ({ path: value, toString: () => value });
+  const vscode = {
+    Uri: { joinPath: (base: { path: string }, ...parts: string[]) => uri(path.posix.normalize([base.path, ...parts].join('/'))), file: (value: string) => uri(value) },
+    ViewColumn: { Active: -1 }, window: {}, workspace: {}, commands: { registerCommand: () => ({ dispose: () => undefined }) }
+  };
+  const nodeModule = require('node:module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
+  const originalLoad = nodeModule._load;
+  nodeModule._load = (request, parent, isMain) => (request === 'vscode' ? vscode : originalLoad(request, parent, isMain));
+  let panel: typeof import('../services/staffRoomPanel');
+  try { panel = require('../services/staffRoomPanel') as typeof import('../services/staffRoomPanel'); } finally { nodeModule._load = originalLoad; }
+  const source = 'https://file+.vscode-resource.vscode-cdn.net';
+  const webview = { cspSource: source, asWebviewUri: (value: { path: string }) => uri(`${source}${value.path}`) };
+  const html = panel.staffRoomHtml(webview as never, uri('/ext/media/staffRoom') as never);
+  const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)![1];
+  assert.doesNotMatch(csp, /unsafe-eval|unsafe-inline|\*|http:|data: [^;]*script/);
+  const nonce = /script-src 'nonce-([A-Za-z0-9+/=]+)'/.exec(csp)![1];
+  assert.match(csp, /^default-src 'none'; /);
+  assert.match(csp, new RegExp(`script-src 'nonce-${nonce.replace(/[+/=]/g, '\\$&')}'(;|$)`), 'scripts only by nonce');
+  assert.match(csp, /worker-src blob:(;|$)/, 'the map worker starts from a blob');
+  assert.match(csp, new RegExp(`connect-src ${source.replace(/[.+]/g, '\\$&')}(;|$)`), 'fetches only from the extension');
+  // Every script carries the nonce and is one of the page's own or the COP map's; the vendored libraries are named for the page to load lazily.
+  const scripts = [...html.matchAll(/<script([^>]*)>/g)].map((match) => match[1]);
+  assert.ok(scripts.length >= 3);
+  for (const attributes of scripts) {
+    assert.match(attributes, new RegExp(`nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`));
+    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffRoom\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
+  }
+  assert.ok(html.indexOf('staff/copMap.js') < html.indexOf('staffRoom/staffMap.js'), 'the COP map is loaded before the room\'s map');
+  const resources = JSON.parse(/data-cop-resources="([^"]+)"/.exec(html)![1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+  assert.deepEqual(Object.keys(resources).sort(), ['maplibre', 'milsymbol', 'worker']);
+  for (const value of Object.values(resources) as string[]) assert.match(value, /^https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/vendor\//);
+  assert.match(html, /vendor\/maplibre-gl\/maplibre-gl\.css/);
+  assert.doesNotMatch(html, /\son[a-z]+=|style="/, 'no inline handler or style');
+  // The panel may read its own folder, the shared stylesheet, the COP map and the vendored libraries, and nothing else.
+  assert.deepEqual(panel.staffRoomResourceRoots(uri('/ext') as never).map((root) => root.path), ['/ext/media/staffRoom', '/ext/media/shared', '/ext/media/staff', '/ext/media/vendor']);
 });

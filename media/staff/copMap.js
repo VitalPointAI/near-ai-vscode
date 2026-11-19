@@ -17,6 +17,19 @@
 //   view.setTime(ms) / view.setMode(mode)          // also driven by the clock; redraws at most 10 times a second
 //   view.setProjection('map' | 'globe') -> boolean // false on the SVG map, which is 2D only
 //   view.setLayerVisible(id, on) / view.setEcoa(id | undefined) / view.select(id | undefined) / view.destroy()
+//   view.highlight(names)                          // marks the features whose name, ECOA or ECOA role is listed (a PIR's NAIs, an adversary COA); [] clears
+//   view.setColours(colours) / view.focus()        // the host page's theme (ocean, land, marsh, contour, river, road, line, label, halo); focus the map
+//
+// Mount options also take `colours` (the same keys as setColours) and `still: true`, which turns off MapLibre's label fades (the Staff Room's Calm and
+// reduced motion).
+//
+// Labels. Symbol images never carry text: every name is a separate label, placed so labels do not cover each other or a symbol, and the symbol always
+// stays. MapLibre places them with its own collision index: the symbols are the top symbol layer (icon-allow-overlap true, so never dropped, and
+// icon-ignore-placement false, so they claim their room), and names follow in the layers below with text-allow-overlap false, text-optional true,
+// variable anchors around the symbol and text padding: symbols first, then their names, then place names, then control measures. With
+// no glyph server MapLibre draws the letters locally from the system's sans-serif font, so no request is made. The SVG map runs declutter() below: greedy
+// placement in priority order, trying offsets around the anchor, then a shortened name, and a label that fits nowhere is hidden (its name stays in the
+// feature's title, its card and Map as table).
 //
 // Offline: the page never asks for a tile, glyph, sprite or font. The ground is the picture's synthetic geography; symbols are drawn by the vendored
 // milsymbol; text is drawn into symbol images or set as DOM text. The only requests are the vendored files from the extension. The page never decides
@@ -25,8 +38,91 @@
   'use strict';
   const SVGNS = 'http://www.w3.org/2000/svg';
   const MAX_REDRAWS_PER_SECOND = 10;
-  const COLOURS = { ocean: '#0e2a47', land: '#3d4a3a', marsh: '#4f6152', contour: '#8a9a7b', river: '#5aa0d8', road: '#c9b26b', friendly: '#80e0ff', hostile: '#ff8080', line: '#e8e8e8', adversary: '#ff8080', star: '#ffd23f' };
+  const COLOURS = { ocean: '#0e2a47', land: '#3d4a3a', marsh: '#4f6152', contour: '#8a9a7b', river: '#5aa0d8', road: '#c9b26b', friendly: '#80e0ff', hostile: '#ff8080', line: '#e8e8e8', adversary: '#ff8080', star: '#ffd23f', label: '#ffffff', halo: '#000000' };
   const ADVERSARY_KINDS = { 'axis-adversary': true };
+  const LABEL_FONT = ['sans-serif'];
+
+  // ---- Label placement (the SVG map; the Staff Room's SVG map carries the same function, and a test holds the two together) ----------------
+
+  /** Where a label may go around its anchor, tried in order: right, left, above, below, then the four corners. */
+  const LABEL_OFFSETS = [[1, 0, 'start'], [-1, 0, 'end'], [0, -1, 'middle'], [0, 1, 'middle'], [1, -1, 'start'], [1, 1, 'start'], [-1, -1, 'end'], [-1, 1, 'end']];
+
+  function overlaps(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
+
+  /** A shorter form of a name for a crowded spot: the first word and an ellipsis, or the first four letters. Undefined when nothing shorter helps. */
+  function shortName(text) {
+    const words = String(text).split(/\s+/).filter(Boolean);
+    if (words.length > 1) return words[0] + '\u2026';
+    return String(text).length > 5 ? String(text).slice(0, 4) + '\u2026' : undefined;
+  }
+
+  /**
+   * Greedy, deterministic label placement. `labels`: { id, x, y (the anchor), w, h (the label's size), gap (space between anchor and label), prio,
+   * text, size (font size, to size a shortened name), first ([dx, dy, anchor]: its usual spot, tried first), fixed (only its usual spot), rings (how
+   * many rings of spots around the anchor it may try, 1 by default; a place name may go a little further out than a unit's designation) }.
+   * `obstacles`: boxes { x, y, w, h, owner } no label may cover, except the label of the symbol that owns the box. Higher priority places first, ties
+   * by id. Each label tries its usual spot, then LABEL_OFFSETS, then the same spots with its shortened name, and takes the first that overlaps nothing
+   * placed; a label with no free spot is hidden.
+   * Returns { [id]: { hidden: false, x, y, anchor, box, text } | { hidden: true } }, where (x, y) is the text's start, end or middle point on its baseline.
+   */
+  function declutter(labels, obstacles) {
+    const placed = [];
+    const out = {};
+    const order = labels.slice().sort(function (a, b) { return (b.prio || 0) - (a.prio || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+    for (const label of order) {
+      const gap = label.gap || 0;
+      let spots = label.first ? [label.first] : [];
+      for (let ring = 1; !label.fixed && ring <= (label.rings || 1); ring += 1) {
+        const reach = gap * (ring === 1 ? 1 : 1 + ring);
+        spots = spots.concat(LABEL_OFFSETS.map(function (o) { return [o[0] * reach, o[1] * (reach + label.h / 2), o[2]]; }));
+      }
+      const short = label.text !== undefined && label.size ? shortName(label.text) : undefined;
+      const tries = [{ text: label.text, w: label.w }];
+      if (short !== undefined) tries.push({ text: short, w: Math.ceil(short.length * label.size * 0.64) + 2 });
+      let found;
+      for (const attempt of tries) {
+        for (const spot of spots) {
+          const cx = label.x + spot[0];
+          const cy = label.y + spot[1];
+          const left = spot[2] === 'start' ? cx : spot[2] === 'end' ? cx - attempt.w : cx - attempt.w / 2;
+          const box = { x: left, y: cy - label.h / 2, w: attempt.w, h: label.h };
+          const blocked = placed.some(function (other) { return overlaps(box, other); }) || (obstacles || []).some(function (other) { return other.owner !== label.id && overlaps(box, other); });
+          if (!blocked) { found = { hidden: false, x: cx, y: cy + label.h * 0.32, anchor: spot[2], box: box, text: attempt.text }; break; }
+        }
+        if (found) break;
+      }
+      if (found) { placed.push(found.box); out[label.id] = found; } else out[label.id] = { hidden: true };
+    }
+    return out;
+  }
+
+  /** A label's anchor and priority for a drawn feature: symbols first, then decision points, then control measures; place names (2.2) go between. */
+  function labelAnchor(feature) {
+    const g = feature.geometry;
+    const p = feature.properties;
+    let at;
+    if (g.type === 'Point') at = g.coordinates;
+    else if (g.type === 'LineString') at = g.coordinates[Math.floor((g.coordinates.length - 1) / 2)];
+    else if (g.type === 'Polygon') {
+      const ring = g.coordinates[0].length > 1 ? g.coordinates[0].slice(0, -1) : g.coordinates[0];
+      at = [ring.reduce(function (s, c) { return s + c[0]; }, 0) / ring.length, ring.reduce(function (s, c) { return s + c[1]; }, 0) / ring.length];
+    }
+    const prio = p.kind === 'symbol' || p.kind === 'track' ? 3 : p.kind === 'decision-point' ? 2.5 : 2;
+    return at ? { at: at, prio: prio, point: g.type === 'Point' } : undefined;
+  }
+
+  function labelText(p) { return p.state === 'lost' ? p.name + ' (lost)' : p.name; }
+
+  /** A label's width in pixels, estimated the same way everywhere (no layout pass needed, so the placement is the same in every window). */
+  function labelWidth(text, size) { return Math.ceil(String(text).length * size * 0.64) + 2; }
+
+  /** Whether a feature is one of the highlighted names: its name, its ECOA or its ECOA role, in any case. */
+  function highlighted(feature, names) {
+    if (!names || !names.length) return false;
+    const p = feature.properties;
+    const wanted = names.map(function (name) { return String(name).toLowerCase(); });
+    return [p.name, p.ecoa, p.ecoaRole].some(function (value) { return value !== undefined && wanted.indexOf(String(value).toLowerCase()) >= 0; });
+  }
 
   /** What is drawn at time t (same rule as src/domain/staff/cop/picture.ts visibleFeatures; a test holds them together). */
   function visibleFeatures(features, t, mode) {
@@ -198,26 +294,42 @@
 
   function symbolOptions(p) {
     // The standard light fills by affiliation (UX 5.10), also for civilian entities, which milsymbol would otherwise fill purple.
-    const options = { size: 28, uniqueDesignation: p.name, civilianColor: false };
+    // The name is a separate label (see Labels above), so a symbol image carries no text and labels can move out of each other's way.
+    const options = { size: 28, civilianColor: false };
     if (p.state === 'stale') options.fillOpacity = 0.4;
-    if (p.state === 'lost') { options.fill = false; options.uniqueDesignation = p.name + ' (lost)'; }
+    if (p.state === 'lost') options.fill = false;
     return options;
+  }
+
+  /** The part of the frame worth drawing: everything the picture places and every named place, with a margin; the whole frame when empty. */
+  function extent(picture) {
+    const frame = picture.frame ? picture.frame.bounds : [-1, -1, 1, 1];
+    const box = [Infinity, Infinity, -Infinity, -Infinity];
+    const take = function (c) { if (Array.isArray(c) && typeof c[0] === 'number') { box[0] = Math.min(box[0], c[0]); box[1] = Math.min(box[1], c[1]); box[2] = Math.max(box[2], c[0]); box[3] = Math.max(box[3], c[1]); } else if (Array.isArray(c)) c.forEach(take); };
+    for (const feature of picture.features) take(feature.geometry.coordinates);
+    for (const g of (picture.geography && picture.geography.features) || []) if (g.geometry.type === 'Point' && g.properties.name) take(g.geometry.coordinates);
+    if (!(box[2] > box[0]) || !(box[3] > box[1])) return frame;
+    const padX = Math.max((box[2] - box[0]) * 0.15, (frame[2] - frame[0]) * 0.03);
+    const padY = Math.max((box[3] - box[1]) * 0.15, (frame[3] - frame[1]) * 0.03);
+    return [Math.max(frame[0], box[0] - padX), Math.max(frame[1], box[1] - padY), Math.min(frame[2], box[2] + padX), Math.min(frame[3], box[3] + padY)];
   }
 
   // ---- SVG renderer (2D, no WebGL, no library needed) -------------------------------------------------------------------------------------
 
   function svgRenderer(chrome, state, ms) {
     const width = 1000, height = 700;
-    const root = svg('svg', { viewBox: '0 0 ' + width + ' ' + height, class: 'cop-map-svg', role: 'img' });
+    const LABEL_SIZE = 12;
+    const root = svg('svg', { viewBox: '0 0 ' + width + ' ' + height, class: 'cop-map-svg', role: 'img', tabindex: '0' });
     const title = svg('title');
     title.textContent = 'Map of the exercise area';
     root.appendChild(title);
     chrome.canvas.appendChild(root);
     let project = function () { return [0, 0]; };
     const byId = new Map();
+    const C = state.colours;
 
     function setup(picture) {
-      const bounds = picture.frame ? picture.frame.bounds : [-1, -1, 1, 1];
+      const bounds = extent(picture);
       const midLat = ((bounds[1] + bounds[3]) / 2) * Math.PI / 180;
       const sx = width / ((bounds[2] - bounds[0]) * Math.cos(midLat));
       const sy = height / (bounds[3] - bounds[1]);
@@ -262,59 +374,98 @@
       }
       const group = svg('g');
       group.appendChild(plainFrame(x, y, p.sidc, p.anticipated));
-      const text = svg('text', { x: x + 15, y: y + 4, class: 'cop-map-svg-text' });
-      text.textContent = p.name;
-      group.appendChild(text);
       return group;
     }
 
-    return {
+    /** Labels for the drawn features and the place names, decluttered so none covers another or a symbol. */
+    function drawLabels(features, places) {
+      const labels = [];
+      const obstacles = [];
+      for (const feature of features) {
+        const anchor = labelAnchor(feature);
+        if (!anchor || !feature.properties.name) continue;
+        const xy = project(anchor.at);
+        const text = labelText(feature.properties);
+        const symbolic = anchor.point && (feature.properties.kind === 'symbol' || feature.properties.kind === 'track' || feature.properties.kind === 'decision-point');
+        if (symbolic) obstacles.push({ x: xy[0] - 14, y: xy[1] - 14, w: 28, h: 28, owner: feature.id });
+        labels.push({ id: feature.id, x: xy[0], y: xy[1], w: labelWidth(text, LABEL_SIZE), h: LABEL_SIZE * 1.4, gap: symbolic ? 16 : 6, prio: anchor.prio, text: text, size: LABEL_SIZE, rings: symbolic ? 1 : 2 });
+      }
+      places.forEach(function (place, index) {
+        const xy = project(place.geometry.coordinates);
+        labels.push({ id: '~place/' + index, x: xy[0], y: xy[1], w: labelWidth(place.properties.name, LABEL_SIZE), h: LABEL_SIZE * 1.4, gap: 6, prio: 2.2, text: place.properties.name, size: LABEL_SIZE, rings: 3 });
+      });
+      const placed = declutter(labels, obstacles);
+      const layer = svg('g', { class: 'cop-map-labels' });
+      for (const label of labels) {
+        const at = placed[label.id];
+        const node = byId.get(label.id);
+        if (at.hidden) { if (node) node.setAttribute('data-label', 'hidden'); continue; }
+        const text = svg('text', { x: at.x.toFixed(1), y: at.y.toFixed(1), 'text-anchor': at.anchor, class: label.id.indexOf('~place/') === 0 ? 'cop-map-svg-place' : 'cop-map-svg-text', 'data-for': label.id, fill: C.label, stroke: C.halo });
+        text.textContent = at.text;
+        layer.appendChild(text);
+      }
+      root.appendChild(layer);
+      return placed;
+    }
+
+    function markHighlight() {
+      byId.forEach(function (node, id) {
+        const feature = state.picture && state.picture.features.find(function (candidate) { return candidate.id === id; });
+        node.setAttribute('class', 'cop-map-feature' + (feature && highlighted(feature, state.highlight) ? ' cop-map-hilite' : ''));
+      });
+    }
+
+    const renderer = {
       kind: 'svg',
+      lastLabels: undefined,
       draw: function () {
         while (root.childNodes.length > 1) root.removeChild(root.lastChild);
         byId.clear();
         const picture = state.picture;
         if (!picture) return;
         setup(picture);
-        root.appendChild(svg('rect', { x: 0, y: 0, width: width, height: height, fill: COLOURS.ocean }));
+        root.appendChild(svg('rect', { x: 0, y: 0, width: width, height: height, fill: C.ocean }));
+        const places = [];
         for (const g of (picture.geography && picture.geography.features) || []) {
           const k = g.properties.kind;
-          if (g.geometry.type === 'Polygon') root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates[0], true), fill: k === 'marsh' ? COLOURS.marsh : COLOURS.land, stroke: 'none' }));
-          else if (g.geometry.type === 'LineString') root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates, false), fill: 'none', stroke: COLOURS[k] || COLOURS.line, 'stroke-width': k === 'contour' ? 0.8 : 2 }));
-          else if (g.geometry.type === 'Point' && g.properties.name) {
-            const p = project(g.geometry.coordinates);
-            const text = svg('text', { x: p[0] + 4, y: p[1] - 4, class: 'cop-map-svg-place' });
-            text.textContent = g.properties.name;
-            root.appendChild(text);
-          }
+          if (g.geometry.type === 'Polygon') root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates[0], true), fill: k === 'marsh' ? C.marsh : C.land, stroke: 'none' }));
+          else if (g.geometry.type === 'LineString') root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates, false), fill: 'none', stroke: C[k] || C.line, 'stroke-width': k === 'contour' ? 0.8 : 2 }));
+          else if (g.geometry.type === 'Point' && g.properties.name) places.push(g);
         }
-        for (const feature of drawn(state)) {
+        const features = drawn(state);
+        for (const feature of features) {
           const p = feature.properties;
           let node;
           if (feature.geometry.type === 'Point') {
             const xy = project(feature.geometry.coordinates);
-            node = p.kind === 'decision-point' ? star(xy[0], xy[1], 10) : p.kind === 'symbol' || p.kind === 'track' ? symbolNode(feature, xy[0], xy[1]) : svg('circle', { cx: xy[0], cy: xy[1], r: 5, fill: 'none', stroke: COLOURS.line, 'stroke-width': 2 });
+            node = p.kind === 'decision-point' ? star(xy[0], xy[1], 10) : p.kind === 'symbol' || p.kind === 'track' ? symbolNode(feature, xy[0], xy[1]) : svg('circle', { cx: xy[0], cy: xy[1], r: 5, fill: 'none', stroke: C.line, 'stroke-width': 2 });
           } else {
             const area = feature.geometry.type === 'Polygon';
             node = svg('path', {
               d: pathOf(area ? feature.geometry.coordinates[0] : feature.geometry.coordinates, area), fill: 'none',
-              stroke: ADVERSARY_KINDS[p.kind] ? COLOURS.adversary : COLOURS.line, 'stroke-width': p.kind === 'axis-main' ? 4 : 2,
+              stroke: ADVERSARY_KINDS[p.kind] ? COLOURS.adversary : C.line, 'stroke-width': p.kind === 'axis-main' ? 4 : 2,
               'stroke-dasharray': p.anticipated || ADVERSARY_KINDS[p.kind] || p.kind === 'nai' ? '8 5' : ''
             });
           }
           node.setAttribute('data-id', feature.id);
           node.setAttribute('class', 'cop-map-feature');
           const label = svg('title');
-          label.textContent = p.name;
+          label.textContent = labelText(p);
           node.appendChild(label);
           node.addEventListener('click', function () { state.select(feature.id); });
           byId.set(feature.id, node);
           root.appendChild(node);
         }
+        renderer.lastLabels = drawLabels(features, places);
+        markHighlight();
       },
+      highlight: markHighlight,
+      setColours: function () { renderer.draw(); },
+      focus: function () { if (typeof root.focus === 'function') root.focus(); },
       setProjection: function () { return false; },
       destroy: function () { if (root.parentNode) root.parentNode.removeChild(root); }
     };
+    return renderer;
   }
 
   // ---- MapLibre renderer (2D and globe, WebGL) --------------------------------------------------------------------------------------------
@@ -339,32 +490,54 @@
     return window.ms;
   }
 
-  function mapLibreRenderer(chrome, state, maplibregl, ms) {
+  function mapLibreRenderer(chrome, state, maplibregl, ms, options) {
     const empty = { type: 'FeatureCollection', features: [] };
+    const C = state.colours;
+    const none = ['literal', ['']];
+    const textPaint = function () { return { 'text-color': C.label, 'text-halo-color': C.halo, 'text-halo-width': 1.5 }; };
     const map = new maplibregl.Map({
-      container: chrome.canvas, attributionControl: false, renderWorldCopies: false, maxPitch: 0,
+      container: chrome.canvas, attributionControl: false, renderWorldCopies: false, maxPitch: 0, fadeDuration: options.still ? 0 : 300,
       style: {
         version: 8, projection: { type: state.projection === 'globe' ? 'globe' : 'mercator' },
         sources: { ground: { type: 'geojson', data: empty }, cop: { type: 'geojson', data: empty } },
         layers: [
-          { id: 'ocean', type: 'background', paint: { 'background-color': COLOURS.ocean } },
-          { id: 'land', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'land'], paint: { 'fill-color': COLOURS.land } },
-          { id: 'marsh', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'marsh'], paint: { 'fill-color': COLOURS.marsh } },
-          { id: 'ground-lines', type: 'line', source: 'ground', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': ['match', ['get', 'kind'], 'river', COLOURS.river, 'road', COLOURS.road, COLOURS.contour], 'line-width': ['match', ['get', 'kind'], 'contour', 0.8, 2] } },
-          { id: 'areas', type: 'line', source: 'cop', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'line-color': ['case', ['==', ['get', 'kind'], 'nai'], COLOURS.adversary, COLOURS.line], 'line-width': 2, 'line-dasharray': [3, 2] } },
-          { id: 'lines', type: 'line', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['!', ['to-boolean', ['get', 'anticipated']]], ['!=', ['get', 'kind'], 'axis-adversary']], paint: { 'line-color': COLOURS.line, 'line-width': ['case', ['==', ['get', 'kind'], 'axis-main'], 4, 2] } },
-          { id: 'lines-dashed', type: 'line', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['any', ['to-boolean', ['get', 'anticipated']], ['==', ['get', 'kind'], 'axis-adversary']]], paint: { 'line-color': ['case', ['==', ['get', 'kind'], 'axis-adversary'], COLOURS.adversary, COLOURS.line], 'line-width': 2, 'line-dasharray': [4, 3] } },
-          { id: 'points', type: 'symbol', source: 'cop', filter: ['==', ['geometry-type'], 'Point'], layout: { 'icon-image': ['get', 'icon'], 'icon-allow-overlap': true, 'icon-ignore-placement': true } }
+          { id: 'ocean', type: 'background', paint: { 'background-color': C.ocean } },
+          { id: 'land', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'land'], paint: { 'fill-color': C.land } },
+          { id: 'marsh', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'marsh'], paint: { 'fill-color': C.marsh } },
+          { id: 'ground-lines', type: 'line', source: 'ground', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour], 'line-width': ['match', ['get', 'kind'], 'contour', 0.8, 2] } },
+          { id: 'hilite-lines', type: 'line', source: 'cop', filter: ['in', ['get', 'fid'], none], paint: { 'line-color': COLOURS.star, 'line-width': 7, 'line-opacity': 0.55 } },
+          { id: 'areas', type: 'line', source: 'cop', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'line-color': ['case', ['==', ['get', 'kind'], 'nai'], COLOURS.adversary, C.line], 'line-width': 2, 'line-dasharray': [3, 2] } },
+          { id: 'lines', type: 'line', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['!', ['to-boolean', ['get', 'anticipated']]], ['!=', ['get', 'kind'], 'axis-adversary']], paint: { 'line-color': C.line, 'line-width': ['case', ['==', ['get', 'kind'], 'axis-main'], 4, 2] } },
+          { id: 'lines-dashed', type: 'line', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['any', ['to-boolean', ['get', 'anticipated']], ['==', ['get', 'kind'], 'axis-adversary']]], paint: { 'line-color': ['case', ['==', ['get', 'kind'], 'axis-adversary'], COLOURS.adversary, C.line], 'line-width': 2, 'line-dasharray': [4, 3] } },
+          { id: 'hilite-points', type: 'circle', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'Point'], ['in', ['get', 'fid'], none]], paint: { 'circle-radius': 20, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': COLOURS.star, 'circle-stroke-width': 3 } },
+          // Labels, lowest priority first: MapLibre places the layers on top first, so symbols win a crowded spot, then place names, then control measures.
+          { id: 'area-labels', type: 'symbol', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['has', 'name']], layout: { 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-allow-overlap': false, 'text-padding': 3 }, paint: textPaint() },
+          { id: 'line-labels', type: 'symbol', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['has', 'name']], layout: { 'symbol-placement': 'line-center', 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-allow-overlap': false, 'text-padding': 3, 'text-max-angle': 35 }, paint: textPaint() },
+          { id: 'place-labels', type: 'symbol', source: 'ground', filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'name']], layout: { 'text-field': ['get', 'name'], 'text-font': LABEL_FONT, 'text-size': 11, 'text-variable-anchor': ['top', 'bottom', 'left', 'right'], 'text-radial-offset': 0.5, 'text-allow-overlap': false, 'text-padding': 3 }, paint: textPaint() },
+          // A name tries eight places around its symbol and is dropped when none is free; the symbols (the layer above) are placed first, so a name
+          // never covers a symbol, its own or another's.
+          {
+            id: 'point-labels', type: 'symbol', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'Point'], ['has', 'text']],
+            layout: {
+              'symbol-sort-key': ['get', 'order'], 'text-field': ['get', 'text'], 'text-font': LABEL_FONT, 'text-size': 12,
+              'text-variable-anchor': ['left', 'right', 'top', 'bottom', 'top-left', 'top-right', 'bottom-left', 'bottom-right'], 'text-radial-offset': 2.1,
+              'text-justify': 'auto', 'text-allow-overlap': false, 'text-ignore-placement': false, 'text-optional': true, 'text-padding': 3
+            },
+            paint: textPaint()
+          },
+          {
+            id: 'points', type: 'symbol', source: 'cop', filter: ['==', ['geometry-type'], 'Point'],
+            layout: { 'icon-image': ['get', 'icon'], 'icon-allow-overlap': true, 'icon-ignore-placement': false, 'icon-padding': 1, 'symbol-sort-key': ['get', 'order'] }
+          }
         ]
       }
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-right');
-    const icons = new Map();
 
     function iconFor(p) {
       if (p.kind === 'decision-point') return 'dp-star';
       if (!p.sidc) return 'point';
-      return 'sym|' + p.sidc + '|' + p.name + '|' + (p.state || 'live');
+      return 'sym|' + p.sidc + '|' + (p.state || 'live');
     }
 
     map.on('styleimagemissing', function (event) {
@@ -381,10 +554,9 @@
         return;
       }
       const parts = id.split('|');
-      const symbol = new ms.Symbol(parts[1], symbolOptions({ name: parts[2], state: parts[3] }));
+      const symbol = new ms.Symbol(parts[1], symbolOptions({ state: parts[2] }));
       const drawnCanvas = symbol.asCanvas(window.devicePixelRatio || 1);
       map.addImage(id, drawnCanvas.getContext('2d').getImageData(0, 0, drawnCanvas.width, drawnCanvas.height), { pixelRatio: window.devicePixelRatio || 1 });
-      icons.set(id, true);
     });
 
     map.on('click', function (event) {
@@ -394,31 +566,68 @@
 
     const ready = new Promise(function (resolve) { map.once('load', resolve); });
     let framed = false;
+    let shown = [];
 
-    return {
+    function markHighlight() {
+      ready.then(function () {
+        const ids = shown.filter(function (feature) { return highlighted(feature, state.highlight); }).map(function (feature) { return feature.id; });
+        const list = ['literal', ids.length ? ids : ['']];
+        map.setFilter('hilite-lines', ['in', ['get', 'fid'], list]);
+        map.setFilter('hilite-points', ['all', ['==', ['geometry-type'], 'Point'], ['in', ['get', 'fid'], list]]);
+      });
+    }
+
+    const renderer = {
       kind: 'maplibre', map: map, ready: ready,
       draw: function () {
         ready.then(function () {
           const picture = state.picture;
           if (!picture) return;
           map.getSource('ground').setData(picture.geography || empty);
-          const features = drawn(state).map(function (feature) {
-            return { type: 'Feature', geometry: feature.geometry, properties: Object.assign({}, feature.properties, { fid: feature.id, icon: iconFor(feature.properties), card: undefined }) };
+          shown = drawn(state);
+          const features = shown.map(function (feature) {
+            const p = feature.properties;
+            const anchor = labelAnchor(feature);
+            return { type: 'Feature', geometry: feature.geometry, properties: Object.assign({}, p, { fid: feature.id, icon: iconFor(p), text: labelText(p), order: anchor ? 10 - anchor.prio : 10, card: undefined }) };
           });
           map.getSource('cop').setData({ type: 'FeatureCollection', features: features });
+          markHighlight();
           if (!framed && picture.frame) {
             framed = true;
-            const b = picture.frame.bounds;
+            const b = extent(picture);
             map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 24, animate: false });
           }
         });
       },
+      highlight: markHighlight,
+      setColours: function () {
+        ready.then(function () {
+          map.setPaintProperty('ocean', 'background-color', C.ocean);
+          map.setPaintProperty('land', 'fill-color', C.land);
+          map.setPaintProperty('marsh', 'fill-color', C.marsh);
+          map.setPaintProperty('ground-lines', 'line-color', ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour]);
+          map.setPaintProperty('lines', 'line-color', C.line);
+          for (const id of ['place-labels', 'area-labels', 'line-labels', 'point-labels']) { map.setPaintProperty(id, 'text-color', C.label); map.setPaintProperty(id, 'text-halo-color', C.halo); }
+        });
+      },
+      focus: function () { const canvas = map.getCanvas && map.getCanvas(); if (canvas && typeof canvas.focus === 'function') canvas.focus(); },
       setProjection: function (projection) {
         ready.then(function () { map.setProjection({ type: projection === 'globe' ? 'globe' : 'mercator' }); });
         return true;
       },
       destroy: function () { map.remove(); }
     };
+    return renderer;
+  }
+
+  /** The theme colours a host page may set: only these keys, only colour words or hex, so a page cannot pass anything else into a style. */
+  function themeColours(colours) {
+    const out = {};
+    for (const key of ['ocean', 'land', 'marsh', 'contour', 'river', 'road', 'line', 'label', 'halo']) {
+      const value = colours && colours[key];
+      if (typeof value === 'string' && /^(#[0-9a-fA-F]{3,8}|rgba?\([0-9., %]+\)|[a-z]+)$/.test(value.trim())) out[key] = value.trim();
+    }
+    return out;
   }
 
   // ---- Mount ------------------------------------------------------------------------------------------------------------------------------
@@ -427,7 +636,8 @@
     options = options || {};
     const state = {
       picture: undefined, time: options.clock ? options.clock.now() : Date.now(), mode: options.mode === 'known' ? 'known' : 'valid',
-      projection: options.projection === 'globe' ? 'globe' : 'map', ecoa: undefined, visible: {}, selected: undefined, clock: options.clock
+      projection: options.projection === 'globe' ? 'globe' : 'map', ecoa: undefined, visible: {}, selected: undefined, clock: options.clock,
+      colours: Object.assign({}, COLOURS, themeColours(options.colours)), highlight: []
     };
     const view = { renderer: 'svg', reason: undefined };
     const chrome = createChrome(container, state, view);
@@ -441,7 +651,7 @@
       } else {
         try {
           const maplibregl = await loadMapLibre(options);
-          renderer = mapLibreRenderer(chrome, state, maplibregl, ms);
+          renderer = mapLibreRenderer(chrome, state, maplibregl, ms, options);
           view.renderer = 'maplibre';
         } catch (error) {
           view.reason = 'the map library could not start (' + (error && error.message ? error.message : String(error)) + ')';
@@ -489,6 +699,9 @@
     view.setLayerVisible = function (id, on) { state.visible[id] = Boolean(on); redraw(); };
     view.setEcoa = function (id) { state.ecoa = id || undefined; redraw(); };
     view.select = function (id) { state.select(id); };
+    view.highlight = function (names) { state.highlight = Array.isArray(names) ? names.map(String) : []; renderer.highlight(); };
+    view.setColours = function (colours) { Object.assign(state.colours, themeColours(colours)); renderer.setColours(); };
+    view.focus = function () { renderer.focus(); };
     let unsubscribe;
     view.destroy = function () {
       if (pending) clearTimeout(pending);
@@ -496,7 +709,7 @@
       renderer.destroy();
       if (chrome.root.parentNode) chrome.root.parentNode.removeChild(chrome.root);
     };
-    view.state = function () { return { time: state.time, mode: state.mode, projection: state.projection, ecoa: state.ecoa, visible: Object.assign({}, state.visible), drawn: drawn(state).map(function (feature) { return feature.id; }) }; };
+    view.state = function () { return { time: state.time, mode: state.mode, projection: state.projection, ecoa: state.ecoa, visible: Object.assign({}, state.visible), drawn: drawn(state).map(function (feature) { return feature.id; }), labels: renderer.lastLabels }; };
     if (options.clock && options.clock.subscribe) unsubscribe = options.clock.subscribe(function (t) { view.setTime(t); });
     // Never wait forever for the map: after 15 seconds the view is returned and the map finishes loading behind it.
     if (renderer.kind === 'maplibre') await Promise.race([renderer.ready, new Promise(function (resolve) { setTimeout(resolve, 15000); })]);
@@ -504,5 +717,5 @@
     return view;
   }
 
-  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures };
+  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures, declutter: declutter };
 })();

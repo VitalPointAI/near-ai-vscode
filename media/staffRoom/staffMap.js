@@ -1,6 +1,14 @@
-// The Staff Room's map (UX concept 5.5 and 5.10; WP-ROOM): one map interface, NearAiStaffMap.create(container, options), that the page draws every
-// workspace's picture through. This renderer draws the host's map model (src/domain/staff/staffRoomMap.ts) as SVG on the scenario's fictional grid. Drop
-// 2's cop-map (MapLibre on the exercise frame) implements the same interface: create, render, setLayer, highlight, showTable, focusFirst, destroy.
+// The Staff Room's map (UX concept 5.5 and 5.10; WP-ROOM, WP-COP): one map interface, NearAiStaffMap.create(container, options), that the page draws
+// every workspace's picture through: create, render, setLayer, highlight, showTable, focusFirst, destroy, plus setPicture and setTheme for the COP map.
+//
+// Two renderers behind it. The COP map (media/staff/copMap.js, window.nearCopMap.mount: MapLibre on the exercise frame, globe and time slider) is used
+// when the host has sent a COP picture with a frame, the script is loaded and WebGL works. Otherwise this file draws the host's map model
+// (src/domain/staff/staffRoomMap.ts) as SVG on the scenario's fictional grid, and says why in a line on the map. Map as table, the keyboard flow and the
+// highlights work the same with either.
+//
+// Labels on the SVG map never cover each other: after drawing, declutter() places every name label greedily by priority (units first, then the adversary
+// axes and control measures, then places, then rivers, roads and sea names), trying its usual spot, then spots around its anchor, then a shortened name;
+// a label that still fits nowhere is hidden and its symbol stays, with the name in the symbol's spoken label, its title and Map as table.
 //
 // Symbols follow the frame shapes of MIL-STD-2525 and APP-6 with the standard light fills (friend 128,224,255; hostile 255,128,128; neutral 170,255,170;
 // unknown 255,255,128), so affiliation is carried by shape as well as colour. Anticipated things (an adversary course of action, a reported position)
@@ -10,6 +18,64 @@
   const SVG = 'http://www.w3.org/2000/svg';
   const EASE = { std: 'cubic-bezier(.2,0,0,1)', settle: 'cubic-bezier(.34,1.4,.64,1)' };
   const AFF_WORD = { F: 'Friendly', H: 'Hostile', N: 'Neutral', U: 'Unknown' };
+  /** The nonce of this script, which the COP map's lazy loads carry, so the page's policy needs no new script source. */
+  const NONCE = typeof document !== 'undefined' && document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : undefined;
+  /** The theme's map colours the COP map takes, read from the page's CSS custom properties. */
+  const THEME_VARS = { ocean: '--map-sea', land: '--map-land', marsh: '--map-ridge', contour: '--map-contour', river: '--map-river', road: '--map-road', line: '--map-ink', label: '--map-ink', halo: '--map-halo' };
+
+  // ---- Label placement (the same function as media/staff/copMap.js; a test holds the two together) ----------------------------------------
+
+  /** Where a label may go around its anchor, tried in order: right, left, above, below, then the four corners. */
+  const LABEL_OFFSETS = [[1, 0, 'start'], [-1, 0, 'end'], [0, -1, 'middle'], [0, 1, 'middle'], [1, -1, 'start'], [1, 1, 'start'], [-1, -1, 'end'], [-1, 1, 'end']];
+
+  function overlaps(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
+
+  /** A shorter form of a name for a crowded spot: the first word and an ellipsis, or the first four letters. Undefined when nothing shorter helps. */
+  function shortName(text) {
+    const words = String(text).split(/\s+/).filter(Boolean);
+    if (words.length > 1) return words[0] + '\u2026';
+    return String(text).length > 5 ? String(text).slice(0, 4) + '\u2026' : undefined;
+  }
+
+  /**
+   * Greedy, deterministic label placement. `labels`: { id, x, y (the anchor), w, h (the label's size), gap (space between anchor and label), prio,
+   * text, size (font size, to size a shortened name), first ([dx, dy, anchor]: its usual spot, tried first), fixed (only its usual spot), rings (how
+   * many rings of spots around the anchor it may try, 1 by default; a place name may go a little further out than a unit's designation) }.
+   * `obstacles`: boxes { x, y, w, h, owner } no label may cover, except the label of the symbol that owns the box. Higher priority places first, ties
+   * by id. Each label tries its usual spot, then LABEL_OFFSETS, then the same spots with its shortened name, and takes the first that overlaps nothing
+   * placed; a label with no free spot is hidden.
+   * Returns { [id]: { hidden: false, x, y, anchor, box, text } | { hidden: true } }, where (x, y) is the text's start, end or middle point on its baseline.
+   */
+  function declutter(labels, obstacles) {
+    const placed = [];
+    const out = {};
+    const order = labels.slice().sort(function (a, b) { return (b.prio || 0) - (a.prio || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+    for (const label of order) {
+      const gap = label.gap || 0;
+      let spots = label.first ? [label.first] : [];
+      for (let ring = 1; !label.fixed && ring <= (label.rings || 1); ring += 1) {
+        const reach = gap * (ring === 1 ? 1 : 1 + ring);
+        spots = spots.concat(LABEL_OFFSETS.map(function (o) { return [o[0] * reach, o[1] * (reach + label.h / 2), o[2]]; }));
+      }
+      const short = label.text !== undefined && label.size ? shortName(label.text) : undefined;
+      const tries = [{ text: label.text, w: label.w }];
+      if (short !== undefined) tries.push({ text: short, w: Math.ceil(short.length * label.size * 0.64) + 2 });
+      let found;
+      for (const attempt of tries) {
+        for (const spot of spots) {
+          const cx = label.x + spot[0];
+          const cy = label.y + spot[1];
+          const left = spot[2] === 'start' ? cx : spot[2] === 'end' ? cx - attempt.w : cx - attempt.w / 2;
+          const box = { x: left, y: cy - label.h / 2, w: attempt.w, h: label.h };
+          const blocked = placed.some(function (other) { return overlaps(box, other); }) || (obstacles || []).some(function (other) { return other.owner !== label.id && overlaps(box, other); });
+          if (!blocked) { found = { hidden: false, x: cx, y: cy + label.h * 0.32, anchor: spot[2], box: box, text: attempt.text }; break; }
+        }
+        if (found) break;
+      }
+      if (found) { placed.push(found.box); out[label.id] = found; } else out[label.id] = { hidden: true };
+    }
+    return out;
+  }
 
   function sv(tag, attrs, parent) {
     const node = document.createElementNS(SVG, tag);
@@ -33,7 +99,7 @@
   }
 
   /** One unit symbol: the affiliation frame, the type icon, the echelon above, the designation (and grade) to the right. */
-  function symbol(unit, parent) {
+  function symbol(unit, parent, register) {
     const g = sv('g', { class: 'sym aff-' + unit.affiliation + (unit.anticipated ? ' planned' : ''), tabindex: '0', role: 'img', 'data-id': unit.id }, parent);
     g.setAttribute('aria-label', AFF_WORD[unit.affiliation] + ' ' + unit.kind + ', ' + unit.designation + (unit.grid ? ', at ' + unit.grid : '') + (unit.grade ? ', graded ' + unit.grade.code : ''));
     g.style.transform = 'translate(' + unit.at[0] + 'px, ' + unit.at[1] + 'px)';
@@ -58,7 +124,15 @@
     if (unit.echelonMark) text({ class: 'ech', x: 0, y: f(top - 2) }, unit.echelonMark, body);
     if (unit.hq) sv('path', { class: 'staff', d: a === 'H' ? 'M-8.5,0 L-8.5,11' : 'M-9,6 L-9,15' }, body);
     const label = text({ class: 'des', x: f(right + 3), y: 2.5 }, unit.designation, body);
-    if (unit.grade) { const chip = sv('tspan', { class: 'grade', dx: 3 }, label); chip.textContent = unit.grade.code; }
+    const fill = () => { label.textContent = unit.designation; if (unit.grade) { const chip = sv('tspan', { class: 'grade', dx: 3 }, label); chip.textContent = unit.grade.code; } };
+    fill();
+    if (register) {
+      register(label, {
+        id: 'u:' + unit.id, x: unit.at[0], y: unit.at[1], first: [right + 3, 2.5, 'start'], gap: right + 2, prio: a === 'H' ? 4.5 : 4, size: 6.5,
+        text: unit.designation + (unit.grade ? ' ' + unit.grade.code : ''), extra: unit.grade ? 3 : 0, origin: unit.at, restore: fill,
+        obstacle: { x: unit.at[0] - right, y: unit.at[1] + top - (unit.echelonMark ? 6 : 0), w: right * 2, h: -top * 2 + (unit.echelonMark ? 6 : 0) }
+      });
+    }
     return g;
   }
 
@@ -98,6 +172,14 @@
     const empty = el('div', 'mapempty');
     empty.hidden = true;
     box.append(empty);
+    // The COP map's place, and the line that says why the SVG map is shown instead.
+    const copSlot = el('div', 'copslot');
+    copSlot.hidden = true;
+    box.append(copSlot);
+    const note = el('p', 'mapnote');
+    note.hidden = true;
+    note.setAttribute('role', 'status');
+    box.append(note);
     container.append(box);
 
     let model;
@@ -107,6 +189,23 @@
     let ecoaGroups = new Map();
     let tableOn = false;
     let mode = 'war-room';
+    let labelItems = [];
+    let placement = {};
+    let highlighted = [];
+    // The COP map: idle (no usable picture yet), mounting, on (MapLibre runs), or off (it cannot run here; `copReason` says why).
+    let copState = 'idle';
+    let copView;
+    let copReason;
+    let picture;
+    let destroyed = false;
+    const subscribers = new Set();
+    const clock = {
+      t: Date.now(), manual: false,
+      now: () => clock.t,
+      subscribe: (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); },
+      set: (t) => { clock.t = t; clock.manual = true; for (const fn of subscribers) fn(t); }
+    };
+    layersButton.className = 'btn small layers-toggle';
 
     tableButton.addEventListener('click', () => showTable(!tableOn));
     layersButton.addEventListener('click', () => {
@@ -135,6 +234,7 @@
       tableOn = Boolean(on);
       table.hidden = !tableOn;
       svg.setAttribute('aria-hidden', tableOn ? 'true' : 'false');
+      copSlot.setAttribute('aria-hidden', tableOn ? 'true' : 'false');
       tableButton.setAttribute('aria-pressed', tableOn ? 'true' : 'false');
       if (options.onTable) options.onTable(tableOn);
       if (tableOn) renderTable();
@@ -190,6 +290,8 @@
       const group = layerGroups.get(id);
       if (group) group.setAttribute('visibility', on ? 'visible' : 'hidden');
       if (id === 'cop-threat-layer') for (const g of ecoaGroups.values()) g.setAttribute('visibility', on ? 'visible' : 'hidden');
+      if (copView) copView.setLayerVisible(id, on);
+      placeLabels();
       if (model) renderLayers();
       if (options.onLayers) options.onLayers([...hidden]);
     }
@@ -217,25 +319,32 @@
         const n = Math.round((model.grid.originNorthing - gy * model.grid.unitMetres) / model.grid.squareMetres);
         text({ class: 'glab', x: f(x + 3), y: gy - 2 }, String(n).padStart(2, '0'), parent);
       }
-      for (const label of model.seaLabels) text({ class: 'plab', x: label.at[0], y: label.at[1], 'text-anchor': 'middle' }, label.name.toUpperCase(), parent);
+      model.seaLabels.forEach((label, index) => {
+        const node = text({ class: 'plab', x: label.at[0], y: label.at[1], 'text-anchor': 'middle' }, label.name.toUpperCase(), parent);
+        register(node, { id: 's:' + index, x: label.at[0], y: label.at[1], first: [0, 0, 'middle'], gap: 8, prio: 0.5, size: 8, factor: 0.8, text: label.name.toUpperCase() });
+      });
     }
 
-    function drawFeature(feature, parent) {
+    function drawFeature(feature, parent, index) {
       const g = sv('g', { class: 'feat k-' + feature.kind }, parent);
       const p = feature.points;
       const a = p[0];
+      const id = 'f:' + index;
+      const name = (node, at, first, extra) => register(node, Object.assign({ id, layer: 'cop-terrain-layer', x: at[0], y: at[1], first, gap: 6, prio: 2, size: 6.5, text: node.textContent, rings: 2 }, extra || {}));
       if (feature.kind === 'high-ground' && p.length >= 2) {
         const b = p[p.length - 1];
         const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2, len = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2 + 12;
         const angle = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
         [[1, 'contour'], [0.68, 'contour'], [0.36, 'ridge']].forEach(([k, cls]) => sv('ellipse', { class: cls, cx: f(cx), cy: f(cy), rx: f(len * k), ry: f(Math.max(4, len * 0.28 * k)), transform: 'rotate(' + f(angle) + ' ' + f(cx) + ' ' + f(cy) + ')' }, g));
-        text({ class: 'tlab ridge-lab', x: f(cx + 6), y: f(cy - 4), transform: 'rotate(' + f(angle) + ' ' + f(cx + 6) + ' ' + f(cy - 4) + ')' }, feature.name, g);
+        // Level, so its box is the box the label placement checks.
+        name(text({ class: 'tlab ridge-lab', x: f(cx + 6), y: f(cy - 4) }, feature.name, g), [cx, cy], [6, -4, 'start'], { gap: 8, prio: 1 });
       } else if (feature.kind === 'river' && p.length >= 2) {
         sv('path', { class: 'river', d: smooth(p) }, g);
-        text({ class: 'tlab river-lab', x: f(p[Math.floor(p.length / 2)][0] + 4), y: f(p[Math.floor(p.length / 2)][1] + 9) }, feature.name, g);
+        const m = p[Math.floor(p.length / 2)];
+        name(text({ class: 'tlab river-lab', x: f(m[0] + 4), y: f(m[1] + 9) }, feature.name, g), m, [4, 9, 'start'], { prio: 1.2 });
       } else if (feature.kind === 'route' && p.length >= 2) {
         sv('path', { class: 'road', d: smooth(p) }, g);
-        text({ class: 'tlab road-lab', x: f(p[0][0] + 4), y: f(p[0][1] + 12) }, feature.name.toUpperCase(), g);
+        name(text({ class: 'tlab road-lab', x: f(p[0][0] + 4), y: f(p[0][1] + 12) }, feature.name.toUpperCase(), g), p[0], [4, 12, 'start'], { prio: 1.1 });
       } else if (feature.kind === 'beach' && p.length >= 1) {
         sv('path', { class: 'beach', d: p.length >= 2 ? smooth(p) : 'M' + f(a[0] - 8) + ',' + f(a[1]) + ' L' + f(a[0] + 8) + ',' + f(a[1]) }, g);
       } else if (feature.kind === 'marsh') {
@@ -244,52 +353,54 @@
         sv('ellipse', { class: 'marsh', cx: f(c[0]), cy: f(c[1]), rx: f(rx), ry: 6 }, g);
       } else if (feature.kind === 'island') {
         sv('ellipse', { class: 'land', cx: a[0], cy: a[1], rx: 14, ry: 7 }, g);
-        text({ class: 'tlab', x: f(a[0] - 10), y: f(a[1] - 10) }, feature.name, g);
+        name(text({ class: 'tlab', x: f(a[0] - 10), y: f(a[1] - 10) }, feature.name, g), a, [-10, -10, 'start'], { gap: 10 });
       } else if (feature.kind === 'town' || feature.kind === 'port') {
         [[0, 0, 9, 6], [7, 4, 6, 5], [-5, 5, 5, 4]].forEach(([dx, dy, w, h]) => sv('rect', { class: 'town', x: f(a[0] + dx - 4), y: f(a[1] + dy - 3), width: w, height: h, rx: 1 }, g));
-        text({ class: 'tlab', x: f(a[0] + 10), y: f(a[1] - 5) }, feature.name, g);
+        name(text({ class: 'tlab', x: f(a[0] + 10), y: f(a[1] - 5) }, feature.name, g), a, [10, -5, 'start'], { gap: 10, prio: feature.kind === 'port' ? 2.4 : 2.2, obstacle: { x: a[0] - 9, y: a[1] - 3, w: 18, h: 9 } });
       } else if (feature.kind === 'crossing') {
         sv('path', { class: 'bridge', d: 'M' + f(a[0] - 4) + ',' + f(a[1] - 3) + ' L' + f(a[0] - 2) + ',' + f(a[1] - 1.5) + ' L' + f(a[0] + 2) + ',' + f(a[1] - 1.5) + ' L' + f(a[0] + 4) + ',' + f(a[1] - 3) + ' M' + f(a[0] - 4) + ',' + f(a[1] + 3) + ' L' + f(a[0] - 2) + ',' + f(a[1] + 1.5) + ' L' + f(a[0] + 2) + ',' + f(a[1] + 1.5) + ' L' + f(a[0] + 4) + ',' + f(a[1] + 3) }, g);
-        text({ class: 'tlab', x: f(a[0] + 6), y: f(a[1] + 11) }, feature.name, g);
+        name(text({ class: 'tlab', x: f(a[0] + 6), y: f(a[1] + 11) }, feature.name, g), a, [6, 11, 'start'], { obstacle: { x: a[0] - 4, y: a[1] - 3, w: 8, h: 6 } });
       } else {
         sv('circle', { class: 'town', cx: a[0], cy: a[1], r: 2.5 }, g);
-        text({ class: 'tlab', x: f(a[0] + 5), y: f(a[1] - 4) }, feature.name, g);
+        name(text({ class: 'tlab', x: f(a[0] + 5), y: f(a[1] - 4) }, feature.name, g), a, [5, -4, 'start'], { gap: 5, obstacle: { x: a[0] - 2.5, y: a[1] - 2.5, w: 5, h: 5 } });
       }
       const title = sv('title', null, g); title.textContent = feature.name + (feature.grid ? ', ' + feature.grid : '') + '. ' + feature.description;
     }
 
-    function drawGraphic(graphic, parent, fresh) {
+    function drawGraphic(graphic, parent, fresh, layer) {
       const g = sv('g', { class: 'cmg k-' + graphic.kind, 'data-name': graphic.name }, parent);
       const p = graphic.points;
       const a = p[0];
+      const name = (node, at, first, extra) => register(node, Object.assign({ id: 'g:' + graphic.id, layer, x: at[0], y: at[1], first, gap: 6, prio: 3, size: 6.5, text: graphic.name, rings: 2 }, extra || {}));
       if (graphic.kind === 'phase-line' && p.length >= 2) {
         sv('path', { class: 'cm pl', d: 'M' + f(a[0]) + ',' + f(a[1]) + ' L' + f(p[p.length - 1][0]) + ',' + f(p[p.length - 1][1]) }, g);
-        text({ class: 'cmlab', x: f(a[0] + 2), y: f(a[1] - 3) }, graphic.name, g);
-        text({ class: 'cmlab', x: f(p[p.length - 1][0] - 2), y: f(p[p.length - 1][1] - 3), 'text-anchor': 'end' }, graphic.name, g);
+        name(text({ class: 'cmlab', x: f(a[0] + 2), y: f(a[1] - 3) }, graphic.name, g), a, [2, -3, 'start'], { id: 'g:' + graphic.id + ':a', gap: 4 });
+        const b = p[p.length - 1];
+        name(text({ class: 'cmlab', x: f(b[0] - 2), y: f(b[1] - 3), 'text-anchor': 'end' }, graphic.name, g), b, [-2, -3, 'end'], { id: 'g:' + graphic.id + ':b', gap: 4 });
       } else if (graphic.kind === 'nai') {
         const spans = p.slice(1);
         const rx = spans.length ? Math.min(32, Math.max(12, ...spans.map((s) => Math.abs(s[0] - a[0]) + 6))) : 14;
         const ry = spans.length ? Math.min(24, Math.max(8, ...spans.map((s) => Math.abs(s[1] - a[1]) + 5))) : 9;
         sv('ellipse', { class: 'cm nai', cx: f(a[0]), cy: f(a[1]), rx: f(rx), ry: f(ry) }, g);
-        text({ class: 'cmlab', x: f(a[0] - rx + 2), y: f(a[1] - ry - 3) }, graphic.name, g);
+        name(text({ class: 'cmlab', x: f(a[0] - rx + 2), y: f(a[1] - ry - 3) }, graphic.name, g), a, [-rx + 2, -ry - 3, 'start'], { prio: 3.2 });
         if (fresh) anim(g, [{ opacity: 0 }, { opacity: 1 }], { duration: 450 });
       } else if (graphic.kind === 'objective') {
         const r = 13;
         const pts = [];
         for (let i = 0; i < 7; i += 1) { const t = (i / 7) * Math.PI * 2; pts.push([a[0] + Math.cos(t) * r * (0.82 + 0.25 * ((i * 37) % 7) / 7), a[1] + Math.sin(t) * r * 0.75]); }
         sv('path', { class: 'cm obj', d: 'M' + pts.map((pt) => f(pt[0]) + ',' + f(pt[1])).join(' L') + ' Z' }, g);
-        text({ class: 'cmlab', x: f(a[0] - 14), y: f(a[1] + r + 9) }, graphic.name, g);
+        name(text({ class: 'cmlab', x: f(a[0] - 14), y: f(a[1] + r + 9) }, graphic.name, g), a, [-14, r + 9, 'start'], { gap: 14 });
       } else if (graphic.kind === 'assembly-area') {
         sv('rect', { class: 'cm obj', x: f(a[0] - 16), y: f(a[1] - 9), width: 32, height: 18, rx: 7 }, g);
-        text({ class: 'cmlab', x: f(a[0] - 14), y: f(a[1] + 19) }, graphic.name, g);
+        name(text({ class: 'cmlab', x: f(a[0] - 14), y: f(a[1] + 19) }, graphic.name, g), a, [-14, 19, 'start'], { gap: 12 });
       } else if (graphic.kind === 'landing-area') {
         const b = p[p.length - 1];
         const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
         sv('ellipse', { class: 'cm la', cx: f(cx), cy: f(cy), rx: f(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2 + 8), ry: 7 }, g);
-        text({ class: 'cmlab', x: f(cx - 12), y: f(cy - 10) }, graphic.name, g);
+        name(text({ class: 'cmlab', x: f(cx - 12), y: f(cy - 10) }, graphic.name, g), [cx, cy], [-12, -10, 'start'], { gap: 10 });
       } else {
         sv('path', { class: 'cm', d: smooth(p.length >= 2 ? p : [a, [a[0] + 1, a[1]]]) }, g);
-        text({ class: 'cmlab', x: f(a[0] + 3), y: f(a[1] - 3) }, graphic.name, g);
+        name(text({ class: 'cmlab', x: f(a[0] + 3), y: f(a[1] - 3) }, graphic.name, g), a, [3, -3, 'start'], { gap: 4 });
       }
       const title = sv('title', null, g); title.textContent = graphic.name + ': ' + graphic.description;
       return g;
@@ -318,6 +429,7 @@
       const head = sv('path', { class: 'head', d: 'M' + f(e[0]) + ',' + f(e[1]) + ' L' + f(bx - uy * hw) + ',' + f(by + ux * hw) + ' L' + f(bx + uy * hw) + ',' + f(by - ux * hw) + ' Z' }, g);
       const mid = p[Math.floor(n / 2)];
       const label = text({ class: 'axlab', x: f(mid[0] + 7), y: f(mid[1] - 5) }, coa.term, g);
+      register(label, { id: 'e:' + coa.id, layer: 'cop-threat-layer', x: mid[0], y: mid[1], first: [7, -5, 'start'], gap: 7, prio: 3.5, size: 7, text: coa.term, rings: 2 });
       const title = sv('title', null, g); title.textContent = coa.term + ': ' + coa.statement;
       reveal.style.strokeDashoffset = '0';
       if (fresh) {
@@ -330,8 +442,8 @@
       return g;
     }
 
-    function drop(unit, parent, delay) {
-      const g = symbol(unit, parent);
+    function drop(unit, parent, delay, layer) {
+      const g = symbol(unit, parent, (node, spec) => register(node, Object.assign({ layer }, spec)));
       g.addEventListener('click', () => { if (options.onSelect) options.onSelect(unit, g); });
       g.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (options.onSelect) options.onSelect(unit, g); } });
       if (!seen.has('u:' + unit.id)) {
@@ -350,12 +462,50 @@
       return g;
     }
 
+    /** Notes a name label for the placement pass: its text node, its anchor and usual spot, and the symbol box it must not leave covered. */
+    function register(node, spec) {
+      const size = spec.size || 6.5;
+      // Sized on the safe side of the browser's own text box (bold capitals, ascent and descent), so the estimate never undercounts.
+      const h = size * 1.4;
+      const item = Object.assign({ node, h, w: Math.ceil(String(spec.text).length * size * (spec.factor || 0.64)) + 2 + (spec.extra || 0), origin: [0, 0], shortened: false }, spec);
+      item.size = size;
+      if (spec.first) item.first = [spec.first[0], spec.first[1] - h * 0.32, spec.first[2]];
+      labelItems.push(item);
+    }
+
+    /** Places every name label on a shown layer so none covers another or a symbol (declutter above); a label with no room is hidden. */
+    function placeLabels() {
+      const live = labelItems.filter((item) => !item.layer || !hidden.has(item.layer));
+      const obstacles = live.filter((item) => item.obstacle).map((item) => Object.assign({ owner: item.id }, item.obstacle));
+      const placed = declutter(live, obstacles);
+      placement = {};
+      for (const item of labelItems) {
+        const at = placed[item.id];
+        if (!at || at.hidden) {
+          item.node.setAttribute('visibility', 'hidden');
+          item.node.setAttribute('data-label', at ? 'hidden' : 'off');
+          placement[item.id] = { id: item.id, layer: item.layer, hidden: true };
+          continue;
+        }
+        item.node.setAttribute('visibility', 'visible');
+        item.node.setAttribute('data-label', at.text === item.text ? 'placed' : 'short');
+        item.node.setAttribute('x', f(at.x - item.origin[0]));
+        item.node.setAttribute('y', f(at.y - item.origin[1]));
+        item.node.setAttribute('text-anchor', at.anchor);
+        if (at.text !== item.text) { item.node.textContent = at.text; item.shortened = true; }
+        else if (item.shortened) { if (item.restore) item.restore(); else item.node.textContent = item.text; item.shortened = false; }
+        const usual = Boolean(item.first) && at.text === item.text && at.anchor === item.first[2] && Math.abs(at.x - item.x - item.first[0]) < 0.01 && Math.abs(at.y - item.h * 0.32 - item.y - item.first[1]) < 0.01;
+        placement[item.id] = { id: item.id, layer: item.layer, hidden: false, text: at.text, box: at.box, usual };
+      }
+    }
+
     function render(next, opts) {
       opts = opts || {};
       model = next;
       mode = opts.mode || mode;
-      box.className = 'mapbox mode-' + mode;
+      box.className = 'mapbox mode-' + mode + (copView ? ' has-cop' : copState === 'mounting' ? ' cop-mounting' : '');
       svg.replaceChildren();
+      labelItems = [];
       layerGroups.clear();
       ecoaGroups = new Map();
       if (!model || !model.available) {
@@ -364,6 +514,7 @@
         if (options.onEmptyAction && model) { const b = el('button', 'btn', 'Load a staff exercise scenario'); b.type = 'button'; b.addEventListener('click', options.onEmptyAction); empty.append(b); }
         layerPanel.replaceChildren();
         if (tableOn) renderTable();
+        placement = {};
         return;
       }
       empty.hidden = true;
@@ -376,11 +527,12 @@
         if (hidden.has(id)) g.setAttribute('visibility', 'hidden');
         layerGroups.set(id, g);
       }
-      for (const feature of model.features) drawFeature(feature, layerGroups.get('cop-terrain-layer'));
+      model.features.forEach((feature, index) => drawFeature(feature, layerGroups.get('cop-terrain-layer'), index));
       for (const graphic of model.graphics) {
         const fresh = !seen.has('g:' + graphic.id);
         seen.add('g:' + graphic.id);
-        drawGraphic(graphic, layerGroups.get(graphic.layer) || layerGroups.get('cop-operations-layer'), fresh);
+        const layer = layerGroups.has(graphic.layer) ? graphic.layer : 'cop-operations-layer';
+        drawGraphic(graphic, layerGroups.get(layer), fresh, layer);
       }
       const axes = sv('g', { class: 'ecoas' }, layerGroups.get('cop-threat-layer'));
       for (const coa of model.ecoas) {
@@ -393,22 +545,27 @@
       let delay = 0;
       for (const unit of model.units) {
         const isNew = !seen.has('u:' + unit.id);
-        drop(unit, layerGroups.get(unit.layer) || layerGroups.get('cop-threat-layer'), isNew && opts.stagger ? delay : 0);
+        const layer = layerGroups.has(unit.layer) ? unit.layer : 'cop-threat-layer';
+        drop(unit, layerGroups.get(layer), isNew && opts.stagger ? delay : 0, layer);
         if (isNew && opts.stagger) delay += 45;
       }
+      placeLabels();
+      if (highlighted.length) highlight(highlighted, true);
       renderLayers();
       if (tableOn) renderTable();
     }
 
     /** Pulses the named graphics (NAIs a PIR's collection covers) or an adversary COA, so a row in a list points at its place on the map. */
-    function highlight(names) {
+    function highlight(names, quiet) {
+      highlighted = (names || []).slice();
+      if (copView && !quiet) copView.highlight(highlighted);
       const wanted = new Set(names || []);
       const walk = (node) => {
         for (const child of node.children || []) {
           if (child.getAttribute && child.getAttribute('data-name') !== null && child.getAttribute('data-name') !== undefined) {
             const on = wanted.has(child.getAttribute('data-name'));
             child.classList.toggle('hilite', on);
-            if (on) anim(child, [{ opacity: 0.4 }, { opacity: 1 }], { duration: 600, iterations: 2 });
+            if (on && !quiet) anim(child, [{ opacity: 0.4 }, { opacity: 1 }], { duration: 600, iterations: 2 });
           }
           if (child.getAttribute && child.getAttribute('data-id') && ecoaGroups.has(child.getAttribute('data-id'))) child.classList.toggle('hilite', wanted.has(child.getAttribute('data-id')));
           walk(child);
@@ -418,6 +575,7 @@
     }
 
     function focusFirst() {
+      if (copView && !tableOn) { copView.focus(); return; }
       const first = svg.children && [...svg.children].length ? findSymbol(svg) : null;
       if (first && typeof first.focus === 'function') first.focus();
     }
@@ -430,15 +588,109 @@
       return null;
     }
 
+    // ---- The COP map ------------------------------------------------------------------------------------------------------------------------
+
+    function showNote(text) { note.hidden = !text; note.textContent = text || ''; }
+
+    /** The SVG map stays, and says why: the COP map cannot run in this window. */
+    function copOff(reason) {
+      copState = 'off';
+      copReason = reason;
+      copView = undefined;
+      copSlot.hidden = true;
+      copSlot.replaceChildren();
+      box.classList.remove('has-cop');
+      box.classList.remove('cop-mounting');
+      showNote('2D map: ' + reason + '.');
+      if (options.onRenderer) options.onRenderer('svg', reason);
+    }
+
+    function themeColours() {
+      if (typeof getComputedStyle !== 'function') return undefined;
+      try {
+        const style = getComputedStyle(box);
+        const out = {};
+        for (const key of Object.keys(THEME_VARS)) { const value = String(style.getPropertyValue(THEME_VARS[key]) || '').trim(); if (value) out[key] = value; }
+        return out;
+      } catch (error) { return undefined; }
+    }
+
+    function mountCop() {
+      const api = typeof window !== 'undefined' ? window.nearCopMap : undefined;
+      if (!api || typeof api.mount !== 'function') { copOff('the COP map script did not load'); return; }
+      copState = 'mounting';
+      // The map measures its box when it starts, so the slot has its full size (unseen) while it loads.
+      copSlot.hidden = false;
+      box.classList.add('cop-mounting');
+      const cop = options.cop || {};
+      let mounting;
+      try {
+        mounting = api.mount(copSlot, { resources: cop.resources, nonce: cop.nonce || NONCE, renderer: 'auto', projection: 'map', clock, still: true, colours: themeColours() });
+      } catch (error) { copOff('the COP map could not start (' + (error && error.message ? error.message : String(error)) + ')'); return; }
+      Promise.resolve(mounting).then((view) => {
+        if (destroyed) { if (view && view.destroy) view.destroy(); return; }
+        if (!view || view.renderer !== 'maplibre') {
+          const reason = (view && view.reason) || 'the map library did not start';
+          try { if (view && view.destroy) view.destroy(); } catch (error) { /* already gone */ }
+          copOff(reason);
+          return;
+        }
+        copView = view;
+        copState = 'on';
+        copReason = undefined;
+        showNote('');
+        copSlot.hidden = false;
+        copSlot.setAttribute('aria-hidden', tableOn ? 'true' : 'false');
+        box.classList.remove('cop-mounting');
+        box.classList.add('has-cop');
+        layerPanel.hidden = true;
+        layersButton.setAttribute('aria-expanded', 'false');
+        try {
+          view.setPicture(picture);
+          for (const id of hidden) view.setLayerVisible(id, false);
+          if (highlighted.length) view.highlight(highlighted);
+        } catch (error) { /* the next picture tries again */ }
+        if (options.onRenderer) options.onRenderer('maplibre');
+      }, (error) => copOff('the COP map could not start (' + (error && error.message ? error.message : String(error)) + ')'));
+    }
+
+    /**
+     * The host's COP picture (src/domain/staff/cop/picture.ts), already clamped to what the person may see, and the time the host's clock says. The
+     * first picture with an exercise frame mounts the COP map; until then, and whenever it cannot run here, the SVG map is drawn.
+     */
+    function setPicture(next, info) {
+      info = info || {};
+      if (typeof info.now === 'number' && isFinite(info.now)) {
+        const span = next && next.time;
+        if (clock.manual && span && clock.t >= span.max) clock.manual = false;
+        if (!clock.manual) { clock.t = info.now; for (const fn of subscribers) fn(info.now); }
+      }
+      if (!next) {
+        if (copState !== 'on' && copState !== 'off') showNote(info.problem ? '2D map: ' + info.problem + '.' : '');
+        return;
+      }
+      picture = next;
+      if (copView) { try { copView.setPicture(next); } catch (error) { /* a picture the map refuses leaves the last one */ } return; }
+      if (copState === 'idle' && next.frame) mountCop();
+    }
+
+    /** The theme changed: the COP map takes the page's map colours (the SVG map follows the CSS by itself). */
+    function setTheme() {
+      const colours = themeColours();
+      if (copView && colours) copView.setColours(colours);
+    }
+
     return {
       element: box,
       render, highlight, showTable, focusFirst,
-      setLayer,
+      setLayer, setPicture, setTheme,
+      renderer: () => ({ kind: copView ? 'maplibre' : 'svg', state: copState, reason: copReason }),
+      labels: () => Object.values(placement),
       tableShown: () => tableOn,
       hiddenLayers: () => [...hidden],
-      destroy: () => box.remove()
+      destroy: () => { destroyed = true; if (copView) copView.destroy(); copView = undefined; box.remove(); }
     };
   }
 
-  window.NearAiStaffMap = { create };
+  window.NearAiStaffMap = { create, declutter };
 })();

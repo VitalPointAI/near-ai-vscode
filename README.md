@@ -347,7 +347,14 @@ most likely and most dangerous courses of action as dashed red axes, NAIs and
 control measures, layers each with the one section that writes it, and **Map
 as table** for all of it in words), the source register, the PIRs with the
 decision points they support, the collection plan and the standing watches
-(`.planning/staff/products/j2/standing-watches.json`). The J5, J3 and J4
+(`.planning/staff/products/j2/standing-watches.json`). The map in both
+workspaces is the COP map: the scenario's synthetic geography, the product
+layers and the observations your clearance covers, in 2D or on the globe, with
+its time slider. Where WebGL or the map library is not available, the room
+draws a 2D map instead and says why in a line on the map. On either map a
+name that would cover another name or a symbol moves to a free spot nearby,
+is shortened, or is left off; the symbol always stays, and its name is still
+in its description and in **Map as table**. The J5, J3 and J4
 workspaces arrive in drop 2. **Calm** stops all movement, as the system's
 reduced-motion setting does; **Follow the action** moves the view to where the
 work is; press **?** for the keys.
