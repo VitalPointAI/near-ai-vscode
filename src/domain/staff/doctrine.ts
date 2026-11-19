@@ -518,6 +518,14 @@ export const ECHELON_ALIASES: Readonly<Record<string, Echelon>> = {
   crew: 'team', detachment: 'platoon', battery: 'company', troop: 'company', group: 'regiment', front: 'army-group', region: 'theatre', theater: 'theatre'
 };
 
+/**
+ * Standard identities (affiliations) of the public symbology standards (MIL-STD-2525D, 2014, and APP-6(D), 2017: pending, unknown, assumed friend,
+ * friend, neutral, suspect, hostile; joker and faker are the exercise identities), as Cursor on Target spells them in its type string (`p`, `u`, `a`,
+ * `f`, `n`, `s`, `h`, `j`, `k`; note 11 [F1][F58]). A feed's identity is a claim; the J2's assessment is a separate field (note 11, 6.2).
+ */
+export const STANDARD_IDENTITIES = ['pending', 'unknown', 'assumed-friend', 'friend', 'neutral', 'suspect', 'hostile', 'joker', 'faker'] as const;
+export type StandardIdentity = (typeof STANDARD_IDENTITIES)[number];
+
 /** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
 export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
 
