@@ -420,6 +420,48 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }],
+    ['after Set Up a Staff Team (J2, US Joint, operational) the chat lists the J2 team, and Task fills the message box without sending (D-48 of 0.4.34)', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const load = <T>(file: string) => require(path.join(extension.extensionPath, 'dist', file)) as T;
+      const setup = load<typeof import('../../services/staffSetup')>('services/staffSetup');
+      const { TeamLibrary } = load<typeof import('../../agent/teams')>('agent/teams');
+      const storage = load<typeof import('../../domain/teamStorage')>('domain/teamStorage');
+      const { postToPage } = load<typeof import('../../services/layoutProbe')>('services/layoutProbe');
+      // The team goes to a library in a temporary folder, never the person's own (~/.near-ai-teams).
+      const previous = process.env.NEAR_AI_TEAMS_DIR;
+      process.env.NEAR_AI_TEAMS_DIR = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-teams-'));
+      try {
+        // What the command writes once the person has chosen J2, US Joint, operational: the same plan and write, without the quick picks.
+        const inputs = await setup.readStaffSetupInputs(workspace);
+        const settings = setup.settingsFrom(setup.existingStaffSettings(inputs.projectJson), { profile: 'us-joint', level: 'operational', planningType: 'campaign' });
+        const plan = setup.planStaffSetup({ templateId: 'j2-intelligence', options: { settings, locality: 'local' }, ...inputs });
+        await setup.applyStaffSetup(workspace, new TeamLibrary(storage.teamLibraryDir(storage.homeFolder())), plan);
+        const project = JSON.parse(await readFile(path.join(workspace, '.planning', '.near-ai', 'project.json'), 'utf8')) as { staff: { teams: Record<string, string> } };
+        assert.deepEqual(project.staff.teams, { j2: 'j2-us-joint-operational' }, 'the project records its J2 team');
+        await api.sidebar.newChat();
+        const before = observer.toView.length;
+        const asked = observer.fromView.length;
+        await api.sidebar.refresh();
+        await observer.next('fromView', (message) => message.type === 'refresh-status', asked);
+        const card = await observer.next('toView', (message) => message.type === 'staff-teams' && Boolean(message.model), before);
+        const j2 = (card.model as { sections: Array<{ section: string; state: string; team?: string }> }).sections.find((entry) => entry.section === 'j2');
+        assert.deepEqual([j2?.state, j2?.team], ['ready', 'j2-us-joint-operational'], JSON.stringify(card.model));
+        const nudges = observer.toView.slice(before).filter((message) => message.type === 'setup-nudge');
+        assert.ok(nudges.every((message) => message.show === false), 'no "no team yet" card in a staff project');
+        const menu = await observer.next('toView', (message) => message.type === 'commands' && JSON.stringify(message.commands).includes('team:j2-us-joint-operational'), before);
+        assert.equal((menu.commands as Array<{ command: string }>)[0].command, 'team:j2-us-joint-operational', 'the /team menu lists the staff team first');
+        // Task, clicked in the real page: the command is in the message box, the cursor after it, and nothing is sent.
+        const sent = observer.fromView.length;
+        await postToPage('chat', { type: 'layout-click', selector: '#staff-teams button[data-key="task-j2"]' });
+        let report = await probe('chat');
+        for (let waited = 0; waited < 5_000 && report.composer?.value !== '/team:j2-us-joint-operational '; waited += 250) { await pause(250); report = await probe('chat'); }
+        assert.deepEqual(report.composer, { value: '/team:j2-us-joint-operational ', caret: '/team:j2-us-joint-operational '.length });
+        assert.deepEqual(observer.fromView.slice(sent).filter((message) => message.type === 'send' || message.type === 'open-command'), [], 'nothing was sent');
+        await postToPage('chat', { type: 'prefill', text: '' });
+      } finally {
+        if (previous === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previous;
+      }
+    }],
     ...teamProjectTests(() => api)
   ];
 }

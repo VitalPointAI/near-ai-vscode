@@ -758,3 +758,29 @@ test('opener adds its hint only to a label the card already has, and never repla
   for (const card of [bare, named]) { card.fire('keydown', { key: 'Enter' }); card.fire('keydown', { key: ' ' }); card.click(); assert.equal(card.tabIndex, 0); }
   assert.equal(opened, 6);
 });
+
+test('each set-up section card shows its team and "Task in chat"; a missing team shows "Set up again"; a section without one shows "Set up" (D-48 of 0.4.34)', async () => {
+  const { model } = await fixtureModel();
+  const withTeams = { ...model, squads: model.squads.map((squad) => squad.section === 'j2' ? { ...squad, team: { state: 'ready', name: 'j2-us-joint-operational' } }
+    : squad.section === 'j5' ? { ...squad, team: { state: 'missing', name: 'j5-us-joint-operational' } }
+      : squad.section === 'j3' ? { ...squad, team: { state: 'none' } } : squad) };
+  const page = await runPage();
+  page.dispatch({ type: 'staff-room', model: withTeams, cues: [] });
+  const pod = (section: string) => page.byClass('pod').find((node) => node.dataset.section === section)!;
+  const line = (section: string) => pod(section).all().find((node) => node.classList.contains('pod-team'));
+  assert.equal(line('command'), undefined, 'the command group has no team line');
+  assert.equal(line('j4'), undefined, 'no team line without the host\'s record');
+  const buttons = (section: string) => line(section)!.all().filter((node) => node.tagName === 'button');
+  assert.ok(line('j2')!.all().some((node) => node.textContent === '/team:j2-us-joint-operational'));
+  assert.deepEqual(buttons('j2').map((node) => node.textContent), ['Task in chat']);
+  assert.deepEqual(buttons('j5').map((node) => node.textContent), ['Set up again']);
+  assert.ok(line('j5')!.all().some((node) => /missing from your teams/.test(node.textContent)));
+  assert.equal(line('j5')!.all().some((node) => /\/team:/.test(node.textContent)), false, 'a missing team is never shown as a command');
+  assert.deepEqual(buttons('j3').map((node) => node.textContent), ['Set up']);
+  const before = page.posts.length;
+  buttons('j2')[0].click();
+  buttons('j5')[0].click();
+  buttons('j3')[0].click();
+  // The page sends only the section; the host looks the team up in what it last sent.
+  assert.deepEqual(page.posts.slice(before), [{ type: 'task-team', section: 'j2' }, { type: 'set-up-section', section: 'j5' }, { type: 'set-up-section', section: 'j3' }]);
+});

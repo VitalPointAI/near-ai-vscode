@@ -546,12 +546,34 @@
       }
       const callout = el('div', 'callout' + (squad.members.some((m) => m.state === 'needs') ? ' h' : ''));
       pod.append(tag, head, toks, callout);
+      const teamLine = squadTeamLine(squad);
+      if (teamLine) pod.append(teamLine);
       typeInto(callout, squad.section, squad.summary);
       pods.set(squad.section, pod);
       nodes.squads.append(pod);
     }
     const current = allTokens.find((token) => token.dataset.token === focusedToken) || allTokens[0];
     if (current) { current.tabIndex = 0; if (focusedToken && current.dataset.token === focusedToken) current.focus(); }
+  }
+
+  /**
+   * A set-up section's team and "Task in chat" (the host fills the chat's message box, nothing is sent); a team gone from the library shows as missing
+   * with "Set up again"; a section not set up shows "Set up". The page sends only the section: the host looks the team up in what it last sent.
+   */
+  function squadTeamLine(squad) {
+    const team = squad.team;
+    if (!isObj(team) || !['ready', 'missing', 'none'].includes(team.state) || !['j2', 'j5', 'j3', 'j4'].includes(squad.section)) return undefined;
+    const line = el('div', 'pod-team');
+    if (team.state === 'ready' && typeof team.name === 'string') {
+      const name = el('span', 'mono', '/team:' + team.name);
+      name.title = 'The ' + squad.code + ' team in your teams';
+      line.append(name, button('Task in chat', 'ghost', () => vscode.postMessage({ type: 'task-team', section: squad.section }), { 'aria-label': 'Task the ' + squad.code + ' team in the chat', title: 'Puts /team:' + team.name + ' in the NEAR AI chat; nothing is sent' }));
+    } else if (team.state === 'missing' && typeof team.name === 'string') {
+      line.append(el('span', 'faint', team.name + ' is missing from your teams'), button('Set up again', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team again' }));
+    } else {
+      line.append(el('span', 'faint', 'No team set up'), button('Set up', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team' }));
+    }
+    return line;
   }
 
   function memberToken(squad, member) {

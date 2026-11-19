@@ -27,6 +27,9 @@ import type { ObsReader } from '../staff/observationStore';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { staffRoomPicture } from '../staff/staffRoomPicture';
 import { currentFeedRuntime } from './staffSimCommand';
+import { projectStaffTeams } from './staffTeams';
+import { TeamLibrary } from '../agent/teams';
+import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 
 /** How often the open Staff Room runs the store's track decay, in milliseconds. */
 export const ROOM_TICK_EVERY_MS = 10_000;
@@ -43,7 +46,12 @@ let panel: vscode.WebviewPanel | undefined;
 /** Set by the extension-host tests to observe the page's messages in both directions. */
 export const staffRoomTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void } = {};
 
-export function registerStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>): void {
+/** Where a section card's "Task in chat" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
+export interface StaffRoomChat { prefill(text: string): Promise<void> }
+let roomChat: StaffRoomChat | undefined;
+
+export function registerStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>, chat?: StaffRoomChat): void {
+  roomChat = chat;
   // An optional argument opens the room on one workspace ('j5', 'j3', ...); anything else is ignored and the room opens where the person left it.
   context.subscriptions.push(vscode.commands.registerCommand(OPEN_STAFF_ROOM_COMMAND, (workspace?: unknown) => openStaffRoom(context, gate, staffRoomWorkspaceOf(workspace))));
 }
@@ -100,7 +108,10 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
       // The J2 workspace's live reports: the store's rows the person's clearance covers, read through the same reader view as the map's.
       const view = store && reader ? await store.view(reader).catch(() => undefined) : undefined;
       const input = await loadStaffRoomInput(host, root, Date.now(), wantedRun, view?.ok ? { live: view.value.rows } : {});
-      model = buildStaffRoomModel(input);
+      // Each section card's team, from the project's one record of them (staff.teams), checked against the person's team library.
+      await whenTeamsMoved();
+      const teams = await projectStaffTeams(root, new TeamLibrary(teamLibraryDir(homeFolder())).directory).catch(() => undefined);
+      model = buildStaffRoomModel({ ...input, ...(teams?.staff ? { teams: teams.sections.map((entry) => ({ section: entry.section, state: entry.state, ...(entry.team ? { team: entry.team } : {}) })) } : {}) });
       const cop = await staffRoomPicture(root, { ...(store ? { store } : {}), reader });
       const text = cop.picture ? JSON.stringify(cop.picture) : `problem:${cop.problem ?? ''}`;
       const changed = text !== lastPicture;
@@ -155,7 +166,8 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
       },
       selectRun: (run) => { wantedRun = run; void send(); },
       refresh: () => { lastPicture = undefined; if (!listening.length) start(); else void send(); },
-      notice: (text) => post({ type: 'notice', text })
+      notice: (text) => post({ type: 'notice', text }),
+      ...(roomChat ? { taskInChat: (team: string) => roomChat!.prefill(`/team:${team}`) } : {})
     });
   }, undefined, context.subscriptions);
   // An open Staff Room is a person attending the project: its standing watches run while it is open, and pause when nothing attends (WP-WATCH, Q5).

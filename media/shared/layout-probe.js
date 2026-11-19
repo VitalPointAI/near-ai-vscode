@@ -23,6 +23,12 @@
     root.style.setProperty('--vscode-font-family', 'monospace');
     root.style.setProperty('--vscode-font-size', Math.round(size * 1.1) + 'px');
   });
+  // On request, clicks one button the way a person would (test-only: this file is never published), so a test can drive a card's button in the real page.
+  window.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'layout-click' || typeof event.data.selector !== 'string') return;
+    const node = document.querySelector(event.data.selector);
+    if (node && typeof node.click === 'function') node.click();
+  });
   // Every content security policy violation the page meets from the moment this script loads, so a test can tell a page that works under its
   // policy from one the policy quietly broke.
   const violations = [];
@@ -66,6 +72,10 @@
         const canvas = document.querySelector('canvas.maplibregl-canvas');
         const note = document.querySelector('.mapnote:not([hidden])');
         return { maplibre: Boolean(canvas && canvas.width > 0 && canvas.height > 0), cop: Boolean(document.querySelector('.has-cop')), note: note ? (note.textContent || '').trim().slice(0, 200) : '' };
+      })(),
+      composer: (function () {
+        const box = document.getElementById('input');
+        return box && typeof box.value === 'string' ? { value: box.value.slice(0, 400), caret: typeof box.selectionStart === 'number' ? box.selectionStart : null } : undefined;
       })()
     };
   };

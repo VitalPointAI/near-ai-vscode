@@ -1,5 +1,6 @@
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { parseStaffSettings, STAFF_TEAM_SECTIONS } from '../domain/staff/profiles';
 
 // The one-time setup steps offered after NEAR AI is connected, and again from "NEAR AI: Project
 // Setup…". Pure: no VS Code import, so the order and wording are tested in plain Node. The host
@@ -46,9 +47,24 @@ export function projectTeamFile(root: string): string {
   return path.join(root, '.planning', '.near-ai', 'team.md');
 }
 
-/** True once the project has a team: team.md exists. project.json alone (a project type) is not a team. */
+/**
+ * True once the project has a team: team.md exists, or the staff settings record at least one section team (Set Up a Staff Team). project.json alone (a
+ * project type, or staff settings with no team yet) is not a team.
+ */
 export async function projectHasTeam(root: string): Promise<boolean> {
-  return access(projectTeamFile(root)).then(() => true, () => false);
+  return await access(projectTeamFile(root)).then(() => true, () => false) || await projectHasStaffTeam(root);
+}
+
+/** True when the project's staff settings record a team for at least one section. Settings that do not read record none. */
+export async function projectHasStaffTeam(root: string): Promise<boolean> {
+  try {
+    const value = JSON.parse(await readFile(path.join(root, '.planning', '.near-ai', 'project.json'), 'utf8')) as unknown;
+    if (!value || typeof value !== 'object' || !Object.prototype.hasOwnProperty.call(value, 'staff')) return false;
+    const parsed = parseStaffSettings((value as Record<string, unknown>).staff);
+    return parsed.ok && STAFF_TEAM_SECTIONS.some((section) => Boolean(parsed.value.teams?.[section]));
+  } catch {
+    return false;
+  }
 }
 
 /**

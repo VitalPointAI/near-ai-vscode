@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Military staff teams
+
+- **The project knows its staff teams.** Set Up a Staff Team now records each section's team in
+  the project's staff settings, so after setting up a J2 the chat no longer says "This project has
+  no team yet". A staff project shows a **Staff teams** card instead: each section with its team's
+  name and a **Task** button that puts `/team:<name> ` in the message box without sending it, and
+  **Set up** for the sections not set up yet.
+- **Task a staff team from anywhere.** The message when setup finishes names the team and offers
+  **Task it now** and **Open the Staff Room**. The `/team` menu lists the project's staff teams
+  first, labelled by section, and each section card in the Staff Room shows its team with **Task
+  in chat** (or **Set up** for a section without one).
+- **Missing and older teams.** A team file that was deleted or renamed in your teams shows as
+  missing with **Set up again**, never as a command that would fail. A project set up before this
+  release is offered the matching teams already in your teams to **Link**, only after you confirm.
+
 ## 0.4.34
 
 This release adds military staff teams. Set up a J2 intelligence, J5 plans, J3 operations or J4

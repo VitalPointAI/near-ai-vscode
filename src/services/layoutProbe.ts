@@ -27,6 +27,8 @@ export interface LayoutReport {
   cspViolations?: string[];
   /** The COP map, on pages with one: MapLibre drew into a canvas, the room shows the COP map, and the fallback line if any. */
   map?: { maplibre: boolean; cop: boolean; note: string };
+  /** The chat's message box, on the chat page: its text and where the cursor is, so a test can check what a button put there. */
+  composer?: { value: string; caret: number | null };
 }
 
 export function layoutProbeEnabled(): boolean {
