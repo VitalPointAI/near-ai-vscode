@@ -230,7 +230,7 @@ function prepare(store: Store, ctx: ReplicaContext, options: FoldOptions): Prepa
     const record = { ...(outcome.hash === undefined ? {} : { hash: outcome.hash }), ...place, stage: 'verify' as const, reason: outcome.reason };
     (outcome.status === 'held' ? verifyHeld : verifyRejected).push(record);
   }
-  const chains = classifyChains(verified, ctx);
+  const chains = classifyChains(verified, ctx, verifyRejected);
   const graph = buildCausalGraph(chains.admitted);
   const plan = planCheckpoints(options.checkpoints ?? [], graph);
   const ordered = checkpointOrder(chains.admitted, plan.sets);
@@ -253,12 +253,21 @@ function cloneRun(run: Run): Run {
 
 function viewOf(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldView {
   const positions = new Map<string, number>();
+  const streamPositions = new Map<string, number>();
+  const streamCounts = new Map<string, number>();
   const entries = new Map<string, VerifiedEntry>();
-  prepared.ordered.forEach((entry, index) => { positions.set(entry.hash, index); entries.set(entry.hash, entry); });
+  prepared.ordered.forEach((entry, index) => {
+    positions.set(entry.hash, index);
+    entries.set(entry.hash, entry);
+    const before = streamCounts.get(entry.header.stream) ?? 0;
+    streamPositions.set(entry.hash, before);
+    streamCounts.set(entry.header.stream, before + 1);
+  });
   return {
     ctx,
     graph: prepared.graph,
     position: (hash) => positions.get(hash),
+    streamPosition: (hash) => streamPositions.get(hash),
     entry: (hash) => entries.get(hash),
     state: (family) => run.states.get(family)?.state,
     isFinal: (hash) => prepared.plan.final.has(hash)

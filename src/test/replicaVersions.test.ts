@@ -13,7 +13,7 @@ import { validateData } from '../domain/replica/kinds';
 import { OWNER_PROMPT_THRESHOLD, replicaVersionHash, versionsReducer } from '../domain/replica/versions';
 import type { Pin, ProductVersions, VersionView } from '../domain/replica/versions';
 import { textReducer } from '../domain/replica/textFold';
-import { createWorld, permutations, rng, shuffled } from './helpers/replicaWorld';
+import { createWorld, permutations, rng, shuffled, streamId } from './helpers/replicaWorld';
 import type { Editor, Written, World } from './helpers/replicaWorld';
 import type { ReplicaContext } from '../domain/replica/rosterView';
 import type { SealedEntry } from '../domain/replica/entry';
@@ -459,4 +459,22 @@ test('release.ts and its tests are not part of this change: the gate steps all r
   const none = noGate.act('SL', TRADECRAFT, 'version.verdict', verdict(PRODUCT, hash, 'tradecraft', 'SIGN-OFF'), [w1]);
   assert.deepEqual(gateRefusals(f.fold()), [[person.hash, 'not-gate-member']]);
   assert.deepEqual(gateRefusals(noGate.fold()), [[none.hash, 'no-tradecraft-gate']]);
+});
+
+// ---- Plan 30-12: no output depends on a global position -------------------------------------------------------------------------------------------
+
+test('regression: an unrelated stream changes no recorded act position, because positions count only the product\'s own stream', () => {
+  const f = fixture();
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  f.act('SL', TRADECRAFT, 'version.verdict', verdict(PRODUCT, replicaVersionHash('Hello world', []), 'tradecraft', 'SIGN-OFF'), [v1]);
+  const before = f.fold();
+  // Entries in another stream with a low lamport sort in between the product's own entries in the total order of every stream together.
+  f.world.write('X', { kind: 'future.thing', data: { n: 1 }, stream: streamId('elsewhere') });
+  f.world.write('Q', { kind: 'future.thing', data: { n: 2 }, stream: streamId('elsewhere') });
+  const after = f.fold();
+  assert.equal(after.order.length, before.order.length + 2);
+  assert.deepEqual(after.families.versions, before.families.versions);
+  const positions = (result: FoldResult): number[] => productsOf(result).flatMap((product) => product.records.flatMap((record) => record.acts.map((act) => act.position)));
+  assert.ok(positions(before).length >= 1);
+  assert.deepEqual(positions(after), positions(before));
 });

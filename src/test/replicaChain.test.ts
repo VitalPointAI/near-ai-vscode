@@ -55,6 +55,8 @@ test('a changed old entry is rejected bad-signature, its writer\'s later entries
   assert.deepEqual(result.rejected.map((record) => record.reason), ['bad-signature']);
   assert.deepEqual([...result.applied].sort(), [w[0].hash, x[0].hash, x[1].hash].sort());
   assert.deepEqual(result.held.filter((record) => record.stage === 'chain').map((record) => record.hash).sort(), [w[2].hash, w[3].hash].sort());
+  // The fold itself passes the refused places on (plan 30-12), so its own output labels them chain-broken, not missing-predecessor.
+  assert.deepEqual(result.held.filter((record) => record.stage === 'chain').map((record) => record.reason), ['chain-broken', 'chain-broken']);
   const without = foldEntries([w[0].entry, ...sealed(...x)], ctx);
   assert.deepEqual(result.digests, without.digests, 'the others\' stream digest equals a fold without the broken writer\'s later entries');
 

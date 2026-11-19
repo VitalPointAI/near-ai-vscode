@@ -66,7 +66,7 @@ export interface Pin { product: string; hash: string }
 export interface VersionAct {
   kind: string;
   entry: string;
-  // Place in the total order.
+  // Place among the entries of the product's own stream, in the total order. Never the global index: an unrelated stream must not change it.
   position: number;
   writer: string;
   member: string;
@@ -308,7 +308,7 @@ export const versionsReducer: FamilyReducer<VersionsState, ProductVersions[]> = 
     if (kind === 'version.propose') return applyPropose(state, entry, view);
     if (['version.verdict', 'version.submit', 'version.withdraw', 'version.decide', 'version.release', 'version.supersede'].includes(kind)) {
       // Judged in finish, from the whole set of acts on the version, so no step depends on which act arrived first.
-      product.acts.push(actOf(entry, view.position(entry.hash) ?? 0));
+      product.acts.push(actOf(entry, view.streamPosition(entry.hash) ?? 0));
       return { status: 'applied' };
     }
     return refused('unsupported-kind');
