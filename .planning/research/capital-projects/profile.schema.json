@@ -1,0 +1,1124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "near-ai/capital-profile/1",
+  "title": "Capital project governance profile",
+  "description": "One schema for the neutral example profile and every organization's private profile. Slots are neutral and fixed; label is neutral; name and sameAs carry an organization's own terms and references and appear only in private profiles.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "title",
+    "audience",
+    "display",
+    "source",
+    "currency",
+    "costBases",
+    "rating",
+    "sizeClasses",
+    "categories",
+    "projectTypes",
+    "bodies",
+    "roles",
+    "phases",
+    "exceptionStates",
+    "gates",
+    "decisions",
+    "paths",
+    "pathRules",
+    "estimateClasses",
+    "settings",
+    "overlays",
+    "documents",
+    "checks",
+    "teamOfTeamsWhen",
+    "restrictedSources",
+    "vocabulary"
+  ],
+  "$defs": {
+    "sameAs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "audience": {
+      "enum": [
+        "example",
+        "private"
+      ]
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "use",
+        "showSameAs"
+      ],
+      "properties": {
+        "use": {
+          "enum": [
+            "label",
+            "name"
+          ]
+        },
+        "showSameAs": {
+          "type": "boolean"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "doNotQuote"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "edition": {
+          "type": "string"
+        },
+        "doNotQuote": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "costBases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^basis-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          }
+        }
+      }
+    },
+    "rating": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot",
+        "label",
+        "levels"
+      ],
+      "properties": {
+        "slot": {
+          "type": "string",
+          "pattern": "^rating$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "sameAs": {
+          "$ref": "#/$defs/sameAs"
+        },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slot",
+              "label",
+              "order"
+            ],
+            "properties": {
+              "slot": {
+                "type": "string",
+                "pattern": "^rating-[0-9]+$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "sameAs": {
+                "$ref": "#/$defs/sameAs"
+              },
+              "order": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "sizeClasses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "basis"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^class-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "min": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "max": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "basis": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "onBound": {
+            "enum": [
+              "lower",
+              "upper",
+              "lower-and-flag",
+              "upper-and-flag",
+              "flag"
+            ]
+          }
+        }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "enabled"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^cat-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "projectTypes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^type-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          }
+        }
+      }
+    },
+    "bodies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "kind",
+          "verbs"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^(board|panel|authority)-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "kind": {
+            "enum": [
+              "board",
+              "panel",
+              "authority"
+            ]
+          },
+          "verbs": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "note",
+                "review",
+                "endorse",
+                "approve",
+                "grant",
+                "direct",
+                "return",
+                "defer"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "verbs"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^role-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "verbs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "note",
+                "review",
+                "endorse",
+                "approve",
+                "grant",
+                "direct",
+                "return",
+                "defer"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "order",
+          "exitRequires"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^phase-[0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "exitRequires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,80}$"
+            }
+          }
+        }
+      }
+    },
+    "exceptionStates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^state-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "order",
+          "phase",
+          "chain",
+          "package"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^gate-[0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "phase": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "chain": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "actor",
+                "verb"
+              ],
+              "properties": {
+                "actor": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{1,80}$"
+                },
+                "verb": {
+                  "enum": [
+                    "note",
+                    "review",
+                    "endorse",
+                    "approve",
+                    "grant",
+                    "direct",
+                    "return",
+                    "defer"
+                  ]
+                }
+              }
+            }
+          },
+          "package": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,80}$"
+            }
+          }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "phase",
+          "chain"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^dec-[0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "phase": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "chain": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "actor",
+                "verb"
+              ],
+              "properties": {
+                "actor": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{1,80}$"
+                },
+                "verb": {
+                  "enum": [
+                    "note",
+                    "review",
+                    "endorse",
+                    "approve",
+                    "grant",
+                    "direct",
+                    "return",
+                    "defer"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "approvingAuthority"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^path-[0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "approvingAuthority": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          }
+        }
+      }
+    },
+    "pathRules": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "when",
+          "outcome"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "when": {
+            "type": "object"
+          },
+          "outcome": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "estimateClasses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "accuracyLowPercent",
+          "accuracyHighPercent",
+          "earliestDecision"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^est-[0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "accuracyLowPercent": {
+            "type": "number",
+            "minimum": 0
+          },
+          "accuracyHighPercent": {
+            "type": "number",
+            "minimum": 0
+          },
+          "detailAbovePercentOfValue": {
+            "type": "number",
+            "minimum": 0
+          },
+          "earliestDecision": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          }
+        }
+      }
+    },
+    "settings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "kind",
+          "unit",
+          "value"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^set-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "kind": {
+            "enum": [
+              "threshold",
+              "limit",
+              "deadline",
+              "band",
+              "scale"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {},
+          "anchor": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          }
+        }
+      }
+    },
+    "overlays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "when",
+          "adds"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^ovl-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "when": {
+            "type": "object"
+          },
+          "adds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,80}$"
+            }
+          },
+          "seniority": {
+            "type": "array"
+          },
+          "routes": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "kind",
+          "phases",
+          "owner",
+          "chain",
+          "paths",
+          "requiredContents"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^doc-[a-z0-9-]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "kind": {
+            "enum": [
+              "document",
+              "register",
+              "plan",
+              "annex",
+              "report",
+              "brief",
+              "record",
+              "certificate"
+            ]
+          },
+          "phases": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,80}$"
+            }
+          },
+          "owner": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "smallCellOwner": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,80}$"
+          },
+          "chain": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "actor",
+                "verb"
+              ],
+              "properties": {
+                "actor": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{1,80}$"
+                },
+                "verb": {
+                  "enum": [
+                    "note",
+                    "review",
+                    "endorse",
+                    "approve",
+                    "grant",
+                    "direct",
+                    "return",
+                    "defer"
+                  ]
+                }
+              }
+            }
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,80}$"
+            }
+          },
+          "requiredContents": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "description",
+                "check"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "check": {
+                  "enum": [
+                    "heading",
+                    "register",
+                    "field",
+                    "link",
+                    "review"
+                  ]
+                },
+                "sameAs": {
+                  "$ref": "#/$defs/sameAs"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "label",
+          "family",
+          "kind",
+          "params"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string",
+            "pattern": "^chk-[a-z]+-[0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          },
+          "family": {
+            "enum": [
+              "completeness",
+              "cost",
+              "consistency",
+              "quality",
+              "risk",
+              "benefits",
+              "governance"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "lint",
+              "lint-and-review",
+              "review"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "teamOfTeamsWhen": {
+      "type": "object"
+    },
+    "restrictedSources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "titles",
+        "phraseFingerprints"
+      ],
+      "properties": {
+        "titles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "phraseFingerprints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "vocabulary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "term",
+          "name"
+        ],
+        "properties": {
+          "term": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sameAs": {
+            "$ref": "#/$defs/sameAs"
+          }
+        }
+      }
+    }
+  }
+}
