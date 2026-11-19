@@ -7,6 +7,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { OBSERVATIONS_TOOL_NAMES } from '../agent/observationsTools';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { renderJ3Team, j3Template } from '../agent/staff/j3Operations';
 import { staffTools, WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
@@ -165,5 +166,7 @@ test('a watch officer given Write, Edit and a shell by a hand edit still writes 
   assert.match(saw[1] ?? '', /outside what this agent may write/);
   for (const name of ['Bash', 'mcp__orders__*']) assert.ok(!offered.includes(name), `${name} is withheld`);
   assert.ok(offered.includes('mcp__staff-products__register'), offered.join(', '));
-  for (const name of offered.filter((tool) => tool.startsWith('mcp__'))) assert.ok(WRITE_LIMITED_STAFF_TOOLS.has(name), `${name} is one the write limit allows`);
+  // Besides the staff tools the write limit allows, it keeps the observations server, which only reads: it watches the feeds with it.
+  assert.ok(offered.includes('mcp__observations__obs_changes'), offered.join(', '));
+  for (const name of offered.filter((tool) => tool.startsWith('mcp__'))) assert.ok(WRITE_LIMITED_STAFF_TOOLS.has(name) || OBSERVATIONS_TOOL_NAMES.includes(name), `${name} is one the write limit allows`);
 });

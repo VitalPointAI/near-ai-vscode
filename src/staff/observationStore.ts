@@ -113,14 +113,24 @@ function isoOf(ms: number): string {
 const sha256 = (data: Buffer | string): string => createHash('sha256').update(data).digest('hex');
 
 export class ObservationStore {
-  private readonly now: () => number;
+  private readonly baseNow: () => number;
+  /** The clock a running simulation lends the store (its exercise clock), so rows' known times and track decay share one clock. */
+  private clock: (() => number) | undefined;
   private readonly cache = new Map<string, CachedSegment>();
   /** What the store last read of each index file (manifest, registry): its next write replaces only those bytes. */
   private readonly indexRead = new Map<string, FileSnapshot>();
 
   public constructor(private readonly options: ObservationStoreOptions) {
-    this.now = options.now ?? Date.now;
+    this.baseNow = options.now ?? Date.now;
   }
+
+  private now(): number { return (this.clock ?? this.baseNow)(); }
+
+  /** The time on the store's clock now. */
+  public time(): number { return this.now(); }
+
+  /** Lends the store another clock (a simulation's exercise clock) until it is given back with undefined. */
+  public setClock(clock: (() => number) | undefined): void { this.clock = clock; }
 
   public get root(): string { return this.options.root; }
 

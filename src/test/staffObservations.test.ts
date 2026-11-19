@@ -434,7 +434,7 @@ test('without a store the tools say so; arguments that name a label or clearance
   assert.throws(() => slice.parse({ slice: {}, clearance: 'x' }), /your clearance always applies/);
 });
 
-test('a staff team\'s run gets the observations server; a plain team does not; J2 grantees hold it, and every granted server exists', () => {
+test('a staff team\'s run gets the observations server only when a member is granted it; a plain team does not; J2 and J3 grantees hold it', () => {
   const runTools = (team: Record<string, unknown> | undefined): string[] => {
     const root = mkdtempSync(path.join(tmpdir(), 'near-ai-obs-run-'));
     const conversation = new AgentConversation(root, () => undefined, path.join(root, '.ckpt'));
@@ -442,17 +442,23 @@ test('a staff team\'s run gets the observations server; a plain team does not; J
     const toolsFor = (conversation as unknown as { toolsFor(...args: unknown[]): AgentTool<any>[] }).toolsFor.bind(conversation);
     return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1').map((tool) => tool.name);
   };
-  assert.deepEqual(runTools({ staff: { section: 'j2', steps: {}, products: [], layers: [] } }).filter((name) => name.startsWith('mcp__observations__')), [...OBSERVATIONS_TOOL_NAMES]);
+  const staff = { section: 'j2', steps: {}, products: [], layers: [] };
+  // Gated on grants like the intel-workbench (drop 1 review round 3): a member granted it brings it into the run; nobody granted, none of it.
+  assert.deepEqual(runTools({ staff, members: [{ name: 'watch-officer', tools: ['Read', OBSERVATIONS], instructions: 'x' }] }).filter((name) => name.startsWith('mcp__observations__')), [...OBSERVATIONS_TOOL_NAMES]);
+  assert.equal(runTools({ staff, members: [{ name: 'watch-officer', tools: ['Read'], instructions: 'x' }] }).some((name) => name.startsWith('mcp__observations__')), false);
+  assert.equal(runTools({ staff }).some((name) => name.startsWith('mcp__observations__')), false);
   assert.equal(runTools({}).some((name) => name.startsWith('mcp__observations__')), false);
   assert.ok(builtInStaffServers().some((server) => server.id === 'observations' && server.grant === 'mcp:observations'));
-  const j2 = STAFF_TEMPLATES.find((template) => template.section === 'j2')!;
-  let seen = 0;
-  for (const rendering of j2.renderings().filter((_, index) => index % 7 === 0)) {
-    for (const member of parseTeam(rendering.team, '/p/t.md').members) {
-      const granted = member.tools.includes(OBSERVATIONS);
-      assert.equal(granted, OBSERVATIONS_GRANTEES.j2.includes(member.name), `${rendering.key}/${member.name}`);
-      if (granted) seen += 1;
+  for (const section of ['j2', 'j3'] as const) {
+    const template = STAFF_TEMPLATES.find((candidate) => candidate.section === section)!;
+    let seen = 0;
+    for (const rendering of template.renderings().filter((_, index) => index % 7 === 0)) {
+      for (const member of parseTeam(rendering.team, '/p/t.md').members) {
+        const granted = member.tools.includes(OBSERVATIONS);
+        assert.equal(granted, OBSERVATIONS_GRANTEES[section].includes(member.name), `${rendering.key}/${member.name}`);
+        if (granted) seen += 1;
+      }
     }
+    assert.ok(seen > 0, section);
   }
-  assert.ok(seen > 0);
 });

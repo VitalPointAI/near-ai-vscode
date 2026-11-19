@@ -7,6 +7,8 @@ import { SIM_SPEEDS } from '../domain/staff/sim/player';
 import type { SimPerson } from '../domain/staff/sim/player';
 import type { SimMessage } from '../domain/staff/sim/timeline';
 import { feedPictureText, loadSimTimeline, SimSession, simStatusText } from '../staff/sim/simSession';
+import { SimFeedRuntime } from '../staff/sim/feedRuntime';
+import { observationStoreFor } from '../staff/observationStore';
 
 export const STAFF_SIM_COMMANDS = {
   start: 'nearAi.staff.startSimulation',
@@ -18,12 +20,18 @@ export const STAFF_SIM_COMMANDS = {
 const PERSON_KEY = 'nearAi.staff.person';
 
 let session: SimSession | undefined;
+let runtime: SimFeedRuntime | undefined;
 let statusItem: vscode.StatusBarItem | undefined;
 let output: vscode.OutputChannel | undefined;
 
 /** The running simulation, if any: the feed picture and the COP read it. */
 export function currentSimulation(): SimSession | undefined {
   return session;
+}
+
+/** The running simulation's feed runtime (the store ingest and its decay timer), if a project folder is open. */
+export function currentFeedRuntime(): SimFeedRuntime | undefined {
+  return runtime;
 }
 
 export function registerStaffSimulation(context: { subscriptions: Array<{ dispose(): unknown }>; globalState?: { get<T>(key: string): T | undefined } }): void {
@@ -45,8 +53,13 @@ async function startSimulation(context: { globalState?: { get<T>(key: string): T
   }
   const stored = context.globalState?.get<{ name?: string; role?: string }>(PERSON_KEY);
   const person: SimPerson = { kind: 'person', name: stored?.name?.trim() || 'Presenter', role: stored?.role?.trim() || 'Exercise control', deviceFingerprint: 'this-window' };
-  const { timeline } = await loadSimTimeline();
+  const { timeline, scenario } = await loadSimTimeline();
   const current = new SimSession(timeline, person);
+  // The simulated streams go into the open project's observation store and its staff event log, so the J2 workspace shows them live.
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const store = root ? observationStoreFor(root) : undefined;
+  runtime = store && scenario.region.frame ? new SimFeedRuntime(current, store, scenario.region.frame, person) : undefined;
+  runtime?.attach();
   output ??= vscode.window.createOutputChannel('NEAR AI Staff Simulation');
   statusItem ??= vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   statusItem.command = STAFF_SIM_COMMANDS.controls;
@@ -62,6 +75,7 @@ async function startSimulation(context: { globalState?: { get<T>(key: string): T
   statusItem.show();
   output.clear();
   output.appendLine(feedPictureText(current));
+  output.appendLine(runtime ? '' : 'No project folder is open, so the reports are not kept in an observation store.');
   output.show(true);
   void vscode.window.showInformationMessage(`Simulation started on this machine only, every feed marked ${SIM_BADGE}. It holds at the mid-demo report.`, 'Controls')
     .then((pick) => { if (pick) void simulationControls(); });
@@ -109,6 +123,12 @@ async function stopSimulation(): Promise<void> {
   session = undefined;
   if (!current) return;
   await current.stop();
+  const feeds = runtime;
+  runtime = undefined;
+  if (feeds) {
+    await feeds.detach();
+    output?.appendLine(`Observation store: ${feeds.counts.appended} report(s) kept, ${feeds.counts.duplicates} repeated, ${feeds.counts.refused} refused.${feeds.counts.problems.length ? ` First problem: ${feeds.counts.problems[0]}` : ''}`);
+  }
   statusItem?.hide();
   output?.appendLine('Simulation stopped. Every loopback server is closed.');
 }
