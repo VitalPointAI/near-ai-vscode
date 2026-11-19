@@ -17,7 +17,11 @@
 // which can only propose, give a gate verdict, submit, withdraw, read and write registers, record the wargame and mark a step. And a person, through
 // the VS Code commands (src/services/staffCommands.ts), which alone can approve, reject, release or supersede, signed with this device's key. The state
 // machine refuses a decision from any agent whatever this host is asked, so the two paths never meet.
-import { registerPath } from '../domain/staff/intel';
+import { decidePir as decidePirEntry, parseRegisterText, registerPath, renderRegister, trustPirDecisions } from '../domain/staff/intel';
+import type { PirEntry } from '../domain/staff/intel';
+import { DECISION_LOG_FILE, DECISION_LOG_GENESIS, pirWording, replayPersonDecisions } from '../domain/staff/personDecisions';
+import type { DecisionReplay, PersonDecisionEntry } from '../domain/staff/personDecisions';
+import { withRegisterLock } from './registerLock';
 import { GUARD_CONFIG_FILE } from '../domain/staff/realEntities';
 import { readRealEntities } from './realEntities';
 import { staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
@@ -78,6 +82,7 @@ export const SOURCES_FILE = registerPath('source-register');
 const LEDGER_LOCK = 'ledger.lock';
 const EVENTS_LOCK = 'events.lock';
 const WARGAME_LOCK = 'wargame.lock';
+const DECISION_LOCK = 'decisions.lock';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_EVENTS_READ = 20_000;
 
@@ -319,6 +324,72 @@ export class StaffHost {
     return present ? path.relative(this.options.root, kept).split(path.sep).join('/') : '';
   }
 
+  // ---- A person's decisions outside the release machine (PIRs) --------------------------------------------------------------------------------
+
+  /**
+   * Every PIR decision a signed entry in the decision log proves (personDecisions.ts). A log that cannot be read whole, or that breaks, proves nothing
+   * from that point, so those decisions read as not taken: the safe side for a decision.
+   */
+  public async pirDecisions(): Promise<ReadonlyMap<string, PersonDecisionEntry>> {
+    return (await this.decisionReplay()).decisions;
+  }
+
+  private async decisionReplay(): Promise<DecisionReplay> {
+    const read = await readWhole(path.join(this.ledgerDir(), DECISION_LOG_FILE));
+    if (read.kind === 'missing') return { decisions: new Map(), entries: 0, head: DECISION_LOG_GENESIS };
+    if (read.kind === 'unreadable') return { decisions: new Map(), entries: 0, head: DECISION_LOG_GENESIS, broken: { seq: 0, reason: read.reason } };
+    const status = await this.options.keyStatus();
+    const lines = read.text.split('\n').filter((line) => line.trim() !== '').map((line) => { try { return JSON.parse(line) as unknown; } catch { return line; } });
+    return replayPersonDecisions(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-decision', status }));
+  }
+
+  /** The PIRs a person can decide on now: those awaiting a decision once every written decision is checked against the log. */
+  public async pirsAwaitingDecision(): Promise<PirEntry[]> {
+    const file = path.join(this.options.root, registerPath('pir-register'));
+    const read = await readWhole(file);
+    if (read.kind !== 'text') return [];
+    const parsed = parseRegisterText('pir-register', read.text);
+    if (!parsed.ok) return [];
+    return trustPirDecisions(parsed.value, await this.pirDecisions()).entries.filter((entry) => entry.status === 'awaiting-decision');
+  }
+
+  /**
+   * A named person approves or rejects a PIR (the NEAR AI: Staff: Decide a PIR command; no tool calls this). Under the register's lock, the register is
+   * read again and checked against the log, the decision is signed with this device's key and appended to the decision log, and only then is the
+   * register written with it. A decision is never written to the register without its signed entry.
+   */
+  public async decidePir(person: PersonActor, input: { pir: string; decision: 'approved' | 'rejected'; reasons?: readonly string[] }): Promise<StaffResult> {
+    if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const signer = await this.options.signer();
+    if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const file = path.join(this.options.root, registerPath('pir-register'));
+    return withRegisterLock(file, async () => {
+      const read = await readWhole(file);
+      if (read.kind === 'missing') return refuse('There is no PIR register in this project yet.');
+      if (read.kind === 'unreadable') return refuse(unreadableText(registerPath('pir-register'), read.reason, 'Fix the file, then decide again.'));
+      const parsed = parseRegisterText('pir-register', read.text);
+      if (!parsed.ok) return refuse(parsed.message);
+      const trusted = trustPirDecisions(parsed.value, await this.pirDecisions()).entries;
+      const reasons = (input.reasons ?? []).map((reason) => reason.trim()).filter(Boolean).slice(0, 10);
+      const at = this.now();
+      const decided = decidePirEntry(trusted, input.pir, input.decision, person, at, reasons);
+      if (!decided.ok) return refuse(decided.message);
+      const entry = decided.value.find((candidate) => candidate.id === input.pir)!;
+      await mkdir(this.ledgerDir(), { recursive: true });
+      const logged = await withFileLock(this.ledgerDir(), DECISION_LOCK, async () => {
+        const replay = await this.decisionReplay();
+        if (replay.broken) return refuse(`The decision log cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded.`);
+        const record: PersonDecisionEntry = { v: 1, seq: replay.entries, prev: replay.head, at: isoOf(at), subject: { kind: 'pir', id: input.pir }, decision: input.decision, wording: pirWording(entry), reasons: input.decision === 'rejected' ? reasons : [], person };
+        const envelope = signPayload(signer, 'staff-decision', record, { now: () => new Date(at) });
+        await appendFile(path.join(this.ledgerDir(), DECISION_LOG_FILE), `${JSON.stringify(envelope)}\n`, 'utf8');
+        return undefined;
+      });
+      if (logged) return logged;
+      await writeFileAtomic(file, renderRegister('pir-register', decided.value));
+      return ok(`${input.pir} is ${input.decision} by ${person.name} (${person.role}), signed with this device's key.`);
+    });
+  }
+
   // ---- Events ---------------------------------------------------------------------------------------------------------------------------------
 
   /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ). */
@@ -396,8 +467,18 @@ export class StaffHost {
     return { exists: true, ...(header ? { header } : {}), headerText: parts !== undefined, body, hash: productHash(body, dependsOn), dependsOn };
   }
 
-  private async writeHeader(root: string, state: ProductState, body: string): Promise<void> {
-    await writeFileAtomic(path.join(root, productPath(state.record.section, state.record.product)), `${renderProductHeader(projectHeader(state))}${body}`);
+  /**
+   * Writes the product's header as the ledger now projects it, over the body as it is on disk at that moment: the body is read again under the ledger
+   * lock, never carried over from before the append, so a member's write that landed in between is kept (it reads as the next pending edit) rather
+   * than overwritten. A product file that is gone, or cannot be read whole, is left alone.
+   */
+  private async writeHeader(root: string, state: ProductState): Promise<void> {
+    await mkdir(this.ledgerDir(), { recursive: true });
+    await withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
+      const file = await this.readProduct(root, state.record.section, state.record.product, state.meta.dependsOn);
+      if (!file.exists) return;
+      await writeFileAtomic(path.join(root, productPath(state.record.section, state.record.product)), `${renderProductHeader(projectHeader(state))}${file.body}`);
+    });
   }
 
   /**
@@ -420,7 +501,7 @@ export class StaffHost {
     replay = result.replay;
     await this.emit(this.transitionEvents(result.written, replay));
     const updated = replay.products.get(product)!;
-    await this.writeHeader(root, updated, file.body);
+    await this.writeHeader(root, updated);
     file = await this.readProduct(root, updated.record.section, product, updated.meta.dependsOn);
     return { replay, file };
   }
@@ -555,7 +636,7 @@ export class StaffHost {
     });
     if (!('replay' in result)) return result;
     const state = result.replay.products.get(input.product)!;
-    await this.writeHeader(caller.root, state, file.body);
+    await this.writeHeader(caller.root, state);
     await this.emit([...this.transitionEvents(result.written, result.replay), ...this.waitingEvents(caller, member, file.body)]);
     const changed = state.history[state.history.length - 1];
     return ok(`${input.product} version ${state.record.version} recorded (${changed.from ?? 'new'} to ${changed.to}). Version hash ${state.record.hash}. Next: the ${state.record.roles.tradecraftReviewer ? 'tradecraft reviewer, then the ' : ''}release-guard checks this exact version.`);
@@ -665,7 +746,7 @@ export class StaffHost {
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(input.product)!;
     await this.writeReport(caller.root, after, input.gate, input.verdict, member, reasons, findingsText);
-    await this.writeHeader(caller.root, after, fresh.file?.body ?? '');
+    await this.writeHeader(caller.root, after);
     await this.emit(this.transitionEvents(result.written, result.replay));
     return ok(`${input.verdict} recorded on ${input.product} version ${after.record.version}; it is now ${after.record.state}${after.record.held ? ' (held)' : ''}. Report: ${path.posix.join(path.posix.dirname(productPath(after.record.section, input.product)), gateReportPath(input.gate, input.product, after.record.version))}.`);
   }
@@ -703,7 +784,7 @@ export class StaffHost {
     const result = await this.append(() => [{ run: caller.run, product: input.product, section: state.record.section, event: { type: 'submit', decisionFor: input.decisionFor }, actor: { kind: 'agent', member }, request }]);
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(input.product)!;
-    await this.writeHeader(caller.root, after, fresh.file?.body ?? '');
+    await this.writeHeader(caller.root, after);
     await this.emit(this.transitionEvents(result.written, result.replay));
     return ok(`${input.product} version ${after.record.version} is awaiting a decision by the ${after.record.decisionFor}. Only that person can approve or reject it; nothing past this point is an agent's to do. Carry on with work that does not depend on the decision.`);
   }
@@ -721,7 +802,7 @@ export class StaffHost {
     const result = await this.append(() => [{ run: caller.run, product: input.product, section: state.record.section, event: { type: 'withdraw', reason: input.reason }, actor: { kind: 'agent', member } }]);
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(input.product)!;
-    if (fresh.file?.exists) await this.writeHeader(caller.root, after, fresh.file.body);
+    await this.writeHeader(caller.root, after);
     await this.emit(this.transitionEvents(result.written, result.replay));
     return ok(`${input.product} version ${after.record.version} is withdrawn.`);
   }
@@ -797,6 +878,13 @@ export class StaffHost {
     if (typeof member !== 'string') return member;
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
+    // One writer at a time per register (the intel workbench's lock): two part writers of the CCIR register, the PIR part and the FFIR part, never drop
+    // each other's rows, because each re-reads the ledger and the rows inside the lock and writes from what it read there.
+    const where = this.registerSection(input.register, caller, await this.replay());
+    return withRegisterLock(path.join(caller.root, productPath(where, input.register)), () => this.registerWriteLocked(caller, member, schema, input));
+  }
+
+  private async registerWriteLocked(caller: StaffCaller, member: string, schema: NonNullable<ReturnType<typeof registerSchema>>, input: { register: string; rows?: readonly unknown[]; remove?: readonly string[]; part?: string; label?: string }): Promise<StaffResult> {
     const replay = await this.replay();
     const section = this.registerSection(input.register, caller, replay);
     const state = replay.products.get(input.register);
@@ -853,8 +941,7 @@ export class StaffHost {
     });
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(register)!;
-    const file = await this.readProduct(caller.root, after.record.section, register, after.meta.dependsOn);
-    await this.writeHeader(caller.root, after, file.body);
+    await this.writeHeader(caller.root, after);
     await this.emit(this.transitionEvents(result.written, result.replay));
     return ok(`Your ${part} rows of ${register} are recorded as version ${after.record.version}; the register is back in draft for its owner's guard check.`);
   }
@@ -1016,7 +1103,7 @@ export class StaffHost {
     });
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(input.product)!;
-    if (fresh.file?.exists) await this.writeHeader(root, after, fresh.file.body);
+    await this.writeHeader(root, after);
     await this.emit(this.transitionEvents(result.written, result.replay));
     return ok(`${input.product} version ${after.record.version} is now ${after.record.state}, by ${person.name} (${person.role}).`);
   }

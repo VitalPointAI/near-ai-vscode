@@ -28,7 +28,7 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
-import { intelWorkbenchTools } from '../agent/intelWorkbench';
+import { grantedIntelWorkbenchTools } from '../agent/intelWorkbench';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -1471,7 +1471,8 @@ export class AgentConversation {
     // server's tools. None of them can approve, reject or release anything, and the workbench reads and writes only the J2 registers, never the network.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
-    const intel = request.team?.staff ? intelWorkbenchTools() : [];
+    // Only to members whose own tools line grants it, never to the run's lead (grantedIntelWorkbenchTools refuses any other caller).
+    const intel = request.team?.staff ? grantedIntelWorkbenchTools(request.team) : [];
     const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;

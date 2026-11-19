@@ -22,3 +22,4 @@ export * from './scenario';
 export * from './acceptance';
 export * from './demoScripts';
 export * from './realEntities';
+export * from './personDecisions';

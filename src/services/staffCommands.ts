@@ -20,7 +20,8 @@ export const STAFF_COMMANDS = {
   release: 'nearAi.staff.releaseProduct',
   withdraw: 'nearAi.staff.withdrawProduct',
   show: 'nearAi.staff.showProducts',
-  setAside: 'nearAi.staff.setAsideLedger'
+  setAside: 'nearAi.staff.setAsideLedger',
+  decidePir: 'nearAi.staff.decidePir'
 } as const;
 
 /** The words every decision dialog shows about who the person is. */
@@ -59,6 +60,7 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   register(STAFF_COMMANDS.withdraw, (args) => decideCommand(context, identity, 'withdraw', args));
   register(STAFF_COMMANDS.show, () => showProducts());
   register(STAFF_COMMANDS.setAside, () => setAsideLedger());
+  register(STAFF_COMMANDS.decidePir, (args) => decidePirCommand(context, identity, args));
 }
 
 function isArgs(value: unknown): value is StaffCommandArgs {
@@ -132,6 +134,46 @@ async function decideCommand(context: StaffCommandContext, identity: () => Promi
   );
   if (!dialog) return;
   const outcome = await host.decide(person, { product: view.product, action, hash: view.hash, reasons, releaseOnApproval: dialog === 'Approve and Release' });
+  if (outcome.ok) void vscode.window.showInformationMessage(outcome.text);
+  else void vscode.window.showWarningMessage(outcome.message);
+}
+
+/**
+ * A named person approves or rejects a PIR awaiting a decision. Like a product decision it asks the person's name and role, confirms in a modal dialog
+ * and is signed with this device's key; the signed entry, not the register file, is what makes the PIR decided.
+ */
+async function decidePirCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, args?: StaffCommandArgs): Promise<void> {
+  const host = hostOrSay();
+  if (!host) return;
+  const waiting = await host.pirsAwaitingDecision();
+  if (!waiting.length) { void vscode.window.showInformationMessage('No PIR is awaiting a decision. A J2 member marks a PIR awaiting-decision with the intel workbench first.'); return; }
+  const wanted = (args as { pir?: unknown } | undefined)?.pir;
+  let pir = typeof wanted === 'string' ? waiting.find((entry) => entry.id === wanted) : undefined;
+  if (!pir) {
+    const picked = await vscode.window.showQuickPick(waiting.map((entry) => ({ label: entry.id, description: entry.requirement, detail: `Supports ${entry.decisionPoint}; latest time of value ${entry.ltiov}` })), { title: 'Decide a PIR', placeHolder: 'Pick the PIR' });
+    if (!picked) return;
+    pir = waiting.find((entry) => entry.id === picked.label);
+    if (!pir) return;
+  }
+  const choice = await vscode.window.showQuickPick([{ label: 'Approve' }, { label: 'Reject' }], { title: `Decide ${pir.id}` });
+  if (!choice) return;
+  const decision = choice.label === 'Approve' ? 'approved' as const : 'rejected' as const;
+  const signer = await identity();
+  const person = await askPerson(context, signer.fingerprint, 'Commander');
+  if (!person) return;
+  let reasons: string[] = [];
+  if (decision === 'rejected') {
+    const reason = await vscode.window.showInputBox({ title: `Why reject ${pir.id}?`, prompt: 'Your reasons go back to the J2. Required.', ignoreFocusOut: true } as vscode.InputBoxOptions);
+    if (!reason?.trim()) return;
+    reasons = reason.split(/\s*;\s*/).filter(Boolean);
+  }
+  const dialog = await vscode.window.showWarningMessage(
+    `${choice.label} ${pir.id} as ${person.name} (${person.role})?`,
+    { modal: true, detail: `${pir.requirement}\nSupports ${pir.decisionPoint}.\n\n${STAFF_IDENTITY_TEXT}` },
+    choice.label
+  );
+  if (dialog !== choice.label) return;
+  const outcome = await host.decidePir(person, { pir: pir.id, decision, reasons });
   if (outcome.ok) void vscode.window.showInformationMessage(outcome.text);
   else void vscode.window.showWarningMessage(outcome.message);
 }

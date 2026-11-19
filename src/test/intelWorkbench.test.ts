@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { INTEL_WORKBENCH_SERVER, INTEL_WORKBENCH_TOOL_NAMES, intelToolName, intelWorkbenchTools } from '../agent/intelWorkbench';
+import { grantedIntelWorkbenchTools, INTEL_WORKBENCH_SERVER, INTEL_WORKBENCH_TOOL_NAMES, intelToolName, intelWorkbenchTools } from '../agent/intelWorkbench';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { readEffectPaths } from '../agent/gateLabels';
 import { DEFAULT_RULES, RunGrants } from '../agent/permissions';
@@ -16,6 +16,8 @@ import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/mani
 import { decidePir, parseRegisterText, renderRegister } from '../domain/staff/intel';
 import { grantsMcpTool } from '../mcp/tools';
 import { AgentConversation } from '../services/agentSession';
+import { StaffHost } from '../staff/staffHost';
+import { testSigner, trusting } from './helpers/staffFixtures';
 import type { AgentTurnRequest } from '../services/agentSession';
 
 const NOW = Date.UTC(2026, 10, 18, 12, 0);
@@ -135,16 +137,31 @@ function runTools(team: Record<string, unknown> | undefined): string[] {
   return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1').map((tool) => tool.name);
 }
 
-test('a staff team\'s run is given the workbench beside the catalog; a plain team and a plain chat are not', () => {
-  const staff = runTools({ staff: { section: 'j2', steps: {}, products: [], layers: [] } });
+test('a staff team\'s run is given the workbench only when a member is granted it; a plain team and a plain chat are not', () => {
+  const member = (tools: string[]) => ({ staff: { section: 'j2', steps: {}, products: [], layers: [] }, members: [{ name: 'osint-analyst', tools, instructions: 'x' }] });
+  const staff = runTools(member(['Read', 'mcp:intel-workbench']));
+  const ungranted = runTools(member(['Read']));
   const plain = runTools({});
   const chat = runTools(undefined);
   assert.deepEqual(staff.filter((name) => name.startsWith('mcp__intel-workbench__')), [...INTEL_WORKBENCH_TOOL_NAMES]);
-  assert.deepEqual(staff.filter((name) => !name.startsWith('mcp__intel-workbench__')), plain, 'everything else is unchanged');
+  assert.deepEqual(staff.filter((name) => !name.startsWith('mcp__intel-workbench__')), ungranted, 'everything else is unchanged');
+  assert.equal(ungranted.some((name) => name.startsWith('mcp__intel-workbench__')), false, 'no member granted it: the run gets none');
   assert.equal(plain.some((name) => name.startsWith('mcp__intel-workbench__')), false);
   assert.equal(chat.some((name) => name.startsWith('mcp__intel-workbench__')), false);
   const catalog = new Set(builtInTools().map((tool) => tool.name));
   assert.equal(INTEL_WORKBENCH_TOOL_NAMES.some((name) => catalog.has(name)), false, 'a local server\'s tools, like a connected server\'s, are not built-in catalog entries');
+});
+
+test('the run\'s lead and a member without the grant cannot call a workbench tool; a granted member can', async () => {
+  const team = { members: [{ name: 'osint-analyst', tools: ['mcp:intel-workbench'] }, { name: 'watch-officer', tools: ['Read'] }] };
+  const tools = new Map(grantedIntelWorkbenchTools(team, { now: () => NOW, decisions: async () => new Map() }).map((tool) => [tool.name.replace(`mcp__${INTEL_WORKBENCH_SERVER}__`, ''), tool]));
+  const { context } = folder();
+  const add = tools.get('source_add')!;
+  const input = add.parse(SOURCE);
+  assert.match(String(await add.forbidden!(input, { ...context, agentLabel: undefined } as ToolContext)), /the run's lead is not one of them/);
+  assert.match(String(await add.forbidden!(input, { ...context, agentLabel: 'watch-officer' } as ToolContext)), /watch-officer is not one of them/);
+  assert.equal(await add.forbidden!(input, { ...context, agentLabel: 'osint-analyst' } as ToolContext), undefined);
+  assert.equal(grantedIntelWorkbenchTools({ members: [{ name: 'watch-officer', tools: ['Read'] }] }).length, 0);
 });
 
 // ---- The tools against a real folder ----------------------------------------------------------------------------------------------------------
@@ -178,26 +195,55 @@ test('independence_check counts origins, not reports', async () => {
   assert.match(await call(tools, 'source_list', { claim: 'bridge-closed-ashby' }, context), /^3 items:/);
 });
 
-test('pir_add refuses a PIR with no decision point; pir_update cannot approve; a person\'s decision then unlocks answering', async () => {
-  const tools = workbench();
+test('pir_add refuses a PIR with no decision point; pir_update cannot approve; a person\'s signed decision then unlocks answering', async () => {
   const { root, context } = folder();
+  const signer = testSigner();
+  const host = new StaffHost({ root, signer: async () => signer, keyStatus: async () => trusting(signer), now: () => NOW });
+  const tools = new Map(intelWorkbenchTools({ now: () => NOW, decisions: () => host.pirDecisions() }).map((tool) => [tool.name.replace(`mcp__${INTEL_WORKBENCH_SERVER}__`, ''), tool]));
   await assert.rejects(call(tools, 'pir_add', { ...PIR, decisionPoint: '' }, context), /decision point/);
   assert.match(await call(tools, 'pir_add', PIR, context), /Added PIR-1 as a candidate, supporting DP 2: commit the reserve, latest time of value 190600Z NOV 26, indicators IND-1, IND-2/);
   assert.match(await call(tools, 'pir_update', { id: 'PIR-1', status: 'awaiting-decision' }, context), /PIR-1 is awaiting-decision/);
   await assert.rejects(call(tools, 'pir_update', { id: 'PIR-1', status: 'approved' }, context), /Only a named person approves or rejects a PIR/);
-  // The person's command (not a tool) records the decision.
-  const file = path.join(root, REGISTERS[1]);
-  const register = parseRegisterText('pir-register', readFileSync(file, 'utf8'));
-  assert.ok(register.ok);
-  if (!register.ok) return;
-  const decided = decidePir(register.value, 'PIR-1', 'approved', { kind: 'person', name: 'Exercise Commander', role: 'commander', deviceFingerprint: 'ab12' }, NOW);
-  assert.ok(decided.ok);
-  if (!decided.ok) return;
-  writeFileSync(file, renderRegister('pir-register', decided.value));
+  // The person's command (not a tool) records the decision, signed with this device's key, in the decision log; then the register.
+  const person = { kind: 'person' as const, name: 'Exercise Commander', role: 'commander', deviceFingerprint: signer.fingerprint };
+  assert.equal((await host.decidePir({ ...person, deviceFingerprint: 'someone-else' }, { pir: 'PIR-1', decision: 'approved' })).ok, false, 'a decision signed by another key is refused');
+  const decided = await host.decidePir(person, { pir: 'PIR-1', decision: 'approved' });
+  assert.ok(decided.ok, decided.ok ? '' : decided.message);
+  assert.equal((await host.pirDecisions()).size, 1);
   await assert.rejects(call(tools, 'pir_update', { id: 'PIR-1', requirement: 'Reworded?' }, context), /propose the change/);
   await call(tools, 'source_add', SOURCE, context);
   assert.match(await call(tools, 'pir_update', { id: 'PIR-1', status: 'answered', answeredBy: ['SRC-1'] }, context), /PIR-1 is answered/);
   assert.match(await call(tools, 'pir_list', {}, context), /\| PIR-1: Will the adversary cross at Ashby Ford\? \| DP 2: commit the reserve \|.*\| answered \(commander, Exercise Commander\) \|/);
+});
+
+test('a decision written into the PIR register by hand, naming anyone, is never trusted: the PIR reads as awaiting a decision', async () => {
+  const { root, context } = folder();
+  const signer = testSigner();
+  const host = new StaffHost({ root, signer: async () => signer, keyStatus: async () => trusting(signer), now: () => NOW });
+  const tools = new Map(intelWorkbenchTools({ now: () => NOW, decisions: () => host.pirDecisions() }).map((tool) => [tool.name.replace(`mcp__${INTEL_WORKBENCH_SERVER}__`, ''), tool]));
+  await call(tools, 'pir_add', PIR, context);
+  await call(tools, 'pir_update', { id: 'PIR-1', status: 'awaiting-decision' }, context);
+  const file = path.join(root, REGISTERS[1]);
+  const register = parseRegisterText('pir-register', readFileSync(file, 'utf8'));
+  assert.ok(register.ok);
+  if (!register.ok) return;
+  // Well formed, naming this computer's own key even: still no signed entry, so it does not count.
+  const forged = decidePir(register.value, 'PIR-1', 'approved', { kind: 'person', name: 'Exercise Commander', role: 'commander', deviceFingerprint: signer.fingerprint }, NOW);
+  assert.ok(forged.ok);
+  if (!forged.ok) return;
+  writeFileSync(file, renderRegister('pir-register', forged.value));
+  const listed = await call(tools, 'pir_list', {}, context);
+  assert.match(listed, /\| awaiting-decision \|/);
+  assert.match(listed, /decision-unrecorded \(PIR-1\)/);
+  assert.match(await call(tools, 'check', {}, context), /decision-unrecorded/);
+  await call(tools, 'source_add', SOURCE, context);
+  await assert.rejects(call(tools, 'pir_update', { id: 'PIR-1', status: 'answered', answeredBy: ['SRC-1'] }, context), /cannot move|pir-transition|cannot be|status/i);
+  assert.equal((await host.pirsAwaitingDecision()).map((pir) => pir.id).join(), 'PIR-1', 'a person can still decide it properly');
+  // A signed decision on other wording does not carry over to changed wording.
+  const decided = await host.decidePir({ kind: 'person', name: 'Exercise Commander', role: 'commander', deviceFingerprint: signer.fingerprint }, { pir: 'PIR-1', decision: 'approved' });
+  assert.ok(decided.ok);
+  writeFileSync(file, readFileSync(file, 'utf8').replace('Will the adversary cross at Ashby Ford?', 'Will the adversary cross at the bridge?'));
+  assert.match(await call(tools, 'pir_list', {}, context), /decision-unrecorded \(PIR-1\)/);
 });
 
 test('a hand-edited approved PIR stops the tools with the damage named, rather than being trusted', async () => {

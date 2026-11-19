@@ -11,16 +11,19 @@ import * as path from 'node:path';
 import {
   buildCollectionEntry, buildPirEntry, buildSourceEntry, changePir, claimsOf, compilationItems, compilationRisk, COMPILATION_NONE_TEXT, corroboration,
   DEFAULT_INTEL_LABEL, draftIntrep, draftIntsum, formatDtg, gradeText, INTEL_RULES, isTemplateLabel, parseRegisterText, readTime, registerFindings,
-  registerPath, renderCollectionPlan, renderPirRegister, renderRegister
+  registerPath, renderCollectionPlan, renderPirRegister, renderRegister, trustPirDecisions
 } from '../domain/staff/intel';
 import type { IntelFinding, IntelRegisterName, IntelRegisters, IntelResult, PirEntry, RegisterTypes, SourceEntry } from '../domain/staff/intel';
 import { STAFF_TEMPLATE_LABELS } from '../domain/staff/doctrine';
 import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profiles';
 import type { StaffSettings } from '../domain/staff/profiles';
-import { mcpToolName } from '../mcp/tools';
+import { grantsMcpTool, mcpToolName } from '../mcp/tools';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED, protectedWrite } from './tools';
 import type { AgentTool, ToolContext } from './tools';
 import { lintTradecraft, sourcesFrom } from '../domain/staff/tradecraftLint';
+import type { PersonDecisionEntry } from '../domain/staff/personDecisions';
+import { withRegisterLock } from '../staff/registerLock';
+import { staffHostFor } from '../staff/staffHost';
 import { displayPath, resolveInWorkspace, ToolError } from './workspace';
 
 /** The server name a team file grants (`mcp:intel-workbench`). */
@@ -36,19 +39,8 @@ export function intelToolName(tool: string): string {
   return mcpToolName(INTEL_WORKBENCH_SERVER, tool);
 }
 
-/** One writer at a time per register file inside this extension host, so two members' calls in one run never lose each other's entry. */
-const fileLocks = new Map<string, Promise<unknown>>();
-async function withFileLock<T>(absolute: string, work: () => Promise<T>): Promise<T> {
-  const before = fileLocks.get(absolute) ?? Promise.resolve();
-  const run = before.then(work, work);
-  const settled = run.then(() => undefined, () => undefined);
-  fileLocks.set(absolute, settled);
-  try {
-    return await run;
-  } finally {
-    if (fileLocks.get(absolute) === settled) fileLocks.delete(absolute);
-  }
-}
+/** One writer at a time per register file inside this extension host (src/staff/registerLock.ts, shared with the staff host). */
+const withFileLock = withRegisterLock;
 
 async function readText(absolute: string): Promise<string | undefined> {
   try {
@@ -64,21 +56,34 @@ function unwrap<T>(result: IntelResult<T>): T {
   return result.value;
 }
 
-async function loadRegister<N extends IntelRegisterName>(context: ToolContext, name: N): Promise<RegisterTypes[N][]> {
+/**
+ * Checks the PIRs' written decisions against the signed decision log (review round 3): a decision with no signed entry reads as awaiting a decision.
+ * Every read and every write of the PIR register goes through it, so no tool ever acts on a decision written into the file alone.
+ */
+type PirTrust = (root: string, entries: PirEntry[]) => Promise<{ readonly entries: PirEntry[]; readonly findings: IntelFinding[] }>;
+
+async function loadRegister<N extends IntelRegisterName>(context: ToolContext, name: N, trust?: PirTrust, sink?: IntelFinding[]): Promise<RegisterTypes[N][]> {
   const absolute = await resolveInWorkspace(context.root, registerPath(name));
-  return unwrap(parseRegisterText(name, await readText(absolute)));
+  const entries = unwrap(parseRegisterText(name, await readText(absolute)));
+  if (name !== 'pir-register') return entries;
+  if (!trust) throw new ToolError('The PIR register is read only with its decisions checked.');
+  const trusted = await trust(context.root, entries as PirEntry[]);
+  sink?.push(...trusted.findings);
+  return trusted.entries as RegisterTypes[N][];
 }
 
-async function loadAll(context: ToolContext): Promise<IntelRegisters> {
-  const [sources, pirs, plan] = await Promise.all([loadRegister(context, 'source-register'), loadRegister(context, 'pir-register'), loadRegister(context, 'collection-plan')]);
+async function loadAll(context: ToolContext, trust: PirTrust, sink?: IntelFinding[]): Promise<IntelRegisters> {
+  const [sources, pirs, plan] = await Promise.all([loadRegister(context, 'source-register'), loadRegister(context, 'pir-register', trust, sink), loadRegister(context, 'collection-plan')]);
   return { sources, pirs, plan };
 }
 
 /** Reads, changes and writes one register under its lock, through a temporary file and a rename, with a checkpoint so the run can be undone. */
-async function updateRegister<N extends IntelRegisterName, R>(context: ToolContext, name: N, change: (entries: RegisterTypes[N][]) => Promise<{ entries: RegisterTypes[N][]; result: R }>): Promise<R> {
+async function updateRegister<N extends IntelRegisterName, R>(context: ToolContext, name: N, change: (entries: RegisterTypes[N][]) => Promise<{ entries: RegisterTypes[N][]; result: R }>, trust?: PirTrust): Promise<R> {
   const absolute = await resolveInWorkspace(context.root, registerPath(name));
   return withFileLock(absolute, async () => {
-    const entries = unwrap(parseRegisterText(name, await readText(absolute)));
+    const read = unwrap(parseRegisterText(name, await readText(absolute)));
+    if (name === 'pir-register' && !trust) throw new ToolError('The PIR register is changed only with its decisions checked.');
+    const entries = name === 'pir-register' ? (await trust!(context.root, read as PirEntry[])).entries as RegisterTypes[N][] : read;
     const next = await change(entries);
     await context.checkpoints.capture(absolute);
     await mkdir(path.dirname(absolute), { recursive: true });
@@ -128,11 +133,15 @@ function asObject(raw: Record<string, unknown>): Record<string, unknown> {
 export interface IntelWorkbenchOptions {
   /** The clock, for latest-time-of-value checks and drafts. Tests pass a fixed one. */
   readonly now?: () => number;
+  /** The PIR decisions a signed entry proves, for a project (the staff host's decision log by default; none when the host is not set up). */
+  readonly decisions?: (root: string) => Promise<ReadonlyMap<string, PersonDecisionEntry>>;
 }
 
 /** The workbench's tools, in the order the J2 works: sources, PIRs, collection, reports, checks. */
 export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentTool<any>[] {
   const now = options.now ?? (() => Date.now());
+  const decisionsFor = options.decisions ?? (async (root: string) => (await staffHostFor(root)?.pirDecisions()) ?? new Map<string, PersonDecisionEntry>());
+  const trust: PirTrust = async (root, entries) => trustPirDecisions(entries, await decisionsFor(root));
 
   const sourceAdd: AgentTool<Record<string, unknown>> = {
     name: intelToolName('source_add'),
@@ -238,7 +247,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
       const entry = await updateRegister(context, 'pir-register', async (entries) => {
         const built = unwrap(buildPirEntry(input as never, entries, who(context)));
         return { entries: [...entries, built], result: built };
-      });
+      }, trust);
       return `Added ${entry.id} as a candidate, supporting ${entry.decisionPoint}, latest time of value ${formatDtg(Date.parse(entry.ltiov))}, indicators ${entry.indicators.map((indicator) => indicator.id).join(', ') || 'none yet'}. Mark it DECISION FOR: commander when it goes for decision.`;
     }
   };
@@ -270,7 +279,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
       const entry = await updateRegister(context, 'pir-register', async (entries) => {
         const next = unwrap(changePir(entries, input, sources));
         return { entries: next, result: next.find((candidate) => candidate.id === input.id) as PirEntry };
-      });
+      }, trust);
       return `${entry.id} is ${entry.status}; supports ${entry.decisionPoint}; latest time of value ${formatDtg(Date.parse(entry.ltiov))}; indicators ${entry.indicators.map((indicator) => `${indicator.id} ${indicator.text}`).join('; ') || 'none'}.`;
     }
   };
@@ -284,9 +293,10 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     parse: asObject,
     title: () => 'PIR register',
     async run(_input, context) {
-      const [pirs, plan] = await Promise.all([loadRegister(context, 'pir-register'), loadRegister(context, 'collection-plan')]);
+      const unrecorded: IntelFinding[] = [];
+      const [pirs, plan] = await Promise.all([loadRegister(context, 'pir-register', trust, unrecorded), loadRegister(context, 'collection-plan')]);
       if (!pirs.length) return 'The PIR register is empty.';
-      const findings = registerFindings({ sources: [], pirs, plan }, now()).filter((finding) => finding.rule.startsWith('pir-') || finding.rule === 'ltiov-passed');
+      const findings = [...unrecorded, ...registerFindings({ sources: [], pirs, plan }, now()).filter((finding) => finding.rule.startsWith('pir-') || finding.rule === 'ltiov-passed')];
       return [renderPirRegister(pirs), ...(findings.length ? ['', 'Findings:', ...findingLines(findings)] : [])].join('\n');
     }
   };
@@ -317,7 +327,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     title: (input) => `Collection plan: recommend for ${typeof input.pir === 'string' ? input.pir : 'a PIR'}`,
     sensitive: (_input, context) => protectedWrite(PLAN, context),
     async run(input, context) {
-      const pirs = await loadRegister(context, 'pir-register');
+      const pirs = await loadRegister(context, 'pir-register', trust);
       const entry = await updateRegister(context, 'collection-plan', async (entries) => {
         const built = unwrap(buildCollectionEntry(input as never, entries, pirs, who(context)));
         return { entries: [...entries, built], result: built };
@@ -335,7 +345,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     parse: asObject,
     title: () => 'Collection plan',
     async run(_input, context) {
-      const [pirs, plan] = await Promise.all([loadRegister(context, 'pir-register'), loadRegister(context, 'collection-plan')]);
+      const [pirs, plan] = await Promise.all([loadRegister(context, 'pir-register', trust), loadRegister(context, 'collection-plan')]);
       if (!plan.length) return 'The collection plan is empty.';
       const findings = registerFindings({ sources: [], pirs, plan }, now()).filter((finding) => ['single-discipline', 'pir-not-approved', 'collection-after-ltiov', 'collection-orphan'].includes(finding.rule));
       return [renderCollectionPlan(plan, pirs), ...(findings.length ? ['', 'Findings:', ...findingLines(findings)] : [])].join('\n');
@@ -361,7 +371,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
       const from = readTime(input.from);
       const to = readTime(input.to);
       if (Number.isNaN(from) || Number.isNaN(to)) throw new ToolError('Give from and to as ISO times in UTC, dates or DTGs.');
-      const [sources, pirs, settings] = await Promise.all([loadRegister(context, 'source-register'), loadRegister(context, 'pir-register'), staffSettings(context)]);
+      const [sources, pirs, settings] = await Promise.all([loadRegister(context, 'source-register'), loadRegister(context, 'pir-register', trust), staffSettings(context)]);
       return unwrap(draftIntsum({ registers: { sources, pirs, plan: [] }, settings, label: draftLabel(input.label), owner: 'watch-officer' }, { from, to }, now()));
     }
   };
@@ -382,7 +392,7 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     async run(input, context) {
       const at = input.at === undefined ? now() : readTime(input.at);
       if (Number.isNaN(at)) throw new ToolError('Give at as an ISO time in UTC, a date or a DTG.');
-      const [sources, pirs, settings] = await Promise.all([loadRegister(context, 'source-register'), loadRegister(context, 'pir-register'), staffSettings(context)]);
+      const [sources, pirs, settings] = await Promise.all([loadRegister(context, 'source-register'), loadRegister(context, 'pir-register', trust), staffSettings(context)]);
       return unwrap(draftIntrep({ registers: { sources, pirs, plan: [] }, settings, label: draftLabel(input.label), owner: 'watch-officer' }, { text: input.event, at, sources: input.sources, indicators: input.indicators }));
     }
   };
@@ -421,11 +431,13 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
     parse: asObject,
     title: () => 'Check the J2 registers',
     async run(_input, context) {
-      const registers = await loadAll(context);
+      const unrecorded: IntelFinding[] = [];
+      const registers = await loadAll(context, trust, unrecorded);
       // The register rules, then the one tradecraft rule set (tradecraftLint.ts, also mcp__staff-products__lint) on the source register and the PIRs,
       // so the workbench never keeps rules of its own for what the tradecraft gate checks.
       const lint = lintTradecraft({ body: '', sources: sourcesFrom(registers.sources), pirs: registers.pirs.map((pir) => ({ id: pir.id, type: 'pir', decisionPoint: pir.decisionPoint, ltiov: pir.ltiov })) });
       const findings: IntelFinding[] = [
+        ...unrecorded,
         ...registerFindings(registers, now()),
         ...lint.map((finding) => ({ rule: `tradecraft:${finding.rule}`, severity: 'block' as const, subject: 'register', message: finding.message }))
       ];
@@ -440,3 +452,27 @@ export function intelWorkbenchTools(options: IntelWorkbenchOptions = {}): AgentT
 /** The names of the workbench's tools, for the tests and the team templates. */
 export const INTEL_WORKBENCH_TOOL_NAMES: readonly string[] = intelWorkbenchTools().map((tool) => tool.name);
 
+
+/** A team as the gate below needs it: its members and their tools lines. */
+export interface IntelTeam { readonly members: ReadonlyArray<{ readonly name: string; readonly tools: readonly string[] }> }
+
+/**
+ * The workbench for one staff team's run, gated the way the staff tools are (review round 3): a call counts only from a member of the team whose own
+ * tools line grants that tool (`mcp:intel-workbench`, the pattern, or the tool's name). The run's lead is not a member, so it cannot write the J2
+ * registers, and neither can a member without the grant. A team where no member is granted any workbench tool gets none.
+ */
+export function grantedIntelWorkbenchTools(team: IntelTeam, options: IntelWorkbenchOptions = {}): AgentTool<any>[] {
+  const granted = (member: string | undefined, tool: string): boolean => {
+    const entry = member === undefined ? undefined : team.members.find((candidate) => candidate.name === member);
+    return Boolean(entry && grantsMcpTool([...entry.tools], tool));
+  };
+  return intelWorkbenchTools(options)
+    .filter((tool) => team.members.some((member) => grantsMcpTool([...member.tools], tool.name)))
+    .map((tool) => ({
+      ...tool,
+      forbidden: async (input: unknown, context: ToolContext) => {
+        if (!granted(context.agentLabel, tool.name)) return `${tool.name} is for the team members whose tools line grants it (mcp:${INTEL_WORKBENCH_SERVER}); ${context.agentLabel ?? 'the run\'s lead'} is not one of them. Ask the member that owns the register.`;
+        return tool.forbidden ? tool.forbidden(input as never, context) : undefined;
+      }
+    }));
+}

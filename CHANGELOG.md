@@ -51,7 +51,9 @@ fictional data only; labels are not accreditation, and no member has a persona n
   the PIR register and the collection plan in `.planning/staff/products/j2/`. Reliability (A to F)
   and credibility (1 to 6) are two fields, reports that share an origin never count as
   corroboration, every PIR names its decision point and latest time of value and only a named
-  person approves one, and the collection plan holds recommendations only. It drafts INTSUM and
+  person approves one, with **NEAR AI: Staff: Decide a PIR**, which signs the decision (a decision
+  written into the register file alone never counts), and the collection plan holds recommendations
+  only. Only members granted `mcp:intel-workbench` can use it. It drafts INTSUM and
   INTREP skeletons and checks a product for compilation risk, which always ends with a question
   for a person. It reaches no network and takes exercise labels only.
 - **Exercise scenarios.** **NEAR AI: Load Staff Exercise Scenario** loads Exercise IRON LANTERN, a

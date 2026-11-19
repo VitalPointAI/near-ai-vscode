@@ -354,6 +354,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.decidePir",
+        "title": "Staff: Decide a PIR",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"
