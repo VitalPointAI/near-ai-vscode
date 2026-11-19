@@ -4,6 +4,17 @@
 **Researched:** 2026-11-18
 **Question:** How should the extension fine-tune open-weight models into specialists on the organization's own on-prem hardware (AMD Strix Halo first, NVIDIA GB10 next), and how should an always-watching agent find, propose and build those specialists?
 
+## Amendment (2026-11-19): Western bases, PRC teachers only in the T0 lane
+
+The owner's model provenance decisions of 2026-11-19 change this document. The design is in `.planning/research/model-provenance/DESIGN.md` (section 11). Where the text below disagrees, the amendment wins; the rest stands.
+
+- **Bases change to NVIDIA Nemotron 3.** Nemotron 3 Nano is the first base (it fits the Strix Halo and the GB10, to measure in Phase 85); Nemotron 3 Super is for larger hardware; Cohere Command A+ (Canadian, Apache 2.0) is for serving and is the second lineage for checking roles. Qwen3.5 and Qwen3.6 are no longer default bases (decision D3 and section 4): they are PRC-origin, so any specialist trained on them is PRC-origin and may be used only in the T0 research lane. Qwen embeddings and the Qwen reranker are replaced by Western models with passports.
+- **PRC models are teachers only, and only in an isolated T0 lane.** Their outputs may become filtered synthetic training data; their weights never become a base. A teacher never shares a base with the student. NEAR-hosted DeepSeek, GLM and Qwen teachers are called only from that lane, never with your organization's data above T0.
+- **Every served artifact gets a model passport** (developer, origin, lineage with base and teachers, licence and inherited licences, artifact hash including quantization, evaluation report, highest use tier, expiry and re-evaluation triggers).
+- **Evaluation adds** agent hijacking, secure code, trigger sweeps with Canadian and defence context, and a differential against the base, all run on the exact artifact served.
+- **Promotion is a signed person decision** with an expiry. The opportunity agent only proposes; auto-promotion (D9) no longer applies above T0.
+- **Crowdsourced optimization** only on a Western base, with security scoring in the score.
+
 **Confidence legend.** HIGH means read directly in this repository or confirmed by a primary source (vendor docs, model card, paper) plus a second source. MEDIUM means a primary source or several agreeing secondary sources. LOW means one secondary source, a community report, or my own estimate. The project's confidence seam rates every single web source LOW by default; findings below are raised to MEDIUM or HIGH only where the reason is stated. Nothing LOW should be read as settled.
 
 ---
