@@ -270,9 +270,11 @@ keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
 synchronization matrix, the DST and DSM and the assessment plan, and every
 FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
-`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:logistics`) are listed on the
-Tools page and in the Team Studio tool picker; only a staff team's run gets
-them.
+`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:logistics`)
+are listed on the Tools page and in the Team Studio tool picker; only a staff
+team's run gets them. `mcp:observations` reads the feed reports kept in
+`.planning/staff/observations/` (not committed), shows only what your
+clearances cover, and says when a limit cut an answer.
 A J4 logistics team starts support planning at the first step, alongside force
 planning, and every number in its products cites the calculator record that
 produced it (`calc:<id>`, a record in `.planning/staff/calculator/`); the

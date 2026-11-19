@@ -76,6 +76,8 @@ import { SpendAccount } from './spendAccount';
 import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
 import { staffTeamInfo, staffTools, WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
 import { staffHostFor } from '../staff/staffHost';
+import { observationStoreFor } from '../staff/observationStore';
+import { observationsTools } from '../agent/observationsTools';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -1467,17 +1469,19 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2), the intel-workbench and the logistics server,
-    // built-in local servers. Members reach them only through their `mcp:staff-products`, `mcp:guard-scan` and `mcp:intel-workbench` grants, like any connected
-    // server's tools. None of them can approve, reject or release anything, and the workbench reads and writes only the J2 registers, never the network.
+    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the built-in local staff servers: the
+    // intel-workbench, observations and logistics. Members reach them only through their grants, like any connected server's tools. None of them can
+    // approve, reject or release anything, and none reaches the network.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
     // Only to members whose own tools line grants it, never to the run's lead (grantedIntelWorkbenchTools refuses any other caller).
     const intel = request.team?.staff ? grantedIntelWorkbenchTools(request.team) : [];
+    // The observations server reads the project's observation store, clamped to the person's clearances (research note 11, section 5): only for staff teams.
+    const observations = request.team?.staff ? observationsTools({ store: () => observationStoreFor(this.root) }) : [];
     // The logistics server (WP-LOG): the calculator, LOGSTAT, movement and readiness, reached through the J4 grants by tool family. Its records are
     // signed into the calculator ledger with this device's key, through the same host as the product ledger.
     const logistics = staffTeam ? logisticsTools({ host: () => staffHostFor(this.root)?.logistics(), team: staffTeam, run: runId }) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...logistics, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...observations, ...logistics, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;

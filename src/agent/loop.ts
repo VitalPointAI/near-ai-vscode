@@ -8,7 +8,7 @@ import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMeta
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
-import { labelReadFilter, labelsOfPaths } from './gateLabels';
+import { labelReadFilter, labelRecordFilter, labelsOfPaths } from './gateLabels';
 import type { Label } from '../domain/gate/labels';
 import type { Capability } from '../domain/gate/vocabulary';
 import { TOOL_FORBIDDEN_RULE, followCommandMoves, gateToolCall, beginLabelledRead, markAboveDefault, recordApprovalReply, recordRefusedBeforeGate, shellReadsCredentialFile, unavailableGateRuntime } from './gateAdapter';
@@ -796,10 +796,17 @@ Note: this test existed before the task and is weaker now (${describeWeakened(fo
     const cwdBefore = context.shell?.workingDirectory ?? context.root;
     try {
       // A search leaves out what the clearances do not cover, the way it leaves out credential files (CLAS-03).
-      if (tool.capability === 'read') context.canRead = await labelReadFilter(this.gate, context.root);
+      if (tool.capability === 'read') {
+        context.canRead = await labelReadFilter(this.gate, context.root);
+        context.canReadLabel = labelRecordFilter(this.gate);
+      }
       // What a search returns raises the mark by its paths' labels before the results reach the model (CLAS-04); labels that cannot be read fail the call.
       context.noteRead = async (relativePaths) => {
         read.add(await labelsOfPaths(this.gate, context.root, relativePaths));
+      };
+      // Records a tool shows (observation rows) raise the mark by their own labels, handling flags included, the same way (CLAS-04).
+      context.noteLabels = async (labels) => {
+        read.add([...labels]);
       };
       let output: string;
       try {

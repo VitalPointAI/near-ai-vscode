@@ -1,10 +1,11 @@
 // The built-in staff servers, as the Tools page and the Team Studio tool picker list them (design 10, 6.2): staff-products, guard-scan, the
-// intel-workbench and the logistics server. They run inside the extension and are given only to a staff team's run (a team file with a `staff:`
-// block); a member reaches them through its `tools:` line, by the whole server (`mcp:<id>`) or one tool at a time (`mcp__<id>__<tool>`). The tool
-// objects here are the very ones a run is given, built without a project, so the lists cannot drift from what a run gets. None of them approves,
-// rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
+// intel-workbench, observations (research note 11, section 5) and logistics. They run inside the extension and are given only to a staff team's run (a
+// team file with a `staff:` block); a member reaches them through its `tools:` line, by the whole server (`mcp:<id>`) or one tool at a time
+// (`mcp__<id>__<tool>`). The tool objects here are the very ones a run is given, built without a project, so the lists cannot drift from what a run
+// gets. None of them approves, rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
 import { INTEL_WORKBENCH_SERVER, intelWorkbenchTools } from './intelWorkbench';
 import { LOGISTICS_SERVER, logisticsTools } from './logisticsTools';
+import { OBSERVATIONS_SERVER, observationsTools } from './observationsTools';
 import { GUARD_SCAN_SERVER, STAFF_PRODUCTS_SERVER, staffTools } from './staffTools';
 
 export interface BuiltInStaffServer {
@@ -35,6 +36,10 @@ export function builtInStaffServers(): BuiltInStaffServer[] {
     {
       id: INTEL_WORKBENCH_SERVER, grant: staffServerGrant(INTEL_WORKBENCH_SERVER), name: 'Intel workbench (built in)', tools: intelWorkbenchTools(),
       description: 'The J2 registers: the source register with reliability and credibility graded apart, the PIR register, collection recommendations, INTSUM and INTREP drafts, and the compilation check. It recommends; a person decides.'
+    },
+    {
+      id: OBSERVATIONS_SERVER, grant: staffServerGrant(OBSERVATIONS_SERVER), name: 'Observations (built in)', tools: observationsTools({ store: () => undefined }),
+      description: 'The project\'s feed observations, read only and clamped to your clearances: slices by area, time, grade, discipline and unit, tracks with their decay, what changed since a time, corroboration by independent origin, timelines, feed status, and the picture as known at any time. Every answer says when a limit cut it.'
     },
     {
       id: LOGISTICS_SERVER, grant: staffServerGrant(LOGISTICS_SERVER), name: 'Logistics (built in)',

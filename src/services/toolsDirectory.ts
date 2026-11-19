@@ -25,7 +25,7 @@ export interface DirectoryAgent { name: string; description: string; tier: strin
 export interface DirectoryTeam { name: string; description: string; command: string; insert: string; project: boolean; members: Array<{ name: string; role?: string; tier: string; model: string; tools: string[] }> }
 export interface DirectoryTool { name: string; description: string; capability: string; status: ToolStatus; statusText: string; notes: string[]; /** What the tool's manifest says it can do, in plain words (also the last of `notes`): the team member cards show these. */ words: string[]; setup?: { label: string; command: string }; /** 0.4.17: the tool runs in Auto by its own marker (the web tools). */ autoSafe?: boolean }
 export interface DirectoryMcpServer { id: string; name: string; transport: string; host: string; words: string[]; enabledHere: boolean; state: string; error?: string; approval: string; tools: Array<{ name: string; agentName: string; description: string; enabled: boolean; status: ToolStatus; statusText: string }> }
-/** A built-in staff server (staff-products, guard-scan, intel-workbench, logistics): given only to a staff team's run, granted by `grant` or tool by tool. */
+/** A built-in staff server (staff-products, guard-scan, intel-workbench, observations, logistics): given only to a staff team's run, granted by `grant` or tool by tool. */
 export interface DirectoryStaffServer { id: string; grant: string; name: string; description: string; tools: DirectoryTool[] }
 export interface DirectoryModel { id: string; privacy: 'tee' | 'local' | 'forwarded' | 'unknown'; privacyText: string; contextLength?: number; inputPerMillion?: number; outputPerMillion?: number; imagePrice?: number; kinds: string[]; usedFor: string[] }
 

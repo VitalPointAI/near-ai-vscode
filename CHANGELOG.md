@@ -135,6 +135,18 @@ fictional data only; labels are not accreditation, and no member has a persona n
   the speed (0.5x, 1x, 2x or 4x); the status bar shows the SIM badge, the speed and the scenario
   clock, and every feed in the feed picture is badged SIM. At 1x the three days play in about
   a quarter of an hour.
+- **Observation store and the observations server.** Feed reports are kept in your project under
+  `.planning/staff/observations/` (not committed: the folder ignores itself), one append-only file
+  per feed, channel and hour. A report delivered twice is kept once. Each report keeps the label its
+  feed gave it, and the store refuses one labelled lower than its channel or without the handling
+  its feed requires. A file that cannot be read whole is named in every answer and never written
+  on top of. Raw messages of live streams are kept beside the reports only for their retention
+  period. J2 members granted `mcp:observations` ask for slices, a track with its state (live,
+  stale, lost or closed), what is near a place or control measure, what changed since a time,
+  corroboration by independent origin, timelines and each feed's state, all as known at any past
+  time if asked. Every answer shows only what your clearances cover, raises the chat's label to
+  what it showed, says when a limit cut it, and fences the feeds' text as untrusted. Feed events go
+  into the staff event log beside the staff events.
 - **Red team and release guard held to their own files.** In a staff team the red team may write
   only its critique and the release guard only its gate reports. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff

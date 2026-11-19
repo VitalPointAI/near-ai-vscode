@@ -7,7 +7,7 @@
 // - J2 registers:    .planning/staff/products/j2/{source-register,pir-register,collection-plan}.json (intel.ts; the source register is the one
 //                    the tradecraft lint reads)
 // - the ledger:      .planning/staff/ledger/products.jsonl, one signed entry per line, chained (src/domain/staff/ledger.ts)
-// - the events:      .planning/staff/ledger/events.jsonl, one staff event per line, for the Staff Room, Team Live and replay
+// - the events:      .planning/staff/ledger/events.jsonl, one staff or feed event per line (ALL_STAFF_EVENT_TYPES), for the Staff Room, Team Live and replay
 // - the wargame:     .planning/staff/wargame/ledger.jsonl
 // - proposals:       .planning/staff/proposals/<product>/ (design 10, 4.3)
 // - guard settings:  .planning/.near-ai/staff-guard.json (the exercise box and real entities; agents must ask before writing there), and
@@ -36,6 +36,8 @@ import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import { STAFF_SECTION_IDS } from '../domain/staff/doctrine';
 import type { CrosswalkStep, StaffLevel, StaffProfileId, StaffSectionId } from '../domain/staff/doctrine';
 import { eventsForTransition, STAFF_EVENT_TYPES } from '../domain/staff/events';
+import { ALL_STAFF_EVENT_TYPES, feedPicture, isFeedEventType } from '../domain/staff/obs/events';
+import type { FeedEvent, FeedPictureModel } from '../domain/staff/obs/events';
 import type { CcirTriggeredEvent, DecisionOption, StaffEvent, StepEnteredEvent, WaitingEvent } from '../domain/staff/events';
 import { guardScan, guardScanText } from '../domain/staff/guardScan';
 import type { ExerciseBox, GuardConfig, GuardScanResult } from '../domain/staff/guardScan';
@@ -193,8 +195,16 @@ export function fileDisagreement(state: ProductState, file: ProductFile): Tamper
   return file.header && file.header.version !== state.record.version ? 'header-version' : undefined;
 }
 
+/** One line of the staff event log: a staff event of design 10, or a feed or watch event of research note 11 (src/domain/staff/obs/events.ts). */
+export type StaffLogEvent = StaffEvent | FeedEvent;
+
+function isStaffEvent(event: StaffLogEvent): event is StaffEvent {
+  return (STAFF_EVENT_TYPES as readonly string[]).includes(event.type);
+}
+
 export class StaffHost {
   private readonly listeners = new Set<(event: StaffEvent) => void>();
+  private readonly feedListeners = new Set<(event: FeedEvent) => void>();
   private readonly now: () => number;
 
   public constructor(private readonly options: StaffHostOptions) {
@@ -215,6 +225,12 @@ export class StaffHost {
   public onEvent(listener: (event: StaffEvent) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Called with every feed and watch event this host writes (the feed panel, the feed layers, the watch board). Returns the function that stops it. */
+  public onFeedEvent(listener: (event: FeedEvent) => void): () => void {
+    this.feedListeners.add(listener);
+    return () => { this.feedListeners.delete(listener); };
   }
 
   // ---- The ledger ---------------------------------------------------------------------------------------------------------------------------
@@ -403,33 +419,39 @@ export class StaffHost {
 
   // ---- Events ---------------------------------------------------------------------------------------------------------------------------------
 
-  /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ). */
+  /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ); feed events are in feedEvents. */
   public async events(): Promise<StaffEvent[]> {
-    return (await this.eventsRead()).events;
+    return (await this.eventsRead()).events.filter(isStaffEvent);
+  }
+
+  /** Every feed and watch event recorded for this project, oldest first: what the feed panel, the feed layers and the watch board draw. */
+  public async feedEvents(): Promise<FeedEvent[]> {
+    return (await this.eventsRead()).events.filter((event): event is FeedEvent => !isStaffEvent(event));
   }
 
   /**
    * The event log, or why it cannot be read whole. The ledger, not this log, is the record of the products; an unreadable log shows no steps or COP and
    * says so (snapshot's eventLogProblem), and nothing more is appended to it.
    */
-  private async eventsRead(): Promise<{ readonly events: StaffEvent[]; readonly unreadable?: string }> {
+  private async eventsRead(): Promise<{ readonly events: StaffLogEvent[]; readonly unreadable?: string }> {
     const read = await readWhole(path.join(this.ledgerDir(), EVENTS_FILE));
     if (read.kind === 'unreadable') return { events: [], unreadable: unreadableText(`${LEDGER_DIR}/${EVENTS_FILE}`, read.reason, 'Move it aside by hand; the product ledger is unaffected.') };
     if (read.kind === 'missing') return { events: [] };
     const text = read.text;
-    const out: StaffEvent[] = [];
+    const out: StaffLogEvent[] = [];
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try {
-        const value = JSON.parse(line) as StaffEvent;
-        if (value && typeof value === 'object' && (STAFF_EVENT_TYPES as readonly string[]).includes(value.type)) out.push(value);
+        const value = JSON.parse(line) as StaffLogEvent;
+        // Feed and watch events are kept beside the staff events (research note 11, 4.2 and 4.5): one log, one order, one replay.
+        if (value && typeof value === 'object' && ALL_STAFF_EVENT_TYPES.includes(value.type)) out.push(value);
       } catch { /* a damaged line is skipped; the ledger, not the event log, is the record */ }
     }
     return { events: out.slice(-MAX_EVENTS_READ) };
   }
 
   /** Writes events to the project's event log and sends them to every listener, each once. */
-  public async emit(events: readonly StaffEvent[]): Promise<void> {
+  public async emit(events: readonly StaffLogEvent[]): Promise<void> {
     if (!events.length) return;
     await mkdir(this.ledgerDir(), { recursive: true });
     await withFileLock(this.ledgerDir(), EVENTS_LOCK, async () => {
@@ -437,7 +459,10 @@ export class StaffHost {
       if ((await readWhole(path.join(this.ledgerDir(), EVENTS_FILE))).kind === 'unreadable') return;
       await appendFile(path.join(this.ledgerDir(), EVENTS_FILE), `${events.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
     });
-    for (const event of events) for (const listener of this.listeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
+    for (const event of events) {
+      if (isStaffEvent(event)) for (const listener of this.listeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
+      else for (const listener of this.feedListeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
+    }
   }
 
   /** Events other parts of the extension observe (lanes, merges, nested teams, COP layers) enter the same log through here. */
@@ -445,6 +470,13 @@ export class StaffHost {
     const allowed: readonly string[] = ['staff.lane.started', 'staff.lane.finished', 'staff.merge.started', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.team.nested', 'staff.cop.updated'];
     if (!allowed.includes(event.type)) throw new Error(`${event.type} is written by the staff-products host itself.`);
     await this.emit([event]);
+  }
+
+  /** Feed and watch events from the observation store, the importers, the simulator and the watches enter the same log through here. */
+  public async recordFeed(events: readonly FeedEvent[]): Promise<void> {
+    const wrong = events.find((event) => !isFeedEventType(event.type));
+    if (wrong) throw new Error(`${String(wrong.type)} is not a feed event.`);
+    await this.emit(events);
   }
 
   private transitionEvents(written: readonly LedgerEntry[], replay: LedgerReplay): StaffEvent[] {
@@ -1138,7 +1170,7 @@ export class StaffHost {
   // ---- Read models ---------------------------------------------------------------------------------------------------------------------------
 
   /** Everything the Staff Room draws, rebuilt from the ledger, the product files and the event log. */
-  public async snapshot(run?: string): Promise<{ registry: ProductView[]; decisions: ReturnType<typeof decisionQueue>; registers: ReturnType<typeof sharedRegisters>; board?: ReturnType<typeof stepBoard>; steps?: ReturnType<typeof currentSteps>; cop: ReturnType<typeof copModel>; ledgerProblem?: string; eventLogProblem?: string }> {
+  public async snapshot(run?: string): Promise<{ registry: ProductView[]; decisions: ReturnType<typeof decisionQueue>; registers: ReturnType<typeof sharedRegisters>; board?: ReturnType<typeof stepBoard>; steps?: ReturnType<typeof currentSteps>; cop: ReturnType<typeof copModel>; feeds: FeedPictureModel; ledgerProblem?: string; eventLogProblem?: string }> {
     const replay = await this.replay();
     const files = new Map<string, FileCheck>();
     const rows = new Map<string, number>();
@@ -1151,9 +1183,10 @@ export class StaffHost {
     }
     const registry = productRegistry(replay, files);
     const log = await this.eventsRead();
-    const events = log.events;
+    const events = log.events.filter(isStaffEvent);
+    const feedEvents = log.events.filter((event): event is FeedEvent => !isStaffEvent(event));
     return {
-      registry, decisions: decisionQueue(replay, files), registers: sharedRegisters(replay, rows), cop: copModel(events),
+      registry, decisions: decisionQueue(replay, files), registers: sharedRegisters(replay, rows), cop: copModel(events), feeds: feedPicture(feedEvents),
       ...(run ? { board: stepBoard(events, run, registry), steps: currentSteps(events, run) } : {}),
       ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}` } : {}),
       ...(log.unreadable ? { eventLogProblem: log.unreadable } : {})

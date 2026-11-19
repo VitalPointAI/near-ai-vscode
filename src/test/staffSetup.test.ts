@@ -32,7 +32,7 @@ const DECISION_VERBS = /__(?:approve|reject|release|supersede|decide|sign)\b/;
 
 test('the Tools page lists the four built-in staff servers with every tool and grant, and no decision verb', () => {
   const directory = buildToolsDirectory(input);
-  assert.deepEqual(directory.staffServers.map((server) => server.grant), ['mcp:staff-products', 'mcp:guard-scan', 'mcp:intel-workbench', 'mcp:logistics']);
+  assert.deepEqual(directory.staffServers.map((server) => server.grant), ['mcp:staff-products', 'mcp:guard-scan', 'mcp:intel-workbench', 'mcp:observations', 'mcp:logistics']);
   const names = directory.staffServers.flatMap((server) => server.tools.map((tool) => tool.name));
   for (const tool of builtInStaffServers().flatMap((server) => server.tools)) assert.ok(names.includes(tool.name), tool.name);
   assert.ok(names.includes('mcp__staff-products__lint') && names.includes('mcp__guard-scan__scan') && names.includes('mcp__intel-workbench__source_add') && names.includes('mcp__logistics__calc_run'));

@@ -10,6 +10,7 @@ import { CREDENTIAL_STORES, EXTENSION_STORAGE_FOLDERS, VSCODE_SECRET_FILES, cred
 import type { FloorLocations } from '../domain/gate/floor';
 import type { InputAs, RunsOn, ToolManifest } from '../domain/gate/manifest';
 import type { GateContextName } from '../domain/gate/bundle';
+import type { Label } from '../domain/gate/labels';
 import { namesStateKeys, protectedWriteReason, STATE_FOLDER_PATH, STATE_KEYS_PATH, stateKeysReason } from '../domain/protectedPaths';
 import { writeAllowedBy } from '../domain/staff/writeLimits';
 import type { RunCheckpoints } from './checkpoints';
@@ -63,6 +64,13 @@ export interface ToolContext {
    * reach the model; when it throws, the search fails rather than return results whose labels could not be counted.
    */
   noteRead?: (relativePaths: readonly string[]) => Promise<void>;
+  /**
+   * Whether the person's clearances cover a label held on a record rather than a file (an observation row, research note 11, 3.2). The loop builds it from
+   * the policy before a read tool runs, by the same check as `canRead`. Absent means no gate: a tool that reads labelled records then shows nothing labelled.
+   */
+  canReadLabel?: (label: Label) => boolean;
+  /** Raises the session's mark by the labels of the records a tool's result shows (CLAS-04), as `noteRead` does for paths. */
+  noteLabels?: (labels: readonly Label[]) => Promise<void>;
 }
 
 /** The plain note a search adds when it left out results for their labels. */

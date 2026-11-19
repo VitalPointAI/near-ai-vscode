@@ -419,6 +419,22 @@ export function scalesOf(runtime: GateRuntime): ScaleTable {
  * path the clearances do not cover is left out, the way Grep leaves out credential files. A project whose label file is held hides every project path; a
  * result outside the project (the Open-GSD runtime) is judged at the default label (D-63, D-67).
  */
+/**
+ * Whether the person's clearances cover a label held on a record (an observation row) rather than on a file: the same verdict a file with that label gets,
+ * so a row marked `no-agent-tools`, or above the clearances, or anything but the shipped default under a broken policy, is never shown to an agent.
+ */
+export function labelRecordFilter(runtime: GateRuntime): (label: Label) => boolean {
+  try {
+    const state = stateOf(runtime);
+    const facts = state === undefined ? clearanceFactsOf({ state: 'failed-closed' } as BundleState, nowOf(runtime)) : clearanceFactsOf(state, nowOf(runtime));
+    return (label) => {
+      try { return markVerdict([label], facts) === undefined; } catch { return false; }
+    };
+  } catch {
+    return () => false;
+  }
+}
+
 export async function labelReadFilter(runtime: GateRuntime, root: string): Promise<(relativePath: string) => boolean> {
   try {
     const state = stateOf(runtime);

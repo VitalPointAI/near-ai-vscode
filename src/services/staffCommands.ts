@@ -12,6 +12,7 @@ import { localKeyStatus } from '../team/keyHistory';
 import { identityDir, loadOrCreateDeviceIdentity } from '../team/identity';
 import type { SecretStorageLike } from './auth';
 import { configureStaffHosts, describeView, staffHostFor } from '../staff/staffHost';
+import { configureObservationStores } from '../staff/observationStore';
 import type { StaffHost } from '../staff/staffHost';
 
 export const STAFF_COMMANDS = {
@@ -48,7 +49,9 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   const dir = identityDir(context.globalStorageUri.fsPath);
   const identity = async () => (await loadOrCreateDeviceIdentity(context.secrets, { identityDir: dir })).identity;
   configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets), headStore: context.secrets });
-  context.subscriptions.push({ dispose: () => { configureStaffHosts(undefined); } });
+  // The observation store of each project writes its feed events to the same project's staff event log (research note 11, 4.2).
+  configureObservationStores({ emit: async (events, root) => { await staffHostFor(root)?.emit(events); } });
+  context.subscriptions.push({ dispose: () => { configureStaffHosts(undefined); configureObservationStores(undefined); } });
   const register = (id: string, run: (args?: StaffCommandArgs) => Promise<void>): void => {
     context.subscriptions.push(vscode.commands.registerCommand(id, async (args?: unknown) => {
       try { await run(isArgs(args) ? args : undefined); } catch (error) { void vscode.window.showErrorMessage(`NEAR AI could not finish that: ${error instanceof Error ? error.message : String(error)}`); }
