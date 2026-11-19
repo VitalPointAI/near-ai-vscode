@@ -146,7 +146,14 @@ export interface J2Workspace {
     readonly nais: readonly string[]; readonly requestedBy: string; readonly decidedBy?: string
   }>;
   readonly collection: ReadonlyArray<{ readonly id: string; readonly pir: string; readonly indicator: string; readonly nai: string; readonly capability: string; readonly discipline: string; readonly from: string; readonly to: string; readonly needs: string; readonly note: string }>;
-  readonly watches: ReadonlyArray<{ readonly id: string; readonly title: string; readonly pir: string; readonly indicator: string; readonly ltiov: string; readonly state: string; readonly stateText: string; readonly alert: string; readonly missed: number; readonly lastMatch?: string }>;
+  readonly watches: ReadonlyArray<{
+    readonly id: string; readonly title: string; readonly pir: string; readonly indicator: string; readonly ltiov: string; readonly state: string; readonly stateText: string;
+    readonly alert: string; readonly missed: number; readonly lastMatch?: string;
+    /** WP-WATCH: observations queued for the person, the drafts awaiting review, the last step's reason, and whether a signed arm decision proves it. */
+    readonly queued?: number; readonly drafts?: readonly string[]; readonly reason?: string; readonly unsigned?: boolean
+  }>;
+  /** WP-WATCH: per named person, the watch alerts in the last hour and the digest waiting for them (alerts past the hourly cap). */
+  readonly watchAlerts?: ReadonlyArray<{ readonly person: string; readonly alertsLastHour: number; readonly digest: number; readonly digestMatches: number }>;
   readonly findings: ReadonlyArray<{ readonly severity: string; readonly subject: string; readonly message: string }>;
   /**
    * Live feed reports from the observation store, newest first, already clamped to the person's clearance by the host: what a running simulation (or any
@@ -188,6 +195,8 @@ export interface J2Input {
   readonly enemyCoaBody?: string;
   readonly enemyCoaProduct?: string;
   readonly watches?: readonly StandingWatch[];
+  /** The watches the file calls armed (or paused, matched, drafting, awaiting review) that no signed arm decision proves: they run nothing (WP-WATCH). */
+  readonly unsignedWatches?: readonly string[];
   /** The observation store's rows the person's clearance covers (the host reads them through the store's reader view). */
   readonly live?: readonly Observation[];
   readonly problems?: readonly string[];
@@ -471,6 +480,23 @@ const WATCH_STATE_TEXT: Readonly<Record<string, string>> = {
 };
 const PAUSE_TEXT: Readonly<Record<string, string>> = { 'no-attended-run': 'no person has the staff run open', 'source-degraded': 'its source is degraded', person: 'a person paused it' };
 
+/** Each named person's watch alerts in the last hour and the digest waiting for them (research note 11, 4.5: a digest instead of a flood). */
+function watchAlertsOf(events: readonly FeedEvent[], now: number): NonNullable<J2Workspace['watchAlerts']> {
+  const people = new Map<string, { person: string; alertsLastHour: number; digest: number; digestMatches: number }>();
+  for (const event of events) {
+    if (event.type !== 'staff.watch.alert') continue;
+    const person = clip(`${event.person.name} (${event.person.role})`, CAP.short);
+    const entry = people.get(person) ?? { person, alertsLastHour: 0, digest: 0, digestMatches: 0 };
+    if (event.mode === 'alert') {
+      entry.digest = 0; entry.digestMatches = 0;
+      const at = Date.parse(event.at);
+      if (now - at >= 0 && now - at < 3_600_000) entry.alertsLastHour += 1;
+    } else { entry.digest += 1; entry.digestMatches += event.matches; }
+    people.set(person, entry);
+  }
+  return [...people.values()].slice(0, CAP.list);
+}
+
 function dpKey(text: string): string {
   const match = /\bDP[\s-]*(\d+)/i.exec(text);
   return match ? `DP ${match[1]}` : text.trim().toLowerCase();
@@ -523,6 +549,7 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
     from: entry.timing.from, to: entry.timing.to, needs: entry.needs === 'partner' ? 'Needs a partner' : 'Needs J3 approval', note: clip(entry.note ?? '', 300)
   }));
   const board = new Map<string, WatchBoardEntry>(feedPicture(input.feedEvents ?? []).watches.map((entry) => [entry.watch, entry]));
+  const unsigned = new Set(j2.unsignedWatches ?? []);
   const watches: Array<J2Workspace['watches'][number]> = (j2.watches ?? []).slice(0, CAP.list).map((watch) => {
     const live = board.get(watch.id);
     const state = live?.state ?? watch.state;
@@ -530,7 +557,9 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
     return {
       id: watch.id, title: clip(watch.title, 200), pir: watch.pir, indicator: watch.indicator, ltiov: watch.ltiov, state,
       stateText: `${WATCH_STATE_TEXT[state] ?? state}${state === 'paused' && reason ? `: ${PAUSE_TEXT[reason] ?? reason}` : ''}`,
-      alert: clip(`${watch.alert.name} (${watch.alert.role})`, CAP.short), missed: live?.missed ?? watch.missedWhilePaused, ...(live?.lastMatch ? { lastMatch: live.lastMatch } : {})
+      alert: clip(`${watch.alert.name} (${watch.alert.role})`, CAP.short), missed: live?.missed ?? watch.missedWhilePaused, ...(live?.lastMatch ? { lastMatch: live.lastMatch } : {}),
+      ...(watch.queued?.length ? { queued: watch.queued.length } : {}), ...(watch.drafts?.length ? { drafts: watch.drafts.map((ref) => clip(`${ref.product} v${ref.version}`, 120)) } : {}),
+      ...(watch.reason ? { reason: clip(watch.reason, 300) } : {}), ...(unsigned.has(watch.id) ? { unsigned: true } : {})
     };
   });
   for (const [id, live] of board) {
@@ -554,7 +583,11 @@ function buildJ2(input: StaffRoomInput, map: StaffMapModel): J2Workspace {
       grade: `${row.reliability}${row.credibility}`, gradeWords: gradeWords(row.reliability, String(row.credibility))
     }))
   };
-  return { ecoas, enemy, sources, reports, pirs, collection, watches, findings, live, problems: (j2.problems ?? []).slice(0, 10).map((problem) => clip(problem, 300)) };
+  const watchAlerts = watchAlertsOf(input.feedEvents ?? [], now);
+  return {
+    ecoas, enemy, sources, reports, pirs, collection, watches, ...(watchAlerts.length ? { watchAlerts } : {}), findings, live,
+    problems: (j2.problems ?? []).slice(0, 10).map((problem) => clip(problem, 300))
+  };
 }
 
 // ---- The whole model ---------------------------------------------------------------------------------------------------------------------------------------

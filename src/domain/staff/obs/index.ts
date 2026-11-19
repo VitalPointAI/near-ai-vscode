@@ -14,3 +14,4 @@ export * from './store';
 export * from './tools';
 export * from './tracks';
 export * from './watches';
+export * from './watchRun';

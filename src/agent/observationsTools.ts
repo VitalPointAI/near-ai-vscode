@@ -32,7 +32,7 @@ import { ToolError } from './workspace';
 
 export { OBSERVATIONS_SERVER };
 
-/** The contract's tools this server answers now. Watches (WP-WATCH) and layer proposals (WP-COP) join the same server when those packages land. */
+/** The contract's read tools this server answers. The watch tools (WP-WATCH) are on the same server in watchTools.ts; layer proposals (WP-COP) join it when that package lands. */
 export const OBSERVATIONS_TOOLS_SERVED: readonly ObsToolName[] = ['obs.slice', 'obs.track', 'obs.near', 'obs.changes', 'obs.corroboration', 'obs.timeline', 'obs.feeds'];
 
 /** `obs.slice` as the tool a member is granted: `mcp__observations__obs_slice`. */

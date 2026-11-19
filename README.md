@@ -369,7 +369,23 @@ in its description and in **Map as table**. The J2 workspace also lists the
 live feed reports the project's observation store holds, newest first and
 only what your clearances cover; a running exercise feed simulation fills it.
 While the room is open it runs track decay, so tracks go stale and then lost.
-The J5, J3 and J4 workspaces say what they will hold. **Calm** stops all movement, as the system's
+The J5, J3 and J4 workspaces say what they will hold.
+
+**Standing watches.** A standing watch binds a PIR's indicator to an area, a
+time window and the weakest source grade it counts, until the PIR's latest
+time of value, and names the person it alerts. **NEAR AI: Staff: Create a
+Standing Watch** creates and arms one; J2 watch members can only propose one,
+which you arm with **Staff: Arm a Standing Watch**. Arming and retiring are
+signed with your device key, so a watch written into the file by hand arms
+nothing. A watch looks at each new observation only while a staff run or the
+Staff Room is open; with neither, it pauses, and what came in meanwhile is
+delivered as "missed while paused" when you are back. On a match it alerts you
+(at most four alerts an hour, then a digest), and the watch officer drafts an
+INTREP, and the threat analyst a course of action revision if the watch allows
+it, as drafts for you in the release process. Nothing is released by a watch.
+**Pause**, **Resume**, **Acknowledge** (once you have seen the drafts) and
+**Reject or Retire** are commands of their own. Past its latest time of value
+a watch expires. **Calm** stops all movement, as the system's
 reduced-motion setting does; **Follow the action** moves the view to where the
 work is; press **?** for the keys.
 

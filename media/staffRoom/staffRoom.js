@@ -830,6 +830,9 @@
     watches.replaceChildren();
     watches.append(el('p', 'rule', 'A watch drafts an INTREP and alerts a named person. It never releases, approves or tasks anything, and runs only while a person has the staff run open.'));
     if (!j2.watches.length) watches.append(el('p', 'faint', 'No standing watches yet. A watch binds a PIR\'s indicator to an area and its latest time of value.'));
+    for (const entry of isArr(j2.watchAlerts) ? j2.watchAlerts : []) {
+      if (entry.digest) watches.append(el('p', 'faint', 'Digest for ' + entry.person + ': ' + entry.digestMatches + ' match' + (entry.digestMatches === 1 ? '' : 'es') + ' in ' + entry.digest + ' held alert' + (entry.digest === 1 ? '' : 's') + ', sent with the next alert.'));
+    }
     for (const watch of j2.watches) {
       const card = el('article', 'watch w-' + watch.state);
       const head = el('div', 't');
@@ -839,6 +842,10 @@
       if (watch.alert) card.append(el('p', 'human-line', 'Alerts ' + watch.alert));
       if (watch.missed) card.append(el('p', 'late', watch.missed + ' match' + (watch.missed === 1 ? '' : 'es') + ' found while paused, kept for the person.'));
       if (watch.lastMatch) card.append(el('p', 'faint', 'Last match ' + shortTime(watch.lastMatch)));
+      if (watch.unsigned) card.append(el('p', 'late', 'No signed arm decision proves this watch, so it runs nothing until a person arms it.'));
+      if (watch.queued) card.append(el('p', 'faint', watch.queued + ' observation' + (watch.queued === 1 ? '' : 's') + ' queued for the person, delivered when it is armed again.'));
+      if (isArr(watch.drafts) && watch.drafts.length) card.append(el('p', 'human-line', 'Drafts for the named person: ' + watch.drafts.join(', ') + '. Each follows its own release path.'));
+      if (typeof watch.reason === 'string' && watch.reason) card.append(el('p', 'faint', watch.reason));
       watches.append(card);
     }
     showJ2Tab(J2_TABS.some(([id]) => id === saved.j2tab) ? saved.j2tab : 'threat', false);
