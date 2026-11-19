@@ -1057,6 +1057,8 @@
     }
 
     map.on('styleimagemissing', function (event) { addImage(event.id); });
+    // The last few map errors (a tile that failed to load or decode), for the real-window check; never shown to the person as raw text.
+    map.on('error', function (event) { const text = event && event.error && event.error.message ? String(event.error.message).slice(0, 160) : 'error'; state.errors = (state.errors || []).concat([text]).slice(-5); });
 
     function makeImage(id) {
       if (id.indexOf('stack|') === 0) { stackImage(id); return; }
@@ -1246,7 +1248,8 @@
         });
       },
       /** Moves the camera to a view (centre, zoom, pitch, bearing), a flight when motion is allowed. */
-      look: function (camera) { ready.then(function () { move(camera); }); },
+      look: function (camera, instant) { ready.then(function () { if (instant && typeof map.jumpTo === 'function') map.jumpTo(camera); else move(camera); }); },
+      pitch: function () { return typeof map.getPitch === 'function' ? map.getPitch() : undefined; },
       /** A PNG data URL of the map as drawn, taken in the next frame (the drawing buffer is only readable while it is drawn). For the e2e check. */
       snapshot: function () {
         return ready.then(function () {
@@ -1523,12 +1526,16 @@
       const out = {};
       if (Array.isArray(camera.center) && camera.center.length === 2 && camera.center.every(function (n) { return typeof n === 'number' && isFinite(n); })) out.center = [camera.center[0], camera.center[1]];
       for (const key of ['zoom', 'pitch', 'bearing']) if (typeof camera[key] === 'number' && isFinite(camera[key])) out[key] = camera[key];
-      renderer.look(out);
+      renderer.look(out, camera.instant === true);
     };
     /** A picture of the map as drawn (a PNG data URL; '' on the SVG map), for the real-window check's screenshots. */
     view.snapshot = function () { return renderer.snapshot(); };
     /** For the real-window check (layout probe): the ground's state and the 3D height at a point. */
-    view.inspect = function (lngLat) { return Object.assign(view.state(), { renderer: view.renderer, height: lngLat ? renderer.terrainHeight(lngLat) : undefined }); };
+    view.inspect = function (lngLat) {
+      const B = state.basemap;
+      const tiles = B ? { globe: Boolean(B.globe.imagery), frame: Boolean(B.frame.imagery), terrain: Boolean(B.frame.terrain), problems: B.problems } : undefined;
+      return Object.assign(view.state(), { renderer: view.renderer, height: lngLat ? renderer.terrainHeight(lngLat) : undefined, tiles: tiles, errors: (state.errors || []).slice(), pitch: renderer.pitch ? renderer.pitch() : undefined });
+    };
     if (options.clock && options.clock.subscribe) unsubscribe = options.clock.subscribe(function (t) { view.setTime(t); });
     // Never wait forever for the map: after 15 seconds the view is returned and the map finishes loading behind it. When the map is ready first, the
     // 15-second timer is cleared, so nothing is left pending after the view is returned (or destroyed).

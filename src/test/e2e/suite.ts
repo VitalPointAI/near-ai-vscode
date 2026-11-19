@@ -429,6 +429,8 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       try {
         await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
         await waitForProbe('staff-room');
+        // The room alone in the editor area and in front, so its page draws frames (a page in the background is throttled and loads no tiles).
+        await editorAreaOnly();
         let report = await probe('staff-room');
         for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
         if (!report.map?.maplibre) {
@@ -437,22 +439,21 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           assert.match(report.map?.note ?? '', /2D map/);
           return;
         }
-        for (let waited = 0; waited < 10_000 && !report.map?.ground; waited += 500) { await pause(500); report = await probe('staff-room'); }
-        assert.equal(report.map?.ground?.base, 'imagery', 'Imagery is the default base');
+        // The view registers once MapLibre has loaded its style (up to 15 s on a software renderer).
+        for (let waited = 0; waited < 40_000 && !report.map?.ground; waited += 500) { await pause(500); report = await probe('staff-room'); }
+        assert.equal(report.map?.ground?.base, 'imagery', `Imagery is the default base (${JSON.stringify(report.map?.ground)})`);
         await postToPage('staff-room', { type: 'layout-act', act: 'map-terrain', on: true });
-        await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { center: [-123.45, -49.1], zoom: 11.4, pitch: 62, bearing: -25 } });
+        await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { center: [-123.45, -49.1], zoom: 11.4, pitch: 62, bearing: -25, instant: true } });
         let height: number | undefined;
-        for (let waited = 0; waited < 40_000; waited += 1000) {
+        for (let waited = 0; waited < 60_000; waited += 1000) {
           await pause(1000);
           report = await probe('staff-room');
           height = report.map?.ground?.height;
+          // The room refits its map when its box changes size (the side bars closing); look again until the view holds.
+          if ((report.map?.ground?.pitch ?? 0) < 30) await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { center: [-123.45, -49.1], zoom: 11.4, pitch: 62, bearing: -25, instant: true } });
           if (typeof height === 'number' && height > 150) break;
         }
-        console.log(`[real-window] 3D terrain at Harrow Ridge: ${height === undefined ? 'no height' : `${Math.round(height)} m`}; origins: ${(report.map?.origins ?? []).join(', ')}`);
-        assert.ok(typeof height === 'number' && height > 150, `Harrow Ridge stands over 150 m in 3D (${height})`);
-        assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation');
-        const foreign = (report.map?.origins ?? []).filter((origin) => !/vscode-resource|vscode-cdn\.net|^vscode-webview:|^null$/.test(origin));
-        assert.deepEqual(foreign, [], 'every request goes to the extension');
+        // The pictures are taken whatever the outcome, so a failure can be seen.
         if (shots) {
           const snap = async (name: string) => {
             await postToPage('staff-room', { type: 'layout-act', act: 'map-snapshot' });
@@ -464,7 +465,7 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           };
           await snap('e2e-imagery-3d');
           await postToPage('staff-room', { type: 'layout-act', act: 'map-base', base: 'topo' });
-          await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { pitch: 0, bearing: 0, zoom: 11 } });
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { pitch: 0, bearing: 0, zoom: 11, instant: true } });
           await pause(6000);
           await snap('e2e-topographic');
           await postToPage('staff-room', { type: 'layout-act', act: 'map-base', base: 'imagery' });
@@ -472,6 +473,11 @@ function projectTests(): Array<[string, () => Promise<void>]> {
           await pause(8000);
           await snap('e2e-globe');
         }
+        console.log(`[real-window] 3D terrain at Harrow Ridge: ${height === undefined ? 'no height' : `${Math.round(height)} m`}; origins: ${(report.map?.origins ?? []).join(', ')}`);
+        assert.ok(typeof height === 'number' && height > 150, `Harrow Ridge stands over 150 m in 3D (${height}; ${JSON.stringify(report.map?.ground)})`);
+        assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation');
+        const foreign = (report.map?.origins ?? []).filter((origin) => !/vscode-resource|vscode-cdn\.net|^vscode-webview:|^null$/.test(origin));
+        assert.deepEqual(foreign, [], 'every request goes to the extension');
       } finally {
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       }

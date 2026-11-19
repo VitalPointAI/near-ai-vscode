@@ -35,7 +35,7 @@ export interface LayoutReport {
     /** The open layer drawer: open, focus inside it, focus on its Layers button, and how many layer switches it shows. */
     drawer?: { open: boolean; focusInside: boolean; buttonFocused: boolean; switches: number };
     /** The COP map's ground: base, 3D terrain and why it is off, projection, renderer, and the 3D height at Harrow Ridge's crest. */
-    ground?: { base: string; terrain: string; terrainReason: string; projection: string; renderer: string; height?: number };
+    ground?: { base: string; terrain: string; terrainReason: string; projection: string; renderer: string; height?: number; tiles?: { globe: boolean; frame: boolean; terrain: boolean; problems: string[] }; errors?: string[]; pitch?: number };
     /** Every origin the page loaded a resource from. */
     origins?: string[];
     /** A PNG data URL of the map canvas, after a map-snapshot act. */
