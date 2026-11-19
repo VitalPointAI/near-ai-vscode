@@ -4,25 +4,6 @@
 
 ### Military staff teams
 
-- **The Staff Room's map has the room.** Once a scenario is loaded the map is the main panel and
-  fills the panel's height without scrolling; the process rail and the section cards fold into
-  one line that opens them again. **Full map** puts the map over the whole Staff Room, and Escape
-  brings the room back. The J2 and J3 workspaces' map fills its view the same way.
-- **A layer drawer instead of a block of checkboxes.** **Layers** over the map shows how many
-  layers are on and slides in a drawer from the map's edge, with the layers grouped as Picture,
-  Environment and Reference, each with its count and a SIM badge for simulated data. Escape or a
-  click outside closes it, and focus stays inside while it is open. The classification line,
-  the track count, the time slider and the data's attribution now float over the map.
-- **A clearer first view.** The map opens on the whole exercise frame with sea round it, the
-  hillshade and contours read in every theme, and units that would cover each other are drawn as
-  one stacked symbol with a count until you zoom in (a click on the stack lists what is in it).
-  Symbols are smaller at the wide view.
-- **Globe that shows the globe.** **Globe** flies out until the curve of the earth is plain, with
-  a graticule and the exercise frame ringed in gold, and **Map** flies back to the frame. Under
-  reduced motion or Calm the view jumps instead.
-- **The 2D map draws the ground.** Where WebGL is not available, the room's 2D map draws the
-  terrain pack's land, hillshade and contours under the units, and uses the same layer drawer.
-- Fixed: symbols could go missing after zooming in on the COP map, leaving only their names.
 - **The project knows its staff teams.** Set Up a Staff Team now records each section's team in
   the project's staff settings, so after setting up a J2 the chat no longer says "This project has
   no team yet". A staff project shows a **Staff teams** card instead: each section with its team's
@@ -35,6 +16,30 @@
 - **Missing and older teams.** A team file that was deleted or renamed in your teams shows as
   missing with **Set up again**, never as a command that would fail. A project set up before this
   release is offered the matching teams already in your teams to **Link**, only after you confirm.
+- **The Staff Room's map has the room.** Once a scenario is loaded the map is the main panel and
+  fills the panel's height without scrolling; the process rail and the section cards fold into
+  one line that opens them again, and that line's **Staff teams** opens the cards at the first
+  section's **Task in chat** or **Set up**. **Full map** puts the map over the whole Staff Room,
+  and Escape brings the room back. The J2 and J3 workspaces' map fills its view the same way.
+- **A layer drawer instead of a block of checkboxes.** **Layers** over the map shows how many
+  layers are on and slides in a drawer from the map's edge, with the layers grouped as Picture,
+  Environment and Reference, each with its count and a SIM badge for simulated data. Escape or a
+  click outside closes it, and focus stays inside while it is open. The classification line,
+  the track count, the time slider and the data's attribution now float over the map.
+- **A closer first view.** The map opens on the land, the named places and the units with a
+  margin, so the peninsula fills most of the map; the exercise frame's dashed line is still drawn
+  round it. The hillshade and contours read in every theme, and units that would cover each other
+  are drawn as one stacked symbol with a count until you zoom in (a click on the stack lists what
+  is in it). Symbols are smaller at the wide view.
+- **Globe that shows the globe.** **Globe** flies out until the curve of the earth is plain, with
+  a graticule and the exercise frame ringed in gold, and **Map** flies back to the first view.
+  Units stay hidden at the globe's zoom. Under reduced motion or Calm the view jumps instead.
+- **The 2D map draws the ground.** Where WebGL is not available, the room's 2D map draws the
+  terrain pack's land, hillshade and contours under the units, and uses the same layer drawer.
+- **One machine for now.** Staff projects work on one machine: several people and machines on one
+  staff project are not supported yet, because the signed ledgers trust only this computer's key.
+  Multi-user staff workspaces are planned.
+- Fixed: symbols could go missing after zooming in on the COP map, leaving only their names.
 
 ## 0.4.34
 

@@ -20,16 +20,17 @@
 //   view.highlight(names)                          // marks the features whose name, ECOA or ECOA role is listed (a PIR's NAIs, an adversary COA); [] clears
 //   view.setColours(colours) / view.focus()        // the host page's theme (ocean, land, marsh, contour, river, road, line, label, halo, hillShadow,
 //                                                  // hillLight, relief, space); focus the map
-//   view.addTool(node) / view.fitFrame() / view.layers(open?)   // a host control over the map; back to the frame; open or close the layer drawer
+//   view.addTool(node) / view.fitFrame() / view.layers(open?)   // a host control over the map; back to the first view; open or close the layer drawer
 //
 // Mount options also take `colours` (the same keys as setColours), `still: true`, which turns off MapLibre's label fades (the Staff Room's Calm and
 // reduced motion), `motion()`, the host's rule for whether anything may move (the drawer's slide, the globe's flight), and `onLayer(id, on)`, told when
 // the person turns a layer on or off in the drawer.
 //
 // Layout (owner direction, D-48 of 0.4.34). The map fills the box and everything floats over it: the classification strip, the controls, the layer
-// drawer (media/staff/layerDrawer.js, shared with the Staff Room's SVG map) and the time slider. The first view fits the whole exercise frame with sea
-// round it; at that view units that would cover each other draw as one stacked symbol with a count, and symbols are smaller until the map is zoomed in.
-// Globe flies out until the curve of the earth is plain, with the frame ringed in gold and a graticule; Map flies back to the frame.
+// drawer (media/staff/layerDrawer.js, shared with the Staff Room's SVG map) and the time slider. The first view fits what is on the map (the land,
+// the named places and the units, contentBounds) with a margin, inside the exercise frame, whose dashed line stays drawn; at that view units that would
+// cover each other draw as one stacked symbol with a count, and symbols are smaller until the map is zoomed in. Globe flies out until the curve of the
+// earth is plain, with the frame ringed in gold and a graticule; Map flies back to the same first view.
 //
 // Labels. Symbol images never carry text: every name is a separate label, placed so labels do not cover each other or a symbol, and the symbol always
 // stays. MapLibre places them with its own collision index: the symbols are the top symbol layer (icon-allow-overlap true, so never dropped, and
@@ -384,7 +385,39 @@
     return options;
   }
 
-  /** The part of the frame worth drawing: everything the picture places and every named place, with a margin; the whole frame when empty. */
+  /**
+   * What the first view fits (owner direction, 0.4.35): the land (the synthetic geography's land and marsh, the terrain pack's coastline), the named
+   * places and the units (every point the picture places), with a margin of a tenth of the larger side (at least 3% of the frame) and kept inside the
+   * exercise frame. The frame's own bounds when nothing is placed, so an empty scenario still opens on its frame.
+   */
+  function contentBounds(picture) {
+    const frame = picture && picture.frame ? picture.frame.bounds : [-1, -1, 1, 1];
+    if (!picture) return frame;
+    const box = [Infinity, Infinity, -Infinity, -Infinity];
+    const take = function (c) {
+      if (Array.isArray(c) && typeof c[0] === 'number' && typeof c[1] === 'number') {
+        if (!(c[0] >= frame[0] && c[0] <= frame[2] && c[1] >= frame[1] && c[1] <= frame[3])) return;
+        box[0] = Math.min(box[0], c[0]); box[1] = Math.min(box[1], c[1]); box[2] = Math.max(box[2], c[0]); box[3] = Math.max(box[3], c[1]);
+      } else if (Array.isArray(c)) c.forEach(take);
+    };
+    for (const g of (picture.geography && picture.geography.features) || []) {
+      const p = g.properties || {};
+      if (!g.geometry) continue;
+      if (p.kind === 'land' || p.kind === 'marsh' || (g.geometry.type === 'Point' && p.name)) take(g.geometry.coordinates);
+    }
+    const contours = picture.environment && picture.environment.contours;
+    for (const c of (contours && contours.features) || []) if (c.properties && c.properties.kind === 'coastline' && c.geometry) take(c.geometry.coordinates);
+    for (const feature of picture.features || []) if (feature.geometry && feature.geometry.type === 'Point') take(feature.geometry.coordinates);
+    if (!(box[2] > box[0]) || !(box[3] > box[1])) return frame;
+    const side = Math.max(box[2] - box[0], box[3] - box[1]);
+    const padX = Math.max(side * 0.1, (frame[2] - frame[0]) * 0.03);
+    const padY = Math.max(side * 0.1, (frame[3] - frame[1]) * 0.03);
+    return [Math.max(frame[0], box[0] - padX), Math.max(frame[1], box[1] - padY), Math.min(frame[2], box[2] + padX), Math.min(frame[3], box[3] + padY)];
+  }
+  /**
+   * The part of the frame the SVG map draws: everything the picture places and every named place, with a margin; the whole frame when empty. Tighter
+   * than contentBounds (no land): the SVG map has no zoom to come apart with, so it keeps its names readable this way.
+   */
   function extent(picture) {
     const frame = picture.frame ? picture.frame.bounds : [-1, -1, 1, 1];
     const box = [Infinity, Infinity, -Infinity, -Infinity];
@@ -765,11 +798,11 @@
       else if (typeof map.jumpTo === 'function') map.jumpTo(camera);
     }
 
-    /** Fits the whole exercise frame with a margin of sea round it. */
+    /** Fits the first view: the land, the places and the units with a margin (contentBounds), inside the frame, clear of the floating controls. */
     function fitFrame(animate) {
       const picture = state.picture;
       if (!picture || !picture.frame || typeof map.fitBounds !== 'function') return;
-      const b = picture.frame.bounds;
+      const b = contentBounds(picture);
       const box = map.getContainer ? map.getContainer() : undefined;
       const side = box ? Math.min(box.clientWidth || 0, box.clientHeight || 0) : 0;
       const sea = Math.max(16, Math.round(side * 0.04));
@@ -995,5 +1028,5 @@
     return view;
   }
 
-  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures, declutter: declutter, weatherFrameAt: weatherFrameAt, weatherFeatures: weatherFeatures };
+  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures, declutter: declutter, weatherFrameAt: weatherFrameAt, weatherFeatures: weatherFeatures, contentBounds: contentBounds };
 })();

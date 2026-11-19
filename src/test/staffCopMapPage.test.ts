@@ -463,13 +463,13 @@ test('the layer drawer slides with transform and opacity only when motion is all
   assert.equal(drawer.panel.hidden, true);
 });
 
-test('the COP map floats its controls over the map, groups its layers in the drawer, fits the whole frame and flies to the globe and back', async () => {
+test('the COP map floats its controls over the map, groups its layers in the drawer, fits the land, places and units and flies to the globe and back', async () => {
   const { window, container } = page();
   const layerCalls: Array<[string, boolean]> = [];
   let motion = true;
   const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
     renderer: 'auto', still: true, motion: () => motion, onLayer: (id: string, on: boolean) => layerCalls.push([id, on]),
-    libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } }
+    libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} }}
   });
   const map = FakeMap.last!;
   const scenario = starter();
@@ -494,10 +494,20 @@ test('the COP map floats its controls over the map, groups its layers in the dra
   assert.deepEqual(layerCalls, [['env-hillshade', false]], 'the host hears of the change');
   assert.equal(view.state().visible['env-hillshade'], false);
   assert.equal(switches(root).find((node) => node.getAttribute('data-layer') === 'env-hillshade')!.getAttribute('aria-checked'), 'false');
-  // The first view fits the whole exercise frame, with room for the floating chrome.
+  // The first view fits the land, the places and the units with a margin, inside the frame (owner direction, 0.4.35), with room for the floating chrome;
+  // the frame's dashed line is still drawn.
   const fit = map.camera.find(([kind]) => kind === 'fitBounds')!;
   const b = picture.frame!.bounds;
-  assert.deepEqual(JSON.parse(JSON.stringify(fit[1].bounds)), [[b[0], b[1]], [b[2], b[3]]]);
+  const [[w, s], [e, n]] = JSON.parse(JSON.stringify(fit[1].bounds)) as [[number, number], [number, number]];
+  assert.deepEqual([w, s, e, n], JSON.parse(JSON.stringify((window.nearCopMap as { contentBounds: (p: unknown) => number[] }).contentBounds(picture))));
+  assert.ok(w >= b[0] && s >= b[1] && e <= b[2] && n <= b[3], 'inside the frame');
+  assert.ok((e - w) * (n - s) < 0.7 * (b[2] - b[0]) * (b[3] - b[1]), `closer than the whole frame (${JSON.stringify([w, s, e, n])} in ${JSON.stringify(b)})`);
+  const inside = (c: number[]) => c[0] >= w && c[0] <= e && c[1] >= s && c[1] <= n;
+  const coast = picture.environment!.contours.features.filter((feature) => feature.properties.kind === 'coastline');
+  assert.ok(coast.length > 0, 'the pack has a coastline');
+  for (const feature of coast) for (const c of (feature.geometry as unknown as { coordinates: number[][] }).coordinates) assert.ok(inside(c), `the coastline is in view: ${JSON.stringify(c)}`);
+  const inFrame = (c: number[]) => c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3];
+  for (const feature of picture.features) if (feature.geometry.type === 'Point' && inFrame(feature.geometry.coordinates as unknown as number[])) assert.ok(inside(feature.geometry.coordinates as unknown as number[]), `${feature.id} is in view`);
   assert.equal(fit[1].animate, false);
   // Hillshade drawn stronger than the pack's own tones, in the theme's colours; units clustered on their own source.
   const style = map.options.style as { sources: Record<string, Record<string, unknown>>; layers: Array<{ id: string; paint?: Record<string, unknown>; minzoom?: number }> };
@@ -506,7 +516,7 @@ test('the COP map floats its controls over the map, groups its layers in the dra
   assert.ok(style.layers.some((layer) => layer.id === 'clusters'));
   assert.equal(style.layers.find((layer) => layer.id === 'points')!.minzoom, 5, 'the globe shows the frame ring, not the units');
   assert.ok((map.data.get('frame') as { features: unknown[] }).features.length === 2, 'the frame and its centre');
-  // Globe flies out to a zoom where the curve is plain; Map flies back to the frame.
+  // Globe flies out to a zoom where the curve is plain; Map flies back to the same first view.
   view.setProjection('globe');
   await wait(10);
   const out = map.camera.at(-1)!;
@@ -517,6 +527,7 @@ test('the COP map floats its controls over the map, groups its layers in the dra
   await wait(10);
   assert.equal(map.camera.at(-1)![0], 'fitBounds');
   assert.equal(map.camera.at(-1)![1].animate, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(map.camera.at(-1)![1].bounds)), [[w, s], [e, n]], 'back to the same first view');
   // Under reduced motion or Calm the same moves are instant.
   motion = false;
   view.setProjection('globe');
@@ -564,6 +575,25 @@ test('the page script names no remote address and the CSP allows no eval, no inl
   const resources = copMapResources((file) => `RES/${file}`);
   assert.deepEqual(Object.keys(resources).sort(), Object.keys(COP_MAP_FILES).sort());
   for (const file of Object.values(COP_MAP_FILES)) assert.ok(readFileSync(path.join(REPO, 'media', file)).length > 0, file);
+});
+
+test('the first view: land, places and units with a margin inside the frame; the frame when nothing is placed; nothing outside the frame widens it', () => {
+  const { window } = page();
+  const contentBounds = (window.nearCopMap as { contentBounds: (p: unknown) => number[] }).contentBounds;
+  const frame = { grid: 'KQ', bounds: [0, 0, 1, 1] as const, centre: [0.5, 0.5] as const };
+  const base = { frame, features: [] as unknown[], geography: { type: 'FeatureCollection', features: [] as unknown[] } };
+  assert.deepEqual(JSON.parse(JSON.stringify(contentBounds({ ...base }))), [0, 0, 1, 1], 'nothing placed: the frame');
+  const land = { type: 'Feature', properties: { kind: 'land' }, geometry: { type: 'Polygon', coordinates: [[[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.4]]] } };
+  const unit = { id: 'u', type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [0.6, 0.7] } };
+  const away = { id: 'x', type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [5, 5] } };
+  const road = { type: 'Feature', properties: { kind: 'road' }, geometry: { type: 'LineString', coordinates: [[0.05, 0.05], [0.95, 0.95]] } };
+  const got = contentBounds({ ...base, geography: { type: 'FeatureCollection', features: [land, road] }, features: [unit, away] });
+  // The box 0.4..0.6 by 0.4..0.7, a margin of a tenth of the larger side (0.03): a road or a point outside the frame does not widen it.
+  assert.deepEqual([...got].map((x) => Number(x.toFixed(6))), [0.37, 0.37, 0.63, 0.73]);
+  // The terrain pack's coastline counts as land; the margin never leaves the frame.
+  const coast = { type: 'Feature', properties: { kind: 'coastline' }, geometry: { type: 'LineString', coordinates: [[0.01, 0.2], [0.3, 0.99]] } };
+  const wide = contentBounds({ ...base, environment: { contours: { type: 'FeatureCollection', features: [coast] } }, features: [unit] });
+  assert.deepEqual([...wide].map((x) => Number(x.toFixed(6))), [0, 0.121, 0.679, 1]);
 });
 
 // ---- The picture ------------------------------------------------------------------------------------------------------------------------------

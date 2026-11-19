@@ -274,7 +274,10 @@ up yet. The `/team` menu lists the project's staff teams first, labelled by
 section, and each section card in the Staff Room has **Task in chat**. A team
 file deleted or renamed in your teams shows as missing with **Set up again**. A
 project set up before this was recorded is offered the matching teams already in
-your teams to **Link**, after you confirm. **NEAR AI: Update Team…** recognises a
+your teams to **Link**, after you confirm. Staff projects work on one machine
+for now: several people and machines on one staff project are not supported
+yet, because the signed ledgers trust only this computer's key. Multi-user
+staff workspaces are planned. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
@@ -379,14 +382,16 @@ and rough sea, for the time on the slider) are layers you turn on and off,
 drawn offline from a bundled synthetic terrain and weather pack. Once a
 scenario is loaded the map is the room's main panel: the process rail and the
 section cards fold into one line (**Show the process and sections** opens
-them), and the map fills the rest of the panel. Its controls float over it:
+them, and **Staff teams** opens them at the first section's **Task in chat**
+or **Set up**), and the map fills the rest of the panel. Its controls float over it:
 the classification line, **Layers** (a drawer that slides in from the map's
 edge, with the layers grouped as Picture, Environment and Reference, each
 with its count and a SIM badge where the data is simulated), **Globe** (flies
 out until the curve of the earth shows, with the exercise frame ringed in
 gold; **Map** flies back), **As happened** or **As known**, **Map as table**,
 **Full map** (the map over the whole Staff Room; Escape returns) and the time
-slider. The map opens on the whole exercise frame, and units that would cover
+slider. The map opens on the land, the named places and the units with a
+margin, inside the exercise frame (its dashed line stays drawn), and units that would cover
 each other draw as one stacked symbol with a count until you zoom in. Nothing
 moves under reduced motion or Calm. Where WebGL or the map library is not available, the room
 draws a 2D map instead, with the same drawer and the terrain pack's land,
