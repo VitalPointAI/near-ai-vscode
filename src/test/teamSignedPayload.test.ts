@@ -66,7 +66,8 @@ const SAMPLES: Record<PayloadPurpose, unknown> = {
   'label-declassify': { chatId: 'conv-sample-1', from: [{ scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] }], to: [{ scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] }], reason: 'reviewed', at: '2026-11-17T00:00:00.000Z' },
   'staff-ledger': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', run: 'run-1', product: 'intelligence-estimate', section: 'j2', event: { type: 'propose', hash: 'b'.repeat(64) }, actor: { kind: 'agent', member: 'j2-chief' } },
   'staff-ledger-head': { v: 1, count: 1, head: 'c'.repeat(64) },
-  'staff-decision': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', subject: { kind: 'pir', id: 'PIR-1' }, decision: 'approved', wording: 'd'.repeat(64), reasons: [], person: { kind: 'person', name: 'A. Demo', role: 'Commander', deviceFingerprint: 'f'.repeat(16) } }
+  'staff-decision': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', subject: { kind: 'pir', id: 'PIR-1' }, decision: 'approved', wording: 'd'.repeat(64), reasons: [], person: { kind: 'person', name: 'A. Demo', role: 'Commander', deviceFingerprint: 'f'.repeat(16) } },
+  'staff-replica': { v: 2, stream: '1'.repeat(32), writer: 'a'.repeat(64), seq: 0, prev: '0'.repeat(64), epoch: 0, body: { hash: 'b'.repeat(64), size: 128 } }
 };
 
 function failure(verdict: ReturnType<typeof verifyPayload>): PayloadFailureReason | 'ok' {
@@ -123,7 +124,7 @@ test('every purpose round-trips, signed by the device identity and by a plain ag
     assert.equal(failure(agentVerdict), 'ok', purpose);
     if (agentVerdict.ok) assert.deepEqual(agentVerdict.payload, SAMPLES[purpose]);
   }
-  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision']);
+  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica']);
 });
 
 test('an envelope with a member id and one without both verify, and the one without has no memberId key at all', () => {
