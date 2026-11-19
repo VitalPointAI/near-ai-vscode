@@ -932,7 +932,13 @@ a range below the lowest that the ITU allocates, and RSS links point at the
 reserved `.invalid` domain. The partner reports are labelled, marked
 simulated and routed local-only, and a person must add the mock partner
 server before any team can call it. Stopping the simulation, or closing the
-window, closes every server.
+window, closes every server. With a project folder open, the simulation also takes its own CoT, AIS and
+RSS reports straight into that project's observation store (in the extension,
+not over the network), stamped with each simulated feed's label and marked
+simulated, and records the feeds' state changes in the staff event log. The
+person who started the simulation is recorded as the person who approved its
+feeds. The partner feed is never taken in this way. Stopping the simulation
+pauses its feeds in the store.
 
 ### COP map
 
