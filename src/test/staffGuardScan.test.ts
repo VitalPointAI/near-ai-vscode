@@ -101,6 +101,11 @@ test('with an exercise box, an unmarked two-decimal pair outside it is for the g
   ]) {
     assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, text);
   }
+  // The trade-off, stated: a plain pair with no position word is not flagged at all, even when it is a real position outside the box. The rules alone
+  // do not catch it; the release guard's own review and the person who releases the product do (SECURITY.md, guard-scan coordinates).
+  for (const text of ['45.42, 75.69', 'The convoy halts. 45.42, 75.69', 'Then 45.42, 75.69 for the night']) {
+    assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, `${text}: a cue-less pair is a known gap`);
+  }
   // The same pair inside one box and outside another: presented as a position, it is held for the guard's check only outside.
   const elsewhere: GuardConfig = { realEntities: [], exerciseBox: [[20, 30], [22, 30], [22, 32], [20, 32]] };
   assert.deepEqual(scan('Rally point 51.10, 11.10', { config: elsewhere }), { rules: ['unmarked-pair-outside-box'], hold: false });

@@ -742,3 +742,19 @@ test('a battle rhythm event whose repeat the host does not know shows "repeat no
   assert.doesNotMatch(item.textContent, /NaN|Invalid/);
   assert.equal(item.getAttribute('aria-label'), 'Targeting board, no date: repeat not shown, chaired by chief of staff');
 });
+
+test('opener adds its hint only to a label the card already has, and never replaces the name a card\'s content gives it', async () => {
+  const page = await runPage({ reduced: true });
+  const opener = (page.window.NearAiStaffWorkspaces as { opener: (node: FakeNode, action: () => void, hint?: string) => void }).opener;
+  let opened = 0;
+  const bare = page.doc.createElement('article');
+  bare.append('COA B, not drafted yet');
+  opener(bare, () => { opened += 1; }, 'Opens its provenance.');
+  assert.equal(bare.getAttribute('aria-label'), null, 'no label is made from the hint alone');
+  const named = page.doc.createElement('article');
+  named.setAttribute('aria-label', 'COA A. Approved version 2.');
+  opener(named, () => { opened += 1; }, 'Opens its provenance.');
+  assert.equal(named.getAttribute('aria-label'), 'COA A. Approved version 2. Opens its provenance.', 'no doubled full stop');
+  for (const card of [bare, named]) { card.fire('keydown', { key: 'Enter' }); card.fire('keydown', { key: ' ' }); card.click(); assert.equal(card.tabIndex, 0); }
+  assert.equal(opened, 6);
+});

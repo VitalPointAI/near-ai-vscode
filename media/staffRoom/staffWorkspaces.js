@@ -17,6 +17,24 @@
     j4: 'Logistics: every number comes from a calculator record that shows its formula. The J4 never commits resources; a person decides.'
   };
 
+  /**
+   * Makes a card that is not a button open something, from the pointer and from the keyboard alike: it takes focus, and Enter or Space on the card
+   * itself (not on a control inside it) does what a click does. Every clickable card in the workspaces goes through here (drop 2 review).
+   */
+  function opener(node, action, hint) {
+    node.tabIndex = 0;
+    node.classList.add('opens');
+    // The hint is added to a label the card already has; a card without one keeps the name its content gives it.
+    const label = node.getAttribute('aria-label');
+    if (hint && label) node.setAttribute('aria-label', label.replace(/[.\s]+$/, '') + '. ' + hint);
+    node.addEventListener('click', action);
+    node.addEventListener('keydown', (event) => {
+      if (event.target !== node || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      action();
+    });
+  }
+
   function create(h) {
     const panes = new Map();
     const shown = new Map();
@@ -36,22 +54,6 @@
         const more = h.button('Show ' + Math.min(PAGE, items.length - limit) + ' more of ' + (items.length - limit), 'ghost small more', () => { shown.set(key, limit + PAGE); render(h.model()); });
         container.append(more);
       }
-    }
-
-    /**
-     * Makes a card that is not a button open something, from the pointer and from the keyboard alike: it takes focus, and Enter or Space on the card
-     * itself (not on a control inside it) does what a click does. Every clickable card in the workspaces goes through here (drop 2 review).
-     */
-    function opener(node, action, hint) {
-      node.tabIndex = 0;
-      node.classList.add('opens');
-      if (hint) node.setAttribute('aria-label', (node.getAttribute('aria-label') || '') + '. ' + hint);
-      node.addEventListener('click', action);
-      node.addEventListener('keydown', (event) => {
-        if (event.target !== node || (event.key !== 'Enter' && event.key !== ' ')) return;
-        event.preventDefault();
-        action();
-      });
     }
 
     function stat(text, cls, label) { const chip = h.el('span', 'ws-stat ' + (cls || ''), text); if (label) chip.setAttribute('aria-label', label); return chip; }
@@ -683,5 +685,5 @@
     };
   }
 
-  window.NearAiStaffWorkspaces = { create };
+  window.NearAiStaffWorkspaces = { create, opener };
 })();

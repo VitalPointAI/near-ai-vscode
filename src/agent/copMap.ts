@@ -8,8 +8,9 @@
 // Layer ownership is enforced here and again by the host: only a product layer's one writer (resolved for the roster, so a member that stands in for a
 // folded job writes it) changes it, and the change becomes a new version in the release state machine. Anyone else proposes, and the writer merges.
 // Feed layers are views: no tool writes a feature into one; their settings owner is sent proposals. No tool approves, rejects or releases anything.
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, createReadStream } from 'node:fs';
 import { copyFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
 import * as path from 'node:path';
 import {
@@ -75,33 +76,55 @@ async function readSmall(file: string): Promise<string | undefined> {
   return (await readSmallBytes(file))?.toString('utf8');
 }
 
-/**
- * Moves `from` (whose bytes the host read as `bytes`) to a new name next to it, never over a file that is there: the bytes are copied to the first free
- * `<name>.stray-<stamp>[-n]` name, and the original name is removed only if it still holds the bytes read. Returns the new file, or undefined when the
- * original changed meanwhile (the copy is then left too, so nothing is lost either way).
- */
-async function moveAside(from: string, bytes: Buffer, stamp: string): Promise<{ moved: string } | { changed: string }> {
-  let target = '';
-  for (let attempt = 1; ; attempt += 1) {
-    target = `${from}.stray-${stamp}${attempt === 1 ? '' : `-${attempt}`}`;
-    try { await copyFile(from, target, fsConstants.COPYFILE_EXCL); break; } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt >= 50) throw error;
-    }
+/** The sha256 of a file's exact bytes, streamed (any size, any content), or undefined when it is missing. Moving a file is a byte operation, never a text read. */
+async function hashOfFile(file: string): Promise<string | undefined> {
+  try {
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+    return hash.digest('hex');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
   }
-  const copied = await readWhole(target);
-  if (copied.kind !== 'text' || !copied.bytes.equals(bytes) || !(await writeIfUnchanged(from, snapshotOfBytes(bytes), undefined))) return { changed: target };
+}
+
+/**
+ * Moves `from` (whose bytes hash to `hash` when the host looked) to a new name next to it, never over a file that is there. The bytes are compared by
+ * hash only, so a binary or large file moves like any other. An aside copy already holding the same bytes (from an attempt that stopped) is reused, so a
+ * retry never makes another; otherwise the bytes are copied to the first free `<name>.stray-<stamp>[-n]`. The original name is removed only if it still
+ * holds the same bytes. 'changed' means the original changed meanwhile: the copy is left too, so nothing is lost either way.
+ */
+async function moveAside(from: string, hash: string, stamp: string): Promise<{ moved: string } | { changed: string }> {
+  const folder = path.dirname(from);
+  const prefix = `${path.basename(from)}.stray-`;
+  let target: string | undefined;
+  for (const entry of (await readdir(folder)).filter((name) => name.startsWith(prefix)).sort()) {
+    if ((await hashOfFile(path.join(folder, entry))) === hash) { target = path.join(folder, entry); break; }
+  }
+  if (!target) {
+    for (let attempt = 1; ; attempt += 1) {
+      const candidate = `${from}.stray-${stamp}${attempt === 1 ? '' : `-${attempt}`}`;
+      try { await copyFile(from, candidate, fsConstants.COPYFILE_EXCL); target = candidate; break; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt >= 50) throw error;
+      }
+    }
+    if ((await hashOfFile(target)) !== hash) return { changed: target };
+  }
+  if (!(await writeIfUnchanged(from, { exists: true, hash }, undefined))) return { changed: target };
   return { moved: target };
 }
 
-/** Moves a stray copy back to `to` only while `to` is free, removing `from` only if it still holds `bytes`. False when `to` is taken or `from` changed. */
-async function moveBackFrom(from: string, to: string, bytes: Buffer): Promise<boolean> {
+/**
+ * Moves a stray copy back to `to` only while `to` is free, comparing bytes by hash. On a restore whose bytes match, `from` is removed (only if it still
+ * holds them). False when `to` is taken, the restored bytes differ, or `from` changed: every copy is then left where it is.
+ */
+async function moveBackFrom(from: string, to: string, hash: string): Promise<boolean> {
   try { await copyFile(from, to, fsConstants.COPYFILE_EXCL); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
     throw error;
   }
-  const copied = await readWhole(to);
-  if (copied.kind !== 'text' || !copied.bytes.equals(bytes)) return false;
-  return writeIfUnchanged(from, snapshotOfBytes(bytes), undefined);
+  if ((await hashOfFile(to)) !== hash) return false;
+  return writeIfUnchanged(from, { exists: true, hash }, undefined);
 }
 
 /** A new file only: never over one that is there (a member's or another proposal's). */
@@ -375,8 +398,10 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
       const kept = path.join(folder, 'merged', path.basename(file));
       const mergedDir = `${layerProposalFolder(layer)}merged/`;
       const keptName = `${mergedDir}${path.basename(file)}`;
-      const before = await readSmallBytes(kept);
-      const keptAlready = before !== undefined && before.equals(proposalBytes);
+      // The copy there is looked at as bytes (its hash), whatever it holds: binary, large or text.
+      const before = await hashOfFile(kept);
+      const proposalSnapshot = snapshotOfBytes(proposalBytes);
+      const keptAlready = before !== undefined && proposalSnapshot.exists && before === proposalSnapshot.hash;
       let strayFile: string | undefined;
       if (before !== undefined && !keptAlready) {
         const aside = await moveAside(kept, before, now().replace(/[:.]/g, '-'));

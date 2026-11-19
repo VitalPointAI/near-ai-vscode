@@ -190,6 +190,54 @@ test('a stray merged copy a person changes while it is moved aside is kept under
   assert.ok((await readdir(folder)).includes(name), 'the proposal stays');
 });
 
+test('moving a stray merged copy aside is a byte operation: binary and large strays move and come back whole, and a retry makes no second aside copy', async () => {
+  const made = await world();
+  const folder = path.join(made.root, '.planning/staff/proposals/cop-threat-layer');
+  const layerFile = path.join(made.root, layerPath('cop-threat-layer'));
+  const stamp = '2026-11-18T12-00-00-000Z';
+  const propose = async (id: string): Promise<string> => {
+    const before = new Set(await readdir(folder).catch(() => [] as string[]));
+    const done = await call(made, J2_TEAM, 'propose', { layer: 'cop-threat-layer', summary: id, features: [{ id, kind: 'symbol', name: id, sidc: '10013000000000000000', at: 'KQ 4142' }] }, 'watch-officer');
+    assert.ok(done.ok, done.text);
+    return (await readdir(folder)).find((entry) => entry.endsWith('.json') && !before.has(entry))!;
+  };
+  const binary = Buffer.from([0x00, 0xff, 0xfe, 0x80, 0xc3, 0x28, 0x0a]);
+  const large = Buffer.alloc(3 * 1024 * 1024, 0x61);
+  for (const [what, bytes] of [['binary', binary], ['larger than 2 MB', large]] as const) {
+    // Proposal names come from the fixed clock, so each round starts with an empty merged/ (this test's own files only).
+    await rm(path.join(folder, 'merged'), { recursive: true, force: true });
+    const name = await propose(`u-${what === 'binary' ? 'bin' : 'big'}`);
+    const kept = path.join(folder, 'merged', name);
+    await mkdir(path.dirname(kept), { recursive: true });
+    await writeFile(kept, bytes);
+    // A refused merge (the layer file does not read) puts the stray back byte for byte and leaves no aside copy.
+    await mkdir(path.dirname(layerFile), { recursive: true });
+    await writeFile(layerFile, '```geojson\n{ not json\n```\n');
+    const refused = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
+    assert.equal(refused.ok, false);
+    assert.doesNotMatch(refused.text, /changed while/, `${what}: nothing changed, so the refusal is the layer's own`);
+    assert.ok((await readFile(kept)).equals(bytes), `${what}: the stray is back byte for byte`);
+    assert.deepEqual((await readdir(path.dirname(kept))).filter((entry) => entry.startsWith(`${name}.stray-`)), [], `${what}: the restored stray's aside copy is removed`);
+    // With the layer readable, the merge moves the stray aside whole and goes on.
+    await rm(layerFile);
+    const merged = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
+    assert.ok(merged.ok, `${what}: ${merged.text}`);
+    assert.ok((await readFile(`${kept}.stray-${stamp}`)).equals(bytes), `${what}: moved aside byte for byte`);
+    assert.match(await readFile(kept, 'utf8'), what === 'binary' ? /u-bin/ : /u-big/);
+  }
+  // Retry: an aside copy with the same bytes (left by an attempt that stopped) is reused, so no second aside copy is made.
+  await rm(path.join(folder, 'merged'), { recursive: true, force: true });
+  const name = await propose('u-retry');
+  await mkdir(path.join(folder, 'merged'), { recursive: true });
+  const kept = path.join(folder, 'merged', name);
+  await writeFile(kept, binary);
+  await writeFile(`${kept}.stray-2026-01-01T00-00-00-000Z`, binary);
+  const retried = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
+  assert.ok(retried.ok, retried.text);
+  assert.deepEqual((await readdir(path.dirname(kept))).filter((entry) => entry.startsWith(`${name}.stray-`)), [`${name}.stray-2026-01-01T00-00-00-000Z`], 'no second aside copy');
+  assert.ok(retried.text.includes(`moved to .planning/staff/proposals/cop-threat-layer/merged/${name}.stray-2026-01-01T00-00-00-000Z`), retried.text);
+});
+
 test('feed layers take no features from anyone, and a settings change goes to their settings owner as a proposal', async () => {
   const made = await world();
   for (const member of ['watch-officer', 'threat-analyst']) {
