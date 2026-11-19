@@ -2,7 +2,8 @@
 // one tradecraft rule set, the staff tools granted by role in both templates, one owner per shared product in every rendering, and one real-entity
 // list that guard-scan and the scenario loader both hold to.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -22,8 +23,8 @@ import { HUMAN_ONLY_EVENTS } from '../domain/staff/release';
 import { staffGuardFolder, staffProductPath } from '../domain/staff/writeLimits';
 import { loadScenarioIntoProject, STARTER_SCENARIO_FILE } from '../services/staffScenarioLoader';
 import { readRealEntities } from '../staff/realEntities';
-import { productPath, SOURCES_FILE } from '../staff/staffHost';
-import { callTool, CLEAN_BODY, J5_TEAM, staffWorld, writeBody } from './helpers/staffFixtures';
+import { LEDGER_DIR, LEDGER_FILE, productPath, SOURCES_FILE } from '../staff/staffHost';
+import { callTool, CLEAN_BODY, hashIn, J5_TEAM, staffWorld, writeBody } from './helpers/staffFixtures';
 
 const members = (team: string) => parseTeam(team, '/p/team.md').members;
 
@@ -183,4 +184,77 @@ test('every product the demo scripts and acceptance fixtures name is a product i
       }
     }
   }
+});
+
+// ---- Review round 1 -------------------------------------------------------------------------------------------------------------------------------
+
+const ledgerCount = async (root: string): Promise<number> => (await readFile(path.join(root, LEDGER_DIR, LEDGER_FILE), 'utf8').catch(() => '')).split('\n').filter(Boolean).length;
+
+test('the host checks the role, not the grant: only the recorded gate gives a verdict, only the owner or lead submits, only the owner withdraws', async () => {
+  const world = await staffWorld();
+  await writeBody(world.root, 'j5', 'concept-of-operations', CLEAN_BODY);
+  const proposed = await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: 'concept-of-operations', kind: 'plan' }, 'lead-planner');
+  assert.ok(proposed.ok, proposed.text);
+  const hash = hashIn(proposed.text);
+  const before = await ledgerCount(world.root);
+  // A team file that grants verdict to the owner, the section lead or another member changes nothing: the host refuses before reading anything.
+  for (const member of ['lead-planner', 'j5-chief', 'plans-writer']) {
+    const cleared = await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: 'concept-of-operations', gate: 'guard', verdict: 'CLEARED', hash }, member);
+    assert.match(cleared.text, /Only the product's release-guard/, `${member} cannot clear`);
+  }
+  const wrongGate = await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: 'concept-of-operations', gate: 'tradecraft', verdict: 'SIGN-OFF', hash }, 'release-guard');
+  assert.match(wrongGate.text, /no tradecraft gate/, 'a J5 product has no tradecraft gate for anyone to sign');
+  const submit = await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: 'concept-of-operations', decisionFor: 'commander' }, 'plans-writer');
+  assert.match(submit.text, /Only the product's owner or the section lead/);
+  const withdraw = await callTool(world, J5_TEAM, 'mcp__staff-products__withdraw', { product: 'concept-of-operations', reason: 'not mine' }, 'release-guard');
+  assert.match(withdraw.text, /Only the product's owner or a person/);
+  assert.equal(await ledgerCount(world.root), before, 'no refused call recorded anything');
+  const guard = await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: 'concept-of-operations', gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard');
+  assert.ok(guard.ok && /CLEARED recorded/.test(guard.text), guard.text);
+});
+
+test('a product file over 2 MB is reported as too large, never as missing, and a too-large register is never overwritten', async () => {
+  const world = await staffWorld();
+  const big = `# Big\n\n${'x'.repeat(2 * 1024 * 1024 + 10)}\n`;
+  await writeBody(world.root, 'j5', 'concept-of-operations', big);
+  const proposed = await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: 'concept-of-operations', kind: 'plan' }, 'lead-planner');
+  assert.match(proposed.text, /larger than 2 MB, so it was not read/);
+  assert.doesNotMatch(proposed.text, /Write the product first/);
+  const scan = await callTool(world, J5_TEAM, 'mcp__guard-scan__scan', { product: 'concept-of-operations' }, 'release-guard');
+  assert.match(scan.text, /larger than 2 MB/);
+  await writeBody(world.root, 'j5', 'facts-assumptions-ledger', big);
+  const write = await callTool(world, J5_TEAM, 'mcp__staff-products__register', { action: 'write', register: 'facts-assumptions-ledger', rows: [{ id: 'A-1' }] }, 'lead-planner');
+  assert.match(write.text, /could not be read, so nothing was changed/, 'the write is refused');
+  assert.equal((await readFile(path.join(world.root, staffProductPath('j5', 'facts-assumptions-ledger')), 'utf8')).length, big.length, 'the register file is untouched');
+});
+
+test('a scenario that fails part way leaves the earlier scenario in place and no partial one', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-scenario-swap-'));
+  const starter = await readFile(STARTER_SCENARIO_FILE, 'utf8');
+  const first = await loadScenarioIntoProject(root, starter, { now: new Date('2026-11-18T10:00:00Z') });
+  assert.ok(first.ok);
+  const before = await readFile(path.join(root, '.planning/staff/scenario/README.md'), 'utf8');
+  // The swap fails when the new scenario folder is moved into place, after the old one was archived.
+  const failing = async (from: string, to: string): Promise<void> => {
+    if (from.includes('.scenario-staging-') && to.endsWith(path.join('.planning', 'staff', 'scenario'))) throw new Error('disk full');
+    await rename(from, to);
+  };
+  const second = await loadScenarioIntoProject(root, starter, { now: new Date('2026-11-18T11:00:00Z'), rename: failing });
+  assert.equal(second.ok, false);
+  assert.match(second.ok ? '' : second.message, /earlier scenario was kept.*disk full/);
+  assert.equal(await readFile(path.join(root, '.planning/staff/scenario/README.md'), 'utf8'), before, 'the earlier scenario is back');
+  assert.ok(existsSync(path.join(root, '.planning/staff/demo/j2-demo-script.md')), 'its demo scripts are back');
+  const staff = await readdir(path.join(root, '.planning/staff'));
+  assert.ok(!staff.some((name) => name.startsWith('.scenario-staging-')), 'no staging folder is left');
+  assert.deepEqual(await readdir(path.join(root, '.planning/staff/archive')).catch(() => []), [], 'nothing is left in the archive');
+  const third = await loadScenarioIntoProject(root, starter, { now: new Date('2026-11-18T12:00:00Z') });
+  assert.ok(third.ok, 'a normal load still works afterwards');
+});
+
+test('the starter scenario is a required release asset, so packaging cannot drop it', async () => {
+  const verifier = await readFile(path.join(__dirname, '..', '..', 'scripts', 'verify-release-content.mjs'), 'utf8');
+  const relative = path.relative(path.join(__dirname, '..', '..'), STARTER_SCENARIO_FILE).split(path.sep).join('/');
+  assert.equal(relative, 'resources/staff/scenarios/iron-lantern.json');
+  assert.ok(verifier.includes(`'extension/${relative}'`), 'verify-release-content.mjs requires the starter scenario');
+  assert.ok(existsSync(STARTER_SCENARIO_FILE));
 });

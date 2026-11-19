@@ -106,6 +106,8 @@ const required = [
   'extension/resources/benchmark/execution/execute-plan/task.json',
   'extension/resources/benchmark/execution/issue-fix/hidden/report.test.js',
   'extension/resources/benchmark/execution/spec-implement/start/SPEC.md',
+  // The staff teams' starter scenario, read at run time by NEAR AI: Load Staff Exercise Scenario and the staff setup.
+  'extension/resources/staff/scenarios/iron-lantern.json',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];

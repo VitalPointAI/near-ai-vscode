@@ -14,6 +14,8 @@ export const REPLACE_ACTION = 'Replace';
 export interface StaffScenarioDeps {
   /** Asks for a scenario file; the default is VS Code's open dialog. */
   readonly pickFile?: () => Promise<string | undefined>;
+  /** Loads the checked text into the project; the default is loadScenarioIntoProject. Tests pass one that fails. */
+  readonly load?: typeof loadScenarioIntoProject;
 }
 
 async function pickFolder(): Promise<string | undefined> {
@@ -63,7 +65,15 @@ export async function loadStaffScenario(deps: StaffScenarioDeps = {}): Promise<v
     if (answer !== REPLACE_ACTION) return;
   }
 
-  const result = await loadScenarioIntoProject(root, text);
+  // A write that fails part way (a full disk, a folder the person cannot write) is a refusal the person sees, not an unhandled rejection; the loader
+  // has already put any earlier scenario back.
+  let result: Awaited<ReturnType<typeof loadScenarioIntoProject>>;
+  try {
+    result = await (deps.load ?? loadScenarioIntoProject)(root, text);
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Scenario not loaded. ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
   if (!result.ok) { void vscode.window.showErrorMessage(`Scenario not loaded. ${result.message}`); return; }
   const notes = [
     `${result.scenario.title} loaded into ${SCENARIO_DIR}/.`,

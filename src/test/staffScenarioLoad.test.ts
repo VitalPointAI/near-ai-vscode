@@ -160,3 +160,15 @@ test('a bad file is refused with the reason and the project is untouched', async
   assert.match(last?.message ?? '', /^Scenario not loaded\./);
   assert.ok(!existsSync(path.join(root, '.planning')));
 });
+
+test('a write that fails while loading shows "Scenario not loaded" with the reason, and is never an unhandled rejection', async () => {
+  const root = await project();
+  stub.setWorkspaceFolders([root]);
+  const context = createFakeContext(root, undefined);
+  command.registerStaffScenario(context as never, { load: async () => { throw new Error('EACCES: permission denied, mkdir .planning/staff'); } });
+  stub.quickPickAnswers.push(command.STARTER_PICK);
+  await assert.doesNotReject(async () => { await stub.commands.get(command.LOAD_STAFF_SCENARIO_COMMAND)!(); });
+  const last = stub.notifications.at(-1);
+  assert.equal(last?.level, 'error');
+  assert.match(last?.message ?? '', /^Scenario not loaded\. EACCES: permission denied/);
+});
