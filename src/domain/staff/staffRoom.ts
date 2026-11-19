@@ -621,8 +621,10 @@ const HASH = /^[a-f0-9]{64}$/;
 const RUN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const OPEN_TARGETS = ['team-live', 'load-scenario', 'set-up-staff', 'show-products'] as const;
 
+/** The message has exactly these keys, each its own: no extra key and none missing (drop 2 review). */
 function exact(message: Record<string, unknown>, keys: readonly string[]): boolean {
-  return Object.keys(message).every((key) => keys.includes(key));
+  const own = Object.keys(message);
+  return own.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(message, key));
 }
 
 /** Validates a message from the page: its type, its exact keys, and the form of every value. */

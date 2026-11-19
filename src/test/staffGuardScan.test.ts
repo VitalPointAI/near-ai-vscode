@@ -65,14 +65,22 @@ test('two-decimal coordinates are held and geofenced too; money, versions, perce
   // Review round 5 of drop 1: "45.42, -75.69" (about a kilometre) was never held.
   assert.deepEqual(scan('Rally point 45.42, -75.69').rules, ['coordinates-without-box']);
   assert.deepEqual(scan('Rally point 45.42, -75.69', { config: BOX }).rules, ['outside-exercise-box']);
-  assert.deepEqual(scan('Rally point 51.10, 11.10', { config: BOX }).rules, [], 'inside the box');
-  assert.deepEqual(scan('Rally point 51.10, 13.10', { config: BOX }).rules, ['outside-exercise-box']);
+  assert.deepEqual(scan('Rally point 51.10 N, 11.10 E', { config: BOX }).rules, [], 'inside the box');
+  assert.deepEqual(scan('Rally point 51.10 N, 13.10 E', { config: BOX }).rules, ['outside-exercise-box']);
+  assert.deepEqual(scan('Rally point 51.10°, 13.10°', { config: BOX }).rules, ['outside-exercise-box'], 'a degree sign reads as a position');
+  assert.deepEqual(scan('Rally point 51.10°N, 13.10°E').rules, ['coordinates-without-box']);
+  assert.deepEqual(coordinatesIn('at 51.10°, 11.10°')[0].point, [11.1, 51.1]);
   assert.deepEqual(coordinatesIn('at 45.42 N, 75.69 W')[0].point, [-75.69, 45.42]);
   assert.deepEqual(coordinatesIn('at -5.25, 39.10')[0].point, [39.1, -5.25], 'a minus sign reads as a position');
   for (const text of [
     'Costs 1.25, 3.50 and 12.5', 'Prices $12.50, $13.75 and €10.20, 11.40', 'Upgrade from v10.12, v11.04', 'Shares 45.42%, 54.58%', 'Version 1.2.3, 4.5.6',
-    'Ratios 1.25, 2.50', 'Totals 1,245.42, 2,075.69', 'Rates 0.25, 0.50', 'Release 10.12.04, 11.04.01'
-  ]) assert.deepEqual(scan(text).rules, [], text);
+    'Ratios 1.25, 2.50', 'Totals 1,245.42, 2,075.69', 'Rates 0.25, 0.50', 'Release 10.12.04, 11.04.01',
+    // Drop 2 review: plain two-digit decimals are not positions without a hemisphere letter, a minus sign or a degree sign.
+    '12.50, 3.50', 'Unit prices 12.50, 3.50', 'Scores 45.42, 54.58', 'Rally point 51.10, 11.10'
+  ]) {
+    assert.deepEqual(scan(text).rules, [], text);
+    assert.deepEqual(scan(text, { config: BOX }).rules, [], `${text} (with a box)`);
+  }
   assert.equal(coordinatesIn('Not a pair: 45.42 then 75.69').length, 0, 'a pair is separated by a comma');
   assert.equal(coordinatesIn('Out of range 95.42, 75.69').length, 0, 'a latitude past 90 is no position');
 });

@@ -52,7 +52,7 @@ const nonce = 'c3Bpa2Vub25jZTEyMzQ=';
 const csp = copMapCsp(R, nonce);
 const html = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}">
 <link rel="stylesheet" href="${R}/vendor/maplibre-gl/maplibre-gl.css"><link rel="stylesheet" href="${R}/staff/copMap.css"></head>
-<body><div id="map"></div><script nonce="${nonce}" src="${R}/staff/copMap.js"></script><script nonce="${nonce}">
+<body><div id="map"></div><script nonce="${nonce}" src="${R}/staff/declutter.js"></script><script nonce="${nonce}" src="${R}/staff/copMap.js"></script><script nonce="${nonce}">
 window.__out = { violations: [], steps: [] };
 document.addEventListener('securitypolicyviolation', (e) => window.__out.violations.push(e.violatedDirective + ' ' + e.blockedURI));
 (async () => {

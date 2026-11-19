@@ -126,11 +126,12 @@ const QUANTITY = /\b\d[\d,]*(?:\.\d+)?\s*(?:litres?|liters?|L|gallons?|gal|short
 
 const DECIMAL_PAIR = /(?<![\d.[])(-?\d{1,2}\.\d{3,})\s*°?\s*([NS])?\s*[,;/ ]\s*(-?\d{1,3}\.\d{3,})\s*°?\s*([EW])?(?!\d|\.\d)/g;
 /**
- * A latitude and longitude written to two decimals ("45.42, -75.69", about a kilometre). Short decimals are also money, versions and measures, so a pair
- * counts only when it is separated by a comma, is not part of a longer number or a word (v1.25, $12.50, 12.50%), and reads as a position: a hemisphere
- * letter, a minus sign, or a latitude of two digits. "Costs 1.25, 3.50" is not one.
+ * A latitude and longitude written to two decimals ("45.42, -75.69", about a kilometre). Short decimals are also money, versions, scores and measures, so
+ * a pair counts only when it is separated by a comma, is not part of a longer number or a word (v1.25, $12.50, 12.50%), and is marked as a position: a
+ * hemisphere letter, a minus sign or a degree sign. Plain numbers are never held: "12.50, 3.50" and "51.10, 11.10" are not positions, while
+ * "51.10 N, 11.10 E", "51.10°, 11.10°" and "45.42, -75.69" are.
  */
-const TWO_DECIMAL_PAIR = /(?<![\w.[$€£¥]|\d,)(-?\d{1,2}\.\d{2})\s*°?\s*([NS])?\s*,\s*(-?\d{1,3}\.\d{2})\s*°?\s*([EW])?(?![\d%]|\.\d|\s*%)/g;
+const TWO_DECIMAL_PAIR = /(?<![\w.[$€£¥]|\d,)(-?\d{1,2}\.\d{2})\s*(°)?\s*([NS])?\s*,\s*(-?\d{1,3}\.\d{2})\s*(°)?\s*([EW])?(?![\d%]|\.\d|\s*%)/g;
 const GEOJSON_PAIR = /\[\s*(-?\d{1,3}\.\d{3,})\s*,\s*(-?\d{1,2}\.\d{3,})\s*\]/g;
 const DMS_PAIR = /(\d{1,2})°\s*(\d{1,2})['′]\s*(?:(\d{1,2}(?:\.\d+)?)["″]\s*)?([NS])[,\s]+(\d{1,3})°\s*(\d{1,2})['′]\s*(?:(\d{1,2}(?:\.\d+)?)["″]\s*)?([EW])/g;
 const MGRS = /\b\d{1,2}[C-HJ-NP-X]\s?[A-HJ-NP-Z]{2}\s?(?:\d{2}\s?\d{2}|\d{3}\s?\d{3}|\d{4}\s?\d{4}|\d{5}\s?\d{5})\b/;
@@ -180,10 +181,11 @@ export function coordinatesIn(line: string): Array<{ point: [number, number]; in
     push(lon, lat, match.index ?? 0, match[0]);
   }
   for (const match of line.matchAll(TWO_DECIMAL_PAIR)) {
-    const positional = match[2] !== undefined || match[4] !== undefined || match[1].startsWith('-') || match[3].startsWith('-') || /^\d{2}\./.test(match[1]);
+    const [, latText, latDegree, ns, lonText, lonDegree, ew] = match;
+    const positional = ns !== undefined || ew !== undefined || latDegree !== undefined || lonDegree !== undefined || latText.startsWith('-') || lonText.startsWith('-');
     if (!positional) continue;
-    const lat = Number(match[1]) * (match[2] === 'S' ? -1 : 1);
-    const lon = Number(match[3]) * (match[4] === 'W' ? -1 : 1);
+    const lat = Number(latText) * (ns === 'S' ? -1 : 1);
+    const lon = Number(lonText) * (ew === 'W' ? -1 : 1);
     push(lon, lat, match.index ?? 0, match[0]);
   }
   return out;

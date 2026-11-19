@@ -123,6 +123,18 @@ export async function writeFactors(root: string, factors: readonly PlanningFacto
   await writeFile(path.join(root, FACTORS_FILE), JSON.stringify({ factors }, null, 2), 'utf8');
 }
 
+/**
+ * The text inside a staff read tool's untrusted-content fence (src/agent/staffFence.ts), after checking the answer is fenced whole and names `tool`
+ * (mcp__<server>__<verb>) as its source.
+ */
+export function unfenced(text: string, tool: string): string {
+  const source = tool.replace(/^mcp__(.+?)__/, '$1: ');
+  const match = /^<untrusted-content id="([0-9a-f]{8})" source="([^"]*)">\n([\s\S]*)\n<\/untrusted-content id="\1">$/.exec(text);
+  if (!match) throw new Error(`Not fenced: ${text.slice(0, 200)}`);
+  if (match[2] !== source) throw new Error(`Fenced as ${match[2]}, not ${source}`);
+  return match[3];
+}
+
 export const HASH = /hash ([0-9a-f]{64})/;
 
 export function hashIn(text: string): string {

@@ -170,7 +170,8 @@ export function staffRoomHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cs
 <div id="app" class="app" data-cop-resources="${attribute(JSON.stringify({ maplibre: cop.maplibre, worker: cop.worker, milsymbol: cop.milsymbol }))}"></div>
 <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>
 <div id="alert" class="visually-hidden" role="alert" aria-live="assertive"></div>
-${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.script}"></script>
+${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.declutter}"></script>
+<script nonce="${nonce}" src="${cop.script}"></script>
 <script nonce="${nonce}" src="${asset('staffMap.js')}"></script>
 <script nonce="${nonce}" src="${asset('staffRoom.js')}"></script></body></html>`;
 }

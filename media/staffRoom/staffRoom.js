@@ -45,6 +45,7 @@
   let clockBase = { at: 0, received: 0 };
   let announceQueue = [];
   let announceTimer;
+  let noticeTimer;
 
   const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : undefined;
   /** Whether anything may move: not under reduced motion, not in Calm, not while the panel is hidden. */
@@ -1081,7 +1082,8 @@
     if (index >= 0) { event.preventDefault(); switchTo(WORKSPACES[index], true); const tab = nodes.tabButtons.get(WORKSPACES[index]); if (tab) tab.focus(); return; }
     if (key === 'd') {
       event.preventDefault();
-      const first = nodes.decList.children.find ? nodes.decList.children.find((li) => li.dataset && li.dataset.product) : [...nodes.decList.children].find((li) => li.dataset && li.dataset.product);
+      // children is an HTMLCollection, which has no find: spread it first.
+      const first = [...nodes.decList.children].find((li) => li.dataset && li.dataset.product);
       const actionButton = first ? findButton(first) : undefined;
       if (actionButton) actionButton.focus(); else { nodes.decideHead.tabIndex = -1; nodes.decideHead.focus(); announce('Nothing waiting for a person.'); }
       return;
@@ -1100,11 +1102,13 @@
     return undefined;
   }
 
+  // One hide timer, kept: a newer notice clears the older one's, so it shows its own full 6 seconds rather than hiding when the older one's ends.
   function showNotice(text) {
     nodes.notice.textContent = text;
     nodes.notice.hidden = false;
     announce(text);
-    setTimeout(() => { nodes.notice.hidden = true; }, 6000);
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { noticeTimer = undefined; nodes.notice.hidden = true; }, 6000);
   }
 
   // ---------- start ----------

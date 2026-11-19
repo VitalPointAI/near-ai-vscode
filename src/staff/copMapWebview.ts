@@ -18,6 +18,8 @@ import type { StaffSectionId } from '../domain/staff/doctrine';
 
 /** The vendored files the page loads, relative to the extension's media folder. */
 export const COP_MAP_FILES = {
+  /** The SVG maps' shared label placement (window.nearDeclutter): loaded before the map script and the Staff Room's map. */
+  declutter: 'staff/declutter.js',
   script: 'staff/copMap.js',
   style: 'staff/copMap.css',
   maplibre: 'vendor/maplibre-gl/maplibre-gl.mjs',

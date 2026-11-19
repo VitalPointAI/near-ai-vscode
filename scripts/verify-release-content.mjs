@@ -104,6 +104,13 @@ const required = [
   'extension/media/teams/teams.css',
   'extension/media/compare/compare.js',
   'extension/media/compare/compare.css',
+  // The Staff Room page and the COP map component; declutter.js is the SVG maps' shared label placement, which both maps need.
+  'extension/media/staff/declutter.js',
+  'extension/media/staff/copMap.js',
+  'extension/media/staff/copMap.css',
+  'extension/media/staffRoom/staffMap.js',
+  'extension/media/staffRoom/staffRoom.js',
+  'extension/media/staffRoom/staffRoom.css',
   'extension/resources/benchmark/execution/execute-plan/task.json',
   'extension/resources/benchmark/execution/issue-fix/hidden/report.test.js',
   'extension/resources/benchmark/execution/spec-implement/start/SPEC.md',

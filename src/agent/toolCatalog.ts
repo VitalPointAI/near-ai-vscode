@@ -73,7 +73,7 @@ export const TOOL_DEFINING_FILES: readonly string[] = [
 ];
 const TOOL_CARRYING_FILES: readonly string[] = [
   'src/agent/toolCatalog.ts', 'src/agent/loop.ts', 'src/agent/gateAdapter.ts', 'src/services/agentSession.ts', 'src/services/toolsDirectory.ts', 'src/services/cyberRun.ts', 'src/services/mcpRegistry.ts',
-  'src/agent/staffGrantGate.ts', 'src/agent/staffServers.ts'
+  'src/agent/staffGrantGate.ts', 'src/agent/staffServers.ts', 'src/agent/staffFence.ts'
 ];
 export const CATALOG_TOOL_FILES: readonly string[] = [...TOOL_DEFINING_FILES, ...TOOL_CARRYING_FILES];
 

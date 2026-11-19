@@ -639,7 +639,27 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'bd922f2557768cc8',
           'a390de2f9bb331b6',
           '9cdc03bc35882274',
-          '396e38c2eeb2e90d'
+          '396e38c2eeb2e90d',
+          '89cb58b90ea1bd17',
+          'a93bf1e92683485b',
+          'da13e5459ee50a3d',
+          '6d12ea7267b396d4',
+          '35510e71bba2e6c8',
+          '72992d6a6f796c4a',
+          'da75f75e2a0bfbca',
+          'badc5256a0480e63',
+          '61cc3beb64a3257c',
+          'e5e5c768b1d1c1d1',
+          '56b2a486796b4a4d',
+          '388dfbc099f6203a',
+          '90a0bba3dc8ef090',
+          'bc3f4f1c44fff833',
+          'abad9e1a445d28d3',
+          '78547f172217fedb',
+          'f8eb208565d74da2',
+          'e730f8e9e40b9c9b',
+          'c692459f0ec83dd3',
+          'f0d66751d367f95d'
         ],
         'requirements-manager': [
           'a7505f756deef82a',
@@ -662,13 +682,24 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '4ef9d0d0093f7cc7',
           'fb38e557a33b1207',
           '86f45c300345de4f',
-          'bd16f11cf8568310'
+          'bd16f11cf8568310',
+          '0a88c8e7e90e4320',
+          '8efa15e208a9c210',
+          'd2e361bb52ff8d6d',
+          '99705bedee6463e7',
+          'a70e2e0031b819d0',
+          '691696b35973bf50',
+          '2bcd3d144381018d'
         ],
         'jipoe-analyst': [
           '54cf668fcd1bc3d8',
           '9501e05d67428666',
           '2fbc056975574fe5',
-          '38d6729f5ab445df'
+          '38d6729f5ab445df',
+          '2a844de452466969',
+          '879a46482344d795',
+          '0921867d2319b846',
+          '191108218c0ac839'
         ],
         'threat-analyst': [
           'e0da731f358d42ca',
@@ -678,13 +709,25 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '6b30760efeee1e51',
           'f8c54c760d3f2c18',
           '2c434decdc19e58d',
-          '5d998d6cf65f5618'
+          '5d998d6cf65f5618',
+          'c0346c6115cb7984',
+          'ea3ae9ec8e73735a',
+          'ca6364c69530605f',
+          'e1aef0c9efcbfd59',
+          '27de34a47bbbb324',
+          '6fec556e3bd590e3',
+          '30de131be00a3596',
+          '2efc7a58dfea6939'
         ],
         'warning-analyst': [
           '2b5b2aeff011ec19',
           '79c9074bf973cbd4',
           '6428d6df7aa20720',
-          'e5f0e86d12fb1be3'
+          'e5f0e86d12fb1be3',
+          'f280fee949a9f023',
+          '995eb551e95b0e84',
+          '216c27b5086e9f3f',
+          '08bc3f4d32dfcf99'
         ],
         'red-cell': [
           'e4019a86a5a23a34',
@@ -717,13 +760,21 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '3328aeffe9842ebc',
           '1dbf36ed786b83f6',
           '2e1438175f499dd8',
-          'e9e9d77b53d6459a'
+          'e9e9d77b53d6459a',
+          'f7d3e68d285a0923',
+          '434418a6259ecb96',
+          'b03ed745f78e9456',
+          'f28ebf4e36d34f8d'
         ],
         'osint-analyst': [
           'b50a5ed605466607',
           'cb3966b3b6cd8ea8',
           '6399b977071edf79',
-          '2ca2278875c85874'
+          '2ca2278875c85874',
+          'e1a4fba2db1db5c4',
+          'ed1a2eb966c123db',
+          '2317abe7bd7a6f0c',
+          '9853fcebfe0b336e'
         ],
         'watch-officer': [
           '697ccc09d5b04f8e',
@@ -735,11 +786,23 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '621754b33484241d',
           '03d23235441542ff',
           'c88e00ad0d99a928',
-          '84c905e4b5b65091'
+          '84c905e4b5b65091',
+          '55ad8e24e36f570b',
+          'b54000b6a9b76ab5',
+          'b9fe06e5fdb7a90f',
+          'a4b66fb3a1927e00',
+          '39d8d9e5f24af6f5',
+          '7915e4c8e1a52c37',
+          '2b898b3af2facf00',
+          '6e07984ddc5f5635',
+          '32da304c23bf30ee',
+          'ca2275e3b77bdfb0'
         ],
         'target-analyst': [
           'dec983630cabfaae',
-          'b9e131c32367aa7f'
+          'b9e131c32367aa7f',
+          '7dab6ff5f9385829',
+          '5d0de8bb43ffc734'
         ],
         's2-lead': [
           'c8742c5314f57c42',
@@ -751,7 +814,17 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '0136ec4f781ace02',
           'd7cfd4a51963274a',
           '7479837ac02419d4',
-          'c9fcdd3ab78e72d1'
+          'c9fcdd3ab78e72d1',
+          'dfefd3e373b63d15',
+          'db8850466734d0b0',
+          'd15007871bc925c8',
+          '88ae01f31f726a77',
+          'b7d79549366330f4',
+          'ad37e56f69f15bf6',
+          '2b51440c99e2bcd1',
+          '044b2a8d33242a18',
+          '4b397703b80f148a',
+          'c4dd10e94c2f31de'
         ],
         'ipb-analyst': [
           'c58f4bfdf92f9251',
@@ -761,7 +834,15 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '2004c4c125173a4f',
           '9a945842ea274a1a',
           '9d1f69f27fd33cca',
-          'eccdab5547829a51'
+          'eccdab5547829a51',
+          '6dc4bc855306848d',
+          '1aee5108ea6bbae6',
+          '1b80f5b6fe4e8357',
+          '11788487e71a871e',
+          '91a2bd0cdda885c8',
+          '9d735d03057953a6',
+          'b99c418d1f78f41e',
+          '25c777fc410454bf'
         ]
       }
     }
