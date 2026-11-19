@@ -591,7 +591,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j2-intelligence': [
     {
       version: 1,
-      definition: 'e879d36f96c74e36',
+      definition: 'c688a5572bcbca54',
       guidance: [
         '8c12c625cdb08b4b',
         'bd0fd1276a805473',
@@ -642,12 +642,12 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'f0d66751d367f95d'
         ],
         'requirements-manager': [
-          'a7505f756deef82a',
-          '8ef0ae1d3d929f3a',
-          'd428d65c584ea89a',
-          '9dfc3d01c1aafbc6',
-          'fb841cee1cefdd39',
-          '777919be1c390fc7'
+          '54352c88df675739',
+          '18295782608b96f9',
+          '3b8ace542f35da73',
+          'df1ea2129eba44e5',
+          '7a6f7357f8375cf4',
+          '25ba099d297a7e29'
         ],
         'collection-manager': [
           '0a88c8e7e90e4320',

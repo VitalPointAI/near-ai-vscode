@@ -17,14 +17,15 @@
 // which can only propose, give a gate verdict, submit, withdraw, read and write registers, record the wargame and mark a step. And a person, through
 // the VS Code commands (src/services/staffCommands.ts), which alone can approve, reject, release or supersede, signed with this device's key. The state
 // machine refuses a decision from any agent whatever this host is asked, so the two paths never meet.
-import { decidePir as decidePirEntry, parseRegisterText, registerPath, renderRegister, trustPirDecisions } from '../domain/staff/intel';
+import { decidePir as decidePirEntry, parseRegisterText, pirRegisterProductBody, registerPath, renderRegister, trustPirDecisions } from '../domain/staff/intel';
 import type { PirEntry } from '../domain/staff/intel';
 import { DECISION_LOG_FILE, DECISION_LOG_GENESIS, pirWording, replayPersonDecisions } from '../domain/staff/personDecisions';
 import type { DecisionReplay, PersonDecisionEntry } from '../domain/staff/personDecisions';
 import { withRegisterLock } from './registerLock';
+import { readWhole, snapshotOfBytes, writeIfUnchanged } from './staffFiles';
 import { GUARD_CONFIG_FILE } from '../domain/staff/realEntities';
 import { readRealEntities } from './realEntities';
-import { staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
+import { staffProductPath, staffWriteLimit, staffWriteLimitKinds, writeAllowedBy } from '../domain/staff/writeLimits';
 import { mkdir, readFile, readdir, rename, rm, appendFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
@@ -59,7 +60,6 @@ import type { TradecraftFinding } from '../domain/staff/tradecraftLint';
 import { checkOrder, deriveFromWargame, parseWargamePhase, wargameTurnEvent } from '../domain/staff/wargame';
 import type { WargameEntry } from '../domain/staff/wargame';
 import { withFileLock } from '../services/stateMirrorLock';
-import { writeFileAtomic } from '../team/teamFile';
 
 export const LEDGER_DIR = '.planning/staff/ledger';
 export const LEDGER_FILE = 'products.jsonl';
@@ -88,6 +88,9 @@ const MAX_EVENTS_READ = 20_000;
 
 /** The J2 products the tradecraft gate reads beside the product it checks, by their conventional names (design 10, 3.2). */
 export const J2_LINT_INPUTS = { pirs: 'pir-register', hvts: 'hvt-list', adversaryCoas: 'adversary-coa-set' } as const;
+/** The J2 PIR register product: generated from the workbench's JSON register, the one source of PIRs (review round 4). */
+export const PIR_REGISTER_PRODUCT = 'pir-register';
+const PIR_REGISTER_ELSEWHERE = 'The PIR register is kept by the intel workbench (pir_add, pir_update; a person decides with NEAR AI: Staff: Decide a PIR), and its product is generated with pir_publish. It is not written through this tool.';
 
 export function productPath(section: StaffSectionId, product: string): string {
   return staffProductPath(section, product);
@@ -141,23 +144,6 @@ function isoOf(ms: number): string {
 async function readText(file: string): Promise<string | undefined> {
   const read = await readWhole(file);
   return read.kind === 'text' ? read.text : undefined;
-}
-
-/**
- * A ledger or log read in full, or why not. A file that is there but cannot be read whole (over the size limit, or refused by the disk) is
- * `unreadable`, never empty: an empty read would show no products and let the next write start the chain again on top of the old file.
- */
-type WholeRead = { readonly kind: 'missing' } | { readonly kind: 'text'; readonly text: string } | { readonly kind: 'unreadable'; readonly reason: string };
-
-async function readWhole(file: string): Promise<WholeRead> {
-  let size: number;
-  try { size = (await stat(file)).size; } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', reason: `it could not be opened (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
-  }
-  if (size > MAX_FILE_BYTES) return { kind: 'unreadable', reason: `it is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB` };
-  try { return { kind: 'text', text: await readFile(file, 'utf8') }; } catch (error) {
-    return { kind: 'unreadable', reason: `it could not be read (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
-  }
 }
 
 /** The plain sentence for a staff file that cannot be read whole, and the way out. */
@@ -343,6 +329,26 @@ export class StaffHost {
     return replayPersonDecisions(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-decision', status }));
   }
 
+  /** The one PIR register (the workbench's JSON), its decisions checked against the log; `entries` undefined when the project has none. */
+  public async pirRegister(): Promise<{ readonly entries?: PirEntry[] } | { readonly unreadable: string }> {
+    const read = await readWhole(path.join(this.options.root, registerPath('pir-register')));
+    if (read.kind === 'missing') return {};
+    if (read.kind === 'unreadable') return { unreadable: unreadableText(registerPath('pir-register'), read.reason, 'Fix it, then try again.') };
+    const parsed = parseRegisterText('pir-register', read.text);
+    if (!parsed.ok) return { unreadable: unreadableText(registerPath('pir-register'), parsed.message, 'Fix it, then try again.') };
+    return { entries: trustPirDecisions(parsed.value, await this.pirDecisions()).entries };
+  }
+
+  /** Why the J2 PIR register product cannot be registered as it is: it must be exactly what the one PIR register generates. */
+  private async pirProductProblem(root: string): Promise<StaffResult | undefined> {
+    const register = await this.pirRegister();
+    if ('unreadable' in register) return refuse(register.unreadable);
+    const file = await this.readProduct(root, 'j2', PIR_REGISTER_PRODUCT);
+    if (!file.exists) return undefined;
+    if (file.body !== pirRegisterProductBody(register.entries ?? [])) return refuse(`${productPath('j2', PIR_REGISTER_PRODUCT)} is generated from ${registerPath('pir-register')} and differs from it. Run the intel workbench's pir_publish to write it again; change PIRs in the register, never in this file.`);
+    return undefined;
+  }
+
   /** The PIRs a person can decide on now: those awaiting a decision once every written decision is checked against the log. */
   public async pirsAwaitingDecision(): Promise<PirEntry[]> {
     const file = path.join(this.options.root, registerPath('pir-register'));
@@ -355,8 +361,9 @@ export class StaffHost {
 
   /**
    * A named person approves or rejects a PIR (the NEAR AI: Staff: Decide a PIR command; no tool calls this). Under the register's lock, the register is
-   * read again and checked against the log, the decision is signed with this device's key and appended to the decision log, and only then is the
-   * register written with it. A decision is never written to the register without its signed entry.
+   * read again and checked against the log; the register is written first, only over the exact bytes read (a member's write in between refuses the
+   * decision, to be taken again on what is there now); then the decision is signed with this device's key and appended to the log. Either failure
+   * leaves the PIR reading as awaiting a decision: a written decision counts only with its signed entry, so neither order can make one count.
    */
   public async decidePir(person: PersonActor, input: { pir: string; decision: 'approved' | 'rejected'; reasons?: readonly string[] }): Promise<StaffResult> {
     if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
@@ -375,6 +382,9 @@ export class StaffHost {
       const decided = decidePirEntry(trusted, input.pir, input.decision, person, at, reasons);
       if (!decided.ok) return refuse(decided.message);
       const entry = decided.value.find((candidate) => candidate.id === input.pir)!;
+      if (!(await writeIfUnchanged(file, snapshotOfBytes(read.bytes), renderRegister('pir-register', decided.value)))) {
+        return refuse(`The PIR register changed while you were deciding, so nothing was recorded. Look at ${input.pir} again and decide again.`);
+      }
       await mkdir(this.ledgerDir(), { recursive: true });
       const logged = await withFileLock(this.ledgerDir(), DECISION_LOCK, async () => {
         const replay = await this.decisionReplay();
@@ -385,7 +395,6 @@ export class StaffHost {
         return undefined;
       });
       if (logged) return logged;
-      await writeFileAtomic(file, renderRegister('pir-register', decided.value));
       return ok(`${input.pir} is ${input.decision} by ${person.name} (${person.role}), signed with this device's key.`);
     });
   }
@@ -468,17 +477,18 @@ export class StaffHost {
   }
 
   /**
-   * Writes the product's header as the ledger now projects it, over the body as it is on disk at that moment: the body is read again under the ledger
-   * lock, never carried over from before the append, so a member's write that landed in between is kept (it reads as the next pending edit) rather
-   * than overwritten. A product file that is gone, or cannot be read whole, is left alone.
+   * Writes the product's header as the ledger now projects it, over the body as it is on disk: the file's bytes are read, the new text is built from
+   * them, and it is written only if the file still holds exactly those bytes (staffFiles.ts writeIfUnchanged), checked again immediately before the
+   * rename. When a member's write lands in between, nothing is written: the member's bytes stand and read as the next edit. A product file that is gone,
+   * or cannot be read whole, is left alone. Returns whether the header was written.
    */
-  private async writeHeader(root: string, state: ProductState): Promise<void> {
-    await mkdir(this.ledgerDir(), { recursive: true });
-    await withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
-      const file = await this.readProduct(root, state.record.section, state.record.product, state.meta.dependsOn);
-      if (!file.exists) return;
-      await writeFileAtomic(path.join(root, productPath(state.record.section, state.record.product)), `${renderProductHeader(projectHeader(state))}${file.body}`);
-    });
+  private async writeHeader(root: string, state: ProductState): Promise<boolean> {
+    const target = path.join(root, productPath(state.record.section, state.record.product));
+    const read = await readWhole(target);
+    if (read.kind !== 'text') return false;
+    const parts = splitProductFile(read.text);
+    const body = parts ? parts.body : read.text;
+    return writeIfUnchanged(target, snapshotOfBytes(read.bytes), `${renderProductHeader(projectHeader(state))}${body}`);
   }
 
   /**
@@ -603,6 +613,10 @@ export class StaffHost {
     // A write-limited member (the red team, the release guard) registers only a product inside its limit: the red team its critique, the guard nothing.
     const limit = staffWriteLimit({ section: caller.team.section }, member);
     if (limit && !writeAllowedBy(limit, productPath(caller.team.section, input.product))) return refuse(`${member} may register only ${limit.join(', ')}; report what should change instead.`);
+    if (caller.team.section === 'j2' && input.product === PIR_REGISTER_PRODUCT) {
+      const generated = await this.pirProductProblem(caller.root);
+      if (generated) return generated;
+    }
     const shared = this.sharedWriterProblem(input.product, caller, member);
     if (shared) return shared;
     const before = await this.replay();
@@ -617,6 +631,11 @@ export class StaffHost {
     const settings = await this.settings(caller.team);
     const kind = input.kind ?? file.header?.kind ?? existing?.meta.kind;
     if (!kind || !(PRODUCT_KINDS as readonly string[]).includes(kind)) return refuse(`Say what kind of product it is: one of ${PRODUCT_KINDS.join(', ')}.`);
+    // A write-limited member registers only its own kinds: the red team's file is a critique, whatever kind it names (never a plan or an order).
+    const kinds = staffWriteLimitKinds({ section: caller.team.section }, member);
+    if (kinds && (!kinds.includes(kind as ProductKind) || (input.kind !== undefined && input.kind !== kind) || (existing && !kinds.includes(existing.meta.kind)))) {
+      return refuse(`${member} may register only ${kinds.length ? kinds.join(' or ') : 'nothing'}; ${input.product} as ${kind} is refused.`);
+    }
     const label = input.label ?? existing?.meta.label ?? 'org/Internal';
     if (!LABEL_PATTERN.test(label)) return refuse('A label is scale/level, for example org/Internal.');
     const meta: ProductMetaInput = { kind: kind as ProductKind, label, profile: existing?.meta.profile ?? settings.profile, level: existing?.meta.level ?? settings.level, dependsOn: [...dependsOn] };
@@ -683,9 +702,11 @@ export class StaffHost {
       const other = await this.readProduct(caller.root, section, name);
       return other.exists ? other.body : undefined;
     };
-    const pirBody = product === J2_LINT_INPUTS.pirs ? read.body : await bodyOf(J2_LINT_INPUTS.pirs);
-    const schema = registerSchema('pir-register')!;
-    const pirs = pirBody === undefined ? undefined : parseRegisterBody(schema, pirBody);
+    // The PIRs come from the one PIR register, the JSON the intel workbench keeps, with every decision checked against the signed log: never from
+    // the generated product or another copy, so the lint and the workbench cannot disagree.
+    const register = await this.pirRegister();
+    if ('unreadable' in register) return refuse(register.unreadable);
+    const pirs = register.entries?.map((entry) => ({ id: entry.id, type: 'pir', decisionPoint: entry.decisionPoint, ltiov: entry.ltiov }));
     const hvtBody = await bodyOf(J2_LINT_INPUTS.hvts);
     const hvts = hvtBody?.split('\n').map((line) => /^\s*[-*]\s+([^:|]{2,120})/.exec(line)?.[1]?.trim()).filter((name): name is string => Boolean(name));
     const coaBody = product === J2_LINT_INPUTS.adversaryCoas ? read.body : await bodyOf(J2_LINT_INPUTS.adversaryCoas);
@@ -753,7 +774,7 @@ export class StaffHost {
 
   private async writeReport(root: string, state: ProductState, gate: StaffGate, verdict: string, member: string, reasons: readonly string[], findings?: string): Promise<void> {
     const file = path.join(root, path.dirname(productPath(state.record.section, state.record.product)), gateReportPath(gate, state.record.product, state.record.version));
-    await mkdir(path.dirname(file), { recursive: true });
+    const before = await readWhole(file);
     const lines = [
       `# ${gate === 'guard' ? 'Release-guard' : 'Tradecraft'} report: ${state.record.product}, version ${state.record.version}`, '',
       `Verdict: ${verdict}`, `Version hash: ${state.record.hash}`, `By: ${member}`, `At: ${isoOf(this.now())}`, '',
@@ -761,7 +782,9 @@ export class StaffHost {
       ...(findings ? ['Mechanical checks:', findings, ''] : []),
       'This is a recommendation to a person. Only a named person approves or releases a staff product.', ''
     ];
-    await writeFile(file, lines.join('\n'), 'utf8');
+    // Only over what was read: the release guard may write in its own report folder, and its bytes are never overwritten unseen.
+    if (before.kind === 'unreadable') return;
+    await writeIfUnchanged(file, snapshotOfBytes(before.kind === 'text' ? before.bytes : undefined), lines.join('\n'));
   }
 
   /** submit: the owner or section lead puts a guard-checked product in front of a person, with the options, their risk and the dissent. */
@@ -878,6 +901,7 @@ export class StaffHost {
     if (typeof member !== 'string') return member;
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
+    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     // One writer at a time per register (the intel workbench's lock): two part writers of the CCIR register, the PIR part and the FFIR part, never drop
     // each other's rows, because each re-reads the ledger and the rows inside the lock and writes from what it read there.
     const where = this.registerSection(input.register, caller, await this.replay());
@@ -899,19 +923,22 @@ export class StaffHost {
     if (!isOwner && state && !(['draft', 'guard-checked', 'awaiting-decision'] as const).some((value) => value === state.record.state)) {
       return refuse(`${input.register} version ${state.record.version} is ${state.record.state}; its owner writes the next version before parts can change.`);
     }
-    const before = await this.registerRows(caller.root, input.register, section);
+    // The rows, the header and the compare-and-swap all come from one read of the file's bytes: the host writes only over exactly what it read.
+    const file = path.join(caller.root, productPath(section, input.register));
+    const read = await readWhole(file);
+    if (read.kind === 'unreadable') return refuse(`${input.register}'s rows could not be read, so nothing was changed (${read.reason}). Its owner writes it again.`);
+    const parts = read.kind === 'text' ? splitProductFile(read.text) : undefined;
+    const before = read.kind === 'missing' ? [] : parseRegisterBody(schema, parts ? parts.body : read.text);
     if (before === undefined) return refuse(`${input.register}'s rows could not be read, so nothing was changed. Its owner writes it again.`);
     const written = writeRows(schema, before, input.rows ?? [], input.remove ?? [], input.part);
     if (!written.ok) return refuse(written.message);
     if (!isOwner && !state) return refuse(`${input.register} does not exist yet; its owner creates it first.`);
     const body = renderRegisterBody(schema, written.rows);
-    const file = path.join(caller.root, productPath(section, input.register));
-    const existing = await this.readProduct(caller.root, section, input.register);
-    // The ledger records the file's hash, so the new body is written first and recorded next; when the record is refused (or fails), the file is put
-    // back exactly as it was, so a register never holds rows the ledger does not.
-    const previous = await readFile(file).then((bytes) => bytes, (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFileAtomic(file, `${existing.exists && existing.headerText && state ? renderProductHeader(projectHeader(state)) : ''}${body}`);
+    const previous = snapshotOfBytes(read.kind === 'text' ? read.bytes : undefined);
+    const text = `${parts && state ? renderProductHeader(projectHeader(state)) : ''}${body}`;
+    // The ledger records the file's hash, so the new body is written first and recorded next. When a member wrote the file since it was read, nothing
+    // is written; when the record is refused, the file is put back, again only if it still holds what the host wrote.
+    if (!(await writeIfUnchanged(file, previous, text))) return refuse(`${input.register} changed while your rows were being written, so nothing was changed. Read it again and write your rows again.`);
     let result: StaffResult;
     try {
       result = isOwner
@@ -921,9 +948,8 @@ export class StaffHost {
       result = refuse(`${input.register} was not recorded: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (!result.ok) {
-      if (previous === undefined) await rm(file, { force: true });
-      else await writeFileAtomic(file, previous.toString('utf8'));
-      return refuse(`${result.message} The register file is back as it was.`);
+      const restored = await writeIfUnchanged(file, snapshotOfBytes(Buffer.from(text, 'utf8')), read.kind === 'text' ? read.text : undefined);
+      return refuse(`${result.message} ${restored ? 'The register file is back as it was.' : 'The register file changed again since, so it was left as it is now.'}`);
     }
     if (result.ok && input.register === 'rfi-tracker') await this.emit(rfiChanges(before, written.rows, caller.run, isoOf(this.now())));
     return result;
@@ -952,6 +978,7 @@ export class StaffHost {
     if (typeof member !== 'string') return member;
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
+    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const rows: RegisterRow[] = [];
     for (const raw of input.rows) {
       const checked = checkRow(schema, raw);
@@ -961,7 +988,8 @@ export class StaffHost {
     const folder = path.join(caller.root, proposalFolder(input.register));
     await mkdir(folder, { recursive: true });
     const name = `${isoOf(this.now()).replace(/[:.]/g, '-')}-${member}.json`;
-    await writeFile(path.join(folder, name), `${JSON.stringify({ register: input.register, from: { section: caller.team.section, member }, note: input.note ?? '', rows }, null, 2)}\n`, 'utf8');
+    // A new file only: an existing one of the same name is never overwritten.
+    if (!(await writeIfUnchanged(path.join(folder, name), { exists: false }, `${JSON.stringify({ register: input.register, from: { section: caller.team.section, member }, note: input.note ?? '', rows }, null, 2)}\n`))) return refuse('A proposal of that name is already there; propose again.');
     return ok(`Proposed ${rows.length} row${rows.length === 1 ? '' : 's'} for ${input.register} in ${proposalFolder(input.register)}${name}. The register's writer merges it.`);
   }
 

@@ -5,6 +5,7 @@
 // it by the extension: the red team, which critiques and must never change a plan file, and the release guard, which gives a verdict and must never fix
 // the product it judges. For them the team runtime refuses any write outside the paths below, whatever the member's instructions or a model says.
 import type { StaffSectionId } from './doctrine';
+import type { ProductKind } from './products';
 import type { StaffTeamBlock } from './teamBlock';
 
 /** The folder every staff file lives in. */
@@ -44,4 +45,13 @@ export function staffWriteLimit(block: Pick<StaffTeamBlock, 'section'> | undefin
 export function writeAllowedBy(limit: readonly string[], relativePath: string): boolean {
   if (relativePath === '' || relativePath.startsWith('/') || relativePath.split('/').some((segment) => segment === '..' || segment === '.')) return false;
   return limit.some((entry) => (entry.endsWith('/') ? relativePath.startsWith(entry) && relativePath.length > entry.length : relativePath === entry));
+}
+
+/**
+ * The product kinds a write-limited member may register (review round 4): the red team registers only critiques, the release guard nothing. Undefined
+ * for a member with no write limit, whose kind follows its products.
+ */
+export function staffWriteLimitKinds(block: Pick<StaffTeamBlock, 'section'> | undefined, member: string): readonly ProductKind[] | undefined {
+  if (!staffWriteLimit(block, member)) return undefined;
+  return member === 'red-team' ? ['critique'] : [];
 }
