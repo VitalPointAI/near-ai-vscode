@@ -21,22 +21,39 @@ function untrusted(nonce, label, text) {
 }
 
 /**
- * Splits a unified diff into per-file sections and keeps whole sections, in order, until the byte
- * budget runs out. Returns { kept, omitted } with `omitted` the file paths left out.
+ * Bulk files: third-party code copied in (any `vendor/` folder), minified bundles, source maps and
+ * lockfiles. A reviewer learns little from their bytes (their integrity is checked by hash or by
+ * npm), so they get the budget last and never crowd out the code a reviewer must read.
+ */
+export function isBulkFile(file) {
+  return /(^|\/)vendor\//.test(file) || /\.min\.(m?js|css)$/.test(file) || /\.map$/.test(file)
+    || /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(file);
+}
+
+/**
+ * Splits a unified diff into per-file sections and keeps whole sections within the byte budget.
+ * Reviewable files are budgeted before bulk files (isBulkFile), and a section too big to fit is
+ * skipped rather than ending the fill, so one large file never pushes out every file after it.
+ * Kept sections stay in their original order. Returns { kept, omitted } with `omitted` the file
+ * paths left out.
  */
 export function capDiff(diff, maxBytes = MAX_DIFF_BYTES) {
   const text = String(diff ?? '');
   if (Buffer.byteLength(text) <= maxBytes) return { kept: text, omitted: [] };
-  const sections = text.split(/(?=^diff --git )/m);
-  const kept = [];
-  const omitted = [];
+  const sections = text.split(/(?=^diff --git )/m).map((body, index) => {
+    const file = /^diff --git a\/(\S+)/.exec(body)?.[1] ?? '(unnamed section)';
+    return { body, index, file, size: Buffer.byteLength(body), bulk: isBulkFile(file) };
+  });
+  const byPriority = [...sections.filter((s) => !s.bulk), ...sections.filter((s) => s.bulk)];
+  const keep = new Set();
   let used = 0;
-  for (const section of sections) {
-    const size = Buffer.byteLength(section);
-    if (omitted.length === 0 && used + size <= maxBytes) { kept.push(section); used += size; continue; }
-    omitted.push(/^diff --git a\/(\S+)/.exec(section)?.[1] ?? '(unnamed section)');
+  for (const section of byPriority) {
+    if (used + section.size <= maxBytes) { keep.add(section.index); used += section.size; }
   }
-  return { kept: kept.join(''), omitted };
+  return {
+    kept: sections.filter((s) => keep.has(s.index)).map((s) => s.body).join(''),
+    omitted: byPriority.filter((s) => !keep.has(s.index)).map((s) => s.file)
+  };
 }
 
 export const SYSTEM_PROMPT = [
