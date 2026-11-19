@@ -1,8 +1,9 @@
 // The built-in staff servers, as the Tools page and the Team Studio tool picker list them (design 10, 6.2): staff-products, guard-scan, the
-// intel-workbench, observations (research note 11, section 5) and logistics. They run inside the extension and are given only to a staff team's run (a
-// team file with a `staff:` block); a member reaches them through its `tools:` line, by the whole server (`mcp:<id>`) or one tool at a time
-// (`mcp__<id>__<tool>`). The tool objects here are the very ones a run is given, built without a project, so the lists cannot drift from what a run
-// gets. None of them approves, rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
+// intel-workbench, observations (research note 11, section 5), cop-map and logistics. They run inside the extension and are given only to a staff
+// team's run (a team file with a `staff:` block); a member reaches them through its `tools:` line, by the whole server (`mcp:<id>`) or one tool at a
+// time (`mcp__<id>__<tool>`). The tool objects here are the very ones a run is given, built without a project, so the lists cannot drift from what a
+// run gets. None of them approves, rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
+import { COP_MAP_SERVER, copMapTools } from './copMap';
 import { INTEL_WORKBENCH_SERVER, intelWorkbenchTools } from './intelWorkbench';
 import { LOGISTICS_SERVER, logisticsTools } from './logisticsTools';
 import { OBSERVATIONS_SERVER, observationsTools } from './observationsTools';
@@ -40,6 +41,11 @@ export function builtInStaffServers(): BuiltInStaffServer[] {
     {
       id: OBSERVATIONS_SERVER, grant: staffServerGrant(OBSERVATIONS_SERVER), name: 'Observations (built in)', tools: observationsTools({ store: () => undefined }),
       description: 'The project\'s feed observations, read only and clamped to your clearances: slices by area, time, grade, discipline and unit, tracks with their decay, what changed since a time, corroboration by independent origin, timelines, feed status, and the picture as known at any time. Every answer says when a limit cut it.'
+    },
+    {
+      id: COP_MAP_SERVER, grant: staffServerGrant(COP_MAP_SERVER), name: 'COP map (built in)',
+      tools: copMapTools({ host: () => undefined, team: { slug: 'tools-directory', section: 'j2', members: [], sectionLead: '' }, run: 'tools-directory' }),
+      description: 'The common operational picture: read the layers, put military symbols, control measures, overlays per adversary course of action and decision points on the layer you write, and propose features for the others. Each product layer has one writer; feed layers are views nobody writes. Nothing is fetched from the network.'
     },
     {
       id: LOGISTICS_SERVER, grant: staffServerGrant(LOGISTICS_SERVER), name: 'Logistics (built in)',

@@ -30,6 +30,7 @@ import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
 import { grantedIntelWorkbenchTools } from '../agent/intelWorkbench';
 import { logisticsTools } from '../agent/logisticsTools';
+import { grantedCopMapTools } from '../agent/copMap';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -1478,10 +1479,12 @@ export class AgentConversation {
     const intel = request.team?.staff ? grantedIntelWorkbenchTools(request.team) : [];
     // The observations server reads the project's observation store, clamped to the person's clearances (research note 11, section 5): only for staff teams.
     const observations = request.team?.staff ? observationsTools({ store: () => observationStoreFor(this.root) }) : [];
+    // The cop-map server (WP-COP), gated the same way; layer ownership is enforced by its tools and again by the staff host.
+    const cop = staffTeam && request.team ? grantedCopMapTools(request.team, { host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
     // The logistics server (WP-LOG): the calculator, LOGSTAT, movement and readiness, reached through the J4 grants by tool family. Its records are
     // signed into the calculator ledger with this device's key, through the same host as the product ledger.
     const logistics = staffTeam ? logisticsTools({ host: () => staffHostFor(this.root)?.logistics(), team: staffTeam, run: runId }) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...observations, ...logistics, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...observations, ...cop, ...logistics, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;

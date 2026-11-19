@@ -270,8 +270,8 @@ keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
 synchronization matrix, the DST and DSM and the assessment plan, and every
 FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
-`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:logistics`)
-are listed on the Tools page and in the Team Studio tool picker; only a staff
+`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:cop-map`,
+`mcp:logistics`) are listed on the Tools page and in the Team Studio tool picker; only a staff
 team's run gets them. `mcp:observations` reads the feed reports kept in
 `.planning/staff/observations/` (not committed), shows only what your
 clearances cover, and says when a limit cut an answer.
@@ -355,6 +355,21 @@ may delete or reach the open world, or says neither way, keeps asking.
 The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
 with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+
+**The COP map** (`mcp:cop-map`) is a built-in local server for military
+staff teams that reaches no network. Members read the COP layers and put
+military symbols, control measures, overlays per adversary course of action
+(ECOA-1 and so on, marked MLCOA or MDCOA) and decision points on the layer they
+write, giving positions as grid references on the scenario's grid; anything
+outside the exercise frame is refused. Each product layer (operations,
+threat, terrain, logistics, plans) has one writer: anyone else's features
+become a proposal in `.planning/staff/proposals/<layer>/` that the writer
+merges, and every change is a new version a person decides on. Hostile and
+other assessed symbols go on the J2's threat layer only; the plans layer is
+kept apart from the current picture. Feed layers are views over observations
+that nobody writes. The map component draws the picture in 2D or on the globe
+offline, over the scenario's synthetic geography, with no map tiles fetched,
+and a time slider on the shared clock.
 
 **The intel workbench** is a built-in local server for military staff J2 teams
 (a team whose file has a `staff:` block). It runs inside the extension, not as

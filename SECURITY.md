@@ -887,6 +887,41 @@ simulated and routed local-only, and a person must add the mock partner
 server before any team can call it. Stopping the simulation, or closing the
 window, closes every server.
 
+### COP map
+
+The `cop-map` server (`mcp:cop-map`) is built in and runs inside the
+extension; it declares only the staff files it reads and writes and names no
+host. Each COP product layer (operations, threat, terrain, logistics, plans)
+has exactly one writer, from the staff ownership table, resolved for the
+team's roster so a member that stands in for a folded job writes it. Anyone
+else's features are written to `.planning/staff/proposals/<layer>/` for the
+writer to merge, and the staff products host checks the writer again when the
+new version is recorded; a version the host refuses puts the layer file back
+exactly as it was. Feed layers are views over observations: no tool writes a
+feature into one. Hostile, suspect, neutral and unknown symbols (the J2's
+assessment) go on the threat layer only, every position must lie inside the
+scenario's exercise frame over empty ocean, every feature carries an exercise
+label, and a layer's label is the join of its features' labels. What one
+member wrote is shown to another agent fenced as untrusted data.
+
+The map page draws the scenario's synthetic geography and requests no map
+tile, glyph, sprite or font: an outside tile request would reveal the area of
+interest. Its only requests are the vendored files under `media/vendor/` and
+the map worker, started from a blob. Spike result (2026-11-18): MapLibre GL
+JS 6.16.0 runs under the page policy `default-src 'none'; script-src
+'nonce-…'; style-src <extension>; img-src <extension> data: blob:; font-src
+<extension>; worker-src blob:; connect-src <extension>` with no
+`'unsafe-eval'`, no `'unsafe-inline'` and no new script source: the nonced
+page script imports the vendored module, fetches the vendored worker from the
+extension and starts it from a blob URL. Checked with
+`scripts/spike-cop-map-csp.mjs` in headless Chromium with the page and the
+resources on two loopback origins, as in a webview: no policy violation, the
+globe and the 2D map both render, and 2,000 moving tracks at 10 updates a
+second kept 60 frames a second with no long task (5,000 doubled the slowest
+frames, so the map draws at most 2,000 tracks and says how many it left out).
+Without WebGL, or if the library cannot start, the page falls back to a 2D
+SVG map behind the same interface and says why.
+
 ## The outbound check
 
 Every chat message passes one check before it leaves VS Code, in this order:
@@ -1093,6 +1128,17 @@ in `vendor/manifest.json` from esbuild's record of what it bundled:
 | imagetracer.js | 1.2.6 | Unlicense | Tracing images into SVG |
 | pptxgenjs (with jszip and 12 small helpers) | 4.0.1 | MIT | Writing .pptx decks |
 | DejaVu Sans | 2.37.3 | Bitstream Vera | Text in rendered SVG |
+
+The COP map page's two libraries are committed under `media/vendor/` byte for
+byte from their published npm packages, each with its license, and
+`media/vendor/VENDORED.json` records their versions, npm integrity and the
+hash of every file (a test checks them); they are never fetched at run time
+and enter the SBOM from that file:
+
+| Package | Version | License | Used for |
+| --- | --- | --- | --- |
+| MapLibre GL JS (`maplibre-gl`) | 6.16.0 | BSD-3-Clause | The COP map, 2D and globe (WebGL) |
+| milsymbol | 3.0.5 | MIT | MIL-STD-2525 and APP-6 military symbols |
 
 Every release carries `sbom.cdx.json` (CycloneDX 1.6) for those components.
 `npm run sbom` builds it and checks each one on OSV.dev; the release fails on a

@@ -50,4 +50,9 @@ async function bundle(entry, target, file, main) {
 await bundle(require.resolve('pptxgenjs'), 'pptxgenjs', 'pptxgen.cjs', 'pptxgenjs');
 await bundle(path.join(root, 'scripts', 'entries', 'mcp-client.mjs'), 'mcp', 'mcp-client.cjs', '@modelcontextprotocol/sdk');
 
+// The COP map page's libraries are committed under media/vendor/ (not built from node_modules); they enter the SBOM from their provenance file.
+for (const entry of JSON.parse(readFileSync(path.join(root, 'media', 'vendor', 'VENDORED.json'), 'utf8')).packages) {
+  manifest.push({ name: entry.name, version: entry.version, license: entry.license, purl: `pkg:npm/${entry.name}@${entry.version}`, path: `media/vendor/${entry.name}` });
+}
+
 writeFileSync(path.join(vendor, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
