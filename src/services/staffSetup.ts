@@ -8,7 +8,8 @@
 // - PROFILE.md and the section's skills under .planning/staff/;
 // - the staff settings into .planning/.near-ai/project.json (`staff`), keeping every other field;
 // - the section's guidance into AGENTS.md between its own markers, beside any project-type block and any other section's.
-import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
+import { lstat, mkdir, readFile, rename } from 'node:fs/promises';
 import * as path from 'node:path';
 import { DOCTRINE_PROFILES, MDO_TERMS, PLANNING_TYPES, RED_TEAM_NOTES, STAFF_LEVELS, STAFF_NATIONS, STAFF_PROFILE_IDS } from '../domain/staff/doctrine';
 import type { PlanningType, StaffLevel, StaffNation, StaffProfileId } from '../domain/staff/doctrine';
@@ -189,8 +190,11 @@ export async function staffTeamTarget(library: TeamLibrary, plan: StaffSetupPlan
 export interface StaffSetupResult { readonly teamFile: string; readonly archived?: string; readonly written: string[] }
 
 /**
- * Writes the plan: an earlier team file of the same name is archived first (the caller asked the person), then the team file, then the project files.
- * A path on the way that is a symbolic link is refused before anything is written, so a link cannot send a write outside the project.
+ * Writes the plan: the project files first (PROFILE.md, the skills, the settings, the guidance), then the team file last, so a team never exists
+ * without the files it reads. An earlier team file of the same name is archived just before the new one is written (the caller asked the person). On
+ * any failure everything written is rolled back: each project file goes back to what it held (or is removed when it was new), only if it still holds
+ * what the setup wrote, and an archived team is put back. A path on the way that is a symbolic link is refused before anything is written, so a link
+ * cannot send a write outside the project.
  */
 export async function applyStaffSetup(root: string, library: TeamLibrary, plan: StaffSetupPlan, options: { replace?: boolean } = {}): Promise<StaffSetupResult> {
   for (const write of plan.writes) {
@@ -202,16 +206,31 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
   }
   const target = await staffTeamTarget(library, plan);
   if (target.exists && !options.replace) throw new Error(`${path.basename(target.file)} is already in your teams. Nothing was written.`);
-  await mkdir(library.directory, { recursive: true });
-  const archived = target.exists ? await library.archive(target.file) : undefined;
-  await writeFile(target.file, plan.team, 'utf8');
-  await library.snapshot(target.file);
-  const written: string[] = [];
-  for (const write of plan.writes) {
-    const file = path.join(root, ...write.path.split('/'));
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, write.content, 'utf8');
-    written.push(write.path);
+  const done: Array<{ file: string; before: Buffer | undefined; wrote: string }> = [];
+  let archived: string | undefined;
+  let teamWritten = false;
+  try {
+    for (const write of plan.writes) {
+      const file = path.join(root, ...write.path.split('/'));
+      const before = await readFile(file).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+      await mkdir(path.dirname(file), { recursive: true });
+      if (!(await writeIfUnchanged(file, snapshotOfBytes(before), write.content))) throw new Error(`${write.path} changed while the staff team was being set up.`);
+      done.push({ file, before, wrote: write.content });
+    }
+    await mkdir(library.directory, { recursive: true });
+    archived = target.exists ? await library.archive(target.file) : undefined;
+    if (!(await writeIfUnchanged(target.file, { exists: false }, plan.team))) throw new Error(`${path.basename(target.file)} appeared in your teams while the staff team was being set up.`);
+    teamWritten = true;
+    await library.snapshot(target.file);
+  } catch (error) {
+    if (teamWritten) await writeIfUnchanged(target.file, snapshotOfBytes(Buffer.from(plan.team, 'utf8')), undefined).catch(() => undefined);
+    if (archived) {
+      await (path.basename(archived) === path.basename(target.file) ? library.restore(archived) : rename(archived, target.file)).catch(() => undefined);
+    }
+    for (const entry of done.reverse()) {
+      await writeIfUnchanged(entry.file, snapshotOfBytes(Buffer.from(entry.wrote, 'utf8')), entry.before === undefined ? undefined : entry.before.toString('utf8')).catch(() => undefined);
+    }
+    throw new Error(`The staff team was not set up, and what was written is rolled back: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return { teamFile: target.file, ...(archived ? { archived } : {}), written };
+  return { teamFile: target.file, ...(archived ? { archived } : {}), written: done.map((entry) => path.relative(root, entry.file).split(path.sep).join('/')) };
 }
