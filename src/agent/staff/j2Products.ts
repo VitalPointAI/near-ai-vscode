@@ -1,6 +1,7 @@
 // The J2 section's products (design 10, 3.2 and 4.3; research note 02, table 9; WP-J2): each product's kind, title, required headings, whether it
 // passes the tradecraft gate, and its one owning member in each roster variant. A product a variant does not carry has no owner there. Members write
-// products at .planning/staff/products/j2/<product>.md with the header of src/domain/staff/products.ts; a map layer is GeoJSON written through the cop-map tool.
+// products at .planning/staff/products/j2/<product>.md with the header of src/domain/staff/products.ts. Until the cop-map server exists (drop 2), a map
+// layer is a product file like any other, its features a GeoJSON FeatureCollection in a fenced block that the member writes directly.
 import { staffGuardFolder, staffProductFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import type { ProductKind } from '../../domain/staff/products';
 import type { J2Variant, J2Vocabulary } from './j2Vocabulary';
@@ -15,6 +16,9 @@ export interface J2Product {
   readonly tradecraft: boolean;
   readonly owners: Readonly<Partial<Record<J2Variant, string>>>;
 }
+
+/** A map layer's headings: its features as a GeoJSON FeatureCollection in a ```geojson block, exercise coordinates only, then where each came from. */
+const LAYER_HEADINGS = ['Layer features (GeoJSON FeatureCollection in a fenced block, exercise coordinates only)', 'Sources and grades'];
 
 const ALL = (member: string): Record<J2Variant, string> => ({ strategic: member, operational: member, brigade: member, battalion: member });
 const CHIEF = { strategic: 'j2-chief', operational: 'j2-chief', brigade: 's2-lead', battalion: 's2-lead' } as const;
@@ -78,7 +82,7 @@ export const J2_PRODUCTS: readonly J2Product[] = [
   {
     id: 'cop-terrain-layer', kind: 'map-layer', tradecraft: true,
     owners: { strategic: 'jipoe-analyst', operational: 'geoint-analyst', brigade: 'ipb-analyst', battalion: 'ipb-analyst' },
-    title: () => 'COP terrain layer', headings: () => []
+    title: () => 'COP terrain layer', headings: () => LAYER_HEADINGS
   },
   {
     id: 'adversary-evaluation', kind: 'report', tradecraft: true,
@@ -106,7 +110,7 @@ export const J2_PRODUCTS: readonly J2Product[] = [
   {
     id: 'cop-threat-layer', kind: 'map-layer', tradecraft: true,
     owners: { strategic: 'threat-analyst', operational: 'threat-analyst', brigade: 'ipb-analyst', battalion: 'ipb-analyst' },
-    title: () => 'COP threat layer', headings: () => []
+    title: () => 'COP threat layer', headings: () => LAYER_HEADINGS
   },
   {
     id: 'intsum', kind: 'report', tradecraft: true, owners: { operational: 'watch-officer', brigade: 'watch-officer', battalion: 'watch-officer' },
@@ -180,7 +184,6 @@ export function variantProducts(variant: J2Variant): J2Product[] {
 export function productPath(product: J2Product): string {
   if (product.id === 'tradecraft-review') return `${staffProductFolder('j2')}tradecraft/<product>-v<n>.md`;
   if (product.id === 'guard-report') return `${staffGuardFolder('j2')}<product>-v<n>.md`;
-  if (product.kind === 'map-layer') return 'written through the cop-map tool';
   return staffProductPath('j2', product.id);
 }
 

@@ -747,12 +747,39 @@ editing the project's profile file cannot redirect a key.
 
 Staff section teams record each product's steps in a ledger in the project
 (`.planning/staff/ledger/products.jsonl`). Every entry is signed with this
-device's key and chained to the one before it, so a line added, changed,
-removed or reordered outside NEAR AI breaks the chain, and the products it
-touches read as tampered until a person sets the ledger aside with **NEAR AI:
-Staff: Set Aside the Product Ledger** (the old file is kept, never deleted).
+device's key and chained to the one before it. This is what is detected, and
+what is not:
+
+- **Detected: a line changed, added, removed from the middle or reordered**
+  outside NEAR AI. It breaks the signature or the chain, and the products it
+  touches read as tampered.
+- **Detected on this computer: the end of the ledger cut off, the file
+  deleted, or the file replaced by an older or different copy.** After every
+  entry it writes or reads, NEAR AI keeps a signed record of the ledger head
+  (how many entries and the last one's hash) in VS Code's secret storage on
+  this computer, outside the project, the way it keeps the label map's last
+  checked copy. A ledger shorter than that record, or with another entry at
+  its place, reads as tampered, with every product in it, because which
+  entries went missing (a HOLD, a decision) cannot be known. A record that
+  does not verify is treated the same way.
+- **Not detected:** cutting the end off a ledger before this computer saw
+  those entries (for example on another computer before you pull), or on a
+  computer whose secret storage was cleared, or a ledger read by a build
+  without the record. There only the chain is checked. Switching to a git
+  branch whose ledger is older than the one this computer saw reads as
+  tampered too, by design.
+- **Unreadable is never empty.** A ledger, wargame ledger, event log or
+  register that cannot be read whole (over 2 MB, or refused by the disk) is
+  reported as unreadable with the reason, nothing is written to it, and no
+  write starts on top of it. The ledger's way out, and the way out of any
+  tampered ledger, is **NEAR AI: Staff: Set Aside the Product Ledger**: the old
+  file is kept beside itself under a new name, never deleted, and the record
+  of the head starts again.
+
 A product file whose header claims a state the ledger does not hold, or an
-approved or released product whose text changed, also reads as tampered.
+approved or released product whose text changed, also reads as tampered. A
+register write that the ledger refuses puts the register file back exactly as
+it was.
 
 Approve, reject, release and withdraw-after-a-decision exist only as VS Code
 commands a person runs and confirms in a dialog. No agent tool offers them,
@@ -761,6 +788,10 @@ person's decision names them and their role and is signed with this device's
 key. Until verified credentials arrive, that name and role are self-declared.
 
 The tools record what they do inside the project only and send nothing out.
+They declare every project file they read (the staff folder, the project's
+staff settings in `.planning/.near-ai/project.json` and the guard settings in
+`.planning/.near-ai/staff-guard.json`) and write only in `.planning/staff/`,
+so the gate's label checks see all of them.
 guard-scan's checks are deterministic text rules: they catch markings,
 coordinates, listed names and the other patterns they know, and nothing else.
 The release-guard reviews what rules cannot judge, and a person decides.

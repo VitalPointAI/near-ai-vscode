@@ -591,7 +591,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j2-intelligence': [
     {
       version: 1,
-      definition: 'cb184a3d95af2978',
+      definition: 'e879d36f96c74e36',
       guidance: [
         '8c12c625cdb08b4b',
         'bd0fd1276a805473',
@@ -659,20 +659,20 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '2bcd3d144381018d'
         ],
         'jipoe-analyst': [
-          '17aaa0fe639fa173',
-          '1209c8f2e86afa9c',
-          'cf03278df023328f',
-          '856abad3cf12926f'
+          '2a844de452466969',
+          '879a46482344d795',
+          '0921867d2319b846',
+          '191108218c0ac839'
         ],
         'threat-analyst': [
-          '2c2b22c7cb41af42',
-          'e76a0175fd06697e',
-          '79fd68fcaeb808ea',
-          '2734526f74648869',
-          'a9b087302b103873',
-          'a6ac88acb33c3692',
-          '2c0b9cb825165c19',
-          '014630ee884a9e2a'
+          'c0346c6115cb7984',
+          'ea3ae9ec8e73735a',
+          'ca6364c69530605f',
+          'e1aef0c9efcbfd59',
+          '27de34a47bbbb324',
+          '6fec556e3bd590e3',
+          '30de131be00a3596',
+          '2efc7a58dfea6939'
         ],
         'warning-analyst': [
           'f280fee949a9f023',
@@ -708,10 +708,10 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'd86137390df3084a'
         ],
         'geoint-analyst': [
-          '6f9fe0c11f67484d',
-          '1e8545ed7066f127',
-          '0211efda4aba472d',
-          'b4b8e2455f8435e4'
+          'f7d3e68d285a0923',
+          '434418a6259ecb96',
+          'b03ed745f78e9456',
+          'f28ebf4e36d34f8d'
         ],
         'osint-analyst': [
           'e1a4fba2db1db5c4',
@@ -720,20 +720,20 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '9853fcebfe0b336e'
         ],
         'watch-officer': [
-          '21cbd9e4dfc4204d',
-          '23e2fe2577b6c464',
-          '4a56882655ab21a1',
-          'c155542240f546c4',
-          'cb0545969e0872d2',
-          '31429ed72633d747',
-          'a99d9eaad554432e',
-          'b114973d3aecbe5f',
-          '6d7eb92981145bc5',
-          'acca2686889ab218'
+          '55ad8e24e36f570b',
+          'b54000b6a9b76ab5',
+          'b9fe06e5fdb7a90f',
+          'a4b66fb3a1927e00',
+          '39d8d9e5f24af6f5',
+          '7915e4c8e1a52c37',
+          '2b898b3af2facf00',
+          '6e07984ddc5f5635',
+          '32da304c23bf30ee',
+          'ca2275e3b77bdfb0'
         ],
         'target-analyst': [
-          'dec983630cabfaae',
-          'b9e131c32367aa7f'
+          '7dab6ff5f9385829',
+          '5d0de8bb43ffc734'
         ],
         's2-lead': [
           'dfefd3e373b63d15',
@@ -748,14 +748,14 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'c4dd10e94c2f31de'
         ],
         'ipb-analyst': [
-          '48e8a7f6b608fff3',
-          '732251458ccb265b',
-          '43df5048b397a432',
-          '4d24bb11ac2279eb',
-          '11f148627b95652f',
-          '984deb484b294f57',
-          '4eeb3f82e2cdb825',
-          '0c2b0cbb61666c14'
+          '6dc4bc855306848d',
+          '1aee5108ea6bbae6',
+          '1b80f5b6fe4e8357',
+          '11788487e71a871e',
+          '91a2bd0cdda885c8',
+          '9d735d03057953a6',
+          'b99c418d1f78f41e',
+          '25c777fc410454bf'
         ]
       }
     }
