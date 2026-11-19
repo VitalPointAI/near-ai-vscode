@@ -36,7 +36,7 @@ import { RELEASE_GUARD_TOOLS } from '../domain/staff/releaseGuard';
 import { staffGuardFolder } from '../domain/staff/writeLimits';
 import { levelChoices, nationChoices, planStaffSetup, profileChoices, templateQuestions } from '../services/staffSetup';
 import { CALCULATOR_DIR } from '../staff/staffHost';
-import { callTool, hashIn, J4_TEAM, staffWorld, writeBody } from './helpers/staffFixtures';
+import { callLogistics, callTool, hashIn, J4_TEAM, staffWorld, writeBody, writeFactors } from './helpers/staffFixtures';
 
 const settings = (patch: Partial<StaffSettings> = {}): StaffSettings => ({ ...defaultStaffSettings(), ...patch });
 const US_JOINT = settings();
@@ -319,7 +319,7 @@ test('every number traces to a calculator record: a traced sample estimate passe
   }
 });
 
-test('the staff tools refuse to clear a J4 product with an untraced number, and clear it once every number traces to a record that exists', async () => {
+test('the staff tools refuse to clear a J4 product with an untraced number or a hand-made record, and clear it once every number traces to a record the calculator wrote', async () => {
   const world = await staffWorld();
   const team4 = { ...J4_TEAM, members: [...J4_TEAM.members, 'log-plans-officer'] };
   const body = (fuel: string) => `# Logistics estimate\n\nClass III (bulk) for phase 1: 120,000 litres${fuel}.\n\n${STAFF_MARKERS.decisionFor} commander. Option A or B, with their risk.\n`;
@@ -335,12 +335,20 @@ test('the staff tools refuse to clear a J4 product with an untraced number, and 
   assert.equal(untraced.ok, false, 'an untraced number is refused');
   assert.match(untraced.text, /number-without-calculation/);
 
+  // A record file a member wrote by hand is not a calculator record: the calculator ledger has no entry for it (WP-LOG).
   await mkdir(path.join(world.root, CALCULATOR_DIR), { recursive: true });
-  await writeFile(path.join(world.root, CALCULATOR_DIR, 'fuel-phase-1.json'), JSON.stringify({ id: 'fuel-phase-1', formula: 'litres per vehicle per day x vehicles x days', inputs: { rate: 1000, vehicles: 40, days: 3 }, result: 120000 }));
+  await writeFile(path.join(world.root, CALCULATOR_DIR, 'fuel-by-hand.json'), JSON.stringify({ id: 'fuel-by-hand', formula: 'litres per vehicle per day x vehicles x days', inputs: { rate: 1000, vehicles: 40, days: 3 }, result: 120000 }));
+  const byHand = await clear(await propose(body(' (calc:fuel-by-hand)')));
+  assert.equal(byHand.ok, false, 'a record the calculator did not write is refused');
+  assert.match(byHand.text, /calc:fuel-by-hand has a file in the calculator folder but no entry in the calculator ledger/);
+
   const missing = await clear(await propose(body(' (calc:fuel-phase-9)')));
   assert.equal(missing.ok, false, 'a record that does not exist is refused');
   assert.match(missing.text, /calc:fuel-phase-9 names no calculator record/);
 
+  await writeFactors(world.root, [{ id: 'fuel-cargo-truck', what: 'Fuel for one cargo truck', rate: 1000, unit: 'litres', per: 'vehicle per day', enteredBy: 'A. Demo' }]);
+  const calculated = await callLogistics(world, team4, 'calc_run', { id: 'fuel-phase-1', title: 'Class III (bulk) for phase 1', lines: [{ factor: 'fuel-cargo-truck', count: 40, item: 'cargo trucks' }], days: 3 }, 'log-plans-officer');
+  assert.ok(calculated.ok, calculated.text);
   const ok = await clear(await propose(body(' (calc:fuel-phase-1)')));
   assert.ok(ok.ok, ok.text);
 });

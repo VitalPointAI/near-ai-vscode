@@ -3,6 +3,7 @@
 // fills in, the classes of supply of the profile, and the calculator record convention every number follows. It lives in the project's
 // .planning/staff/skills/ so the person can read it and fill in the table. Pure: no I/O, no clock, no vscode.
 import { STAFF_FOLDER } from '../../domain/staff/writeLimits';
+import { FACTORS_FILE } from '../../domain/staff/logistics/calculator';
 import { CALC_RECORDS_HEADING, CALCULATOR_FOLDER } from './j4Products';
 import type { J4Vocabulary } from './j4Vocabulary';
 
@@ -65,11 +66,11 @@ export function logstatDefinitionsSkill(v: J4Vocabulary): string {
     '',
     '## Every number traces to a calculator record',
     '',
-    `1. Numbers come from the consumption calculator on the logistics server: factors a person entered (a rate per unit per day) times the force list times the days. The calculator ships no planning factor tables, and members never use one from a government source.`,
-    `2. Each calculation is kept as a record at ${CALCULATOR_FOLDER}<id>.json with its formula and its inputs.`,
+    `1. Numbers come from the consumption calculator on the logistics server (calc_run): factors a person entered (a rate per unit per day, in ${FACTORS_FILE}, which members never write) times the force list times the days. The calculator ships no planning factor tables, and members never use one from a government source.`,
+    `2. Each calculation is kept as a record at ${CALCULATOR_FOLDER}<id>.json with its formula and its inputs, written only by the logistics server and entered in the calculator ledger with its hash. A checked movement table and a readiness import are records too.`,
     `3. A product cites the record on the same line as the number: \`calc:<id>\` (the id is lower-case letters, digits and hyphens, at most 64 characters, as guard-scan reads it). Example: "Class III (bulk) for phase 2: 120,000 litres (calc:fuel-phase-2)".`,
     `4. Every product with numbers lists its records under "${CALC_RECORDS_HEADING}" with what each computed.`,
-    '5. guard-scan holds a J4 product with a number and no record on its line, or with a calc:<id> that names no record. The release guard cannot clear it.',
+    '5. guard-scan holds a J4 product with a number and no record on its line, or with a calc:<id> that names no record the calculator wrote: a file in the folder with no entry in the calculator ledger, or one changed since, counts as none. The release guard cannot clear it.',
     '6. A number in a fenced code block (a formula shown as working) is not checked; the result line outside it is.',
     ''
   ].join('\n');

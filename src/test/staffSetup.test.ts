@@ -30,16 +30,16 @@ const DECISION_VERBS = /__(?:approve|reject|release|supersede|decide|sign)\b/;
 
 // ---- Item 9: the tools show up ----------------------------------------------------------------------------------------------------------------
 
-test('the Tools page lists the three built-in staff servers with every tool and grant, and no decision verb', () => {
+test('the Tools page lists the four built-in staff servers with every tool and grant, and no decision verb', () => {
   const directory = buildToolsDirectory(input);
-  assert.deepEqual(directory.staffServers.map((server) => server.grant), ['mcp:staff-products', 'mcp:guard-scan', 'mcp:intel-workbench']);
+  assert.deepEqual(directory.staffServers.map((server) => server.grant), ['mcp:staff-products', 'mcp:guard-scan', 'mcp:intel-workbench', 'mcp:logistics']);
   const names = directory.staffServers.flatMap((server) => server.tools.map((tool) => tool.name));
   for (const tool of builtInStaffServers().flatMap((server) => server.tools)) assert.ok(names.includes(tool.name), tool.name);
-  assert.ok(names.includes('mcp__staff-products__lint') && names.includes('mcp__guard-scan__scan') && names.includes('mcp__intel-workbench__source_add'));
+  assert.ok(names.includes('mcp__staff-products__lint') && names.includes('mcp__guard-scan__scan') && names.includes('mcp__intel-workbench__source_add') && names.includes('mcp__logistics__calc_run'));
   for (const name of names) assert.doesNotMatch(name, DECISION_VERBS);
   for (const server of directory.staffServers) assert.ok(server.tools.every((tool) => tool.name.startsWith(`mcp__${server.id}__`)), server.id);
   // The intel-workbench is not a catalog tool, so the staff servers are where the page shows it.
-  assert.ok(!directory.tools.some((tool) => tool.name.startsWith('mcp__intel-workbench__')));
+  assert.ok(!directory.tools.some((tool) => tool.name.startsWith('mcp__intel-workbench__') || tool.name.startsWith('mcp__logistics__')));
 });
 
 test('the Tools page script draws the staff servers', () => {

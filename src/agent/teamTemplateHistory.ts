@@ -1022,6 +1022,123 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '0602af3edbde525b'
         ]
       }
+    },
+    {
+      version: 2,
+      definition: 'd8277a0530858b88',
+      guidance: [
+        '43fd3f310afca7c6',
+        'bc1042479c7a898f',
+        '7e19b22506095fec',
+        '2c06de7e5af01765',
+        'f55dccaa7615be16',
+        'a0feba23cffb3f61',
+        'ca1c413f09543719',
+        '2125915d463620dd',
+        '3b9f67f477120a76',
+        '49309f316b68b745',
+        '5eba610a4f2d2a00',
+        '22cd73bd7838ed93',
+        '665a5b56ccb3214a',
+        '8a2f4cf6fa5de04f',
+        '85f2482d0120348d'
+      ],
+      members: {
+        'j4-director': [
+          'd2904d650fc7df99',
+          'a38dba5d65454bfb',
+          'f648afd0cae6345b',
+          '981cbed8b4eb9c06',
+          '715bb570843119c5',
+          'ddbe990e584c3a2b',
+          'd8db3f56bac7212f',
+          '252fcf20642527dc',
+          'e8b0ba3187fbd81e',
+          '194b178ba19ae71f',
+          'ef850d4cf0cd0942',
+          'b49a06dfbb23e118'
+        ],
+        'log-plans-officer': [
+          'ee6c24961fa4d4f1',
+          '0192f8da709f4935',
+          '87e3d93f5e11b501',
+          '39c4c8cd7ddece34',
+          '5b3047a9f6c3f25a',
+          'a05e0e35efba2a36',
+          'ca3244239018ff4e',
+          'd05a5ba1c1bc1ef8'
+        ],
+        'jloc-chief': [
+          'dd3154fbbd75ca29',
+          'cd04a895a441c911',
+          'c1162a06d3a3f2a3',
+          '655693d9de5635ab',
+          '835371f0c527c9e4',
+          '036fa941cd2154aa',
+          'e339d7ddae1714ac',
+          '1d0718b6283c801a',
+          '624be410ffca3e8e'
+        ],
+        'supply-planner': [
+          'caad25616ddf7cfd',
+          '233f4fa3f27db046',
+          'edc45d58980fc705',
+          'f496b5bdd0081851',
+          'e9fae3e72538270b'
+        ],
+        'maintenance-planner': [
+          'aa332716a813c8b0',
+          '7f87fd287836efc9',
+          'c686b4056519693a',
+          '7d6c196182e95bb0',
+          'ed1797cfb5b5de1a',
+          'b02984c70364c1bd',
+          'c8cf7a27997ee6af',
+          'd7f9f71267436934',
+          '81ae6538b53a7742'
+        ],
+        'mobility-planner': [
+          '01bdbe0799c6e21c',
+          '9367abd2e5dd99af',
+          'f45a79f4ca460fdf',
+          '792277136707cfcf',
+          '87f2e462e1cf1a04'
+        ],
+        'engineer-planner': [
+          '651b66df5888b41c',
+          'b73e1a08e1e25f79'
+        ],
+        'ocs-planner': [
+          '3b79e1222b39abb1',
+          '495fb2ee6e278503',
+          '84d5e252269df850',
+          'ceabdf12f5e54e63',
+          '4be68adc9f26307a'
+        ],
+        'health-services-planner': [
+          '2c5047ddc79ac31a',
+          'add499f3287ad949',
+          'a486922a81444cbb',
+          '722b1118381b40b0',
+          '5cb1c53bd21c069d'
+        ],
+        'services-mortuary-planner': [
+          '7e083dff95524ab2',
+          '3c0f2658f0d5201c'
+        ],
+        'logstat-analyst': [
+          '22bd91d35eae3e88'
+        ],
+        'release-guard': [
+          '4da1480ec19a35b3',
+          'ac39c6f3ebb6786e'
+        ],
+        's4-lead': [
+          'a1139804dac7740a',
+          '57a285985e8cd191',
+          '5436206869e90a5a'
+        ]
+      }
     }
   ]
 };

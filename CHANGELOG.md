@@ -63,6 +63,17 @@ fictional data only; labels are not accreditation, and no member has a persona n
   plausibility rules, colour bands you set, your profile's classes of supply and the calculator
   record convention. Health products carry SURGEON REVIEW REQUIRED, and mortuary affairs products
   hold no personal data.
+- **Logistics server.** The J4 team's built-in `mcp:logistics` tools. The consumption calculator
+  multiplies planning factors you enter in `.planning/.near-ai/staff-factors.json` by the force
+  list and the days, gives days of supply from what is on hand, and shows the formula on every
+  result; it ships no planning factor tables. LOGSTAT reports are entered as the units sent them,
+  validated against the six plausibility rules with each finding sent back to its unit, and
+  consolidated only once they pass, with the colour bands you set and consumption against the
+  forecast. Notional movement tables are checked for lift and arrival against the required
+  delivery date, routes come from a road graph in your project with no network, and readiness
+  comes from a CSV you import. Every calculation, movement check and readiness import is a
+  calculator record entered in a signed calculator ledger, and the release guard now holds a
+  product that cites a record the calculator did not write or that changed since.
 - **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
   and move from draft through the gates to a person's decision, recorded in a signed, chained
   ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head

@@ -12,6 +12,7 @@
 // - proposals:       .planning/staff/proposals/<product>/ (design 10, 4.3)
 // - guard settings:  .planning/.near-ai/staff-guard.json (the exercise box and real entities; agents must ask before writing there), and
 //                    .planning/staff/real-entities.txt (more real entities, one per line, shared with the demo scenario import)
+// - calculator:      .planning/staff/calculator/<id>.json and its signed ledger .planning/staff/ledger/calculator.jsonl (src/staff/logisticsHost.ts)
 //
 // Two kinds of caller reach this host and nothing else does. A team member, through the staff-products, guard-scan and lint tools (src/agent/staffTools.ts),
 // which can only propose, give a gate verdict, submit, withdraw, read and write registers, record the wargame and mark a step. And a person, through
@@ -60,6 +61,7 @@ import type { TradecraftFinding } from '../domain/staff/tradecraftLint';
 import { checkOrder, deriveFromWargame, parseWargamePhase, wargameTurnEvent } from '../domain/staff/wargame';
 import type { WargameEntry } from '../domain/staff/wargame';
 import { withFileLock } from '../services/stateMirrorLock';
+import { LogisticsHost, readCalculatorCheck } from './logisticsHost';
 import { writeFileAtomic } from '../team/teamFile';
 
 export const LEDGER_DIR = '.planning/staff/ledger';
@@ -77,7 +79,7 @@ export const EVENTS_FILE = 'events.jsonl';
 export const WARGAME_DIR = '.planning/staff/wargame';
 export const WARGAME_FILE = 'ledger.jsonl';
 export { GUARD_CONFIG_FILE, REAL_ENTITIES_FILE } from '../domain/staff/realEntities';
-export const CALCULATOR_DIR = '.planning/staff/calculator';
+export { CALCULATOR_RECORD_DIR as CALCULATOR_DIR } from '../domain/staff/logistics/calculator';
 /** The source register the tradecraft lint reads when a product carries no sources block of its own (intel-workbench writes it). */
 export const SOURCES_FILE = registerPath('source-register');
 const LEDGER_LOCK = 'ledger.lock';
@@ -200,6 +202,14 @@ export class StaffHost {
   }
 
   public get root(): string { return this.options.root; }
+
+  private logisticsHost: LogisticsHost | undefined;
+
+  /** The logistics server's files for this project (WP-LOG), signed with the same device key as the product ledger. */
+  public logistics(): LogisticsHost {
+    this.logisticsHost ??= new LogisticsHost(this.options);
+    return this.logisticsHost;
+  }
 
   /** Called with every staff event this host writes. Returns the function that stops it. */
   public onEvent(listener: (event: StaffEvent) => void): () => void {
@@ -537,9 +547,13 @@ export class StaffHost {
     }
     // The one real-entity list (src/staff/realEntities.ts): the guard settings' names and the list file's, as the scenario loader reads them.
     const entities = await readRealEntities(this.options.root);
-    let records: Set<string> | undefined;
-    try { records = new Set((await readdir(path.join(this.options.root, CALCULATOR_DIR))).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5))); } catch { records = undefined; }
-    return { ...(box ? { exerciseBox: box } : {}), realEntities: entities, ...(records ? { calculatorRecords: records } : {}) };
+    // The calculator records a J4 number may cite: only those whose file matches a trusted entry in the calculator ledger (WP-LOG). A file a member wrote
+    // by hand, or changed after the calculator wrote it, is held with the reason; with no records at all, every calc:<id> names no record.
+    const calculator = await readCalculatorCheck(this.options.root, await this.options.keyStatus());
+    return {
+      ...(box ? { exerciseBox: box } : {}), realEntities: entities, calculatorRecords: calculator.verified,
+      ...(calculator.problems.size ? { calculatorProblems: calculator.problems } : {})
+    };
   }
 
   // ---- Who may act ---------------------------------------------------------------------------------------------------------------------------

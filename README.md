@@ -270,14 +270,32 @@ keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
 synchronization matrix, the DST and DSM and the assessment plan, and every
 FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
-`mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
-the Team Studio tool picker; only a staff team's run gets them.
+`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:logistics`) are listed on the
+Tools page and in the Team Studio tool picker; only a staff team's run gets
+them.
 A J4 logistics team starts support planning at the first step, alongside force
 planning, and every number in its products cites the calculator record that
 produced it (`calc:<id>`, a record in `.planning/staff/calculator/`); the
-release guard cannot clear a number without one. Its members reach the
-logistics tools (`mcp__logistics__calc*`, `logstat*`, `movement*`,
-`readiness*`) once that server is installed.
+release guard cannot clear a number without one, or with a record the
+calculator did not write. Its members reach the built-in logistics server by
+tool family (`mcp__logistics__calc*`, `logstat*`, `movement*`, `readiness*`):
+- **The consumption calculator** (`calc_run`) multiplies planning factors you
+  enter in `.planning/.near-ai/staff-factors.json` by the force list and the
+  days, and gives days of supply from what is on hand. It ships no factor
+  tables. Every result shows its formula and is kept as a record signed into
+  the calculator ledger; `calc_read`, `calc_list` and `calc_factors` show them.
+- **LOGSTAT** (`logstat_submit`, `logstat_read`, `logstat_validate`,
+  `logstat_consolidate`): reports are entered as the units sent them, checked
+  against the plausibility rules of the LOGSTAT definitions skill, sent back
+  with the rule named, and consolidated only once they pass, with the colour
+  bands you set and consumption against the calculator's forecast.
+- **Movement** (`movement_table`, `movement_read`, `movement_route`): notional
+  movement tables checked for lift and arrival against the required delivery
+  date, and the shortest route on a road graph you keep in
+  `.planning/staff/logistics/roads.json`, with no network.
+- **Readiness** (`readiness_import`, `readiness_read`): readiness from a CSV
+  you put in the project, by unit and equipment type, with stale figures
+  marked.
 
 For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
 exercise scenario into `.planning/staff/scenario/` for the team to read. The
