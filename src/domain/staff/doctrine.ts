@@ -802,3 +802,137 @@ export const RED_TEAM_NOTES: Readonly<Record<StaffProfileId, { readonly note: st
   'us-army': { note: 'The red team is an independent group, separate from the S-2 or G-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
   'nato-ca': { note: 'Red teaming is a UK national element in AJP-5, not NATO doctrine. It is on by default; the commander may switch it off.', optional: true }
 };
+
+// ---- Logistics terms (design 10, 2.5 and 3.5; research note 03 part B; WP-J4) -----------------------------------------------------------------
+
+/**
+ * The core logistics functions support planning covers, one J4 member each (design 10, 3.5; 03 Summary 3 and B2). Support planning runs at the same time
+ * as force planning, from the first step, not after the COA decision (03 B3).
+ */
+// JP 5-0 (2020) ch. IV support planning, as read for note 03 (03 B2); JP 4-0 (20 July 2023) by title, whose core logistic capabilities use the same areas
+// (03 B1; design 10, 2.9). The seven names are unchanged in the JP 5-0 (1 July 2025) the owner supplied (design 10, 2.8: only listed changes apply).
+export const CORE_LOGISTICS_FUNCTIONS: readonly string[] = [
+  'Deployment and distribution', 'Supply', 'Maintenance', 'Logistic services', 'Operational contract support', 'Joint health services', 'Engineering'
+];
+/** Support planning runs alongside force planning from step 1 (03 B3, B12 item 6). */
+// JP 5-0 (2020) ch. IV: support planning "is conducted concurrently with force planning" (03 B3).
+export const SUPPORT_PLANNING_RULE = 'Support planning runs at the same time as force planning, from the first planning step.';
+
+/** The four elements of sustainment, the US Army's frame for the sustainment warfighting function (03 B5). */
+// ADP 4-0, Sustainment (July 2019) ch. 1; the 2019 edition made financial management a separate element (03 B5).
+export const SUSTAINMENT_ELEMENTS: readonly string[] = ['Logistics', 'Financial management', 'Personnel services', 'Health service support'];
+
+/** The Canadian lines of support, by the level that usually provides them (design 10, 2.5; 03 B6, B11). */
+// CFJP 4-0, Support (2016) by title, as quoted by secondary sources (03 B6 [S49][S50]); level mapping 03 B11. Best judgement until CFJP 4-0 is read (design 10, 2.9).
+export const CANADIAN_LINES_OF_SUPPORT: ReadonlyArray<{ readonly line: string; readonly meaning: string; readonly level: StaffLevel }> = [
+  { line: 'First line', meaning: 'Support organic to the ship, unit or squadron', level: 'tactical' },
+  { line: 'Second line', meaning: 'Support organic or allocated to a formation', level: 'tactical' },
+  { line: 'Third line', meaning: 'Support to a force in a theatre or along strategic lines of communication (the JTF Support Component)', level: 'operational' },
+  { line: 'Fourth line', meaning: 'Strategic resources: national depots, contractors and industry', level: 'strategic' }
+];
+
+/** One class of supply: its numeral and what it holds. */
+export interface SupplyClass { readonly class: string; readonly holds: string }
+
+/**
+ * The classes of supply each profile uses. US Joint and US Army use the ten US classes; NATO and Canada use the five NATO classes. Members forecast by
+ * these classes only, and never with a factor table from a government source (03 B5, B12 items 1 and 2).
+ */
+// US: JP 4-09 (public reference edition) and ATP 4-42 series, the ten classes as US practice lists them (03 B2 [S46]; best judgement).
+// NATO/Canadian: AAP-06, NATO Glossary of Terms and Definitions, "class of supply" (five classes); Canada follows NATO terms first (design 10, 2.5).
+export const SUPPLY_CLASSES: Readonly<Record<StaffProfileId, readonly SupplyClass[]>> = {
+  'us-joint': [
+    { class: 'I', holds: 'Subsistence and water' }, { class: 'II', holds: 'Clothing, individual equipment, tools and administrative supplies' },
+    { class: 'III', holds: 'Petroleum, oils and lubricants' }, { class: 'IV', holds: 'Construction and barrier materiel' }, { class: 'V', holds: 'Ammunition' },
+    { class: 'VI', holds: 'Personal demand items' }, { class: 'VII', holds: 'Major end items' }, { class: 'VIII', holds: 'Medical materiel' },
+    { class: 'IX', holds: 'Repair parts' }, { class: 'X', holds: 'Materiel to support nonmilitary programs' }
+  ],
+  'us-army': [
+    { class: 'I', holds: 'Subsistence and water' }, { class: 'II', holds: 'Clothing, individual equipment, tools and administrative supplies' },
+    { class: 'III', holds: 'Petroleum, oils and lubricants' }, { class: 'IV', holds: 'Construction and barrier materiel' }, { class: 'V', holds: 'Ammunition' },
+    { class: 'VI', holds: 'Personal demand items' }, { class: 'VII', holds: 'Major end items' }, { class: 'VIII', holds: 'Medical materiel' },
+    { class: 'IX', holds: 'Repair parts' }, { class: 'X', holds: 'Materiel to support nonmilitary programs' }
+  ],
+  'nato-ca': [
+    { class: 'I', holds: 'Subsistence (food and forage) consumed at a broadly uniform rate' },
+    { class: 'II', holds: 'Items with an established table of allowances: clothing, weapons, tools, spare parts and vehicles' },
+    { class: 'III', holds: 'Petroleum, oils and lubricants for all purposes' },
+    { class: 'IV', holds: 'Items without an established table of allowances, such as fortification and construction materiel' },
+    { class: 'V', holds: 'Ammunition, explosives and chemical agents of all types' }
+  ]
+};
+
+/** The logistics status report and the words in it (03 B5, B12 item 7). */
+// "The Trouble with LOGSTATs" (11 Feb 2025) and the battalion-to-brigade LOGSTAT flow (03 B5 [S45][S46]); FM 4-0 calls a LOGSTAT data that needs analysis.
+export const LOGSTAT_TERMS = {
+  report: 'LOGSTAT',
+  /** How far ahead a LOGSTAT projects needs (03 B5 [S46]). */
+  forecastHours: 72,
+  /** The words a LOGSTAT uses, each defined per commodity and echelon in the project's logstat-definitions skill. */
+  fields: ['On hand', 'Received', 'Consumed', 'Capacity', 'Required', 'Days of supply'],
+  /** The logistics common operational picture the JLOC keeps (03 B5, B8). */
+  picture: 'LOGCOP'
+} as const;
+
+/** One profile's logistics words: what the section and its estimate are called, and its current-operations centre per level. */
+export interface LogisticsTerms {
+  /** The function the J4, G4 or S4 serves: logistics (joint), sustainment (US Army). */
+  readonly function: string;
+  readonly estimate: string;
+  /** The logistics estimate at strategic level, one of the joint strategic estimates (03 B3). */
+  readonly strategicEstimate: string;
+  /** The overview that starts the estimate in step 1 (03 B3): "theater" in US spelling, "theatre" in NATO and Canadian. */
+  readonly overview: string;
+  readonly conceptOfSupport: string;
+  /** Reception of forces in the theatre and their move forward (JRSOI, RSOI or RSOM). */
+  readonly reception: string;
+  /** The logistics current-operations centre at each level. Always qualified: a JTF J4 JLOC is not the DLA one (03 B4, B12 item 3). */
+  readonly currentOps: Readonly<Record<StaffLevel, string>>;
+  readonly source: string;
+}
+
+// JP 5-0 (2020) ch. IV and app. A (theater logistics overview, logistics estimate, Annex D); JP 4-0 (2023) ch. V JLOC by title (03 B3, B4); FM 5-0 (Nov 2024)
+// running estimates and Annex F (03 B3); ADP 4-0 (2019) (03 B5); AJP-4 by title, CFJP 4-0 (2016) by title and the JTF Support Component (03 B6). Best
+// judgement where a level has no named centre: the plain description, never an invented branch name (03 A8 gap, B12 item 3).
+export const LOGISTICS_TERMS: Readonly<Record<StaffProfileId, LogisticsTerms>> = {
+  'us-joint': {
+    function: 'Logistics',
+    estimate: 'Logistics estimate',
+    strategicEstimate: 'Joint logistics estimate',
+    overview: 'Theater logistics overview',
+    conceptOfSupport: 'Concept of support',
+    reception: 'Joint reception, staging, onward movement and integration (JRSOI)', // JP 3-35 (2018) (03 B1, B2)
+    currentOps: { strategic: 'CCMD J4 joint logistics operations center (CCMD J4 JLOC)', operational: 'JTF J4 joint logistics operations center (JTF J4 JLOC)', tactical: 'Not offered at tactical level' },
+    source: 'JP 5-0 (2020, 2025); JP 4-0 (2023) by title'
+  },
+  'us-army': {
+    function: 'Sustainment',
+    estimate: 'Sustainment estimate',
+    strategicEstimate: 'Not offered at strategic level',
+    overview: 'Sustainment overview',
+    conceptOfSupport: 'Concept of support',
+    reception: 'Reception, staging, onward movement and integration (RSOI)', // ATP 3-35 (2015) Army deployment doctrine (best judgement)
+    currentOps: { strategic: 'Not offered at strategic level', operational: 'Not offered at operational level', tactical: 'Sustainment cell current operations, with the supporting unit\'s support operations officer' },
+    source: 'FM 5-0 (2024); ADP 4-0 (2019)'
+  },
+  'nato-ca': {
+    function: 'Logistics',
+    estimate: 'Logistics estimate',
+    strategicEstimate: 'Strategic logistics estimate',
+    overview: 'Theatre logistics overview',
+    conceptOfSupport: 'Concept of logistic support',
+    reception: 'Reception, staging and onward movement (RSOM)', // AJP-3.13, Deployment and Redeployment of Forces, by title (best judgement)
+    currentOps: { strategic: 'Strategic J4 logistics operations centre', operational: 'JTF J4 joint logistics operations centre (JTF J4 JLOC)', tactical: 'Combat service support current operations' },
+    source: 'AJP-4 and AJP-5 by title; CFJP 4-0 (2016) by title (03 B6)'
+  }
+};
+
+/** The reports a deployed Canadian operation sends to the CJOC J4 desk, alongside the LOGSTAT (design 10, 2.5; 03 B6, B12 item 9). */
+// DND evaluation of CAF operational support (2021) as summarised in 03 B6 [S52]: a weekly logistics report plus equipment, ammunition status and
+// ammunition expenditure reports to the CJOC Joint Support (J4) desk. Report names are plain descriptions until CFJP 4-0 is read (design 10, 2.9).
+export const CANADIAN_J4_REPORTS = {
+  weekly: 'Weekly logistics report',
+  others: ['Equipment status report', 'Ammunition status report', 'Ammunition expenditure report'],
+  to: 'the CJOC J4 desk',
+  cadence: 'weekly'
+} as const;
