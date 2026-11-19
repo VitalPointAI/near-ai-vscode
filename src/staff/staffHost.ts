@@ -174,6 +174,36 @@ export function unreadableText(file: string, reason: string, wayOut: string): st
 }
 
 const SET_ASIDE_WAY_OUT = 'A person can set it aside with NEAR AI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
+/** The way out of a ledger that reads as tampered only because it is not the copy this computer recorded (another git branch's, for example). */
+export const USE_BRANCH_LEDGER_WAY_OUT = 'If you switched to another git branch, a person can use NEAR AI: Staff: Use This Branch\'s Ledger, which checks this ledger\'s own signatures and chain and then makes it the one this computer checks against.';
+
+/** The reasons a ledger reads as tampered that Use This Branch's Ledger answers: shorter than, or different from, the head this computer recorded. */
+function otherCopyReason(reason: string | undefined): 'truncated' | 'replaced' | undefined {
+  return reason === LEDGER_PROBLEMS.truncated ? 'truncated' : reason === LEDGER_PROBLEMS.replaced ? 'replaced' : undefined;
+}
+
+/** For a product that reads as tampered because the ledger is another copy than the one recorded: the sentence that names Use This Branch's Ledger. */
+function tamperWayOut(tampered: string | undefined): string {
+  return otherCopyReason(tampered) ? ` ${USE_BRANCH_LEDGER_WAY_OUT}` : '';
+}
+
+/** The ways out of a broken ledger, for the reason it broke. */
+function ledgerWayOut(reason: string): string {
+  return otherCopyReason(reason) ? `${USE_BRANCH_LEDGER_WAY_OUT} Otherwise: ${SET_ASIDE_WAY_OUT}` : SET_ASIDE_WAY_OUT;
+}
+
+/**
+ * How this project's ledger stands against the head this computer recorded, for Use This Branch's Ledger:
+ *  - `current`: it reads as the copy this computer recorded (or there is no record), so there is nothing to use;
+ *  - `other-copy`: it verifies on its own (every signature, the whole chain) but is shorter than, or different from, the recorded head;
+ *  - `broken`: it does not verify on its own, so it cannot be used (Set Aside is the way out);
+ *  - `unreadable`: it cannot be read whole.
+ */
+export type BranchLedgerCheck =
+  | { readonly kind: 'current' }
+  | { readonly kind: 'other-copy'; readonly reason: 'truncated' | 'replaced'; readonly recorded: number; readonly entries: number; readonly products: number; readonly head: string }
+  | { readonly kind: 'broken'; readonly message: string }
+  | { readonly kind: 'unreadable'; readonly message: string };
 
 /** The refusal for a product file over the size limit: it is there, but too large to read, so nothing acts on it. */
 export function tooLargeText(file: string, reason = `it is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB`): string {
@@ -301,7 +331,7 @@ export class StaffHost {
     await mkdir(this.ledgerDir(), { recursive: true });
     return withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
       const replay = await this.replay();
-      if (replay.broken) return refuse(`The staff ledger cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded, and nothing more can be until a person looks at it. ${SET_ASIDE_WAY_OUT}`);
+      if (replay.broken) return refuse(`The staff ledger cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded, and nothing more can be until a person looks at it. ${ledgerWayOut(replay.broken.reason)}`);
       const drafts = await decide(replay);
       if (!Array.isArray(drafts)) return drafts;
       if (replay.entries + drafts.length > MAX_LEDGER_ENTRIES) return refuse('The staff ledger is full. A person can set it aside and start a new one.');
@@ -352,6 +382,58 @@ export class StaffHost {
       await this.writeHead(0, LEDGER_GENESIS);
     });
     return present ? path.relative(this.options.root, kept).split(path.sep).join('/') : '';
+  }
+
+  /** How the ledger stands against the head this computer recorded (BranchLedgerCheck). Reads only. */
+  public async branchLedgerCheck(): Promise<BranchLedgerCheck> {
+    const status = await this.options.keyStatus();
+    const read = await this.ledgerLines();
+    if ('unreadable' in read) return { kind: 'unreadable', message: unreadableText(`${LEDGER_DIR}/${LEDGER_FILE}`, read.unreadable, SET_ASIDE_WAY_OUT) };
+    const mark = await this.readHead(status);
+    const verify = (envelope: unknown) => verifyPayload(envelope, { purpose: 'staff-ledger', status });
+    // The ledger on its own, with no recorded head: every signature and the whole chain must hold.
+    const alone = replayLedger(read.lines, verify);
+    if (alone.broken) return { kind: 'broken', message: `This ledger cannot be used: it does not verify on its own from entry ${alone.broken.seq + 1}. ${alone.broken.reason} ${SET_ASIDE_WAY_OUT}` };
+    if (mark === 'unverified') return { kind: 'broken', message: `${LEDGER_PROBLEMS['head-unverified']} ${SET_ASIDE_WAY_OUT}` };
+    if (mark === undefined) return { kind: 'current' };
+    const reason = otherCopyReason(replayLedger(read.lines, verify, mark).broken?.reason);
+    if (!reason) return { kind: 'current' };
+    return { kind: 'other-copy', reason, recorded: mark.count, entries: alone.entries, products: alone.products.size, head: alone.head };
+  }
+
+  /**
+   * Use This Branch's Ledger (the person-only command of that name; no agent tool calls it): a named person makes this branch's ledger the one this
+   * computer checks against. Only for a ledger that reads as tampered because it is shorter than, or different from, the recorded head, and that
+   * verifies on its own; checked again under the ledger lock, against exactly the head the person was shown. Who did it is recorded first, as a signed
+   * entry in the decision log (subject `ledger-head`), and only then does the recorded head move. A broken ledger is refused: Set Aside is its way out.
+   */
+  public async adoptBranchLedger(person: PersonActor, expected: { readonly head: string; readonly entries: number }): Promise<StaffResult> {
+    if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const signer = await this.options.signer();
+    if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    if (!this.options.headStore) return refuse('This computer keeps no record of the ledger head here, so there is nothing to change.');
+    await mkdir(this.ledgerDir(), { recursive: true });
+    return withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
+      const check = await this.branchLedgerCheck();
+      if (check.kind === 'broken' || check.kind === 'unreadable') return refuse(`${check.message} Nothing was changed.`);
+      if (check.kind === 'current') return refuse('The staff ledger already reads as the copy this computer recorded. Nothing was changed.');
+      if (check.head !== expected.head || check.entries !== expected.entries) return refuse('The staff ledger changed since you looked at it, so nothing was changed. Run the command again to see it as it is now.');
+      const at = this.now();
+      const logged = await withFileLock(this.ledgerDir(), DECISION_LOCK, async () => {
+        const replay = await this.decisionReplay();
+        if (replay.broken) return refuse(`The decision log cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was changed, because who used this ledger could not be recorded.`);
+        const record: PersonDecisionEntry = {
+          v: 1, seq: replay.entries, prev: replay.head, at: isoOf(at), subject: { kind: 'ledger-head', id: String(check.entries) }, decision: 'approved', wording: check.head,
+          reasons: [`Use this branch's ledger: this computer had recorded ${check.recorded} entries; this ledger has ${check.entries} (${check.reason === 'truncated' ? 'shorter' : 'a different history'}).`], person
+        };
+        const envelope = signPayload(signer, 'staff-decision', record, { now: () => new Date(at) });
+        await appendFile(path.join(this.ledgerDir(), DECISION_LOG_FILE), `${JSON.stringify(envelope)}\n`, 'utf8');
+        return undefined;
+      });
+      if (logged) return logged;
+      await this.writeHead(check.entries, check.head);
+      return ok(`This branch's staff ledger (${check.entries} entries, ${check.products} products) is now the one this computer checks against, by ${person.name} (${person.role}), recorded in ${LEDGER_DIR}/${DECISION_LOG_FILE} and signed with this device's key.`);
+    });
   }
 
   // ---- A person's decisions outside the release machine (PIRs) --------------------------------------------------------------------------------
@@ -694,7 +776,7 @@ export class StaffHost {
     const shared = this.sharedWriterProblem(input.product, caller, member, before);
     if (shared) return shared;
     const existing = before.products.get(input.product);
-    if (existing?.tampered) return refuse(`${input.product} cannot be changed: ${existing.tampered}`);
+    if (existing?.tampered) return refuse(`${input.product} cannot be changed: ${existing.tampered}${tamperWayOut(existing.tampered)}`);
     const section = existing?.record.section ?? caller.team.section;
     // A product handed over at transition stays where it was made (handedOverInPlace): its writer now, which sharedWriterProblem has just checked the
     // caller is, writes it in the other section's folder.
@@ -822,7 +904,7 @@ export class StaffHost {
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
-    if (state.tampered) return refuse(`${input.product} cannot be checked: ${state.tampered}`);
+    if (state.tampered) return refuse(`${input.product} cannot be checked: ${state.tampered}${tamperWayOut(state.tampered)}`);
     if (fresh.disagreement) return refuse(`${input.product} reads as tampered: ${TAMPER_REASONS[fresh.disagreement]} Its owner writes it again, then you check the new version.`);
     if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product), fresh.file.unreadable) : `The file ${productPath(state.record.section, input.product)} is missing.`);
     if (input.hash !== state.record.hash) return refuse(`${RELEASE_REFUSALS['stale-version']} The current version is ${state.record.version}, hash ${state.record.hash}.`);
@@ -899,7 +981,7 @@ export class StaffHost {
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
-    if (state.tampered) return refuse(`${input.product} cannot be changed: ${state.tampered}`);
+    if (state.tampered) return refuse(`${input.product} cannot be changed: ${state.tampered}${tamperWayOut(state.tampered)}`);
     const result = await this.append(() => [{ run: caller.run, product: input.product, section: state.record.section, event: { type: 'withdraw', reason: input.reason }, actor: { kind: 'agent', member } }]);
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(input.product)!;
@@ -1009,7 +1091,7 @@ export class StaffHost {
       return refuse(`${input.register} is written by ${writer?.member ?? owner ?? 'its owner'}. Propose your rows with the propose action instead.${why}`);
     }
     if (section !== caller.team.section && input.part === undefined && !(isOwner && handedOverInPlace(input.register))) return refuse(`${input.register} belongs to ${section}.`);
-    if (state?.tampered) return refuse(`${input.register} cannot be changed: ${state.tampered}`);
+    if (state?.tampered) return refuse(`${input.register} cannot be changed: ${state.tampered}${tamperWayOut(state.tampered)}`);
     if (!isOwner && state && !(['draft', 'guard-checked', 'awaiting-decision'] as const).some((value) => value === state.record.state)) {
       return refuse(`${input.register} version ${state.record.version} is ${state.record.state}; its owner writes the next version before parts can change.`);
     }
@@ -1050,7 +1132,7 @@ export class StaffHost {
     const result = await this.append(async (replay) => {
       const state = replay.products.get(register);
       if (!state) return refuse(`${register} does not exist yet; its owner creates it first.`);
-      if (state.tampered) return refuse(`${register} cannot be changed: ${state.tampered}`);
+      if (state.tampered) return refuse(`${register} cannot be changed: ${state.tampered}${tamperWayOut(state.tampered)}`);
       const file = await this.readProduct(caller.root, state.record.section, register, state.meta.dependsOn);
       if (file.hash === state.record.hash) return refuse('Nothing changed.');
       return [{ run: caller.run, product: register, section: state.record.section, event: { type: 'edit', hash: file.hash }, actor: { kind: 'agent', member }, meta: { ...state.meta, dependsOn: [...file.dependsOn] } }];
@@ -1200,7 +1282,7 @@ export class StaffHost {
     const fresh = await this.refresh(root, input.product, 'person');
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
-    if (state.tampered) return refuse(`${input.product} cannot be decided on: ${state.tampered}`);
+    if (state.tampered) return refuse(`${input.product} cannot be decided on: ${state.tampered}${tamperWayOut(state.tampered)}`);
     if (fresh.disagreement) return refuse(`${input.product} cannot be decided on: ${TAMPER_REASONS[fresh.disagreement]}`);
     const run = state.request?.run ?? state.history[state.history.length - 1]?.run ?? 'person';
     const reasons = (input.reasons ?? []).map((reason) => reason.trim()).filter(Boolean);
@@ -1247,7 +1329,7 @@ export class StaffHost {
     return {
       registry, decisions: decisionQueue(replay, files), registers: sharedRegisters(replay, rows), cop: copModel(events), feeds: feedPicture(feedEvents),
       ...(run ? { board: stepBoard(events, run, registry), steps: currentSteps(events, run) } : {}),
-      ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}` } : {}),
+      ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}${otherCopyReason(replay.broken.reason) ? ` ${USE_BRANCH_LEDGER_WAY_OUT}` : ''}` } : {}),
       ...(log.unreadable ? { eventLogProblem: log.unreadable } : {})
     };
   }

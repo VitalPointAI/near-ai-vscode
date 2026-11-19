@@ -1016,7 +1016,10 @@ until it runs out aren't shown.
   verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
   product, what waits for you, and its history. **NEAR AI: Staff: Decide a
   PIR** approves or rejects a PIR awaiting a decision, signed the same way; a
-  decision written into the PIR register any other way does not count. The
+  decision written into the PIR register any other way does not count. After
+  switching to a git branch with an older or different staff ledger, **NEAR
+  AI: Staff: Use This Branch's Ledger** makes that branch's ledger the one
+  NEAR AI checks, if its own signatures and chain verify. The
   exercise box and the
   real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
   and `.planning/staff/real-entities.txt`. Everything a staff team writes

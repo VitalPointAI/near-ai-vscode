@@ -8,6 +8,7 @@ export const STAFF_COMMANDS = {
   withdraw: 'nearAi.staff.withdrawProduct',
   show: 'nearAi.staff.showProducts',
   setAside: 'nearAi.staff.setAsideLedger',
+  useBranchLedger: 'nearAi.staff.useBranchLedger',
   decidePir: 'nearAi.staff.decidePir'
 } as const;
 

@@ -57,6 +57,7 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   register(STAFF_COMMANDS.withdraw, (args) => decideCommand(context, identity, 'withdraw', args));
   register(STAFF_COMMANDS.show, () => showProducts());
   register(STAFF_COMMANDS.setAside, () => setAsideLedger());
+  register(STAFF_COMMANDS.useBranchLedger, () => useBranchLedgerCommand(context, identity));
   register(STAFF_COMMANDS.decidePir, (args) => decidePirCommand(context, identity, args));
 }
 
@@ -132,7 +133,57 @@ async function decideCommand(context: StaffCommandContext, identity: () => Promi
   if (!dialog) return;
   const outcome = await host.decide(person, { product: view.product, action, hash: view.hash, reasons, releaseOnApproval: dialog === 'Approve and Release' });
   if (outcome.ok) void vscode.window.showInformationMessage(outcome.text);
+  else await offerBranchLedger(host, outcome.message);
+}
+
+/** The button on a tampered-ledger message that runs Use This Branch's Ledger (the person still names themselves and confirms in a dialog). */
+export const USE_BRANCH_LEDGER_ACTION = "Use This Branch's Ledger";
+export const USE_BRANCH_LEDGER_QUESTION = "Use this branch's staff ledger?";
+
+/**
+ * Shows a staff warning; when the ledger reads as tampered only because it is another copy than the one this computer recorded (another git branch's,
+ * shorter or different, but verifying on its own), the message offers Use This Branch's Ledger.
+ */
+async function offerBranchLedger(host: StaffHost, message: string, onlyWhenOffered = false): Promise<void> {
+  const check = await host.branchLedgerCheck().catch(() => undefined);
+  if (check?.kind !== 'other-copy') { if (!onlyWhenOffered) void vscode.window.showWarningMessage(message); return; }
+  const answer = await vscode.window.showWarningMessage(message, USE_BRANCH_LEDGER_ACTION);
+  if (answer === USE_BRANCH_LEDGER_ACTION) await vscode.commands.executeCommand(STAFF_COMMANDS.useBranchLedger);
+}
+
+/**
+ * Use This Branch's Ledger: after a switch to another git branch, the ledger there is shorter than, or different from, the head this computer recorded,
+ * so it reads as tampered. A named person, after a modal dialog that says what changes, makes this branch's ledger the one this computer checks against.
+ * Only a ledger whose own signatures and chain verify is offered; a broken one gets Set Aside instead. Signed with this device's key and recorded in the
+ * decision log. No agent tool reaches it.
+ */
+async function useBranchLedgerCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>): Promise<void> {
+  const host = hostOrSay();
+  if (!host) return;
+  const check = await host.branchLedgerCheck();
+  if (check.kind === 'current') { void vscode.window.showInformationMessage('The staff ledger already reads as the copy this computer recorded. There is nothing to change.'); return; }
+  if (check.kind !== 'other-copy') { void vscode.window.showWarningMessage(check.message); return; }
+  const signer = await identity();
+  const person = await askPerson(context, signer.fingerprint);
+  if (!person) return;
+  const dialog = await vscode.window.showWarningMessage(
+    USE_BRANCH_LEDGER_QUESTION,
+    { modal: true, detail: `${branchLedgerDetail(check)}\n\nYou do this as ${person.name} (${person.role}). ${STAFF_IDENTITY_TEXT}` },
+    USE_BRANCH_LEDGER_ACTION
+  );
+  if (dialog !== USE_BRANCH_LEDGER_ACTION) return;
+  const outcome = await host.adoptBranchLedger(person, { head: check.head, entries: check.entries });
+  if (outcome.ok) void vscode.window.showInformationMessage(outcome.text);
   else void vscode.window.showWarningMessage(outcome.message);
+}
+
+/** What changes, in the words the dialog shows. */
+export function branchLedgerDetail(check: { readonly reason: 'truncated' | 'replaced'; readonly recorded: number; readonly entries: number; readonly products: number }): string {
+  return [
+    `This computer last recorded a staff ledger of ${check.recorded} entries. The ledger on this branch has ${check.entries} entries for ${check.products} products${check.reason === 'truncated' ? ', fewer than that' : ', with a different history'}, and its own signatures and chain verify.`,
+    'Using it makes this ledger the one NEAR AI checks this project against: products read as this ledger records them, and steps and decisions that only the other copy holds (for example on the branch you came from) are not in it.',
+    'Who did this is recorded in .planning/staff/ledger/decisions.jsonl, signed with this device\'s key. Switching back to the other branch needs the same step there.'
+  ].join('\n\n');
 }
 
 /**
@@ -197,6 +248,7 @@ async function showProducts(): Promise<void> {
   lines.push('', STAFF_IDENTITY_TEXT);
   const document = await vscode.workspace.openTextDocument({ language: 'markdown', content: lines.join('\n') });
   await vscode.window.showTextDocument(document, { preview: true });
+  if (snapshot.ledgerProblem) await offerBranchLedger(host, `The staff product ledger reads as tampered. ${snapshot.ledgerProblem}`, true);
 }
 
 async function setAsideLedger(): Promise<void> {

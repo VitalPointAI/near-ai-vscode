@@ -360,6 +360,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.useBranchLedger",
+        "title": "Staff: Use This Branch's Ledger",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.decidePir",
         "title": "Staff: Decide a PIR",
         "category": "NEAR AI"

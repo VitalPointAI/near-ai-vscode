@@ -770,7 +770,14 @@ what is not:
   computer whose secret storage was cleared, or a ledger read by a build
   without the record. There only the chain is checked. Switching to a git
   branch whose ledger is older than the one this computer saw reads as
-  tampered too, by design.
+  tampered too, by design. **NEAR AI: Staff: Use This Branch's Ledger** is
+  the way back for that case only: it is offered when the ledger is shorter
+  than, or different from, the recorded head and its own signatures and chain
+  verify; a person names themselves and their role, confirms in a dialog that
+  says what changes, and the recorded head moves to this branch's ledger. Who
+  did it is a signed entry in `.planning/staff/ledger/decisions.jsonl`. A
+  ledger whose chain is broken is refused (Set Aside is its way out), and no
+  agent tool can run it.
 - **Unreadable is never empty.** A ledger, wargame ledger, event log or
   register that cannot be read whole (over 2 MB, or refused by the disk) is
   reported as unreadable with the reason, nothing is written to it, and no
