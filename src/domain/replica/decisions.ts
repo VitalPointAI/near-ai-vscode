@@ -69,11 +69,11 @@ function actKey(act: DecisionAct): string {
 
 interface Settled { max: DecisionAct[]; classes: DecisionClass[]; pending: DecisionAct[]; superseded: DecisionAct[] }
 
-/** Maximal confirmed acts, their classes, and which unconfirmed acts are still pending. `preceded(x, y)` is true when x is in y's past. */
+/** Maximal confirmed acts, their classes, and which unconfirmed acts are still pending. `preceded(x, y)` is true when x is in the past of y. */
 function settle(members: readonly DecisionAct[], preceded: (x: DecisionAct, y: DecisionAct) => boolean): Settled {
   const counting = members.filter((m) => m.confirmed && m.outcome !== 'decline');
   const settlers = members.filter((m) => m.confirmed);
-  const max = counting.filter((m) => !counting.some((o) => o !== m && preceded(o, m)));
+  const max = counting.filter((m) => !counting.some((o) => o !== m && preceded(m, o)));
   const pending = members.filter((m) => !m.confirmed && !settlers.some((s) => preceded(m, s)));
   const superseded = members.filter((m) => m.outcome !== 'decline' && !max.includes(m) && !pending.includes(m));
   const classes = [...new Set(max.map((m) => classOf(m.outcome) as DecisionClass))].sort(compareText);
