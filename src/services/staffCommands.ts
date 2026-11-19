@@ -41,7 +41,7 @@ function projectRoot(): string | undefined {
 export function registerStaffCommands(context: StaffCommandContext): void {
   const dir = identityDir(context.globalStorageUri.fsPath);
   const identity = async () => (await loadOrCreateDeviceIdentity(context.secrets, { identityDir: dir })).identity;
-  configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets) });
+  configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets), headStore: context.secrets });
   context.subscriptions.push({ dispose: () => { configureStaffHosts(undefined); } });
   const register = (id: string, run: (args?: StaffCommandArgs) => Promise<void>): void => {
     context.subscriptions.push(vscode.commands.registerCommand(id, async (args?: unknown) => {
@@ -137,6 +137,7 @@ async function showProducts(): Promise<void> {
   const snapshot = await host.snapshot();
   const lines = ['# Staff products', ''];
   if (snapshot.ledgerProblem) lines.push(`The product ledger cannot be trusted after one point: ${snapshot.ledgerProblem}`, '');
+  if (snapshot.eventLogProblem) lines.push(`The staff event log: ${snapshot.eventLogProblem}`, '');
   if (snapshot.decisions.length) {
     lines.push('## Waiting for a person', '');
     for (const entry of snapshot.decisions) {
@@ -164,5 +165,5 @@ async function setAsideLedger(): Promise<void> {
   );
   if (answer !== 'Set Aside') return;
   const kept = await host.setAsideLedger();
-  void vscode.window.showInformationMessage(kept ? `The old ledger is kept at ${kept}. A new one starts with the next product.` : 'There is no ledger to set aside.');
+  void vscode.window.showInformationMessage(kept === undefined ? 'There is no ledger to set aside.' : kept ? `The old ledger is kept at ${kept}. A new one starts with the next product.` : 'The ledger file was already gone, so there was nothing to keep. A new ledger starts with the next product.');
 }

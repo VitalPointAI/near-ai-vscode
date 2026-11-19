@@ -21,8 +21,10 @@ import { registerPath } from '../domain/staff/intel';
 import { GUARD_CONFIG_FILE } from '../domain/staff/realEntities';
 import { readRealEntities } from './realEntities';
 import { staffProductPath, staffWriteLimit, writeAllowedBy } from '../domain/staff/writeLimits';
-import { mkdir, readFile, readdir, rename, appendFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, appendFile, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
+import type { SecretStorageLike } from '../services/auth';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -33,10 +35,10 @@ import type { CcirTriggeredEvent, DecisionOption, StaffEvent, StepEnteredEvent, 
 import { guardScan, guardScanText } from '../domain/staff/guardScan';
 import type { ExerciseBox, GuardConfig, GuardScanResult } from '../domain/staff/guardScan';
 import {
-  apply, entryDigest, FILE_CHANGE_ACTOR, gateReportPath, headerDisagreement, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, MAX_LEDGER_ENTRIES,
-  productHash, projectHeader, RELEASE_GUARD_SLUG, replayLedger, RESERVED_MEMBER_SLUGS, TAMPER_REASONS, TRADECRAFT_REVIEWER_SLUG, TRADECRAFT_SECTIONS
+  apply, entryDigest, FILE_CHANGE_ACTOR, gateReportPath, headerDisagreement, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LEDGER_PROBLEMS, LINE_CLOSING_STATES, MAX_LEDGER_ENTRIES,
+  parseLedgerHeadMark, productHash, projectHeader, RELEASE_GUARD_SLUG, replayLedger, RESERVED_MEMBER_SLUGS, TAMPER_REASONS, TRADECRAFT_REVIEWER_SLUG, TRADECRAFT_SECTIONS
 } from '../domain/staff/ledger';
-import type { DecisionRequestInput, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState, TamperReason } from '../domain/staff/ledger';
+import type { DecisionRequestInput, LedgerEntry, LedgerHeadMark, LedgerReplay, ProductMetaInput, ProductState, TamperReason } from '../domain/staff/ledger';
 import { mayWrite, proposalFolder, sharedProduct, writerIn, writerOf } from '../domain/staff/ownership';
 import { isOneLine, STAFF_SLUG } from '../domain/staff/parse';
 import { LABEL_PATTERN, parseProductHeader, PRODUCT_KINDS, renderProductHeader, splitProductFile, STAFF_MARKERS } from '../domain/staff/products';
@@ -57,6 +59,15 @@ import { writeFileAtomic } from '../team/teamFile';
 
 export const LEDGER_DIR = '.planning/staff/ledger';
 export const LEDGER_FILE = 'products.jsonl';
+/** The project's settings file, where the staff profile and level are (`staff`). */
+export const STAFF_SETTINGS_FILE = '.planning/.near-ai/project.json';
+/**
+ * Every project path the staff host reads or writes, as manifest globs: the staff tools declare exactly these, so the gate's label checks see every file
+ * they touch. A test checks every project path the host and its readers name is covered here.
+ */
+export const STAFF_HOST_PATHS: readonly string[] = ['.planning/staff/**', STAFF_SETTINGS_FILE, GUARD_CONFIG_FILE];
+/** The SecretStorage key prefix of each project's signed ledger head (D-59 pattern); the hashed project path follows it. */
+export const LEDGER_HEAD_SECRET_PREFIX = 'nearAi.staff.ledgerHead.';
 export const EVENTS_FILE = 'events.jsonl';
 export const WARGAME_DIR = '.planning/staff/wargame';
 export const WARGAME_FILE = 'ledger.jsonl';
@@ -105,6 +116,11 @@ export interface StaffHostOptions {
   readonly signer: () => Promise<PayloadSigner>;
   /** The keys this computer trusts to have signed ledger entries. */
   readonly keyStatus: () => Promise<KeyStatusLookup>;
+  /**
+   * Where the signed ledger head is kept, outside the project (the extension's SecretStorage), so a ledger cut short or deleted is caught (D-59). Without
+   * one the host still checks the chain, but cannot tell a ledger whose last entries were removed from one that never had them.
+   */
+  readonly headStore?: SecretStorageLike;
   readonly now?: () => number;
 }
 
@@ -118,19 +134,41 @@ function isoOf(ms: number): string {
 }
 
 async function readText(file: string): Promise<string | undefined> {
-  try {
-    const text = await readFile(file, 'utf8');
-    return text.length > MAX_FILE_BYTES ? undefined : text;
-  } catch { return undefined; }
+  const read = await readWhole(file);
+  return read.kind === 'text' ? read.text : undefined;
 }
 
+/**
+ * A ledger or log read in full, or why not. A file that is there but cannot be read whole (over the size limit, or refused by the disk) is
+ * `unreadable`, never empty: an empty read would show no products and let the next write start the chain again on top of the old file.
+ */
+type WholeRead = { readonly kind: 'missing' } | { readonly kind: 'text'; readonly text: string } | { readonly kind: 'unreadable'; readonly reason: string };
+
+async function readWhole(file: string): Promise<WholeRead> {
+  let size: number;
+  try { size = (await stat(file)).size; } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', reason: `it could not be opened (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
+  }
+  if (size > MAX_FILE_BYTES) return { kind: 'unreadable', reason: `it is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB` };
+  try { return { kind: 'text', text: await readFile(file, 'utf8') }; } catch (error) {
+    return { kind: 'unreadable', reason: `it could not be read (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
+  }
+}
+
+/** The plain sentence for a staff file that cannot be read whole, and the way out. */
+export function unreadableText(file: string, reason: string, wayOut: string): string {
+  return `${file} cannot be read: ${reason}. Nothing was changed. ${wayOut}`;
+}
+
+const SET_ASIDE_WAY_OUT = 'A person can set it aside with NEAR AI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
+
 /** The refusal for a product file over the size limit: it is there, but too large to read, so nothing acts on it. */
-export function tooLargeText(file: string): string {
-  return `${file} is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB, so it was not read. Shorten it or split it into products of their own, then try again.`;
+export function tooLargeText(file: string, reason = `it is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB`): string {
+  return `${file} cannot be read: ${reason}, so it was not read. Nothing was changed. Shorten it or split it into products of their own (or fix what stops it being read), then try again.`;
 }
 
 /** A product file as read from disk: its parsed header (if it has one that parses), its body, and the version hash of both. */
-export interface ProductFile { readonly exists: boolean; /** The file is there but over the 2 MB limit, so it was not read. */ readonly tooLarge?: boolean; readonly header?: ProductHeader; readonly headerText: boolean; readonly body: string; readonly hash: string; readonly dependsOn: readonly ProductDependency[] }
+export interface ProductFile { readonly exists: boolean; /** The file is there but cannot be read whole (over the 2 MB limit, or refused by the disk), so it was not read. */ readonly tooLarge?: boolean; readonly unreadable?: string; readonly header?: ProductHeader; readonly headerText: boolean; readonly body: string; readonly hash: string; readonly dependsOn: readonly ProductDependency[] }
 
 /**
  * How a product file on disk stands against the ledger. `pending-edit`: the body changed while the product can still change, which the host records as an
@@ -167,16 +205,57 @@ export class StaffHost {
 
   private ledgerDir(): string { return path.join(this.options.root, LEDGER_DIR); }
 
-  private async ledgerLines(): Promise<unknown[]> {
-    const text = await readText(path.join(this.ledgerDir(), LEDGER_FILE));
-    if (text === undefined) return [];
-    return text.split('\n').filter((line) => line.trim() !== '').map((line) => { try { return JSON.parse(line) as unknown; } catch { return line; } });
+  private async ledgerLines(): Promise<{ readonly lines: unknown[] } | { readonly unreadable: string }> {
+    const read = await readWhole(path.join(this.ledgerDir(), LEDGER_FILE));
+    if (read.kind === 'unreadable') return { unreadable: read.reason };
+    if (read.kind === 'missing') return { lines: [] };
+    return { lines: read.text.split('\n').filter((line) => line.trim() !== '').map((line) => { try { return JSON.parse(line) as unknown; } catch { return line; } }) };
   }
 
-  /** The ledger replayed, every signature checked against the keys this computer trusts. */
+  /** The SecretStorage key of this project's ledger head: the project's path, hashed, so no path is in the key. */
+  private headKey(): string {
+    return `${LEDGER_HEAD_SECRET_PREFIX}${createHash('sha256').update(path.resolve(this.options.root).split(path.sep).join('/')).digest('hex').slice(0, 32)}`;
+  }
+
+  /** The head this computer last recorded: undefined when none; `unverified` when a record is there but does not verify. */
+  private async readHead(status: KeyStatusLookup): Promise<LedgerHeadMark | 'unverified' | undefined> {
+    const store = this.options.headStore;
+    if (!store) return undefined;
+    const text = await Promise.resolve(store.get(this.headKey())).catch(() => undefined);
+    if (text === undefined) return undefined;
+    try {
+      const verdict = verifyPayload(JSON.parse(text) as unknown, { purpose: 'staff-ledger-head', status });
+      const mark = verdict.ok ? parseLedgerHeadMark(verdict.payload) : undefined;
+      return mark ?? 'unverified';
+    } catch { return 'unverified'; }
+  }
+
+  /** Records the head, signed with this device's key, outside the project. */
+  private async writeHead(count: number, head: string): Promise<void> {
+    const store = this.options.headStore;
+    if (!store) return;
+    const mark: LedgerHeadMark = { v: 1, count, head };
+    const envelope = signPayload(await this.options.signer(), 'staff-ledger-head', mark, { now: () => new Date(this.now()) });
+    await store.store(this.headKey(), JSON.stringify(envelope));
+  }
+
+  /**
+   * The ledger replayed, every signature checked against the keys this computer trusts, and the whole checked against the head this computer last
+   * recorded. A ledger that cannot be read whole is broken from its first entry, never empty. A ledger that verifies and has grown (entries written on
+   * another computer) moves the recorded head forward.
+   */
   public async replay(): Promise<LedgerReplay> {
     const status = await this.options.keyStatus();
-    return replayLedger(await this.ledgerLines(), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status }));
+    const read = await this.ledgerLines();
+    if ('unreadable' in read) return { products: new Map(), entries: 0, head: LEDGER_GENESIS, broken: { seq: 0, reason: `${LEDGER_PROBLEMS['file-unreadable']} (${read.unreadable}.)` } };
+    const mark = await this.readHead(status);
+    if (mark === 'unverified') {
+      const replay = replayLedger(read.lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status }));
+      return { ...replay, broken: replay.broken ?? { seq: 0, reason: LEDGER_PROBLEMS['head-unverified'] } };
+    }
+    const replay = replayLedger(read.lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status }), mark);
+    if (!replay.broken && replay.entries > (mark?.count ?? 0)) await this.writeHead(replay.entries, replay.head).catch(() => undefined);
+    return replay;
   }
 
   /**
@@ -187,7 +266,7 @@ export class StaffHost {
     await mkdir(this.ledgerDir(), { recursive: true });
     return withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
       const replay = await this.replay();
-      if (replay.broken) return refuse(`The staff ledger cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing more can be recorded until a person looks at it (NEAR AI: Staff: Set Aside the Product Ledger keeps the old file and starts a new one).`);
+      if (replay.broken) return refuse(`The staff ledger cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded, and nothing more can be until a person looks at it. ${SET_ASIDE_WAY_OUT}`);
       const drafts = await decide(replay);
       if (!Array.isArray(drafts)) return drafts;
       if (replay.entries + drafts.length > MAX_LEDGER_ENTRIES) return refuse('The staff ledger is full. A person can set it aside and start a new one.');
@@ -213,7 +292,10 @@ export class StaffHost {
         lines.push(JSON.stringify(envelope));
         written.push(entry);
       }
-      if (lines.length) await appendFile(path.join(this.ledgerDir(), LEDGER_FILE), `${lines.join('\n')}\n`, 'utf8');
+      if (lines.length) {
+        await appendFile(path.join(this.ledgerDir(), LEDGER_FILE), `${lines.join('\n')}\n`, 'utf8');
+        await this.writeHead(replay.entries + written.length, head);
+      }
       return { replay: { products, entries: replay.entries + written.length, head }, written };
     });
   }
@@ -224,18 +306,35 @@ export class StaffHost {
    */
   public async setAsideLedger(): Promise<string | undefined> {
     const file = path.join(this.ledgerDir(), LEDGER_FILE);
-    if (await readText(file) === undefined) return undefined;
+    const present = (await readWhole(file)).kind !== 'missing';
+    // The recorded head goes back to an empty ledger either way: a person chose to start again, including after the file was deleted or cut short.
+    const hadHead = this.options.headStore ? (await Promise.resolve(this.options.headStore.get(this.headKey())).catch(() => undefined)) !== undefined : false;
+    if (!present && !hadHead) return undefined;
+    await mkdir(this.ledgerDir(), { recursive: true });
     const kept = path.join(this.ledgerDir(), `products.set-aside-${isoOf(this.now()).replace(/[:.]/g, '-')}.jsonl`);
-    await withFileLock(this.ledgerDir(), LEDGER_LOCK, () => rename(file, kept));
-    return path.relative(this.options.root, kept).split(path.sep).join('/');
+    await withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
+      if (present) await rename(file, kept);
+      await this.writeHead(0, LEDGER_GENESIS);
+    });
+    return present ? path.relative(this.options.root, kept).split(path.sep).join('/') : '';
   }
 
   // ---- Events ---------------------------------------------------------------------------------------------------------------------------------
 
   /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ). */
   public async events(): Promise<StaffEvent[]> {
-    const text = await readText(path.join(this.ledgerDir(), EVENTS_FILE));
-    if (text === undefined) return [];
+    return (await this.eventsRead()).events;
+  }
+
+  /**
+   * The event log, or why it cannot be read whole. The ledger, not this log, is the record of the products; an unreadable log shows no steps or COP and
+   * says so (snapshot's eventLogProblem), and nothing more is appended to it.
+   */
+  private async eventsRead(): Promise<{ readonly events: StaffEvent[]; readonly unreadable?: string }> {
+    const read = await readWhole(path.join(this.ledgerDir(), EVENTS_FILE));
+    if (read.kind === 'unreadable') return { events: [], unreadable: unreadableText(`${LEDGER_DIR}/${EVENTS_FILE}`, read.reason, 'Move it aside by hand; the product ledger is unaffected.') };
+    if (read.kind === 'missing') return { events: [] };
+    const text = read.text;
     const out: StaffEvent[] = [];
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
@@ -244,14 +343,18 @@ export class StaffHost {
         if (value && typeof value === 'object' && (STAFF_EVENT_TYPES as readonly string[]).includes(value.type)) out.push(value);
       } catch { /* a damaged line is skipped; the ledger, not the event log, is the record */ }
     }
-    return out.slice(-MAX_EVENTS_READ);
+    return { events: out.slice(-MAX_EVENTS_READ) };
   }
 
   /** Writes events to the project's event log and sends them to every listener, each once. */
   public async emit(events: readonly StaffEvent[]): Promise<void> {
     if (!events.length) return;
     await mkdir(this.ledgerDir(), { recursive: true });
-    await withFileLock(this.ledgerDir(), EVENTS_LOCK, () => appendFile(path.join(this.ledgerDir(), EVENTS_FILE), `${events.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8'));
+    await withFileLock(this.ledgerDir(), EVENTS_LOCK, async () => {
+      // An event log that cannot be read whole is not appended to: it is never read as empty and written on top of.
+      if ((await readWhole(path.join(this.ledgerDir(), EVENTS_FILE))).kind === 'unreadable') return;
+      await appendFile(path.join(this.ledgerDir(), EVENTS_FILE), `${events.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
+    });
     for (const event of events) for (const listener of this.listeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
   }
 
@@ -281,10 +384,10 @@ export class StaffHost {
 
   private async readProduct(root: string, section: StaffSectionId, product: string, fallbackDepends: readonly ProductDependency[] = []): Promise<ProductFile> {
     const file = path.join(root, productPath(section, product));
-    const size = await stat(file).then((info) => (info.isFile() ? info.size : undefined), () => undefined);
-    if (size !== undefined && size > MAX_FILE_BYTES) return { exists: false, tooLarge: true, headerText: false, body: '', hash: productHash('', fallbackDepends), dependsOn: fallbackDepends };
-    const text = await readText(file);
-    if (text === undefined) return { exists: false, headerText: false, body: '', hash: productHash('', fallbackDepends), dependsOn: fallbackDepends };
+    const read = await readWhole(file);
+    if (read.kind === 'unreadable') return { exists: false, tooLarge: true, unreadable: read.reason, headerText: false, body: '', hash: productHash('', fallbackDepends), dependsOn: fallbackDepends };
+    if (read.kind === 'missing') return { exists: false, headerText: false, body: '', hash: productHash('', fallbackDepends), dependsOn: fallbackDepends };
+    const text = read.text;
     const parts = splitProductFile(text);
     const body = parts ? parts.body : text;
     const parsed = parts ? parseProductHeader(parts.header) : undefined;
@@ -323,7 +426,7 @@ export class StaffHost {
   }
 
   private async settings(team?: StaffTeamInfo): Promise<{ profile: StaffProfileId; level: StaffLevel }> {
-    const text = await readText(path.join(this.options.root, '.planning', '.near-ai', 'project.json'));
+    const text = await readText(path.join(this.options.root, ...STAFF_SETTINGS_FILE.split('/')));
     if (text !== undefined) {
       try {
         const staff = (JSON.parse(text) as { staff?: unknown }).staff;
@@ -427,7 +530,7 @@ export class StaffHost {
     const section = existing?.record.section ?? caller.team.section;
     if (section !== caller.team.section) return refuse(`${input.product} belongs to ${section}, not to this team's section. Propose your change in ${proposalFolder(input.product)}.`);
     const file = await this.readProduct(caller.root, section, input.product, input.dependsOn ?? existing?.meta.dependsOn ?? []);
-    if (!file.exists) return refuse(file.tooLarge ? tooLargeText(productPath(section, input.product)) : `Write the product first, at ${productPath(section, input.product)}, then propose it.`);
+    if (!file.exists) return refuse(file.tooLarge ? tooLargeText(productPath(section, input.product), file.unreadable) : `Write the product first, at ${productPath(section, input.product)}, then propose it.`);
     const dependsOn = input.dependsOn ?? file.dependsOn;
     const hash = productHash(file.body, dependsOn);
     const settings = await this.settings(caller.team);
@@ -475,7 +578,7 @@ export class StaffHost {
     const state = replay.products.get(product);
     const section = state?.record.section ?? caller.team.section;
     const read = file ?? await this.readProduct(caller.root, section, product);
-    if (!read.exists) return refuse(read.tooLarge ? tooLargeText(productPath(section, product)) : `There is no product at ${productPath(section, product)}.`);
+    if (!read.exists) return refuse(read.tooLarge ? tooLargeText(productPath(section, product), read.unreadable) : `There is no product at ${productPath(section, product)}.`);
     const header = state ? projectHeader(state) : read.header;
     const result = guardScan({ ...(header ? { header } : {}), body: read.body, section, owner: state?.record.roles.owner ?? header?.owner ?? '', config: await this.guardConfig() });
     // The hash of the file as scanned: the current version's, or the version the next write records when the file changed since.
@@ -493,7 +596,7 @@ export class StaffHost {
     const state = replay.products.get(product);
     const section = state?.record.section ?? caller.team.section;
     const read = file ?? await this.readProduct(caller.root, section, product);
-    if (!read.exists) return refuse(read.tooLarge ? tooLargeText(productPath(section, product)) : `There is no product at ${productPath(section, product)}.`);
+    if (!read.exists) return refuse(read.tooLarge ? tooLargeText(productPath(section, product), read.unreadable) : `There is no product at ${productPath(section, product)}.`);
     const kind = state?.meta.kind ?? read.header?.kind;
     const bodyOf = async (name: string): Promise<string | undefined> => {
       const other = await this.readProduct(caller.root, section, name);
@@ -541,7 +644,7 @@ export class StaffHost {
     if (!state) return refuse(`${input.product} has not been proposed.`);
     if (state.tampered) return refuse(`${input.product} cannot be checked: ${state.tampered}`);
     if (fresh.disagreement) return refuse(`${input.product} reads as tampered: ${TAMPER_REASONS[fresh.disagreement]} Its owner writes it again, then you check the new version.`);
-    if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product)) : `The file ${productPath(state.record.section, input.product)} is missing.`);
+    if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product), fresh.file.unreadable) : `The file ${productPath(state.record.section, input.product)} is missing.`);
     if (input.hash !== state.record.hash) return refuse(`${RELEASE_REFUSALS['stale-version']} The current version is ${state.record.version}, hash ${state.record.hash}.`);
     let findingsText: string | undefined;
     if (input.gate === 'guard' && input.verdict === 'CLEARED') {
@@ -590,7 +693,7 @@ export class StaffHost {
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
     if (state.tampered || fresh.disagreement) return refuse(`${input.product} reads as tampered: ${state.tampered ?? TAMPER_REASONS[fresh.disagreement!]}`);
-    if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product)) : `The file ${productPath(state.record.section, input.product)} is missing.`);
+    if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product), fresh.file.unreadable) : `The file ${productPath(state.record.section, input.product)} is missing.`);
     const options = (input.options ?? []).slice(0, 10).map((option) => ({ label: option.label.trim(), risk: option.risk.trim() }));
     if (!options.every((option) => isOneLine(option.label, 200) && isOneLine(option.risk, 500))) return refuse('Each option has a label and its risk, each one line.');
     const dissent = (input.dissent ?? []).map((line) => line.trim()).filter(Boolean).slice(0, 20);
@@ -712,16 +815,27 @@ export class StaffHost {
     if (before === undefined) return refuse(`${input.register}'s rows could not be read, so nothing was changed. Its owner writes it again.`);
     const written = writeRows(schema, before, input.rows ?? [], input.remove ?? [], input.part);
     if (!written.ok) return refuse(written.message);
+    if (!isOwner && !state) return refuse(`${input.register} does not exist yet; its owner creates it first.`);
     const body = renderRegisterBody(schema, written.rows);
     const file = path.join(caller.root, productPath(section, input.register));
     const existing = await this.readProduct(caller.root, section, input.register);
+    // The ledger records the file's hash, so the new body is written first and recorded next; when the record is refused (or fails), the file is put
+    // back exactly as it was, so a register never holds rows the ledger does not.
+    const previous = await readFile(file).then((bytes) => bytes, (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+    await mkdir(path.dirname(file), { recursive: true });
     await writeFileAtomic(file, `${existing.exists && existing.headerText && state ? renderProductHeader(projectHeader(state)) : ''}${body}`);
     let result: StaffResult;
-    if (isOwner) {
-      result = await this.propose(caller, { product: input.register, kind: schema.kind, ...(input.label ? { label: input.label } : {}) });
-    } else {
-      if (!state) return refuse(`${input.register} does not exist yet; its owner creates it first.`);
-      result = await this.recordPartEdit(caller, member, input.register, input.part ?? '');
+    try {
+      result = isOwner
+        ? await this.propose(caller, { product: input.register, kind: schema.kind, ...(input.label ? { label: input.label } : {}) })
+        : await this.recordPartEdit(caller, member, input.register, input.part ?? '');
+    } catch (error) {
+      result = refuse(`${input.register} was not recorded: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!result.ok) {
+      if (previous === undefined) await rm(file, { force: true });
+      else await writeFileAtomic(file, previous.toString('utf8'));
+      return refuse(`${result.message} The register file is back as it was.`);
     }
     if (result.ok && input.register === 'rfi-tracker') await this.emit(rfiChanges(before, written.rows, caller.run, isoOf(this.now())));
     return result;
@@ -796,9 +910,21 @@ export class StaffHost {
 
   private wargameDir(): string { return path.join(this.options.root, WARGAME_DIR); }
 
+  /** The recorded wargame turns, or why the wargame ledger cannot be read whole (then it is never treated as empty). */
+  private async wargameRead(): Promise<{ readonly entries: WargameEntry[] } | { readonly unreadable: string }> {
+    const read = await readWhole(path.join(this.wargameDir(), WARGAME_FILE));
+    if (read.kind === 'unreadable') return { unreadable: unreadableText(`${WARGAME_DIR}/${WARGAME_FILE}`, read.reason, 'Move it aside by hand (it is kept in git or your backups), then record the game again.') };
+    return { entries: read.kind === 'missing' ? [] : this.wargameParse(read.text) };
+  }
+
+  /** The recorded wargame turns. Throws, with the plain reason, when the wargame ledger cannot be read whole. */
   public async wargameEntries(): Promise<WargameEntry[]> {
-    const text = await readText(path.join(this.wargameDir(), WARGAME_FILE));
-    if (text === undefined) return [];
+    const read = await this.wargameRead();
+    if ('unreadable' in read) throw new Error(read.unreadable);
+    return read.entries;
+  }
+
+  private wargameParse(text: string): WargameEntry[] {
     const out: WargameEntry[] = [];
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
@@ -819,7 +945,9 @@ export class StaffHost {
     if (!parsed.ok) return refuse(parsed.message);
     await mkdir(this.wargameDir(), { recursive: true });
     return withFileLock(this.wargameDir(), WARGAME_LOCK, async () => {
-      const entries = await this.wargameEntries();
+      const read = await this.wargameRead();
+      if ('unreadable' in read) return refuse(read.unreadable);
+      const entries = read.entries;
       const order = checkOrder(entries, parsed.value);
       if (order) return refuse(order);
       const entry: WargameEntry = { ...parsed.value, recordedBy: member, at: isoOf(this.now()) };
@@ -836,7 +964,9 @@ export class StaffHost {
   public async wargameDerive(caller: StaffCaller): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
-    const derived = deriveFromWargame(await this.wargameEntries());
+    const read = await this.wargameRead();
+    if ('unreadable' in read) return refuse(read.unreadable);
+    const derived = deriveFromWargame(read.entries);
     const context = { phase: 'planning' as const, mode: 'standalone' as const };
     const writes: string[] = [];
     for (const [register, rows] of [['sync-matrix', derived.sync], ['dst-dsm', derived.dsm]] as const) {
@@ -894,7 +1024,7 @@ export class StaffHost {
   // ---- Read models ---------------------------------------------------------------------------------------------------------------------------
 
   /** Everything the Staff Room draws, rebuilt from the ledger, the product files and the event log. */
-  public async snapshot(run?: string): Promise<{ registry: ProductView[]; decisions: ReturnType<typeof decisionQueue>; registers: ReturnType<typeof sharedRegisters>; board?: ReturnType<typeof stepBoard>; steps?: ReturnType<typeof currentSteps>; cop: ReturnType<typeof copModel>; ledgerProblem?: string }> {
+  public async snapshot(run?: string): Promise<{ registry: ProductView[]; decisions: ReturnType<typeof decisionQueue>; registers: ReturnType<typeof sharedRegisters>; board?: ReturnType<typeof stepBoard>; steps?: ReturnType<typeof currentSteps>; cop: ReturnType<typeof copModel>; ledgerProblem?: string; eventLogProblem?: string }> {
     const replay = await this.replay();
     const files = new Map<string, FileCheck>();
     const rows = new Map<string, number>();
@@ -906,11 +1036,13 @@ export class StaffHost {
       if (schema && file.exists) rows.set(state.record.product, parseRegisterBody(schema, file.body)?.length ?? 0);
     }
     const registry = productRegistry(replay, files);
-    const events = await this.events();
+    const log = await this.eventsRead();
+    const events = log.events;
     return {
       registry, decisions: decisionQueue(replay, files), registers: sharedRegisters(replay, rows), cop: copModel(events),
       ...(run ? { board: stepBoard(events, run, registry), steps: currentSteps(events, run) } : {}),
-      ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}` } : {})
+      ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}` } : {}),
+      ...(log.unreadable ? { eventLogProblem: log.unreadable } : {})
     };
   }
 }

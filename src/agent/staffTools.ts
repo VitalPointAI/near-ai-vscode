@@ -12,7 +12,7 @@ import { STAFF_SLUG } from '../domain/staff/parse';
 import type { DecisionOption } from '../domain/staff/events';
 import type { ProductDependency } from '../domain/staff/products';
 import type { StaffCaller, StaffHost, StaffResult, StaffTeamInfo } from '../staff/staffHost';
-import { staffSectionOf } from '../staff/staffHost';
+import { STAFF_HOST_PATHS, staffSectionOf } from '../staff/staffHost';
 import type { TeamDefinition } from './teams';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED } from './tools';
 import type { AgentTool, ToolContext } from './tools';
@@ -58,9 +58,12 @@ export interface StaffToolAccess {
   readonly run: string;
 }
 
-const STAFF_PATHS = ['.planning/staff/**'];
-const READS = { verb: 'read', paths: STAFF_PATHS };
-const WRITES = { verb: 'workspaceWrite', paths: STAFF_PATHS };
+/**
+ * The files the staff tools touch: they read everything the host reads (the staff folder, the project's staff settings and the guard settings), and
+ * write only inside the staff folder.
+ */
+const READS = { verb: 'read', paths: [...STAFF_HOST_PATHS] };
+const WRITES = { verb: 'workspaceWrite', paths: ['.planning/staff/**'] };
 const readManifest = (tool: string) => declareManifest({ tool, effects: [READS], contexts: INTERACTIVE_AND_UNATTENDED });
 const writeManifest = (tool: string) => declareManifest({ tool, effects: [READS, WRITES], contexts: INTERACTIVE_AND_UNATTENDED });
 
