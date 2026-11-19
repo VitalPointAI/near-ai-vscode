@@ -45,10 +45,13 @@ async function bundle(entry, target, file, main) {
     manifest.push({ name: meta.name, version: meta.version, license: typeof meta.license === 'string' ? meta.license : 'see LICENSES.txt', purl: `pkg:npm/${meta.name.replace('@', '%40')}@${meta.version}`, path: `vendor/${target}`, ...(meta.name === main ? {} : { bundledIn: main }) });
   }
   writeFileSync(path.join(vendor, target, 'LICENSES.txt'), licenses.join('\n\n'));
+  return result.metafile;
 }
 
 await bundle(require.resolve('pptxgenjs'), 'pptxgenjs', 'pptxgen.cjs', 'pptxgenjs');
 await bundle(path.join(root, 'scripts', 'entries', 'mcp-client.mjs'), 'mcp', 'mcp-client.cjs', '@modelcontextprotocol/sdk');
+// Yjs (with lib0) for the replica core; src/domain/replica/doc.ts is the only file that loads vendor/yjs/yjs.cjs (D-17).
+await bundle(path.join(root, 'scripts', 'entries', 'yjs.mjs'), 'yjs', 'yjs.cjs', 'yjs');
 
 // The COP map page's libraries are committed under media/vendor/ (not built from node_modules); they enter the SBOM from their provenance file.
 for (const entry of JSON.parse(readFileSync(path.join(root, 'media', 'vendor', 'VENDORED.json'), 'utf8')).packages) {
