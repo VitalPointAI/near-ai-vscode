@@ -22,3 +22,5 @@ export * from './scenario';
 export * from './acceptance';
 export * from './demoScripts';
 export * from './realEntities';
+// WP-OBS0: the drop 2 feed contract (observations, feeds, tracks, the exercise frame, slices, watches, feed layers and events).
+export * from './obs';

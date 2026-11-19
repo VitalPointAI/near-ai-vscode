@@ -60,6 +60,22 @@ fictional data only; labels are not accreditation, and no member has a persona n
   earlier scenario is archived rather than deleted. The real-entity list is one list, in
   `.planning/.near-ai/staff-guard.json` and `.planning/staff/real-entities.txt`, used by both the
   scenario import and guard-scan.
+- **IRON LANTERN on the globe, and its directions fixed.** The starter scenario's grid references
+  now grow northward, so "north of Saltmere", "along PL COPPER north of Ashby Ford", "south of
+  Kell" and the artillery reach statements all hold on the map. Scenario files gain version 2
+  beside version 1: an optional exercise frame that places a fictional grid over empty ocean, far
+  from any land, so map and feed replays can use real position formats without naming a real
+  place. Version 1 files load as before.
+- **Feed contract for live staff pictures.** The shared rules every feed feature builds on: one
+  observation record (when it was true, when you learned it, where and how accurately, who
+  reported it and where the information first came from, reliability and credibility graded
+  separately, its label), tracks that go stale and then lost without ever deleting a report,
+  slices by area, time, grade, discipline, unit and echelon that can never show more than your
+  clearance allows, map feed layers with one settings owner each, and standing watches that only
+  draft products and alert a named person, and run only while a person has the staff run open.
+  ACLED, social media and other sources whose terms restrict this use are off by default, are
+  never used for training, and stay off until your organization records a licence; partner
+  intelligence enters a staff project only as a fictional simulation kept on this machine.
 - **Red team and release guard held to their own files.** In a staff team the red team may write
   only its critique and the release guard only its gate reports. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff

@@ -275,7 +275,10 @@ exercise scenario into `.planning/staff/scenario/` for the team to read. The
 starter scenario, Exercise IRON LANTERN, is fictional and unclassified: a
 peninsula with a coast and a strait, friendly and adversary orders of battle,
 a mission with the higher commander's intent, and reports graded for
-reliability and credibility (one left ungraded). You can load a scenario file
+reliability and credibility (one left ungraded). Its grid references grow
+northward like a real grid, and the scenario places its fictional grid over
+empty ocean, far from any land, so positions can be written in real formats
+without naming a real place. You can load a scenario file
 of your own instead; it must be marked as fictional, unclassified exercise
 data, and anything with a classification marking, a name on your real-entity
 list (the one guard-scan uses: `.planning/staff/real-entities.txt` and the
