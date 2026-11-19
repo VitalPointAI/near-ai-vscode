@@ -9,6 +9,7 @@ import type { AgentTool, ToolContext } from '../../agent/tools';
 import { fingerprintOf } from '../../domain/team/canonical';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
+import type { SecretStorageLike } from '../../services/auth';
 import type { PersonActor } from '../../domain/staff/release';
 import { productPath, StaffHost } from '../../staff/staffHost';
 import type { StaffTeamInfo } from '../../staff/staffHost';
@@ -39,19 +40,28 @@ export interface StaffWorld {
   readonly root: string;
   readonly signer: PayloadSigner;
   host: StaffHost;
+  readonly headStore?: SecretStorageLike;
   clock: { now: number };
   /** A new host over the same folder, as after a window reload. */
   reload(): StaffHost;
   person(name?: string, role?: string): PersonActor;
 }
 
-export async function staffWorld(options: { trust?: (signer: PayloadSigner) => KeyStatusLookup } = {}): Promise<StaffWorld> {
+/** An in-memory stand-in for VS Code's SecretStorage, where the host keeps its signed ledger head. */
+export function memorySecrets(): SecretStorageLike & { readonly values: Map<string, string> } {
+  const values = new Map<string, string>();
+  return { values, get: async (key) => values.get(key), store: async (key, value) => { values.set(key, value); }, delete: async (key) => { values.delete(key); } };
+}
+
+export async function staffWorld(options: { trust?: (signer: PayloadSigner) => KeyStatusLookup; headStore?: SecretStorageLike | null } = {}): Promise<StaffWorld> {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-staff-'));
   const signer = testSigner();
   const clock = { now: Date.parse('2026-11-18T12:00:00.000Z') };
-  const make = (): StaffHost => new StaffHost({ root, signer: async () => signer, keyStatus: async () => (options.trust ?? ((value) => trusting(value)))(signer), now: () => { clock.now += 1000; return clock.now; } });
+  // Every world keeps its ledger head outside the project, as the extension does; null runs a host with no head store.
+  const headStore = options.headStore === null ? undefined : options.headStore ?? memorySecrets();
+  const make = (): StaffHost => new StaffHost({ root, signer: async () => signer, keyStatus: async () => (options.trust ?? ((value) => trusting(value)))(signer), ...(headStore ? { headStore } : {}), now: () => { clock.now += 1000; return clock.now; } });
   const world: StaffWorld = {
-    root, signer, clock, host: make(),
+    root, signer, clock, host: make(), headStore,
     reload: () => { world.host = make(); return world.host; },
     person: (name = 'A. Demo', role = 'Commander') => ({ kind: 'person', name, role, deviceFingerprint: signer.fingerprint })
   };

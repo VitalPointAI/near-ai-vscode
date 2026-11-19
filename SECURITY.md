@@ -26,7 +26,7 @@ Last reviewed: 2026-11-15, against the code on `main` plus the messaging relay f
 | MCP tool calls | Only servers you add and switch on for the project | The call's arguments, shown on the approval card; see MCP connections below. |
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | A team's knowledge graph | One file per team on this computer, `~/.near-ai-teams/knowledge/<team>.json` (or `knowledge/` under `NEAR_AI_TEAMS_DIR`), never in the project and never synced | What the team's agents add with the Learn tool during runs with that team: actors, what they do, how they relate, and facts with their sources and Admiralty grades. Every member reads it with TeamKnowledge, and its contents go to the model as tool results. A team from your library has one graph for every project it works in; a project's own team (`team.md`) has a graph for that project only. Agents' grades are capped at C3, because a run that read a hostile page could be steered into claiming anything. Team Studio shows it. |
-| A staff team's J2 registers (the intel workbench, `mcp:intel-workbench`) | `.planning/staff/products/j2/source-register.json`, `pir-register.json` and `collection-plan.json` in your project, so they go wherever the project's files go | What the J2 members record: source items with their two grades, origin and deception note; PIRs with their decision points, latest times of value, indicators and any person's decision; and collection recommendations. The tools run inside the extension, reach no network, and declare only these files and `.planning/.near-ai/project.json`, so the gate's label checks apply to them. Entries above org/Internal, NATO Unclassified or Protected A are refused: staff templates hold exercise and fictional data only, and labels are not accreditation. A hand-edited approved PIR with no person's decision on record does not load. |
+| A staff team's J2 registers (the intel workbench, `mcp:intel-workbench`) | `.planning/staff/products/j2/source-register.json`, `pir-register.json` and `collection-plan.json` in your project, so they go wherever the project's files go | What the J2 members record: source items with their two grades, origin and deception note; PIRs with their decision points, latest times of value, indicators and any person's decision; and collection recommendations. The tools run inside the extension, reach no network, and declare only these files and `.planning/.near-ai/project.json`, so the gate's label checks apply to them. Entries above org/Internal, NATO Unclassified or Protected A are refused: staff templates hold exercise and fictional data only, and labels are not accreditation. A PIR counts as approved or rejected only when a signed entry in `.planning/staff/ledger/decisions.jsonl` records it: one made by **NEAR AI: Staff: Decide a PIR**, signed with the deciding person's device key, on that exact wording. A decision written into the register by hand or by a member, naming anyone, reads as awaiting a decision. Only members whose tools line grants `mcp:intel-workbench` can call these tools; the run's lead cannot. |
 | A team sent for review (**Improve with AI** in Team Studio, and the description you give when the AI drafts a team) | One model on NEAR AI Cloud or your local runtime, only when you ask, after the outbound check | The team's name, description, and each member's name, role, reports-to line, tools and instructions, plus the local check's findings. Which model may see it follows the team's privacy: a private team (marked `privacy: private`, every member private, or any team, including one being drafted, in a project with a knowledge base, which Team Studio decides from the workspace rather than from what the page sends) goes only to a private model, a NEAR TEE model on NEAR AI Cloud's own endpoint whose attestation NEAR reports as supported or verified (one reported as failed or unverified, or not reported at all, does not count), or a model on this computer; a team with some private members goes to a private model, or, when there is none, without those members' text; any other team goes to a model your settings and TEE-only mode allow. Nothing is sent while the team holds something that looks like a key, token or password. The reply is read as data: the reviewer has no tools, its suggestions never change a model or privacy, and none is applied until you accept it and Save. |
 | A shared team file (**Share…** in Team Studio) | A `.near-team.json` file you save and choose where to send; the extension sends it nowhere | The team file as saved (names, roles, models, tools, instructions), a summary, a format version and a checksum. No file path, setting, key or token. A team holding something that looks like a key or password is refused; one naming a folder on this computer is shared only after you agree. The team's knowledge graph is included only when you choose it, after local paths, non-web sources and secret-looking values are removed. An imported team file is checked, shown and added only with your consent, and stays untrusted until you approve it the first time it would run; its checksum is not a signature. |
 | Team Studio's dashboard | Nothing new is sent anywhere. Your ratings, the last role test of each team, how you last sorted and filtered the dashboard, and a team the AI drafted that you have not yet used or discarded (its name, members, roles, models and instructions, as shown to you) are kept in this extension's own storage on this computer, never synced, and never written into a team file or the project, so a code push never carries them (see below for a line an old development build wrote) | The dashboard reads what is already kept: the project's activity history (each run's title, outcome, times and spend), the live agent activity, and the team files. Ratings and role tests are kept by the team's identity, `user:<name>` for a team in My teams (`archived:<name>` while it is archived) or `project:` and a hash of the project folder's real path, so no path is stored; a new team under an earlier team's name never takes that team's records. A rating is 1 to 5 stars (or cleared), with when it was set; at most 500 are kept. A role test record holds only when it ran, how many members were tested and passed, and the average score; at most 200 are kept. A `rating:` line a development build of this release wrote into a team file (a project team's `team.md` included, so a code push could carry it) is read once into this storage and stays in the file until the team is next saved in Team Studio, which leaves it out; the extension never writes one. The page is given figures and team ids, never a file path. **Share…** and **Import…** leave the rating out, so your opinion is not sent with a team and someone else's is not taken as yours. |
@@ -747,12 +747,51 @@ editing the project's profile file cannot redirect a key.
 
 Staff section teams record each product's steps in a ledger in the project
 (`.planning/staff/ledger/products.jsonl`). Every entry is signed with this
-device's key and chained to the one before it, so a line added, changed,
-removed or reordered outside NEAR AI breaks the chain, and the products it
-touches read as tampered until a person sets the ledger aside with **NEAR AI:
-Staff: Set Aside the Product Ledger** (the old file is kept, never deleted).
+device's key and chained to the one before it. This is what is detected, and
+what is not:
+
+- **Detected: a line changed, added, removed from the middle or reordered**
+  outside NEAR AI. It breaks the signature or the chain, and the products it
+  touches read as tampered.
+- **Detected on this computer: the end of the ledger cut off, the file
+  deleted, or the file replaced by an older or different copy.** After every
+  entry it writes or reads, NEAR AI keeps a signed record of the ledger head
+  (how many entries and the last one's hash) in VS Code's secret storage on
+  this computer, outside the project, the way it keeps the label map's last
+  checked copy. A ledger shorter than that record, or with another entry at
+  its place, reads as tampered, with every product in it, because which
+  entries went missing (a HOLD, a decision) cannot be known. A record that
+  does not verify is treated the same way.
+- **Not detected:** cutting the end off a ledger before this computer saw
+  those entries (for example on another computer before you pull), or on a
+  computer whose secret storage was cleared, or a ledger read by a build
+  without the record. There only the chain is checked. Switching to a git
+  branch whose ledger is older than the one this computer saw reads as
+  tampered too, by design.
+- **Unreadable is never empty.** A ledger, wargame ledger, event log or
+  register that cannot be read whole (over 2 MB, or refused by the disk) is
+  reported as unreadable with the reason, nothing is written to it, and no
+  write starts on top of it. The ledger's way out, and the way out of any
+  tampered ledger, is **NEAR AI: Staff: Set Aside the Product Ledger**: the old
+  file is kept beside itself under a new name, never deleted, and the record
+  of the head starts again.
+
 A product file whose header claims a state the ledger does not hold, or an
 approved or released product whose text changed, also reads as tampered.
+
+**A decision counts only when a signed entry records it.** Products are
+decided only through the product ledger above. A PIR is approved or rejected
+only through **NEAR AI: Staff: Decide a PIR**, which asks the person's name and
+role, confirms in a dialog, and appends an entry to
+`.planning/staff/ledger/decisions.jsonl`, signed with this device's key and
+chained like the ledger. The register is written only after that entry. A
+decision block in a register file without a matching entry (same PIR, same
+decision, same person, same wording) reads as awaiting a decision, whoever
+wrote it; a broken or unverifiable log proves nothing from that point, which
+leaves decisions untaken, never taken. The staff event log is a notice board,
+never the record of any decision. A
+register write that the ledger refuses puts the register file back exactly as
+it was.
 
 Approve, reject, release and withdraw-after-a-decision exist only as VS Code
 commands a person runs and confirms in a dialog. No agent tool offers them,
@@ -761,6 +800,10 @@ person's decision names them and their role and is signed with this device's
 key. Until verified credentials arrive, that name and role are self-declared.
 
 The tools record what they do inside the project only and send nothing out.
+They declare every project file they read (the staff folder, the project's
+staff settings in `.planning/.near-ai/project.json` and the guard settings in
+`.planning/.near-ai/staff-guard.json`) and write only in `.planning/staff/`,
+so the gate's label checks see all of them.
 guard-scan's checks are deterministic text rules: they catch markings,
 coordinates, listed names and the other patterns they know, and nothing else.
 The release-guard reviews what rules cannot judge, and a person decides.

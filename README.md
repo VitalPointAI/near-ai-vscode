@@ -933,7 +933,10 @@ until it runs out aren't shown.
   **Reject a Product**, **Release a Product** or **Withdraw a Product**,
   signed with this device's key. Your name and role are self-declared until
   verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
-  product, what waits for you, and its history. The exercise box and the
+  product, what waits for you, and its history. **NEAR AI: Staff: Decide a
+  PIR** approves or rejects a PIR awaiting a decision, signed the same way; a
+  decision written into the PIR register any other way does not count. The
+  exercise box and the
   real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
   and `.planning/staff/real-entities.txt`. Everything a staff team writes
   lives under `.planning/staff/`: products in

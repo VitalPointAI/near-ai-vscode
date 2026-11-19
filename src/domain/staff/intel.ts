@@ -9,6 +9,8 @@
 //   - The collection plan holds recommendations only. The J3 approves asset allocation; partner-only disciplines always need a partner.
 //   - INTSUM and INTREP drafts are skeletons with the facts filled in from the registers and the judgement left to the analyst.
 //   - The compilation-risk check never clears anything: it either finds nothing mechanical or asks a person with authority.
+import { decisionKey, decisionMatches, pirWording } from './personDecisions';
+import type { PersonDecisionEntry } from './personDecisions';
 import { parseIsoMillis } from '../gate/shape';
 import {
   COLLECTION_PLAN_HEADINGS, COLLECTION_PLAN_RULE, CONFIRMED_CREDIBILITY, DTG_MONTHS, INFORMATION_CREDIBILITY, INFORMATION_CREDIBILITY_GRADES,
@@ -331,7 +333,7 @@ export type PirStatus = (typeof PIR_STATUSES)[number];
 /** Statuses only a named person sets (design 10, 3.1 and 4.1: members never decide). */
 export const PERSON_ONLY_PIR_STATUSES: readonly PirStatus[] = ['approved', 'rejected'];
 /** Statuses whose wording the commander has decided on: the requirement, decision point and latest time of value are not edited by members. */
-const DECIDED_PIR_STATUSES: readonly PirStatus[] = ['approved', 'answered', 'closed'];
+export const DECIDED_PIR_STATUSES: readonly PirStatus[] = ['approved', 'answered', 'closed'];
 
 /** The status moves a member may make, through the tools. Approve and reject are not here and never will be. */
 export const MEMBER_PIR_MOVES: ReadonlyArray<{ readonly from: PirStatus; readonly to: PirStatus }> = [
@@ -505,6 +507,27 @@ export function decidePir(register: readonly PirEntry[], id: string, decision: '
   const next = register.slice();
   next[index] = { ...entry, status: decision, decision: { decision, by, at: iso(at), ...(decision === 'rejected' ? { reasons: reasons.map((reason) => reason.trim()) } : {}) } };
   return done(next);
+}
+
+/**
+ * The PIRs as far as a person's decisions are proven (review round 3 of drop 1): a PIR whose status says a person decided (approved, rejected, answered,
+ * closed) counts as decided only when a signed entry in the decision log recorded that decision, by that person, on that exact wording
+ * (personDecisions.ts). Any other is read as awaiting a decision, its written decision dropped, with a blocking finding: a decision is never trusted from
+ * the register file alone, whoever wrote it there.
+ */
+export function trustPirDecisions(register: readonly PirEntry[], recorded: ReadonlyMap<string, PersonDecisionEntry>): { readonly entries: PirEntry[]; readonly findings: IntelFinding[] } {
+  const findings: IntelFinding[] = [];
+  const entries = register.map((entry) => {
+    const decided = PERSON_ONLY_PIR_STATUSES.includes(entry.status) || DECIDED_PIR_STATUSES.includes(entry.status);
+    if (!decided) return entry;
+    const expected = entry.status === 'rejected' ? 'rejected' : 'approved';
+    const record = recorded.get(decisionKey({ kind: 'pir', id: entry.id }));
+    if (entry.decision?.decision === expected && decisionMatches(record, entry.decision, pirWording(entry))) return entry;
+    findings.push({ rule: 'decision-unrecorded', severity: 'block', subject: entry.id, message: `${entry.id} says ${entry.status}, but no signed decision by a person records that on this wording, so it is read as awaiting a decision. Only NEAR AI: Staff: Decide a PIR records a PIR decision.` });
+    const { decision: _dropped, ...rest } = entry;
+    return { ...rest, status: 'awaiting-decision' as const };
+  });
+  return { entries, findings };
 }
 
 /** Findings over the PIR register: latest times of value that have passed, PIRs without indicators, and decided PIRs with no collection recommended. */

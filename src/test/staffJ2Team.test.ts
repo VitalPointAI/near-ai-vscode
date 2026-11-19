@@ -88,7 +88,7 @@ test('every product has exactly one owner on its roster, the staff block lists t
       const instructions = member(text, owner).instructions;
       assert.ok(instructions.includes(`- ${product.title(v)}, ${productPath(product)}.`), `${owner} lists ${product.id}`);
       if (product.headings(v).length) assert.ok(instructions.includes(`Headings, in this order: ${product.headings(v).join('; ')}.`), `${owner} carries the headings of ${product.id}`);
-      for (const other of names.filter((name) => name !== owner)) assert.ok(!member(text, other).instructions.includes(`, ${productPath(product)}.`) || product.kind === 'map-layer', `${other} does not also own ${product.id}`);
+      for (const other of names.filter((name) => name !== owner)) assert.ok(!member(text, other).instructions.includes(`, ${productPath(product)}.`), `${other} does not also own ${product.id}`);
     }
     for (const entry of parsed.members) assert.ok(productsOwnedBy(entry.name, v.variant).length > 0, `${rendering.key}: ${entry.name} owns at least one product`);
     assert.deepEqual([...parsed.staff!.products, ...parsed.staff!.layers].sort(), variantProducts(v.variant).map((product) => product.id).sort());

@@ -234,20 +234,49 @@ export const LEDGER_PROBLEMS = {
   chain: 'A ledger entry does not follow the one before it, so an entry was removed, reordered or added outside NEAR AI.',
   'person-key': 'A person\'s decision is signed by a key other than the one it names.',
   impossible: 'A ledger entry records a step the state machine refuses, so it was not written by NEAR AI.',
-  'after-break': 'An earlier ledger entry is broken, so nothing after it can be trusted.'
+  'after-break': 'An earlier ledger entry is broken, so nothing after it can be trusted.',
+  'file-unreadable': 'The ledger file could not be read in full (it is larger than the limit, or the disk refused it), so none of its entries is trusted.',
+  truncated: 'The ledger ends before the last entry this computer recorded, so entries were removed from its end, or the file was deleted or replaced by an older copy.',
+  replaced: 'The ledger entry this computer last recorded is not the one in the file at that place, so the ledger was replaced or rewritten.',
+  'head-unverified': 'This computer\'s signed record of the ledger head does not verify, so the ledger cannot be checked against it.'
 } as const;
+
+/**
+ * The ledger head this computer last saw (design 10, 4.1; the D-59 rollback marker the label map keeps): how many entries the ledger held and the digest
+ * of the last one. It is signed with this device's key (purpose `staff-ledger-head`) and kept in the extension's SecretStorage, outside the project, so
+ * deleting the ledger file or cutting entries off its end cannot also roll this record back.
+ */
+export interface LedgerHeadMark {
+  readonly v: 1;
+  /** Entries the ledger held. */
+  readonly count: number;
+  /** entryDigest of entry `count - 1`; LEDGER_GENESIS when count is 0. */
+  readonly head: string;
+}
+
+export function parseLedgerHeadMark(value: unknown): LedgerHeadMark | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = Object.keys(value).sort().join(',');
+  if (keys !== 'count,head,v' || value.v !== 1) return undefined;
+  const count = value.count;
+  const head = value.head;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0 || typeof head !== 'string' || !/^[0-9a-f]{64}$/.test(head)) return undefined;
+  return { v: 1, count, head };
+}
 export type LedgerProblem = keyof typeof LEDGER_PROBLEMS;
 
 /**
  * Replays signed ledger lines into product states. `verify` checks one envelope's signature and key (verifyPayload with purpose `staff-ledger` and the
  * keys this computer trusts). The first line that fails any check breaks the chain: nothing after it is applied, and every product it or a later line
- * names is marked tampered with the reason.
+ * names is marked tampered with the reason. With `expect`, the head this computer last recorded, a ledger shorter than it or with another entry at its
+ * place is broken too (`truncated`, `replaced`).
  */
-export function replayLedger(envelopes: readonly unknown[], verify: (envelope: unknown) => PayloadVerdict<unknown>): LedgerReplay {
+export function replayLedger(envelopes: readonly unknown[], verify: (envelope: unknown) => PayloadVerdict<unknown>, expect?: LedgerHeadMark): LedgerReplay {
   const products = new Map<string, ProductState>();
   let head = LEDGER_GENESIS;
   let broken: { seq: number; reason: string } | undefined;
   let entries = 0;
+  let headAtMark: string | undefined;
   const mark = (product: string | undefined, reason: string): void => {
     if (product === undefined) return;
     const state = products.get(product);
@@ -273,6 +302,16 @@ export function replayLedger(envelopes: readonly unknown[], verify: (envelope: u
     products.set(entry.product, applied);
     head = entryDigest(envelope);
     entries += 1;
+    if (expect && entries === expect.count) headAtMark = head;
+  }
+  // Checked against the head this computer last recorded: a ledger cut short, deleted or replaced reads as tampered, every product in it too, because
+  // which entries went missing (a HOLD, a decision) cannot be known.
+  if (!broken && expect && expect.count > 0) {
+    const problem: LedgerProblem | undefined = entries < expect.count ? 'truncated' : headAtMark !== expect.head ? 'replaced' : undefined;
+    if (problem) {
+      broken = { seq: Math.min(entries, expect.count - 1), reason: LEDGER_PROBLEMS[problem] };
+      for (const product of [...products.keys()]) mark(product, LEDGER_PROBLEMS[problem]);
+    }
   }
   return { products, entries, head, ...(broken ? { broken } : {}) };
 }

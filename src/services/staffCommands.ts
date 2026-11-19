@@ -20,7 +20,8 @@ export const STAFF_COMMANDS = {
   release: 'nearAi.staff.releaseProduct',
   withdraw: 'nearAi.staff.withdrawProduct',
   show: 'nearAi.staff.showProducts',
-  setAside: 'nearAi.staff.setAsideLedger'
+  setAside: 'nearAi.staff.setAsideLedger',
+  decidePir: 'nearAi.staff.decidePir'
 } as const;
 
 /** The words every decision dialog shows about who the person is. */
@@ -46,7 +47,7 @@ function projectRoot(): string | undefined {
 export function registerStaffCommands(context: StaffCommandContext): void {
   const dir = identityDir(context.globalStorageUri.fsPath);
   const identity = async () => (await loadOrCreateDeviceIdentity(context.secrets, { identityDir: dir })).identity;
-  configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets) });
+  configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets), headStore: context.secrets });
   context.subscriptions.push({ dispose: () => { configureStaffHosts(undefined); } });
   const register = (id: string, run: (args?: StaffCommandArgs) => Promise<void>): void => {
     context.subscriptions.push(vscode.commands.registerCommand(id, async (args?: unknown) => {
@@ -59,6 +60,7 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   register(STAFF_COMMANDS.withdraw, (args) => decideCommand(context, identity, 'withdraw', args));
   register(STAFF_COMMANDS.show, () => showProducts());
   register(STAFF_COMMANDS.setAside, () => setAsideLedger());
+  register(STAFF_COMMANDS.decidePir, (args) => decidePirCommand(context, identity, args));
 }
 
 function isArgs(value: unknown): value is StaffCommandArgs {
@@ -136,12 +138,53 @@ async function decideCommand(context: StaffCommandContext, identity: () => Promi
   else void vscode.window.showWarningMessage(outcome.message);
 }
 
+/**
+ * A named person approves or rejects a PIR awaiting a decision. Like a product decision it asks the person's name and role, confirms in a modal dialog
+ * and is signed with this device's key; the signed entry, not the register file, is what makes the PIR decided.
+ */
+async function decidePirCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, args?: StaffCommandArgs): Promise<void> {
+  const host = hostOrSay();
+  if (!host) return;
+  const waiting = await host.pirsAwaitingDecision();
+  if (!waiting.length) { void vscode.window.showInformationMessage('No PIR is awaiting a decision. A J2 member marks a PIR awaiting-decision with the intel workbench first.'); return; }
+  const wanted = (args as { pir?: unknown } | undefined)?.pir;
+  let pir = typeof wanted === 'string' ? waiting.find((entry) => entry.id === wanted) : undefined;
+  if (!pir) {
+    const picked = await vscode.window.showQuickPick(waiting.map((entry) => ({ label: entry.id, description: entry.requirement, detail: `Supports ${entry.decisionPoint}; latest time of value ${entry.ltiov}` })), { title: 'Decide a PIR', placeHolder: 'Pick the PIR' });
+    if (!picked) return;
+    pir = waiting.find((entry) => entry.id === picked.label);
+    if (!pir) return;
+  }
+  const choice = await vscode.window.showQuickPick([{ label: 'Approve' }, { label: 'Reject' }], { title: `Decide ${pir.id}` });
+  if (!choice) return;
+  const decision = choice.label === 'Approve' ? 'approved' as const : 'rejected' as const;
+  const signer = await identity();
+  const person = await askPerson(context, signer.fingerprint, 'Commander');
+  if (!person) return;
+  let reasons: string[] = [];
+  if (decision === 'rejected') {
+    const reason = await vscode.window.showInputBox({ title: `Why reject ${pir.id}?`, prompt: 'Your reasons go back to the J2. Required.', ignoreFocusOut: true } as vscode.InputBoxOptions);
+    if (!reason?.trim()) return;
+    reasons = reason.split(/\s*;\s*/).filter(Boolean);
+  }
+  const dialog = await vscode.window.showWarningMessage(
+    `${choice.label} ${pir.id} as ${person.name} (${person.role})?`,
+    { modal: true, detail: `${pir.requirement}\nSupports ${pir.decisionPoint}.\n\n${STAFF_IDENTITY_TEXT}` },
+    choice.label
+  );
+  if (dialog !== choice.label) return;
+  const outcome = await host.decidePir(person, { pir: pir.id, decision, reasons });
+  if (outcome.ok) void vscode.window.showInformationMessage(outcome.text);
+  else void vscode.window.showWarningMessage(outcome.message);
+}
+
 async function showProducts(): Promise<void> {
   const host = hostOrSay();
   if (!host) return;
   const snapshot = await host.snapshot();
   const lines = ['# Staff products', ''];
   if (snapshot.ledgerProblem) lines.push(`The product ledger cannot be trusted after one point: ${snapshot.ledgerProblem}`, '');
+  if (snapshot.eventLogProblem) lines.push(`The staff event log: ${snapshot.eventLogProblem}`, '');
   if (snapshot.decisions.length) {
     lines.push('## Waiting for a person', '');
     for (const entry of snapshot.decisions) {
@@ -169,5 +212,5 @@ async function setAsideLedger(): Promise<void> {
   );
   if (answer !== 'Set Aside') return;
   const kept = await host.setAsideLedger();
-  void vscode.window.showInformationMessage(kept ? `The old ledger is kept at ${kept}. A new one starts with the next product.` : 'There is no ledger to set aside.');
+  void vscode.window.showInformationMessage(kept === undefined ? 'There is no ledger to set aside.' : kept ? `The old ledger is kept at ${kept}. A new one starts with the next product.` : 'The ledger file was already gone, so there was nothing to keep. A new ledger starts with the next product.');
 }
