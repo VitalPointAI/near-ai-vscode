@@ -906,6 +906,19 @@ list from both files, so a name in either is held in products and refused in
 scenarios. Staff templates are for exercise and fictional
 data only: labels are not accreditation.
 
+Coordinates marked as positions (a hemisphere letter, a minus sign, a degree
+sign, degrees and minutes, or a GeoJSON pair) are always held when no exercise
+box is set or when they fall outside it. Two plain decimal numbers such as
+"45.42, 75.69" look the same as prices, scores and measures, so guard-scan
+treats them as a possible position only when a word before them presents them
+as one (lat, lon, grid, position, located, at, rally point and the like) and
+no money, score or unit word sits beside them; such a pair outside the
+exercise box goes to the release guard to check. This is a deliberate
+trade-off: a plain pair with no such word (for example a bare "45.42, 75.69"
+line) is not flagged at all, so the rules alone do not catch a position
+written that way. The release guard's own review and the person who releases
+the product are the check for it.
+
 In a J4 logistics team, guard-scan holds any number that has no calculator
 record on its line (`calc:<id>`), or a `calc:<id>` the calculator did not
 write. Every record the logistics server writes to

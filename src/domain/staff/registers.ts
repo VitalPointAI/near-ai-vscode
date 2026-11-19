@@ -14,6 +14,9 @@ import { isOneLine, isRecord, ownValue } from './parse';
 import type { ProductKind } from './products';
 import { STAFF_MARKERS } from './products';
 
+/** The repeats a battle rhythm event may have, with the days between occurrences (0: it happens once). One list for the register, its calendar import and the Staff Room. */
+export const BATTLE_RHYTHM_REPEAT_DAYS: Readonly<Record<'once' | 'daily' | 'weekly', number>> = { once: 0, daily: 1, weekly: 7 };
+
 export interface RegisterColumn {
   readonly key: string;
   readonly title: string;
@@ -110,7 +113,7 @@ export const REGISTER_SCHEMAS: Readonly<Record<string, RegisterSchema>> = {
       { key: 'kind', title: 'Kind', required: true, values: [...BATTLE_RHYTHM_KINDS] },
       { key: 'start', title: 'Start (UTC)', required: true, form: 'time' },
       { key: 'durationMinutes', title: 'Duration (min)', required: true, form: 'number' },
-      { key: 'repeat', title: 'Repeats', required: true, values: ['once', 'daily', 'weekly'] },
+      { key: 'repeat', title: 'Repeats', required: true, values: Object.keys(BATTLE_RHYTHM_REPEAT_DAYS) },
       { key: 'chair', title: 'Owner', required: true },
       { key: 'attendees', title: 'Attendees' },
       { key: 'inputs', title: 'Inputs' },

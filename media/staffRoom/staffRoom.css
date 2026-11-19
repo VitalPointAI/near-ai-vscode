@@ -355,6 +355,7 @@ body { background: var(--vscode-editor-background); }
 .game .k.hostile { color: var(--g-hostile); border-color: var(--g-hostile); }
 .coa-cell p, .game p, .annex p, .ev p, .dsm p, .frago p, .unit p, .calc p, .recommend p { margin: 4px 0 0; overflow-wrap: anywhere; }
 .coa-cell { position: relative; }
+.opens { cursor: pointer; }
 .coa-cell .theme { font-weight: 600; }
 .tests { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); }
 .test { overflow-wrap: anywhere; }

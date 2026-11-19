@@ -17,10 +17,31 @@
     j4: 'Logistics: every number comes from a calculator record that shows its formula. The J4 never commits resources; a person decides.'
   };
 
+  /**
+   * Makes a card that is not a button open something, from the pointer and from the keyboard alike: it takes focus, and Enter or Space on the card
+   * itself (not on a control inside it) does what a click does. Every clickable card in the workspaces goes through here (drop 2 review).
+   */
+  function opener(node, action, hint) {
+    node.tabIndex = 0;
+    node.classList.add('opens');
+    // The hint is added to a label the card already has; a card without one keeps the name its content gives it.
+    const label = node.getAttribute('aria-label');
+    if (hint && label) node.setAttribute('aria-label', label.replace(/[.\s]+$/, '') + '. ' + hint);
+    node.addEventListener('click', action);
+    node.addEventListener('keydown', (event) => {
+      if (event.target !== node || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      action();
+    });
+  }
+
   function create(h) {
     const panes = new Map();
     const shown = new Map();
+    // Every event log entry the page has seen, by id, across the whole log (not only the page shown): an escalation is announced wherever it is. A new
+    // entry moves once, when it is first drawn (on this page or a later one); an old row never moves when paging.
     let seenLog = new Set();
+    let toRise = new Set();
     let first = true;
 
     /** A list shown a page at a time: the rest stays one press away, so a register of thousands of rows never slows the room. */
@@ -224,7 +245,7 @@
           card.append(tests);
         } else card.append(h.el('p', 'faint', 'Validity tests (' + j5.tests.join(', ') + ') not recorded yet.'));
         if (cell.distinctFrom) card.append(h.el('p', 'faint', 'Distinct from: ' + cell.distinctFrom));
-        if (cell.product) card.addEventListener('click', () => h.openProductCard(cell.product.product, card));
+        if (cell.product) opener(card, () => h.openProductCard(cell.product.product, card), 'Opens its provenance.');
         grid.append(card);
         if (first) rise(card, index * 70);
       });
@@ -369,11 +390,18 @@
         const line = h.el('p', 'human-line', 'CCIR ' + trigger.ccir + ' reported as triggered by ' + trigger.member + ' ' + h.shortTime(trigger.at) + ': ' + trigger.report);
         log.append(line);
       }
-      const now = new Set();
+      // New entries, by id, over the whole log: an escalation past the first page is still announced, and paging never animates old rows.
+      const ids = new Set(j3.eventLog.rows.map((row) => row.id));
+      toRise = new Set([...toRise].filter((id) => ids.has(id)));
+      for (const row of j3.eventLog.rows) {
+        if (first || seenLog.has(row.id)) continue;
+        toRise.add(row.id);
+        if (row.status === 'escalated') h.announce('Event log: ' + row.id + ' escalated' + (row.ccir ? ' on CCIR ' + row.ccir : '') + '.');
+      }
+      seenLog = ids;
       const rows = h.el('ol', 'evrows');
       rows.setAttribute('aria-label', 'Event log');
       paged(rows, 'j3:log', j3.eventLog.rows, (row, parent) => {
-        now.add(row.id);
         const li = h.el('li', 'ev s-' + row.status);
         li.tabIndex = 0;
         const head = h.el('div', 't');
@@ -383,12 +411,8 @@
         li.append(head, h.el('p', '', row.report), h.el('p', 'faint', 'Source: ' + row.source));
         li.setAttribute('aria-label', row.time + ', ' + row.status + (row.ccir ? ', matches CCIR ' + row.ccir : '') + (row.decisionPoint ? ', matches ' + row.decisionPoint : '') + ': ' + row.report);
         parent.append(li);
-        if (!first && !seenLog.has(row.id)) {
-          rise(li, 0);
-          if (row.status === 'escalated') h.announce('Event log: ' + row.id + ' escalated' + (row.ccir ? ' on CCIR ' + row.ccir : '') + '.');
-        }
+        if (toRise.delete(row.id)) rise(li, 0);
       }, 'No event log yet. The watch officer logs each report with its time and source, and flags CCIR and DSM matches.');
-      seenLog = now;
       log.append(rows);
       current.append(log);
       if (j3.ccir.length) {
@@ -489,11 +513,13 @@
       paged(cal, 'j3:rhythm', j3.rhythm.events, (event, parent) => {
         const li = h.el('li', 'calev k-' + event.kind);
         li.tabIndex = 0;
-        const when = Date.parse(event.next);
-        li.append(h.el('span', 'when mono', h.dtg(when)), h.el('b', '', event.title), h.el('span', 'faint', event.kind.replace(/-/g, ' ') + ' · ' + event.minutes + ' min · ' + event.repeat + ' · chair ' + event.chair));
+        // An event whose repeat the host does not know has no date (next is empty): it says so rather than show a wrong one.
+        const when = event.next ? Date.parse(event.next) : NaN;
+        const known = Number.isFinite(when);
+        li.append(h.el('span', 'when mono', known ? h.dtg(when) : 'No date'), h.el('b', '', event.title), h.el('span', 'faint', event.kind.replace(/-/g, ' ') + ' · ' + event.minutes + ' min · ' + event.repeat + ' · chair ' + event.chair));
         if (event.inputs || event.outputs) li.append(h.el('span', 'faint', (event.inputs ? 'In: ' + event.inputs : '') + (event.inputs && event.outputs ? ' · ' : '') + (event.outputs ? 'Out: ' + event.outputs : '')));
-        li.append(h.el('span', 'in mono', h.inWords(when - h.now())));
-        li.setAttribute('aria-label', event.title + ', ' + h.dtg(when) + ', ' + h.inWords(when - h.now()) + ', chaired by ' + event.chair);
+        li.append(h.el('span', 'in mono', known ? h.inWords(when - h.now()) : event.repeat));
+        li.setAttribute('aria-label', event.title + ', ' + (known ? h.dtg(when) + ', ' + h.inWords(when - h.now()) : 'no date: ' + event.repeat) + ', chaired by ' + event.chair);
         parent.append(li);
       });
       rhythm.append(cal);
@@ -659,5 +685,5 @@
     };
   }
 
-  window.NearAiStaffWorkspaces = { create };
+  window.NearAiStaffWorkspaces = { create, opener };
 })();

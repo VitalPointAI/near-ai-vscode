@@ -198,13 +198,28 @@ function twoDecimalPairs(line: string): Array<{ point: [number, number]; index: 
   return out;
 }
 
+/** Words that present the numbers after them as a position (read in the few words before an unmarked pair). */
+const POSITION_CUE = /\b(?:lat|lats|latitude|lon|long|lng|longitude|lat\/lon|lat\/long|grid|position|posn|pos|located|location|loc|at|near|coordinates?|coords?|waypoint|wpt|rally point|check ?point|objective|obj|rendezvous|rv|landing zone|lz|drop zone|dz|fix|plotted)\b[^.;:!?]{0,12}$/i;
+/** Words that present the numbers next to them as money, scores or measures instead (read before the pair). */
+const NOT_A_POSITION_BEFORE = /\b(?:prices?|priced|costs?|costing|fees?|budget|paid|pay|sold|bought|spent|totals?|subtotal|sum|amounts?|balance|rates?|ratios?|shares?|scores?|scored|results?|odds|averages?|avg|mean|marks?|grades?|ratings?|durations?|weights?|heights?|lengths?|distances?|speeds?|sizes?|measures?|measured|versions?)\b[^.;:!?]{0,24}$/i;
+/** A unit or score word right after the pair that makes it a measure, not a position. */
+const NOT_A_POSITION_AFTER = /^\s*(?:points?|pts|goals?|runs?|km|kms|m|mi|nm|nmi|ft|kg|kgs|g|lb|lbs|t|tonnes?|tons?|l|litres?|liters?|gal|hours?|hrs?|h|mins?|minutes?|secs?|seconds?|days?|weeks?|dollars?|cents?|cad|usd|eur|gbp|percent|per ?cent|each|apiece|ea|kph|km\/h|kts?|knots?|mph)\b/i;
+
 /**
- * The unmarked two-decimal pairs in a line that read as a plausible latitude and longitude ([longitude, latitude] points): "12.50, 3.50". They are not
- * positions on their own (money, scores and measures look the same), so guard-scan looks at them only against an exercise box a person set.
+ * The unmarked two-decimal pairs in a line that read as a plausible latitude and longitude ([longitude, latitude] points): "Rally point 45.42, 75.69".
+ * Money, scores and measures look the same ("12.50, 3.50"), so a pair counts only when it is presented as a position: a coordinate cue in the few words
+ * before it (lat, lon, grid, position, located, at, rally point and the like), with no money, score or measure word before it and no unit or score word
+ * after it. Guard-scan looks at them only against an exercise box a person set.
  */
 export function unmarkedPairsIn(line: string): Array<{ point: [number, number]; index: number; text: string }> {
   return twoDecimalPairs(line)
     .filter((pair) => !pair.marked && Math.abs(pair.point[1]) <= 90 && Math.abs(pair.point[0]) <= 180)
+    .filter((pair) => {
+      const before = line.slice(Math.max(0, pair.index - 48), pair.index);
+      const after = line.slice(pair.index + pair.text.length);
+      if (NOT_A_POSITION_AFTER.test(after) || NOT_A_POSITION_BEFORE.test(before)) return false;
+      return POSITION_CUE.test(before);
+    })
     .map(({ point, index, text }) => ({ point, index, text }));
 }
 

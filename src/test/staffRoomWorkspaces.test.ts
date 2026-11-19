@@ -6,7 +6,8 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { buildStaffRoomModel, staffRoomWorkspaceOf } from '../domain/staff/staffRoom';
-import { markdownTables, nextOccurrence } from '../domain/staff/staffRoomWorkspaces';
+import { markdownTables, nextOccurrence, REPEAT_NOT_SHOWN } from '../domain/staff/staffRoomWorkspaces';
+import { BATTLE_RHYTHM_REPEAT_DAYS, registerSchema } from '../domain/staff/registers';
 import { defaultStaffSettings } from '../domain/staff/profiles';
 import { WARGAME_DIR, WARGAME_FILE } from '../staff/staffHost';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
@@ -140,6 +141,26 @@ test('Markdown tables are read as data: pipes escaped, fenced blocks skipped, an
   assert.equal(nextOccurrence('2026-11-19T09:00:00Z', 'once', NOW), undefined);
   assert.equal(nextOccurrence('2026-11-12T09:00:00Z', 'weekly', NOW), Date.parse('2026-11-26T09:00:00Z'));
   assert.equal(nextOccurrence('not a time', 'daily', NOW), undefined);
+});
+
+test('the next battle rhythm occurrence follows every repeat the battle rhythm defines; any other repeat shows "repeat not shown", never a wrong date', () => {
+  // NOW is 2026-11-19T12:00:00Z (the fixture). The repeats the room knows are exactly the register's.
+  assert.deepEqual(Object.keys(BATTLE_RHYTHM_REPEAT_DAYS).sort(), ['daily', 'once', 'weekly']);
+  assert.deepEqual(registerSchema('battle-rhythm-calendar')?.columns.find((column) => column.key === 'repeat')?.values, Object.keys(BATTLE_RHYTHM_REPEAT_DAYS));
+  assert.equal(nextOccurrence('2026-11-18T09:00:00Z', 'daily', NOW), Date.parse('2026-11-20T09:00:00Z'));
+  assert.equal(nextOccurrence('2026-11-18T13:00:00Z', 'daily', NOW), Date.parse('2026-11-19T13:00:00Z'));
+  assert.equal(nextOccurrence('2026-11-05T09:00:00Z', 'weekly', NOW), Date.parse('2026-11-26T09:00:00Z'));
+  assert.equal(nextOccurrence('2026-11-18T09:00:00Z', 'once', NOW), undefined, 'a one-off event that is over is gone');
+  for (const repeat of ['fortnightly', 'monthly', 'Weekly', '', 'hourly']) {
+    assert.equal(nextOccurrence('2026-11-18T09:00:00Z', repeat, NOW), 'unknown', `${repeat || '(empty)'} after its first start`);
+    assert.equal(nextOccurrence('2026-11-25T09:00:00Z', repeat, NOW), Date.parse('2026-11-25T09:00:00Z'), 'a first start still ahead is right whatever the repeat');
+  }
+  const rows = [
+    { id: 'BR-1', title: 'Update brief', kind: 'brief', start: '2026-11-18T09:00:00Z', durationMinutes: 30, repeat: 'daily', chair: 'commander' },
+    { id: 'BR-2', title: 'Targeting board', kind: 'board', start: '2026-11-12T10:00:00Z', durationMinutes: 60, repeat: 'fortnightly', chair: 'chief of staff' }
+  ] as unknown as RegisterRow[];
+  const model = buildStaffRoomModel({ now: NOW, settings: defaultStaffSettings(), registry: [], decisions: [], cop: { layers: [], eventTail: [] }, events: [], j2: { sources: [], pirs: [], plan: [] }, workspaces: { registers: { battleRhythm: rows } } });
+  assert.deepEqual(model.j3.rhythm.events.map((event) => [event.id, event.next, event.repeat]), [['BR-1', '2026-11-20T09:00:00.000Z', 'daily'], ['BR-2', '', REPEAT_NOT_SHOWN]]);
 });
 
 test('the open command\'s workspace argument names a workspace or nothing', () => {

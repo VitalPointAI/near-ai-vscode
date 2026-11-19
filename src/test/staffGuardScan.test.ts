@@ -90,10 +90,27 @@ test('two-decimal coordinates are held and geofenced too; money, versions, perce
 
 test('with an exercise box, an unmarked two-decimal pair outside it is for the guard to check; inside it passes; with no box it is not a coordinate', () => {
   // Outside the box: a plausible latitude and longitude, held for the guard's review (CHECK), never a block (HOLD).
-  for (const text of ['12.50, 3.50', 'Rally point 45.42, 75.69', 'Scores 45.42, 54.58']) {
+  for (const text of ['Position 12.50, 3.50', 'Rally point 45.42, 75.69', 'Located at 45.42, 54.58', 'lat/lon 33.25, 44.10', 'Grid 45.42, 75.69']) {
     assert.deepEqual(scan(text, { config: BOX }), { rules: ['unmarked-pair-outside-box'], hold: false }, text);
     assert.deepEqual(scan(text), { rules: [], hold: false }, `${text}: with no box an unmarked pair is not a coordinate`);
   }
+  // Agent review of drop 2: ordinary money, score and measure pairs are not presented as positions, so they are no CHECK on every product.
+  for (const text of [
+    '12.50, 3.50', 'Unit prices 12.50, 3.50', 'Scores 45.42, 54.58', 'The team scored at 45.42, 54.58', 'Costs at 12.50, 3.50 per item',
+    'At 12.50, 3.50 points', 'Readings at 12.50, 3.50 km', 'Totals at the end 45.42, 75.69', 'At the depot 12.50, 3.50 kg each'
+  ]) {
+    assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, text);
+  }
+  // The trade-off, stated: a plain pair with no position word is not flagged at all, even when it is a real position outside the box. The rules alone
+  // do not catch it; the release guard's own review and the person who releases the product do (SECURITY.md, guard-scan coordinates).
+  for (const text of ['45.42, 75.69', 'The convoy halts. 45.42, 75.69', 'Then 45.42, 75.69 for the night']) {
+    assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, `${text}: a cue-less pair is a known gap`);
+  }
+  // The same pair inside one box and outside another: presented as a position, it is held for the guard's check only outside.
+  const elsewhere: GuardConfig = { realEntities: [], exerciseBox: [[20, 30], [22, 30], [22, 32], [20, 32]] };
+  assert.deepEqual(scan('Rally point 51.10, 11.10', { config: elsewhere }), { rules: ['unmarked-pair-outside-box'], hold: false });
+  assert.deepEqual(scan('Rally point 51.10, 11.10', { config: BOX }), { rules: [], hold: false });
+  assert.deepEqual(scan('Scores 51.10, 11.10', { config: elsewhere }), { rules: [], hold: false }, 'the same numbers as scores are not a position');
   // Inside the box: it passes.
   for (const text of ['Rally point 51.10, 11.10', 'Grid 50.50, 10.25']) assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, text);
   // Not a plausible position, or not a pair at all: nothing, box or not.
@@ -103,7 +120,7 @@ test('with an exercise box, an unmarked two-decimal pair outside it is for the g
   // A marked pair is still a coordinate, held outside the box as before; it is not also reported as unmarked.
   assert.deepEqual(scan('Rally point 45.42 N, 75.69 E', { config: BOX }).rules, ['outside-exercise-box']);
   assert.deepEqual(unmarkedPairsIn('at 12.50, 3.50'), [{ point: [3.5, 12.5], index: 3, text: '12.50, 3.50' }]);
-  assert.match(guardScanText(guardScan({ body: '12.50, 3.50', section: 'j5', owner: 'lead-planner', config: BOX }), 'h'), /\[CHECK\] unmarked-pair-outside-box[\s\S]*No finding is a HOLD/);
+  assert.match(guardScanText(guardScan({ body: 'Position 12.50, 3.50', section: 'j5', owner: 'lead-planner', config: BOX }), 'h'), /\[CHECK\] unmarked-pair-outside-box[\s\S]*No finding is a HOLD/);
 });
 
 test('names on the real-entity list are held, as whole words in any case', () => {
