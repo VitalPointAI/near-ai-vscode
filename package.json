@@ -370,6 +370,36 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.createWatch",
+        "title": "Staff: Create a Standing Watch",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.armWatch",
+        "title": "Staff: Arm a Standing Watch",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.pauseWatch",
+        "title": "Staff: Pause a Standing Watch",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.resumeWatch",
+        "title": "Staff: Resume a Standing Watch",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.acknowledgeWatch",
+        "title": "Staff: Acknowledge a Standing Watch's Drafts",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.retireWatch",
+        "title": "Staff: Reject or Retire a Standing Watch",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.startSimulation",
         "title": "Staff: Start the Exercise Feed Simulation",
         "category": "NEAR AI"

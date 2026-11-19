@@ -13,6 +13,8 @@ import { FEED_EVENT_TYPES } from '../domain/staff/obs/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
 import type { Observation } from '../domain/staff/obs/observation';
 import { parseWatch } from '../domain/staff/obs/watches';
+import { trustWatch } from '../domain/staff/obs/watchRun';
+import type { PersonDecisionEntry } from '../domain/staff/personDecisions';
 import type { StandingWatch } from '../domain/staff/obs/watches';
 import { splitProductFile } from '../domain/staff/products';
 import { defaultStaffSettings, parseStaffSettings } from '../domain/staff/profiles';
@@ -94,15 +96,19 @@ export async function scenarioOf(root: string): Promise<{ scenario?: Scenario; p
   return parsed.ok ? { scenario: parsed.value } : { problem: `The scenario in ${SCENARIO_DIR}/ could not be read: ${parsed.message}` };
 }
 
-/** The standing watches file, each watch read strictly; a watch that does not read is named, never half-drawn. */
-export async function standingWatchesOf(root: string): Promise<{ watches: StandingWatch[]; problems: string[] }> {
+/**
+ * The standing watches file, each watch read strictly; a watch that does not read is named, never half-drawn. With the signed decisions (WP-WATCH), a watch
+ * the file calls armed that no signed arm decision proves is named in `unsigned` (it runs nothing until a person arms it), and a retired one is shown
+ * retired whatever the file says.
+ */
+export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<string, PersonDecisionEntry>): Promise<{ watches: StandingWatch[]; problems: string[]; unsigned: string[] }> {
   const read = await readSmall(path.join(root, STANDING_WATCHES_FILE));
-  if (read.problem) return { watches: [], problems: [read.problem] };
-  if (read.text === undefined) return { watches: [], problems: [] };
+  if (read.problem) return { watches: [], problems: [read.problem], unsigned: [] };
+  if (read.text === undefined) return { watches: [], problems: [], unsigned: [] };
   let value: unknown;
-  try { value = JSON.parse(read.text); } catch { return { watches: [], problems: ['The standing watches file is not JSON.'] }; }
+  try { value = JSON.parse(read.text); } catch { return { watches: [], problems: ['The standing watches file is not JSON.'], unsigned: [] }; }
   const entries = value && typeof value === 'object' && !Array.isArray(value) ? (value as { register?: unknown; entries?: unknown }) : undefined;
-  if (!entries || entries.register !== 'standing-watches' || !Array.isArray(entries.entries)) return { watches: [], problems: ['The standing watches file is not a standing-watches register.'] };
+  if (!entries || entries.register !== 'standing-watches' || !Array.isArray(entries.entries)) return { watches: [], problems: ['The standing watches file is not a standing-watches register.'], unsigned: [] };
   const watches: StandingWatch[] = [];
   const problems: string[] = [];
   entries.entries.slice(0, 200).forEach((entry, index) => {
@@ -110,7 +116,17 @@ export async function standingWatchesOf(root: string): Promise<{ watches: Standi
     if (parsed.ok) watches.push(parsed.value);
     else problems.push(`Standing watch ${index + 1} was not read: ${parsed.message}`);
   });
-  return { watches, problems };
+  // Read through the signed decisions: a retired watch shows as retired whatever the file says; one the file calls armed with no signed arm decision is
+  // flagged on its card (it runs nothing until a person arms it).
+  const unsigned: string[] = [];
+  const shown = watches.map((watch) => {
+    if (!decisions) return watch;
+    const trusted = trustWatch(watch, decisions.get(watch.id));
+    if (!trusted.problem) return watch;
+    if (trusted.watch.state === 'proposed') { unsigned.push(watch.id); return watch; }
+    return trusted.watch;
+  });
+  return { watches: shown, problems, unsigned };
 }
 
 /** Everything the Staff Room model is built from, read now. */
@@ -121,7 +137,7 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     feedEventsOf(root),
     staffSettingsOf(root),
     scenarioOf(root),
-    standingWatchesOf(root)
+    host ? host.watchDecisions().then((decisions) => standingWatchesOf(root, decisions)) : standingWatchesOf(root)
   ]);
   const problems: string[] = [...(scenario.problem ? [scenario.problem] : []), ...watches.problems];
   const registers: { sources: SourceEntry[]; pirs: PirEntry[]; plan: CollectionEntry[] } = { sources: [], pirs: [], plan: [] };
@@ -156,7 +172,7 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     ...(scenario.scenario ? { scenario: scenario.scenario } : {}), ...(scenario.problem ? { scenarioProblem: scenario.problem } : {}),
     j2: {
       ...registers, ...(dsm ? { dsm } : {}), ...(enemyCoaBody ? { enemyCoaBody } : {}), ...(enemyCoaProduct ? { enemyCoaProduct } : {}),
-      watches: watches.watches, ...(options.live ? { live: options.live } : {}), problems
+      watches: watches.watches, ...(watches.unsigned.length ? { unsignedWatches: watches.unsigned } : {}), ...(options.live ? { live: options.live } : {}), problems
     }
   };
 }

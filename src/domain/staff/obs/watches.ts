@@ -11,7 +11,7 @@
 import { parseIsoMillis } from '../../gate/shape';
 import { isNamedPerson } from '../release';
 import type { StaffActor } from '../release';
-import { childPath, choice, fail, field, fields, int, isoTime, obsRefused, optionalField, reading, templateLabel, text, uniqueList } from './read';
+import { childPath, choice, fail, field, fields, int, isoTime, list, obsRefused, optionalField, reading, templateLabel, text, uniqueList } from './read';
 import type { ObsFailure, ObsParsed } from './read';
 import { parseSliceQuery } from './slices';
 import type { SliceQuery } from './slices';
@@ -20,7 +20,7 @@ export const WATCH_STATES = ['proposed', 'armed', 'paused', 'matched', 'drafting
 export type WatchState = (typeof WATCH_STATES)[number];
 export const TERMINAL_WATCH_STATES: readonly WatchState[] = ['expired', 'disarmed', 'rejected'];
 
-export const WATCH_EVENTS = ['arm', 'reject', 'match', 'pause', 'resume', 'draft', 'drafts-ready', 'acknowledge', 'expire', 'disarm'] as const;
+export const WATCH_EVENTS = ['arm', 'reject', 'match', 'pause', 'resume', 'draft', 'drafts-ready', 'abandon', 'acknowledge', 'expire', 'disarm'] as const;
 export type WatchEvent = (typeof WATCH_EVENTS)[number];
 
 /** What a match may produce: drafts, a "source changed" mark and an alert. Nothing else is expressible. */
@@ -40,6 +40,15 @@ export const WATCH_DEFAULTS = { dedupeWindowMinutes: 30, alertsPerPersonPerHour:
 /** The person a watch alerts: a name and a role on record, never a member. */
 export interface WatchAlertee { readonly name: string; readonly role: string }
 
+/** The match a watch is working on: when it was raised, the observations it rests on, and how many of them were found while it was paused. */
+export interface WatchMatch { readonly at: string; readonly observations: readonly string[]; readonly missed: number }
+
+/** A draft a member made for a match, as the product ledger holds it: the product and the version recorded. */
+export interface WatchDraftRef { readonly product: string; readonly version: number }
+
+/** The most observation ids a watch keeps queued or on one match, and the most subjects it remembers for de-duplication. */
+export const WATCH_CAPS = { queued: 500, matchObservations: 100, recent: 200, drafts: 5 } as const;
+
 export interface StandingWatch {
   readonly id: string;
   readonly title: string;
@@ -58,6 +67,23 @@ export interface StandingWatch {
   /** Matches found while paused, queued for the person on resume. */
   readonly missedWhilePaused: number;
   readonly label: string;
+  // Runtime fields (WP-WATCH), written only by the watch host:
+  /** Who drafted it: `person:<name> (<role>)` or `member:<slug>`. */
+  readonly proposedBy?: string;
+  /** The known time the watch has looked at observations through. Rows known later are new to it. */
+  readonly cursor?: string;
+  /** Observations found while the watch could not raise a match (paused, or busy with one), delivered when it is armed again: never dropped. */
+  readonly queued?: readonly string[];
+  /** Subjects matched recently, for de-duplication within the window. */
+  readonly recent?: ReadonlyArray<{ readonly subject: string; readonly at: string }>;
+  /** The match being worked on (matched, drafting, awaiting-review). */
+  readonly match?: WatchMatch;
+  /** The member run drafting it now. */
+  readonly drafting?: { readonly run: string; readonly member: string };
+  /** The drafts made for the match, waiting in the release state machine. */
+  readonly drafts?: readonly WatchDraftRef[];
+  /** Why it ended, or why its last step happened, in one line. */
+  readonly reason?: string;
 }
 
 const WATCH_ID = /^WATCH-[1-9][0-9]{0,5}$/;
@@ -70,7 +96,7 @@ const INDICATOR_ID = /^IND-[1-9][0-9]{0,5}$/;
  */
 export function parseWatch(value: unknown, path = ''): ObsParsed<StandingWatch> {
   return reading(() => {
-    const raw = fields(value, path, ['id', 'title', 'pir', 'indicator', 'condition', 'ltiov', 'alert', 'outputs', 'runMode', 'state', 'missedWhilePaused', 'label'], ['pausedReason']);
+    const raw = fields(value, path, ['id', 'title', 'pir', 'indicator', 'condition', 'ltiov', 'alert', 'outputs', 'runMode', 'state', 'missedWhilePaused', 'label'], ['pausedReason', ...WATCH_RUNTIME_FIELDS]);
     const at = (key: string): string => childPath(path, key);
     const id = (key: string, pattern: RegExp): string => {
       const v = field(raw, key);
@@ -98,9 +124,63 @@ export function parseWatch(value: unknown, path = ''): ObsParsed<StandingWatch> 
       alert: { name: text(field(alert, 'name'), childPath(at('alert'), 'name'), 120), role: text(field(alert, 'role'), childPath(at('alert'), 'role'), 120) },
       outputs, runMode: 'attended', state, ...(pausedReason ? { pausedReason } : {}),
       missedWhilePaused: int(field(raw, 'missedWhilePaused'), at('missedWhilePaused'), 0, 1_000_000),
-      label: templateLabel(field(raw, 'label'), at('label'))
+      label: templateLabel(field(raw, 'label'), at('label')),
+      ...runtimeFields(raw, path)
     };
   });
+}
+
+const WATCH_RUNTIME_FIELDS = ['proposedBy', 'cursor', 'queued', 'recent', 'match', 'drafting', 'drafts', 'reason'] as const;
+const OBS_ID = /^obs-[0-9a-f]{64}$/;
+const MEMBER_SLUG = /^[a-z][a-z0-9-]{0,63}$/;
+const PRODUCT_SLUG = /^[a-z0-9][a-z0-9-]{0,99}$/;
+
+function obsIds(value: unknown, path: string, max: number): string[] {
+  return uniqueList(value, path, max, (item, where) => {
+    if (typeof item !== 'string' || !OBS_ID.test(item)) fail('wrong-type', where);
+    return item;
+  });
+}
+
+/** The runtime fields, each read strictly when present. */
+function runtimeFields(raw: Parameters<typeof field>[0], path: string): Partial<StandingWatch> {
+  const out: { -readonly [K in keyof StandingWatch]?: StandingWatch[K] } = {};
+  const proposedBy = optionalField(raw, 'proposedBy', path, (v, where) => text(v, where, 200));
+  if (proposedBy !== undefined) out.proposedBy = proposedBy;
+  const cursor = optionalField(raw, 'cursor', path, isoTime);
+  if (cursor !== undefined) out.cursor = cursor;
+  const queued = optionalField(raw, 'queued', path, (v, where) => obsIds(v, where, WATCH_CAPS.queued));
+  if (queued !== undefined) out.queued = queued;
+  const recent = optionalField(raw, 'recent', path, (v, where) => list(v, where, WATCH_CAPS.recent, (item, itemAt) => {
+    const entry = fields(item, itemAt, ['subject', 'at']);
+    return { subject: text(field(entry, 'subject'), childPath(itemAt, 'subject'), 120), at: isoTime(field(entry, 'at'), childPath(itemAt, 'at')) };
+  }));
+  if (recent !== undefined) out.recent = recent;
+  const match = optionalField(raw, 'match', path, (v, where) => {
+    const entry = fields(v, where, ['at', 'observations', 'missed']);
+    return {
+      at: isoTime(field(entry, 'at'), childPath(where, 'at')), observations: obsIds(field(entry, 'observations'), childPath(where, 'observations'), WATCH_CAPS.matchObservations),
+      missed: int(field(entry, 'missed'), childPath(where, 'missed'), 0, 1_000_000)
+    };
+  });
+  if (match !== undefined) out.match = match;
+  const drafting = optionalField(raw, 'drafting', path, (v, where) => {
+    const entry = fields(v, where, ['run', 'member']);
+    const member = field(entry, 'member');
+    if (typeof member !== 'string' || !MEMBER_SLUG.test(member)) fail('wrong-type', childPath(where, 'member'));
+    return { run: text(field(entry, 'run'), childPath(where, 'run'), 120), member };
+  });
+  if (drafting !== undefined) out.drafting = drafting;
+  const drafts = optionalField(raw, 'drafts', path, (v, where) => list(v, where, WATCH_CAPS.drafts, (item, itemAt) => {
+    const entry = fields(item, itemAt, ['product', 'version']);
+    const product = field(entry, 'product');
+    if (typeof product !== 'string' || !PRODUCT_SLUG.test(product)) fail('wrong-type', childPath(itemAt, 'product'));
+    return { product, version: int(field(entry, 'version'), childPath(itemAt, 'version'), 1, 100_000) };
+  }));
+  if (drafts !== undefined) out.drafts = drafts;
+  const reason = optionalField(raw, 'reason', path, (v, where) => text(v, where, 300));
+  if (reason !== undefined) out.reason = reason;
+  return out;
 }
 
 /** Actions a watch may never take, whatever its outputs say; the tests prove each is refused. */
@@ -116,9 +196,12 @@ export const WATCH_TRANSITIONS: ReadonlyArray<{ readonly from: readonly WatchSta
   { from: ['paused'], event: 'resume', to: 'armed', who: 'person-or-system' },
   { from: ['matched'], event: 'draft', to: 'drafting', who: 'agent' },
   { from: ['drafting'], event: 'drafts-ready', to: 'awaiting-review', who: 'agent-or-system' },
+  // The member run drafting it ended without drafts: the match goes back to wait for the next member run, so drafting never waits forever (WP-WATCH).
+  { from: ['drafting'], event: 'abandon', to: 'matched', who: 'agent-or-system' },
   { from: ['awaiting-review'], event: 'acknowledge', to: 'armed', who: 'person' },
   { from: ['proposed', 'armed', 'paused'], event: 'expire', to: 'expired', who: 'system' },
-  { from: ['armed', 'paused', 'awaiting-review'], event: 'disarm', to: 'disarmed', who: 'person' }
+  // A person may retire a watch whatever it is doing, so a match no member run picks up never holds it (WP-WATCH).
+  { from: ['armed', 'paused', 'matched', 'drafting', 'awaiting-review'], event: 'disarm', to: 'disarmed', who: 'person' }
 ];
 
 export type WatchActor = StaffActor | { readonly kind: 'system' };
@@ -148,6 +231,8 @@ export function watchTransition(watch: StandingWatch, event: WatchEvent, actor: 
         : rule.who === 'agent-or-system' ? actor.kind === 'agent' || actor.kind === 'system'
           : person || actor.kind === 'system';
   if (!allowed) return obsRefused(rule.who === 'person' ? 'not-a-person' : 'bad-transition', 'actor');
+  // A watch a person paused is resumed by a person: the runtime resumes only the pauses it made itself.
+  if (event === 'resume' && actor.kind === 'system' && watch.pausedReason === 'person') return obsRefused('not-a-person', 'actor');
   const ltiovPassed = context.at > parseIsoMillis(watch.ltiov);
   if (ltiovPassed && ['arm', 'match', 'resume', 'draft'].includes(event)) return obsRefused('ltiov-passed', 'ltiov');
   if (event === 'expire' && !ltiovPassed) return obsRefused('bad-transition', 'ltiov');

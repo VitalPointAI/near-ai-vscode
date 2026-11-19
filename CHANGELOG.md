@@ -179,6 +179,22 @@ members draft and recommend, and a named person makes every decision.
   time if asked. Every answer shows only what your clearances cover, raises the chat's label to
   what it showed, says when a limit cut it, and fences the feeds' text as untrusted. Feed events go
   into the staff event log beside the staff events.
+- **Standing watches.** A watch binds a PIR's indicator to an area, a time window and the weakest
+  source grade it counts, until the PIR's latest time of value, and names the person it alerts.
+  **NEAR AI: Staff: Create a Standing Watch** creates and arms one; the J2 watch officer, warning
+  analyst and threat or IPB analyst can only propose one, which a person arms with **Staff: Arm a
+  Standing Watch**. Arming and retiring are signed with your device key, so a watch armed in the
+  file by hand runs nothing. A watch looks at new observations only while a staff run or the Staff
+  Room is open; without one it pauses, and what came in meanwhile is delivered as "missed while
+  paused" when a person is back. A watch you pause counts and queues its matches and delivers them
+  when you resume it; a degraded feed pauses it until the feed recovers. Matches are
+  de-duplicated per track for 30 minutes, and you get at most four alerts an hour, then a digest
+  that comes with the next alert. On a match the watch officer drafts an INTREP, and the owner of
+  the adversary courses of action a revision if the watch allows it, each saying plainly that it is
+  a draft for you and going through the gates to your decision; nothing is released by a watch.
+  **Acknowledge** arms it again once you have seen the drafts, and a match left by a run that ended
+  waits for the next one. Past its latest time of value a watch expires. The Staff Room's J2
+  workspace shows each watch's queue, drafts and digest.
 - **The COP map.** Staff team members granted `mcp:cop-map` read the COP layers and put military
   symbols (MIL-STD-2525D and APP-6(D), drawn by milsymbol), control measures, overlays per
   adversary course of action and decision points on the layer they write, in grid references on

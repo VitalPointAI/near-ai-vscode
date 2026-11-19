@@ -45,8 +45,13 @@ export const LOGISTICS_LOGSTAT_VALIDATE = 'mcp__logistics__logstat_validate';
 export const LOGISTICS_MOVEMENT = 'mcp__logistics__movement*';
 export const LOGISTICS_MOVEMENT_READ = 'mcp__logistics__movement_read';
 export const LOGISTICS_READINESS = 'mcp__logistics__readiness*';
-/** The observations server (research note 11, section 5): slices, tracks, changes, corroboration, timelines and feed status, read-only. */
-export const OBSERVATIONS = 'mcp__observations__*';
+/** The observations server's read tools (research note 11, section 5): slices, tracks, changes, corroboration, timelines and feed status. */
+export const OBSERVATIONS = 'mcp__observations__obs_*';
+/**
+ * The observations server's standing watch tools (research note 11, 4.5; WP-WATCH): propose a watch, list them, draft for a match and report the drafts
+ * ready. Arming, pausing, resuming, acknowledging and retiring are a named person's commands, never a tool.
+ */
+export const OBSERVATIONS_WATCH = 'mcp__observations__watch_*';
 
 /**
  * The members that read the feeds, by section (research note 11, 1 and 6.1): the J2's integrator and the analysts who build the threat picture, warning
@@ -57,3 +62,10 @@ export const OBSERVATIONS_GRANTEES: Readonly<Record<'j2' | 'j3', readonly string
   j2: ['j2-chief', 's2-lead', 'collection-manager', 'jipoe-analyst', 'geoint-analyst', 'osint-analyst', 'threat-analyst', 'watch-officer', 'warning-analyst', 'ipb-analyst'],
   j3: ['j3-director', 's3-lead', 'joc-chief', 'current-ops-chief', 'watch-officer', 'airspace-maritime-liaison']
 };
+
+/**
+ * The members that work standing watches (research note 11, 4.5; design 10, 3.2): the watch officer, who watches the indicators and writes the INTREP
+ * when one fires; the warning analyst, who does that at strategic level in place of a watch; and the owner of the adversary courses of action (the threat
+ * analyst, or the IPB analyst in a brigade or battalion S2), who drafts the revised assessment a match bears on. J2 only: the watches serve PIRs.
+ */
+export const OBSERVATIONS_WATCH_GRANTEES: readonly string[] = ['watch-officer', 'warning-analyst', 'threat-analyst', 'ipb-analyst'];

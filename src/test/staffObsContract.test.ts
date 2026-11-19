@@ -535,7 +535,8 @@ test('the feed picture: sources with state and gaps, feed layers with the SIM ba
 test('the observations tools: the names note 11 lists, local with no hosts, and only proposals change anything', () => {
   assert.deepEqual(OBS_TOOLS.map((tool) => tool.name), [...OBS_TOOL_NAMES]);
   assert.deepEqual(OBS_TOOL_MANIFEST, { runsOn: 'local', hosts: [] });
-  assert.deepEqual(OBS_TOOLS.filter((tool) => tool.proposes).map((tool) => tool.name), ['watch.propose', 'cop.layer.propose']);
+  // WP-WATCH adds the two drafting steps: each writes a draft for a named person, never a decision.
+  assert.deepEqual(OBS_TOOLS.filter((tool) => tool.proposes).map((tool) => tool.name), ['watch.propose', 'watch.draft', 'watch.drafted', 'cop.layer.propose']);
 });
 
 test('the contract is pure: no vscode, no file system, no network in src/domain/staff/obs', () => {

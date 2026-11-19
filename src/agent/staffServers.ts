@@ -11,6 +11,8 @@ import { COP_MAP_SERVER, copMapTools } from './copMap';
 import { INTEL_WORKBENCH_SERVER, intelWorkbenchTools } from './intelWorkbench';
 import { LOGISTICS_SERVER, logisticsTools } from './logisticsTools';
 import { OBSERVATIONS_SERVER, observationsTools } from './observationsTools';
+import { watchTools } from './watchTools';
+import { watchHostFor } from '../staff/watchHost';
 import { grantedToMembers } from './staffGrantGate';
 import type { GrantedTeam } from './staffGrantGate';
 import { GUARD_SCAN_SERVER, STAFF_PRODUCTS_SERVER, staffTools } from './staffTools';
@@ -54,8 +56,11 @@ const GATED_STAFF_SERVERS: readonly GatedStaffServer[] = [
   },
   {
     id: OBSERVATIONS_SERVER, name: 'Observations (built in)',
-    description: 'The project\'s feed observations, read only and clamped to your clearances: slices by area, time, grade, discipline and unit, tracks with their decay, what changed since a time, corroboration by independent origin, timelines, feed status, and the picture as known at any time. Every answer says when a limit cut it.',
-    build: (access) => observationsTools({ store: () => access.store() })
+    description: 'The project\'s feed observations, read only and clamped to your clearances: slices by area, time, grade, discipline and unit, tracks with their decay, what changed since a time, corroboration by independent origin, timelines, feed status, and the picture as known at any time. Every answer says when a limit cut it. The J2 watch members also propose standing watches and draft for their matches; a named person arms them, and nothing is released by a watch.',
+    build: (access) => [
+      ...observationsTools({ store: () => access.store() }),
+      ...watchTools({ watches: () => { const host = access.host(); return host ? watchHostFor(host.root) : undefined; }, team: access.team, run: access.run })
+    ]
   },
   {
     id: COP_MAP_SERVER, name: 'COP map (built in)',

@@ -525,6 +525,50 @@ export class StaffHost {
     });
   }
 
+  /** The latest signed decision on each standing watch (subject kind `watch`, WP-WATCH): what arms or retires a watch, never the register file alone. */
+  public async watchDecisions(): Promise<ReadonlyMap<string, PersonDecisionEntry>> {
+    const out = new Map<string, PersonDecisionEntry>();
+    for (const entry of (await this.decisionReplay()).decisions.values()) if (entry.subject.kind === 'watch') out.set(entry.subject.id, entry);
+    return out;
+  }
+
+  /**
+   * Signs a named person's decision on a standing watch (arm: `approved`; reject or retire: `rejected`, with reasons) with this device's key and appends
+   * it to the decision log. Only the watch host's person commands call it; no tool does. The person must be the one this device's key signs for.
+   */
+  public async signWatchDecision(person: PersonActor, input: { readonly watch: string; readonly decision: 'approved' | 'rejected'; readonly wording: string; readonly reasons: readonly string[] }): Promise<StaffResult> {
+    if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const signer = await this.options.signer();
+    if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const reasons = input.reasons.map((reason) => reason.trim().replace(/\s+/g, ' ').slice(0, 500)).filter(Boolean).slice(0, 10);
+    if (input.decision === 'rejected' && reasons.length === 0) return refuse('Say why the watch is rejected or retired.');
+    await mkdir(this.ledgerDir(), { recursive: true });
+    const at = this.now();
+    const logged = await withFileLock(this.ledgerDir(), DECISION_LOCK, async () => {
+      const replay = await this.decisionReplay();
+      if (replay.broken) return refuse(`The decision log cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded.`);
+      const record: PersonDecisionEntry = { v: 1, seq: replay.entries, prev: replay.head, at: isoOf(at), subject: { kind: 'watch', id: input.watch }, decision: input.decision, wording: input.wording, reasons: input.decision === 'rejected' ? reasons : [], person };
+      const envelope = signPayload(signer, 'staff-decision', record, { now: () => new Date(at) });
+      await appendFile(path.join(this.ledgerDir(), DECISION_LOG_FILE), `${JSON.stringify(envelope)}\n`, 'utf8');
+      return undefined;
+    });
+    return logged ?? ok(`${input.watch} ${input.decision === 'approved' ? 'armed' : 'retired'} by ${person.name} (${person.role}), signed with this device's key.`);
+  }
+
+  /** Whether a person is named and is the one this device's key signs for: the check every person-only step makes. */
+  public async isThisDevicePerson(person: PersonActor): Promise<boolean> {
+    if (!isNamedPerson(person)) return false;
+    return person.deviceFingerprint === (await this.options.signer()).fingerprint;
+  }
+
+  /** The product ledger's view of one product: its state, version and recorded history, for the watch host's draft check. */
+  public async productState(product: string): Promise<{ readonly state: string; readonly version: number; readonly owner: string; readonly section: StaffSectionId; readonly tampered?: string; readonly lastAt: string } | undefined> {
+    const state = (await this.replay()).products.get(product);
+    if (!state) return undefined;
+    const last = state.history[state.history.length - 1];
+    return { state: state.record.state, version: state.record.version, owner: state.record.roles.owner, section: state.record.section, ...(state.tampered ? { tampered: state.tampered } : {}), lastAt: last?.at ?? '' };
+  }
+
   // ---- Events ---------------------------------------------------------------------------------------------------------------------------------
 
   /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ); feed events are in feedEvents. */
