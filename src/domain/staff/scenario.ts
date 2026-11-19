@@ -6,11 +6,19 @@
 // any classification or caveat marking, any name on your organization's real-entity list, and coordinates outside the exercise area. It does not
 // replace the release-guard's scan of products (design 10, 4.2); it keeps the inputs those products are built from clean.
 import { INFORMATION_CREDIBILITY, SOURCE_RELIABILITY } from './doctrine';
+import { FRAME_AXES, FRAME_FAILURES, FRAME_KINDS, frameProblem, gridReferencesIn, insideFrame } from './obs/frame';
+import type { ExerciseFrame } from './obs/frame';
 import { checkStaffKeys, childPath, isOneOf, isRecord, ownValue, STAFF_PARSE_FAILURES } from './parse';
 import type { Fields } from './parse';
 
 export const SCENARIO_FORMAT = 'near-ai-staff-scenario';
-export const SCENARIO_VERSION = 1;
+/**
+ * The versions this reader reads (D-22: a new version sits beside the old one). Version 2 adds the optional exercise frame (`region.frame`, note 11,
+ * section 6.5); a version 1 file reads exactly as before and may not carry a frame. SCENARIO_VERSION is the newest.
+ */
+export const SCENARIO_VERSIONS = [1, 2] as const;
+export type ScenarioVersion = (typeof SCENARIO_VERSIONS)[number];
+export const SCENARIO_VERSION: ScenarioVersion = 2;
 
 /** The largest scenario file read, in bytes of text. A scenario is a few dozen kilobytes; anything far larger is not one. */
 export const SCENARIO_MAX_FILE = 512 * 1024;
@@ -29,7 +37,9 @@ export const SCENARIO_FAILURES = {
   'real-entity': 'The text names an entry on your organization\'s real-entity list.',
   coordinates: 'The text carries coordinates outside the exercise area.',
   'dangling-reference': 'A field names an id the scenario does not define.',
-  'too-many': 'A list has more entries than a scenario may hold.'
+  'too-many': 'A list has more entries than a scenario may hold.',
+  frame: 'The exercise frame is not usable.',
+  'outside-frame': 'A grid reference lies outside the exercise frame.'
 } as const;
 export type ScenarioFailure = keyof typeof SCENARIO_FAILURES;
 
@@ -131,6 +141,8 @@ export interface Scenario {
     readonly name: string;
     readonly description: string;
     readonly grid: ScenarioGrid;
+    /** Where the fictional grid sits on the globe for the map and feed replays (version 2 only). */
+    readonly frame?: ExerciseFrame;
     readonly features: readonly ScenarioFeature[];
     readonly weather: { readonly summary: string; readonly effects: readonly string[] };
     readonly civil: readonly CivilConsideration[];
@@ -303,7 +315,8 @@ export function parseScenarioText(text: string, options: ScenarioOptions = {}): 
 
 function readScenario(value: unknown, options: ScenarioOptions): Scenario {
   if (!isRecord(value)) refuse('not-an-object', 'scenario');
-  if (ownValue(value, 'format') !== SCENARIO_FORMAT || ownValue(value, 'version') !== SCENARIO_VERSION) refuse('wrong-format', 'format');
+  const version = ownValue(value, 'version');
+  if (ownValue(value, 'format') !== SCENARIO_FORMAT || !(SCENARIO_VERSIONS as readonly unknown[]).includes(version)) refuse('wrong-format', 'format');
   if (ownValue(value, 'fictional') !== true) refuse('not-fictional', 'fictional');
   const top = record(value, '', [
     'format', 'version', 'id', 'title', 'marking', 'fictional', 'summary', 'region', 'parties', 'forces', 'controlMeasures', 'mission', 'reports'
@@ -313,8 +326,9 @@ function readScenario(value: unknown, options: ScenarioOptions): Scenario {
     .filter((entry) => entry !== '')
     .map((entry) => new RegExp(`(^|[^A-Za-z0-9])${escapeRegExp(entry).split(/\s+/).join('\\s+')}($|[^A-Za-z0-9])`, 'i'));
 
-  const regionFields = record(ownValue(top, 'region'), 'region', ['name', 'description', 'grid', 'features', 'weather', 'civil']);
+  const regionFields = record(ownValue(top, 'region'), 'region', ['name', 'description', 'grid', 'features', 'weather', 'civil'], version === 2 ? ['frame'] : []);
   const grid = readGrid(ownValue(regionFields, 'grid'), 'region.grid');
+  const frame = optional(regionFields, 'frame', (raw) => readFrame(raw, 'region.frame', grid));
   const walk: Walk = { realEntities, grid };
   const seen = new Set<string>();
 
@@ -345,6 +359,7 @@ function readScenario(value: unknown, options: ScenarioOptions): Scenario {
     name: line(ownValue(regionFields, 'name'), 'region.name', walk),
     description: prose(ownValue(regionFields, 'description'), 'region.description', walk),
     grid,
+    ...(frame ? { frame } : {}),
     features,
     weather: {
       summary: prose(ownValue(weatherFields, 'summary'), 'region.weather.summary', walk),
@@ -482,6 +497,17 @@ function readScenario(value: unknown, options: ScenarioOptions): Scenario {
   reports.forEach((report, index) => report.about.forEach((entry, at) => {
     if (!seen.has(entry) || entry === report.id) refuse('dangling-reference', `reports[${index}].about[${at}]`);
   }));
+  if (frame) {
+    // Every grid reference a place or unit is given at must fall inside the frame, so every replayed position lands on the frame's ocean.
+    const located: Array<{ readonly location: string; readonly path: string }> = [
+      ...features.map((entry, index) => ({ location: entry.location, path: `region.features[${index}].location` })),
+      ...forces.map((entry, index) => ({ location: entry.location, path: `forces[${index}].location` })),
+      ...controlMeasures.map((entry, index) => ({ location: entry.location, path: `controlMeasures[${index}].location` }))
+    ];
+    for (const entry of located) {
+      if (gridReferencesIn(entry.location, frame.grid, frame.squareMetres).some((reference) => !insideFrame(frame, reference))) refuse('outside-frame', entry.path);
+    }
+  }
 
   return {
     id: id(ownValue(top, 'id'), 'id', seen),
@@ -490,6 +516,30 @@ function readScenario(value: unknown, options: ScenarioOptions): Scenario {
     summary: prose(ownValue(top, 'summary'), 'summary', walk),
     region, parties, forces, controlMeasures, mission, reports, sourceRegister
   };
+}
+
+function readFrame(value: unknown, path: string, grid: ScenarioGrid): ExerciseFrame {
+  if (grid.kind !== 'fictional') refuse('not-allowed-here', path);
+  const fields = record(value, path, ['kind', 'grid', 'squareMetres', 'origin', 'extent', 'axis']);
+  const origin = record(ownValue(fields, 'origin'), childPath(path, 'origin'), ['latitude', 'longitude']);
+  const extent = record(ownValue(fields, 'extent'), childPath(path, 'extent'), ['eastings', 'northings']);
+  const number = (raw: unknown, at: string): number => {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) refuse('wrong-type', at);
+    return raw;
+  };
+  const gridName = ownValue(fields, 'grid');
+  if (typeof gridName !== 'string') refuse('wrong-type', childPath(path, 'grid'));
+  const frame: ExerciseFrame = {
+    kind: choice(FRAME_KINDS, ownValue(fields, 'kind'), childPath(path, 'kind')),
+    grid: gridName,
+    squareMetres: number(ownValue(fields, 'squareMetres'), childPath(path, 'squareMetres')),
+    origin: { latitude: number(ownValue(origin, 'latitude'), childPath(path, 'origin.latitude')), longitude: number(ownValue(origin, 'longitude'), childPath(path, 'origin.longitude')) },
+    extent: { eastings: number(ownValue(extent, 'eastings'), childPath(path, 'extent.eastings')), northings: number(ownValue(extent, 'northings'), childPath(path, 'extent.northings')) },
+    axis: choice(FRAME_AXES, ownValue(fields, 'axis'), childPath(path, 'axis'))
+  };
+  const problem = frameProblem(frame, grid.name);
+  if (problem) throw new Refused({ ...scenarioRefused('frame', path), message: `${SCENARIO_FAILURES.frame} ${FRAME_FAILURES[problem]} (at ${path})` });
+  return frame;
 }
 
 function readMission(value: unknown, walk: Walk, seen: Set<string>): ScenarioMission {
@@ -594,6 +644,9 @@ export function scenarioFiles(scenario: Scenario): Array<{ readonly path: string
     `# ${scenario.region.name}`, '', ...banner,
     scenario.region.description, '',
     `Grid: ${scenario.region.grid.kind === 'fictional' ? `fictional grid ${scenario.region.grid.name}; no real coordinates` : `exercise box ${scenario.region.grid.south} to ${scenario.region.grid.north} latitude, ${scenario.region.grid.west} to ${scenario.region.grid.east} longitude`}.`, '',
+    ...(scenario.region.frame
+      ? [`Map frame: for the map and feed replays the ${scenario.region.frame.grid} grid is placed over empty ocean, far from any land, with northings growing northward. Nothing real is near it.`, '']
+      : []),
     '## Terrain, coast and sea', '',
     ...table(['Id', 'Feature', 'Kind', 'Location', 'Description'], scenario.region.features.map((feature) => [feature.id, feature.name, feature.kind, feature.location, feature.description])), '',
     '## Weather', '',
@@ -676,5 +729,6 @@ export function scenarioFiles(scenario: Scenario): Array<{ readonly path: string
 
 /** The scenario as file JSON, in the format `parseScenario` reads back to the same scenario. */
 export function scenarioJson(scenario: Scenario): Record<string, unknown> {
-  return { format: SCENARIO_FORMAT, version: SCENARIO_VERSION, fictional: true, ...JSON.parse(JSON.stringify(scenario)) as Record<string, unknown> };
+  // A scenario without a frame is written as version 1, so a file read from version 1 round trips to version 1.
+  return { format: SCENARIO_FORMAT, version: scenario.region.frame ? 2 : 1, fictional: true, ...JSON.parse(JSON.stringify(scenario)) as Record<string, unknown> };
 }
