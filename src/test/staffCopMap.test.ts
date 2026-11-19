@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
-import { COP_MAP_SERVER, COP_MAP_TOOL_NAMES, copMapTools, SCENARIO_FILE } from '../agent/copMap';
+import { COP_MAP_SERVER, COP_MAP_TOOL_NAMES, copMapTools, grantedCopMapTools, SCENARIO_FILE } from '../agent/copMap';
 import { builtInStaffServers } from '../agent/staffServers';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { layerAccess, layerPath, PRODUCT_LAYERS, readLayerBody } from '../domain/staff/cop';
@@ -209,4 +209,18 @@ test('cop-map is a built-in staff server that reaches no network, offers no deci
     assert.ok(effects.ok, tool.name);
     if (effects.ok) for (const effect of effects.value) assert.ok(['read', 'workspaceWrite'].includes(effect.verb), `${tool.name}: ${effect.verb}`);
   }
+});
+
+test('a run gets cop-map only when a member is granted it, and only that member may call it', async () => {
+  const made = await world();
+  const access = { host: () => made.host, team: J2_TEAM, run: 'run-1' };
+  assert.deepEqual(grantedCopMapTools({ members: [{ name: 'threat-analyst', tools: ['Read'] }] }, access), [], 'no grant, no server');
+  const tools = grantedCopMapTools({ members: [{ name: 'threat-analyst', tools: ['mcp:cop-map'] }, { name: 'watch-officer', tools: ['mcp__cop-map__layers'] }] }, access);
+  assert.deepEqual(tools.map((tool) => tool.name), [...COP_MAP_TOOL_NAMES]);
+  const propose = tools.find((tool) => tool.name === 'mcp__cop-map__propose')!;
+  const as = (member?: string) => ({ root: made.root, ...(member ? { agentLabel: member } : {}) }) as unknown as ToolContext;
+  assert.equal(await propose.forbidden!({}, as('threat-analyst')), undefined);
+  assert.match(String(await propose.forbidden!({}, as('watch-officer'))), /whose tools line grants it/);
+  assert.match(String(await propose.forbidden!({}, as(undefined))), /the run's lead is not one of them/);
+  assert.equal(await tools.find((tool) => tool.name === 'mcp__cop-map__layers')!.forbidden!({}, as('watch-officer')), undefined, 'a single tool can be granted by name');
 });

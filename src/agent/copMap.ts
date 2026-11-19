@@ -21,7 +21,7 @@ import type { ExerciseFrame } from '../domain/staff/obs/frame';
 import { parseScenarioText, SCENARIO_DIR } from '../domain/staff/scenario';
 import { splitProductFile } from '../domain/staff/products';
 import { STAFF_SLUG } from '../domain/staff/parse';
-import { mcpToolName } from '../mcp/tools';
+import { grantsMcpTool, mcpToolName } from '../mcp/tools';
 import type { StaffCaller, StaffHost, StaffTeamInfo } from '../staff/staffHost';
 import { STAFF_HOST_PATHS } from '../staff/staffHost';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED } from './tools';
@@ -365,6 +365,26 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
   };
 
   return [layers, layerRead, propose, proposals, merge, symbol];
+}
+
+/**
+ * cop-map for one staff team's run, gated as the intel-workbench is (drop 1 review round 3): a call counts only from a member whose own tools line
+ * grants that tool (`mcp:cop-map`, the pattern, or the tool's name). A team where no member is granted any cop-map tool gets none.
+ */
+export function grantedCopMapTools(team: { readonly members: ReadonlyArray<{ readonly name: string; readonly tools: readonly string[] }> }, access: CopMapAccess): AgentTool<any>[] {
+  const granted = (member: string | undefined, tool: string): boolean => {
+    const entry = member === undefined ? undefined : team.members.find((candidate) => candidate.name === member);
+    return Boolean(entry && grantsMcpTool([...entry.tools], tool));
+  };
+  return copMapTools(access)
+    .filter((tool) => team.members.some((member) => grantsMcpTool([...member.tools], tool.name)))
+    .map((tool) => ({
+      ...tool,
+      forbidden: async (input: unknown, context: ToolContext) => {
+        if (!granted(context.agentLabel, tool.name)) return `${tool.name} is for the team members whose tools line grants it (mcp:${COP_MAP_SERVER}); ${context.agentLabel ?? 'the run\'s lead'} is not one of them.`;
+        return tool.forbidden ? tool.forbidden(input as never, context) : undefined;
+      }
+    }));
 }
 
 /** The server's tools as a run is given them, without a project, for the Tools page, Team Studio and tests. */

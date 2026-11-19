@@ -472,7 +472,7 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
     security: { consented: () => true, scan: async () => undefined },
     cyber: { engagement: {}, tools: () => [...cyberProbes({ inScope: () => false }), ...cyberExploitTools({ inScope: () => false, engagementId: 'e', sandboxTier: 'disabled' })], limiter: () => undefined, grant: () => undefined },
     webSearch: { name: 'searxng', label: 'x', host: 'search.example', search: async () => [] },
-    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [{ name: 'j2-chief', tools: [], instructions: 'x' }], staff: { section: 'j2' } }
+    team: { slug: 'team', name: 'Team', description: 'd', file: path.join(root, 'team.md'), members: [{ name: 'j2-chief', tools: ['mcp:intel-workbench', 'mcp:cop-map'], instructions: 'x' }], staff: { section: 'j2' } }
   } as unknown as AgentTurnRequest;
   const toolsFor = (conversation as unknown as { toolsFor(...args: unknown[]): AgentTool<any>[] }).toolsFor.bind(conversation);
   return toolsFor(request, { root, cwd: root }, new RunGrants(), [], async () => undefined, new AbortController().signal, 'run-1');
