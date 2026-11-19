@@ -351,7 +351,9 @@ decision points they support, the collection plan and the standing watches
 (`.planning/staff/products/j2/standing-watches.json`). The map in both
 workspaces is the COP map: the scenario's synthetic geography, the product
 layers and the observations your clearance covers, in 2D or on the globe, with
-its time slider. Where WebGL or the map library is not available, the room
+its time slider. Hillshade, contours and the exercise weather (wind, fog, rain
+and rough sea, for the time on the slider) are layers you turn on and off,
+drawn offline from a bundled synthetic terrain and weather pack. Where WebGL or the map library is not available, the room
 draws a 2D map instead and says why in a line on the map. On either map a
 name that would cover another name or a symbol moves to a free spot nearby,
 is shortened, or is left off; the symbol always stays, and its name is still

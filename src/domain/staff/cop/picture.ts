@@ -24,6 +24,9 @@ import type { ProductLayer } from './layers';
 import type { StaffWriter } from '../ownership';
 import { describeSymbol, forceSidc, parseSidc } from './symbols';
 import type { Geography } from './geography';
+import { ENV_LAYERS } from './environment';
+import type { PictureEnvironment } from './environment';
+import { feedLayer } from '../obs/layers';
 
 /** The most feed tracks the map draws at once (measured; see the header). */
 export const COP_TRACK_BUDGET = 2000;
@@ -66,7 +69,7 @@ export interface PictureFeature { readonly type: 'Feature'; readonly id: string;
 export interface PictureLayer {
   readonly id: string;
   readonly title: string;
-  readonly kind: 'product' | 'feed' | 'reference';
+  readonly kind: 'product' | 'feed' | 'reference' | 'environment';
   /** Who writes it (a product layer), who sets it (a feed layer), or where it comes from. */
   readonly owner: string;
   readonly label: string;
@@ -83,6 +86,8 @@ export interface CopPicture {
   readonly marking: string;
   readonly frame?: { readonly grid: string; readonly bounds: readonly [number, number, number, number]; readonly centre: readonly [number, number] };
   readonly geography?: Geography;
+  /** Terrain and weather from an environment pack (WP-ENV): drawn under the layers, toggled like them, the weather frame picked by the clock. */
+  readonly environment?: PictureEnvironment;
   readonly layers: readonly PictureLayer[];
   readonly features: readonly PictureFeature[];
   /** The adversary courses of action the threat layer has overlays for, with their roles. */
@@ -180,6 +185,31 @@ export interface PictureInput {
   readonly feeds?: PictureFeeds;
   readonly scenario?: Scenario;
   readonly budget?: number;
+  readonly environment?: PictureEnvironment;
+  /** Why the environment pack was not shown (it was refused on load), in words. */
+  readonly environmentProblem?: string;
+}
+
+function environmentLayers(environment: PictureEnvironment | undefined, problem: string | undefined): PictureLayer[] {
+  const owner = (layer: string) => {
+    const entry = feedLayer(layer);
+    return entry ? `${entry.settingsOwner.section} ${entry.settingsOwner.member} (settings)` : '';
+  };
+  if (!environment) {
+    return problem ? [{ id: ENV_LAYERS.contours, title: 'Terrain pack', kind: 'environment', owner: owner('cop-feed-terrain'), label: 'org/Internal', separate: false, visible: false, simulated: false, count: 0, note: `Not shown: ${problem}` }] : [];
+  }
+  const synthetic = environment.pack.data === 'synthetic';
+  const credit = `${environment.pack.title}. ${environment.pack.attribution.join(' ')} Licence: ${environment.pack.licence}.`;
+  const out: PictureLayer[] = [
+    { id: ENV_LAYERS.hillshade, title: 'Hillshade', kind: 'environment', owner: owner('cop-feed-terrain'), label: 'org/Internal', separate: false, visible: true, simulated: synthetic, count: environment.hillshade.features.length, note: credit },
+    { id: ENV_LAYERS.contours, title: 'Contours', kind: 'environment', owner: owner('cop-feed-terrain'), label: 'org/Internal', separate: false, visible: true, simulated: synthetic, count: environment.contours.features.length, note: `Every ${environment.levels.length > 1 ? environment.levels[1] - environment.levels[0] : environment.levels[0] ?? 0} m, with the coastline. ${credit}` }
+  ];
+  const weather = environment.weather;
+  if (weather) {
+    const run = new Date(weather.runAt).toISOString().slice(0, 16).replace('T', ' ');
+    out.push({ id: ENV_LAYERS.weather, title: 'Weather', kind: 'environment', owner: owner('cop-feed-weather'), label: 'org/Internal', separate: false, visible: false, simulated: synthetic, count: weather.frames.length, note: `A forecast snapshot: ${weather.model}, run ${run}Z, ${weather.frames.length} frames. The time slider picks the frame. ${credit}` });
+  }
+  return out;
 }
 
 function frameBounds(frame: ExerciseFrame): { bounds: [number, number, number, number]; centre: [number, number] } {
@@ -268,6 +298,7 @@ export function buildCopPicture(input: PictureInput): CopPicture {
     });
   }
   if (feed) features.push(...feed.features);
+  layers.push(...environmentLayers(input.environment, input.environmentProblem));
   if (input.scenario) {
     const reference = scenarioReference(input.scenario);
     features.push(...reference);
@@ -279,11 +310,13 @@ export function buildCopPicture(input: PictureInput): CopPicture {
   const ecoas = new Map<string, string | undefined>();
   for (const feature of features) if (feature.properties.ecoa) ecoas.set(feature.properties.ecoa, feature.properties.ecoaRole ?? ecoas.get(feature.properties.ecoa));
   const times = features.flatMap((feature) => [feature.properties.vf, feature.properties.vt, feature.properties.ka].filter((value): value is number => value !== undefined));
+  for (const frame of input.environment?.weather?.frames ?? []) times.push(frame.validFrom, frame.validTo);
   const cut = feed && feed.tracks > feed.shown ? `Showing the ${feed.shown.toLocaleString('en-US')} most recently updated of ${feed.tracks.toLocaleString('en-US')} tracks (budget ${limit.toLocaleString('en-US')}).` : undefined;
   return {
     version: PICTURE_VERSION, marking: input.marking,
     ...(input.frame ? { frame: { grid: input.frame.grid, ...frameBounds(input.frame) } } : {}),
     ...(input.geography ? { geography: input.geography } : {}),
+    ...(input.environment ? { environment: input.environment } : {}),
     layers, features,
     ecoas: [...ecoas.entries()].sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true })).map(([id, role]) => (role ? { id, role } : { id })),
     ...(times.length ? { time: { min: Math.min(...times), max: Math.max(...times) } } : {}),

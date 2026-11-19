@@ -109,6 +109,11 @@ const required = [
   'extension/resources/benchmark/execution/spec-implement/start/SPEC.md',
   // The staff teams' starter scenario, read at run time by NEAR AI: Load Staff Exercise Scenario and the staff setup.
   'extension/resources/staff/scenarios/iron-lantern.json',
+  // The starter scenario's synthetic terrain and weather pack, read by the COP map (src/staff/envPack.ts).
+  'extension/resources/staff/env/iron-lantern/manifest.json',
+  'extension/resources/staff/env/iron-lantern/dem.json',
+  'extension/resources/staff/env/iron-lantern/coastline.geojson',
+  'extension/resources/staff/env/iron-lantern/weather.json',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];

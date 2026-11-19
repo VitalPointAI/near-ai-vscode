@@ -1,0 +1,2 @@
+# Environment packs record each file's SHA-256 in their manifest (docs/staff-env-packs.md): never convert their line endings.
+resources/staff/env/** -text

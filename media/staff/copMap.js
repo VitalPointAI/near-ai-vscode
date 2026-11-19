@@ -34,6 +34,12 @@
 // Offline: the page never asks for a tile, glyph, sprite or font. The ground is the picture's synthetic geography; symbols are drawn by the vendored
 // milsymbol; text is drawn into symbol images or set as DOM text. The only requests are the vendored files from the extension. The page never decides
 // anything and shows the host's latest state; every text goes in with textContent.
+//
+// Terrain and weather (WP-ENV). When the picture carries an environment pack (picture.environment, src/domain/staff/cop/environment.ts), the map
+// draws its hillshade and contours over the land and its weather on top of the ground, each a layer the person toggles like any other (env-hillshade,
+// env-contours, env-weather). The shared clock picks the weather frame with weatherFrameAt (the host's rule in src/domain/staff/env/weather.ts; a test
+// holds the two together), and a line under the map says which forecast is shown, its run and lead time, or that there is none for this time, with
+// the pack's attribution whenever one of its layers is on. All of it is GeoJSON the host sent: no raster, terrain tile or image is fetched.
 (function () {
   'use strict';
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -144,6 +150,70 @@
     return out.concat(Array.from(latest.values()).sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; }));
   }
 
+  // ---- Terrain and weather (WP-ENV) ------------------------------------------------------------------------------------------------------
+
+  const ENV_LAYER_IDS = { hillshade: 'env-hillshade', contours: 'env-contours', weather: 'env-weather' };
+  const WEATHER_COLOURS = { fog: '#d8d8d8', rain: '#4fa3ff', 'rough-sea': '#ff9f40', wind: '#f4f4f4' };
+
+  /** The weather frame at time t (same rule as src/domain/staff/env/weather.ts weatherFrameAt; a test holds them together). */
+  function weatherFrameAt(layer, t, mode) {
+    if (!layer || !Array.isArray(layer.frames)) return undefined;
+    if (mode === 'known' && t < layer.runAt) return undefined;
+    return layer.frames.find(function (frame) { return frame.validFrom <= t && t < frame.validTo; });
+  }
+
+  /** A weather frame's shapes: a cell square for each marked cell, and an arrow downwind from each grid point, longer for stronger wind. */
+  function weatherFeatures(layer, frame) {
+    if (!layer || !frame) return [];
+    const b = layer.bounds;
+    const clampLon = function (v) { return Math.min(b[2], Math.max(b[0], v)); };
+    const clampLat = function (v) { return Math.min(b[3], Math.max(b[1], v)); };
+    const cosLat = Math.cos(((b[1] + b[3]) / 2) * Math.PI / 180);
+    const out = [];
+    for (const entry of frame.cells || []) {
+      const at = layer.points[entry[0]];
+      if (!at) continue;
+      const w = clampLon(at[0] - layer.cell[0] / 2), e = clampLon(at[0] + layer.cell[0] / 2), s = clampLat(at[1] - layer.cell[1] / 2), n = clampLat(at[1] + layer.cell[1] / 2);
+      out.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] }, properties: { kind: entry[1], opacity: entry[2] } });
+    }
+    const wind = frame.wind || [];
+    for (let i = 0; i < layer.points.length && 2 * i + 1 < wind.length; i += 1) {
+      const at = layer.points[i];
+      const speed = wind[2 * i];
+      const to = ((wind[2 * i + 1] + 180) % 360) * Math.PI / 180;
+      const length = Math.min(1, Math.max(0.15, speed / 20)) * 0.4 * layer.cell[1];
+      const dx = Math.sin(to) * length / cosLat, dy = Math.cos(to) * length;
+      const tip = [clampLon(at[0] + dx / 2), clampLat(at[1] + dy / 2)];
+      const wing = function (turn) { const a = to + Math.PI + turn; return [clampLon(tip[0] + Math.sin(a) * length * 0.35 / cosLat), clampLat(tip[1] + Math.cos(a) * length * 0.35)]; };
+      out.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [[clampLon(at[0] - dx / 2), clampLat(at[1] - dy / 2)], tip, wing(0.5), tip, wing(-0.5)] }, properties: { kind: 'wind', speed: speed } });
+    }
+    return out;
+  }
+
+  /** What the environment layers draw now: the terrain features of the visible layers, the weather frame at the clock, and the words under the map. */
+  function environmentNow(state) {
+    const env = state.picture && state.picture.environment;
+    if (!env) return { terrain: [], weather: [], line: '' };
+    const terrain = [];
+    if (state.visible[ENV_LAYER_IDS.hillshade]) terrain.push.apply(terrain, (env.hillshade && env.hillshade.features) || []);
+    if (state.visible[ENV_LAYER_IDS.contours]) terrain.push.apply(terrain, (env.contours && env.contours.features) || []);
+    let weather = [];
+    const words = [];
+    if (env.weather && state.visible[ENV_LAYER_IDS.weather]) {
+      const frame = weatherFrameAt(env.weather, state.time, state.mode);
+      weather = weatherFeatures(env.weather, frame);
+      if (frame) words.push(frame.label + (state.mode === 'known' ? ' (as known)' : '') + '.');
+      else {
+        const first = env.weather.frames[0], last = env.weather.frames[env.weather.frames.length - 1];
+        const iso = function (ms) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z'; };
+        words.push(state.mode === 'known' && state.time < env.weather.runAt ? 'No weather: the forecast was run at ' + iso(env.weather.runAt) + ', after this time.' : 'No weather for this time: the forecast covers ' + (first ? iso(first.validFrom) + ' to ' + iso(last.validTo) : 'no time') + '.');
+      }
+    }
+    const on = [ENV_LAYER_IDS.hillshade, ENV_LAYER_IDS.contours, ENV_LAYER_IDS.weather].some(function (id) { return state.visible[id]; });
+    if (on && env.pack) words.push(env.pack.title + ': ' + (env.pack.attribution || []).join(' ') + (env.pack.licence ? ' Licence: ' + env.pack.licence + '.' : ''));
+    return { terrain: terrain, weather: weather, line: words.join(' ') };
+  }
+
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -210,7 +280,10 @@
     card.hidden = true;
     const notice = el('div', 'cop-map-notice');
     notice.hidden = true;
-    root.appendChild(bar); root.appendChild(layers); root.appendChild(canvas); root.appendChild(slider); root.appendChild(card); root.appendChild(notice);
+    const envLine = el('div', 'cop-map-env');
+    envLine.setAttribute('aria-live', 'polite');
+    envLine.hidden = true;
+    root.appendChild(bar); root.appendChild(layers); root.appendChild(canvas); root.appendChild(slider); root.appendChild(card); root.appendChild(notice); root.appendChild(envLine);
     container.appendChild(root);
 
     projection.addEventListener('click', function () { view.setProjection(state.projection === 'globe' ? 'map' : 'globe'); });
@@ -267,6 +340,9 @@
           range.value = String(Math.round(span.max > span.min ? ((state.time - span.min) / (span.max - span.min)) * 1000 : 1000));
           timeText.textContent = new Date(state.time).toISOString().replace('.000Z', 'Z') + (state.mode === 'known' ? ' (as known)' : '');
         }
+        const envWords = environmentNow(state).line;
+        envLine.hidden = !envWords;
+        envLine.textContent = envWords;
       },
       showCard: function (feature) {
         while (card.firstChild) card.removeChild(card.firstChild);
@@ -432,6 +508,14 @@
           else if (g.geometry.type === 'LineString') root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates, false), fill: 'none', stroke: C[k] || C.line, 'stroke-width': k === 'contour' ? 0.8 : 2 }));
           else if (g.geometry.type === 'Point' && g.properties.name) places.push(g);
         }
+        const env = environmentNow(state);
+        for (const g of env.terrain.concat(env.weather)) {
+          const k = g.properties.kind;
+          if (g.geometry.type === 'Polygon') {
+            const fill = k === 'hillshade' ? (g.properties.tone === 'light' ? '#ffffff' : '#000000') : WEATHER_COLOURS[k] || C.line;
+            root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates[0], true), fill: fill, 'fill-opacity': g.properties.opacity || 0.3, stroke: k === 'rough-sea' ? WEATHER_COLOURS[k] : 'none', 'stroke-dasharray': k === 'rough-sea' ? '4 3' : '', class: 'cop-map-env-' + k }));
+          } else root.appendChild(svg('path', { d: pathOf(g.geometry.coordinates, false), fill: 'none', stroke: k === 'wind' ? WEATHER_COLOURS.wind : k === 'coastline' ? C.line : C.contour, 'stroke-width': k === 'wind' ? 1.2 : g.properties.index ? 1.2 : 0.6, class: 'cop-map-env-' + k }));
+        }
         const features = drawn(state);
         for (const feature of features) {
           const p = feature.properties;
@@ -499,12 +583,16 @@
       container: chrome.canvas, attributionControl: false, renderWorldCopies: false, maxPitch: 0, fadeDuration: options.still ? 0 : 300,
       style: {
         version: 8, projection: { type: state.projection === 'globe' ? 'globe' : 'mercator' },
-        sources: { ground: { type: 'geojson', data: empty }, cop: { type: 'geojson', data: empty } },
+        sources: { ground: { type: 'geojson', data: empty }, cop: { type: 'geojson', data: empty }, terrain: { type: 'geojson', data: empty }, weather: { type: 'geojson', data: empty } },
         layers: [
           { id: 'ocean', type: 'background', paint: { 'background-color': C.ocean } },
           { id: 'land', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'land'], paint: { 'fill-color': C.land } },
           { id: 'marsh', type: 'fill', source: 'ground', filter: ['==', ['get', 'kind'], 'marsh'], paint: { 'fill-color': C.marsh } },
+          { id: 'env-hillshade', type: 'fill', source: 'terrain', filter: ['==', ['get', 'kind'], 'hillshade'], paint: { 'fill-color': ['match', ['get', 'tone'], 'light', '#ffffff', '#000000'], 'fill-opacity': ['get', 'opacity'], 'fill-antialias': false } },
+          { id: 'env-contours', type: 'line', source: 'terrain', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': ['match', ['get', 'kind'], 'coastline', C.line, C.contour], 'line-width': ['case', ['to-boolean', ['get', 'index']], 1.2, 0.6] } },
           { id: 'ground-lines', type: 'line', source: 'ground', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour], 'line-width': ['match', ['get', 'kind'], 'contour', 0.8, 2] } },
+          { id: 'env-weather-cells', type: 'fill', source: 'weather', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': ['match', ['get', 'kind'], 'fog', WEATHER_COLOURS.fog, 'rain', WEATHER_COLOURS.rain, WEATHER_COLOURS['rough-sea']], 'fill-opacity': ['get', 'opacity'] } },
+          { id: 'env-weather-wind', type: 'line', source: 'weather', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': WEATHER_COLOURS.wind, 'line-width': 1.2 } },
           { id: 'hilite-lines', type: 'line', source: 'cop', filter: ['in', ['get', 'fid'], none], paint: { 'line-color': COLOURS.star, 'line-width': 7, 'line-opacity': 0.55 } },
           { id: 'areas', type: 'line', source: 'cop', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'line-color': ['case', ['==', ['get', 'kind'], 'nai'], COLOURS.adversary, C.line], 'line-width': 2, 'line-dasharray': [3, 2] } },
           { id: 'lines', type: 'line', source: 'cop', filter: ['all', ['==', ['geometry-type'], 'LineString'], ['!', ['to-boolean', ['get', 'anticipated']]], ['!=', ['get', 'kind'], 'axis-adversary']], paint: { 'line-color': C.line, 'line-width': ['case', ['==', ['get', 'kind'], 'axis-main'], 4, 2] } },
@@ -584,6 +672,9 @@
           const picture = state.picture;
           if (!picture) return;
           map.getSource('ground').setData(picture.geography || empty);
+          const env = environmentNow(state);
+          map.getSource('terrain').setData({ type: 'FeatureCollection', features: env.terrain });
+          map.getSource('weather').setData({ type: 'FeatureCollection', features: env.weather });
           shown = drawn(state);
           const features = shown.map(function (feature) {
             const p = feature.properties;
@@ -606,6 +697,7 @@
           map.setPaintProperty('land', 'fill-color', C.land);
           map.setPaintProperty('marsh', 'fill-color', C.marsh);
           map.setPaintProperty('ground-lines', 'line-color', ['match', ['get', 'kind'], 'river', C.river, 'road', C.road, C.contour]);
+          map.setPaintProperty('env-contours', 'line-color', ['match', ['get', 'kind'], 'coastline', C.line, C.contour]);
           map.setPaintProperty('lines', 'line-color', C.line);
           for (const id of ['place-labels', 'area-labels', 'line-labels', 'point-labels']) { map.setPaintProperty(id, 'text-color', C.label); map.setPaintProperty(id, 'text-halo-color', C.halo); }
         });
@@ -717,5 +809,5 @@
     return view;
   }
 
-  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures, declutter: declutter };
+  window.nearCopMap = { version: 1, mount: mount, visibleFeatures: visibleFeatures, declutter: declutter, weatherFrameAt: weatherFrameAt, weatherFeatures: weatherFeatures };
 })();
