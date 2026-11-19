@@ -359,6 +359,21 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.startSimulation",
+        "title": "Staff: Start the Exercise Feed Simulation",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.simulationControls",
+        "title": "Staff: Simulation Controls (pause, step, speed)",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.stopSimulation",
+        "title": "Staff: Stop the Exercise Feed Simulation",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"

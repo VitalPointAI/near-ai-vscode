@@ -316,6 +316,19 @@ staff profile's own terms, with a checklist of the headings, terms and
 citations each product must contain. Loading again moves the earlier
 scenario to `.planning/staff/archive/` rather than deleting it.
 
+**NEAR AI: Staff: Start the Exercise Feed Simulation** replays Exercise IRON
+LANTERN as live feeds for a J2 demo, on this machine only: Cursor on Target
+tracks and spot reports, AIS sentences for ships in and near the Varn Strait,
+RSS from fictional outlets, and a mock partner MCP server with fictional
+HUMINT, SIGINT, MASINT and CI reports. Every message is marked SIM, every
+ship has a made-up radio id that no real ship can hold, and the output panel
+lists the addresses to connect an importer or MCP client to. The timeline
+follows the J2 demo script and holds when the mid-demo report lands.
+**Staff: Simulation Controls** (or the SIM item in the status bar) pauses,
+resumes, steps and sets the speed: 0.5x, 1x, 2x or 4x. The inject script that
+drives it, `resources/staff/scenarios/iron-lantern.sim.jsonl`, and the message
+shapes are described in `src/domain/staff/sim/`.
+
 ### MCP connections
 
 **NEAR AI: Manage MCP Connections** adds Model Context Protocol servers, remote
