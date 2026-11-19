@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { MAX_DIFF_BYTES, approvalBody, buildReviewPrompt, capDiff, recommendationBlock } from '../lib/ci-review.mjs';
+import { MAX_DIFF_BYTES, approvalBody, buildReviewPrompt, capDiff, isBulkFile, recommendationBlock } from '../lib/ci-review.mjs';
 import { parseReview, reviewDecision } from '../lib/workflow.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -523,4 +523,21 @@ test('a diff over the cap keeps whole files, names the rest, and says so in the 
   assert.match(prompt, /## Not included[\s\S]*- src\/b\.ts\n- src\/c\.ts/);
   // A 2,400-line PR (#12, about 200 KB of diff) must fit whole.
   assert.ok(MAX_DIFF_BYTES >= 1_000_000);
+});
+
+test('vendored and minified files never crowd out the code a reviewer must read (#111)', () => {
+  const file = (name, size) => `diff --git a/${name} b/${name}\n+${'x'.repeat(size)}\n`;
+  // Alphabetically the vendored bundle comes first; before the fix it took the budget and every
+  // file after it was left out, tests and host code included.
+  const diff = file('media/vendor/lib/lib.mjs', 400) + file('package-lock.json', 100) + file('src/gate.ts', 100) + file('src/test/gate.test.ts', 100);
+  const capped = capDiff(diff, 500);
+  assert.deepEqual(capped.omitted, ['media/vendor/lib/lib.mjs']);
+  assert.ok(capped.kept.indexOf('package-lock.json') < capped.kept.indexOf('src/gate.ts'), 'kept files stay in diff order');
+  assert.ok(capped.kept.includes('src/test/gate.test.ts'));
+  // One file too big to fit is skipped, and the smaller files after it are still kept.
+  const big = file('src/a.ts', 100) + file('src/huge.ts', 1000) + file('src/z.ts', 100);
+  assert.deepEqual(capDiff(big, 300).omitted, ['src/huge.ts']);
+  assert.ok(capDiff(big, 300).kept.includes('src/z.ts'));
+  for (const bulk of ['media/vendor/x.js', 'vendor/pdfjs/pdf.min.mjs', 'a/b.min.css', 'dist/x.js.map', 'package-lock.json', 'web/yarn.lock']) assert.ok(isBulkFile(bulk), bulk);
+  for (const code of ['src/vendorList.ts', 'scripts/vendor-libs.mjs', 'src/a.ts', 'SECURITY.md']) assert.ok(!isBulkFile(code), code);
 });
