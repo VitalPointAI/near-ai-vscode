@@ -5,11 +5,12 @@
 // LOGSTAT report: the page draws it and decides nothing. A product's tables are read as data (the first Markdown table with the columns the section's
 // skill gives it); a table that is not there is simply not drawn, and the workspace says what would fill it. Decisions stay on the shared decision list
 // (staffRoom.ts), so a button in a section workspace is the same signed, person-only path as everywhere else.
+import { DOCTRINE_PROFILES, FRAGMENTARY_ORDER, LOGISTICS_TERMS } from './doctrine';
 import type { StaffProfileId, StaffSectionId } from './doctrine';
 import type { DecisionQueueEntry, StaffEvent } from './events';
 import { bandOf, consolidateLogstat, formatNumber, movementBoard } from './logistics';
 import type { BandSetting, CalcRecord, LogstatReport, MovementRecord, ReadinessRecord } from './logistics';
-import { blocking, checkAnnexes } from './orders';
+import { blocking, checkAnnexes, compareLetters } from './orders';
 import type { OrderProductFacts } from './orders';
 import { writerOf } from './ownership';
 import type { StaffWriter } from './ownership';
@@ -25,7 +26,8 @@ const clip = (text: unknown, max: number = CAP.text): string => {
   const value = typeof text === 'string' ? text : text === undefined || text === null ? '' : String(text);
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 };
-const titleOf = productTitle;
+/** A product's title in the profile's words (frago-1 reads as the profile's fragmentary order). */
+const titleOf = (ctx: Pick<WorkspaceContext, 'profile'>, product: string): string => productTitle(product, ctx.profile);
 const PILL: Readonly<Record<string, string>> = {
   draft: 'draft', 'draft (held)': 'held', 'draft (tampered)': 'tampered', 'guard-checked': 'checked', 'awaiting decision': 'awaiting', approved: 'approved',
   rejected: 'rejected', released: 'released', superseded: 'superseded', withdrawn: 'withdrawn'
@@ -140,6 +142,8 @@ export interface J3Workspace extends SectionCommon {
   readonly triggers: ReadonlyArray<{ readonly at: string; readonly ccir: string; readonly report: string; readonly member: string }>;
   readonly dsm: { readonly owner: RegisterOwner; readonly rows: ReadonlyArray<{ readonly id: string; readonly description: string; readonly indicator: string; readonly nai: string; readonly pir: string; readonly action: string; readonly maker: string; readonly coa: string; readonly matched: boolean }> };
   readonly sync: { readonly owner: RegisterOwner; readonly total: number; readonly from: number; readonly to: number; readonly rows: ReadonlyArray<{ readonly row: string; readonly cells: ReadonlyArray<{ readonly id: string; readonly offset: number; readonly entry: string; readonly section: string; readonly coa: string }> }> };
+  /** The fragmentary order in the profile's words: FRAGORD under the US profiles, Frag O under NATO/Canadian. */
+  readonly frago: string;
   readonly fragos: readonly WorkspaceProduct[];
   readonly rhythm: { readonly events: ReadonlyArray<{ readonly id: string; readonly title: string; readonly kind: string; readonly next: string; readonly minutes: number; readonly repeat: string; readonly chair: string; readonly inputs: string; readonly outputs: string }>; readonly product?: WorkspaceProduct };
   readonly suspenses: ReadonlyArray<{ readonly id: string; readonly from: string; readonly to: string; readonly question: string; readonly suspense: string; readonly overdue: boolean }>;
@@ -155,6 +159,8 @@ export interface J4Workspace extends SectionCommon {
   readonly calcProblems: readonly string[];
   readonly movement: ReadonlyArray<{ readonly table: string; readonly serial: string; readonly what: string; readonly mode: string; readonly from: string; readonly to: string; readonly arrives: string; readonly required: string; readonly feasible: boolean; readonly why: string }>;
   readonly readiness: ReadonlyArray<{ readonly equipment: string; readonly onHand: number; readonly ready: number; readonly percent: number; readonly asOf: string; readonly stale: boolean; readonly record: string }>;
+  /** The profile's name for the logistics annex: "Logistics annex", or "Sustainment annex" under the US Army profile. */
+  readonly annexName: string;
   readonly annexes: ReadonlyArray<{ readonly product: string; readonly title: string; readonly state: string; readonly pill: string; readonly version: number; readonly owner: string; readonly tracker: string }>;
   readonly supportability: ReadonlyArray<{ readonly coa: string; readonly fn: string; readonly judgement: string; readonly culminates: string; readonly calc: string; readonly verified: boolean; readonly level: 'ok' | 'risk' | 'bad' | 'unknown' }>;
 }
@@ -189,10 +195,10 @@ export interface WorkspaceContext {
 
 // ---- Helpers ------------------------------------------------------------------------------------------------------------------------------------------
 
-function productOf(view: ProductView): WorkspaceProduct {
+function productOf(ctx: WorkspaceContext, view: ProductView): WorkspaceProduct {
   const last = view.history[view.history.length - 1];
   return {
-    product: view.product, title: titleOf(view.product), kind: view.kind, version: view.version, display: view.display, pill: PILL[view.display] ?? 'draft',
+    product: view.product, title: titleOf(ctx, view.product), kind: view.kind, version: view.version, display: view.display, pill: PILL[view.display] ?? 'draft',
     owner: clip(view.owner, 60), at: last?.at ?? '', ...(view.approvedBy ? { approvedBy: clip(`${view.approvedBy.name} (${view.approvedBy.role})`, CAP.short) } : {})
   };
 }
@@ -202,7 +208,7 @@ function find(ctx: WorkspaceContext, product: string): ProductView | undefined {
 }
 
 function sectionProducts(ctx: WorkspaceContext, section: StaffSectionId): WorkspaceProduct[] {
-  return ctx.registry.filter((view) => view.section === section).slice(0, CAP.products).map(productOf);
+  return ctx.registry.filter((view) => view.section === section).slice(0, CAP.products).map((view) => productOf(ctx, view));
 }
 
 /** The section's agent work, newest first: lanes started and finished, products drafted and checked, waits. A person's decision is not agent work. */
@@ -212,9 +218,9 @@ function sectionActivity(ctx: WorkspaceContext, section: StaffSectionId): Worksp
     const event = ctx.events[i];
     if (!('section' in event) || event.section !== section) continue;
     let line: WorkspaceActivity | undefined;
-    if (event.type === 'staff.lane.started') line = { at: event.at, member: event.member, text: `started${event.product ? ` on ${titleOf(event.product)}` : ''}` };
-    else if (event.type === 'staff.lane.finished') line = { at: event.at, member: event.member, text: `${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'stopped with an error' : 'was stopped'}${event.product ? `: ${titleOf(event.product)}` : ''}` };
-    else if (event.type === 'staff.product.state' && event.actor.kind === 'agent') line = { at: event.at, member: event.actor.member ?? 'an agent', text: `${titleOf(event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}` };
+    if (event.type === 'staff.lane.started') line = { at: event.at, member: event.member, text: `started${event.product ? ` on ${titleOf(ctx, event.product)}` : ''}` };
+    else if (event.type === 'staff.lane.finished') line = { at: event.at, member: event.member, text: `${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'stopped with an error' : 'was stopped'}${event.product ? `: ${titleOf(ctx, event.product)}` : ''}` };
+    else if (event.type === 'staff.product.state' && event.actor.kind === 'agent') line = { at: event.at, member: event.actor.member ?? 'an agent', text: `${titleOf(ctx, event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}` };
     else if (event.type === 'staff.waiting') line = { at: event.at, member: event.member, text: `waits on ${event.waitingOn === 'human' ? 'a person' : ctx.code(event.waitingOn)}: ${event.what}` };
     else if (event.type === 'staff.step.entered') line = { at: event.at, member: ctx.code(section), text: `entered step ${event.step}${event.stepName ? `, ${event.stepName}` : ''}` };
     if (line) out.push({ at: line.at, member: clip(line.member, 60), text: clip(line.text, 300) });
@@ -288,13 +294,13 @@ function buildJ5(ctx: WorkspaceContext): J5Workspace {
   for (const row of themes?.table.rows.slice(0, 6) ?? []) {
     const coa = clip(at(row, themes!.col(/^COA$/i)), 40);
     const view = coaSlug(coa) ? find(ctx, coaSlug(coa)!) : undefined;
-    cells.push({ coa, owner: clip(at(row, themes!.col(/owner/i)), 60), theme: clip(at(row, themes!.col(/theme/i)), 300), differs: clip(at(row, themes!.col(/differ/i)), 300), ...(view ? { product: productOf(view) } : {}), ...validityFor(coa) });
+    cells.push({ coa, owner: clip(at(row, themes!.col(/owner/i)), 60), theme: clip(at(row, themes!.col(/theme/i)), 300), differs: clip(at(row, themes!.col(/differ/i)), 300), ...(view ? { product: productOf(ctx, view) } : {}), ...validityFor(coa) });
   }
   // COA products the themes do not name yet still get their cell, so a cell's work shows from its first draft.
   for (const view of ctx.registry.filter((candidate) => /^coa-[a-z0-9]$/.test(candidate.product) && candidate.section === 'j5')) {
     if (cells.some((cell) => cell.product?.product === view.product)) continue;
     const coa = `COA ${view.product.slice(4).toUpperCase()}`;
-    cells.push({ coa, owner: clip(view.owner, 60), theme: '', differs: '', product: productOf(view), ...validityFor(coa) });
+    cells.push({ coa, owner: clip(view.owner, 60), theme: '', differs: '', product: productOf(ctx, view), ...validityFor(coa) });
   }
   cells.sort((a, b) => a.coa.localeCompare(b.coa));
 
@@ -385,17 +391,19 @@ function buildJ5(ctx: WorkspaceContext): J5Workspace {
       state: fact ? `${fact.state} v${fact.version}` : product ? 'not in the ledger' : 'no product yet', findings: own.map((finding) => clip(finding.message, 300)), blocked: own.some((finding) => blockingKinds.has(finding))
     };
   });
+  // In letter order as the profile files them (A to Z, then AA; a numbered COPD sub-annex such as SS2 after its annex); rows with no letter last.
+  annexRows.sort((a, b) => (a.letter && b.letter ? compareLetters(a.letter, b.letter) : a.letter ? -1 : b.letter ? 1 : 0));
   const trackerView = find(ctx, 'annex-tracker');
 
   return {
     tests, cells,
-    comparison: { coas, criteria, totals, ...(approval ? { approval } : {}), ...(comparisonView ? { product: productOf(comparisonView) } : {}) },
+    comparison: { coas, criteria, totals, ...(approval ? { approval } : {}), ...(comparisonView ? { product: productOf(ctx, comparisonView) } : {}) },
     wargame,
     brief: {
-      ...(briefView ? { product: productOf(briefView) } : {}), recommendation, dissent: (queued?.dissent ?? []).slice(0, 20).map((line) => clip(line, 500)),
-      ...(redTeam ? { redTeam: productOf(redTeam) } : {}), ...(queued ? { decisionFor: clip(queued.decisionFor, 80) } : {})
+      ...(briefView ? { product: productOf(ctx, briefView) } : {}), recommendation, dissent: (queued?.dissent ?? []).slice(0, 20).map((line) => clip(line, 500)),
+      ...(redTeam ? { redTeam: productOf(ctx, redTeam) } : {}), ...(queued ? { decisionFor: clip(queued.decisionFor, 80) } : {})
     },
-    annexes: { rows: annexRows, findings: findings.length, blocking: blockingKinds.size, ...(trackerView ? { product: productOf(trackerView) } : {}) },
+    annexes: { rows: annexRows, findings: findings.length, blocking: blockingKinds.size, ...(trackerView ? { product: productOf(ctx, trackerView) } : {}) },
     products: sectionProducts(ctx, 'j5'), activity: sectionActivity(ctx, 'j5'), problems
   };
 }
@@ -442,17 +450,17 @@ function buildJ3(ctx: WorkspaceContext): J3Workspace {
     owner: registerOwner(ctx, 'sync-matrix'), total: syncRows.length, from: offsets.length ? Math.min(...offsets) : 0, to: offsets.length ? Math.max(...offsets) : 0,
     rows: [...grouped.entries()].sort((a, b) => SYNC_ORDER.indexOf(a[0]) - SYNC_ORDER.indexOf(b[0])).map(([row, cells]) => ({ row, cells: cells.sort((a, b) => a.offset - b.offset) }))
   };
-  const fragos = ctx.registry.filter((view) => /(^|-)frago(-|$)/.test(view.product) || (view.section === 'j3' && view.kind === 'order')).slice(0, CAP.products).map(productOf);
+  const fragos = ctx.registry.filter((view) => /(^|-)frago(-|$)/.test(view.product) || (view.section === 'j3' && view.kind === 'order')).slice(0, CAP.products).map((view) => productOf(ctx, view));
   const rhythmView = find(ctx, 'battle-rhythm-calendar');
   const rhythm = {
     events: (registers.battleRhythm ?? []).map((row) => ({ row, next: nextOccurrence(String(row.start), String(row.repeat), ctx.now) }))
       .filter((entry): entry is { row: RegisterRow; next: number } => entry.next !== undefined).sort((a, b) => a.next - b.next).slice(0, 40)
       .map(({ row, next }) => ({ id: str(row, 'id', 40), title: str(row, 'title', 160), kind: str(row, 'kind', 20), next: new Date(next).toISOString(), minutes: Number(row.durationMinutes) || 0, repeat: str(row, 'repeat', 10), chair: str(row, 'chair', 80), inputs: str(row, 'inputs', 300), outputs: str(row, 'outputs', 300) })),
-    ...(rhythmView ? { product: productOf(rhythmView) } : {})
+    ...(rhythmView ? { product: productOf(ctx, rhythmView) } : {})
   };
   const suspenses = (registers.rfi ?? []).filter((row) => row.status === 'open').sort((a, b) => String(a.suspense).localeCompare(String(b.suspense))).slice(0, CAP.rows)
     .map((row) => ({ id: str(row, 'id', 40), from: str(row, 'from', 20), to: str(row, 'to', 20), question: str(row, 'question', 300), suspense: str(row, 'suspense', 30), overdue: Date.parse(String(row.suspense)) < ctx.now }));
-  return { eventLog, ccir, triggers, dsm, sync, fragos, rhythm, suspenses, products: sectionProducts(ctx, 'j3'), activity: sectionActivity(ctx, 'j3'), problems: [] };
+  return { eventLog, ccir, triggers, dsm, sync, frago: FRAGMENTARY_ORDER.abbreviation[ctx.profile], fragos, rhythm, suspenses, products: sectionProducts(ctx, 'j3'), activity: sectionActivity(ctx, 'j3'), problems: [] };
 }
 
 // ---- J4 -----------------------------------------------------------------------------------------------------------------------------------------------
@@ -471,6 +479,25 @@ function supportLevel(judgement: string): 'ok' | 'risk' | 'bad' | 'unknown' {
   if (/\brisk\b|\bwith (?:risk|mitigation)\b|\bmarginal\b|\bshort/i.test(judgement)) return 'risk';
   if (/\bsupportable\b|\bfeasible\b/i.test(judgement)) return 'ok';
   return 'unknown';
+}
+
+/** The profile's name for the logistics annex, from its annex list (Logistics, or Sustainment under the US Army profile). */
+function logisticsAnnexName(profile: StaffProfileId): string {
+  const placement = DOCTRINE_PROFILES[profile].annexes.logistics;
+  return placement.kind === 'annex' ? `${placement.title} annex` : 'Logistics annex';
+}
+
+/** A J4 annex product's title in the profile's words: its letter and title, where movements go in a profile with no movements annex, and the profile's
+ * name for the concept of support (COLS under US Joint). */
+function j4AnnexTitle(ctx: WorkspaceContext, product: string): string {
+  if (product === 'concept-of-support') return LOGISTICS_TERMS[ctx.profile].conceptOfSupport;
+  const annexes = DOCTRINE_PROFILES[ctx.profile].annexes;
+  const placement = product === 'logistics-annex' ? annexes.logistics : product === 'movements-annex' ? annexes.movements : undefined;
+  if (!placement) return titleOf(ctx, product);
+  if (placement.kind === 'annex') return `Annex ${placement.letter} (${placement.title})`;
+  if (placement.kind === 'appendix') return `${titleOf(ctx, product)} (an appendix to Annex ${placement.toAnnex})`;
+  if (placement.kind === 'within') return `${titleOf(ctx, product)} (part of Annex ${placement.annex})`;
+  return clip(`${titleOf(ctx, product)}: ${placement.note}`, CAP.short);
 }
 
 function buildJ4(ctx: WorkspaceContext): J4Workspace {
@@ -513,7 +540,7 @@ function buildJ4(ctx: WorkspaceContext): J4Workspace {
   const tracker = ctx.input.registers?.annexTracker ?? [];
   const annexes = ['logistics-annex', 'movements-annex', 'concept-of-support'].map((product) => ({ product, view: find(ctx, product), row: tracker.find((row) => row.product === product) }))
     .filter((entry) => entry.view || entry.row).map(({ product, view, row }) => ({
-      product, title: titleOf(product), state: view?.display ?? 'not proposed yet', pill: view ? PILL[view.display] ?? 'draft' : 'draft', version: view?.version ?? 0, owner: clip(view?.owner ?? String(row?.owner ?? ''), 60),
+      product, title: j4AnnexTitle(ctx, product), state: view?.display ?? 'not proposed yet', pill: view ? PILL[view.display] ?? 'draft' : 'draft', version: view?.version ?? 0, owner: clip(view?.owner ?? String(row?.owner ?? ''), 60),
       tracker: row ? clip(`Annex tracker: ${row.letter ? `Annex ${String(row.letter)}, ` : ''}${String(row.status)}`, 120) : 'Not on the annex tracker yet'
     }));
   const support = tableWith((ctx.input.bodies ?? {})['coa-supportability'], [/course of action|^COA$/i, /judgement/i]);
@@ -528,7 +555,7 @@ function buildJ4(ctx: WorkspaceContext): J4Workspace {
   return {
     logstat: { reports: logistics?.reports.length ?? 0, units: [...units.values()], heldOut: consolidated.heldOut.slice(0, CAP.rows).map((entry) => ({ unit: clip(entry.unit, 80), report: clip(entry.report, 60), rules: entry.rules.map(String) })) },
     calcs, calcProblems: [...(logistics?.ledgerProblem ? [clip(logistics.ledgerProblem)] : []), ...(logistics?.recordProblems ?? []).slice(0, 10).map((problem) => clip(problem))],
-    movement, readiness: [...readiness.values()].slice(0, CAP.rows), annexes, supportability,
+    movement, readiness: [...readiness.values()].slice(0, CAP.rows), annexName: logisticsAnnexName(ctx.profile), annexes, supportability,
     products: sectionProducts(ctx, 'j4'), activity: sectionActivity(ctx, 'j4'), problems: []
   };
 }

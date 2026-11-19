@@ -11,6 +11,7 @@ import { defaultStaffSettings } from '../domain/staff/profiles';
 import { WARGAME_DIR, WARGAME_FILE } from '../staff/staffHost';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { NOW, sectionsProject } from './helpers/staffRoomFixture';
+import type { RegisterRow } from '../domain/staff/registers';
 import { callTool, hashIn, J5_TEAM, writeBody } from './helpers/staffFixtures';
 
 async function sectionsModel() {
@@ -179,4 +180,58 @@ test('product titles keep staff abbreviations and section codes in capitals on e
   assert.equal(productTitle('facts-assumptions'), 'Facts assumptions');
   assert.equal(productTitle('coa-a'), 'COA A');
   assert.equal(productTitle('a-plan'), 'A plan');
+  // With the profile, the fragmentary order reads as that profile writes it; the file name stays frago-N.
+  assert.equal(productTitle('frago-1', 'us-joint'), 'FRAGORD 1');
+  assert.equal(productTitle('frago-1', 'us-army'), 'FRAGORD 1');
+  assert.equal(productTitle('frago-2', 'nato-ca'), 'Frag O 2');
+  assert.equal(productTitle('fragos-log', 'nato-ca'), 'Frag Os log');
+  assert.equal(productTitle('coa-decision-brief', 'nato-ca'), 'COA decision brief');
+});
+
+test('the workspaces use the profile\'s doctrine terms: the fragmentary order, the logistics annex letters, the concept of support and the annex order', async () => {
+  const { input } = await sectionsModel();
+  const under = (profile: 'us-joint' | 'us-army' | 'nato-ca', level: 'operational' | 'tactical' = 'operational', workspaces = input.workspaces) =>
+    buildStaffRoomModel({ ...input, settings: { ...input.settings, profile, level }, ...(workspaces ? { workspaces } : {}) });
+  // The FRAGO: FRAGORD under the US profiles, Frag O under NATO/Canadian, on the J3 list, the shared decision card and the activity line alike.
+  const nato = under('nato-ca');
+  assert.equal(nato.j3.frago, 'Frag O');
+  assert.deepEqual(nato.j3.fragos.map((row) => [row.product, row.title]), [['frago-1', 'Frag O 1']]);
+  assert.equal(nato.decisions.find((card) => card.product === 'frago-1')!.title, 'Frag O 1');
+  assert.ok(nato.j3.activity.some((line) => /^Frag O 1 v1/.test(line.text)));
+  assert.equal(under('us-joint').j3.frago, 'FRAGORD');
+  assert.equal(under('us-army', 'tactical').j3.fragos[0].title, 'FRAGORD 1');
+  // The logistics annex with the profile's letter and title, and the concept of support in the profile's words (COLS under US Joint).
+  const support = { ...input.workspaces, registers: { ...input.workspaces?.registers, annexTracker: [
+    ...(input.workspaces?.registers?.annexTracker ?? []), { id: 'A3', subject: 'movements', owner: 'j4-director', status: 'drafting', product: 'movements-annex' },
+    { id: 'A4', subject: 'logistics', owner: 'j4-director', status: 'not-started', product: 'concept-of-support' }
+  ] } };
+  const titles = (model: ReturnType<typeof under>) => Object.fromEntries(model.j4.annexes.map((row) => [row.product, row.title]));
+  assert.deepEqual(titles(under('us-joint', 'operational', support)), {
+    'logistics-annex': 'Annex D (Logistics)', 'movements-annex': 'Movements annex: No separate movements annex; movements are part of Annex D (Logistics).', 'concept-of-support': 'Concept of logistics support (COLS)'
+  });
+  assert.deepEqual(titles(under('nato-ca', 'operational', support)), { 'logistics-annex': 'Annex R (Logistics)', 'movements-annex': 'Annex S (Movements)', 'concept-of-support': 'Concept of logistic support' });
+  assert.equal(under('us-army', 'tactical', support).j4.annexes.find((row) => row.product === 'logistics-annex')!.title, 'Annex F (Sustainment)');
+  assert.equal(under('us-army', 'tactical').j4.annexName, 'Sustainment annex');
+  assert.equal(under('nato-ca').j4.annexName, 'Logistics annex');
+  // The annex tracker in the profile's letter order: a numbered COPD sub-annex (SS2, Info Ops) after its annex, two-letter annexes after the single ones,
+  // and a row with no letter last.
+  const tracker: RegisterRow[] = [
+    { id: 'T1', subject: 'public-affairs', letter: 'TT', status: 'drafting' }, { id: 'T2', subject: 'information', letter: 'SS2', status: 'drafting' },
+    { id: 'T3', subject: 'reports', status: 'not-started' }, { id: 'T4', subject: 'communication-strategy', letter: 'SS', status: 'drafting' },
+    { id: 'T5', subject: 'task-organization', letter: 'B', status: 'done' }
+  ];
+  const ordered = under('nato-ca', 'operational', { ...input.workspaces, registers: { ...input.workspaces?.registers, annexTracker: tracker } }).j5.annexes.rows;
+  assert.deepEqual(ordered.map((row) => row.letter), ['B', 'SS', 'SS2', 'TT', '']);
+  assert.ok(!ordered.find((row) => row.subject === 'information')!.findings.some((finding) => /not Annex/.test(finding)), 'SS2 is the NATO/Canadian Info Ops letter');
+});
+
+test('the room built for the workspaces shows each standing watch in its trusted state', async () => {
+  const { world, model } = await sectionsModel();
+  // The fixture's watch was armed by a signed decision, so it shows as the file says.
+  assert.deepEqual(model.j2.watches.map((watch) => [watch.id, watch.state, watch.unsigned]), [['WATCH-1', 'paused', undefined]]);
+  // With no staff host nothing can prove the arm: the same watch reads as proposed and is flagged, and the live board cannot make it look armed.
+  const bare = await loadStaffRoomInput(undefined, world.root, NOW);
+  assert.deepEqual(bare.j2.distrustedWatches, ['WATCH-1']);
+  const shown = buildStaffRoomModel({ ...bare, feedEvents: [] }).j2.watches;
+  assert.deepEqual(shown.map((watch) => [watch.id, watch.state, watch.unsigned]), [['WATCH-1', 'proposed', true]]);
 });

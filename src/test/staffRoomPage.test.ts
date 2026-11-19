@@ -9,7 +9,7 @@ import vm from 'node:vm';
 import { buildCopPicture, syntheticGeography } from '../domain/staff/cop';
 import type { CopPicture } from '../domain/staff/cop';
 import { parseScenarioText } from '../domain/staff/scenario';
-import { handoffsFor } from '../domain/staff/staffRoom';
+import { buildStaffRoomModel, handoffsFor } from '../domain/staff/staffRoom';
 import type { StaffRoomModel } from '../domain/staff/staffRoom';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { modelOf, NOW, project, SCENARIO, sectionsProject } from './helpers/staffRoomFixture';
@@ -517,7 +517,7 @@ test('each section workspace draws its real state from the host\'s model: produc
 
   const j3 = view(page, 'pane-j3');
   for (const expected of ['E1', 'escalated', 'CCIR PIR-1', 'Two armoured vehicles moving off the south slope', 'CCIR PIR-1 reported as triggered by joc-chief', 'DP-2', 'Decides: commander', 'trigger reported',
-    'while planning. It passes to the', 'manoeuvre', 'H+6', 'FRAGO 1', 'Commander\'s update brief', 'RFI-7', 'Past its suspense']) assert.ok(j3.textContent.includes(expected), `the J3 workspace shows ${expected}`);
+    'while planning. It passes to the', 'manoeuvre', 'H+6', 'FRAGORD 1', 'Commander\'s update brief', 'RFI-7', 'Past its suspense']) assert.ok(j3.textContent.includes(expected), `the J3 workspace shows ${expected}`);
   const j4 = view(page, 'pane-j4');
   for (const expected of ['1 Bn', 'Red', '2 Bn (bn2-191000z): failed rule 1', 'calc:fuel-phase-1', '3,500 per day', 'Bridging stock', 'lift short', 'generator', 'Data older than a day',
     'Not supportable', 'not vouched for by the calculator ledger', 'Logistics annex', 'Annex D, drafting']) assert.ok(j4.textContent.includes(expected), `the J4 workspace shows ${expected}`);
@@ -647,5 +647,25 @@ test('large registers stay fast: lists show a page at a time with the rest one p
   empty.dispatch({ type: 'staff-room', model: blank, cues: [] });
   assert.match(view(empty, 'pane-j4').textContent, /No LOGSTAT yet/);
   assert.match(view(empty, 'pane-j5').textContent, /No COA cells yet/);
-  assert.match(view(empty, 'pane-j3').textContent, /No FRAGO drafts/);
+  assert.match(view(empty, 'pane-j3').textContent, /No FRAGORD drafts/, 'the fixture runs under US Joint, which writes FRAGORD');
+});
+
+test('the J3 and J4 workspaces name the fragmentary order and the logistics annex in the profile\'s words, as the host sends them', async () => {
+  const { world } = await sectionsProject();
+  const input = await loadStaffRoomInput(world.host, world.root, NOW);
+  const page = await runPage({ state: { workspace: 'j3', wsTabs: { j3: 'fragos' } } });
+  // The host's model under NATO/Canadian: "Frag O" on the tab, the lead line, the rule, the decision card and the draft's own title (its file stays frago-1).
+  const nato = buildStaffRoomModel({ ...input, settings: { ...input.settings, profile: 'nato-ca' } });
+  page.dispatch({ type: 'staff-room', model: nato, cues: [] });
+  const tab = view(page, 'j3tab-fragos');
+  assert.match(tab.textContent, /^Frag Os/);
+  const pane = view(page, 'pane-j3');
+  assert.match(pane.textContent, /Every Frag O is a draft until a person releases it/);
+  assert.match(view(page, 'j3panel-fragos').textContent, /A Frag O is a draft the future operations planner writes[\s\S]*Frag O 1/);
+  assert.doesNotMatch(pane.textContent, /FRAGO/, 'no US abbreviation left on a NATO/Canadian screen');
+  assert.match(view(page, 'j4tab-annex').textContent, /^Logistics annex/);
+  // Under the US Army profile the J4's annex is the sustainment annex (FM 5-0 Annex F).
+  page.dispatch({ type: 'staff-room', model: buildStaffRoomModel({ ...input, settings: { ...input.settings, profile: 'us-army', level: 'tactical' } }), cues: [] });
+  assert.match(view(page, 'j4tab-annex').textContent, /^Sustainment annex/);
+  assert.match(view(page, 'j3tab-fragos').textContent, /^FRAGORDs/);
 });

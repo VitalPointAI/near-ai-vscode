@@ -71,7 +71,6 @@ persona name or a rank.
   only its critique and the release guard only its gate reports. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
   tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
-
 - **J3 operations team.** 12 members at strategic and operational level and 10 at tactical level:
   an integrator who keeps the running estimate (headed by the seven joint functions, or Command,
   Sense, Act, Shield and Sustain under NATO/Canadian with Canada) and proposes the CCIRs, current
@@ -130,8 +129,7 @@ persona name or a rank.
   (newest first, only what your clearances cover, simulated ones marked SIM). The map is the real
   COP map (MapLibre, 2D or globe, offline) when the window has WebGL, and the room's own SVG map
   otherwise, with the reason shown; on both, names never cover each other. While the room is open
-  it runs track decay every few seconds, so tracks go stale and then lost on screen. The J5, J3
-  and J4 workspaces say what they will hold. Night, day and high contrast themes follow VS Code; Calm and the system's
+  it runs track decay every few seconds, so tracks go stale and then lost on screen. Night, day and high contrast themes follow VS Code; Calm and the system's
   reduced-motion setting stop all movement; the whole room works from the keyboard, with
   single-key shortcuts you can turn off; Follow the action moves the view to where the work is.
 - **J5, J3 and J4 workspaces in the Staff Room.** Each section has its own workspace beside the
@@ -139,12 +137,15 @@ persona name or a rank.
   version and release state, the decisions waiting for a named person in gold with the same
   signed buttons, and the agents' work in violet. J5: COA cells with their themes and validity
   tests, the comparison against the criteria and weights a person approved, the wargame ledger,
-  the decision brief with dissent unedited, and the annex tracker through the orders check. J3:
-  the event log with escalations and CCIR matches on the COP map, the decision support and
-  synchronization matrices with their owner (the J3 only after a person approves the transition
-  brief), FRAGO drafts waiting for a person, the battle rhythm and suspenses. J4: LOGSTAT by unit,
-  calculator results with their formulas, movement, readiness, supportability per COA and the
-  logistics annex. Nothing moves under reduced motion or Calm, every view works from the
+  the decision brief with dissent unedited, and the annex tracker through the orders check, in
+  the profile's letter order. J3: the event log with escalations and CCIR matches on the COP map,
+  the decision support and synchronization matrices with their owner (the J3 only after a person
+  approves the transition brief), fragmentary order drafts waiting for a person (FRAGORD, or Frag O
+  under NATO/Canadian), the battle rhythm and suspenses. J4: LOGSTAT by unit, calculator results
+  with their formulas, movement, readiness, supportability per COA and the logistics annex with
+  the profile's letter (the sustainment annex under US Army), with the concept of support in the
+  profile's words (COLS under US Joint). Product titles keep staff abbreviations in capitals
+  (COA, DSM, LOGSTAT) on every screen. Nothing moves under reduced motion or Calm, every view works from the
   keyboard, and long registers show a page at a time.
 - **IRON LANTERN on the globe, and its directions fixed.** The starter scenario's grid references
   now grow northward, so "north of Saltmere", "along PL COPPER north of Ashby Ford", "south of
@@ -290,7 +291,9 @@ persona name or a rank.
   when it is marked as a position: a hemisphere letter, a minus sign or a degree
   sign ("51.10 N, 11.10 E", "45.42, -75.69"). Those are still checked against the exercise box.
 - **A COP merge never loses a proposal.** When the merged copy of a proposal cannot be kept, the
-  merge is refused and the proposal stays where it is.
+  merge is refused and the proposal stays where it is. A stray merged copy left by an earlier
+  attempt no longer blocks the merge: the same copy is kept, a different one is replaced, and it is
+  put back if the merge is refused.
 - **Staff Room notices stay up their full time.** A newer notice is no longer hidden early by the
   timer of the one before it.
 - **Updated doctrine terms.** US Army teams use the six-step intelligence process of ADP 2-0
@@ -301,8 +304,8 @@ persona name or a rank.
 - **Standing watches and the release guard, tightened.** A watch nobody signed shows as proposed in
   the Staff Room whatever the file says, and only the watch grant (`mcp__observations__watch_*`)
   gives the watch tools. With an exercise box set, two plain numbers that read as a position outside
-  it go to the release guard to check. A stray merged copy no longer blocks a COP merge, and a
-  feed import whose parser cannot start is refused at once.
+  it go to the release guard to check, and a feed import whose parser cannot start is refused at
+  once.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

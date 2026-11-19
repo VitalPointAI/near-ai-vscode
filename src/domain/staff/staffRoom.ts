@@ -240,7 +240,8 @@ export function abbreviation(member: string): string {
   return member.slice(0, 2).toUpperCase();
 }
 
-const titleOf = productTitle;
+/** A product's title in the profile's words (a FRAGO reads as the profile writes it). */
+const titleOf = (settings: Pick<StaffSettings, 'profile'>, product: string): string => productTitle(product, settings.profile);
 
 const PILL: Readonly<Record<string, string>> = {
   draft: 'draft', 'draft (held)': 'held', 'draft (tampered)': 'tampered', 'guard-checked': 'checked', 'awaiting decision': 'awaiting', approved: 'approved',
@@ -331,7 +332,7 @@ function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run
       else if (lane.status === 'done') state = 'done';
       else if (lane.status === 'failed') state = 'failed';
       else state = 'stopped';
-      const product = lane.product ? titleOf(lane.product) : undefined;
+      const product = lane.product ? titleOf(settings, lane.product) : undefined;
       const task = state === 'working' ? (product ? `Drafting ${product}` : 'Working')
         : state === 'needs' ? `Needs a person: ${wait?.what ?? 'a decision'}`
           : state === 'waiting' ? `Waiting on ${wait ? (wait.on === 'human' ? 'a person' : codeOf(settings, wait.on as StaffSectionId)) : 'another member'}${wait ? `: ${wait.what}` : ''}`
@@ -363,7 +364,7 @@ function buildLedger(settings: StaffSettings, registry: readonly ProductView[]):
       ...(view.guard ? [{ gate: 'Release-guard', verdict: view.guard.verdict, version: view.guard.version }] : [])
     ];
     return {
-      product: view.product, title: titleOf(view.product), section: view.section, code: codeOf(settings, view.section), kind: view.kind, version: view.version,
+      product: view.product, title: titleOf(settings, view.product), section: view.section, code: codeOf(settings, view.section), kind: view.kind, version: view.version,
       display: view.display, pill: PILL[view.display] ?? 'draft', owner: clip(view.owner, 60), at: last?.at ?? '', hash: view.hash, label: clip(view.label, 60),
       path: staffProductPath(view.section, view.product), gates,
       ...(view.approvedBy ? { approvedBy: clip(`${view.approvedBy.name} (${view.approvedBy.role})`, CAP.short) } : {}),
@@ -391,7 +392,7 @@ function buildDecisions(settings: StaffSettings, now: number, queue: readonly De
     const view = byProduct.get(entry.product);
     if (!view || view.tampered) continue;
     cards.push({
-      product: entry.product, title: titleOf(entry.product), version: entry.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'decide',
+      product: entry.product, title: titleOf(settings, entry.product), version: entry.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'decide',
       decisionFor: clip(entry.decisionFor, 80), options: entry.options.slice(0, 10).map((option) => ({ label: clip(option.label, 200), risk: clip(option.risk, 500) })),
       dissent: entry.dissent.slice(0, 20).map((line) => clip(line, 500)), requestedAt: entry.requestedAt, ...(entry.deadline ? { deadline: entry.deadline } : {}),
       overdue: entry.deadline !== undefined && Date.parse(entry.deadline) < now, gates: gatesText(view)
@@ -400,7 +401,7 @@ function buildDecisions(settings: StaffSettings, now: number, queue: readonly De
   for (const view of registry) {
     if (view.state !== 'approved' || view.tampered) continue;
     cards.push({
-      product: view.product, title: titleOf(view.product), version: view.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'release',
+      product: view.product, title: titleOf(settings, view.product), version: view.version, hash: view.hash, section: view.section, code: codeOf(settings, view.section), kind: 'release',
       decisionFor: clip(view.decisionFor ?? view.approvedBy?.role ?? 'approver', 80), options: [], dissent: [], requestedAt: view.history[view.history.length - 1]?.at ?? '',
       overdue: false, gates: view.approvedBy ? `Approved by ${clip(`${view.approvedBy.name} (${view.approvedBy.role})`, CAP.short)}. Not released yet.` : 'Approved. Not released yet.'
     });
@@ -415,12 +416,12 @@ export function activityLine(settings: StaffSettings, event: StaffEvent): Activi
   const code = (section: StaffSectionId) => codeOf(settings, section);
   switch (event.type) {
     case 'staff.step.entered': return { at: event.at, section: code(event.section), kind: 'info', text: `${code(event.section)} entered step ${event.step}${event.stepName ? `, ${event.stepName}` : ''}.` };
-    case 'staff.lane.started': return { at: event.at, section: code(event.section), kind: 'task', text: `${event.member} started${event.product ? ` on ${titleOf(event.product)}` : ''}.` };
-    case 'staff.lane.finished': return { at: event.at, section: code(event.section), kind: event.outcome === 'done' ? 'prod' : 'info', text: `${event.member} ${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'failed' : 'was stopped'}${event.product ? `: ${titleOf(event.product)}` : ''}.` };
-    case 'staff.product.state': return { at: event.at, section: code(event.section), kind: event.actor.kind === 'person' ? 'human' : event.to === 'guard-checked' ? 'gate' : 'prod', text: `${titleOf(event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}, by ${actorWords(event.actor)}.` };
-    case 'staff.gate.verdict': return { at: event.at, section: '', kind: 'gate', text: `${event.gate === 'tradecraft' ? 'Tradecraft' : 'Release-guard'} ${event.verdict} on ${titleOf(event.product)} v${event.version}.` };
-    case 'staff.decision.requested': return { at: event.at, section: '', kind: 'human', text: `${titleOf(event.product)} v${event.version} waits for the ${event.role}. Agents stop here.` };
-    case 'staff.decision.recorded': return { at: event.at, section: '', kind: 'human', text: `${event.person.name} (${event.person.role}) ${event.decision} ${titleOf(event.product)} v${event.version}, signed.` };
+    case 'staff.lane.started': return { at: event.at, section: code(event.section), kind: 'task', text: `${event.member} started${event.product ? ` on ${titleOf(settings, event.product)}` : ''}.` };
+    case 'staff.lane.finished': return { at: event.at, section: code(event.section), kind: event.outcome === 'done' ? 'prod' : 'info', text: `${event.member} ${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'failed' : 'was stopped'}${event.product ? `: ${titleOf(settings, event.product)}` : ''}.` };
+    case 'staff.product.state': return { at: event.at, section: code(event.section), kind: event.actor.kind === 'person' ? 'human' : event.to === 'guard-checked' ? 'gate' : 'prod', text: `${titleOf(settings, event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}, by ${actorWords(event.actor)}.` };
+    case 'staff.gate.verdict': return { at: event.at, section: '', kind: 'gate', text: `${event.gate === 'tradecraft' ? 'Tradecraft' : 'Release-guard'} ${event.verdict} on ${titleOf(settings, event.product)} v${event.version}.` };
+    case 'staff.decision.requested': return { at: event.at, section: '', kind: 'human', text: `${titleOf(settings, event.product)} v${event.version} waits for the ${event.role}. Agents stop here.` };
+    case 'staff.decision.recorded': return { at: event.at, section: '', kind: 'human', text: `${event.person.name} (${event.person.role}) ${event.decision} ${titleOf(settings, event.product)} v${event.version}, signed.` };
     case 'staff.waiting': return { at: event.at, section: code(event.section), kind: event.waitingOn === 'human' ? 'human' : 'info', text: `${event.member} waits on ${event.waitingOn === 'human' ? 'a person' : code(event.waitingOn)}: ${event.what}` };
     case 'staff.cop.updated': return { at: event.at, section: code(event.owner.section), kind: 'prod', text: `${event.owner.member} updated the ${event.layer.replace(/^cop-|-layer$/g, '')} layer: ${event.summary}` };
     case 'staff.merge.conflict': return { at: event.at, section: code(event.section), kind: 'info', text: `${code(event.section)} has a merge conflict in ${event.files.length} file${event.files.length === 1 ? '' : 's'}.` };
@@ -440,16 +441,16 @@ export function handoffsFor(settings: StaffSettings, events: readonly StaffEvent
   for (const event of events) {
     switch (event.type) {
       case 'staff.lane.started':
-        cues.push({ kind: 'task', from: 'section:command', to: `member:${event.section}:${event.member}`, label: clip(event.product ? titleOf(event.product) : `Task for ${event.member}`, 40), workspace: workspaceOf(event.section) });
+        cues.push({ kind: 'task', from: 'section:command', to: `member:${event.section}:${event.member}`, label: clip(event.product ? titleOf(settings, event.product) : `Task for ${event.member}`, 40), workspace: workspaceOf(event.section) });
         break;
       case 'staff.product.state':
-        if (event.actor.kind === 'agent' && (event.to === 'guard-checked' || (event.to === 'draft' && event.from === null))) cues.push({ kind: 'prod', from: `section:${event.section}`, to: `ledger:${event.product}`, label: clip(`${titleOf(event.product)} v${event.version}`, 40), workspace: workspaceOf(event.section) });
-        if (event.to === 'awaiting-decision') cues.push({ kind: 'task', from: `section:${event.section}`, to: 'decisions', label: clip(`${titleOf(event.product)}: needs a person`, 40), workspace: workspaceOf(event.section) });
+        if (event.actor.kind === 'agent' && (event.to === 'guard-checked' || (event.to === 'draft' && event.from === null))) cues.push({ kind: 'prod', from: `section:${event.section}`, to: `ledger:${event.product}`, label: clip(`${titleOf(settings, event.product)} v${event.version}`, 40), workspace: workspaceOf(event.section) });
+        if (event.to === 'awaiting-decision') cues.push({ kind: 'task', from: `section:${event.section}`, to: 'decisions', label: clip(`${titleOf(settings, event.product)}: needs a person`, 40), workspace: workspaceOf(event.section) });
         break;
       case 'staff.decision.recorded': {
         if (!decisionBacked(event, registry)) break;
         const section = sectionOf(event.product) ?? 'command';
-        cues.push({ kind: 'human', from: 'decisions', to: `section:${section}`, label: clip(`${event.decision[0].toUpperCase()}${event.decision.slice(1)}: ${titleOf(event.product)}`, 40), workspace: workspaceOf(section) });
+        cues.push({ kind: 'human', from: 'decisions', to: `section:${section}`, label: clip(`${event.decision[0].toUpperCase()}${event.decision.slice(1)}: ${titleOf(settings, event.product)}`, 40), workspace: workspaceOf(section) });
         break;
       }
       case 'staff.cop.updated':
@@ -610,7 +611,7 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     : ltiovs[0] ? { label: `${ltiovs[0].id} latest time of value`, at: ltiovs[0].ltiov, dtg: formatDtg(Date.parse(ltiovs[0].ltiov)) } : undefined;
   const scenario = input.scenario;
   const activity = input.events.slice(-200).map((event) => (event.type === 'staff.decision.recorded' && !decisionBacked(event, input.registry)
-    ? { at: event.at, section: '', kind: 'info' as const, text: `The event log names a decision on ${titleOf(event.product)} v${event.version} that the signed ledger does not hold. It is not counted.` }
+    ? { at: event.at, section: '', kind: 'info' as const, text: `The event log names a decision on ${titleOf(settings, event.product)} v${event.version} that the signed ledger does not hold. It is not counted.` }
     : activityLine(settings, event))).filter((line): line is ActivityLine => Boolean(line)).slice(-CAP.activity).reverse()
     .map((line) => ({ ...line, text: clip(line.text, 300) }));
   return {

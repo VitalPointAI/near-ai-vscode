@@ -386,10 +386,11 @@ unedited, and the annex tracker held to the ledger by the orders check. **J3**
 shows current operations (the event log with escalations and CCIR matches, on
 the COP map), the decision support matrix and the synchronization matrix with
 who owns them (the J5 while planning, the J3 once a person approves the
-transition brief), FRAGO drafts waiting for a person, and the battle rhythm
-with open suspenses. **J4** shows LOGSTAT by unit with its bands, reports held
+transition brief), fragmentary order drafts waiting for a person (FRAGORD, or
+Frag O under NATO/Canadian), and the battle rhythm with open suspenses. **J4** shows LOGSTAT by unit with its bands, reports held
 back until corrected, every calculator result with its formula, the movement
-and readiness boards, supportability per COA and the logistics annex. Long
+and readiness boards, supportability per COA and the logistics annex with the
+profile's letter (the sustainment annex under US Army). Long
 registers show a page at a time. **NEAR AI: Open Staff Room** opens on a
 section when a command passes it one (`j5`, `j3`, `j4`).
 

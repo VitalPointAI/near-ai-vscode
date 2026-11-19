@@ -12,6 +12,7 @@
   };
   const LEAD = {
     j5: 'Plans: COA cells work side by side, the comparison runs against the criteria a person approved, and the commander decides.',
+    // renderJ3 rewrites the J3 line and its FRAGO tab in the profile's words (FRAGORD, or Frag O under NATO/Canadian).
     j3: 'Operations: the current picture, the decision support matrix and the battle rhythm. Every FRAGO is a draft until a person releases it.',
     j4: 'Logistics: every number comes from a calculator record that shows its formula. The J4 never commits resources; a person decides.'
   };
@@ -44,7 +45,8 @@
       const titles = h.el('div', 'ws-titles');
       const title = h.el('h2', '', '');
       title.id = 'ws-title-' + id;
-      titles.append(title, h.el('p', 'muted ws-lead', LEAD[id]));
+      const lead = h.el('p', 'muted ws-lead', LEAD[id]);
+      titles.append(title, lead);
       const stats = h.el('div', 'ws-stats');
       head.append(mark, titles, stats);
       const problems = h.el('div', 'problems');
@@ -101,7 +103,7 @@
       body.append(main, side);
       root.append(head, problems, decide, body);
       pane.replaceChildren(root);
-      panes.set(id, { root, title, stats, problems, decide, tabButtons, panelNodes, productList, activity, mapSlot });
+      panes.set(id, { root, title, lead, stats, problems, decide, tabButtons, panelNodes, productList, activity, mapSlot });
     }
 
     function showTab(id, key, byUser) {
@@ -182,6 +184,8 @@
       return badge;
     }
     function rule(text) { return h.el('p', 'rule', text); }
+    /** A tab's label, renamed in the profile's words (the host's model names the term; the page never picks one itself). */
+    function relabel(ws, key, label) { const tab = ws.tabButtons.get(key); if (tab && typeof label === 'string' && label) h.setText(tab.children[0], label); }
     function grow(node, delay) { h.anim(node, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: 450, delay: delay || 0, fill: 'backwards', easing: h.EASE.settle }); }
     function rise(node, delay) { h.anim(node, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 380, delay: delay || 0, fill: 'backwards' }); }
 
@@ -351,6 +355,10 @@
       const j3 = model.j3;
       const counts = { current: j3.eventLog.total, dsm: j3.dsm.rows.length, sync: j3.sync.total, fragos: j3.fragos.length, rhythm: j3.rhythm.events.length };
       for (const [key, tab] of ws.tabButtons) h.setText(tab.children[1], String(counts[key]));
+      // The fragmentary order in the profile's words: FRAGORD under the US profiles, Frag O under NATO/Canadian.
+      const frago = typeof j3.frago === 'string' && j3.frago ? j3.frago : 'FRAGO';
+      relabel(ws, 'fragos', frago + 's');
+      h.setText(ws.lead, 'Operations: the current picture, the decision support matrix and the battle rhythm. Every ' + frago + ' is a draft until a person releases it.');
 
       const current = ws.panelNodes.get('current');
       for (const child of [...current.children]) if (child !== ws.mapSlot) child.remove();
@@ -459,8 +467,8 @@
       }
 
       const fragos = ws.panelNodes.get('fragos');
-      fragos.replaceChildren(rule('A FRAGO is a draft the future operations planner writes. It is issued only when a named person releases it; nothing is sent by an agent.'));
-      if (!j3.fragos.length) fragos.append(h.el('p', 'faint', 'No FRAGO drafts. A trigger in the DSM or a branch leads the future operations planner to draft one.'));
+      fragos.replaceChildren(rule('A ' + frago + ' is a draft the future operations planner writes. It is issued only when a named person releases it; nothing is sent by an agent.'));
+      if (!j3.fragos.length) fragos.append(h.el('p', 'faint', 'No ' + frago + ' drafts. A trigger in the DSM or a branch leads the future operations planner to draft one.'));
       for (const frago of j3.fragos) {
         const card = h.el('article', 'frago');
         const head = h.el('div', 't');
@@ -516,6 +524,9 @@
       const j4 = model.j4;
       const counts = { logstat: j4.logstat.units.length, calcs: j4.calcs.length, movement: j4.movement.length + j4.readiness.length, support: j4.supportability.length, annex: j4.annexes.length };
       for (const [key, tab] of ws.tabButtons) h.setText(tab.children[1], String(counts[key]));
+      // The logistics annex in the profile's words (Sustainment annex under the US Army profile).
+      const annexName = typeof j4.annexName === 'string' && j4.annexName ? j4.annexName : 'Logistics annex';
+      relabel(ws, 'annex', annexName);
       const BAND = { red: 'Red', amber: 'Amber', green: 'Green', none: 'No band set' };
 
       const logstat = ws.panelNodes.get('logstat');
@@ -611,8 +622,8 @@
       }
 
       const annex = ws.panelNodes.get('annex');
-      annex.replaceChildren(rule('The logistics annex, its letter from the doctrine profile, through the release guard to a person.'));
-      if (!j4.annexes.length) annex.append(h.el('p', 'faint', 'No logistics annex yet. The J4 director drafts it in step 7.'));
+      annex.replaceChildren(rule('The ' + annexName.toLowerCase() + ', its letter from the doctrine profile, through the release guard to a person.'));
+      if (!j4.annexes.length) annex.append(h.el('p', 'faint', 'No ' + annexName.toLowerCase() + ' yet. The J4 director drafts it in step 7.'));
       for (const row of j4.annexes) {
         const card = h.el('article', 'annex');
         const head = h.el('div', 't');
