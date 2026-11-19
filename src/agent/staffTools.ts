@@ -9,6 +9,7 @@
 import { AGENT_PRODUCT_VERBS } from '../domain/staff/release';
 import type { StaffGate } from '../domain/staff/release';
 import { STAFF_SLUG } from '../domain/staff/parse';
+import { RESERVED_MEMBER_SLUGS } from '../domain/staff/ledger';
 import type { DecisionOption } from '../domain/staff/events';
 import type { ProductDependency } from '../domain/staff/products';
 import type { StaffCaller, StaffHost, StaffResult, StaffTeamInfo } from '../staff/staffHost';
@@ -51,6 +52,11 @@ export function staffTeamInfo(team: Pick<TeamDefinition, 'slug' | 'members' | 's
   const top = team.members.filter((member) => !member.reportsTo || !names.includes(member.reportsTo));
   const lead = top.find((member) => member.name !== 'release-guard' && member.name !== 'tradecraft-reviewer') ?? top[0] ?? team.members[0];
   return { slug: team.slug, section: team.staff.section, members: names, sectionLead: lead.name, ...(team.staff.profile ? { profile: team.staff.profile } : {}), ...(team.staff.level ? { level: team.staff.level } : {}) };
+}
+
+/** True when the caller may act on staff products as StaffHost.memberOf decides: a member of the team that is not a reserved name. Undefined is the run's lead. */
+export function isStaffMember(team: Pick<StaffTeamInfo, 'members'>, agentLabel: string | undefined): boolean {
+  return agentLabel !== undefined && team.members.includes(agentLabel) && !RESERVED_MEMBER_SLUGS.includes(agentLabel);
 }
 
 export interface StaffToolAccess {
@@ -338,6 +344,10 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     run: async (input, context) => result(await hostOf().lintText(callerOf(context), input.product))
   };
 
+  // The tools only a member may call (the host refuses the run's lead and anyone not on the team, StaffHost.memberOf) are offered only to members, so
+  // the lead is never offered a tool it may not call (0.4.35). The lead keeps what it may call: status, list, register_read, wargame (it reads the
+  // record; recording and deriving stay a member's, refused by the host), step, lint and the guard scan.
+  const forMembers = <T>(tool: AgentTool<T>): AgentTool<T> => ({ ...tool, offeredTo: (agentLabel) => isStaffMember(access.team, agentLabel) });
   // Every read tool's answer is fenced whole: products, registers and reports are other members' text (staffFence.ts).
-  return fenceReadResults([propose, verdict, submit, withdraw, status, list, register, registerRead, wargame, step, lint, scan]);
+  return fenceReadResults([...[propose, verdict, submit, withdraw].map(forMembers), status, list, forMembers(register), registerRead, wargame, step, lint, scan]);
 }

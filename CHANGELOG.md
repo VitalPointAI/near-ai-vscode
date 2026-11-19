@@ -66,6 +66,11 @@
   staff project are not supported yet, because the signed ledgers trust only this computer's key.
   Multi-user staff workspaces are planned.
 - Fixed: symbols could go missing after zooming in on the COP map, leaving only their names.
+- Fixed: a staff team's run could sit on "working" without tasking anyone, after an error card
+  such as "COP layers failed. Not allowed". The run's lead was offered the members' tools (the COP
+  map, the feeds, the workbenches), tried one and was refused. Each agent is now offered only the
+  tools it may use: the lead coordinates, marks the step and starts the members at once, and each
+  member gets what its tools line grants.
 
 ## 0.4.34
 

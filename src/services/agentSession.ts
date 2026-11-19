@@ -28,12 +28,13 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
+import { staffLeadNote } from '../agent/staffLead';
 import { staffServerToolsForRun } from '../agent/staffServers';
 import { OBSERVATIONS_TOOL_NAMES } from '../agent/observationsTools';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
-import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
+import { AgentTool, CORE_TOOLS, offeredTools, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
 import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import { displayPath, ToolError } from '../agent/workspace';
@@ -660,7 +661,7 @@ export class AgentConversation {
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) this.teamSlug = request.team.slug;
-    if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
+    if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''), staffLeadNote(request.team));
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
@@ -727,7 +728,8 @@ export class AgentConversation {
     const run = new AgentRun({
       client: request.client,
       model: request.model,
-      tools,
+      // The run's lead is offered only the tools it may call (offeredTools): a staff server's member-only tools go to the members granted them.
+      tools: offeredTools(tools, undefined),
       context,
       policy: request.policy,
       rules: request.rules,
@@ -1476,8 +1478,8 @@ export class AgentConversation {
       : [];
     // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the built-in local staff servers listed once in
     // staffServers.ts: the intel-workbench, observations, cop-map and logistics. Each of those is given only to members whose own tools line grants it,
-    // never to the run's lead (staffServerToolsForRun refuses any other caller). None of them can approve, reject or release anything, and none reaches
-    // the network.
+    // never to the run's lead: each is offered only to those members (offeredTools, below and in the run) and refuses any other caller at call time
+    // (staffServerToolsForRun). None of them can approve, reject or release anything, and none reaches the network.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
     const servers = staffTeam && request.team?.staff ? staffServerToolsForRun(request.team, { host: () => staffHostFor(this.root), store: () => observationStoreFor(this.root), team: staffTeam, run: runId }) : [];
@@ -1547,7 +1549,9 @@ export class AgentConversation {
         // built-in staff tools it is granted stay (WRITE_LIMITED_STAFF_TOOLS): they write only the ledger, headers and gate reports, through the host.
         // The observations server's tools stay too: they only read the observation store (the J3 watch officer watches the feeds with them).
         const writeOnly = spawn.agent?.writeOnly;
-        const allowed = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
+        const limited = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
+        // Offered only what it may call: a staff server's tools only when this member's own tools line grants them (the call-time gate stays).
+        const allowed = offeredTools(limited, label);
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
