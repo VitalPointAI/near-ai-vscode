@@ -28,7 +28,8 @@ export const STREAM_ID_PATTERN = /^[0-9a-f]{32}$/;
 export const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const SIG_BYTES = 64;
 const PUBLIC_KEY_BYTES = 32;
-const SEALED_OVERHEAD = IV_BYTES + TAG_BYTES;
+// iv plus tag: what sealing adds to the plaintext length.
+export const SEALED_OVERHEAD = IV_BYTES + TAG_BYTES;
 const HEADER_KEYS = ['v', 'stream', 'writer', 'seq', 'prev', 'epoch', 'body', 'sig'] as const;
 
 export interface Dep { writer: string; seq: number; hash: string }
@@ -225,4 +226,17 @@ export function parseHeaderShape(value: unknown): HeaderShape {
     // Anything that cannot be read as a plain header is malformed; hostile input never throws out of here.
     return { ok: false, reason: 'malformed-header' };
   }
+}
+
+// The closed actor shapes (D-06). Slugs and run ids are short, lowercase-safe words so a name can never carry markup or a path.
+const ACTOR_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+export function isActorShape(value: unknown): value is Actor {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  const only = (...allowed: string[]): boolean => keys.length === allowed.length && allowed.every((key) => keys.includes(key));
+  if (value.kind === 'person') return only('kind');
+  if (value.kind === 'agent') return only('kind', 'member', 'run') && typeof value.member === 'string' && ACTOR_NAME.test(value.member) && typeof value.run === 'string' && RUN_ID.test(value.run);
+  if (value.kind === 'hub') return only('kind', 'watch') && typeof value.watch === 'string' && ACTOR_NAME.test(value.watch);
+  return false;
 }
