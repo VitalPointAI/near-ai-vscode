@@ -110,8 +110,14 @@ export function workload(random, options, Y = YDefault) {
   const vocabulary = makeVocabulary(random);
   const target = options.pages * CHARS_PER_PAGE;
   const authors = [];
+  const used = new Set();
   for (let i = 0; i < authorCount; i++) {
     const doc = new Y.Doc(); // an editor replica: garbage collection on, as in a real editor
+    // Yjs picks client ids at random; take them from the seeded generator so a seed replays exactly.
+    let clientId;
+    do { clientId = 1 + random.int(4294967294); } while (used.has(clientId));
+    used.add(clientId);
+    doc.clientID = clientId;
     const isAgent = i >= options.persons;
     const author = { index: i, isAgent, doc, text: doc.getText('body'), cursor: 0, inbox: [], typedClock: 0 };
     authors.push(author);
@@ -152,7 +158,7 @@ export function workload(random, options, Y = YDefault) {
     // Sequential typing at a cursor, with an occasional jump, as a person writes.
     if (random.chance(0.1)) author.cursor = random.int(author.text.length + 1);
     const at = clamp(author.cursor, author.text.length);
-    const str = random.chance(0.02) ? '\n\n' : words(random, vocabulary, random.range(1, 40), false);
+    const str = random.chance(0.02) ? '\n\n' : words(random, vocabulary, author.isAgent ? random.range(10, 80) : random.range(1, 40), false);
     current = author; currentKind = 'typing';
     author.doc.transact(() => insertChars(author, at, str), 'local');
     author.cursor = at + str.length;
@@ -168,7 +174,7 @@ export function workload(random, options, Y = YDefault) {
   };
 
   const doPaste = (author) => {
-    const size = author.isAgent ? random.range(200, 3000) : random.range(500, 3000);
+    const size = author.isAgent ? random.range(200, 1500) : random.range(500, 3000);
     const at = random.int(author.text.length + 1);
     const str = words(random, vocabulary, size, true);
     current = author; currentKind = 'paste';
@@ -186,7 +192,7 @@ export function workload(random, options, Y = YDefault) {
     end = end < 0 ? Math.min(whole.length, p + 600) : end;
     end = Math.min(end, start + CHARS_PER_PAGE);
     if (end - start < 20) return doTyping(author);
-    const replacement = words(random, vocabulary, Math.max(20, Math.round((end - start) * (0.6 + random.next() * 0.8))), false);
+    const replacement = words(random, vocabulary, Math.max(20, Math.round((end - start) * (0.5 + random.next() * 0.8))), false);
     current = author; currentKind = 'rewrite';
     author.doc.transact(() => {
       author.text.delete(start, end - start);
@@ -211,13 +217,15 @@ export function workload(random, options, Y = YDefault) {
     deliver(author);
     const roll = random.next();
     if (author.isAgent) {
-      // An agent run writes in blocks and rewrites; occasional small typing.
-      if (roll < 0.5) doPaste(author);
-      else if (roll < 0.85) doRewrite(author);
-      else doTyping(author);
-    } else if (roll < 0.86) doTyping(author);
-    else if (roll < 0.93) doDelete(author);
-    else if (roll < 0.95) doPaste(author);
+      // An agent run streams short chunks (one 500 ms batch each), now and then pastes a block
+      // or rewrites a paragraph.
+      if (roll < 0.75) doTyping(author);
+      else if (roll < 0.78) doPaste(author);
+      else if (roll < 0.9) doDelete(author);
+      else doRewrite(author);
+    } else if (roll < 0.8) doTyping(author);
+    else if (roll < 0.94) doDelete(author);
+    else if (roll < 0.946) doPaste(author);
     else doRewrite(author);
     if (step % 50 === 0) {
       peakHeap = Math.max(peakHeap, process.memoryUsage().heapUsed);
@@ -452,7 +460,7 @@ export function report(results, options, env) {
   L('## Method');
   L();
   L(`- Workload: a simulated ${options.pages}-page product (target about ${CHARS_PER_PAGE} characters per page of final text), ${options.persons} persons and ${options.agents} agent runs, each author with its own Yjs document and client id. Authors take random turns; every update reaches each other author after a random delay of 0 to 12 turns, so edits are genuinely concurrent.`);
-  L('- Persons mostly type in batches of 1 to 40 characters at a cursor (one update per batch, as a 500 ms batch would give), sometimes delete, paste 500 to 3000 characters, or rewrite a paragraph. Agent runs mostly paste blocks of 200 to 3000 characters and rewrite paragraphs, with a little typing.');
+  L('- Persons mostly type in batches of 1 to 40 characters at a cursor (one update per batch, as a 500 ms batch would give), sometimes delete, paste 500 to 3000 characters, or rewrite a paragraph. Agent runs mostly stream chunks of 10 to 80 characters (one 500 ms batch each), and now and then paste a block of 200 to 1500 characters, delete, or rewrite a paragraph.');
   L('- The fold document is garbage collection off (needed for versions and deletion records, 30-RESEARCH "Yjs facts" item 9). The compaction is the full state of that document. The "garbage collection on" figure is the full state of a document fed the same updates with collection on.');
   L('- Load time is a compaction taken before the last 500 updates, loaded into a fresh document, then those 500 updates applied. Timings are the median of three runs (walk: five); heap is `process.memoryUsage().heapUsed` after a forced collection, and the peak sampled during the workload, which includes all live editor replicas.');
   L('- Convergence: two fresh garbage-collection-off documents fed all updates in two different shuffled orders, each with 5 percent duplicates, must end with equal text and equal state vector and nothing pending. Attribution: every live character in the final document sits in an item whose client id is the author who typed that character at that clock. A failure of either prints the seed and exits with code 1.');
@@ -543,7 +551,7 @@ export function report(results, options, env) {
   }
   L();
   if (savingLow > THRESHOLDS.gcSavingRecordPercent) {
-    L(`Input for Phase 33's compaction default: garbage collection on was at least ${savingLow.toFixed(1)} percent smaller than off on every seed (above the ${THRESHOLDS.gcSavingRecordPercent} percent mark). Nothing changes in this phase; the fold document stays garbage collection off for versions and deletion records.`);
+    L(`Input for Phase 33's compaction default: garbage collection on was at least ${savingLow.toFixed(1)} percent smaller than off on every seed (above the ${THRESHOLDS.gcSavingRecordPercent} percent mark). The difference is the text of deleted ranges, which garbage collection off keeps so that earlier versions can be restored; this workload is deletion-heavy on purpose (rewrites and deletions). Nothing changes in this phase; the fold document stays garbage collection off for versions and deletion records.`);
   } else {
     L(`Garbage collection on was never more than ${THRESHOLDS.gcSavingRecordPercent} percent smaller than off on every seed (smallest saving ${savingLow.toFixed(1)} percent), so there is no size reason to prefer a garbage-collected compaction by default. The fold document stays garbage collection off for versions and deletion records.`);
   }

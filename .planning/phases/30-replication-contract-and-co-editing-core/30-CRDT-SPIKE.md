@@ -4,8 +4,8 @@ Measured with `node scripts/crdt-spike.mjs`, a seeded script over the vendored Y
 
 ## Method
 
-- Workload: a simulated 1-page product (target about 3000 characters per page of final text), 2 persons and 1 agent runs, each author with its own Yjs document and client id. Authors take random turns; every update reaches each other author after a random delay of 0 to 12 turns, so edits are genuinely concurrent.
-- Persons mostly type in batches of 1 to 40 characters at a cursor (one update per batch, as a 500 ms batch would give), sometimes delete, paste 500 to 3000 characters, or rewrite a paragraph. Agent runs mostly paste blocks of 200 to 3000 characters and rewrite paragraphs, with a little typing.
+- Workload: a simulated 30-page product (target about 3000 characters per page of final text), 12 persons and 8 agent runs, each author with its own Yjs document and client id. Authors take random turns; every update reaches each other author after a random delay of 0 to 12 turns, so edits are genuinely concurrent.
+- Persons mostly type in batches of 1 to 40 characters at a cursor (one update per batch, as a 500 ms batch would give), sometimes delete, paste 500 to 3000 characters, or rewrite a paragraph. Agent runs mostly stream chunks of 10 to 80 characters (one 500 ms batch each), and now and then paste a block of 200 to 1500 characters, delete, or rewrite a paragraph.
 - The fold document is garbage collection off (needed for versions and deletion records, 30-RESEARCH "Yjs facts" item 9). The compaction is the full state of that document. The "garbage collection on" figure is the full state of a document fed the same updates with collection on.
 - Load time is a compaction taken before the last 500 updates, loaded into a fresh document, then those 500 updates applied. Timings are the median of three runs (walk: five); heap is `process.memoryUsage().heapUsed` after a forced collection, and the peak sampled during the workload, which includes all live editor replicas.
 - Convergence: two fresh garbage-collection-off documents fed all updates in two different shuffled orders, each with 5 percent duplicates, must end with equal text and equal state vector and nothing pending. Attribution: every live character in the final document sits in an item whose client id is the author who typed that character at that clock. A failure of either prints the seed and exits with code 1.
@@ -15,7 +15,7 @@ Measured with `node scripts/crdt-spike.mjs`, a seeded script over the vendored Y
 - Node v24.22.3, linux x64
 - yjs 13.6.33, lib0 0.2.119
 - vendor/yjs/yjs.cjs sha256 74fe708b18c6494d3f698b8a66ea7d5861c3a8c802938f545e3b060e33841ef4 (matches scripts/crdt-vendor.json)
-- Options: pages 1, persons 2, agents 1, seeds 1
+- Options: pages 30, persons 12, agents 8, seeds 30, 31, 32
 - Run: 2026-11-19
 
 ## Thresholds
@@ -25,51 +25,97 @@ Measured with `node scripts/crdt-spike.mjs`, a seeded script over the vendored Y
 - Heap above 256 MB for the workload is a size problem.
 - Research's preliminary figure was about 3.6 bytes per character and 73 ms to apply 8000 updates.
 
-## seed 1
+## seed 30
 
-Updates 51, final text 13592 characters, 3 authors. Convergence: held. Attribution: held (13592 live characters checked).
+Updates 2901, final text 92067 characters, 20 authors. Convergence: held. Attribution: held (92067 live characters checked).
 
 | Update size by pattern (bytes) | count | median | p95 | p99 | max |
 |---|---|---|---|---|---|
-| typing batches (at most 500 ms) | 34 | 45 | 64 | 65 | 65 |
-| deletions | 3 | 11 | 11 | 11 | 11 |
-| paste blocks | 10 | 1116 | 2253 | 2253 | 2253 |
-| paragraph rewrites | 4 | 917 | 1502 | 1502 | 1502 |
+| typing batches (at most 500 ms) | 2244 | 53 | 97 | 105 | 108 |
+| deletions | 396 | 11 | 21 | 29 | 38 |
+| paste blocks | 40 | 1069 | 2169 | 2648 | 2648 |
+| paragraph rewrites | 221 | 1295 | 3563 | 3898 | 3961 |
 
 | Measurement | Value |
 |---|---|
-| Sum of all updates | 18167 bytes |
-| Full state, garbage collection off | 17833 bytes (1.31 bytes per character) |
-| Full state, garbage collection on | 14568 bytes (18.3 percent smaller than off) |
-| Compaction (full state of the gc-off document) | 17833 bytes |
-| Apply every update to a fresh document | 1 ms |
-| Load a compaction plus the last 51 updates | 1 ms (compaction at that point 2 bytes) |
+| Sum of all updates | 528050 bytes |
+| Full state, garbage collection off | 520879 bytes (5.66 bytes per character) |
+| Full state, garbage collection on | 166021 bytes (68.1 percent smaller than off) |
+| Compaction (full state of the gc-off document) | 520879 bytes |
+| Apply every update to a fresh document | 20 ms |
+| Load a compaction plus the last 500 updates | 10 ms (compaction at that point 438503 bytes) |
+| Walk the text for attribution | 0.1 ms |
+| Heap used after the run (forced collection) | 16.5 MB |
+| Heap used, peak during the workload | 105.5 MB |
+
+## seed 31
+
+Updates 3201, final text 94201 characters, 20 authors. Convergence: held. Attribution: held (94201 live characters checked).
+
+| Update size by pattern (bytes) | count | median | p95 | p99 | max |
+|---|---|---|---|---|---|
+| typing batches (at most 500 ms) | 2468 | 53 | 98 | 106 | 109 |
+| deletions | 419 | 11 | 21 | 29 | 38 |
+| paste blocks | 60 | 859 | 2488 | 2909 | 2909 |
+| paragraph rewrites | 254 | 1072 | 2979 | 3745 | 3798 |
+
+| Measurement | Value |
+|---|---|
+| Sum of all updates | 522548 bytes |
+| Full state, garbage collection off | 515176 bytes (5.47 bytes per character) |
+| Full state, garbage collection on | 177248 bytes (65.6 percent smaller than off) |
+| Compaction (full state of the gc-off document) | 515176 bytes |
+| Apply every update to a fresh document | 22 ms |
+| Load a compaction plus the last 500 updates | 6 ms (compaction at that point 429433 bytes) |
 | Walk the text for attribution | 0.0 ms |
-| Heap used after the run (forced collection) | 6.6 MB |
-| Heap used, peak during the workload | 7.7 MB |
+| Heap used after the run (forced collection) | 15.6 MB |
+| Heap used, peak during the workload | 114.2 MB |
+
+## seed 32
+
+Updates 2951, final text 92250 characters, 20 authors. Convergence: held. Attribution: held (92250 live characters checked).
+
+| Update size by pattern (bytes) | count | median | p95 | p99 | max |
+|---|---|---|---|---|---|
+| typing batches (at most 500 ms) | 2306 | 53 | 97 | 105 | 109 |
+| deletions | 383 | 11 | 21 | 29 | 35 |
+| paste blocks | 51 | 937 | 2606 | 2817 | 2817 |
+| paragraph rewrites | 211 | 1146 | 2611 | 3257 | 3589 |
+
+| Measurement | Value |
+|---|---|
+| Sum of all updates | 440681 bytes |
+| Full state, garbage collection off | 436595 bytes (4.73 bytes per character) |
+| Full state, garbage collection on | 169146 bytes (61.3 percent smaller than off) |
+| Compaction (full state of the gc-off document) | 436595 bytes |
+| Apply every update to a fresh document | 19 ms |
+| Load a compaction plus the last 500 updates | 5 ms (compaction at that point 380367 bytes) |
+| Walk the text for attribution | 0.1 ms |
+| Heap used after the run (forced collection) | 14.6 MB |
+| Heap used, peak during the workload | 112.4 MB |
 
 ## Summary across seeds
 
 | Measurement | min | max |
 |---|---|---|
-| Final text (characters) | 13592 | 13592 |
-| Typing update median (bytes) | 45 | 45 |
-| Typing update p99 (bytes) | 65 | 65 |
-| Typing update max (bytes) | 65 | 65 |
-| Paste update max (bytes) | 2253 | 2253 |
-| Rewrite update max (bytes) | 1502 | 1502 |
-| Sum of all updates (bytes) | 18167 | 18167 |
-| Full state, gc off (bytes) | 17833 | 17833 |
-| Full state, gc on (bytes) | 14568 | 14568 |
-| gc-off bytes per character | 1.31 | 1.31 |
-| gc saving (percent of gc-off) | 18.3 | 18.3 |
-| Apply all updates (ms) | 1 | 1 |
-| Load compaction plus later updates (ms) | 1 | 1 |
-| Attribution walk (ms) | 0.0 | 0.0 |
-| Heap peak (MB) | 7.7 | 7.7 |
+| Final text (characters) | 92067 | 94201 |
+| Typing update median (bytes) | 53 | 53 |
+| Typing update p99 (bytes) | 105 | 106 |
+| Typing update max (bytes) | 108 | 109 |
+| Paste update max (bytes) | 2648 | 2909 |
+| Rewrite update max (bytes) | 3589 | 3961 |
+| Sum of all updates (bytes) | 440681 | 528050 |
+| Full state, gc off (bytes) | 436595 | 520879 |
+| Full state, gc on (bytes) | 166021 | 177248 |
+| gc-off bytes per character | 4.73 | 5.66 |
+| gc saving (percent of gc-off) | 61.3 | 68.1 |
+| Apply all updates (ms) | 19 | 22 |
+| Load compaction plus later updates (ms) | 5 | 10 |
+| Attribution walk (ms) | 0.0 | 0.1 |
+| Heap peak (MB) | 105.5 | 114.2 |
 
 ## Verdict
 
 Verdict: No size or garbage collection problem found. Convergence and attribution held on every seed. A garbage-collection-off fold document and compaction blobs are affordable at this size.
 
-Garbage collection on was never more than 25 percent smaller than off on every seed (smallest saving 18.3 percent), so there is no size reason to prefer a garbage-collected compaction by default. The fold document stays garbage collection off for versions and deletion records.
+Input for Phase 33's compaction default: garbage collection on was at least 61.3 percent smaller than off on every seed (above the 25 percent mark). The difference is the text of deleted ranges, which garbage collection off keeps so that earlier versions can be restored; this workload is deletion-heavy on purpose (rewrites and deletions). Nothing changes in this phase; the fold document stays garbage collection off for versions and deletion records.
