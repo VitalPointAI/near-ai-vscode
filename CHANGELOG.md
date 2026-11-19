@@ -78,6 +78,16 @@ fictional data only; labels are not accreditation, and no member has a persona n
   ACLED, social media and other sources whose terms restrict this use are off by default, are
   never used for training, and stay off until your organization records a licence; partner
   intelligence enters a staff project only as a fictional simulation kept on this machine.
+- **The COP map.** Staff team members granted `mcp:cop-map` read the COP layers and put military
+  symbols (MIL-STD-2525D and APP-6(D), drawn by milsymbol), control measures, overlays per
+  adversary course of action and decision points on the layer they write, in grid references on
+  the scenario's grid. Each product layer has one writer; anyone else proposes and the writer
+  merges, and each change is a new version a person decides on. Feed layers are views nobody
+  writes. A map component for the Staff Room draws the COP in 2D or on the globe (MapLibre),
+  offline over the scenario's synthetic geography with no map tiles fetched, with a time slider
+  on the shared clock, "as happened" and "as known" replay, symbol cards in words, and a track
+  budget of 2,000; without WebGL it falls back to a 2D SVG map behind the same interface. The J2
+  members that draw the threat and terrain layers are granted it again.
 - **Red team and release guard held to their own files.** In a staff team the red team may write
   only its critique and the release guard only its gate reports. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff

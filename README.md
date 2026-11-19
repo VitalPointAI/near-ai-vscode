@@ -267,7 +267,7 @@ the **NEAR AI: Staff** commands approve, reject or release a product. It then
 offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. The built-in staff servers (`mcp:staff-products`,
-`mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
+`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:cop-map`) are listed on the Tools page and in
 the Team Studio tool picker; only a staff team's run gets them.
 
 For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
@@ -313,6 +313,21 @@ may delete or reach the open world, or says neither way, keeps asking.
 The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
 with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+
+**The COP map** (`mcp:cop-map`) is a built-in local server for military
+staff teams that reaches no network. Members read the COP layers and put
+military symbols, control measures, overlays per adversary course of action
+(ECOA-1 and so on, marked MLCOA or MDCOA) and decision points on the layer they
+write, giving positions as grid references on the scenario's grid; anything
+outside the exercise frame is refused. Each product layer (operations,
+threat, terrain, logistics, plans) has one writer: anyone else's features
+become a proposal in `.planning/staff/proposals/<layer>/` that the writer
+merges, and every change is a new version a person decides on. Hostile and
+other assessed symbols go on the J2's threat layer only; the plans layer is
+kept apart from the current picture. Feed layers are views over observations
+that nobody writes. The map component draws the picture in 2D or on the globe
+offline, over the scenario's synthetic geography, with no map tiles fetched,
+and a time slider on the shared clock.
 
 **The intel workbench** is a built-in local server for military staff J2 teams
 (a team whose file has a `staff:` block). It runs inside the extension, not as
