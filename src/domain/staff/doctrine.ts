@@ -525,6 +525,13 @@ export const ECHELON_ALIASES: Readonly<Record<string, Echelon>> = {
  */
 export const STANDARD_IDENTITIES = ['pending', 'unknown', 'assumed-friend', 'friend', 'neutral', 'suspect', 'hostile', 'joker', 'faker'] as const;
 export type StandardIdentity = (typeof STANDARD_IDENTITIES)[number];
+/**
+ * The letter Cursor on Target writes for each standard identity, second in its type string (`a-h-G` is a hostile ground track; MITRE CoT base schema and
+ * the public CoT type list, note 11 [F1][F58]). The same letters as MIL-STD-2525 affiliations: an exact table, never inferred.
+ */
+export const COT_IDENTITY_CODES: Readonly<Record<StandardIdentity, string>> = {
+  pending: 'p', unknown: 'u', 'assumed-friend': 'a', friend: 'f', neutral: 'n', suspect: 's', hostile: 'h', joker: 'j', faker: 'k'
+};
 
 /** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
 export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
