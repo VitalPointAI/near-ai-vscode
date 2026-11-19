@@ -317,3 +317,11 @@ test('the Staff Room page loads only the vendored map files, under a policy with
   // The panel may read its own folder, the shared stylesheet, the COP map and the vendored libraries, and nothing else.
   assert.deepEqual(panel.staffRoomResourceRoots(uri('/ext') as never).map((root) => root.path), ['/ext/media/staffRoom', '/ext/media/shared', '/ext/media/staff', '/ext/media/vendor']);
 });
+
+test('the room\'s fixed layers are sized to the viewport without its scrollbar, so a page that scrolls never reaches past its right edge', async () => {
+  // e2e found the hand-off effects layer, sized 100vw, ending past the page's edge once the room scrolled: viewport units include the scrollbar.
+  const css = await readFile(path.join(__dirname, '..', '..', 'media', 'staffRoom', 'staffRoom.css'), 'utf8');
+  const fixed = [...css.matchAll(/^([^{}\n]+)\{([^}]*position:\s*fixed[^}]*)\}/gm)];
+  assert.ok(fixed.some((rule) => rule[1].trim() === '.fx'), 'the effects layer is a fixed layer');
+  for (const [, selector, body] of fixed) assert.doesNotMatch(body, /(?:^|;)\s*width:\s*100vw/, `${selector.trim()} must not be 100vw wide`);
+});
