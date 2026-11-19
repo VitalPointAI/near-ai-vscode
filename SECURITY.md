@@ -27,6 +27,7 @@ Last reviewed: 2026-11-15, against the code on `main` plus the messaging relay f
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | A team's knowledge graph | One file per team on this computer, `~/.near-ai-teams/knowledge/<team>.json` (or `knowledge/` under `NEAR_AI_TEAMS_DIR`), never in the project and never synced | What the team's agents add with the Learn tool during runs with that team: actors, what they do, how they relate, and facts with their sources and Admiralty grades. Every member reads it with TeamKnowledge, and its contents go to the model as tool results. A team from your library has one graph for every project it works in; a project's own team (`team.md`) has a graph for that project only. Agents' grades are capped at C3, because a run that read a hostile page could be steered into claiming anything. Team Studio shows it. |
 | A staff team's J2 registers (the intel workbench, `mcp:intel-workbench`) | `.planning/staff/products/j2/source-register.json`, `pir-register.json` and `collection-plan.json` in your project, so they go wherever the project's files go | What the J2 members record: source items with their two grades, origin and deception note; PIRs with their decision points, latest times of value, indicators and any person's decision; and collection recommendations. The tools run inside the extension, reach no network, and declare only these files and `.planning/.near-ai/project.json`, so the gate's label checks apply to them. Entries above org/Internal, NATO Unclassified or Protected A are refused: staff templates hold exercise and fictional data only, and labels are not accreditation. A PIR counts as approved or rejected only when a signed entry in `.planning/staff/ledger/decisions.jsonl` records it: one made by **NEAR AI: Staff: Decide a PIR**, signed with the deciding person's device key, on that exact wording. A decision written into the register by hand or by a member, naming anyone, reads as awaiting a decision. Only members whose tools line grants `mcp:intel-workbench` can call these tools; the run's lead cannot. |
+| A staff team's feed observations (the observation store, read through `mcp:observations`) | `.planning/staff/observations/` in your project, which ignores itself in git, so it is not committed or pushed | Feed reports, one append-only file per feed, channel and hour, each with its label and handling as the feed stamped them; the feed registry and an index of file sizes and hashes; and, for live streams only, the raw messages the reports came from, kept as a documented raw-copy exception (a stream cannot be read again from its source) for a retention period per feed class (72 hours for positions, 30 days for events, 90 days for reports, 7 days for gridded data), with any message over 64 KB kept as its hash and length only. The tools run inside the extension, reach no network, read only this folder and the loaded scenario, and show an agent only reports your clearances cover (none marked no-agent-tools); the chat's label rises to what they show. Labels above org/Internal, NATO Unclassified or Protected A are refused. |
 | A team sent for review (**Improve with AI** in Team Studio, and the description you give when the AI drafts a team) | One model on NEAR AI Cloud or your local runtime, only when you ask, after the outbound check | The team's name, description, and each member's name, role, reports-to line, tools and instructions, plus the local check's findings. Which model may see it follows the team's privacy: a private team (marked `privacy: private`, every member private, or any team, including one being drafted, in a project with a knowledge base, which Team Studio decides from the workspace rather than from what the page sends) goes only to a private model, a NEAR TEE model on NEAR AI Cloud's own endpoint whose attestation NEAR reports as supported or verified (one reported as failed or unverified, or not reported at all, does not count), or a model on this computer; a team with some private members goes to a private model, or, when there is none, without those members' text; any other team goes to a model your settings and TEE-only mode allow. Nothing is sent while the team holds something that looks like a key, token or password. The reply is read as data: the reviewer has no tools, its suggestions never change a model or privacy, and none is applied until you accept it and Save. |
 | A shared team file (**Share…** in Team Studio) | A `.near-team.json` file you save and choose where to send; the extension sends it nowhere | The team file as saved (names, roles, models, tools, instructions), a summary, a format version and a checksum. No file path, setting, key or token. A team holding something that looks like a key or password is refused; one naming a folder on this computer is shared only after you agree. The team's knowledge graph is included only when you choose it, after local paths, non-web sources and secret-looking values are removed. An imported team file is checked, shown and added only with your consent, and stays untrusted until you approve it the first time it would run; its checksum is not a signature. |
 | Team Studio's dashboard | Nothing new is sent anywhere. Your ratings, the last role test of each team, how you last sorted and filtered the dashboard, and a team the AI drafted that you have not yet used or discarded (its name, members, roles, models and instructions, as shown to you) are kept in this extension's own storage on this computer, never synced, and never written into a team file or the project, so a code push never carries them (see below for a line an old development build wrote) | The dashboard reads what is already kept: the project's activity history (each run's title, outcome, times and spend), the live agent activity, and the team files. Ratings and role tests are kept by the team's identity, `user:<name>` for a team in My teams (`archived:<name>` while it is archived) or `project:` and a hash of the project folder's real path, so no path is stored; a new team under an earlier team's name never takes that team's records. A rating is 1 to 5 stars (or cleared), with when it was set; at most 500 are kept. A role test record holds only when it ran, how many members were tested and passed, and the average score; at most 200 are kept. A `rating:` line a development build of this release wrote into a team file (a project team's `team.md` included, so a code push could carry it) is read once into this storage and stays in the file until the team is next saved in Team Studio, which leaves it out; the extension never writes one. The page is given figures and team ids, never a file path. **Share…** and **Import…** leave the rating out, so your opinion is not sent with a team and someone else's is not taken as yours. |
@@ -720,19 +721,21 @@ other agent's. That policy is the only limit: nothing confines the red team's
 writes to `.planning/`, and Bash can reach anywhere the policy allows.
 
 **Staff team write limits.** In a team file with a `staff:` block (the military
-staff templates), two members are held to their own files by the extension, not
+staff templates), three members are held to their own files by the extension, not
 only by their instructions: the `red-team` may write only
-`.planning/staff/products/<section>/red-team-critique.md`, and the
+`.planning/staff/products/<section>/red-team-critique.md`, the
 `release-guard` only its section's gate reports,
-`.planning/staff/products/<section>/guard/`. Write and Edit refuse
+`.planning/staff/products/<section>/guard/`, and the J3 `watch-officer` no file
+at all (it logs by proposing event-log rows through the staff tools). Write and Edit refuse
 any other path outright (no approval card), after resolving `..`, absolute paths
 and links, so a critique or a verdict can never change a plan file. Such a member
 is also given no tool that could write elsewhere (shell, document and graphics
 makers, MCP tools, starting other agents), even when its `tools:` line lists one.
 The one exception is the built-in staff tools it is granted (propose, verdict,
-status, list, the tradecraft lint and guard-scan): they write only the ledger,
-product headers and gate reports, and the extension refuses to let such a
-member register any product outside its own files.
+status, list, the register tools, the tradecraft lint and guard-scan): they write
+only the ledger, product headers, gate reports and register proposals, and the
+extension refuses to let such a member register any product or write any
+register outside its own files.
 Teams without a `staff:` block are unaffected.
 
 **Update Team** rewrites a team file (and, for a project, the extension's own
@@ -767,7 +770,14 @@ what is not:
   computer whose secret storage was cleared, or a ledger read by a build
   without the record. There only the chain is checked. Switching to a git
   branch whose ledger is older than the one this computer saw reads as
-  tampered too, by design.
+  tampered too, by design. **NEAR AI: Staff: Use This Branch's Ledger** is
+  the way back for that case only: it is offered when the ledger is shorter
+  than, or different from, the recorded head and its own signatures and chain
+  verify; a person names themselves and their role, confirms in a dialog that
+  says what changes, and the recorded head moves to this branch's ledger. Who
+  did it is a signed entry in `.planning/staff/ledger/decisions.jsonl`. A
+  ledger whose chain is broken is refused (Set Aside is its way out), and no
+  agent tool can run it.
 - **Unreadable is never empty.** A ledger, wargame ledger, event log or
   register that cannot be read whole (over 2 MB, or refused by the disk) is
   reported as unreadable with the reason, nothing is written to it, and no
@@ -804,13 +814,46 @@ ledger refuses puts the register file back as it was, under the same check.
 The J2 PIR register has one source,
 `.planning/staff/products/j2/pir-register.json`: the PIR register product is
 generated from it (`pir_publish`), a differing product cannot be registered,
-and the tradecraft lint reads the register itself.
+and the tradecraft lint reads the register itself. The staff register tools
+keep no second PIR schema: reading `pir-register` returns that JSON register
+with its decisions checked, and writing or proposing PIR rows there is
+refused. Reading any register is its own read-only tool
+(`mcp__staff-products__register_read`), so a read never asks for a write
+approval. **Decide a PIR** says why the PIR register cannot be read when it
+cannot, rather than saying no PIR is waiting.
 
 Approve, reject, release and withdraw-after-a-decision exist only as VS Code
 commands a person runs and confirms in a dialog. No agent tool offers them,
 and the state machine refuses them from any agent whatever calls it. A
 person's decision names them and their role and is signed with this device's
 key. Until verified credentials arrive, that name and role are self-declared.
+
+A project moves from planning to execution only when a person approves the
+transition brief (`transition-brief`); the phase is read from the signed
+ledger, so no agent can start execution, and from then on the J3 members, not
+the planners, write the synchronization matrix, the DST and DSM and the
+assessment plan. A product the J5 made in planning stays in the J5 folder the
+ledger recorded; after the approval the J3 writer writes it there, the J5 is
+refused and proposes instead, and status names the new writer and the
+approval that moved it. A version still open under the J5 at that point is
+withdrawn by a person (or by its J5 owner) before the J3 writes the next one.
+The Staff Room panel only reads: the ledger, the event log, the files
+under `.planning/staff/` and the observation store. Its page gets display data
+only, through `textContent`, under the COP map's content security policy (see
+"COP map" below): no inline script, no `'unsafe-eval'`, no `'unsafe-inline'`
+and no remote source. The panel may load files only from its own folder, the
+shared stylesheet, `media/staff/` (the map component) and `media/vendor/` (the
+vendored map libraries). The COP picture it sends holds only the observations
+the person's clearance covers: the rows come from the store's reader view,
+which drops every row the gate's own check does not cover before anything is
+built from them, and with no gate in the window no observation is read. Every
+message from the page is checked for its type, exact keys and the form of
+each value. A decision button sends only the product and the version hash the
+person saw; the extension then runs the same person-only command, which asks
+who they are, confirms in a dialog and signs, and refuses a product that
+changed. The event log is not signed, so the room shows a person's decision,
+and names a person on a section, only when the signed ledger holds it; a
+decision in the log that the ledger does not hold is shown as not counted.
 
 The tools record what they do inside the project only and send nothing out.
 They declare every project file they read (the staff folder, the project's
@@ -827,6 +870,35 @@ file, so review changes to it. guard-scan and the scenario import read the same
 list from both files, so a name in either is held in products and refused in
 scenarios. Staff templates are for exercise and fictional
 data only: labels are not accreditation.
+
+In a J4 logistics team, guard-scan holds any number that has no calculator
+record on its line (`calc:<id>`), or a `calc:<id>` the calculator did not
+write. Every record the logistics server writes to
+`.planning/staff/calculator/<id>.json` is entered in the calculator ledger,
+`.planning/staff/ledger/calculator.jsonl`: one entry per record holding the
+SHA-256 of the record file, signed with this device's key and chained to the
+entry before it, like the product ledger. A record counts only when its file
+matches a trusted entry. A file a member wrote by hand has no entry, and a
+record changed after the calculator wrote it no longer matches its hash, so
+guard-scan holds a product that cites either one and says which. An agent
+never holds the key, so it cannot add an entry that verifies; a removed,
+reordered or forged entry breaks the chain, and no record after it is
+trusted. Records never change: a revised calculation is a new record.
+
+The calculator takes no rate from an agent. Rates are planning factors a person
+enters in `.planning/.near-ai/staff-factors.json`, which an agent must ask
+before changing, and every result shows its formula with each factor and who
+entered it. The extension ships no planning factor tables. Readiness data comes
+only from a CSV file a person puts in the project, and each import records the
+file's name and hash. Movement tables are notional, and a table naming a real
+deployment database is refused. Road routing runs on a road graph in the
+project (`.planning/staff/logistics/roads.json`); no route request leaves the
+machine, and no logistics tool declares a network effect.
+
+The LOGSTAT analyst has no file tools at all, so it can flag a report but
+never change one: its validation tool writes only the validation log and its
+product, and every consolidation checks the plausibility rules again rather
+than trusting the log.
 
 ### Exercise scenarios for staff teams
 
@@ -846,6 +918,73 @@ refused file writes nothing. An earlier scenario is moved to
 a folder on the way is a symbolic link. These checks keep the inputs clean;
 they are not an accreditation, and real operational material belongs on
 accredited systems.
+
+**The exercise feed simulation** (**NEAR AI: Staff: Start the Exercise Feed
+Simulation**) opens two Cursor on Target streams and one AIS stream over TCP,
+and one HTTP server for the RSS outlets and the mock partner MCP server, all
+bound to 127.0.0.1 and nothing else. It opens no outbound connection and no
+UDP or multicast socket, and transmits on no radio. The HTTP server answers
+only requests addressed to this machine's own names and refuses requests from
+a web page of any other origin, so a browser page cannot read it by DNS
+rebinding. Request bodies are capped and a client that falls behind is
+dropped. Every message is fictional and marked SIM; ship radio ids come from
+a range below the lowest that the ITU allocates, and RSS links point at the
+reserved `.invalid` domain. The partner reports are labelled, marked
+simulated and routed local-only, and a person must add the mock partner
+server before any team can call it. Stopping the simulation, or closing the
+window, closes every server. With a project folder open, the simulation also takes its own CoT, AIS and
+RSS reports straight into that project's observation store (in the extension,
+not over the network), stamped with each simulated feed's label and marked
+simulated, and records the feeds' state changes in the staff event log. The
+person who started the simulation is recorded as the person who approved its
+feeds. The partner feed is never taken in this way. Stopping the simulation
+pauses its feeds in the store.
+
+### COP map
+
+The `cop-map` server (`mcp:cop-map`) is built in and runs inside the
+extension; it declares only the staff files it reads and writes and names no
+host. Each COP product layer (operations, threat, terrain, logistics, plans)
+has exactly one writer, from the staff ownership table, resolved for the
+team's roster so a member that stands in for a folded job writes it. Anyone
+else's features are written to `.planning/staff/proposals/<layer>/` for the
+writer to merge, and the staff products host checks the writer again when the
+new version is recorded; a version the host refuses puts the layer file back
+exactly as it was. Feed layers are views over observations: no tool writes a
+feature into one. Hostile, suspect, neutral and unknown symbols (the J2's
+assessment) go on the threat layer only, every position must lie inside the
+scenario's exercise frame over empty ocean, every feature carries an exercise
+label, and a layer's label is the join of its features' labels. What one
+member wrote is shown to another agent fenced as untrusted data.
+
+The map page draws the scenario's synthetic geography and requests no map
+tile, glyph, sprite or font: an outside tile request would reveal the area of
+interest. Its only requests are the vendored files under `media/vendor/` and
+the map worker, started from a blob. Spike result (2026-11-18): MapLibre GL
+JS 6.16.0 runs under the page policy `default-src 'none'; script-src
+'nonce-…'; style-src <extension>; img-src <extension> data: blob:; font-src
+<extension>; worker-src blob:; connect-src <extension>` with no
+`'unsafe-eval'`, no `'unsafe-inline'` and no new script source: the nonced
+page script imports the vendored module, fetches the vendored worker from the
+extension and starts it from a blob URL. Checked with
+`scripts/spike-cop-map-csp.mjs` in headless Chromium with the page and the
+resources on two loopback origins, as in a webview: no policy violation, the
+globe and the 2D map both render, and 2,000 moving tracks at 10 updates a
+second kept 60 frames a second with no long task (5,000 doubled the slowest
+frames, so the map draws at most 2,000 tracks and says how many it left out).
+Without WebGL, or if the library cannot start, the page falls back to a 2D
+SVG map behind the same interface and says why.
+
+The Staff Room embeds this component in the J2 workspace and the war room
+through the same interface, under the same policy, and keeps its own SVG map
+as the fallback, with the reason on the map. Checked on 2026-11-18 with
+`scripts/spike-cop-map-csp.mjs <chrome> --room`, which loads the Staff Room
+page exactly as the panel writes it: no policy violation, MapLibre running,
+and the only requests the page's own files, the vendored files and the worker
+blob. With `--no-webgl` the room shows its SVG map and the line "2D map:
+WebGL is not available in this window.", and no two of its 44 name labels
+overlap as the browser measures them. Map names are drawn by MapLibre from
+the system's own font, so no glyph is fetched.
 
 ## The outbound check
 
@@ -1053,6 +1192,19 @@ in `vendor/manifest.json` from esbuild's record of what it bundled:
 | imagetracer.js | 1.2.6 | Unlicense | Tracing images into SVG |
 | pptxgenjs (with jszip and 12 small helpers) | 4.0.1 | MIT | Writing .pptx decks |
 | DejaVu Sans | 2.37.3 | Bitstream Vera | Text in rendered SVG |
+
+The COP map page's two libraries are committed under `media/vendor/` byte for
+byte from their published npm packages, each with its license, and
+`media/vendor/VENDORED.json` records their versions, npm integrity and the
+hash of every file. `src/test/staffCopSymbols.test.ts` checks every file in the
+working tree against those hashes, and `npm run verify:release` checks the same hashes on the
+bytes inside the packaged VSIX, so a changed or substituted copy fails CI and the release; they are never fetched at run time
+and enter the SBOM from that file:
+
+| Package | Version | License | Used for |
+| --- | --- | --- | --- |
+| MapLibre GL JS (`maplibre-gl`) | 6.16.0 | BSD-3-Clause | The COP map, 2D and globe (WebGL) |
+| milsymbol | 3.0.5 | MIT | MIL-STD-2525 and APP-6 military symbols |
 
 Every release carries `sbom.cdx.json` (CycloneDX 1.6) for those components.
 `npm run sbom` builds it and checks each one on OSV.dev; the release fails on a

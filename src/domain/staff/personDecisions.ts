@@ -1,5 +1,6 @@
 // A person's decisions outside the product release machine (design 10, 3.1 and 4.1: members never decide; review round 3 of drop 1). Today that is a
-// PIR's approval or rejection. A decision counts only when a signed entry in the decision log recorded it: the log is `.planning/staff/ledger/
+// PIR's approval or rejection, and a person's choice to use this branch's product ledger (the head this computer checks it against moves to it). A
+// decision counts only when a signed entry in the decision log recorded it: the log is `.planning/staff/ledger/
 // decisions.jsonl`, one entry per line, each signed with the deciding person's device key (purpose `staff-decision`) and chained to the one before, the
 // same way the product ledger is. A decision block written into a register file by hand, or by a member with Write, is never trusted from the file
 // alone: without a matching signed entry it reads as not decided. Pure: no I/O, no clock, no vscode.
@@ -16,8 +17,12 @@ export const DECISION_LOG_GENESIS = '0'.repeat(64);
 const MAX_REASONS = 10;
 const MAX_REASON = 500;
 
-/** What a person decided on: a PIR in the J2 PIR register, by its id. */
-export interface DecisionSubject { readonly kind: 'pir'; readonly id: string }
+/**
+ * What a person decided on: a PIR in the J2 PIR register, by its id; or the product ledger head this computer checks against (`ledger-head`, its id the
+ * number of entries, its wording the digest of the last one), when a person chose to use this branch's ledger.
+ */
+export type DecisionSubject = { readonly kind: 'pir'; readonly id: string } | { readonly kind: 'ledger-head'; readonly id: string };
+export const DECISION_SUBJECT_KINDS: ReadonlyArray<DecisionSubject['kind']> = ['pir', 'ledger-head'];
 
 export interface PersonDecisionEntry {
   readonly v: 1;
@@ -27,7 +32,7 @@ export interface PersonDecisionEntry {
   readonly at: string;
   readonly subject: DecisionSubject;
   readonly decision: 'approved' | 'rejected';
-  /** A hash of the exact wording decided on (pirWording): a later change to the wording voids the decision. */
+  /** A hash of the exact wording decided on (pirWording): a later change to the wording voids the decision. For a ledger head, the head's digest. */
   readonly wording: string;
   readonly reasons: readonly string[];
   readonly person: PersonActor;
@@ -59,7 +64,7 @@ export function parsePersonDecision(value: unknown): PersonDecisionEntry | undef
   if (typeof ownValue(value, 'prev') !== 'string' || !HEX64.test(ownValue(value, 'prev') as string)) return undefined;
   if (typeof ownValue(value, 'wording') !== 'string' || !HEX64.test(ownValue(value, 'wording') as string)) return undefined;
   if (typeof ownValue(value, 'at') !== 'string' || Number.isNaN(Date.parse(ownValue(value, 'at') as string))) return undefined;
-  if (!isRecord(subject) || ownValue(subject, 'kind') !== 'pir' || !isOneLine(ownValue(subject, 'id'), 40) || Object.keys(subject).length !== 2) return undefined;
+  if (!isRecord(subject) || !(DECISION_SUBJECT_KINDS as readonly unknown[]).includes(ownValue(subject, 'kind')) || !isOneLine(ownValue(subject, 'id'), 40) || Object.keys(subject).length !== 2) return undefined;
   const decision = ownValue(value, 'decision');
   if (decision !== 'approved' && decision !== 'rejected') return undefined;
   if (!isRecord(person) || !isNamedPerson(person as never)) return undefined;

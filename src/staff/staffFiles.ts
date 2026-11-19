@@ -18,13 +18,13 @@ export type WholeRead =
   | { readonly kind: 'text'; readonly text: string; readonly bytes: Buffer }
   | { readonly kind: 'unreadable'; readonly reason: string };
 
-/** A file read whole, or why not. */
-export async function readWhole(file: string): Promise<WholeRead> {
+/** A file read whole, or why not. `max` is the size limit (2 MB unless a store sets its own, such as the observation store's 8 MB segments). */
+export async function readWhole(file: string, max: number = MAX_STAFF_FILE_BYTES): Promise<WholeRead> {
   let size: number;
   try { size = (await stat(file)).size; } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', reason: `it could not be opened (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
   }
-  if (size > MAX_STAFF_FILE_BYTES) return { kind: 'unreadable', reason: `it is larger than ${MAX_STAFF_FILE_BYTES / (1024 * 1024)} MB` };
+  if (size > max) return { kind: 'unreadable', reason: `it is larger than ${Math.round(max / (1024 * 1024))} MB` };
   try {
     const bytes = await readFile(file);
     return { kind: 'text', text: bytes.toString('utf8'), bytes };

@@ -7,11 +7,12 @@
 // - J2 registers:    .planning/staff/products/j2/{source-register,pir-register,collection-plan}.json (intel.ts; the source register is the one
 //                    the tradecraft lint reads)
 // - the ledger:      .planning/staff/ledger/products.jsonl, one signed entry per line, chained (src/domain/staff/ledger.ts)
-// - the events:      .planning/staff/ledger/events.jsonl, one staff event per line, for the Staff Room, Team Live and replay
+// - the events:      .planning/staff/ledger/events.jsonl, one staff or feed event per line (ALL_STAFF_EVENT_TYPES), for the Staff Room, Team Live and replay
 // - the wargame:     .planning/staff/wargame/ledger.jsonl
 // - proposals:       .planning/staff/proposals/<product>/ (design 10, 4.3)
 // - guard settings:  .planning/.near-ai/staff-guard.json (the exercise box and real entities; agents must ask before writing there), and
 //                    .planning/staff/real-entities.txt (more real entities, one per line, shared with the demo scenario import)
+// - calculator:      .planning/staff/calculator/<id>.json and its signed ledger .planning/staff/ledger/calculator.jsonl (src/staff/logisticsHost.ts)
 //
 // Two kinds of caller reach this host and nothing else does. A team member, through the staff-products, guard-scan and lint tools (src/agent/staffTools.ts),
 // which can only propose, give a gate verdict, submit, withdraw, read and write registers, record the wargame and mark a step. And a person, through
@@ -36,6 +37,8 @@ import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import { STAFF_SECTION_IDS } from '../domain/staff/doctrine';
 import type { CrosswalkStep, StaffLevel, StaffProfileId, StaffSectionId } from '../domain/staff/doctrine';
 import { eventsForTransition, STAFF_EVENT_TYPES } from '../domain/staff/events';
+import { ALL_STAFF_EVENT_TYPES, feedPicture, isFeedEventType } from '../domain/staff/obs/events';
+import type { FeedEvent, FeedPictureModel } from '../domain/staff/obs/events';
 import type { CcirTriggeredEvent, DecisionOption, StaffEvent, StepEnteredEvent, WaitingEvent } from '../domain/staff/events';
 import { guardScan, guardScanText } from '../domain/staff/guardScan';
 import type { ExerciseBox, GuardConfig, GuardScanResult } from '../domain/staff/guardScan';
@@ -44,7 +47,8 @@ import {
   parseLedgerHeadMark, productHash, projectHeader, RELEASE_GUARD_SLUG, replayLedger, RESERVED_MEMBER_SLUGS, TAMPER_REASONS, TRADECRAFT_REVIEWER_SLUG, TRADECRAFT_SECTIONS
 } from '../domain/staff/ledger';
 import type { DecisionRequestInput, LedgerEntry, LedgerHeadMark, LedgerReplay, ProductMetaInput, ProductState, TamperReason } from '../domain/staff/ledger';
-import { mayWrite, proposalFolder, sharedProduct, writerIn, writerOf } from '../domain/staff/ownership';
+import { handsOverAtTransition, mayWrite, phaseFrom, proposalFolder, sharedProduct, TRANSITION_PRODUCT, writerIn, writerOf } from '../domain/staff/ownership';
+import type { StaffPhase } from '../domain/staff/ownership';
 import { isOneLine, STAFF_SLUG } from '../domain/staff/parse';
 import { LABEL_PATTERN, parseProductHeader, PRODUCT_KINDS, renderProductHeader, splitProductFile, STAFF_MARKERS } from '../domain/staff/products';
 import type { ProductDependency, ProductHeader, ProductKind } from '../domain/staff/products';
@@ -60,6 +64,7 @@ import type { TradecraftFinding } from '../domain/staff/tradecraftLint';
 import { checkOrder, deriveFromWargame, parseWargamePhase, wargameTurnEvent } from '../domain/staff/wargame';
 import type { WargameEntry } from '../domain/staff/wargame';
 import { withFileLock } from '../services/stateMirrorLock';
+import { LogisticsHost, readCalculatorCheck } from './logisticsHost';
 
 export const LEDGER_DIR = '.planning/staff/ledger';
 export const LEDGER_FILE = 'products.jsonl';
@@ -76,7 +81,7 @@ export const EVENTS_FILE = 'events.jsonl';
 export const WARGAME_DIR = '.planning/staff/wargame';
 export const WARGAME_FILE = 'ledger.jsonl';
 export { GUARD_CONFIG_FILE, REAL_ENTITIES_FILE } from '../domain/staff/realEntities';
-export const CALCULATOR_DIR = '.planning/staff/calculator';
+export { CALCULATOR_RECORD_DIR as CALCULATOR_DIR } from '../domain/staff/logistics/calculator';
 /** The source register the tradecraft lint reads when a product carries no sources block of its own (intel-workbench writes it). */
 export const SOURCES_FILE = registerPath('source-register');
 const LEDGER_LOCK = 'ledger.lock';
@@ -94,6 +99,23 @@ const PIR_REGISTER_ELSEWHERE = 'The PIR register is kept by the intel workbench 
 
 export function productPath(section: StaffSectionId, product: string): string {
   return staffProductPath(section, product);
+}
+
+/**
+ * Whether a product is one whose writer changes at transition (ownership.ts handsOverAtTransition), and so may be written by a member of a section other
+ * than the one that made it.
+ *
+ * Where the file stays: the J5 makes the DST and DSM and the synchronization matrix in planning, at .planning/staff/products/j5/<product>.md, and the
+ * ledger fixes a product's section at its first entry (ledger.ts apply refuses an entry for another section). After a person approves the transition
+ * brief, the J3 writer keeps writing that same file in the J5 folder. Moving it would need a second product (its history split across two ledger lines)
+ * or a ledger entry that changes a section (a new kind of step the state machine and every older ledger would have to learn), would leave gate reports
+ * and every reader that finds the product by its recorded section (the Staff Room's DSM, the J2's decision points) pointing at the old place, and would
+ * put the host in the business of moving a file members can also write. In place, the product keeps one ledger line, one file and one path; only the
+ * writer changes, and the registry and status say who writes it now and why (readModels.ts handoverOf). The J3 writes a register through the register
+ * tool, which the host writes, so no member needs Write on another section's folder.
+ */
+function handedOverInPlace(product: string): boolean {
+  return handsOverAtTransition(product);
 }
 
 /** The team a staff run works with, as the tools see it: its section, its members, and the member who leads (integrates) the section. */
@@ -152,6 +174,36 @@ export function unreadableText(file: string, reason: string, wayOut: string): st
 }
 
 const SET_ASIDE_WAY_OUT = 'A person can set it aside with NEAR AI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
+/** The way out of a ledger that reads as tampered only because it is not the copy this computer recorded (another git branch's, for example). */
+export const USE_BRANCH_LEDGER_WAY_OUT = 'If you switched to another git branch, a person can use NEAR AI: Staff: Use This Branch\'s Ledger, which checks this ledger\'s own signatures and chain and then makes it the one this computer checks against.';
+
+/** The reasons a ledger reads as tampered that Use This Branch's Ledger answers: shorter than, or different from, the head this computer recorded. */
+function otherCopyReason(reason: string | undefined): 'truncated' | 'replaced' | undefined {
+  return reason === LEDGER_PROBLEMS.truncated ? 'truncated' : reason === LEDGER_PROBLEMS.replaced ? 'replaced' : undefined;
+}
+
+/** For a product that reads as tampered because the ledger is another copy than the one recorded: the sentence that names Use This Branch's Ledger. */
+function tamperWayOut(tampered: string | undefined): string {
+  return otherCopyReason(tampered) ? ` ${USE_BRANCH_LEDGER_WAY_OUT}` : '';
+}
+
+/** The ways out of a broken ledger, for the reason it broke. */
+function ledgerWayOut(reason: string): string {
+  return otherCopyReason(reason) ? `${USE_BRANCH_LEDGER_WAY_OUT} Otherwise: ${SET_ASIDE_WAY_OUT}` : SET_ASIDE_WAY_OUT;
+}
+
+/**
+ * How this project's ledger stands against the head this computer recorded, for Use This Branch's Ledger:
+ *  - `current`: it reads as the copy this computer recorded (or there is no record), so there is nothing to use;
+ *  - `other-copy`: it verifies on its own (every signature, the whole chain) but is shorter than, or different from, the recorded head;
+ *  - `broken`: it does not verify on its own, so it cannot be used (Set Aside is the way out);
+ *  - `unreadable`: it cannot be read whole.
+ */
+export type BranchLedgerCheck =
+  | { readonly kind: 'current' }
+  | { readonly kind: 'other-copy'; readonly reason: 'truncated' | 'replaced'; readonly recorded: number; readonly entries: number; readonly products: number; readonly head: string }
+  | { readonly kind: 'broken'; readonly message: string }
+  | { readonly kind: 'unreadable'; readonly message: string };
 
 /** The refusal for a product file over the size limit: it is there, but too large to read, so nothing acts on it. */
 export function tooLargeText(file: string, reason = `it is larger than ${MAX_FILE_BYTES / (1024 * 1024)} MB`): string {
@@ -176,8 +228,16 @@ export function fileDisagreement(state: ProductState, file: ProductFile): Tamper
   return file.header && file.header.version !== state.record.version ? 'header-version' : undefined;
 }
 
+/** One line of the staff event log: a staff event of design 10, or a feed or watch event of research note 11 (src/domain/staff/obs/events.ts). */
+export type StaffLogEvent = StaffEvent | FeedEvent;
+
+function isStaffEvent(event: StaffLogEvent): event is StaffEvent {
+  return (STAFF_EVENT_TYPES as readonly string[]).includes(event.type);
+}
+
 export class StaffHost {
   private readonly listeners = new Set<(event: StaffEvent) => void>();
+  private readonly feedListeners = new Set<(event: FeedEvent) => void>();
   private readonly now: () => number;
 
   public constructor(private readonly options: StaffHostOptions) {
@@ -186,10 +246,24 @@ export class StaffHost {
 
   public get root(): string { return this.options.root; }
 
+  private logisticsHost: LogisticsHost | undefined;
+
+  /** The logistics server's files for this project (WP-LOG), signed with the same device key as the product ledger. */
+  public logistics(): LogisticsHost {
+    this.logisticsHost ??= new LogisticsHost(this.options);
+    return this.logisticsHost;
+  }
+
   /** Called with every staff event this host writes. Returns the function that stops it. */
   public onEvent(listener: (event: StaffEvent) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  /** Called with every feed and watch event this host writes (the feed panel, the feed layers, the watch board). Returns the function that stops it. */
+  public onFeedEvent(listener: (event: FeedEvent) => void): () => void {
+    this.feedListeners.add(listener);
+    return () => { this.feedListeners.delete(listener); };
   }
 
   // ---- The ledger ---------------------------------------------------------------------------------------------------------------------------
@@ -257,7 +331,7 @@ export class StaffHost {
     await mkdir(this.ledgerDir(), { recursive: true });
     return withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
       const replay = await this.replay();
-      if (replay.broken) return refuse(`The staff ledger cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded, and nothing more can be until a person looks at it. ${SET_ASIDE_WAY_OUT}`);
+      if (replay.broken) return refuse(`The staff ledger cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was recorded, and nothing more can be until a person looks at it. ${ledgerWayOut(replay.broken.reason)}`);
       const drafts = await decide(replay);
       if (!Array.isArray(drafts)) return drafts;
       if (replay.entries + drafts.length > MAX_LEDGER_ENTRIES) return refuse('The staff ledger is full. A person can set it aside and start a new one.');
@@ -310,6 +384,58 @@ export class StaffHost {
     return present ? path.relative(this.options.root, kept).split(path.sep).join('/') : '';
   }
 
+  /** How the ledger stands against the head this computer recorded (BranchLedgerCheck). Reads only. */
+  public async branchLedgerCheck(): Promise<BranchLedgerCheck> {
+    const status = await this.options.keyStatus();
+    const read = await this.ledgerLines();
+    if ('unreadable' in read) return { kind: 'unreadable', message: unreadableText(`${LEDGER_DIR}/${LEDGER_FILE}`, read.unreadable, SET_ASIDE_WAY_OUT) };
+    const mark = await this.readHead(status);
+    const verify = (envelope: unknown) => verifyPayload(envelope, { purpose: 'staff-ledger', status });
+    // The ledger on its own, with no recorded head: every signature and the whole chain must hold.
+    const alone = replayLedger(read.lines, verify);
+    if (alone.broken) return { kind: 'broken', message: `This ledger cannot be used: it does not verify on its own from entry ${alone.broken.seq + 1}. ${alone.broken.reason} ${SET_ASIDE_WAY_OUT}` };
+    if (mark === 'unverified') return { kind: 'broken', message: `${LEDGER_PROBLEMS['head-unverified']} ${SET_ASIDE_WAY_OUT}` };
+    if (mark === undefined) return { kind: 'current' };
+    const reason = otherCopyReason(replayLedger(read.lines, verify, mark).broken?.reason);
+    if (!reason) return { kind: 'current' };
+    return { kind: 'other-copy', reason, recorded: mark.count, entries: alone.entries, products: alone.products.size, head: alone.head };
+  }
+
+  /**
+   * Use This Branch's Ledger (the person-only command of that name; no agent tool calls it): a named person makes this branch's ledger the one this
+   * computer checks against. Only for a ledger that reads as tampered because it is shorter than, or different from, the recorded head, and that
+   * verifies on its own; checked again under the ledger lock, against exactly the head the person was shown. Who did it is recorded first, as a signed
+   * entry in the decision log (subject `ledger-head`), and only then does the recorded head move. A broken ledger is refused: Set Aside is its way out.
+   */
+  public async adoptBranchLedger(person: PersonActor, expected: { readonly head: string; readonly entries: number }): Promise<StaffResult> {
+    if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const signer = await this.options.signer();
+    if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    if (!this.options.headStore) return refuse('This computer keeps no record of the ledger head here, so there is nothing to change.');
+    await mkdir(this.ledgerDir(), { recursive: true });
+    return withFileLock(this.ledgerDir(), LEDGER_LOCK, async () => {
+      const check = await this.branchLedgerCheck();
+      if (check.kind === 'broken' || check.kind === 'unreadable') return refuse(`${check.message} Nothing was changed.`);
+      if (check.kind === 'current') return refuse('The staff ledger already reads as the copy this computer recorded. Nothing was changed.');
+      if (check.head !== expected.head || check.entries !== expected.entries) return refuse('The staff ledger changed since you looked at it, so nothing was changed. Run the command again to see it as it is now.');
+      const at = this.now();
+      const logged = await withFileLock(this.ledgerDir(), DECISION_LOCK, async () => {
+        const replay = await this.decisionReplay();
+        if (replay.broken) return refuse(`The decision log cannot be trusted from entry ${replay.broken.seq + 1}: ${replay.broken.reason} Nothing was changed, because who used this ledger could not be recorded.`);
+        const record: PersonDecisionEntry = {
+          v: 1, seq: replay.entries, prev: replay.head, at: isoOf(at), subject: { kind: 'ledger-head', id: String(check.entries) }, decision: 'approved', wording: check.head,
+          reasons: [`Use this branch's ledger: this computer had recorded ${check.recorded} entries; this ledger has ${check.entries} (${check.reason === 'truncated' ? 'shorter' : 'a different history'}).`], person
+        };
+        const envelope = signPayload(signer, 'staff-decision', record, { now: () => new Date(at) });
+        await appendFile(path.join(this.ledgerDir(), DECISION_LOG_FILE), `${JSON.stringify(envelope)}\n`, 'utf8');
+        return undefined;
+      });
+      if (logged) return logged;
+      await this.writeHead(check.entries, check.head);
+      return ok(`This branch's staff ledger (${check.entries} entries, ${check.products} products) is now the one this computer checks against, by ${person.name} (${person.role}), recorded in ${LEDGER_DIR}/${DECISION_LOG_FILE} and signed with this device's key.`);
+    });
+  }
+
   // ---- A person's decisions outside the release machine (PIRs) --------------------------------------------------------------------------------
 
   /**
@@ -349,14 +475,14 @@ export class StaffHost {
     return undefined;
   }
 
-  /** The PIRs a person can decide on now: those awaiting a decision once every written decision is checked against the log. */
-  public async pirsAwaitingDecision(): Promise<PirEntry[]> {
-    const file = path.join(this.options.root, registerPath('pir-register'));
-    const read = await readWhole(file);
-    if (read.kind !== 'text') return [];
-    const parsed = parseRegisterText('pir-register', read.text);
-    if (!parsed.ok) return [];
-    return trustPirDecisions(parsed.value, await this.pirDecisions()).entries.filter((entry) => entry.status === 'awaiting-decision');
+  /**
+   * The PIRs a person can decide on now: those awaiting a decision once every written decision is checked against the log. A register that cannot be
+   * read whole, or does not parse, is never read as having none: the reason comes back, so Decide a PIR says it instead of "no PIR is waiting".
+   */
+  public async pirsAwaitingDecision(): Promise<{ readonly entries: PirEntry[] } | { readonly unreadable: string }> {
+    const register = await this.pirRegister();
+    if ('unreadable' in register) return register;
+    return { entries: (register.entries ?? []).filter((entry) => entry.status === 'awaiting-decision') };
   }
 
   /**
@@ -401,33 +527,39 @@ export class StaffHost {
 
   // ---- Events ---------------------------------------------------------------------------------------------------------------------------------
 
-  /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ). */
+  /** Every staff event recorded for this project, oldest first (the last MAX_EVENTS_READ); feed events are in feedEvents. */
   public async events(): Promise<StaffEvent[]> {
-    return (await this.eventsRead()).events;
+    return (await this.eventsRead()).events.filter(isStaffEvent);
+  }
+
+  /** Every feed and watch event recorded for this project, oldest first: what the feed panel, the feed layers and the watch board draw. */
+  public async feedEvents(): Promise<FeedEvent[]> {
+    return (await this.eventsRead()).events.filter((event): event is FeedEvent => !isStaffEvent(event));
   }
 
   /**
    * The event log, or why it cannot be read whole. The ledger, not this log, is the record of the products; an unreadable log shows no steps or COP and
    * says so (snapshot's eventLogProblem), and nothing more is appended to it.
    */
-  private async eventsRead(): Promise<{ readonly events: StaffEvent[]; readonly unreadable?: string }> {
+  private async eventsRead(): Promise<{ readonly events: StaffLogEvent[]; readonly unreadable?: string }> {
     const read = await readWhole(path.join(this.ledgerDir(), EVENTS_FILE));
     if (read.kind === 'unreadable') return { events: [], unreadable: unreadableText(`${LEDGER_DIR}/${EVENTS_FILE}`, read.reason, 'Move it aside by hand; the product ledger is unaffected.') };
     if (read.kind === 'missing') return { events: [] };
     const text = read.text;
-    const out: StaffEvent[] = [];
+    const out: StaffLogEvent[] = [];
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try {
-        const value = JSON.parse(line) as StaffEvent;
-        if (value && typeof value === 'object' && (STAFF_EVENT_TYPES as readonly string[]).includes(value.type)) out.push(value);
+        const value = JSON.parse(line) as StaffLogEvent;
+        // Feed and watch events are kept beside the staff events (research note 11, 4.2 and 4.5): one log, one order, one replay.
+        if (value && typeof value === 'object' && ALL_STAFF_EVENT_TYPES.includes(value.type)) out.push(value);
       } catch { /* a damaged line is skipped; the ledger, not the event log, is the record */ }
     }
     return { events: out.slice(-MAX_EVENTS_READ) };
   }
 
   /** Writes events to the project's event log and sends them to every listener, each once. */
-  public async emit(events: readonly StaffEvent[]): Promise<void> {
+  public async emit(events: readonly StaffLogEvent[]): Promise<void> {
     if (!events.length) return;
     await mkdir(this.ledgerDir(), { recursive: true });
     await withFileLock(this.ledgerDir(), EVENTS_LOCK, async () => {
@@ -435,7 +567,10 @@ export class StaffHost {
       if ((await readWhole(path.join(this.ledgerDir(), EVENTS_FILE))).kind === 'unreadable') return;
       await appendFile(path.join(this.ledgerDir(), EVENTS_FILE), `${events.map((event) => JSON.stringify(event)).join('\n')}\n`, 'utf8');
     });
-    for (const event of events) for (const listener of this.listeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
+    for (const event of events) {
+      if (isStaffEvent(event)) for (const listener of this.listeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
+      else for (const listener of this.feedListeners) { try { listener(event); } catch { /* a listener never stops the record */ } }
+    }
   }
 
   /** Events other parts of the extension observe (lanes, merges, nested teams, COP layers) enter the same log through here. */
@@ -443,6 +578,13 @@ export class StaffHost {
     const allowed: readonly string[] = ['staff.lane.started', 'staff.lane.finished', 'staff.merge.started', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.team.nested', 'staff.cop.updated'];
     if (!allowed.includes(event.type)) throw new Error(`${event.type} is written by the staff-products host itself.`);
     await this.emit([event]);
+  }
+
+  /** Feed and watch events from the observation store, the importers, the simulator and the watches enter the same log through here. */
+  public async recordFeed(events: readonly FeedEvent[]): Promise<void> {
+    const wrong = events.find((event) => !isFeedEventType(event.type));
+    if (wrong) throw new Error(`${String(wrong.type)} is not a feed event.`);
+    await this.emit(events);
   }
 
   private transitionEvents(written: readonly LedgerEntry[], replay: LedgerReplay): StaffEvent[] {
@@ -546,9 +688,13 @@ export class StaffHost {
     }
     // The one real-entity list (src/staff/realEntities.ts): the guard settings' names and the list file's, as the scenario loader reads them.
     const entities = await readRealEntities(this.options.root);
-    let records: Set<string> | undefined;
-    try { records = new Set((await readdir(path.join(this.options.root, CALCULATOR_DIR))).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5))); } catch { records = undefined; }
-    return { ...(box ? { exerciseBox: box } : {}), realEntities: entities, ...(records ? { calculatorRecords: records } : {}) };
+    // The calculator records a J4 number may cite: only those whose file matches a trusted entry in the calculator ledger (WP-LOG). A file a member wrote
+    // by hand, or changed after the calculator wrote it, is held with the reason; with no records at all, every calc:<id> names no record.
+    const calculator = await readCalculatorCheck(this.options.root, await this.options.keyStatus());
+    return {
+      ...(box ? { exerciseBox: box } : {}), realEntities: entities, calculatorRecords: calculator.verified,
+      ...(calculator.problems.size ? { calculatorProblems: calculator.problems } : {})
+    };
   }
 
   // ---- Who may act ---------------------------------------------------------------------------------------------------------------------------
@@ -567,6 +713,15 @@ export class StaffHost {
     if (tradecraft && !team.members.includes(TRADECRAFT_REVIEWER_SLUG)) return refuse(`This J2 team has no ${TRADECRAFT_REVIEWER_SLUG} member, and J2 products pass the tradecraft gate before the release-guard.`);
     if (owner === RELEASE_GUARD_SLUG || owner === TRADECRAFT_REVIEWER_SLUG) return refuse('A gate member checks products; it does not own them.');
     return { owner, sectionLead: team.sectionLead, releaseGuard: RELEASE_GUARD_SLUG, ...(tradecraft ? { tradecraftReviewer: TRADECRAFT_REVIEWER_SLUG } : {}) };
+  }
+
+  /**
+   * The phase the project is in, read from the decision log: execution once a person has approved the transition brief (ownership.ts phaseFrom), so the
+   * shared products that pass from the planners to the J3 at transition (the synchronization matrix, the DST and DSM, the assessment plan) have their
+   * execution writer from then on. A section team runs on its own here; a full staff's writers are the integration's.
+   */
+  private writerContext(replay: LedgerReplay): { readonly phase: StaffPhase; readonly mode: 'standalone' } {
+    return { phase: phaseFrom(replay.products.get(TRANSITION_PRODUCT)), mode: 'standalone' };
   }
 
   /**
@@ -592,9 +747,9 @@ export class StaffHost {
   }
 
   /** A shared product has one writer (design 10, 4.3): anyone else proposes an entry. */
-  private sharedWriterProblem(product: string, caller: StaffCaller, member: string): StaffResult | undefined {
+  private sharedWriterProblem(product: string, caller: StaffCaller, member: string, replay: LedgerReplay): StaffResult | undefined {
     if (!sharedProduct(product)) return undefined;
-    const context = { phase: 'planning' as const, mode: 'standalone' as const };
+    const context = this.writerContext(replay);
     if (mayWrite(product, { section: caller.team.section, member }, context, undefined, caller.team.members)) return undefined;
     const writer = writerIn(product, context, caller.team);
     return refuse(`${product} is a shared product with one writer (${writer ? `${writer.member} in ${writer.section}` : 'its owner'}). Propose your change as an entry in ${proposalFolder(product)} with the register tool's propose action, and the writer merges it.`);
@@ -617,13 +772,15 @@ export class StaffHost {
       const generated = await this.pirProductProblem(caller.root);
       if (generated) return generated;
     }
-    const shared = this.sharedWriterProblem(input.product, caller, member);
-    if (shared) return shared;
     const before = await this.replay();
+    const shared = this.sharedWriterProblem(input.product, caller, member, before);
+    if (shared) return shared;
     const existing = before.products.get(input.product);
-    if (existing?.tampered) return refuse(`${input.product} cannot be changed: ${existing.tampered}`);
+    if (existing?.tampered) return refuse(`${input.product} cannot be changed: ${existing.tampered}${tamperWayOut(existing.tampered)}`);
     const section = existing?.record.section ?? caller.team.section;
-    if (section !== caller.team.section) return refuse(`${input.product} belongs to ${section}, not to this team's section. Propose your change in ${proposalFolder(input.product)}.`);
+    // A product handed over at transition stays where it was made (handedOverInPlace): its writer now, which sharedWriterProblem has just checked the
+    // caller is, writes it in the other section's folder.
+    if (section !== caller.team.section && !handedOverInPlace(input.product)) return refuse(`${input.product} belongs to ${section}, not to this team's section. Propose your change in ${proposalFolder(input.product)}.`);
     const file = await this.readProduct(caller.root, section, input.product, input.dependsOn ?? existing?.meta.dependsOn ?? []);
     if (!file.exists) return refuse(file.tooLarge ? tooLargeText(productPath(section, input.product), file.unreadable) : `Write the product first, at ${productPath(section, input.product)}, then propose it.`);
     const dependsOn = input.dependsOn ?? file.dependsOn;
@@ -646,6 +803,9 @@ export class StaffHost {
         const roles = this.rolesFor(caller, member);
         if ('ok' in roles) return roles;
         return [{ run: caller.run, product: input.product, section, roles, event: { type: 'propose', hash }, actor: { kind: 'agent', member }, meta }];
+      }
+      if (state.record.roles.owner !== member && handedOverInPlace(input.product)) {
+        return refuse(`${input.product} version ${state.record.version} is still open (${state.record.state}) under ${state.record.roles.owner}, who wrote it before the transition. A person withdraws that version with NEAR AI: Staff: Withdraw a Product (or ${state.record.roles.owner} withdraws it), then you write the next version.`);
       }
       if (state.record.roles.owner !== member) return refuse(`${input.product} is owned by ${state.record.roles.owner}. Only the owner writes it; propose your change in ${proposalFolder(input.product)}.`);
       if (hash === state.record.hash) return refuse('The product has not changed since its current version.');
@@ -744,7 +904,7 @@ export class StaffHost {
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
-    if (state.tampered) return refuse(`${input.product} cannot be checked: ${state.tampered}`);
+    if (state.tampered) return refuse(`${input.product} cannot be checked: ${state.tampered}${tamperWayOut(state.tampered)}`);
     if (fresh.disagreement) return refuse(`${input.product} reads as tampered: ${TAMPER_REASONS[fresh.disagreement]} Its owner writes it again, then you check the new version.`);
     if (!fresh.file?.exists) return refuse(fresh.file?.tooLarge ? tooLargeText(productPath(state.record.section, input.product), fresh.file.unreadable) : `The file ${productPath(state.record.section, input.product)} is missing.`);
     if (input.hash !== state.record.hash) return refuse(`${RELEASE_REFUSALS['stale-version']} The current version is ${state.record.version}, hash ${state.record.hash}.`);
@@ -821,7 +981,7 @@ export class StaffHost {
     const fresh = await this.refresh(caller.root, input.product, caller.run);
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
-    if (state.tampered) return refuse(`${input.product} cannot be changed: ${state.tampered}`);
+    if (state.tampered) return refuse(`${input.product} cannot be changed: ${state.tampered}${tamperWayOut(state.tampered)}`);
     const result = await this.append(() => [{ run: caller.run, product: input.product, section: state.record.section, event: { type: 'withdraw', reason: input.reason }, actor: { kind: 'agent', member } }]);
     if (!('replay' in result)) return result;
     const after = result.replay.products.get(input.product)!;
@@ -877,11 +1037,18 @@ export class StaffHost {
   private registerSection(register: string, caller: StaffCaller, replay: LedgerReplay): StaffSectionId {
     const existing = replay.products.get(register);
     if (existing) return existing.record.section;
-    const writer = sharedProduct(register) ? writerOf(register, { phase: 'planning', mode: 'standalone' }) : undefined;
+    const writer = sharedProduct(register) ? writerOf(register, this.writerContext(replay)) : undefined;
     return writer?.section ?? caller.team.section;
   }
 
   public async registerRead(caller: StaffCaller, register: string): Promise<StaffResult> {
+    // The PIR register is read from its one source, the intel workbench's JSON, with every decision checked against the signed log; never from the
+    // product generated from it.
+    if (register === PIR_REGISTER_PRODUCT) {
+      const pirs = await this.pirRegister();
+      if ('unreadable' in pirs) return refuse(pirs.unreadable);
+      return ok(JSON.stringify({ register, source: registerPath('pir-register'), entries: pirs.entries ?? [], note: PIR_REGISTER_ELSEWHERE }, null, 2));
+    }
     const schema = registerSchema(register);
     if (!schema) return refuse(`There is no register called ${register}.`);
     const replay = await this.replay();
@@ -899,9 +1066,9 @@ export class StaffHost {
   public async registerWrite(caller: StaffCaller, input: { register: string; rows?: readonly unknown[]; remove?: readonly string[]; part?: string; label?: string }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
-    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     // One writer at a time per register (the intel workbench's lock): two part writers of the CCIR register, the PIR part and the FFIR part, never drop
     // each other's rows, because each re-reads the ledger and the rows inside the lock and writes from what it read there.
     const where = this.registerSection(input.register, caller, await this.replay());
@@ -911,15 +1078,27 @@ export class StaffHost {
   private async registerWriteLocked(caller: StaffCaller, member: string, schema: NonNullable<ReturnType<typeof registerSchema>>, input: { register: string; rows?: readonly unknown[]; remove?: readonly string[]; part?: string; label?: string }): Promise<StaffResult> {
     const replay = await this.replay();
     const section = this.registerSection(input.register, caller, replay);
+    // A write-limited member (the red team, the release guard, the J3 watch officer) writes no register outside its limit; it proposes rows instead.
+    const limit = staffWriteLimit({ section: caller.team.section }, member);
+    if (limit && !writeAllowedBy(limit, productPath(section, input.register))) return refuse(`${member} does not write registers; propose your rows with the propose action and the register's writer merges them.`);
     const state = replay.products.get(input.register);
-    const context = { phase: 'planning' as const, mode: 'standalone' as const };
+    const context = this.writerContext(replay);
     const partWriter = input.part !== undefined ? writerIn(input.register, context, caller.team, input.part) : undefined;
     if (input.part !== undefined && (!partWriter || partWriter.member !== member || partWriter.section !== caller.team.section)) return refuse(`You do not write the ${input.part} part of ${input.register}.`);
     const owner = state?.record.roles.owner;
-    const isOwner = input.part === undefined && (state ? owner === member : !sharedProduct(input.register) || mayWrite(input.register, { section: caller.team.section, member }, context, undefined, caller.team.members));
-    if (!isOwner && input.part === undefined) return refuse(`${input.register} is written by ${owner ?? writerIn(input.register, context, caller.team)?.member ?? 'its owner'}. Propose your rows with the propose action instead.`);
-    if (section !== caller.team.section && input.part === undefined) return refuse(`${input.register} belongs to ${section}.`);
-    if (state?.tampered) return refuse(`${input.register} cannot be changed: ${state.tampered}`);
+    // A shared register is written by the writer the ownership table names now (it changes at transition for the DST and DSM and the sync matrix), not
+    // by whoever wrote its last version; any other register by its owner.
+    const shared = sharedProduct(input.register) !== undefined;
+    const isOwner = input.part === undefined && (shared ? mayWrite(input.register, { section: caller.team.section, member }, context, undefined, caller.team.members) : !state || owner === member);
+    if (!isOwner && input.part === undefined) {
+      const writer = shared ? writerIn(input.register, context, caller.team) : undefined;
+      const why = writer && handsOverAtTransition(input.register)
+        ? ` ${context.phase === 'execution' ? `The ${writer.section.toUpperCase()} writes it since a person approved the transition brief.` : 'It passes to the J3 when a person approves the transition brief.'}`
+        : '';
+      return refuse(`${input.register} is written by ${writer?.member ?? owner ?? 'its owner'}. Propose your rows with the propose action instead.${why}`);
+    }
+    if (section !== caller.team.section && input.part === undefined && !(isOwner && handedOverInPlace(input.register))) return refuse(`${input.register} belongs to ${section}.`);
+    if (state?.tampered) return refuse(`${input.register} cannot be changed: ${state.tampered}${tamperWayOut(state.tampered)}`);
     if (!isOwner && state && !(['draft', 'guard-checked', 'awaiting-decision'] as const).some((value) => value === state.record.state)) {
       return refuse(`${input.register} version ${state.record.version} is ${state.record.state}; its owner writes the next version before parts can change.`);
     }
@@ -960,7 +1139,7 @@ export class StaffHost {
     const result = await this.append(async (replay) => {
       const state = replay.products.get(register);
       if (!state) return refuse(`${register} does not exist yet; its owner creates it first.`);
-      if (state.tampered) return refuse(`${register} cannot be changed: ${state.tampered}`);
+      if (state.tampered) return refuse(`${register} cannot be changed: ${state.tampered}${tamperWayOut(state.tampered)}`);
       const file = await this.readProduct(caller.root, state.record.section, register, state.meta.dependsOn);
       if (file.hash === state.record.hash) return refuse('Nothing changed.');
       return [{ run: caller.run, product: register, section: state.record.section, event: { type: 'edit', hash: file.hash }, actor: { kind: 'agent', member }, meta: { ...state.meta, dependsOn: [...file.dependsOn] } }];
@@ -976,9 +1155,9 @@ export class StaffHost {
   public async registerPropose(caller: StaffCaller, input: { register: string; rows: readonly unknown[]; note?: string }): Promise<StaffResult> {
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const schema = registerSchema(input.register);
     if (!schema) return refuse(`There is no register called ${input.register}.`);
-    if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
     const rows: RegisterRow[] = [];
     for (const raw of input.rows) {
       const checked = checkRow(schema, raw);
@@ -1082,7 +1261,7 @@ export class StaffHost {
     const read = await this.wargameRead();
     if ('unreadable' in read) return refuse(read.unreadable);
     const derived = deriveFromWargame(read.entries);
-    const context = { phase: 'planning' as const, mode: 'standalone' as const };
+    const context = this.writerContext(await this.replay());
     const writes: string[] = [];
     for (const [register, rows] of [['sync-matrix', derived.sync], ['dst-dsm', derived.dsm]] as const) {
       if (!rows.length) continue;
@@ -1110,7 +1289,7 @@ export class StaffHost {
     const fresh = await this.refresh(root, input.product, 'person');
     const state = fresh.replay.products.get(input.product);
     if (!state) return refuse(`${input.product} has not been proposed.`);
-    if (state.tampered) return refuse(`${input.product} cannot be decided on: ${state.tampered}`);
+    if (state.tampered) return refuse(`${input.product} cannot be decided on: ${state.tampered}${tamperWayOut(state.tampered)}`);
     if (fresh.disagreement) return refuse(`${input.product} cannot be decided on: ${TAMPER_REASONS[fresh.disagreement]}`);
     const run = state.request?.run ?? state.history[state.history.length - 1]?.run ?? 'person';
     const reasons = (input.reasons ?? []).map((reason) => reason.trim()).filter(Boolean);
@@ -1139,7 +1318,7 @@ export class StaffHost {
   // ---- Read models ---------------------------------------------------------------------------------------------------------------------------
 
   /** Everything the Staff Room draws, rebuilt from the ledger, the product files and the event log. */
-  public async snapshot(run?: string): Promise<{ registry: ProductView[]; decisions: ReturnType<typeof decisionQueue>; registers: ReturnType<typeof sharedRegisters>; board?: ReturnType<typeof stepBoard>; steps?: ReturnType<typeof currentSteps>; cop: ReturnType<typeof copModel>; ledgerProblem?: string; eventLogProblem?: string }> {
+  public async snapshot(run?: string): Promise<{ registry: ProductView[]; decisions: ReturnType<typeof decisionQueue>; registers: ReturnType<typeof sharedRegisters>; board?: ReturnType<typeof stepBoard>; steps?: ReturnType<typeof currentSteps>; cop: ReturnType<typeof copModel>; feeds: FeedPictureModel; ledgerProblem?: string; eventLogProblem?: string }> {
     const replay = await this.replay();
     const files = new Map<string, FileCheck>();
     const rows = new Map<string, number>();
@@ -1152,11 +1331,12 @@ export class StaffHost {
     }
     const registry = productRegistry(replay, files);
     const log = await this.eventsRead();
-    const events = log.events;
+    const events = log.events.filter(isStaffEvent);
+    const feedEvents = log.events.filter((event): event is FeedEvent => !isStaffEvent(event));
     return {
-      registry, decisions: decisionQueue(replay, files), registers: sharedRegisters(replay, rows), cop: copModel(events),
+      registry, decisions: decisionQueue(replay, files), registers: sharedRegisters(replay, rows), cop: copModel(events), feeds: feedPicture(feedEvents),
       ...(run ? { board: stepBoard(events, run, registry), steps: currentSteps(events, run) } : {}),
-      ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}` } : {}),
+      ...(replay.broken ? { ledgerProblem: `Entry ${replay.broken.seq + 1}: ${replay.broken.reason}${otherCopyReason(replay.broken.reason) ? ` ${USE_BRANCH_LEDGER_WAY_OUT}` : ''}` } : {}),
       ...(log.unreadable ? { eventLogProblem: log.unreadable } : {})
     };
   }
@@ -1168,6 +1348,7 @@ export function describeView(view: ProductView): string {
     `${view.product} (${view.section}, ${view.kind}), version ${view.version}: ${view.display}.`,
     `Owner: ${view.owner}. Label: ${view.label}. Version hash: ${view.hash}.`
   ];
+  if (view.handover) lines.push(`Writer now: ${view.handover.to.member} (${view.handover.to.section}), since ${view.handover.by.name} (${view.handover.by.role}) approved the transition brief at ${view.handover.at}. In planning it was ${view.handover.from.member} (${view.handover.from.section}); the file stays at ${productPath(view.section, view.product)}.`);
   if (view.tampered) lines.push(`Tampered: ${view.tampered}`);
   if (view.heldReasons?.length) lines.push(`Held: ${view.heldReasons.map((reason, index) => `${index + 1}. ${reason}`).join(' ')}`);
   if (view.tradecraft) lines.push(`Tradecraft: ${view.tradecraft.verdict} on version ${view.tradecraft.version}.`);

@@ -115,7 +115,8 @@ test('import refuses text that is not a scenario: not JSON, too large, wrong for
   if (!large.ok) assert.equal(large.reason, 'too-large');
   refusedWith([], 'not-an-object');
   refusedWith(edited((value) => { value.format = 'something-else'; }), 'wrong-format');
-  refusedWith(edited((value) => { value.version = 2; }), 'wrong-format');
+  // Version 2 (the exercise frame) is read beside version 1; the next version is not.
+  refusedWith(edited((value) => { value.version = 3; }), 'wrong-format');
 });
 
 test('import refuses a scenario not marked fictional and unclassified', () => {
@@ -149,12 +150,15 @@ test('import refuses coordinates on a fictional grid, and coordinates outside a 
   assert.ok(temperature.ok, 'a temperature is not a coordinate');
   const boxed = (location: string) => edited((value) => {
     value.region.grid = { kind: 'geographic', south: 10, west: 20, north: 12, east: 24 };
+    // A geographic grid is already on the globe, so it carries no exercise frame (the frame places a fictional grid).
+    delete value.region.frame;
     value.forces[0].location = location;
   });
   assert.ok(parseScenario(boxed('At 11.50, 21.75')).ok, 'inside the box');
   refusedWith(boxed('At 45.42, -75.69'), 'coordinates', 'forces[0].location');
   refusedWith(edited((value) => { value.region.grid = { kind: 'geographic', south: 12, west: 20, north: 10, east: 24 }; }), 'out-of-range', 'region.grid.north');
   refusedWith(edited((value) => { value.region.grid = { kind: 'fictional', name: 'KQ', south: 1 }; }), 'not-allowed-here', 'region.grid.south');
+  refusedWith(edited((value) => { value.region.grid = { kind: 'geographic', south: 10, west: 20, north: 12, east: 24 }; }), 'not-allowed-here', 'region.frame');
 });
 
 test('import refuses unknown fields, missing fields, wrong kinds and bad grades', () => {

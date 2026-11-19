@@ -9,6 +9,8 @@ import type {
 import { changedSources, displayState, TAMPER_REASONS } from './ledger';
 import type { DisplayState, HistoryItem, LedgerReplay, ProductState, TamperReason } from './ledger';
 import { REGISTER_SCHEMAS } from './registers';
+import { handsOverAtTransition, phaseFrom, TRANSITION_PRODUCT, writerOf } from './ownership';
+import type { StaffWriter } from './ownership';
 
 /** One row of the product ledger view: the WP-0 registry entry, plus the words a person reads and why a product reads as tampered or held. */
 export interface ProductView extends ProductRegistryEntry {
@@ -20,6 +22,32 @@ export interface ProductView extends ProductRegistryEntry {
   readonly history: readonly HistoryItem[];
   /** The newer approved versions of what it depends on. */
   readonly changedSources: ReadonlyArray<{ readonly product: string; readonly version: number }>;
+  /** For a shared product that passed to another writer at transition: who writes it now, who did before, and the person's approval that moved it. */
+  readonly handover?: Handover;
+}
+
+/** A shared product's writer after the transition brief was approved (ownership.ts handsOverAtTransition): who writes it now and why. */
+export interface Handover {
+  readonly from: StaffWriter;
+  readonly to: StaffWriter;
+  /** The person who approved the transition brief, and when: the one act that moves the writer. */
+  readonly by: { readonly name: string; readonly role: string };
+  readonly at: string;
+}
+
+/**
+ * The handover of a shared product, or undefined while the project is planning (or for a product that keeps one writer). Read from the ledger alone: the
+ * first approval of the transition brief by a person, which the replay has already checked is signed with a trusted key, so no agent can cause it.
+ */
+export function handoverOf(product: string, all: ReadonlyMap<string, ProductState>): Handover | undefined {
+  if (!handsOverAtTransition(product)) return undefined;
+  const transition = all.get(TRANSITION_PRODUCT);
+  if (phaseFrom(transition) !== 'execution') return undefined;
+  const approval = transition?.history.find((item) => item.to === 'approved' && item.actor.kind === 'person');
+  const from = writerOf(product, { phase: 'planning', mode: 'standalone' });
+  const to = writerOf(product, { phase: 'execution', mode: 'standalone' });
+  if (!approval || approval.actor.kind !== 'person' || !from || !to) return undefined;
+  return { from, to, by: { name: approval.actor.name, role: approval.actor.role }, at: approval.at };
 }
 
 /** What the host found on disk for one product: a disagreement with the ledger, if any. */
@@ -40,6 +68,7 @@ export function productView(state: ProductState, all: ReadonlyMap<string, Produc
   const gate = (mark: ProductState['guard']): { verdict: string; version: number } | undefined => (mark ? { verdict: mark.verdict, version: mark.version } : undefined);
   const guard = gate(state.guard);
   const tradecraft = gate(state.tradecraft);
+  const handover = handoverOf(record.product, all);
   return {
     product: record.product, kind: state.meta.kind, section: record.section, owner: record.roles.owner, version: record.version, state: record.state,
     label: state.meta.label, ...(record.decisionFor !== undefined ? { decisionFor: record.decisionFor } : {}),
@@ -52,7 +81,8 @@ export function productView(state: ProductState, all: ReadonlyMap<string, Produc
     ...(record.held ? { heldReasons: record.held.reasons } : {}),
     ...(record.approval ? { approvedBy: { name: record.approval.by.name, role: record.approval.by.role, deviceFingerprint: record.approval.by.deviceFingerprint } } : {}),
     history: state.history,
-    changedSources: changed
+    changedSources: changed,
+    ...(handover ? { handover } : {})
   };
 }
 
@@ -78,7 +108,9 @@ export function sharedRegisters(replay: LedgerReplay, rows: ReadonlyMap<string, 
   for (const name of Object.keys(REGISTER_SCHEMAS)) {
     const state = replay.products.get(name);
     if (!state) continue;
-    out.push({ product: name, writer: { section: state.record.section, member: state.record.roles.owner }, version: state.record.version, state: state.record.state, rows: rows.get(name) ?? 0 });
+    // A register handed over at transition is written by its new writer, whoever wrote the last version.
+    const writer = handoverOf(name, replay.products)?.to ?? { section: state.record.section, member: state.record.roles.owner };
+    out.push({ product: name, writer, version: state.record.version, state: state.record.state, rows: rows.get(name) ?? 0 });
   }
   return out;
 }

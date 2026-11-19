@@ -505,6 +505,56 @@ export const INTELLIGENCE_DISCIPLINES = ['OSINT', 'GEOINT', 'HUMINT', 'SIGINT', 
 export type IntelligenceDiscipline = (typeof INTELLIGENCE_DISCIPLINES)[number];
 export const PARTNER_ONLY_DISCIPLINES: readonly IntelligenceDiscipline[] = ['HUMINT', 'SIGINT', 'MASINT', 'CI'];
 
+/**
+ * Unit echelons, lowest first, as the echelon amplifiers of the public symbology standards order them (MIL-STD-2525D, 2014, and APP-6(D), 2017, table of
+ * echelon amplifiers: team or crew; squad; section; platoon or detachment; company, battery or troop; battalion or squadron; regiment or group; brigade;
+ * division; corps; army; army group or front; region or theatre). A slice by echelon ("battalion and above") compares positions in this list (note 11,
+ * section 5). The second name of a pair reads as the first through ECHELON_ALIASES; "squadron" is left out on purpose, because a US cavalry squadron is a
+ * battalion and a Commonwealth armour squadron is a company, so a scenario names the echelon it means.
+ */
+export const ECHELONS = ['team', 'squad', 'section', 'platoon', 'company', 'battalion', 'regiment', 'brigade', 'division', 'corps', 'army', 'army-group', 'theatre'] as const;
+export type Echelon = (typeof ECHELONS)[number];
+export const ECHELON_ALIASES: Readonly<Record<string, Echelon>> = {
+  crew: 'team', detachment: 'platoon', battery: 'company', troop: 'company', group: 'regiment', front: 'army-group', region: 'theatre', theater: 'theatre'
+};
+
+/**
+ * Standard identities (affiliations) of the public symbology standards (MIL-STD-2525D, 2014, and APP-6(D), 2017: pending, unknown, assumed friend,
+ * friend, neutral, suspect, hostile; joker and faker are the exercise identities), as Cursor on Target spells them in its type string (`p`, `u`, `a`,
+ * `f`, `n`, `s`, `h`, `j`, `k`; note 11 [F1][F58]). A feed's identity is a claim; the J2's assessment is a separate field (note 11, 6.2).
+ */
+export const STANDARD_IDENTITIES = ['pending', 'unknown', 'assumed-friend', 'friend', 'neutral', 'suspect', 'hostile', 'joker', 'faker'] as const;
+export type StandardIdentity = (typeof STANDARD_IDENTITIES)[number];
+/**
+ * The letter Cursor on Target writes for each standard identity, second in its type string (`a-h-G` is a hostile ground track; MITRE CoT base schema and
+ * the public CoT type list, note 11 [F1][F58]). The same letters as MIL-STD-2525 affiliations: an exact table, never inferred.
+ */
+export const COT_IDENTITY_CODES: Readonly<Record<StandardIdentity, string>> = {
+  pending: 'p', unknown: 'u', 'assumed-friend': 'a', friend: 'f', neutral: 'n', suspect: 's', hostile: 'h', joker: 'j', faker: 'k'
+};
+
+/**
+ * The symbol sets of the public symbology standards a COP symbol may use (MIL-STD-2525D, 2014, and APP-6(D), 2017, the 20-digit symbol identification
+ * code, positions 5 and 6): air, land unit, land equipment, land installation, sea surface and sea subsurface. Control measures are drawn as graphics
+ * (COP_CONTROL_MEASURES), not with a code.
+ */
+export const SYMBOL_SETS = { air: '01', 'land-unit': '10', 'land-equipment': '15', 'land-installation': '20', 'sea-surface': '30', 'sea-subsurface': '35' } as const;
+export type SymbolSet = keyof typeof SYMBOL_SETS;
+
+/**
+ * The control measures a COP layer draws (UX concept 5.10, after the tactical graphics of FM 1-02.2, 2022, and APP-6(D), 2017): the scenario's own kinds
+ * (phase line, objective, assembly area, NAI, boundary, landing area, route), plus the target area of interest, the axes of advance (the main attack has a
+ * filled head, a supporting attack an open one; an adversary axis is dashed), an obstacle and the decision point, drawn as a gold star (UX 5.10; JP 5-0,
+ * 2025: a point in space and time when the commander or staff anticipates making a key decision about a specific course of action). Each names the
+ * geometry it is drawn with.
+ */
+export const COP_CONTROL_MEASURES = {
+  'phase-line': 'line', boundary: 'line', route: 'line', 'axis-main': 'line', 'axis-supporting': 'line', 'axis-adversary': 'line',
+  objective: 'area', 'assembly-area': 'area', 'landing-area': 'area', nai: 'area', tai: 'area', obstacle: 'area',
+  'decision-point': 'point'
+} as const;
+export type CopControlMeasure = keyof typeof COP_CONTROL_MEASURES;
+
 /** The two adversary COAs every J2 estimate names (JP 2-0 JIPOE step 4; ATP 2-01.3 IPB step 4; design 10, 3.2 and 4.4). */
 export const ADVERSARY_COA_TERMS = { mostLikely: 'MLCOA', mostDangerous: 'MDCOA' } as const;
 
@@ -802,3 +852,204 @@ export const RED_TEAM_NOTES: Readonly<Record<StaffProfileId, { readonly note: st
   'us-army': { note: 'The red team is an independent group, separate from the S-2 or G-2 red cell, that challenges the planners\' assumptions and logic.', optional: false },
   'nato-ca': { note: 'Red teaming is a UK national element in AJP-5, not NATO doctrine. It is on by default; the commander may switch it off.', optional: true }
 };
+
+// ---- Operations terms (design 10, 3.4; research note 03, part A; WP-J3) -----------------------------------------------------------------------------
+// The J3 template and its two skills (running-estimate, execution-loop) read these tables. The running estimate headings are FUNCTION_SETS above, the
+// space vocabulary SPACE_MISSION_AREAS, and the horizon lengths come from the staff settings (STAFF_DEFAULTS), never from here.
+
+/**
+ * The three venues of planning in execution, by time horizon: what each covers and which body usually owns it. The codes (J-3, J35, G-5) come from the
+ * profile; these words are code-neutral.
+ */
+// JP 5-0 (1 July 2025) ch. IV, planning in execution (03 A3, quoting the 2020 text, which the 2025 edition keeps); JP 3-33 (2018) for the future
+// operations cell under the J-3 (J35 in many headquarters, design 10, 3.1).
+export const PLANNING_HORIZONS = {
+  currentOperations: { name: 'Current operations', covers: 'immediate and near-term issues of the operation under way', owner: 'the operations centre' },
+  futureOperations: { name: 'Future operations', covers: 'branches to the current operation', owner: 'the future operations cell of the operations section' },
+  futurePlans: { name: 'Future plans', covers: 'the next phase of the operation and sequels', owner: 'the plans section' }
+} as const;
+
+/** The current operations body at each level. */
+// 03 A13 (JP 3-33, 2018; FM 6-0, May 2022, integrating cells); ATP 6-0.5 (2017) for the battle captain and battle NCO duties (03 A7); Land Operations
+// (2008) for the Canadian operations centre (design 10, 2.5).
+export const CURRENT_OPERATIONS_BODIES = {
+  strategic: 'Command centre or joint operations centre (JOC)',
+  operational: 'Joint operations centre (JOC)',
+  tactical: 'Tactical operations centre (TOC) or main command post, with the current operations integration cell',
+  tacticalDuties: 'the battle captain\'s and battle NCO\'s duties'
+} as const;
+
+/** The competition continuum: the J3 at strategic level runs day-to-day campaigning across it, not only crisis response. */
+// JP 1 Volume 1, Joint Warfighting (27 August 2023); JP 3-0 (18 June 2022) summary of changes (design 10, 2.8 item 8; 03 A2).
+export const COMPETITION_CONTINUUM: readonly string[] = ['Cooperation', 'Competition below armed conflict', 'Armed conflict'];
+
+/** The US Army information activities the information planner synchronizes. */
+// ADP 3-13, Information (27 November 2023) (03 A5). JP 3-04 (2022) is not public and is not used.
+export const INFORMATION_ACTIVITIES: readonly string[] = ['Enable', 'Protect', 'Inform', 'Influence', 'Attack'];
+
+/** The Canadian Army influence activities, which replace the information operations umbrella in land planning. */
+// CADN 16-01, Land Operations Doctrine: an updated summary (27 May 2016) (design 10, 2.5).
+export const INFLUENCE_ACTIVITIES: readonly string[] = ['Psychological operations (PSYOPS)', 'Key leader engagement', 'Civil support', 'Posture, profile and presence', 'Media relations'];
+
+/**
+ * The six phases of the joint targeting cycle, which may run at the same time and serve deliberate and dynamic targeting. Phase 4 is the commander's
+ * decision; working groups prepare and boards decide.
+ */
+// JP 3-60, Joint Targeting (28 September 2018), released through the DoD FOIA reading room (03 A5). Phase 6: the 2013 edition said "combat assessment";
+// the 2018 renaming could not be read in a primary copy (03 gap 3), so the plain name "Assessment" is used, by best judgement.
+export const JOINT_TARGETING_CYCLE: readonly string[] = [
+  'End state and commander\'s objectives', 'Target development and prioritization', 'Capabilities analysis', 'Commander\'s decision and force assignment',
+  'Mission planning and force execution', 'Assessment'
+];
+
+/** What every running estimate holds, and the rule that it always carries recommendations for anticipated decisions. */
+// FM 5-0, Planning and Orders Production (November 2024), running estimates (03 A6; 03 A14 item 8).
+export const RUNNING_ESTIMATE = {
+  parts: ['Facts', 'Assumptions', 'Friendly force status', 'Enemy activities and capabilities', 'Civil considerations', 'Conclusions and recommendations, with risk'],
+  rule: 'A running estimate always includes recommendations for anticipated decisions; one without them is sent back.'
+} as const;
+
+/** The fragmentary order: what it is, and the abbreviation each profile uses. */
+// FM 5-0 (November 2024) definition (03 A6); JP 5-0 (1 July 2025) joint orders list, FRAGORD (design 10, 2.8 item 5); NATO and Canadian usage FRAGO
+// (CFJP 5.0, 2008, art. 406 writes "Frag O"; Land Operations, 2008), by best judgement where AJP-5 gives no abbreviation.
+export const FRAGMENTARY_ORDER = {
+  definition: 'An abbreviated order that changes or modifies an order, or executes a branch or sequel; it gives the changes only, in the five-paragraph format.',
+  abbreviation: { 'us-joint': 'FRAGORD', 'us-army': 'FRAGORD', 'nato-ca': 'FRAGO' }
+} as const satisfies { readonly abbreviation: Readonly<Record<StaffProfileId, string>> } & Record<string, unknown>;
+
+/** The space products the space command owns; the J3 cyber and space planner feeds them and never writes them. */
+// JP 3-14, Joint Space Operations (23 August 2023) ch. III (design 10, 3.4, cyber-space-planner).
+export const SPACE_COMMAND_PRODUCTS: readonly string[] = ['Space operations directive', 'Master space plan', 'Combined space tasking order (weekly)'];
+// ---- Logistics terms (design 10, 2.5 and 3.5; research note 03 part B; WP-J4) -----------------------------------------------------------------
+
+/**
+ * The core logistics functions support planning covers, one J4 member each (design 10, 3.5; 03 Summary 3 and B2). Support planning runs at the same time
+ * as force planning, from the first step, not after the COA decision (03 B3).
+ */
+// JP 5-0 (2020) ch. IV support planning, as read for note 03 (03 B2); JP 4-0 (20 July 2023) by title, whose core logistic capabilities use the same areas
+// (03 B1; design 10, 2.9). The seven names are unchanged in the JP 5-0 (1 July 2025) the owner supplied (design 10, 2.8: only listed changes apply).
+export const CORE_LOGISTICS_FUNCTIONS: readonly string[] = [
+  'Deployment and distribution', 'Supply', 'Maintenance', 'Logistic services', 'Operational contract support', 'Joint health services', 'Engineering'
+];
+/** Support planning runs alongside force planning from step 1 (03 B3, B12 item 6). */
+// JP 5-0 (2020) ch. IV: support planning "is conducted concurrently with force planning" (03 B3).
+export const SUPPORT_PLANNING_RULE = 'Support planning runs at the same time as force planning, from the first planning step.';
+
+/** The four elements of sustainment, the US Army's frame for the sustainment warfighting function (03 B5). */
+// ADP 4-0, Sustainment (July 2019) ch. 1; the 2019 edition made financial management a separate element (03 B5).
+export const SUSTAINMENT_ELEMENTS: readonly string[] = ['Logistics', 'Financial management', 'Personnel services', 'Health service support'];
+
+/** The Canadian lines of support, by the level that usually provides them (design 10, 2.5; 03 B6, B11). */
+// CFJP 4-0, Support (2016) by title, as quoted by secondary sources (03 B6 [S49][S50]); level mapping 03 B11. Best judgement until CFJP 4-0 is read (design 10, 2.9).
+export const CANADIAN_LINES_OF_SUPPORT: ReadonlyArray<{ readonly line: string; readonly meaning: string; readonly level: StaffLevel }> = [
+  { line: 'First line', meaning: 'Support organic to the ship, unit or squadron', level: 'tactical' },
+  { line: 'Second line', meaning: 'Support organic or allocated to a formation', level: 'tactical' },
+  { line: 'Third line', meaning: 'Support to a force in a theatre or along strategic lines of communication (the JTF Support Component)', level: 'operational' },
+  { line: 'Fourth line', meaning: 'Strategic resources: national depots, contractors and industry', level: 'strategic' }
+];
+
+/** One class of supply: its numeral and what it holds. */
+export interface SupplyClass { readonly class: string; readonly holds: string }
+
+/**
+ * The classes of supply each profile uses. US Joint and US Army use the ten US classes; NATO and Canada use the five NATO classes. Members forecast by
+ * these classes only, and never with a factor table from a government source (03 B5, B12 items 1 and 2).
+ */
+// US: JP 4-09 (public reference edition) and ATP 4-42 series, the ten classes as US practice lists them (03 B2 [S46]; best judgement).
+// NATO/Canadian: AAP-06, NATO Glossary of Terms and Definitions, "class of supply" (five classes); Canada follows NATO terms first (design 10, 2.5).
+export const SUPPLY_CLASSES: Readonly<Record<StaffProfileId, readonly SupplyClass[]>> = {
+  'us-joint': [
+    { class: 'I', holds: 'Subsistence and water' }, { class: 'II', holds: 'Clothing, individual equipment, tools and administrative supplies' },
+    { class: 'III', holds: 'Petroleum, oils and lubricants' }, { class: 'IV', holds: 'Construction and barrier materiel' }, { class: 'V', holds: 'Ammunition' },
+    { class: 'VI', holds: 'Personal demand items' }, { class: 'VII', holds: 'Major end items' }, { class: 'VIII', holds: 'Medical materiel' },
+    { class: 'IX', holds: 'Repair parts' }, { class: 'X', holds: 'Materiel to support nonmilitary programs' }
+  ],
+  'us-army': [
+    { class: 'I', holds: 'Subsistence and water' }, { class: 'II', holds: 'Clothing, individual equipment, tools and administrative supplies' },
+    { class: 'III', holds: 'Petroleum, oils and lubricants' }, { class: 'IV', holds: 'Construction and barrier materiel' }, { class: 'V', holds: 'Ammunition' },
+    { class: 'VI', holds: 'Personal demand items' }, { class: 'VII', holds: 'Major end items' }, { class: 'VIII', holds: 'Medical materiel' },
+    { class: 'IX', holds: 'Repair parts' }, { class: 'X', holds: 'Materiel to support nonmilitary programs' }
+  ],
+  'nato-ca': [
+    { class: 'I', holds: 'Subsistence (food and forage) consumed at a broadly uniform rate' },
+    { class: 'II', holds: 'Items with an established table of allowances: clothing, weapons, tools, spare parts and vehicles' },
+    { class: 'III', holds: 'Petroleum, oils and lubricants for all purposes' },
+    { class: 'IV', holds: 'Items without an established table of allowances, such as fortification and construction materiel' },
+    { class: 'V', holds: 'Ammunition, explosives and chemical agents of all types' }
+  ]
+};
+
+/** The logistics status report and the words in it (03 B5, B12 item 7). */
+// "The Trouble with LOGSTATs" (11 Feb 2025) and the battalion-to-brigade LOGSTAT flow (03 B5 [S45][S46]); FM 4-0 calls a LOGSTAT data that needs analysis.
+export const LOGSTAT_TERMS = {
+  report: 'LOGSTAT',
+  /** How far ahead a LOGSTAT projects needs (03 B5 [S46]). */
+  forecastHours: 72,
+  /** The words a LOGSTAT uses, each defined per commodity and echelon in the project's logstat-definitions skill. */
+  fields: ['On hand', 'Received', 'Consumed', 'Capacity', 'Required', 'Days of supply'],
+  /** The logistics common operational picture the JLOC keeps (03 B5, B8). */
+  picture: 'LOGCOP'
+} as const;
+
+/** One profile's logistics words: what the section and its estimate are called, and its current-operations centre per level. */
+export interface LogisticsTerms {
+  /** The function the J4, G4 or S4 serves: logistics (joint), sustainment (US Army). */
+  readonly function: string;
+  readonly estimate: string;
+  /** The logistics estimate at strategic level, one of the joint strategic estimates (03 B3). */
+  readonly strategicEstimate: string;
+  /** The overview that starts the estimate in step 1 (03 B3): "theater" in US spelling, "theatre" in NATO and Canadian. */
+  readonly overview: string;
+  readonly conceptOfSupport: string;
+  /** Reception of forces in the theatre and their move forward (JRSOI, RSOI or RSOM). */
+  readonly reception: string;
+  /** The logistics current-operations centre at each level. Always qualified: a JTF J4 JLOC is not the DLA one (03 B4, B12 item 3). */
+  readonly currentOps: Readonly<Record<StaffLevel, string>>;
+  readonly source: string;
+}
+
+// JP 5-0 (2020) ch. IV and app. A (theater logistics overview, logistics estimate, Annex D); JP 4-0 (2023) ch. V JLOC by title (03 B3, B4); FM 5-0 (Nov 2024)
+// running estimates and Annex F (03 B3); ADP 4-0 (2019) (03 B5); AJP-4 by title, CFJP 4-0 (2016) by title and the JTF Support Component (03 B6). Best
+// judgement where a level has no named centre: the plain description, never an invented branch name (03 A8 gap, B12 item 3).
+export const LOGISTICS_TERMS: Readonly<Record<StaffProfileId, LogisticsTerms>> = {
+  'us-joint': {
+    function: 'Logistics',
+    estimate: 'Logistics estimate',
+    strategicEstimate: 'Joint logistics estimate',
+    overview: 'Theater logistics overview',
+    conceptOfSupport: 'Concept of support',
+    reception: 'Joint reception, staging, onward movement and integration (JRSOI)', // JP 3-35 (2018) (03 B1, B2)
+    currentOps: { strategic: 'CCMD J4 joint logistics operations center (CCMD J4 JLOC)', operational: 'JTF J4 joint logistics operations center (JTF J4 JLOC)', tactical: 'Not offered at tactical level' },
+    source: 'JP 5-0 (2020, 2025); JP 4-0 (2023) by title'
+  },
+  'us-army': {
+    function: 'Sustainment',
+    estimate: 'Sustainment estimate',
+    strategicEstimate: 'Not offered at strategic level',
+    overview: 'Sustainment overview',
+    conceptOfSupport: 'Concept of support',
+    reception: 'Reception, staging, onward movement and integration (RSOI)', // ATP 3-35 (2015) Army deployment doctrine (best judgement)
+    currentOps: { strategic: 'Not offered at strategic level', operational: 'Not offered at operational level', tactical: 'Sustainment cell current operations, with the supporting unit\'s support operations officer' },
+    source: 'FM 5-0 (2024); ADP 4-0 (2019)'
+  },
+  'nato-ca': {
+    function: 'Logistics',
+    estimate: 'Logistics estimate',
+    strategicEstimate: 'Strategic logistics estimate',
+    overview: 'Theatre logistics overview',
+    conceptOfSupport: 'Concept of logistic support',
+    reception: 'Reception, staging and onward movement (RSOM)', // AJP-3.13, Deployment and Redeployment of Forces, by title (best judgement)
+    currentOps: { strategic: 'Strategic J4 logistics operations centre', operational: 'JTF J4 joint logistics operations centre (JTF J4 JLOC)', tactical: 'Combat service support (CSS) current operations cell' },
+    source: 'AJP-4 and AJP-5 by title; CFJP 4-0 (2016) by title (03 B6)'
+  }
+};
+
+/** The reports a deployed Canadian operation sends to the CJOC J4 desk, alongside the LOGSTAT (design 10, 2.5; 03 B6, B12 item 9). */
+// DND evaluation of CAF operational support (2021) as summarised in 03 B6 [S52]: a weekly logistics report plus equipment, ammunition status and
+// ammunition expenditure reports to the CJOC Joint Support (J4) desk. Report names are plain descriptions until CFJP 4-0 is read (design 10, 2.9).
+export const CANADIAN_J4_REPORTS = {
+  weekly: 'Weekly logistics report',
+  others: ['Equipment status report', 'Ammunition status report', 'Ammunition expenditure report'],
+  to: 'the CJOC J4 desk',
+  cadence: 'weekly'
+} as const;

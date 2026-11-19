@@ -1,0 +1,8 @@
+{
+  "register": "collection-plan",
+  "formatVersion": 1,
+  "entries": [
+    {"id":"CR-1","pir":"PIR-1","indicator":"IND-1","nai":"NAI 2","capability":"Recommend a persistent UAS orbit over the west slope of Harrow Ridge","discipline":"GEOINT","timing":{"from":"2026-11-20T00:00:00.000Z","to":"2026-11-21T04:00:00.000Z"},"needs":"j3-approval","status":"recommended","label":"org/Internal","addedBy":"collection-manager"},
+    {"id":"CR-2","pir":"PIR-2","indicator":"IND-3","nai":"NAI 3","capability":"Recommend partner signals coverage of the eastern channel","discipline":"SIGINT","timing":{"from":"2026-11-19T18:00:00.000Z","to":"2026-11-20T16:00:00.000Z"},"needs":"partner","status":"recommended","label":"org/Internal","addedBy":"collection-manager"}
+  ]
+}

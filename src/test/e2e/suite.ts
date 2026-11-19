@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -374,6 +374,22 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.equal(existsSync(path.join(workspace, 'notes.txt')), false);
       server?.close();
     }],
+    ['the Staff Room shows the real COP map for a loaded scenario, with no content security policy violation (real-window check)', async () => {
+      // The starter scenario in this project, as Load Staff Exercise Scenario writes it, so the room has a frame to draw the COP map over.
+      const workspace = vscode.workspace.workspaceFolders![0].uri.fsPath;
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      await mkdir(path.join(workspace, '.planning', 'staff', 'scenario'), { recursive: true });
+      await writeFile(path.join(workspace, '.planning', 'staff', 'scenario', 'scenario.json'), await readFile(path.join(extension.extensionPath, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
+      await vscode.commands.executeCommand('nearAi.openStaffRoom');
+      await waitForProbe('staff-room');
+      let report = await probe('staff-room');
+      for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
+      // Read by the person running the check: which renderer drew, and why when it fell back.
+      console.log(`[real-window] Staff Room map: ${report.map?.maplibre ? 'MapLibre canvas drawn' : `SVG fallback (${report.map?.note || 'no reason shown'})`}; CSP violations: ${(report.cspViolations ?? []).length}`);
+      assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation in the Staff Room');
+      assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    }],
     ...teamProjectTests(() => api)
   ];
 }
@@ -636,7 +652,8 @@ const EDITOR_WIDTHS = [220, 320, 470, 600];
 const WIDER_EDITOR_WIDTHS = [800, 1000];
 const PANELS: Array<[string, string]> = [
   ['activity', 'nearAi.openAgentActivity'], ['compare', 'nearAi.compareModels'], ['mcp', 'nearAi.manageMcp'],
-  ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup'], ['team-live', 'nearAi.openTeamLive']
+  ['teams', 'nearAi.manageTeams'], ['tools', 'nearAi.openTools'], ['onboarding', 'nearAi.setup'], ['team-live', 'nearAi.openTeamLive'],
+  ['staff-room', 'nearAi.openStaffRoom']
 ];
 const samples = new Map<string, Message[]>();
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -857,6 +874,7 @@ function sampleData(name: string, seen: Message[]): Message[] {
     return [{ type: 'state', servers: [server], project: 'a-project-folder-with-a-long-name', saved: false }];
   }
   if (name === 'team-live') return [teamLiveSample()];
+  if (name === 'staff-room') return [staffRoomSample()];
   if (name === 'teams') return [teamsDashboardSample()];
   return [];
 }
@@ -883,6 +901,34 @@ function teamsDashboardSample(): Message {
     teams: teams.map((team) => ({ id: team.id, kind: team.kind as 'project' | 'user', slug: team.kind === 'project' ? 'team' : team.id.slice(5), file: `/e2e/${team.id}.md`, ...(team.imported ? { imported: true } : {}), check: team.check, members: team.members }))
   });
   return { type: 'library', library: { teams, archived: [{ id: 'archived:an-archived-team-with-a-very-long-name', name: 'An archived team with a very long name' }] }, dashboard };
+}
+
+/**
+ * The Staff Room as its host would send it, built by the extension's own code: the IRON LANTERN scenario on the map, a run with long member names in
+ * every state, and an adversary COA set, so every width from 220 to 1000px is measured with a full room.
+ */
+function staffRoomSample(): Message {
+  const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+  const { buildStaffRoomModel } = require(path.join(extension.extensionPath, 'dist/domain/staff/staffRoom')) as typeof import('../../domain/staff/staffRoom');
+  const { parseScenarioText } = require(path.join(extension.extensionPath, 'dist/domain/staff/scenario')) as typeof import('../../domain/staff/scenario');
+  const { defaultStaffSettings } = require(path.join(extension.extensionPath, 'dist/domain/staff/profiles')) as typeof import('../../domain/staff/profiles');
+  const { readFileSync } = require('node:fs') as typeof import('node:fs');
+  const scenario = parseScenarioText(readFileSync(path.join(extension.extensionPath, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
+  const at = (minute: number) => new Date(Date.UTC(2026, 10, 19, 11, minute)).toISOString();
+  const events = [
+    { type: 'staff.step.entered', run: 'run-e2e', at: at(0), section: 'j2', step: 3, stepName: 'COA development' },
+    { type: 'staff.step.entered', run: 'run-e2e', at: at(0), section: 'j5', step: 3, stepName: 'COA development' },
+    { type: 'staff.lane.started', run: 'run-e2e', at: at(1), section: 'j2', member: 'threat-analyst-with-a-rather-long-member-name', product: 'adversary-coa-set' },
+    { type: 'staff.lane.started', run: 'run-e2e', at: at(2), section: 'j2', member: 'collection-manager', product: 'collection-plan' },
+    { type: 'staff.waiting', run: 'run-e2e', at: at(3), section: 'j5', member: 'lead-planner', waitingOn: 'human', what: 'The commander\'s guidance on the two COA themes before the cells start' },
+    { type: 'staff.lane.finished', run: 'run-e2e', at: at(4), section: 'j2', member: 'watch-officer', product: 'intsum', outcome: 'done' }
+  ];
+  const coaBody = '## Most likely course of action\n\n41 CSTL BDE defends Port Calder from PL COPPER, holding Ashby Ford with 1-41 MECH at KQ 4532. We assess this is likely. We have moderate confidence.\n\n## Most dangerous course of action\n\n3-41 ARMD counter-attacks from KQ 4726 west to Ashby Ford KQ 4528 and on towards AA OAK. This is unlikely. We have low confidence.\n';
+  const model = buildStaffRoomModel({
+    now: Date.UTC(2026, 10, 19, 12, 0), settings: defaultStaffSettings(), registry: [], decisions: [], cop: { layers: [], eventTail: [] }, events: events as never,
+    ...(scenario.ok ? { scenario: scenario.value } : {}), j2: { sources: [], pirs: [], plan: [], enemyCoaBody: coaBody, enemyCoaProduct: 'adversary-coa-set' }
+  });
+  return { type: 'staff-room', model, cues: [] };
 }
 
 /**

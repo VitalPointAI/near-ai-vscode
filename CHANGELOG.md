@@ -69,6 +69,157 @@ fictional data only; labels are not accreditation, and no member has a persona n
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
   tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
 
+**Military staff teams, drop 2.** Set up a J3 operations or J4 logistics staff team beside the J2
+and J5, open the Staff Room to watch the staff at work, replay Exercise IRON LANTERN as live
+simulated feeds on this machine, and see them on the COP map and in the J2 workspace. As in drop 1,
+members draft and recommend, and a named person makes every decision.
+
+- **J3 operations team.** 12 members at strategic and operational level and 10 at tactical level:
+  an integrator who keeps the running estimate (headed by the seven joint functions, or Command,
+  Sense, Act, Shield and Sustain under NATO/Canadian with Canada) and proposes the CCIRs, current
+  operations with the COP and the event log, a watch officer, future operations with branches,
+  FRAGO drafts and the DST and DSM in execution, fires and effects, targeting, information, cyber
+  and space (JP 3-14 (2023) mission areas only), airspace and maritime liaison, assessment,
+  liaison and a release guard. The three horizons come from your staff settings; a plan moves
+  into execution only when a person accepts the transition brief, and from then on the J3 keeps
+  the synchronization matrix, the DST and DSM and the assessment plan. Every FRAGO is a product a
+  person releases, every fires package and targeting row carries both the commander-or-delegate
+  and legal review marks, and in crisis planning the J3 director leads staff planning. The watch
+  officer has no Write: it proposes event-log rows and reports CCIR triggers through the staff
+  tools, and the extension refuses its file writes. Two skills: running estimate and execution
+  loop.
+- **J4 logistics team.** 12 members at strategic and operational level and 9 at tactical level:
+  the section's integrator, a logistics plans officer, the logistics current-operations chief
+  (always named in full, for example the JTF J4 JLOC), one planner for each core logistics
+  function (supply, maintenance, deployment and distribution, engineering, operational contract
+  support, health services, and logistic services with mortuary affairs), a LOGSTAT analyst with
+  no file tools, so it can flag a report but never fix one, and the release guard. Support planning
+  starts at step 1, alongside force planning, with the functional planners working at once. Every
+  number in a J4 product cites the calculator record that produced it (`calc:<id>` on the same
+  line, from factors a person entered); the release guard cannot clear a product with a number
+  that has no record, or a record that does not exist. The words follow the profile: Annex D
+  (Logistics) under US Joint, Annex F (Sustainment) under US Army, Annex R (Logistics) with
+  movements in Annex S under NATO/Canadian, and combat service support (CSS) at Canadian tactical
+  level. With the Canadian nation setting the team also writes the weekly logistics and ammunition
+  reports for the CJOC J4 desk alongside the LOGSTAT. One skill: LOGSTAT definitions, with the
+  plausibility rules, colour bands you set, your profile's classes of supply and the calculator
+  record convention. Health products carry SURGEON REVIEW REQUIRED, and mortuary affairs products
+  hold no personal data.
+- **Logistics server.** The J4 team's built-in `mcp:logistics` tools. The consumption calculator
+  multiplies planning factors you enter in `.planning/.near-ai/staff-factors.json` by the force
+  list and the days, gives days of supply from what is on hand, and shows the formula on every
+  result; it ships no planning factor tables. LOGSTAT reports are entered as the units sent them,
+  validated against the six plausibility rules with each finding sent back to its unit, and
+  consolidated only once they pass, with the colour bands you set and consumption against the
+  forecast. Notional movement tables are checked for lift and arrival against the required
+  delivery date, routes come from a road graph in your project with no network, and readiness
+  comes from a CSV you import. Every calculation, movement check and readiness import is a
+  calculator record entered in a signed calculator ledger, and the release guard now holds a
+  product that cites a record the calculator did not write or that changed since.
+- **The Staff Room.** **NEAR AI: Open Staff Room**, also a button in Team Studio and on the
+  message after staff setup, shows a staff run as a war room: the planning process across the
+  top in your profile's own step names, the staff sections as squads with each agent's state in
+  words and icons, the product ledger where every product opens its provenance (owner, version,
+  gates on that version, who approved it, what it depends on, its history), and the gold human
+  decisions panel. Its buttons run only the person-only staff commands, which ask who you are,
+  confirm in a dialog and sign; the room shows a decision only once the signed ledger holds it.
+  Workspaces share one map, the ledger, the decisions and one clock: the war room for the whole
+  staff, and the J2 workspace with the threat picture on the exercise map (adversary units with
+  their grades, the MLCOA and MDCOA as dashed red axes, NAIs and control measures, map layers
+  each with its one writer, and a table view of all of it), the source register with reliability
+  and credibility graded separately, PIRs linked to the decision points they support, the
+  collection plan, the standing watches and the live feed reports the observation store holds
+  (newest first, only what your clearances cover, simulated ones marked SIM). The map is the real
+  COP map (MapLibre, 2D or globe, offline) when the window has WebGL, and the room's own SVG map
+  otherwise, with the reason shown; on both, names never cover each other. While the room is open
+  it runs track decay every few seconds, so tracks go stale and then lost on screen. The J5, J3
+  and J4 workspaces say what they will hold. Night, day and high contrast themes follow VS Code; Calm and the system's
+  reduced-motion setting stop all movement; the whole room works from the keyboard, with
+  single-key shortcuts you can turn off; Follow the action moves the view to where the work is.
+- **IRON LANTERN on the globe, and its directions fixed.** The starter scenario's grid references
+  now grow northward, so "north of Saltmere", "along PL COPPER north of Ashby Ford", "south of
+  Kell" and the artillery reach statements all hold on the map. Scenario files gain version 2
+  beside version 1: an optional exercise frame that places a fictional grid over empty ocean, far
+  from any land, so map and feed replays can use real position formats without naming a real
+  place. Version 1 files load as before.
+- **Feed contract for live staff pictures.** The shared rules every feed feature builds on: one
+  observation record (when it was true, when you learned it, where and how accurately, who
+  reported it and where the information first came from, reliability and credibility graded
+  separately, its label), tracks that go stale and then lost without ever deleting a report,
+  slices by area, time, grade, discipline, unit and echelon that can never show more than your
+  clearance allows, map feed layers with one settings owner each, and standing watches that only
+  draft products and alert a named person, and run only while a person has the staff run open.
+  ACLED, social media and other sources whose terms restrict this use are off by default, are
+  never used for training, and stay off until your organization records a licence; partner
+  intelligence enters a staff project only as a fictional simulation kept on this machine.
+- **IRON LANTERN as live feeds.** **NEAR AI: Staff: Start the Exercise Feed Simulation** replays
+  the starter scenario as live streams on this machine only: friendly and enemy tracks as Cursor on
+  Target, ships in and near the Varn Strait as AIS, fictional news outlets as RSS, and a mock
+  partner server (MCP) standing in for partner-only HUMINT, SIGINT, MASINT and CI with fictional
+  reports, each marked SIM and kept local-only. The timeline follows the J2 demo script beat by
+  beat and holds when the mid-demo report lands, so you can run the change-propagation beat and
+  then resume. **Staff: Simulation Controls** pauses, resumes, steps to the next reports and sets
+  the speed (0.5x, 1x, 2x or 4x); the status bar shows the SIM badge, the speed and the scenario
+  clock, and every feed in the feed picture is badged SIM. At 1x the three days play in about
+  a quarter of an hour.
+  With a project folder open, the simulated CoT, AIS and RSS reports also go into the project's
+  observation store and the feed changes into the staff event log, so the J2 workspace, the
+  observations tools and the COP show them live; the store keeps the exercise clock while the
+  simulation runs and decays tracks on a timer. Stopping the simulation pauses its feeds, and the
+  next run resumes them. The partner feed stays off until a person adds the mock partner server.
+- **Observation store and the observations server.** Feed reports are kept in your project under
+  `.planning/staff/observations/` (not committed: the folder ignores itself), one append-only file
+  per feed, channel and hour. A report delivered twice is kept once. Each report keeps the label its
+  feed gave it, and the store refuses one labelled lower than its channel or without the handling
+  its feed requires. A file that cannot be read whole is named in every answer and never written
+  on top of. Raw messages of live streams are kept beside the reports only for their retention
+  period. J2 members granted `mcp:observations` ask for slices, a track with its state (live,
+  stale, lost or closed), what is near a place or control measure, what changed since a time,
+  corroboration by independent origin, timelines and each feed's state, all as known at any past
+  time if asked. Every answer shows only what your clearances cover, raises the chat's label to
+  what it showed, says when a limit cut it, and fences the feeds' text as untrusted. Feed events go
+  into the staff event log beside the staff events.
+- **The COP map.** Staff team members granted `mcp:cop-map` read the COP layers and put military
+  symbols (MIL-STD-2525D and APP-6(D), drawn by milsymbol), control measures, overlays per
+  adversary course of action and decision points on the layer they write, in grid references on
+  the scenario's grid. Each product layer has one writer; anyone else proposes and the writer
+  merges, and each change is a new version a person decides on. Feed layers are views nobody
+  writes. A map component for the Staff Room draws the COP in 2D or on the globe (MapLibre),
+  offline over the scenario's synthetic geography with no map tiles fetched, with a time slider
+  on the shared clock, "as happened" and "as known" replay, symbol cards in words, and a track
+  budget of 2,000; without WebGL it falls back to a 2D SVG map behind the same interface. The J2
+  members that draw the threat and terrain layers are granted it again.
+- **J3 watch officer held to its own files.** Like the red team and the release guard, the J3 watch
+  officer is held to a write limit: it may write nothing at all. Write and Edit refuse every path,
+  and it gets no shell, document, agent-starting or other MCP tool, only the staff tools it is
+  granted and the read-only observations server.
+- **J3 takes over the plan's DSM and sync matrix in execution.** Once a person approves the
+  transition brief, the J3 writes the decision support matrix and the synchronization matrix the
+  J5 made in planning, in place, and the J5 proposes changes instead. Status names the new writer
+  and the approval that moved it. A version still open under the J5 at that moment is withdrawn
+  by a person, or by its J5 owner, before the J3 writes the next one.
+- **Staff: Use This Branch's Ledger.** After switching to a git branch with an older product
+  ledger, the ledger reads as tampered, because this computer remembers a later head. This person
+  only command checks that the branch's ledger verifies on its own (every signature and the whole
+  chain), shows what changes in a dialog, records a signed entry with your name and role, and then
+  remembers this ledger's head. A ledger that does not verify is refused; Set Aside stays the way
+  out for that. No agent can run it.
+- **Built-in staff servers listed once and given only to granted members.** staff-products,
+  guard-scan, the intel workbench, observations, the COP map and logistics are listed once on the
+  Tools page (no tool appears twice) and in the Team Studio picker. A run gets the intel workbench,
+  observations, COP map and logistics tools only when a member's tools line grants them, and the
+  run's lead can call none of them. J3 integrator, current operations, watch officer and the
+  maritime and air liaison are granted the observations server.
+- **Never writing over a member's bytes.** Every write the drop 2 servers make to a file a member
+  can also write (COP layers, their proposals and merges, calculator records, the LOGSTAT
+  validation log, the observation store's indexes) replaces only the bytes the server read; a
+  member's write that lands in between stands, and the server refuses instead.
+- **Smaller fixes.** guard-scan now holds and geofences coordinates written with two decimals.
+  Reading a register is its own read-only tool (`mcp__staff-products__register_read`), so a read no
+  longer asks for a write approval, and reading the PIR register returns the intel workbench's
+  register. **Decide a PIR** names the reason when the PIR register cannot be read instead of
+  saying no PIR is waiting.
+
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through
   NEAR AI: Edit Policy). A call to that server from a chat whose label is above it is refused before

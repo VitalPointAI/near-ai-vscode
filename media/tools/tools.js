@@ -127,6 +127,8 @@
     root.append(el('p', 'hint', 'Built-in tools every agent run is given, and what each does under your approval mode right now.'));
     const list = el('ul', 'list'); list.setAttribute('aria-labelledby', 'tools-title');
     for (const tool of data.tools) {
+      // A staff server's tool is drawn once, under its server below.
+      if (tool.staffServer) continue;
       const item = row('li', [tool.name, tool.description, tool.capability, tool.statusText, ...tool.notes]);
       const head = el('div', 'item-head');
       head.append(el('code', 'name', tool.name), badge(tool.capability, 'capability', 'Capability'), statusBadge(tool.status, tool.statusText));

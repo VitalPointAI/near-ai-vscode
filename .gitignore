@@ -35,5 +35,8 @@ relay/**/*.db
 relay/**/*.db-wal
 relay/**/*.db-shm
 
+# The COP map page's vendored libraries are committed (media/vendor/VENDORED.json lists them with their hashes).
+!media/vendor/
+
 # Reference doctrine kept locally by the owner; never committed.
 docs/references/

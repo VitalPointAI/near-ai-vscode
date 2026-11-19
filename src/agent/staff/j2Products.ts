@@ -1,7 +1,7 @@
 // The J2 section's products (design 10, 3.2 and 4.3; research note 02, table 9; WP-J2): each product's kind, title, required headings, whether it
 // passes the tradecraft gate, and its one owning member in each roster variant. A product a variant does not carry has no owner there. Members write
-// products at .planning/staff/products/j2/<product>.md with the header of src/domain/staff/products.ts. Until the cop-map server exists (drop 2), a map
-// layer is a product file like any other, its features a GeoJSON FeatureCollection in a fenced block that the member writes directly.
+// products at .planning/staff/products/j2/<product>.md with the header of src/domain/staff/products.ts. A map layer is a product file like any other,
+// its features a GeoJSON FeatureCollection in a fenced block; the cop-map tool writes it for the layer's one writer (src/agent/copMap.ts).
 import { staffGuardFolder, staffProductFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import type { ProductKind } from '../../domain/staff/products';
 import type { J2Variant, J2Vocabulary } from './j2Vocabulary';

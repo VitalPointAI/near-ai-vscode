@@ -11,7 +11,7 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import { intelToolName, intelWorkbenchTools } from '../agent/intelWorkbench';
 import { J2_PRODUCTS } from '../agent/staff/j2Products';
 import { j5OptionSets, j5Template } from '../agent/staff/j5Plans';
-import { J2_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES, staffTemplate, staffTemplateForSection } from '../agent/staff/templates';
+import { J2_STAFF_TEMPLATE, J4_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, STAFF_TEMPLATES, staffTemplate, staffTemplateForSection } from '../agent/staff/templates';
 import { WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
 import { parseTeam } from '../agent/teams';
 import type { AgentTool, ToolContext } from '../agent/tools';
@@ -28,11 +28,13 @@ import { callTool, CLEAN_BODY, hashIn, J5_TEAM, staffWorld, writeBody } from './
 
 const members = (team: string) => parseTeam(team, '/p/team.md').members;
 
-test('one staff template registry holds both sections, each with a distinct id, section, file and guidance markers', () => {
-  assert.deepEqual(STAFF_TEMPLATES.map((template) => [template.id, template.section]), [['j2-intelligence', 'j2'], ['j5-plans', 'j5']]);
+test('one staff template registry holds every section, each with a distinct id, section, file and guidance markers', () => {
+  assert.deepEqual(STAFF_TEMPLATES.map((template) => [template.id, template.section]), [['j2-intelligence', 'j2'], ['j5-plans', 'j5'], ['j3-operations', 'j3'], ['j4-logistics', 'j4']]);
+  assert.equal(new Set(STAFF_TEMPLATES.map((template) => template.file)).size, STAFF_TEMPLATES.length, 'one team file name per section');
   assert.equal(staffTemplate('j5-plans'), J5_STAFF_TEMPLATE);
   assert.equal(staffTemplateForSection('j2'), J2_STAFF_TEMPLATE);
-  assert.equal(staffTemplateForSection('j4'), undefined);
+  assert.equal(staffTemplateForSection('j4'), J4_STAFF_TEMPLATE);
+  assert.equal(staffTemplateForSection('j1'), undefined);
   for (const template of STAFF_TEMPLATES) {
     const renderings = template.renderings();
     assert.ok(renderings.length > 0);

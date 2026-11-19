@@ -88,6 +88,60 @@ for (const beat of DEMO_SCRIPTS.j2.beats) {
 }
 check(!/products\/j2\/[a-z-]+\.md/.test(script.replace(/\.planning\/staff\/products\/j2\//g, '')), 'no product path outside .planning/staff/');
 
+// 5. Start the exercise feed simulation (loopback only), as NEAR AI: Staff: Start the Exercise Feed Simulation does with this project open: its reports
+// land in the observation store, its feed changes reach the event hook, and the J2 workspace read model shows them. A virtual clock plays it quickly.
+const { loadSimTimeline, SimSession } = load('staff/sim/simSession.js');
+const { SimFeedRuntime } = load('staff/sim/feedRuntime.js');
+const { ObservationStore } = load('staff/observationStore.js');
+const { loadStaffRoomInput } = load('staff/staffRoomData.js');
+const { buildStaffRoomModel } = load('domain/staff/staffRoom.js');
+const virtual = {
+  time: Date.parse('2026-11-18T12:00:00Z'),
+  timers: [],
+  now() { return this.time; },
+  setTimeout(run, ms) { const timer = { due: this.time + ms, run }; this.timers.push(timer); return timer; },
+  clearTimeout(handle) { this.timers = this.timers.filter((timer) => timer !== handle); },
+  setInterval(run, ms) { const timer = { due: this.time + ms, every: ms, run }; this.timers.push(timer); return timer; },
+  clearInterval(handle) { this.clearTimeout(handle); }
+};
+const feedEvents = [];
+const store = new ObservationStore({ root: project, now: () => virtual.now(), emit: async (events) => { feedEvents.push(...events); } });
+const person = { kind: 'person', name: 'Smoke Test', role: 'Exercise control', deviceFingerprint: 'smoke' };
+const { scenario, timeline } = await loadSimTimeline(path.join(project, '.planning/staff/scenario/scenario.json'));
+const session = new SimSession(timeline, person, virtual);
+const runtime = new SimFeedRuntime(session, store, scenario.region.frame, person, virtual);
+runtime.attach();
+const endpoints = await session.start();
+check(/^127\.0\.0\.1:|\/\/127\.0\.0\.1:/.test(String(endpoints.ais)), `the simulation listens on loopback only (${endpoints.ais})`);
+session.player.setSpeed(4);
+// Ten scenario hours of traffic, resuming at any demo hold.
+const until = virtual.time + 10 * 3600 * 1000 / (300 * 4);
+while (virtual.time < until) {
+  virtual.timers.sort((a, b) => a.due - b.due);
+  const timer = virtual.timers[0];
+  if (!timer || timer.due > until) { virtual.time = until; break; }
+  virtual.time = Math.max(virtual.time, timer.due);
+  if (timer.every) timer.due += timer.every; else virtual.timers.shift();
+  timer.run();
+  if (session.status().state === 'paused') session.player.resume();
+  await runtime.settled();
+}
+await new Promise((resolve) => setTimeout(resolve, 50));
+await runtime.settled();
+const stored = await store.load();
+check(stored.ok && stored.value.rows.length > 0, `simulated reports land in the observation store (${stored.ok ? stored.value.rows.length : stored.message})`);
+check(stored.ok && stored.value.rows.every((row) => row.simulated), 'every stored report is marked simulated');
+check(runtime.counts.refused === 0, `the store refused none of them${runtime.counts.problems.length ? `: ${runtime.counts.problems[0]}` : ''}`);
+check(feedEvents.some((event) => event.type === 'feed.source.state' && event.to === 'live'), 'the feeds going live reach the staff event hook');
+check(runtime.counts.ticks > 0, `track decay ran on its timer (${runtime.counts.ticks} passes)`);
+const input = await loadStaffRoomInput(undefined, project, virtual.now(), undefined, { live: stored.ok ? stored.value.rows : [] });
+const room = buildStaffRoomModel(input);
+check(room.j2.live.total > 0 && room.j2.live.reports.every((report) => report.simulated), `the J2 workspace read model shows the live simulated reports (${room.j2.live.total})`);
+await session.stop();
+await runtime.detach();
+const after = await store.load();
+check(after.ok && after.value.registry.feeds['sim-ais']?.state === 'paused', 'stopping the simulation pauses its feeds in the store');
+
 console.log(`\n${checks} checks passed.`);
 if (keep) console.log(`Project: ${project}\nTeams: ${storage}`);
 else { rmSync(project, { recursive: true, force: true }); rmSync(storage, { recursive: true, force: true }); }

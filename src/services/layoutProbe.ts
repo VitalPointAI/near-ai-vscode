@@ -23,6 +23,10 @@ export interface LayoutReport {
   images?: Array<{ element: string; naturalWidth: number; complete: boolean }>;
   /** Each trust badge on the page (CLAS-08), with its state and its title as shown. */
   trustBadges?: Array<{ state: string; title: string }>;
+  /** Content security policy violations the page met since the probe loaded. */
+  cspViolations?: string[];
+  /** The COP map, on pages with one: MapLibre drew into a canvas, the room shows the COP map, and the fallback line if any. */
+  map?: { maplibre: boolean; cop: boolean; note: string };
 }
 
 export function layoutProbeEnabled(): boolean {

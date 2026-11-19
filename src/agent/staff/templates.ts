@@ -10,6 +10,9 @@ import { definitionHash, guidanceFingerprint, memberFingerprint } from '../teamF
 import { splitTeam } from '../teamMarkdown';
 import type { TemplateSnapshot } from '../teamTemplateHistory';
 import { J2_TEMPLATE_ID, j2Renderings, j2Template } from './j2Template';
+import { j3Guidance, j3Key, j3OptionSets, j3Profile, J3_SKILLS, J3_TEMPLATE_ID, j3SkillPath, renderJ3Team } from './j3Operations';
+import { j3SkillText } from './j3Skills';
+import { J4_TEMPLATE_ID, j4Renderings, j4Template } from './j4Template';
 import { j5Guidance, j5OptionSets, J5_SKILLS, renderJ5Team, skillPath } from './j5Plans';
 import type { J5TemplateOptions, J5Variant } from './j5Plans';
 import { j5SkillText } from './j5Skills';
@@ -130,7 +133,43 @@ export const J5_STAFF_TEMPLATE: StaffTemplate = fromRenderings({
   }))
 });
 
-export const STAFF_TEMPLATES: readonly StaffTemplate[] = [J2_STAFF_TEMPLATE, J5_STAFF_TEMPLATE];
+export const J3_STAFF_TEMPLATE: StaffTemplate = fromRenderings({
+  id: J3_TEMPLATE_ID,
+  section: 'j3',
+  label: 'J3 operations',
+  description: 'Operations section: current operations and the event log, future operations with branches and FRAGO drafts, fires and targeting, information, cyber and space, assessment, liaison, and a release guard before a person decides or any order goes out.',
+  glyph: 'chevrons',
+  file: 'j3-operations',
+  render: (options) => {
+    const j3 = { settings: options.settings, ...(options.locality ? { locality: options.locality } : {}) };
+    return {
+      team: renderJ3Team(j3),
+      guidance: j3Guidance(j3),
+      files: [{ path: '.planning/staff/PROFILE.md', content: j3Profile(j3) }, ...J3_SKILLS.map((skill) => ({ path: j3SkillPath(skill), content: j3SkillText(skill, j3) }))]
+    };
+  },
+  renderings: () => j3OptionSets().flatMap((options) => LOCALITIES.map((locality) => {
+    const j3 = { ...options, locality };
+    return { key: j3Key(j3), ...J3_STAFF_TEMPLATE.render({ settings: j3.settings, locality }) };
+  }))
+});
+
+export const J4_STAFF_TEMPLATE: StaffTemplate = fromRenderings({
+  id: J4_TEMPLATE_ID,
+  section: 'j4',
+  label: 'J4 logistics',
+  description: 'Logistics staff section: support planning from the first step, one planner per logistics function working at once, the logistics current-operations watch and LOGSTAT validation, every number traced to a calculator record, and a release guard before a person decides.',
+  glyph: 'package',
+  file: 'j4-logistics',
+  render: (options) => {
+    const output = j4Template(options.settings, options.locality ? { locality: options.locality } : {});
+    return { team: output.team, guidance: output.guidance, files: output.files.map((file) => ({ path: file.path, content: file.content })) };
+  },
+  renderings: () => j4Renderings().flatMap((rendering) => LOCALITIES.map((locality) => ({ key: `${rendering.key}/${locality}`, ...J4_STAFF_TEMPLATE.render({ settings: rendering.settings, locality }) })))
+});
+
+/** The staff templates in demo order (design 10, 3): J2, J5, J3, J4. */
+export const STAFF_TEMPLATES: readonly StaffTemplate[] = [J2_STAFF_TEMPLATE, J5_STAFF_TEMPLATE, J3_STAFF_TEMPLATE, J4_STAFF_TEMPLATE];
 
 export function staffTemplate(id: string): StaffTemplate | undefined {
   return STAFF_TEMPLATES.find((template) => template.id === id);

@@ -19,6 +19,14 @@ function onHiddenScreen(env: NodeJS.ProcessEnv): boolean {
 // Under xvfb-run on a Wayland desktop, Electron would still pick the person's Wayland screen
 // (WAYLAND_DISPLAY wins over the DISPLAY xvfb-run set). So the Wayland variables are removed from what
 // VS Code inherits (runTests passes process.env on) and Electron is told to use X11, the hidden screen.
+/**
+ * NEAR_AI_E2E_WEBGL=1 gives the hidden window software WebGL (SwiftShader), which the GPU blocklist otherwise refuses under xvfb, so the Staff Room's
+ * real-window check can see MapLibre draw. Off by default: the default run checks the room's SVG fallback instead.
+ */
+function webglArgs(): string[] {
+  return process.env.NEAR_AI_E2E_WEBGL === '1' ? ['--ignore-gpu-blocklist', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [];
+}
+
 function keepToHiddenScreen(env: NodeJS.ProcessEnv): string[] {
   if (process.platform !== 'linux') return [];
   delete env.WAYLAND_DISPLAY;
@@ -63,7 +71,7 @@ async function main(): Promise<void> {
       extensionTestsPath,
       // --password-store=basic keeps this window's secrets (Enable stores the device key) in its own temporary user data, so it never asks the
       // person's OS keyring or puts an unlock prompt on the real screen.
-      launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--password-store=basic', '--skip-welcome', '--skip-release-notes', ...screenArgs],
+      launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--password-store=basic', '--skip-welcome', '--skip-release-notes', ...screenArgs, ...webglArgs()],
       extensionTestsEnv: { NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace, NEAR_AI_E2E_USER_DATA: userData, ...gitEnv }
     });
   }

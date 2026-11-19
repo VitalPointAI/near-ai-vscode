@@ -254,28 +254,61 @@ writes the exact commands and leaves them for you to approve and run.
 
 **NEAR AI: Set Up a Staff Team** (also **Set up a staff team** in Team
 Studio) makes a military staff section team for this project: choose the
-section (J2 intelligence or J5 plans), the doctrine profile (US Joint, US Army
+section (J2 intelligence, J5 plans, J3 operations or J4 logistics), the doctrine profile (US Joint, US Army
 MDMP or NATO/Canadian), the level, the nation and the kind of planning, then
 check the roster before anything is written. The team goes to your teams as
 `<section>-<profile>-<level>.md` and runs with `/team:<that name>`; PROFILE.md
 and the section's skills go under `.planning/staff/`, the staff settings into
 `.planning/.near-ai/project.json`, and the section's guidance into `AGENTS.md`
-between markers of its own, so a J2 and a J5 team can share a project. An
+between markers of its own, so teams of different sections can share a project. An
 earlier team file of the same name moves to your teams archive. The team is
 private, its members draft and recommend, and a named person decides: only
 the **NEAR AI: Staff** commands approve, reject or release a product. It then
 offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
-keeping members you changed. The built-in staff servers (`mcp:staff-products`,
-`mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
-the Team Studio tool picker; only a staff team's run gets them.
+keeping members you changed. A J3 team's plan moves into execution only when
+a person approves its transition brief; from then on the J3 keeps the
+synchronization matrix, the DST and DSM and the assessment plan (in place,
+where the J5 made them; the J5 then proposes changes), and every
+FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
+`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:cop-map`,
+`mcp:logistics`) are listed on the Tools page and in the Team Studio tool picker; only a staff
+team's run gets them. `mcp:observations` reads the feed reports kept in
+`.planning/staff/observations/` (not committed), shows only what your
+clearances cover, and says when a limit cut an answer.
+A J4 logistics team starts support planning at the first step, alongside force
+planning, and every number in its products cites the calculator record that
+produced it (`calc:<id>`, a record in `.planning/staff/calculator/`); the
+release guard cannot clear a number without one, or with a record the
+calculator did not write. Its members reach the built-in logistics server by
+tool family (`mcp__logistics__calc*`, `logstat*`, `movement*`, `readiness*`):
+- **The consumption calculator** (`calc_run`) multiplies planning factors you
+  enter in `.planning/.near-ai/staff-factors.json` by the force list and the
+  days, and gives days of supply from what is on hand. It ships no factor
+  tables. Every result shows its formula and is kept as a record signed into
+  the calculator ledger; `calc_read`, `calc_list` and `calc_factors` show them.
+- **LOGSTAT** (`logstat_submit`, `logstat_read`, `logstat_validate`,
+  `logstat_consolidate`): reports are entered as the units sent them, checked
+  against the plausibility rules of the LOGSTAT definitions skill, sent back
+  with the rule named, and consolidated only once they pass, with the colour
+  bands you set and consumption against the calculator's forecast.
+- **Movement** (`movement_table`, `movement_read`, `movement_route`): notional
+  movement tables checked for lift and arrival against the required delivery
+  date, and the shortest route on a road graph you keep in
+  `.planning/staff/logistics/roads.json`, with no network.
+- **Readiness** (`readiness_import`, `readiness_read`): readiness from a CSV
+  you put in the project, by unit and equipment type, with stale figures
+  marked.
 
 For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
 exercise scenario into `.planning/staff/scenario/` for the team to read. The
 starter scenario, Exercise IRON LANTERN, is fictional and unclassified: a
 peninsula with a coast and a strait, friendly and adversary orders of battle,
 a mission with the higher commander's intent, and reports graded for
-reliability and credibility (one left ungraded). You can load a scenario file
+reliability and credibility (one left ungraded). Its grid references grow
+northward like a real grid, and the scenario places its fictional grid over
+empty ocean, far from any land, so positions can be written in real formats
+without naming a real place. You can load a scenario file
 of your own instead; it must be marked as fictional, unclassified exercise
 data, and anything with a classification marking, a name on your real-entity
 list (the one guard-scan uses: `.planning/staff/real-entities.txt` and the
@@ -285,6 +318,50 @@ demo scripts in `.planning/staff/demo/`: the prompts for each step in your
 staff profile's own terms, with a checklist of the headings, terms and
 citations each product must contain. Loading again moves the earlier
 scenario to `.planning/staff/archive/` rather than deleting it.
+
+**NEAR AI: Staff: Start the Exercise Feed Simulation** replays Exercise IRON
+LANTERN as live feeds for a J2 demo, on this machine only: Cursor on Target
+tracks and spot reports, AIS sentences for ships in and near the Varn Strait,
+RSS from fictional outlets, and a mock partner MCP server with fictional
+HUMINT, SIGINT, MASINT and CI reports. Every message is marked SIM, every
+ship has a made-up radio id that no real ship can hold, and the output panel
+lists the addresses to connect an importer or MCP client to. The timeline
+follows the J2 demo script and holds when the mid-demo report lands.
+**Staff: Simulation Controls** (or the SIM item in the status bar) pauses,
+resumes, steps and sets the speed: 0.5x, 1x, 2x or 4x. The inject script that
+drives it, `resources/staff/scenarios/iron-lantern.sim.jsonl`, and the message
+shapes are described in `src/domain/staff/sim/`.
+**NEAR AI: Open Staff Room** (also **Open the Staff Room** in Team Studio once
+you have a staff team) shows the project's staff run as a war room. The process
+rail across the top shows each step in your profile's own words and whether it
+is done, working now, next, or waiting for a named person. Below it, each staff
+section is a squad of agents, each with its state in words; a token opens the
+agent's card. On the right, **Human decisions** (in gold) lists every product
+waiting for a person: **Approve…**, **Reject…** and **Release…** run the
+**NEAR AI: Staff** commands, which ask who you are, confirm in a dialog and
+sign, so nothing is decided in the page itself. Below it, the **Product
+ledger** lists every product with its state; a row opens its provenance. The
+workspaces share one map, the ledger, the decisions and one clock: **War room**
+for the whole staff with what each section is doing, and **J2** with the
+threat picture on the exercise map (adversary units with their grades, the
+most likely and most dangerous courses of action as dashed red axes, NAIs and
+control measures, layers each with the one section that writes it, and **Map
+as table** for all of it in words), the source register, the PIRs with the
+decision points they support, the collection plan and the standing watches
+(`.planning/staff/products/j2/standing-watches.json`). The map in both
+workspaces is the COP map: the scenario's synthetic geography, the product
+layers and the observations your clearance covers, in 2D or on the globe, with
+its time slider. Where WebGL or the map library is not available, the room
+draws a 2D map instead and says why in a line on the map. On either map a
+name that would cover another name or a symbol moves to a free spot nearby,
+is shortened, or is left off; the symbol always stays, and its name is still
+in its description and in **Map as table**. The J2 workspace also lists the
+live feed reports the project's observation store holds, newest first and
+only what your clearances cover; a running exercise feed simulation fills it.
+While the room is open it runs track decay, so tracks go stale and then lost.
+The J5, J3 and J4 workspaces say what they will hold. **Calm** stops all movement, as the system's
+reduced-motion setting does; **Follow the action** moves the view to where the
+work is; press **?** for the keys.
 
 ### MCP connections
 
@@ -310,6 +387,21 @@ may delete or reach the open world, or says neither way, keeps asking.
 The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
 with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+
+**The COP map** (`mcp:cop-map`) is a built-in local server for military
+staff teams that reaches no network. Members read the COP layers and put
+military symbols, control measures, overlays per adversary course of action
+(ECOA-1 and so on, marked MLCOA or MDCOA) and decision points on the layer they
+write, giving positions as grid references on the scenario's grid; anything
+outside the exercise frame is refused. Each product layer (operations,
+threat, terrain, logistics, plans) has one writer: anyone else's features
+become a proposal in `.planning/staff/proposals/<layer>/` that the writer
+merges, and every change is a new version a person decides on. Hostile and
+other assessed symbols go on the J2's threat layer only; the plans layer is
+kept apart from the current picture. Feed layers are views over observations
+that nobody writes. The map component draws the picture in 2D or on the globe
+offline, over the scenario's synthetic geography, with no map tiles fetched,
+and a time slider on the shared clock.
 
 **The intel workbench** is a built-in local server for military staff J2 teams
 (a team whose file has a `staff:` block). It runs inside the extension, not as
@@ -608,8 +700,9 @@ until it runs out aren't shown.
   older version that does not know it still reads the member's tools
   correctly; if you write it by hand, put it after `tools:` too.
   In a military staff team (a team file with a `staff:` block), the red team
-  can write only its critique and the release guard only its verdicts: the
-  extension refuses their other writes and gives them no shell.
+  can write only its critique, the release guard only its verdicts, and the J3
+  watch officer nothing at all: the extension refuses their other writes and
+  gives them no shell.
   New research teams have `privacy: private` on every member (and presales
   teams on their reviewer), so client material stays on private models;
   change a member's line to `privacy: any` to relax it. Run one with `/team:<name> <task>`
@@ -920,7 +1013,8 @@ until it runs out aren't shown.
   file with a `staff:` block, for exercise and fictional data only) works on
   products through three tool groups its members are granted:
   `mcp:staff-products` (propose a new version, give a gate verdict, submit
-  for a decision, withdraw, status, list, the shared registers, the wargame
+  for a decision, withdraw, status, list, the shared registers including the
+  operations centre's event log (read with a read-only tool of its own), the wargame
   ledger and the tradecraft lint) and `mcp:guard-scan` (the release-guard's
   checks for markings, the exercise box, real names, decisions written as
   made, personal data and J4 numbers without a calculation). Every product
@@ -932,7 +1026,10 @@ until it runs out aren't shown.
   verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
   product, what waits for you, and its history. **NEAR AI: Staff: Decide a
   PIR** approves or rejects a PIR awaiting a decision, signed the same way; a
-  decision written into the PIR register any other way does not count. The
+  decision written into the PIR register any other way does not count. After
+  switching to a git branch with an older or different staff ledger, **NEAR
+  AI: Staff: Use This Branch's Ledger** makes that branch's ledger the one
+  NEAR AI checks, if its own signatures and chain verify. The
   exercise box and the
   real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
   and `.planning/staff/real-entities.txt`. Everything a staff team writes

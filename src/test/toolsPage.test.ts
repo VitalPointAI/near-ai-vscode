@@ -455,3 +455,16 @@ test('a tool summary does not stop at an abbreviation such as "e.g."', () => {
   assert.equal(firstSentence('Read a text file from the workspace. Lines are numbered.'), 'Read a text file from the workspace.');
   assert.equal(firstSentence('Short. But this continues for a while.'), 'Short. But this continues for a while.');
 });
+
+test('the page draws each built-in staff server tool once, under its server, though staff-products and guard-scan are also catalog tools', async () => {
+  const page = await runPageScript();
+  const directory = buildToolsDirectory(input());
+  assert.ok(directory.tools.some((tool) => tool.name === 'mcp__staff-products__propose' && tool.staffServer === 'staff-products'), 'the catalog keeps the tool, marked with its server');
+  page.dispatch({ type: 'directory', directory });
+  const codes = page.doc.body.all().filter((node) => node.tagName === 'code').map((node) => node.textContent);
+  for (const server of directory.staffServers) {
+    assert.equal(codes.filter((text) => text === server.grant).length, 1, `${server.grant} once`);
+    for (const tool of server.tools) assert.equal(codes.filter((text) => text === tool.name).length, 1, `${tool.name} is drawn once`);
+  }
+  assert.equal(codes.filter((text) => text === 'Read').length, 1, 'a plain catalog tool still shows in the tools list');
+});

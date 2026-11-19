@@ -1,9 +1,10 @@
 // Where staff members may write (design 10, 3.1, 3.3 and 4.2; WP-J5). Pure: no I/O, no clock, no vscode.
 //
 // Every staff file lives under `.planning/staff/`: a product is `.planning/staff/products/<section>/<product>.md`, and a gate's report for one version
-// is beside it in `guard/` or `tradecraft/` (ledger.ts gateReportPath). Most members keep to their own files by instruction and by the single-writer rule (ownership.ts). Two members are held to
-// it by the extension: the red team, which critiques and must never change a plan file, and the release guard, which gives a verdict and must never fix
-// the product it judges. For them the team runtime refuses any write outside the paths below, whatever the member's instructions or a model says.
+// is beside it in `guard/` or `tradecraft/` (ledger.ts gateReportPath). Most members keep to their own files by instruction and by the single-writer rule (ownership.ts). Three members are held to
+// it by the extension: the red team, which critiques and must never change a plan file; the release guard, which gives a verdict and must never fix
+// the product it judges; and the J3 watch officer, which writes no file at all. For them the team runtime refuses any write outside the paths below,
+// whatever the member's instructions or a model says.
 import type { StaffSectionId } from './doctrine';
 import type { ProductKind } from './products';
 import type { StaffTeamBlock } from './teamBlock';
@@ -35,6 +36,9 @@ export function staffWriteLimit(block: Pick<StaffTeamBlock, 'section'> | undefin
   if (!block) return undefined;
   if (member === 'red-team') return [staffProductPath(block.section, RED_TEAM_PRODUCT)];
   if (member === 'release-guard') return [staffGuardFolder(block.section)];
+  // The J3 watch officer logs facts, never interpretation, and has no Write (design 10, 3.4): it proposes event-log rows and reports CCIR triggers through
+  // the staff-products register tool, and writes no file at all.
+  if (block.section === 'j3' && member === 'watch-officer') return [];
   return undefined;
 }
 

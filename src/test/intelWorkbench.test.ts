@@ -239,7 +239,8 @@ test('a decision written into the PIR register by hand, naming anyone, is never 
   assert.match(await call(tools, 'check', {}, context), /decision-unrecorded/);
   await call(tools, 'source_add', SOURCE, context);
   await assert.rejects(call(tools, 'pir_update', { id: 'PIR-1', status: 'answered', answeredBy: ['SRC-1'] }, context), /cannot move|pir-transition|cannot be|status/i);
-  assert.equal((await host.pirsAwaitingDecision()).map((pir) => pir.id).join(), 'PIR-1', 'a person can still decide it properly');
+  const queue = await host.pirsAwaitingDecision();
+  assert.equal(('entries' in queue ? queue.entries : []).map((pir) => pir.id).join(), 'PIR-1', 'a person can still decide it properly');
   // A signed decision on other wording does not carry over to changed wording.
   const decided = await host.decidePir({ kind: 'person', name: 'Exercise Commander', role: 'commander', deviceFingerprint: signer.fingerprint }, { pir: 'PIR-1', decision: 'approved' });
   assert.ok(decided.ok);

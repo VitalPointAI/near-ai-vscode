@@ -23,6 +23,12 @@
     root.style.setProperty('--vscode-font-family', 'monospace');
     root.style.setProperty('--vscode-font-size', Math.round(size * 1.1) + 'px');
   });
+  // Every content security policy violation the page meets from the moment this script loads, so a test can tell a page that works under its
+  // policy from one the policy quietly broke.
+  const violations = [];
+  document.addEventListener('securitypolicyviolation', (event) => {
+    if (violations.length < 25) violations.push(event.violatedDirective + ' blocked ' + String(event.blockedURI || 'inline').slice(0, 120));
+  });
   window.nearAiLayoutProbe = function () {
     const doc = document.documentElement;
     const width = window.innerWidth;
@@ -53,7 +59,14 @@
     return {
       type: 'layout-probe-result', width, scrollWidth: doc.scrollWidth, clientWidth: doc.clientWidth,
       bodyScrollWidth: document.body.scrollWidth, bodyClientWidth: document.body.clientWidth,
-      offenders: offenders.slice(0, 25), scrollers: scrollers.slice(0, 25), clipped: clipped.slice(0, 25), images, trustBadges
+      offenders: offenders.slice(0, 25), scrollers: scrollers.slice(0, 25), clipped: clipped.slice(0, 25), images, trustBadges,
+      cspViolations: violations.slice(),
+      // The COP map, where a page has one: whether MapLibre drew into a canvas, and the line the map shows when it fell back.
+      map: (function () {
+        const canvas = document.querySelector('canvas.maplibregl-canvas');
+        const note = document.querySelector('.mapnote:not([hidden])');
+        return { maplibre: Boolean(canvas && canvas.width > 0 && canvas.height > 0), cop: Boolean(document.querySelector('.has-cop')), note: note ? (note.textContent || '').trim().slice(0, 200) : '' };
+      })()
     };
   };
 })();

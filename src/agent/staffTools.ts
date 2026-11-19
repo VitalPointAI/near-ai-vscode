@@ -22,17 +22,18 @@ export const STAFF_PRODUCTS_SERVER = 'staff-products';
 export const GUARD_SCAN_SERVER = 'guard-scan';
 
 /** The staff-products tools: the agent verbs of the state machine, then the registers, the wargame and the step mark. */
-export const STAFF_PRODUCT_TOOL_VERBS = [...AGENT_PRODUCT_VERBS, 'register', 'wargame', 'step', 'lint'] as const;
+export const STAFF_PRODUCT_TOOL_VERBS = [...AGENT_PRODUCT_VERBS, 'register', 'register_read', 'wargame', 'step', 'lint'] as const;
 
 export const staffToolName = (server: string, verb: string): string => `mcp__${server}__${verb}`;
 
 /**
- * The staff tools a write-limited member (a staff team's red team or release guard, src/domain/staff/writeLimits.ts) keeps when its tools line lists
- * them. They write only through the host, which records the ledger, the header and the gate report, never a product body: propose is refused for any
- * product outside the member's write limit, and verdict only records a gate member's verdict.
+ * The staff tools a write-limited member (a staff team's red team, release guard or J3 watch officer, src/domain/staff/writeLimits.ts) keeps when its
+ * tools line lists them. They write only through the host, which records the ledger, the header and the gate report, never a product body: propose is
+ * refused for any product outside the member's write limit, register writes no register outside it (proposing rows and reporting a CCIR trigger stay
+ * open), and verdict only records a gate member's verdict.
  */
 export const WRITE_LIMITED_STAFF_TOOLS: ReadonlySet<string> = new Set([
-  ...(['propose', 'verdict', 'status', 'list', 'lint'] as const).map((verb) => staffToolName(STAFF_PRODUCTS_SERVER, verb)),
+  ...(['propose', 'verdict', 'status', 'list', 'lint', 'register', 'register_read'] as const).map((verb) => staffToolName(STAFF_PRODUCTS_SERVER, verb)),
   staffToolName(GUARD_SCAN_SERVER, 'scan')
 ]);
 
@@ -221,13 +222,13 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     run: async (input, context) => result(await hostOf().list(callerOf(context), input))
   };
 
-  const register: AgentTool<{ action: 'read' | 'write' | 'propose' | 'trigger'; register: string; rows: unknown[]; remove: string[]; part?: string; note?: string; ccir?: string; report?: string; label?: string }> = {
+  const register: AgentTool<{ action: 'write' | 'propose' | 'trigger'; register: string; rows: unknown[]; remove: string[]; part?: string; note?: string; ccir?: string; report?: string; label?: string }> = {
     name: name('register'),
-    description: '[staff-products] The structured registers: ccir-register, pir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook. action read returns the rows; write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns.',
+    description: '[staff-products] Changes the structured registers: ccir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log. action write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns. Read a register with mcp__staff-products__register_read. The PIR register is kept by the intel workbench, not here.',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['read', 'write', 'propose', 'trigger'] }, register: { type: 'string' }, rows: { type: 'array', items: { type: 'object' } },
+        action: { type: 'string', enum: ['write', 'propose', 'trigger'] }, register: { type: 'string' }, rows: { type: 'array', items: { type: 'object' } },
         remove: { type: 'array', items: { type: 'string' } }, part: { type: 'string' }, note: { type: 'string' }, ccir: { type: 'string' }, report: { type: 'string' }, label: { type: 'string' }
       },
       required: ['action'], additionalProperties: false
@@ -236,7 +237,8 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     manifest: writeManifest(name('register')),
     parse: (raw) => {
       const action = raw.action;
-      if (action !== 'read' && action !== 'write' && action !== 'propose' && action !== 'trigger') throw new ToolError('action is read, write, propose or trigger.');
+      if (action === 'read') throw new ToolError('Read a register with mcp__staff-products__register_read; this tool only changes registers.');
+      if (action !== 'write' && action !== 'propose' && action !== 'trigger') throw new ToolError('action is write, propose or trigger.');
       const rows = raw.rows === undefined ? [] : raw.rows;
       if (!Array.isArray(rows) || rows.length > 500) throw new ToolError('rows is a list of at most 500 rows.');
       const part = optionalText(raw, 'part', 40);
@@ -251,7 +253,6 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
       const host = hostOf();
       const caller = callerOf(context);
       switch (input.action) {
-        case 'read': return result(await host.registerRead(caller, input.register));
         case 'write': return result(await host.registerWrite(caller, { register: input.register, rows: input.rows, remove: input.remove, ...(input.part ? { part: input.part } : {}), ...(input.label ? { label: input.label } : {}) }));
         case 'propose': return result(await host.registerPropose(caller, { register: input.register, rows: input.rows, ...(input.note ? { note: input.note } : {}) }));
         default:
@@ -259,6 +260,18 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
           return result(await host.ccirTrigger(caller, { ccir: input.ccir, report: input.report }));
       }
     }
+  };
+
+  const registerRead: AgentTool<{ register: string }> = {
+    name: name('register_read'),
+    description: '[staff-products] Reads a structured register\'s rows: ccir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log; and pir-register, which returns the intel workbench\'s PIR register (its one source) with every decision checked against the signed log. Reads only.',
+    parameters: { type: 'object', properties: { register: { type: 'string' } }, required: ['register'], additionalProperties: false },
+    capability: 'read',
+    manifest: readManifest(name('register_read')),
+    concurrent: true,
+    parse: (raw) => ({ register: text(raw, 'register', 64) }),
+    title: (input) => `Read ${input.register}`,
+    run: async (input, context) => result(await hostOf().registerRead(callerOf(context), input.register))
   };
 
   const wargame: AgentTool<{ action: 'record' | 'derive' | 'read'; phase?: unknown }> = {
@@ -323,5 +336,5 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     run: async (input, context) => result(await hostOf().lintText(callerOf(context), input.product))
   };
 
-  return [propose, verdict, submit, withdraw, status, list, register, wargame, step, lint, scan];
+  return [propose, verdict, submit, withdraw, status, list, register, registerRead, wargame, step, lint, scan];
 }

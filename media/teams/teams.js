@@ -559,7 +559,10 @@
     actions.append(button('Import…', () => vscode.postMessage({ type: 'import' }), { id: 'import-team' }), button('Refresh', () => vscode.postMessage({ type: 'refresh' }), { link: true, id: 'refresh' }));
     bar.append(heading, actions);
     root.append(bar);
-    if (lib.teams.some((team) => team.staff)) root.append(staffLegend());
+    if (lib.teams.some((team) => team.staff)) {
+      actions.append(button('Open the Staff Room', () => vscode.postMessage({ type: 'staff-room' }), { label: 'Open the Staff Room: the staff run as a war room, with each section\'s workspace, the shared map, the products and the decisions waiting for a person', id: 'staff-room' }));
+      root.append(staffLegend());
+    }
 
     if (savedDraft) {
       const resume = el('div', 'resume');

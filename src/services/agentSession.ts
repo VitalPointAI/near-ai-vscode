@@ -28,7 +28,8 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
-import { grantedIntelWorkbenchTools } from '../agent/intelWorkbench';
+import { staffServerToolsForRun } from '../agent/staffServers';
+import { OBSERVATIONS_TOOL_NAMES } from '../agent/observationsTools';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
@@ -75,6 +76,7 @@ import { SpendAccount } from './spendAccount';
 import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
 import { staffTeamInfo, staffTools, WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
 import { staffHostFor } from '../staff/staffHost';
+import { observationStoreFor } from '../staff/observationStore';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -1466,14 +1468,14 @@ export class AgentConversation {
           add: async (addition) => addKnowledge(teamLibraryDir(homeFolder()), teamKnowledgeKey(request.team!.file), addition)
         }, 'research')
       : [];
-    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the intel-workbench, a built-in local
-    // server. Members reach them only through their `mcp:staff-products`, `mcp:guard-scan` and `mcp:intel-workbench` grants, like any connected
-    // server's tools. None of them can approve, reject or release anything, and the workbench reads and writes only the J2 registers, never the network.
+    // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the built-in local staff servers listed once in
+    // staffServers.ts: the intel-workbench, observations, cop-map and logistics. Each of those is given only to members whose own tools line grants it,
+    // never to the run's lead (staffServerToolsForRun refuses any other caller). None of them can approve, reject or release anything, and none reaches
+    // the network.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
-    // Only to members whose own tools line grants it, never to the run's lead (grantedIntelWorkbenchTools refuses any other caller).
-    const intel = request.team?.staff ? grantedIntelWorkbenchTools(request.team) : [];
-    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...intel, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
+    const servers = staffTeam && request.team?.staff ? staffServerToolsForRun(request.team, { host: () => staffHostFor(this.root), store: () => observationStoreFor(this.root), team: staffTeam, run: runId }) : [];
+    const base = [...CORE_TOOLS, webFetchTool, webSearchTool(request.webSearch), checkCitationsTool, checkOriginalityTool, ...GRAPHICS_TOOLS, ...media, ...(request.security ? [securityTool(request.security)] : []), ...(request.cyber ? request.cyber.tools() : []), ...staff, ...servers, ...(request.mcpTools ?? []), ...teamKnowledge, ...memoryFor()];
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
@@ -1537,8 +1539,9 @@ export class AgentConversation {
         // An agent with a write limit (a staff team's red team or guard) keeps only Write and Edit among the tools that change files, since those two
         // refuse every path outside the limit; a shell, an MCP tool or a document maker could write anywhere, and starting other agents could too. The
         // built-in staff tools it is granted stay (WRITE_LIMITED_STAFF_TOOLS): they write only the ledger, headers and gate reports, through the host.
+        // The observations server's tools stay too: they only read the observation store (the J3 watch officer watches the feeds with them).
         const writeOnly = spawn.agent?.writeOnly;
-        const allowed = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
+        const allowed = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };

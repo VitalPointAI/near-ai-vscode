@@ -240,6 +240,12 @@
         "icon": "$(pulse)"
       },
       {
+        "command": "nearAi.openStaffRoom",
+        "title": "Open Staff Room",
+        "category": "NEAR AI",
+        "icon": "$(shield)"
+      },
+      {
         "command": "nearAi.openTeamLive",
         "title": "Watch the Team Live",
         "category": "NEAR AI",
@@ -354,8 +360,28 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.useBranchLedger",
+        "title": "Staff: Use This Branch's Ledger",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.decidePir",
         "title": "Staff: Decide a PIR",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.startSimulation",
+        "title": "Staff: Start the Exercise Feed Simulation",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.simulationControls",
+        "title": "Staff: Simulation Controls (pause, step, speed)",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.stopSimulation",
+        "title": "Staff: Stop the Exercise Feed Simulation",
         "category": "NEAR AI"
       },
       {

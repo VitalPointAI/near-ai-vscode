@@ -523,6 +523,7 @@ export type StudioMessage =
   | { type: 'save-draft'; draft: TeamDraft; step: number; target: StudioTarget; startingPoint?: string; path?: BuilderPath }
   | { type: 'optimise-all' }
   | { type: 'staff-setup' }
+  | { type: 'staff-room' }
   | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
   | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
   /**
@@ -642,6 +643,7 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
     }
     case 'optimise-all': return isPlain(message) && exactKeys(message, ['type']) ? { type: 'optimise-all' } : undefined;
     case 'staff-setup': return exactKeys(message, ['type']) ? { type: 'staff-setup' } : undefined;
+    case 'staff-room': return exactKeys(message, ['type']) ? { type: 'staff-room' } : undefined;
     case 'draft-team': {
       if (!exactKeys(message, ['type', 'idea'], ['outputFormat', 'depth', 'private']) || !text(message.idea, 2000) || !message.idea.trim()) return undefined;
       if (message.private !== undefined && typeof message.private !== 'boolean') return undefined;
@@ -763,6 +765,8 @@ export interface TeamStudioDeps {
   updateTeam?(file: string): Promise<unknown>;
   /** NEAR AI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
   setUpStaffTeam?(): Promise<unknown>;
+  /** Opens the Staff Room for this project's staff run. */
+  openStaffRoom?(): Promise<unknown>;
   /** 0.4.28: whether a run of the team with this slug is going now, and opening Team Live to watch it. */
   liveRun?(slug: string): boolean;
   /** Opens Team Live; with a run id, on that run. */
@@ -1702,6 +1706,10 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'open-markdown': {
         const file = fileFor(message.id, ['project', 'user', 'archived']);
         if (file) await deps.openFile(file);
+        return;
+      }
+      case 'staff-room': {
+        await deps.openStaffRoom?.();
         return;
       }
       case 'staff-setup': {
