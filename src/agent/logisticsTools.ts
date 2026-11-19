@@ -26,6 +26,7 @@ import { mcpToolName } from '../mcp/tools';
 import type { LogisticsHost } from '../staff/logisticsHost';
 import type { StaffTeamInfo } from '../staff/staffHost';
 import { declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED } from './tools';
+import { fenceReadResults, fenceStaffText } from './staffFence';
 import type { AgentTool, ToolContext } from './tools';
 import { resolveInWorkspace, ToolError } from './workspace';
 import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
@@ -259,14 +260,16 @@ export function logisticsTools(access: LogisticsToolAccess): AgentTool<any>[] {
       await host.appendValidation(entries);
       let product = '';
       if (access.team.section === 'j4') product = await writeValidationProduct(context, validationLogMarkdown([...log, ...entries]));
+      // The unit and commodity names and the findings quote what a unit wrote: they go back fenced, as every read tool's answer does (staffFence.ts).
       const lines: string[] = [];
       for (const entry of entries) {
         if (entry.passed) { lines.push(`${entry.report} (${entry.unit}): passes every rule${entry.against ? `, balanced against ${entry.against}` : ', with no earlier report to balance against'}.`); continue; }
         lines.push(`${entry.report} (${entry.unit}): ${plural(entry.findings.length, 'finding')}, sent back to ${entry.unit}; it stays out of the consolidation until a report that passes comes in.`);
         for (const finding of entry.findings) lines.push(`- rule ${finding.rule} (${finding.commodity}): ${finding.message}`);
       }
-      if (product) lines.push('', `The validation log product is at ${product}; propose it with the staff-products tool.`);
-      return lines.join('\n');
+      const passed = entries.filter((entry) => entry.passed).length;
+      const head = `Validated ${plural(entries.length, 'LOGSTAT')}: ${passed} passed, ${entries.length - passed} with findings.`;
+      return [head, fenceStaffText(logisticsToolName('logstat_validate'), lines.join('\n')), ...(product ? ['', `The validation log product is at ${product}; propose it with the staff-products tool.`] : [])].join('\n');
     }
   };
 
@@ -400,7 +403,8 @@ export function logisticsTools(access: LogisticsToolAccess): AgentTool<any>[] {
     }
   };
 
-  return [calcRun, calcRead, calcList, calcFactors, logstatSubmit, logstatRead, logstatValidate, logstatConsolidate, movementTable, movementRead, movementRoute, readinessImport, readinessRead];
+  // Every read tool's answer is fenced whole (staffFence.ts): LOGSTATs, factors, records and readiness rows are text units, people and members wrote.
+  return fenceReadResults([calcRun, calcRead, calcList, calcFactors, logstatSubmit, logstatRead, logstatValidate, logstatConsolidate, movementTable, movementRead, movementRoute, readinessImport, readinessRead]);
 }
 
 /** Writes the validation log product's body, keeping its staff header when it has one, so the analyst (who has no file tools) can propose it. */

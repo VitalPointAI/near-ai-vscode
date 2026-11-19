@@ -15,6 +15,7 @@ import { INTEL_WORKBENCH_TOOL_NAMES } from '../agent/intelWorkbench';
 import { COP_MAP_TOOL_NAMES } from '../agent/copMap';
 import { LOGISTICS_TOOL_NAMES } from '../agent/logisticsTools';
 import { OBSERVATIONS_TOOL_NAMES } from '../agent/observationsTools';
+import { WATCH_TOOL_NAMES } from '../agent/watchTools';
 import { builtInTools, CATALOG_TOOL_FILES, SHORTHAND_EXCEPTIONS, TOOL_DEFINING_FILES } from '../agent/toolCatalog';
 import { effectsFor, parseToolManifest, shorthandFor } from '../domain/gate/manifest';
 import { buildStudioContext, reviewDraft } from '../services/teamStudioPage';
@@ -211,8 +212,8 @@ test('the team studio pickers offer the 13 tools with their words, and TeamKnowl
   const names = studio.tools.map((tool) => tool.name);
   assert.deepEqual(names.slice(0, EXPECTED_ORDER.length), EXPECTED_ORDER, 'the picker lists the whole catalog in catalog order');
   // After the catalog: each built-in staff server's whole-server grant, and the staff tools that are not catalog tools (the intel-workbench's, the
-  // observations server's, cop-map's and the logistics server's).
-  assert.ok(names.slice(EXPECTED_ORDER.length).every((name) => /^mcp:(?:staff-products|guard-scan|intel-workbench|observations|cop-map|logistics)$/.test(name) || /^mcp__(?:intel-workbench|observations|cop-map|logistics)__/.test(name)), 'only staff server entries follow the catalog');
+  // observations server's, cop-map's, the logistics server's, the orders server's and the battle-rhythm server's).
+  assert.ok(names.slice(EXPECTED_ORDER.length).every((name) => /^mcp:(?:staff-products|guard-scan|intel-workbench|observations|cop-map|logistics|orders|battle-rhythm)$/.test(name) || /^mcp__(?:intel-workbench|observations|cop-map|logistics|orders|battle-rhythm)__/.test(name)), 'only staff server entries follow the catalog');
   const byName = new Map(builtInTools().map((tool) => [tool.name, tool]));
   for (const name of [...CYBER_TOOLS, 'TeamKnowledge', 'Learn']) assert.deepEqual(studio.tools.find((tool) => tool.name === name)!.words, describeManifest(byName.get(name)!.manifest!), `${name} words in the picker`);
   const draft = { name: 'k', description: '', members: [{ name: 'a', role: '', model: '', tools: ['TeamKnowledge', 'Learn', 'CyberHttpProbe', 'Teleport'], instructions: 'x' }] } as unknown as Parameters<typeof reviewDraft>[0];
@@ -484,12 +485,12 @@ function toolsOfARunWithEverythingOn(): AgentTool<any>[] {
 test('a run with every option on is given exactly the catalog\'s tools, in the catalog\'s order, so a tool added to a run but not to the catalog fails here', () => {
   const given = toolsOfARunWithEverythingOn().map((tool) => tool.name);
   // The run is a staff team's, so it also gets the built-in local staff servers a member is granted: the intel-workbench, observations, cop-map and
-  // logistics. Their tools, like a connected server's, are not catalog entries (intelWorkbench.test.ts, staffObservations.test.ts, staffCopMap.test.ts,
+  // logistics (with the observations server's standing watch tools, WP-WATCH). Their tools, like a connected server's, are not catalog entries (intelWorkbench.test.ts, staffObservations.test.ts, staffCopMap.test.ts,
   // staffLogistics.test.ts). They come right after the staff tools; everything else is exactly the catalog.
   const catalog = builtInTools().map((tool) => tool.name);
   const after = catalog.indexOf('mcp__guard-scan__scan') + 1;
   assert.ok(after > 0);
-  assert.deepEqual(given, [...catalog.slice(0, after), ...INTEL_WORKBENCH_TOOL_NAMES, ...OBSERVATIONS_TOOL_NAMES, ...COP_MAP_TOOL_NAMES, ...LOGISTICS_TOOL_NAMES, ...catalog.slice(after)]);
+  assert.deepEqual(given, [...catalog.slice(0, after), ...INTEL_WORKBENCH_TOOL_NAMES, ...OBSERVATIONS_TOOL_NAMES, ...WATCH_TOOL_NAMES, ...COP_MAP_TOOL_NAMES, ...LOGISTICS_TOOL_NAMES, ...catalog.slice(after)]);
 });
 
 function sourceFilesUnder(folder: string): string[] {

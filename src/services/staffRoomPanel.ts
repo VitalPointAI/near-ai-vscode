@@ -32,6 +32,8 @@ import { currentFeedRuntime } from './staffSimCommand';
 export const ROOM_TICK_EVERY_MS = 10_000;
 import { handleStaffRoomMessage } from '../staff/staffRoomHost';
 import { staffHostFor } from '../staff/staffHost';
+import { attend } from '../staff/watchAttendance';
+import { watchHostFor } from '../staff/watchHost';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 
 const MIN_GAP_MS = 250;
@@ -152,7 +154,10 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
       notice: (text) => post({ type: 'notice', text })
     });
   }, undefined, context.subscriptions);
-  view.onDidDispose(() => { stop(); panel = undefined; }, undefined, context.subscriptions);
+  // An open Staff Room is a person attending the project: its standing watches run while it is open, and pause when nothing attends (WP-WATCH, Q5).
+  if (root) watchHostFor(root);
+  const releaseAttendance = root ? attend(root, { kind: 'staff-room', id: 'panel' }) : () => undefined;
+  view.onDidDispose(() => { stop(); releaseAttendance(); panel = undefined; }, undefined, context.subscriptions);
   start();
 }
 
@@ -170,7 +175,8 @@ export function staffRoomHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cs
 <div id="app" class="app" data-cop-resources="${attribute(JSON.stringify({ maplibre: cop.maplibre, worker: cop.worker, milsymbol: cop.milsymbol }))}"></div>
 <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>
 <div id="alert" class="visually-hidden" role="alert" aria-live="assertive"></div>
-${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.script}"></script>
+${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.declutter}"></script>
+<script nonce="${nonce}" src="${cop.script}"></script>
 <script nonce="${nonce}" src="${asset('staffMap.js')}"></script>
 <script nonce="${nonce}" src="${asset('staffRoom.js')}"></script></body></html>`;
 }

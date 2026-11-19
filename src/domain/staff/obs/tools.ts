@@ -9,7 +9,8 @@ import type { SliceQuery } from './slices';
 export const OBSERVATIONS_SERVER = 'observations';
 
 export const OBS_TOOL_NAMES = [
-  'obs.slice', 'obs.track', 'obs.near', 'obs.changes', 'obs.corroboration', 'obs.timeline', 'obs.feeds', 'watch.propose', 'watch.list', 'cop.layer.propose'
+  'obs.slice', 'obs.track', 'obs.near', 'obs.changes', 'obs.corroboration', 'obs.timeline', 'obs.feeds', 'watch.propose', 'watch.list', 'watch.draft', 'watch.drafted',
+  'cop.layer.propose'
 ] as const;
 export type ObsToolName = (typeof OBS_TOOL_NAMES)[number];
 
@@ -36,6 +37,10 @@ export interface WatchProposeInput {
   readonly alert: { readonly name: string; readonly role: string }
 }
 export interface WatchListInput { readonly states?: readonly string[] }
+/** A member drafts for a matched watch (WP-WATCH): an INTREP draft the host writes and records, or the revision note for an adversary COA product. */
+export interface WatchDraftInput { readonly watch: string; readonly kind: 'intrep' | 'ecoa-revision' }
+/** A member reports a watch's drafts ready: the INTREP the host recorded, and any revision it proposed itself. */
+export interface WatchDraftedInput { readonly watch: string; readonly products?: readonly string[] }
 /** A proposed change to a layer the member does not own; the owner merges it (design 10, 4.3). */
 export interface CopLayerProposeInput { readonly layer: string; readonly summary: string; readonly change: string }
 
@@ -57,6 +62,8 @@ export const OBS_TOOLS: readonly ObsToolSpec[] = [
   { name: 'obs.feeds', summary: 'Each feed\'s state, gaps and last report, and what cannot be read.', proposes: false },
   { name: 'watch.propose', summary: 'Draft a standing watch; a named person arms it.', proposes: true },
   { name: 'watch.list', summary: 'Armed watches and their recent matches.', proposes: false },
+  { name: 'watch.draft', summary: 'Draft an INTREP or an adversary COA revision for a matched watch, as a draft for its named person.', proposes: true },
+  { name: 'watch.drafted', summary: 'Report a watch\'s drafts ready for its named person to review.', proposes: true },
   { name: 'cop.layer.propose', summary: 'Propose a change to a layer you do not own; its owner merges it.', proposes: true }
 ];
 

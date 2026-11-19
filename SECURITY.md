@@ -27,6 +27,7 @@ Last reviewed: 2026-11-15, against the code on `main` plus the messaging relay f
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | A team's knowledge graph | One file per team on this computer, `~/.near-ai-teams/knowledge/<team>.json` (or `knowledge/` under `NEAR_AI_TEAMS_DIR`), never in the project and never synced | What the team's agents add with the Learn tool during runs with that team: actors, what they do, how they relate, and facts with their sources and Admiralty grades. Every member reads it with TeamKnowledge, and its contents go to the model as tool results. A team from your library has one graph for every project it works in; a project's own team (`team.md`) has a graph for that project only. Agents' grades are capped at C3, because a run that read a hostile page could be steered into claiming anything. Team Studio shows it. |
 | A staff team's J2 registers (the intel workbench, `mcp:intel-workbench`) | `.planning/staff/products/j2/source-register.json`, `pir-register.json` and `collection-plan.json` in your project, so they go wherever the project's files go | What the J2 members record: source items with their two grades, origin and deception note; PIRs with their decision points, latest times of value, indicators and any person's decision; and collection recommendations. The tools run inside the extension, reach no network, and declare only these files and `.planning/.near-ai/project.json`, so the gate's label checks apply to them. Entries above org/Internal, NATO Unclassified or Protected A are refused: staff templates hold exercise and fictional data only, and labels are not accreditation. A PIR counts as approved or rejected only when a signed entry in `.planning/staff/ledger/decisions.jsonl` records it: one made by **NEAR AI: Staff: Decide a PIR**, signed with the deciding person's device key, on that exact wording. A decision written into the register by hand or by a member, naming anyone, reads as awaiting a decision. Only members whose tools line grants `mcp:intel-workbench` can call these tools; the run's lead cannot. |
+| A staff team's standing watches (`mcp__observations__watch_*` and the **NEAR AI: Staff** watch commands) | `.planning/staff/products/j2/standing-watches.json` in your project, and the watch decisions in `.planning/staff/ledger/decisions.jsonl` | Each watch's PIR and indicator, the slice it matches, its latest time of value, the person it alerts by name and role, what it may draft, its state, what it found while paused (observation ids), the subjects it matched in the last 30 minutes, its current match and drafts. Arming and retiring are signed decisions of the named person. Watch events (state, matches, pauses and alerts with the person's name and role) go into the staff event log. Nothing leaves this computer. |
 | A staff team's feed observations (the observation store, read through `mcp:observations`) | `.planning/staff/observations/` in your project, which ignores itself in git, so it is not committed or pushed | Feed reports, one append-only file per feed, channel and hour, each with its label and handling as the feed stamped them; the feed registry and an index of file sizes and hashes; and, for live streams only, the raw messages the reports came from, kept as a documented raw-copy exception (a stream cannot be read again from its source) for a retention period per feed class (72 hours for positions, 30 days for events, 90 days for reports, 7 days for gridded data), with any message over 64 KB kept as its hash and length only. The tools run inside the extension, reach no network, read only this folder and the loaded scenario, and show an agent only reports your clearances cover (none marked no-agent-tools); the chat's label rises to what they show. Labels above org/Internal, NATO Unclassified or Protected A are refused. |
 | A team sent for review (**Improve with AI** in Team Studio, and the description you give when the AI drafts a team) | One model on NEAR AI Cloud or your local runtime, only when you ask, after the outbound check | The team's name, description, and each member's name, role, reports-to line, tools and instructions, plus the local check's findings. Which model may see it follows the team's privacy: a private team (marked `privacy: private`, every member private, or any team, including one being drafted, in a project with a knowledge base, which Team Studio decides from the workspace rather than from what the page sends) goes only to a private model, a NEAR TEE model on NEAR AI Cloud's own endpoint whose attestation NEAR reports as supported or verified (one reported as failed or unverified, or not reported at all, does not count), or a model on this computer; a team with some private members goes to a private model, or, when there is none, without those members' text; any other team goes to a model your settings and TEE-only mode allow. Nothing is sent while the team holds something that looks like a key, token or password. The reply is read as data: the reviewer has no tools, its suggestions never change a model or privacy, and none is applied until you accept it and Save. |
 | A shared team file (**Share…** in Team Studio) | A `.near-team.json` file you save and choose where to send; the extension sends it nowhere | The team file as saved (names, roles, models, tools, instructions), a summary, a format version and a checksum. No file path, setting, key or token. A team holding something that looks like a key or password is refused; one naming a folder on this computer is shared only after you agree. The team's knowledge graph is included only when you choose it, after local paths, non-web sources and secret-looking values are removed. An imported team file is checked, shown and added only with your consent, and stays untrusted until you approve it the first time it would run; its checksum is not a signature. |
@@ -801,6 +802,36 @@ wrote it; a broken or unverifiable log proves nothing from that point, which
 leaves decisions untaken, never taken. The staff event log is a notice board,
 never the record of any decision.
 
+**Standing watches run only when a person armed them, and only while a person
+attends.** The J2's standing watches live in
+`.planning/staff/products/j2/standing-watches.json`, a file members could also
+write. A watch is armed, rejected or retired only through the **NEAR AI:
+Staff** watch commands, which ask the person's name and role, confirm in a
+dialog and append an entry to `.planning/staff/ledger/decisions.jsonl` signed
+with this device's key, over a hash of the watch as the person saw it (what it
+matches, whom it alerts, what it may draft and its label). A watch the file
+calls armed with no matching entry, or changed since it was armed, reads as
+proposed and looks at nothing; a retired one stays retired whatever the file
+says. Pausing, resuming and acknowledging also need the person this device's
+key signs for. Members granted the watch tools (`mcp__observations__watch_*`:
+the J2 watch officer, warning analyst and threat or IPB analyst, and no one
+else) can propose a watch, list them, draft for a match and report drafts
+ready; no tool arms, pauses, resumes, acknowledges, retires, approves or
+releases. A watch may only draft and alert a named person: an output that
+would release, approve or task collection is refused when the watch is read.
+Watches are evaluated only while a person's staff run or the Staff Room is
+open in this window (owner decision: attended runs only until run contracts
+exist), the watch tools are declared for interactive runs only, and nothing
+evaluates them in the background. A watch sees only observations at its own
+label or Public, and its drafts carry its label. An INTREP draft is written as
+a new product file only (never over an existing one), says that it is a draft
+for the named person, copies no free text from the feeds, and enters the
+product ledger as the member's draft; the tradecraft gate, the release-guard
+and a person's decision follow as for any product. Every write to the watch
+register is a compare-and-swap like the other staff files below, and a
+register with one watch that does not read refuses every change rather than
+dropping it. `watch_list` returns its text fenced as untrusted.
+
 **NEAR AI never overwrites bytes it did not read.** Members write project
 files with Write and Edit, which take no lock, so every write NEAR AI makes to
 a file a member can also write (product headers, register rewrites, the J2
@@ -847,8 +878,8 @@ vendored map libraries). The COP picture it sends holds only the observations
 the person's clearance covers: the rows come from the store's reader view,
 which drops every row the gate's own check does not cover before anything is
 built from them, and with no gate in the window no observation is read. Every
-message from the page is checked for its type, exact keys and the form of
-each value. A decision button sends only the product and the version hash the
+message from the page is checked for its type, exact keys (a message with a
+key added or left out is refused) and the form of each value. A decision button sends only the product and the version hash the
 person saw; the extension then runs the same person-only command, which asks
 who they are, confirms in a dialog and signs, and refuses a product that
 changed. The event log is not signed, so the room shows a person's decision,
@@ -900,6 +931,23 @@ never change one: its validation tool writes only the validation log and its
 product, and every consolidation checks the plausibility rules again rather
 than trusting the log.
 
+The orders server (`mcp:orders`) builds an order or plan only from staff
+products a person released, and only when each product file still holds the
+exact version the ledger records as released. It writes the result, and every
+FRAGO it drafts, as a draft product of the calling member in
+`.planning/staff/products/<section>/`, over only the bytes it read, and
+registers it through the same propose step as any product, so the release
+guard checks it and only a person approves and releases it. It takes annex
+letters from the doctrine profile, never from the caller. The battle-rhythm
+server (`mcp:battle-rhythm`) writes the calendar through the register tool, so
+only its one writer changes it, writes an `.ics` file only under
+`.planning/staff/exports/`, and reads an `.ics` file only from inside the
+project. That file is treated as untrusted: at most 256 KB, refused whole when
+a line is not a well-formed iCalendar line, has control characters or BEGIN
+and END that do not nest, each event checked against the register's columns,
+and its text returned to the model fenced as untrusted data. Neither server
+reaches the network, and neither has an approve, release, issue or send verb.
+
 ### Exercise scenarios for staff teams
 
 **NEAR AI: Load Staff Exercise Scenario** reads the starter scenario shipped
@@ -940,6 +988,29 @@ person who started the simulation is recorded as the person who approved its
 feeds. The partner feed is never taken in this way. Stopping the simulation
 pauses its feeds in the store.
 
+**Feed file import** (**NEAR AI: Staff: Import Feed File...**) is run by a
+person only: no agent tool runs a VS Code command, and a new import feed must
+be approved by the named person who confirms the import. The chosen file is
+never parsed in the extension host. The extension starts a separate Node
+process for it with a 256 MB heap limit, an environment that holds nothing
+but the switch that makes the editor's runtime act as Node (no tokens, keys
+or proxy settings), no standard input or output, and a 20 second limit after
+which the process is killed. Files over 16 MB are refused before any process
+starts, and text that is not UTF-8 is refused. The parser opens no network
+connection, writes no file and returns only plain records, which the extension
+checks again one by one. XML (CoT, KML, RSS, Atom) is read by the extension's
+own small reader, not a third-party parser: a document type declaration is
+refused outright, only the five predefined XML entities and character
+references are read, nothing external is ever resolved, and nesting depth,
+element and attribute counts and value lengths are capped. This choice
+follows the entity expansion flaws found in popular JavaScript XML parsers in
+2026. AIS sentences are accepted only with a correct NMEA checksum. Every
+imported report is placed inside the scenario's exercise frame or held back
+(with no frame loaded, everything with a position is held), is stamped with a
+label inside the staff template ceiling (never below its feed's), is never
+marked simulated, and enters the observation store through its one append
+path, which checks the label and stamp again. No dependency was added.
+
 ### COP map
 
 The `cop-map` server (`mcp:cop-map`) is built in and runs inside the
@@ -956,6 +1027,16 @@ assessment) go on the threat layer only, every position must lie inside the
 scenario's exercise frame over empty ocean, every feature carries an exercise
 label, and a layer's label is the join of its features' labels. What one
 member wrote is shown to another agent fenced as untrusted data.
+
+Every read tool of the built-in staff servers (staff-products, guard-scan, the
+intel workbench, cop-map, logistics, orders and battle-rhythm) returns its whole answer inside an
+`<untrusted-content>` block with a random id, with injection attempts flagged,
+the same fence web pages and MCP results get: products, registers, LOGSTATs,
+planning factors, layers and proposals are text a unit, a person or another
+member wrote. A write tool that also returns stored text (the wargame ledger,
+LOGSTAT validation findings, an `.ics` import) fences that part. The
+observations server fences its rows itself, and its `watch_list` its text. A test calls every read tool of every staff server and
+checks the fence.
 
 The map page draws the scenario's synthetic geography and requests no map
 tile, glyph, sprite or font: an outside tile request would reveal the area of

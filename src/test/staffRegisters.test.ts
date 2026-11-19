@@ -9,7 +9,7 @@ import { checkRow, parseRegisterBody, REGISTER_SCHEMAS, renderRegisterBody, writ
 import { copModel, stepBoard } from '../domain/staff/readModels';
 import { deriveFromWargame } from '../domain/staff/wargame';
 import type { StaffEvent } from '../domain/staff/events';
-import { callTool, J2_TEAM, J3_TEAM, J5_TEAM, readProductFile, staffWorld } from './helpers/staffFixtures';
+import { callTool, J2_TEAM, J3_TEAM, J5_TEAM, readProductFile, staffWorld, unfenced } from './helpers/staffFixtures';
 
 const REGISTER = 'mcp__staff-products__register';
 const REGISTER_READ = 'mcp__staff-products__register_read';
@@ -62,7 +62,7 @@ test('the CCIR register: the J3 director writes it, the J2 requirements manager 
   assert.ok(proposal.ok, proposal.text);
   assert.equal((await readdir(path.join(world.root, '.planning/staff/proposals/ccir-register'))).length, 1);
   const read = await callTool(world, J3_TEAM, REGISTER_READ, { register: 'ccir-register' }, 'joc-chief');
-  assert.equal((JSON.parse(read.text) as { rows: unknown[] }).rows.length, 2);
+  assert.equal((JSON.parse(unfenced(read.text, REGISTER_READ)) as { rows: unknown[] }).rows.length, 2);
   const trigger = await callTool(world, J3_TEAM, REGISTER, { action: 'trigger', ccir: 'F1', report: 'Bridge reported down at 0400' }, 'joc-chief');
   assert.ok(trigger.ok, trigger.text);
   assert.equal(heard.filter((event) => event.type === 'staff.ccir.triggered').length, 1);

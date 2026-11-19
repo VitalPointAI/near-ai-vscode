@@ -93,7 +93,19 @@ class FakeDoc {
   key(key: string, target?: FakeNode) { for (const listener of this.listeners.get('keydown') ?? []) listener({ key, target: target ?? this.activeElement ?? this.body, preventDefault() {} }); }
 }
 
-async function runPage(options: { reduced?: boolean; state?: Record<string, unknown>; theme?: string; window?: Record<string, unknown>; copMap?: boolean; styles?: Record<string, string> } = {}) {
+/** Timers the test drives by hand: each pending callback by its delay, run with fire(ms). */
+function manualTimers() {
+  let next = 0;
+  const pending = new Map<number, { fn: () => void; ms: number }>();
+  return {
+    pending,
+    setTimeout: (fn: () => void, ms: number) => { next += 1; pending.set(next, { fn, ms }); return next; },
+    clearTimeout: (id: number) => { pending.delete(id); },
+    fire(ms: number) { for (const [id, timer] of [...pending]) if (timer.ms === ms) { pending.delete(id); timer.fn(); } }
+  };
+}
+
+async function runPage(options: { reduced?: boolean; state?: Record<string, unknown>; theme?: string; window?: Record<string, unknown>; copMap?: boolean; styles?: Record<string, string>; timers?: { setTimeout: (fn: () => void, ms: number) => unknown; clearTimeout: (id: never) => void } } = {}) {
   const doc = new FakeDoc(options.theme ?? 'vscode-dark');
   const posts: Array<Record<string, any>> = [];
   const states: Array<Record<string, unknown>> = [];
@@ -103,10 +115,12 @@ async function runPage(options: { reduced?: boolean; state?: Record<string, unkn
     document: doc, window,
     matchMedia: (query: string) => ({ matches: Boolean(options.reduced) && /reduce/.test(query), addEventListener() {} }),
     acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => options.state, setState: (state: Record<string, unknown>) => states.push(JSON.parse(JSON.stringify(state))) }),
-    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms).unref(), clearTimeout, setInterval: (fn: () => void, ms: number) => setInterval(fn, ms).unref(), clearInterval,
+    ...(options.timers ? { setTimeout: options.timers.setTimeout, clearTimeout: options.timers.clearTimeout } : { setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms).unref(), clearTimeout }), setInterval: (fn: () => void, ms: number) => setInterval(fn, ms).unref(), clearInterval,
     JSON, Map, Set, Date, String, Number, Boolean, Object, Array, Math, RegExp,
     ...(options.styles ? { getComputedStyle: () => ({ getPropertyValue: (name: string) => options.styles![name] ?? '' }) } : {})
   });
+  // The page's order (staffRoomPanel.ts): the shared label placement, the COP map, the room's map, the room.
+  vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'declutter.js'), 'utf8'), sandbox, { timeout: 1000 });
   if (options.copMap) vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'copMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffRoom.js'), 'utf8'), sandbox, { timeout: 1000 });
@@ -169,6 +183,22 @@ test('a decision button posts only the product and the version hash; the page ne
   const kinds = new Set(page.posts.map((post) => post.type));
   assert.ok([...kinds].every((kind) => ['ready', 'decide', 'open', 'open-product', 'select-run'].includes(kind)));
   assert.ok(page.posts.every((post) => !('command' in post)));
+});
+
+test('a newer notice keeps its own 6 seconds: the older notice\'s hide timer is cleared, not left to hide it early', async () => {
+  const timers = manualTimers();
+  const page = await runPage({ timers });
+  const toast = () => page.byClass('toast')[0];
+  page.dispatch({ type: 'notice', text: 'First notice' });
+  assert.equal(toast().hidden, false);
+  assert.equal([...timers.pending.values()].filter((timer) => timer.ms === 6000).length, 1);
+  page.dispatch({ type: 'notice', text: 'Second notice' });
+  assert.equal([...timers.pending.values()].filter((timer) => timer.ms === 6000).length, 1, 'the first notice\'s timer was cleared');
+  assert.equal(toast().textContent, 'Second notice');
+  timers.fire(6000);
+  assert.equal(toast().hidden, true, 'the second notice hides after its own 6 seconds');
+  page.dispatch({ type: 'notice', text: 'Third notice' });
+  assert.equal(toast().hidden, false, 'a notice after one has hidden shows again');
 });
 
 test('a message from the host that does not fit the model is ignored', async () => {

@@ -9,7 +9,14 @@ export const STAFF_COMMANDS = {
   show: 'nearAi.staff.showProducts',
   setAside: 'nearAi.staff.setAsideLedger',
   useBranchLedger: 'nearAi.staff.useBranchLedger',
-  decidePir: 'nearAi.staff.decidePir'
+  decidePir: 'nearAi.staff.decidePir',
+  // A named person's standing watch steps (research note 11, 4.5; WP-WATCH). Arming and retiring are signed; no tool runs any of them.
+  createWatch: 'nearAi.staff.createWatch',
+  armWatch: 'nearAi.staff.armWatch',
+  pauseWatch: 'nearAi.staff.pauseWatch',
+  resumeWatch: 'nearAi.staff.resumeWatch',
+  acknowledgeWatch: 'nearAi.staff.acknowledgeWatch',
+  retireWatch: 'nearAi.staff.retireWatch'
 } as const;
 
 /** The person-only decision commands, the only commands the Staff Room's decision buttons may run. */
@@ -17,3 +24,9 @@ export const PERSON_DECISION_COMMANDS: readonly string[] = [STAFF_COMMANDS.appro
 
 /** The command that opens the Staff Room. */
 export const OPEN_STAFF_ROOM_COMMAND = 'nearAi.openStaffRoom';
+
+/**
+ * The person-run feed file import (WP-IMP): it picks a file, shows what will be imported and asks before writing. It is a VS Code command only: no agent
+ * tool runs a VS Code command, so a member can never import a file into the observation store.
+ */
+export const STAFF_IMPORT_FEED_COMMAND = 'nearAi.staff.importFeedFile';

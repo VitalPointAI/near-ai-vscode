@@ -535,12 +535,14 @@ test('the feed picture: sources with state and gaps, feed layers with the SIM ba
 test('the observations tools: the names note 11 lists, local with no hosts, and only proposals change anything', () => {
   assert.deepEqual(OBS_TOOLS.map((tool) => tool.name), [...OBS_TOOL_NAMES]);
   assert.deepEqual(OBS_TOOL_MANIFEST, { runsOn: 'local', hosts: [] });
-  assert.deepEqual(OBS_TOOLS.filter((tool) => tool.proposes).map((tool) => tool.name), ['watch.propose', 'cop.layer.propose']);
+  // WP-WATCH adds the two drafting steps: each writes a draft for a named person, never a decision.
+  assert.deepEqual(OBS_TOOLS.filter((tool) => tool.proposes).map((tool) => tool.name), ['watch.propose', 'watch.draft', 'watch.drafted', 'cop.layer.propose']);
 });
 
 test('the contract is pure: no vscode, no file system, no network in src/domain/staff/obs', () => {
   const folder = path.join(__dirname, '..', '..', 'src', 'domain', 'staff', 'obs');
-  for (const file of readdirSync(folder).filter((name) => name.endsWith('.ts'))) {
+  // The codecs (WP-IMP) are in a subfolder and are held to the same rules.
+  for (const file of readdirSync(folder, { recursive: true }).map(String).filter((name) => name.endsWith('.ts'))) {
     const source = readFileSync(path.join(folder, file), 'utf8');
     assert.ok(!/from 'vscode'|require\('vscode'\)/.test(source), `${file} imports vscode`);
     assert.ok(!/from 'node:(fs|net|http|https|dgram|child_process)'/.test(source), `${file} does I/O`);

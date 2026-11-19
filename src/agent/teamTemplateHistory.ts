@@ -591,7 +591,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j2-intelligence': [
     {
       version: 1,
-      definition: '74f962e6b4955162',
+      definition: '8fd995077a17a1ad',
       guidance: [
         '8c12c625cdb08b4b',
         'bd0fd1276a805473',
@@ -639,7 +639,47 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'bd922f2557768cc8',
           'a390de2f9bb331b6',
           '9cdc03bc35882274',
-          '396e38c2eeb2e90d'
+          '396e38c2eeb2e90d',
+          '89cb58b90ea1bd17',
+          'a93bf1e92683485b',
+          'da13e5459ee50a3d',
+          '6d12ea7267b396d4',
+          '35510e71bba2e6c8',
+          '72992d6a6f796c4a',
+          'da75f75e2a0bfbca',
+          'badc5256a0480e63',
+          '61cc3beb64a3257c',
+          'e5e5c768b1d1c1d1',
+          '56b2a486796b4a4d',
+          '388dfbc099f6203a',
+          '90a0bba3dc8ef090',
+          'bc3f4f1c44fff833',
+          'abad9e1a445d28d3',
+          '78547f172217fedb',
+          'f8eb208565d74da2',
+          'e730f8e9e40b9c9b',
+          'c692459f0ec83dd3',
+          'f0d66751d367f95d',
+          '35341ff2f8053acf',
+          '8ad792705c2bbcb4',
+          '78beabc944dc410a',
+          'bf5318340e946210',
+          'c9fa5a148b7e02bf',
+          '3353d861ea11ae91',
+          '2c623cdf4e064131',
+          '9dc165991fbfd4f0',
+          'fbd0d9615e01f307',
+          '06f5a22291faf8aa',
+          '88e4ea365876fa21',
+          '1d02e6970380d4d0',
+          '4cc4b290c58568f9',
+          '7d5189bce668db1c',
+          'b5776ef1242086e3',
+          'e61397fb3291b12e',
+          '86bfad22d06640ca',
+          '66a97b4a3bf45718',
+          '4ae2438c2d4362c0',
+          '80de4911025a0855'
         ],
         'requirements-manager': [
           'a7505f756deef82a',
@@ -662,13 +702,35 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '4ef9d0d0093f7cc7',
           'fb38e557a33b1207',
           '86f45c300345de4f',
-          'bd16f11cf8568310'
+          'bd16f11cf8568310',
+          '0a88c8e7e90e4320',
+          '8efa15e208a9c210',
+          'd2e361bb52ff8d6d',
+          '99705bedee6463e7',
+          'a70e2e0031b819d0',
+          '691696b35973bf50',
+          '2bcd3d144381018d',
+          '359694656291e314',
+          'd1ac7b10a0d456ef',
+          '1c3f3d6751aac5d3',
+          '99803f151e9850a7',
+          '9966d04d531e2b59',
+          '7118081387a38cfe',
+          '9ce9b9ff8057a8ee'
         ],
         'jipoe-analyst': [
           '54cf668fcd1bc3d8',
           '9501e05d67428666',
           '2fbc056975574fe5',
-          '38d6729f5ab445df'
+          '38d6729f5ab445df',
+          '2a844de452466969',
+          '879a46482344d795',
+          '0921867d2319b846',
+          '191108218c0ac839',
+          'c78a26a53002b2c7',
+          '8621bede48d69af1',
+          'e8aa30005067f235',
+          '41c4973036dccd1e'
         ],
         'threat-analyst': [
           'e0da731f358d42ca',
@@ -678,13 +740,37 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '6b30760efeee1e51',
           'f8c54c760d3f2c18',
           '2c434decdc19e58d',
-          '5d998d6cf65f5618'
+          '5d998d6cf65f5618',
+          'c0346c6115cb7984',
+          'ea3ae9ec8e73735a',
+          'ca6364c69530605f',
+          'e1aef0c9efcbfd59',
+          '27de34a47bbbb324',
+          '6fec556e3bd590e3',
+          '30de131be00a3596',
+          '2efc7a58dfea6939',
+          'bfb68f1000ce4cf8',
+          '8f77db556aa8db25',
+          '41c7d0bd99346180',
+          'd0ab56ab62a68f68',
+          'ed1b7fb51602cf7e',
+          '68c27a546012da6d',
+          '08ad6791410a4543',
+          '94dedef5236c35e1'
         ],
         'warning-analyst': [
           '2b5b2aeff011ec19',
           '79c9074bf973cbd4',
           '6428d6df7aa20720',
-          'e5f0e86d12fb1be3'
+          'e5f0e86d12fb1be3',
+          'f280fee949a9f023',
+          '995eb551e95b0e84',
+          '216c27b5086e9f3f',
+          '08bc3f4d32dfcf99',
+          'c0da362d8d3f0787',
+          'c17a6a976e5d6d47',
+          '4be3f4e5515ef4a9',
+          'a091c1f5d17f24ae'
         ],
         'red-cell': [
           'e4019a86a5a23a34',
@@ -717,13 +803,29 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '3328aeffe9842ebc',
           '1dbf36ed786b83f6',
           '2e1438175f499dd8',
-          'e9e9d77b53d6459a'
+          'e9e9d77b53d6459a',
+          'f7d3e68d285a0923',
+          '434418a6259ecb96',
+          'b03ed745f78e9456',
+          'f28ebf4e36d34f8d',
+          'abe9a4f5f1976c95',
+          '38a289654f9ac12a',
+          '01dba9ab14853379',
+          'cf9c40f455baefca'
         ],
         'osint-analyst': [
           'b50a5ed605466607',
           'cb3966b3b6cd8ea8',
           '6399b977071edf79',
-          '2ca2278875c85874'
+          '2ca2278875c85874',
+          'e1a4fba2db1db5c4',
+          'ed1a2eb966c123db',
+          '2317abe7bd7a6f0c',
+          '9853fcebfe0b336e',
+          'e24eb0c86302844f',
+          'ab0a183b4cac30d0',
+          'b7bdc29387c7cbb6',
+          'd24a18a88768f3e8'
         ],
         'watch-officer': [
           '697ccc09d5b04f8e',
@@ -735,11 +837,33 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '621754b33484241d',
           '03d23235441542ff',
           'c88e00ad0d99a928',
-          '84c905e4b5b65091'
+          '84c905e4b5b65091',
+          '55ad8e24e36f570b',
+          'b54000b6a9b76ab5',
+          'b9fe06e5fdb7a90f',
+          'a4b66fb3a1927e00',
+          '39d8d9e5f24af6f5',
+          '7915e4c8e1a52c37',
+          '2b898b3af2facf00',
+          '6e07984ddc5f5635',
+          '32da304c23bf30ee',
+          'ca2275e3b77bdfb0',
+          '3c0028f0b6c28f10',
+          '33e2dfa371e99fb8',
+          '6a9861dae953fe33',
+          '33a2363d515679f1',
+          'ee2748a0545933fd',
+          'ca588e86eca17741',
+          'a733c86fabfb4343',
+          'd51ac2b1077ddee6',
+          '83ce6bd1982a006b',
+          '7bf40eabf4231304'
         ],
         'target-analyst': [
           'dec983630cabfaae',
-          'b9e131c32367aa7f'
+          'b9e131c32367aa7f',
+          '7dab6ff5f9385829',
+          '5d0de8bb43ffc734'
         ],
         's2-lead': [
           'c8742c5314f57c42',
@@ -751,7 +875,27 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '0136ec4f781ace02',
           'd7cfd4a51963274a',
           '7479837ac02419d4',
-          'c9fcdd3ab78e72d1'
+          'c9fcdd3ab78e72d1',
+          'dfefd3e373b63d15',
+          'db8850466734d0b0',
+          'd15007871bc925c8',
+          '88ae01f31f726a77',
+          'b7d79549366330f4',
+          'ad37e56f69f15bf6',
+          '2b51440c99e2bcd1',
+          '044b2a8d33242a18',
+          '4b397703b80f148a',
+          'c4dd10e94c2f31de',
+          '4719c9f46dcceb6e',
+          'ab55b3ed4a9e925b',
+          'a6961b59ba406e0e',
+          '5724beaf36a07048',
+          '5399db1ab9739ad2',
+          'b5fb361eb10b9b69',
+          'a4e3529494446a79',
+          '3c304a17636d9280',
+          '0b5b2e918cad8086',
+          '002b46c4690ffa47'
         ],
         'ipb-analyst': [
           'c58f4bfdf92f9251',
@@ -761,7 +905,23 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '2004c4c125173a4f',
           '9a945842ea274a1a',
           '9d1f69f27fd33cca',
-          'eccdab5547829a51'
+          'eccdab5547829a51',
+          '6dc4bc855306848d',
+          '1aee5108ea6bbae6',
+          '1b80f5b6fe4e8357',
+          '11788487e71a871e',
+          '91a2bd0cdda885c8',
+          '9d735d03057953a6',
+          'b99c418d1f78f41e',
+          '25c777fc410454bf',
+          '88a11a34956f5cfc',
+          'fc8439e227a1a46f',
+          'b048f6c08f449aa7',
+          'a687f8662902fec4',
+          '3b20b6616e297de7',
+          '147c5357b96daffb',
+          '7111f34f144af2f4',
+          '642f100b743b3746'
         ]
       }
     }
@@ -769,7 +929,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j5-plans': [
     {
       version: 1,
-      definition: 'c288552bc28144dc',
+      definition: 'a4452bc3ed94b84e',
       guidance: [
         '1c14ba20f94496a7',
         '104f6e7f44235e52',
@@ -837,7 +997,23 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '6d8a5de184181661',
           '81ef76e971dd5c3c',
           '3cde5fac33b90dfd',
-          '77b97e027a6859c0'
+          '77b97e027a6859c0',
+          '56e71a264e2f5188',
+          'e69af7452b5d9ef5',
+          '0307c098c492cecb',
+          'af9551070adc7f29',
+          '5636595cb1c2044a',
+          'fab9d14bff79b81e',
+          '3042d27b01708e18',
+          '530876d62b762c94',
+          '73f71cd58c4137cf',
+          '7eac74288e33afd7',
+          '7aa2a49f04fee9c7',
+          '2d92f58742f48d31',
+          '41223112679fbbc5',
+          '348cd7dee40915d0',
+          'ee31268275eed754',
+          'fb898656505e1d95'
         ],
         'policy-planner': [
           'eadf49a73a0fa838',
@@ -932,7 +1108,12 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'a70fabc96e328c65',
           'e69032b6f78d8eb2',
           '11c0e47225946250',
-          'a474c71f401b6ca7'
+          'a474c71f401b6ca7',
+          'fa3030e3ce377467',
+          '69be62ad65a9321b',
+          'e68f4547e063840b',
+          '4ab841751260b3df',
+          '72c5702840bff51c'
         ],
         'release-guard': [
           'd45ee62cf30769d8'
@@ -963,7 +1144,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j3-operations': [
     {
       version: 1,
-      definition: 'b87646c854e43806',
+      definition: 'bb5d6974438f0688',
       guidance: [
         '72c995694f3baa60',
         '3be6d6fee96d4cee',
@@ -1009,7 +1190,43 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '889514c1c42083ed',
           'd50ffee663647eb4',
           'b2e744290e3c44e8',
-          '4ae6066bad7153be'
+          '4ae6066bad7153be',
+          '9374909ebaf21142',
+          '89f8950166a424b2',
+          '2756fb91956efc5f',
+          '8098e355c96ead60',
+          '015ec5e3f8440d3e',
+          '8233750c59675f1e',
+          'b5d607700530c9bf',
+          '1950e99045254c12',
+          '06a1b15d749f72fa',
+          '91f9e9f0eb2f8f17',
+          'ab97809867f39ab6',
+          '97bc83c92c1b25fe',
+          'b06bfe2a094a39fd',
+          '67d03d85bf9c6bf1',
+          'c5095fe9a4221a06',
+          '5b989109690370c6',
+          'ed5b909892902e06',
+          '8b48a0c1611a152b',
+          '594a6a4f98c1fab3',
+          '5d66150150b30e03',
+          '334efb61b2f0c58a',
+          'a96f535c3b1c3e85',
+          '7a3a2620d8bc2870',
+          '10deea2999b1fe5e',
+          '4278f35296db1fd3',
+          '201f7a3988552b2b',
+          '44511725c0532f5b',
+          '955006319e10d60a',
+          'dd155e3ae0dcbd70',
+          'b93a72baa142b75d',
+          'f538720ffda6f17b',
+          '453a605dd40f22a9',
+          '5494713dc01e7aa1',
+          '2fa76af1e7c9fd25',
+          'b894f3b9367474b6',
+          'd4925dffdbff4b63'
         ],
         'joc-chief': [
           '59a2e266455bdf51',
@@ -1019,7 +1236,23 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'be6400e6e98a3cc1',
           'de111cc8d2d10b90',
           '7d29f03e3d12abf9',
-          '00a83bc4e2e06f6d'
+          '00a83bc4e2e06f6d',
+          'a10be0a8b0714a51',
+          '6de22d3e41a66e39',
+          '72bd9c3a06faf04f',
+          '6299dde8bd9e2e8a',
+          '6f74a713e6f9c0d9',
+          '39eafa060378e1d9',
+          '5bedb9d896ec1611',
+          'a56a5749d2e2a821',
+          '1de73cc43f873e88',
+          'bc87efd0dedb128c',
+          '1ee2abe3fd564546',
+          '188e3a7aa5b3aa88',
+          '22aa6ab983ceb715',
+          '269af3def2f40f96',
+          '64bf348fed7a41ef',
+          'f5c9b42240ca2e87'
         ],
         'watch-officer': [
           'f2f3913f65648b6b',
@@ -1029,7 +1262,11 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '577111c2d3de1fbf',
           '4a27a63f03bc3295',
           'ca14b8dd32763718',
-          '6c67ee160a79f128'
+          '6c67ee160a79f128',
+          '1e7d2902a6a92162',
+          '48e2ae538baa3f55',
+          'e9bb417f58322cdd',
+          'ec04a8b274f5124e'
         ],
         'future-ops-planner': [
           '01e9a29780d8f0cd',
@@ -1045,7 +1282,14 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'a11bb7a827e0c271',
           '989175aa408abb58',
           '9994f4b7abb2368d',
-          '71bd18cd0e85b96a'
+          '71bd18cd0e85b96a',
+          'febc1718f671ae46',
+          '8dec7e6f78539400',
+          '9f3b4c8d75300b41',
+          '2e6d3f2496107cc5',
+          '68c2674404bf5f66',
+          '504d7f26c3a158d6',
+          'd63957ba6b4f6939'
         ],
         'fires-effects-coordinator': [
           '98f7b5eb46c1c721',
@@ -1079,7 +1323,9 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '61b7e2c3159ba851',
           '5b166b537ada660a',
           '215d1d154af01ad0',
-          '830071b0edfac954'
+          '830071b0edfac954',
+          'dbefe9310f5901ab',
+          '69921a324d6e57dd'
         ],
         'cyber-space-planner': [
           'b0e64fb3af85fef0',
@@ -1089,7 +1335,9 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '9670976325db3303',
           '9134287e4f498db1',
           'cca768971a306182',
-          '4cff7ae76a42e2ee'
+          '4cff7ae76a42e2ee',
+          '902da59a86be8ed5',
+          '84f3013236805b96'
         ],
         'assessment-analyst': [
           '078321a2e72e8468',
@@ -1134,7 +1382,25 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'f031ff9d8407e66d',
           'f4a733f75a3e0636',
           '92827e94db95e5d1',
-          '6db77d14552f0bd9'
+          '6db77d14552f0bd9',
+          '61b5d79a2e4cc428',
+          '0f4c9e86c1e66c66',
+          '3876c4d6eff70320',
+          'a49c00c3e7235119',
+          '57c88832c86d4fab',
+          '5f7cdd3adf94fd76',
+          'd5f6f5c9bd16056e',
+          '612b2ac9c6b39323',
+          '8d9dca027d7aba17',
+          '8a676d66d20a2dc9',
+          '15d90afef6163eb7',
+          '631676b944e700bd',
+          '5e3690b45cedc186',
+          '156c2b3677cda448',
+          'eb34b88c06f405ef',
+          '1ec15382cfe3dc98',
+          '061b3ea2b3629ecd',
+          '9d7345f81665b618'
         ],
         'current-ops-chief': [
           '4e083e85e336ca22',
@@ -1142,7 +1408,19 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '2885172427718d73',
           '055c4b78fd74eccf',
           '23390e53bf08a7a8',
-          '7b3facbcf13d162a'
+          '7b3facbcf13d162a',
+          '650425e456c80978',
+          'f6742ea484806fba',
+          'be2c63904830d167',
+          '4d333a0077885154',
+          'b5254d1c79a83701',
+          'a66421b9dd0e731e',
+          'e3fd3469e4f963b8',
+          'e39bfa7790e0f821',
+          '67814f9bfeb048a5',
+          'daa3a0ce8ccc2354',
+          '8ec2ea743a73c03f',
+          '606a1e6afb72aa01'
         ],
         'information-cyber-space-planner': [
           'c9e8a7fe1f3f647e',
@@ -1158,7 +1436,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j4-logistics': [
     {
       version: 1,
-      definition: '103c9119d598420d',
+      definition: '295eeb01a4512121',
       guidance: [
         '43fd3f310afca7c6',
         'bc1042479c7a898f',
@@ -1201,7 +1479,19 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '284be0f60a4cff78',
           '868bd0f8b9e72135',
           'e8628fea7c152a8d',
-          '35750762f8b08994'
+          '35750762f8b08994',
+          '295a72cf6da30bee',
+          'efe2e3a2f537e423',
+          'ed5372f783181a5f',
+          '561254c088eb9829',
+          '11d43c6e690bdd17',
+          '5e0ca93d02193cd9',
+          '69b02fa796a94744',
+          '0795d7445e319d46',
+          '0cda1dcd7dafa0a7',
+          'd4c118d2c1568eda',
+          'ac49768b0af535ea',
+          '4f84dbb5b699405e'
         ],
         'log-plans-officer': [
           'ee6c24961fa4d4f1',
@@ -1334,7 +1624,10 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '5436206869e90a5a',
           '1c94effa73c662df',
           '3357746981e7f592',
-          '164dba0b3161787e'
+          '164dba0b3161787e',
+          '4e7225401afc65a7',
+          '7339e9a695e6b16a',
+          'cd022149dca26c54'
         ]
       }
     }

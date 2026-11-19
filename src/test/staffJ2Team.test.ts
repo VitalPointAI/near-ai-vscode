@@ -311,6 +311,21 @@ test('a staff template cannot change without a new template version', () => {
   assert.equal(staffTemplateSnapshot(STAFF_TEMPLATES[0]).definition, staffTemplateSnapshot(STAFF_TEMPLATES[0]).definition, 'renderings are deterministic');
 });
 
+test('a staff template version keeps every fingerprint main recorded for it before drop 2, so a team made from that build still reads as unchanged', () => {
+  // Drop 1 was never released, so drop 2 kept j2-intelligence and j5-plans at v1; scripts/template-history.mjs --keep-from 94b9909 merged the
+  // fingerprints main had at that commit into v1 rather than replacing them. The fixture is that commit's history for the staff templates.
+  const fixture = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'test', 'fixtures', 'template-history', 'staff-before-drop2.json'), 'utf8')) as { templates: Record<string, Array<{ version: number; guidance: string[]; members: Record<string, string[]> }>> };
+  assert.deepEqual(Object.keys(fixture.templates).sort(), ['j2-intelligence', 'j5-plans']);
+  for (const [id, versions] of Object.entries(fixture.templates)) {
+    for (const old of versions) {
+      const kept = TEMPLATE_HISTORY[id]?.find((version) => version.version === old.version);
+      assert.ok(kept, `${id} v${old.version} is still in the history`);
+      for (const print of old.guidance) assert.ok(kept.guidance.includes(print), `${id} v${old.version} guidance ${print}`);
+      for (const [name, prints] of Object.entries(old.members)) for (const print of prints) assert.ok(kept.members[name]?.includes(print), `${id} v${old.version} ${name} ${print}`);
+    }
+  }
+});
+
 test('the staff template sources and renderings carry no em-dash, no provisional or preview marker, and spell no doctrine term of their own', () => {
   const terms = new Set<string>();
   for (const process of Object.values(STAFF_PROCESSES)) for (const step of CROSSWALK_STEPS) { const entry = process.steps[step]; if (entry.kind === 'step') terms.add(entry.name); }

@@ -45,6 +45,7 @@
   let clockBase = { at: 0, received: 0 };
   let announceQueue = [];
   let announceTimer;
+  let noticeTimer;
 
   const reducedQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : undefined;
   /** Whether anything may move: not under reduced motion, not in Calm, not while the panel is hidden. */
@@ -829,6 +830,9 @@
     watches.replaceChildren();
     watches.append(el('p', 'rule', 'A watch drafts an INTREP and alerts a named person. It never releases, approves or tasks anything, and runs only while a person has the staff run open.'));
     if (!j2.watches.length) watches.append(el('p', 'faint', 'No standing watches yet. A watch binds a PIR\'s indicator to an area and its latest time of value.'));
+    for (const entry of isArr(j2.watchAlerts) ? j2.watchAlerts : []) {
+      if (entry.digest) watches.append(el('p', 'faint', 'Digest for ' + entry.person + ': ' + entry.digestMatches + ' match' + (entry.digestMatches === 1 ? '' : 'es') + ' in ' + entry.digest + ' held alert' + (entry.digest === 1 ? '' : 's') + ', sent with the next alert.'));
+    }
     for (const watch of j2.watches) {
       const card = el('article', 'watch w-' + watch.state);
       const head = el('div', 't');
@@ -838,6 +842,10 @@
       if (watch.alert) card.append(el('p', 'human-line', 'Alerts ' + watch.alert));
       if (watch.missed) card.append(el('p', 'late', watch.missed + ' match' + (watch.missed === 1 ? '' : 'es') + ' found while paused, kept for the person.'));
       if (watch.lastMatch) card.append(el('p', 'faint', 'Last match ' + shortTime(watch.lastMatch)));
+      if (watch.unsigned) card.append(el('p', 'late', 'No signed arm decision proves this watch, so it runs nothing until a person arms it.'));
+      if (watch.queued) card.append(el('p', 'faint', watch.queued + ' observation' + (watch.queued === 1 ? '' : 's') + ' queued for the person, delivered when it is armed again.'));
+      if (isArr(watch.drafts) && watch.drafts.length) card.append(el('p', 'human-line', 'Drafts for the named person: ' + watch.drafts.join(', ') + '. Each follows its own release path.'));
+      if (typeof watch.reason === 'string' && watch.reason) card.append(el('p', 'faint', watch.reason));
       watches.append(card);
     }
     showJ2Tab(J2_TABS.some(([id]) => id === saved.j2tab) ? saved.j2tab : 'threat', false);
@@ -1081,7 +1089,8 @@
     if (index >= 0) { event.preventDefault(); switchTo(WORKSPACES[index], true); const tab = nodes.tabButtons.get(WORKSPACES[index]); if (tab) tab.focus(); return; }
     if (key === 'd') {
       event.preventDefault();
-      const first = nodes.decList.children.find ? nodes.decList.children.find((li) => li.dataset && li.dataset.product) : [...nodes.decList.children].find((li) => li.dataset && li.dataset.product);
+      // children is an HTMLCollection, which has no find: spread it first.
+      const first = [...nodes.decList.children].find((li) => li.dataset && li.dataset.product);
       const actionButton = first ? findButton(first) : undefined;
       if (actionButton) actionButton.focus(); else { nodes.decideHead.tabIndex = -1; nodes.decideHead.focus(); announce('Nothing waiting for a person.'); }
       return;
@@ -1100,11 +1109,13 @@
     return undefined;
   }
 
+  // One hide timer, kept: a newer notice clears the older one's, so it shows its own full 6 seconds rather than hiding when the older one's ends.
   function showNotice(text) {
     nodes.notice.textContent = text;
     nodes.notice.hidden = false;
     announce(text);
-    setTimeout(() => { nodes.notice.hidden = true; }, 6000);
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { noticeTimer = undefined; nodes.notice.hidden = true; }, 6000);
   }
 
   // ---------- start ----------

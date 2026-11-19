@@ -17,6 +17,7 @@ import type { TeamDefinition } from './teams';
 import { declareManifest, INTERACTIVE_AND_UNATTENDED } from './tools';
 import type { AgentTool, ToolContext } from './tools';
 import { ToolError } from './workspace';
+import { fenceReadResults, fenceStaffText } from './staffFence';
 
 export const STAFF_PRODUCTS_SERVER = 'staff-products';
 export const GUARD_SCAN_SERVER = 'guard-scan';
@@ -224,7 +225,7 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
 
   const register: AgentTool<{ action: 'write' | 'propose' | 'trigger'; register: string; rows: unknown[]; remove: string[]; part?: string; note?: string; ccir?: string; report?: string; label?: string }> = {
     name: name('register'),
-    description: '[staff-products] Changes the structured registers: ccir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log. action write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns. Read a register with mcp__staff-products__register_read. The PIR register is kept by the intel workbench, not here.',
+    description: '[staff-products] Changes the structured registers: ccir-register, rfi-tracker, facts-assumptions-ledger, annex-tracker, sync-matrix, dst-dsm, targeting-workbook, event-log, battle-rhythm-calendar (also kept through the battle-rhythm server). action write (the register\'s writer, or a part\'s writer with part, such as pir on the ccir-register) adds or replaces rows by id and removes ids; propose leaves rows for the writer to merge; trigger reports that a CCIR fired (ccir, report). Rows are checked against the register\'s columns. Read a register with mcp__staff-products__register_read. The PIR register is kept by the intel workbench, not here.',
     parameters: {
       type: 'object',
       properties: {
@@ -292,7 +293,8 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
       if (input.action === 'record') return result(await host.wargameRecord(callerOf(context), input.phase));
       if (input.action === 'derive') return result(await host.wargameDerive(callerOf(context)));
       const entries = await host.wargameEntries();
-      return entries.length ? JSON.stringify(entries, null, 2) : 'No wargame phases recorded yet.';
+      // The ledger is written by other members: what it holds goes back fenced, the way every read tool's answer does (staffFence.ts).
+      return entries.length ? fenceStaffText(name('wargame'), JSON.stringify(entries, null, 2)) : 'No wargame phases recorded yet.';
     }
   };
 
@@ -336,5 +338,6 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     run: async (input, context) => result(await hostOf().lintText(callerOf(context), input.product))
   };
 
-  return [propose, verdict, submit, withdraw, status, list, register, registerRead, wargame, step, lint, scan];
+  // Every read tool's answer is fenced whole: products, registers and reports are other members' text (staffFence.ts).
+  return fenceReadResults([propose, verdict, submit, withdraw, status, list, register, registerRead, wargame, step, lint, scan]);
 }

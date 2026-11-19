@@ -19,7 +19,7 @@ import type { ResolvedProfile, StaffSettings } from '../../domain/staff/profiles
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { RED_TEAM_PRODUCT, STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
-import { GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools } from './grants';
+import { GATE_VERBS, GUARD_SCAN, LEAD_VERBS, ORDERS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools } from './grants';
 
 export type J5Variant = 'standard' | 'mdo';
 export const J5_VARIANTS: readonly J5Variant[] = ['standard', 'mdo'];
@@ -199,14 +199,14 @@ function leadPlanner(ctx: Context): J5Member {
     `Wargame: you are the controller. Wargame one COA at a time against the same adversary COAs, ${adversaryOrder()}, so the results compare. Every turn is ${list(WARGAME_TURN)}: the owning COA member and the future operations seat play the friendly side, the red-cell-seat plays the adversary to win, sustainment and legal note issues, and the plans-writer records every turn. From the record you draft the sync matrix, the DST and DSM and the decision points. The branch list is the ${ctx.level === 'strategic' ? 'component' : 'future operations'} seat's; the sequel list (later operations or phases) is yours. Ask the red team for its bias check after each COA's wargame.`,
     'Comparison: score each COA against the evaluation criteria and weights the commander approved, with the rationale for every score, and recommend one COA with its main risk and the mitigation. Place the red team\'s dissent beside your recommendation, unedited.',
     `Decision: write the decision brief content and ${decisionFor('commander')} with the options, your recommendation and the risk; the plans-writer builds the deck. The commander decides; agents never select.`,
-    `Plan: write the CONOPS first${gates.beforeFullPlan ? `. ${gates.beforeFullPlan}` : ''}. Then the annex owners write in their own files and the plans-writer assembles; you make one integration pass for consistency of intent, tasks, timings and risk. Transition: with the future operations seat, prepare the transition brief. ${ctx.resolved.planning.transition.note}`,
+    `Plan: write the CONOPS first${gates.beforeFullPlan ? `. ${gates.beforeFullPlan}` : ''}. Then the annex owners write in their own files and the plans-writer assembles; run mcp__orders__check on the annex tracker, then make one integration pass for consistency of intent, tasks, timings and risk. Transition: with the future operations seat, prepare the transition brief. ${ctx.resolved.planning.transition.note}`,
     owns(...ownList),
     'Boundary: "Your output is a recommendation with risk, not a selected COA."',
     `Hands back: the step's outputs above, the open WAITING ON items, and the list of ${decisionFor('<role>')} items for the people who decide (restated mission, intent, CCIRs, COAs to analyse, COA, plan).`
   ].join('\n\n');
   return { name: 'lead-planner', role: ctx.resolved.landTerms
       ? `Chief of plans: ${lowerFirst(ctx.resolved.landTerms.planningCentres[0])}; wargame controller`
-      : tactical ? `Chief of plans: plans cell under the ${ctx.opsCode} at brigade or the ${ctx.plansCode} at division; wargame controller` : `Chief of plans: planning group lead and wargame controller (${ctx.plansCode})`, model: 'deep', tools: [...READ, ...WRITE, ...DOCS, ...LEAD], instructions: text };
+      : tactical ? `Chief of plans: plans cell under the ${ctx.opsCode} at brigade or the ${ctx.plansCode} at division; wargame controller` : `Chief of plans: planning group lead and wargame controller (${ctx.plansCode})`, model: 'deep', tools: [...READ, ...WRITE, ...DOCS, ...LEAD, ORDERS], instructions: text };
 }
 
 function policyPlanner(ctx: Context): J5Member {
@@ -388,13 +388,13 @@ function plansWriter(ctx: Context): J5Member {
   const text = [
     preamble(),
     'Job: you are the recorder and the writer. In the wargame, record every turn in the wargame record as .planning/staff/skills/wargame-ledger.md shows: action, reaction, counteraction, result, decision points and the time of each, keeping what happened apart from what was judged. The lead-planner drafts the sync matrix, DST and DSM from your record, so record nothing you did not see.',
-    `In plan development, assemble ${format} from the CONOPS and the annexes, in the format .planning/staff/skills/planning-templates.md gives. Keep the annex tracker: each annex with its letter taken from PROFILE.md (never from memory), its owner, its status and its version. Check consistency across the plan: the same names, times, task organization and decision points everywhere, and every cross-reference resolving.`,
+    `In plan development, assemble ${format} from the CONOPS and the annexes, in the format .planning/staff/skills/planning-templates.md gives, with the orders tool: mcp__orders__assemble takes no product a person has not released, puts each annex under the letter the profile gives its subject, and writes the result as your draft for the release guard and a person. Keep the annex tracker: each annex with its letter taken from mcp__orders__annexes or PROFILE.md (never from memory), its owner, its status, its version and its product, and run mcp__orders__check on it before each assembly. Check consistency across the plan: the same names, times, task organization and decision points everywhere, and every cross-reference resolving.`,
     `Build the brief decks from the lead-planner's content: the mission analysis brief and the COA decision brief${strategic ? ', and the in-progress review decks' : ''}. Make each deck with CreatePresentation and the plan with CreateDocument, regenerating them whenever their source changes. The red team's dissent goes into the decision brief word for word.`,
     owns('wargame-record', 'annex-tracker', 'base-plan', 'brief-decks'),
     'Boundary: "Your output is the assembled document; annex content belongs to its owners."',
     'Hands back: the wargame record, the annex tracker, the assembled plan or order with its open-items list, and the decks.'
   ].join('\n\n');
-  return { name: 'plans-writer', role: 'Plans writer: orders production, wargame recorder, annex tracker', model: 'standard', tools: [...READ, ...WRITE, ...DOCS, ...RECORDER], reportsTo: 'lead-planner', instructions: text };
+  return { name: 'plans-writer', role: 'Plans writer: orders production, wargame recorder, annex tracker', model: 'standard', tools: [...READ, ...WRITE, ...DOCS, ...RECORDER, ORDERS], reportsTo: 'lead-planner', instructions: text };
 }
 
 function releaseGuard(_ctx: Context): J5Member {

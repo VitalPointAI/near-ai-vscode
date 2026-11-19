@@ -152,6 +152,23 @@ test('every message from the page is validated: type, exact keys and the form of
     { type: 'select-run', run: 'bad run!' }, { type: 'open-product', product: 'A B' }, { type: 'run-command', command: 'nearAi.staff.approveProduct' }
   ]) assert.equal(parseStaffRoomMessage(bad), undefined, JSON.stringify(bad));
   assert.deepEqual(parseStaffRoomMessage({ type: 'open', target: 'team-live' }), { type: 'open', target: 'team-live' });
+  // Drop 2 review: exact keys for every message type, so a key the page adds (or leaves out) is refused rather than ignored.
+  const good: Array<Record<string, unknown>> = [
+    { type: 'ready' }, { type: 'decide', action: 'release', product: 'intel-estimate', hash }, { type: 'open-product', product: 'intel-estimate' },
+    { type: 'select-run', run: 'run-1' }, { type: 'open', target: 'show-products' }
+  ];
+  for (const message of good) {
+    assert.ok(parseStaffRoomMessage(message), JSON.stringify(message));
+    assert.equal(parseStaffRoomMessage({ ...message, extra: true }), undefined, `${JSON.stringify(message)} with an extra key`);
+    assert.equal(parseStaffRoomMessage({ ...message, command: 'nearAi.staff.approveProduct' }), undefined, `${JSON.stringify(message)} with a command key`);
+    for (const key of Object.keys(message).filter((name) => name !== 'type')) {
+      const { [key]: _left, ...missing } = message;
+      assert.equal(parseStaffRoomMessage(missing), undefined, `${JSON.stringify(message)} without ${key}`);
+      assert.equal(parseStaffRoomMessage({ ...missing, [key]: undefined }), undefined, `${JSON.stringify(message)} with ${key} undefined`);
+    }
+  }
+  const inherited = Object.assign(Object.create({ action: 'approve' }), { type: 'decide', product: 'intel-estimate', hash });
+  assert.equal(parseStaffRoomMessage(inherited), undefined, 'an inherited key is not one of the message\'s own');
 });
 
 test('decision buttons reach only the person-only staff commands, for the product and version the person saw', async () => {
@@ -306,9 +323,10 @@ test('the Staff Room page loads only the vendored map files, under a policy with
   assert.ok(scripts.length >= 3);
   for (const attributes of scripts) {
     assert.match(attributes, new RegExp(`nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`));
-    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffRoom\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
+    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
   }
   assert.ok(html.indexOf('staff/copMap.js') < html.indexOf('staffRoom/staffMap.js'), 'the COP map is loaded before the room\'s map');
+  assert.ok(html.includes('staff/declutter.js') && html.indexOf('staff/declutter.js') < html.indexOf('staff/copMap.js'), 'the shared label placement is loaded before both maps');
   const resources = JSON.parse(/data-cop-resources="([^"]+)"/.exec(html)![1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
   assert.deepEqual(Object.keys(resources).sort(), ['maplibre', 'milsymbol', 'worker']);
   for (const value of Object.values(resources) as string[]) assert.match(value, /^https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/vendor\//);

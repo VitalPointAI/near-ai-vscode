@@ -1,6 +1,6 @@
 // A person's decisions outside the product release machine (design 10, 3.1 and 4.1: members never decide; review round 3 of drop 1). Today that is a
-// PIR's approval or rejection, and a person's choice to use this branch's product ledger (the head this computer checks it against moves to it). A
-// decision counts only when a signed entry in the decision log recorded it: the log is `.planning/staff/ledger/
+// PIR's approval or rejection, a standing watch armed or retired (WP-WATCH), and a person's choice to use this branch's product ledger (the head this
+// computer checks it against moves to it). A decision counts only when a signed entry in the decision log recorded it: the log is `.planning/staff/ledger/
 // decisions.jsonl`, one entry per line, each signed with the deciding person's device key (purpose `staff-decision`) and chained to the one before, the
 // same way the product ledger is. A decision block written into a register file by hand, or by a member with Write, is never trusted from the file
 // alone: without a matching signed entry it reads as not decided. Pure: no I/O, no clock, no vscode.
@@ -21,8 +21,12 @@ const MAX_REASON = 500;
  * What a person decided on: a PIR in the J2 PIR register, by its id; or the product ledger head this computer checks against (`ledger-head`, its id the
  * number of entries, its wording the digest of the last one), when a person chose to use this branch's ledger.
  */
-export type DecisionSubject = { readonly kind: 'pir'; readonly id: string } | { readonly kind: 'ledger-head'; readonly id: string };
-export const DECISION_SUBJECT_KINDS: ReadonlyArray<DecisionSubject['kind']> = ['pir', 'ledger-head'];
+export type DecisionSubject = { readonly kind: 'pir'; readonly id: string } | { readonly kind: 'ledger-head'; readonly id: string } | { readonly kind: 'watch'; readonly id: string };
+/**
+ * `watch` (WP-WATCH): a standing watch by its id. `approved` arms it, `rejected` rejects or retires it; the wording is the hash of the watch as the person
+ * saw it (watchWording), so a watch changed after it was armed reads as not armed.
+ */
+export const DECISION_SUBJECT_KINDS: ReadonlyArray<DecisionSubject['kind']> = ['pir', 'ledger-head', 'watch'];
 
 export interface PersonDecisionEntry {
   readonly v: 1;

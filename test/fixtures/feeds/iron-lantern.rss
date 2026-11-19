@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:georss="http://www.georss.org/georss">
+  <channel>
+    <title>EXERCISE SIM: Calder Courier (fictional)</title>
+    <link>https://exercise.invalid/calder-courier</link>
+    <description>Fictional outlet for the importer tests.</description>
+    <item>
+      <title>EXERCISE SIM: Ferry service suspended at Port Calder</title>
+      <link>https://exercise.invalid/calder-courier/1</link>
+      <guid isPermaLink="false">calder-courier-1</guid>
+      <pubDate>Wed, 19 May 2027 05:30:00 GMT</pubDate>
+      <description><![CDATA[<p>EXERCISE SIM. Fictional: the harbour master closed the quay.</p>]]></description>
+      <georss:point>-48.92 -123.42</georss:point>
+    </item>
+    <item>
+      <title>EXERCISE SIM: Residents report convoy noise overnight</title>
+      <guid isPermaLink="false">calder-courier-2</guid>
+      <pubDate>Wed, 19 May 2027 06:45:00 GMT</pubDate>
+      <description>EXERCISE SIM. Fictional: no place is named.</description>
+    </item>
+  </channel>
+</rss>

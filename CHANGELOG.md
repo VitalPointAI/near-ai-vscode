@@ -2,14 +2,17 @@
 
 ## Unreleased
 
-**Military staff teams.** Set up a J2 intelligence or J5 plans staff team for your project in your
-staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian), load a fictional exercise
-scenario, and let the members draft in parallel while every product passes the team's gates and a
-named person makes every decision. Staff teams are private, unclassified and for exercise and
-fictional data only; labels are not accreditation, and no member has a persona name or a rank.
+**Military staff teams.** Set up a J2 intelligence, J5 plans, J3 operations or J4 logistics staff
+team for your project in your staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian),
+load a fictional exercise scenario, and let the members draft in parallel while every product
+passes the team's gates and a named person makes every decision. Open the Staff Room to watch the
+staff at work, replay Exercise IRON LANTERN as live simulated feeds on this machine or import feed
+files, and see them on the COP map and in the J2 workspace. Staff teams are private, unclassified
+and for exercise and fictional data only; labels are not accreditation, and no member has a
+persona name or a rank.
 
 - **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
-  for the section (J2 or J5), the doctrine profile, the level, the nation (NATO/Canadian), the
+  for the section (J2, J5, J3 or J4), the doctrine profile, the level, the nation (NATO/Canadian), the
   planning type and the section's own options, then shows the roster: the person who decides, and
   each member with its role and who it reports to. It saves the private team to your teams, writes
   PROFILE.md and the section's skills under `.planning/staff/`, the staff settings in the
@@ -68,11 +71,6 @@ fictional data only; labels are not accreditation, and no member has a persona n
   only its critique and the release guard only its gate reports. Write and Edit refuse every other
   path, and such a member gets no shell, document, agent-starting or other MCP tool, only the staff
   tools it is granted. The staff tools appear on the Tools page and in the Team Studio tool picker.
-
-**Military staff teams, drop 2.** Set up a J3 operations or J4 logistics staff team beside the J2
-and J5, open the Staff Room to watch the staff at work, replay Exercise IRON LANTERN as live
-simulated feeds on this machine, and see them on the COP map and in the J2 workspace. As in drop 1,
-members draft and recommend, and a named person makes every decision.
 
 - **J3 operations team.** 12 members at strategic and operational level and 10 at tactical level:
   an integrator who keeps the running estimate (headed by the seven joint functions, or Command,
@@ -179,6 +177,35 @@ members draft and recommend, and a named person makes every decision.
   time if asked. Every answer shows only what your clearances cover, raises the chat's label to
   what it showed, says when a limit cut it, and fences the feeds' text as untrusted. Feed events go
   into the staff event log beside the staff events.
+- **Import feed files.** **NEAR AI: Staff: Import Feed File...** takes a GeoJSON, KML, Cursor on
+  Target, RSS, Atom or AIS (NMEA) file into the project's observation store. You pick the file and
+  the label; the file is read in a separate process with its own memory, size (16 MB) and time
+  (20 seconds) limits, never in the editor itself; then you see how many reports would be
+  imported, the format, the label and the time span, what is held back because it lies outside
+  the exercise frame, and what was skipped and why, and nothing is written until you choose
+  Import. Files that declare a document type are refused outright, so XML entity attacks cannot
+  start. AIS logs are checked sentence by sentence (bad checksums and missing parts of multi-part
+  messages are counted and skipped), and vessel names from the static messages are applied to the
+  positions. Imported reports name the file and the time they were imported and are never marked
+  simulated; importing the same file again adds nothing. Agents cannot run the import. Cursor on
+  Target tracks now show their military symbol on the COP from one CoT-type table, drawn as
+  unknown unless they are own-force positions, because a feed's affiliation is a claim.
+- **Standing watches.** A watch binds a PIR's indicator to an area, a time window and the weakest
+  source grade it counts, until the PIR's latest time of value, and names the person it alerts.
+  **NEAR AI: Staff: Create a Standing Watch** creates and arms one; the J2 watch officer, warning
+  analyst and threat or IPB analyst can only propose one, which a person arms with **Staff: Arm a
+  Standing Watch**. Arming and retiring are signed with your device key, so a watch armed in the
+  file by hand runs nothing. A watch looks at new observations only while a staff run or the Staff
+  Room is open; without one it pauses, and what came in meanwhile is delivered as "missed while
+  paused" when a person is back. A watch you pause counts and queues its matches and delivers them
+  when you resume it; a degraded feed pauses it until the feed recovers. Matches are
+  de-duplicated per track for 30 minutes, and you get at most four alerts an hour, then a digest
+  that comes with the next alert. On a match the watch officer drafts an INTREP, and the owner of
+  the adversary courses of action a revision if the watch allows it, each saying plainly that it is
+  a draft for you and going through the gates to your decision; nothing is released by a watch.
+  **Acknowledge** arms it again once you have seen the drafts, and a match left by a run that ended
+  waits for the next one. Past its latest time of value a watch expires. The Staff Room's J2
+  workspace shows each watch's queue, drafts and digest.
 - **The COP map.** Staff team members granted `mcp:cop-map` read the COP layers and put military
   symbols (MIL-STD-2525D and APP-6(D), drawn by milsymbol), control measures, overlays per
   adversary course of action and decision points on the layer they write, in grid references on
@@ -213,20 +240,47 @@ members draft and recommend, and a named person makes every decision.
   remembers this ledger's head. A ledger that does not verify is refused; Set Aside stays the way
   out for that. No agent can run it.
 - **Built-in staff servers listed once and given only to granted members.** staff-products,
-  guard-scan, the intel workbench, observations, the COP map and logistics are listed once on the
-  Tools page (no tool appears twice) and in the Team Studio picker. A run gets the intel workbench,
-  observations, COP map and logistics tools only when a member's tools line grants them, and the
-  run's lead can call none of them. J3 integrator, current operations, watch officer and the
+  guard-scan, the intel workbench, observations (with the standing watch tools), the COP map,
+  logistics, orders and battle rhythm are listed once on the Tools page (no tool appears twice) and
+  in the Team Studio picker. A run gets the intel workbench, observations, COP map, logistics,
+  orders and battle-rhythm tools only when a member's tools line grants them, and the run's lead
+  can call none of them. J3 integrator, current operations, watch officer and the
   maritime and air liaison are granted the observations server.
+- **Orders server.** Staff members granted `mcp:orders` (the J3 director and future operations
+  planner, the J5 lead planner and plans writer, and the J4 director) get the annex list of your
+  doctrine profile with every letter from the profile, a consistency check that names a wrong
+  annex letter, a missing owner, an annex not yet released and an annex built on a source that has
+  a newer approved version, assembly of an OPORD, OPLAN, CONOPS or the profile's other orders from
+  released products only, and FRAGO drafts against a released order. The J3 current operations
+  chief (the JOC chief) may draft an immediate FRAGO with the FRAGO tool alone. Each result is a
+  draft that goes through the release guard; only a person releases it.
+- **Battle-rhythm server.** The J3 current operations chief keeps the battle rhythm (boards,
+  bureaus, centres, cells, working groups, meetings and briefs, with times, owners, inputs and
+  outputs) with `mcp:battle-rhythm`, exports it to an `.ics` file you can open in a calendar
+  program, and imports one you put in the project; the import is size-capped, checked line by line
+  and shown to the model as untrusted data. The information planner reads it. It also lists the
+  suspenses of open RFIs and decisions waiting on a person.
 - **Never writing over a member's bytes.** Every write the drop 2 servers make to a file a member
   can also write (COP layers, their proposals and merges, calculator records, the LOGSTAT
   validation log, the observation store's indexes) replaces only the bytes the server read; a
   member's write that lands in between stands, and the server refuses instead.
-- **Smaller fixes.** guard-scan now holds and geofences coordinates written with two decimals.
-  Reading a register is its own read-only tool (`mcp__staff-products__register_read`), so a read no
+- **Smaller fixes.** Reading a register is its own read-only tool (`mcp__staff-products__register_read`), so a read no
   longer asks for a write approval, and reading the PIR register returns the intel workbench's
   register. **Decide a PIR** names the reason when the PIR register cannot be read instead of
   saying no PIR is waiting.
+- **Staff tool answers fenced as untrusted.** Every answer a staff read tool gives an agent
+  (products, registers, LOGSTATs, planning factors, map layers and proposals, readiness and
+  movement records, the annex check, the battle rhythm and its suspenses) now reaches the model fenced as untrusted text with injection attempts flagged,
+  so text a unit, a person or another member wrote cannot pass as instructions. Before, the
+  logistics LOGSTAT tools returned unit-written text unfenced.
+- **Two-decimal coordinates checked, plain numbers left alone.** guard-scan now holds and geofences
+  coordinates written with two decimals, and holds a two-decimal pair such as "12.50, 3.50" only
+  when it is marked as a position: a hemisphere letter, a minus sign or a degree
+  sign ("51.10 N, 11.10 E", "45.42, -75.69"). Those are still checked against the exercise box.
+- **A COP merge never loses a proposal.** When the merged copy of a proposal cannot be kept, the
+  merge is refused and the proposal stays where it is.
+- **Staff Room notices stay up their full time.** A newer notice is no longer hidden early by the
+  timer of the one before it.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

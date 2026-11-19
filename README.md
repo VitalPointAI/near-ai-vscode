@@ -272,8 +272,12 @@ synchronization matrix, the DST and DSM and the assessment plan (in place,
 where the J5 made them; the J5 then proposes changes), and every
 FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
 `mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:cop-map`,
-`mcp:logistics`) are listed on the Tools page and in the Team Studio tool picker; only a staff
-team's run gets them. `mcp:observations` reads the feed reports kept in
+`mcp:logistics`, `mcp:orders`, `mcp:battle-rhythm`) are listed on the Tools page and in the Team
+Studio tool picker; only a staff team's run gets them. `mcp:orders` gives the annex letters of your
+doctrine profile, checks an order's annexes (wrong letter, missing owner, not yet released, stale
+source), assembles an order or plan from released products and drafts FRAGOs, each a draft a
+person releases. `mcp:battle-rhythm` keeps the battle rhythm calendar and exports it to an `.ics`
+file, or imports one you put in the project. `mcp:observations` reads the feed reports kept in
 `.planning/staff/observations/` (not committed), shows only what your
 clearances cover, and says when a limit cut an answer.
 A J4 logistics team starts support planning at the first step, alongside force
@@ -331,6 +335,14 @@ follows the J2 demo script and holds when the mid-demo report lands.
 resumes, steps and sets the speed: 0.5x, 1x, 2x or 4x. The inject script that
 drives it, `resources/staff/scenarios/iron-lantern.sim.jsonl`, and the message
 shapes are described in `src/domain/staff/sim/`.
+**NEAR AI: Staff: Import Feed File...** brings your own GeoJSON, KML, Cursor
+on Target, RSS, Atom or AIS (NMEA) file into the project's observation store.
+The file is read in a separate process, never in the editor; you see how many
+reports it holds, the format, the label and the time span, and what is held
+back because it lies outside the exercise frame, and nothing is written until
+you choose Import. Imported reports name the file they came from, and
+importing the same file twice adds nothing.
+
 **NEAR AI: Open Staff Room** (also **Open the Staff Room** in Team Studio once
 you have a staff team) shows the project's staff run as a war room. The process
 rail across the top shows each step in your profile's own words and whether it
@@ -361,7 +373,23 @@ in its description and in **Map as table**. The J2 workspace also lists the
 live feed reports the project's observation store holds, newest first and
 only what your clearances cover; a running exercise feed simulation fills it.
 While the room is open it runs track decay, so tracks go stale and then lost.
-The J5, J3 and J4 workspaces say what they will hold. **Calm** stops all movement, as the system's
+The J5, J3 and J4 workspaces say what they will hold.
+
+**Standing watches.** A standing watch binds a PIR's indicator to an area, a
+time window and the weakest source grade it counts, until the PIR's latest
+time of value, and names the person it alerts. **NEAR AI: Staff: Create a
+Standing Watch** creates and arms one; J2 watch members can only propose one,
+which you arm with **Staff: Arm a Standing Watch**. Arming and retiring are
+signed with your device key, so a watch written into the file by hand arms
+nothing. A watch looks at each new observation only while a staff run or the
+Staff Room is open; with neither, it pauses, and what came in meanwhile is
+delivered as "missed while paused" when you are back. On a match it alerts you
+(at most four alerts an hour, then a digest), and the watch officer drafts an
+INTREP, and the threat analyst a course of action revision if the watch allows
+it, as drafts for you in the release process. Nothing is released by a watch.
+**Pause**, **Resume**, **Acknowledge** (once you have seen the drafts) and
+**Reject or Retire** are commands of their own. Past its latest time of value
+a watch expires. **Calm** stops all movement, as the system's
 reduced-motion setting does; **Follow the action** moves the view to where the
 work is; press **?** for the keys.
 

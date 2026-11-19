@@ -33,9 +33,18 @@ function folder(): { root: string; context: ToolContext } {
   return { root, context };
 }
 
+/**
+ * Runs a workbench tool. A read tool's answer is fenced whole as untrusted content (staffFence.ts, drop 2 review): that is checked here, and the text
+ * inside the fence (after a draft's note) is returned, so each test below reads the answer itself.
+ */
 async function call(tools: Map<string, AgentTool<any>>, name: string, raw: Record<string, unknown>, context: ToolContext): Promise<string> {
   const tool = tools.get(name)!;
-  return tool.run(tool.parse(raw), context);
+  const text = await tool.run(tool.parse(raw), context);
+  if (tool.capability !== 'read') return text;
+  const fence = new RegExp(`^<untrusted-content id="([0-9a-f]{8})" source="intel-workbench: ${name}">\\n(?:\\[This is a draft for you to write[^\\n]*\\]\\n)?([\\s\\S]*)\\n</untrusted-content id="\\1">$`);
+  const match = fence.exec(text);
+  assert.ok(match, `${name} answers fenced:\n${text.slice(0, 200)}`);
+  return match[2];
 }
 
 const SOURCE = {

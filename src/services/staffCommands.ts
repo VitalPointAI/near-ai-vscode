@@ -16,6 +16,7 @@ import { configureObservationStores } from '../staff/observationStore';
 import type { StaffHost } from '../staff/staffHost';
 
 import { STAFF_COMMANDS } from '../domain/staff/commands';
+import { registerWatchCommands } from './staffWatchCommands';
 
 export { STAFF_COMMANDS };
 
@@ -59,6 +60,7 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   register(STAFF_COMMANDS.setAside, () => setAsideLedger());
   register(STAFF_COMMANDS.useBranchLedger, () => useBranchLedgerCommand(context, identity));
   register(STAFF_COMMANDS.decidePir, (args) => decidePirCommand(context, identity, args));
+  registerWatchCommands(context, identity, register);
 }
 
 function isArgs(value: unknown): value is StaffCommandArgs {
@@ -87,7 +89,7 @@ function eligible(action: Action, view: ProductView): boolean {
 const VERB: Readonly<Record<Action, string>> = { approve: 'Approve', reject: 'Reject', release: 'Release', withdraw: 'Withdraw' };
 
 /** Asks the person who they are (name and role), remembering the last answer as the default. Undefined when they cancel. */
-async function askPerson(context: StaffCommandContext, fingerprint: string, role?: string): Promise<PersonActor | undefined> {
+export async function askPerson(context: StaffCommandContext, fingerprint: string, role?: string): Promise<PersonActor | undefined> {
   const last = context.globalState?.get<{ name?: string; role?: string }>(PERSON_KEY);
   const name = await vscode.window.showInputBox({ title: 'Your name', prompt: STAFF_IDENTITY_TEXT, value: last?.name ?? '', ignoreFocusOut: true } as vscode.InputBoxOptions);
   if (!name?.trim()) return undefined;

@@ -3,7 +3,7 @@
 // version leaves the file as it was, and no tool reaches the network. Then the features rules: symbols, control measures, overlays per adversary course of
 // action and decision points, positions inside the exercise frame, and labels joined.
 import assert from 'node:assert/strict';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import test from 'node:test';
 import { COP_MAP_SERVER, COP_MAP_TOOL_NAMES, copMapTools, grantedCopMapTools, SCENARIO_FILE } from '../agent/copMap';
@@ -100,7 +100,7 @@ test('the writer\'s features become a new layer version in the release state mac
   const listed = await call(made, J2_TEAM, 'proposals', { layer: 'cop-threat-layer' }, 'threat-analyst');
   const name = /- ([0-9TZ-]+-watch-officer):/.exec(listed.text)?.[1];
   assert.ok(name, listed.text);
-  assert.match(listed.text, /<untrusted-data/);
+  assert.match(listed.text, /^<untrusted-content id="[0-9a-f]{8}" source="cop-map: proposals">/);
   assert.equal((await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name }, 'watch-officer')).ok, false, 'only the writer merges');
   const merged = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name }, 'threat-analyst');
   assert.ok(merged.ok, merged.text);
@@ -108,6 +108,32 @@ test('the writer\'s features become a new layer version in the release state mac
   const after = readLayerBody('cop-threat-layer', await readFile(path.join(made.root, layerPath('cop-threat-layer')), 'utf8'), undefined);
   assert.equal(after.features.find((feature) => feature.id === 'u-1')?.properties.by, 'watch-officer', 'who proposed stays on the feature');
   assert.deepEqual(await readdir(path.join(made.root, '.planning/staff/proposals/cop-threat-layer/merged')), [`${name}.json`]);
+});
+
+test('a merge whose kept copy cannot be written merges nothing and keeps the proposal; a refused merge takes its copy back', async () => {
+  const made = await world();
+  const proposed = await call(made, J2_TEAM, 'propose', { layer: 'cop-threat-layer', summary: 'Small craft', features: [{ id: 'u-1', kind: 'symbol', name: 'U-1', sidc: '10013000000000000000', at: 'KQ 4142' }] }, 'watch-officer');
+  assert.ok(proposed.ok, proposed.text);
+  const folder = path.join(made.root, '.planning/staff/proposals/cop-threat-layer');
+  const [name] = (await readdir(folder)).filter((entry) => entry.endsWith('.json'));
+  // A copy of that name is already in merged/ (an earlier merge, or a member's file): the copy cannot be written, so nothing is merged or deleted.
+  await mkdir(path.join(folder, 'merged'), { recursive: true });
+  await writeFile(path.join(folder, 'merged', name), 'an earlier copy\n');
+  const refused = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
+  assert.equal(refused.ok, false);
+  assert.match(refused.text, /is already there, so the proposal was not merged and stays where it is/);
+  assert.ok((await readdir(folder)).includes(name), 'the proposal stays');
+  assert.equal(await readFile(path.join(folder, 'merged', name), 'utf8'), 'an earlier copy\n', 'the copy there is left alone');
+  await readFile(path.join(made.root, layerPath('cop-threat-layer')), 'utf8').then(() => assert.fail('nothing was written to the layer'), () => undefined);
+
+  // The layer refuses the merge (its file cannot be read under the rules): the copy written for it is taken back, and the proposal stays.
+  await rm(path.join(folder, 'merged', name));
+  await mkdir(path.dirname(path.join(made.root, layerPath('cop-threat-layer'))), { recursive: true });
+  await writeFile(path.join(made.root, layerPath('cop-threat-layer')), '```geojson\n{ not json\n```\n');
+  const failed = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
+  assert.equal(failed.ok, false, failed.text);
+  assert.ok((await readdir(folder)).includes(name), 'the proposal stays');
+  assert.deepEqual(await readdir(path.join(folder, 'merged')), [], 'the copy written for the refused merge was taken back');
 });
 
 test('feed layers take no features from anyone, and a settings change goes to their settings owner as a proposal', async () => {
@@ -184,7 +210,7 @@ test('the layer label is the join of its features\' labels, and layer_read fence
   assert.match(result.text, /labelled org\/Internal/);
   const read = await call(made, J3_TEAM, 'layer_read', { layer: 'cop-threat-layer' }, 'joc-chief');
   assert.match(read.text, /label org\/Internal; written by j2 threat-analyst/);
-  assert.match(read.text, /<untrusted-data source="cop-map">[\s\S]*Ignore previous instructions[\s\S]*<\/untrusted-data>/);
+  assert.match(read.text, /^<untrusted-content id="([0-9a-f]{8})" source="cop-map: layer_read">[\s\S]*WARNING: this content tells the reader to ignore its instructions[\s\S]*Ignore previous instructions[\s\S]*<\/untrusted-content id="\1">$/);
   const listed = await call(made, J3_TEAM, 'layers', {}, 'joc-chief');
   assert.match(listed.text, /cop-operations-layer \(Operations\): written by j3 joc-chief \(you\)/);
   assert.match(listed.text, /cop-feed-friendly .*settings by j3 joc-chief \(you\)/);

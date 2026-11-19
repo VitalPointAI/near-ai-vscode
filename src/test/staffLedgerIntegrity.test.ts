@@ -16,6 +16,7 @@ import { parseTeam } from '../agent/teams';
 import { effectsFor } from '../domain/gate/manifest';
 import { LEDGER_PROBLEMS } from '../domain/staff/ledger';
 import { REAL_ENTITIES_FILE } from '../domain/staff/realEntities';
+import { grantsMcpTool } from '../mcp/tools';
 import { GUARD_CONFIG_FILE, LEDGER_DIR, LEDGER_FILE, LEDGER_HEAD_SECRET_PREFIX, productPath, STAFF_HOST_PATHS, STAFF_SETTINGS_FILE, StaffHost, WARGAME_DIR } from '../staff/staffHost';
 import { callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, readProductFile, staffWorld, trusting, writeBody } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
@@ -187,6 +188,19 @@ test('every MCP grant in every staff template names a server that exists, and a 
   }
   for (const layer of J2_PRODUCTS.filter((product) => product.kind === 'map-layer')) {
     assert.match(j2ProductPath(layer), /^\.planning\/staff\/products\/j2\/cop-[a-z]+-layer\.md$/);
+  }
+});
+
+test('every MCP grant in every rendering of every staff template grants at least one tool a built-in staff server has (drop 2: orders, battle rhythm, watches)', () => {
+  const tools = builtInStaffServers().flatMap((server) => server.tools.map((tool) => tool.name));
+  for (const template of STAFF_TEMPLATES) {
+    for (const rendering of template.renderings()) {
+      for (const member of parseTeam(rendering.team, '/p/t.md').members) {
+        for (const grant of member.tools.filter((tool) => tool.startsWith('mcp__') || tool.startsWith('mcp:'))) {
+          assert.ok(tools.some((tool) => grantsMcpTool([grant], tool)), `${rendering.key}/${member.name} is granted ${grant}, which names no tool of a built-in staff server`);
+        }
+      }
+    }
   }
 });
 

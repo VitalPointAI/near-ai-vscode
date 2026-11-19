@@ -19,7 +19,7 @@ import { REGISTER_SCHEMAS } from '../domain/staff/registers';
 import { buildStaffRoomModel } from '../domain/staff/staffRoom';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { MemorySecrets } from './helpers/teamHarness';
-import { callTool, J2_TEAM, J3_TEAM, J5_TEAM, staffWorld } from './helpers/staffFixtures';
+import { callTool, J2_TEAM, J3_TEAM, J5_TEAM, staffWorld, unfenced } from './helpers/staffFixtures';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const stub = createVscodeStub();
@@ -46,7 +46,7 @@ test('the PIR register: no stale schema, its read returns the workbench\'s JSON 
   await call('pir_publish', {});
   const read = await callTool(world, J3_TEAM, REGISTER_READ, { register: 'pir-register' }, 'joc-chief');
   assert.ok(read.ok, read.text);
-  const value = JSON.parse(read.text) as { register: string; source: string; entries: Array<{ id: string; requirement: string }> };
+  const value = JSON.parse(unfenced(read.text, REGISTER_READ)) as { register: string; source: string; entries: Array<{ id: string; requirement: string }> };
   assert.equal(value.source, registerPath('pir-register'));
   assert.deepEqual(value.entries.map((entry) => [entry.id, entry.requirement]), [['PIR-1', PIR.requirement]]);
   for (const action of ['write', 'propose']) {
@@ -85,7 +85,7 @@ test('reading a register is its own read-only tool: no write approval for a read
   const world = await staffWorld();
   assert.ok((await callTool(world, J5_TEAM, REGISTER, { action: 'write', register: 'facts-assumptions-ledger', rows: [{ id: 'A-1', kind: 'assumption', statement: 's', status: 'unconfirmed', invalidationTrigger: 't' }] }, 'lead-planner')).ok);
   const read = await callTool(world, J5_TEAM, REGISTER_READ, { register: 'facts-assumptions-ledger' }, 'red-team');
-  assert.equal((JSON.parse(read.text) as { rows: unknown[] }).rows.length, 1, 'any member reads, the red team too');
+  assert.equal((JSON.parse(unfenced(read.text, REGISTER_READ)) as { rows: unknown[] }).rows.length, 1, 'any member reads, the red team too');
 });
 
 test('every staff template member granted the register tool is granted the read tool with it', () => {

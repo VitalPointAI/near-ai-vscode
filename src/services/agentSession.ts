@@ -77,6 +77,8 @@ import { nanoToUsd, totalNanoUsd, withSpendTag } from './spendLedger';
 import { staffTeamInfo, staffTools, WRITE_LIMITED_STAFF_TOOLS } from '../agent/staffTools';
 import { staffHostFor } from '../staff/staffHost';
 import { observationStoreFor } from '../staff/observationStore';
+import { attend } from '../staff/watchAttendance';
+import { watchHostFor } from '../staff/watchHost';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -780,6 +782,9 @@ export class AgentConversation {
     let costAsked = false;
     this.markVisible();
     const heartbeat = setInterval(() => this.heartbeat(runStartedAt), this.progressTiming.checkMs);
+    // A person's staff run attends the project while it runs: the standing watches run with it and pause when nothing attends (WP-WATCH, Q5).
+    if (request.team?.staff) watchHostFor(this.root);
+    const releaseAttendance = request.team?.staff ? attend(this.root, { kind: 'run', id: runId }) : () => undefined;
     try {
       let result: RunResult;
       try {
@@ -847,6 +852,7 @@ export class AgentConversation {
       }
     } finally {
       clearInterval(heartbeat);
+      releaseAttendance();
       if (this.abort === abort) this.abort = undefined;
       this.releasePending();
       this.markerRun = undefined;
