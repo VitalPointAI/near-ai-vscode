@@ -1,0 +1,4772 @@
+{
+  "$schema": "./profile.schema.json",
+  "schemaVersion": 1,
+  "id": "example-general",
+  "title": "Example general capital project profile",
+  "audience": "example",
+  "display": {
+    "use": "label",
+    "showSameAs": false
+  },
+  "source": {
+    "title": "Neutral example written for the extension",
+    "doNotQuote": false,
+    "note": "Example values, not policy. Load your organization's private profile to see your own names."
+  },
+  "currency": "XXX",
+  "costBases": [
+    {
+      "slot": "basis-total",
+      "label": "Total cost with taxes, benefits loading and contingency"
+    },
+    {
+      "slot": "basis-base-year",
+      "label": "Base-year cost"
+    },
+    {
+      "slot": "basis-base-year-ex-tax",
+      "label": "Base-year cost without taxes"
+    },
+    {
+      "slot": "basis-acquisition",
+      "label": "Acquisition cost with taxes"
+    },
+    {
+      "slot": "basis-procurement-value",
+      "label": "Equipment procurement value"
+    },
+    {
+      "slot": "basis-sustainment",
+      "label": "Contracted sustainment to end of life"
+    }
+  ],
+  "rating": {
+    "slot": "rating",
+    "label": "Complexity and risk assessment imported and confirmed by a person",
+    "levels": [
+      {
+        "slot": "rating-1",
+        "label": "Rating 1 (lowest)",
+        "order": 1
+      },
+      {
+        "slot": "rating-2",
+        "label": "Rating 2",
+        "order": 2
+      },
+      {
+        "slot": "rating-3",
+        "label": "Rating 3",
+        "order": 3
+      },
+      {
+        "slot": "rating-4",
+        "label": "Rating 4 (highest)",
+        "order": 4
+      }
+    ]
+  },
+  "sizeClasses": [
+    {
+      "slot": "class-small",
+      "label": "Small",
+      "max": "set-threshold-major",
+      "basis": "basis-total"
+    },
+    {
+      "slot": "class-major",
+      "label": "Major",
+      "min": "set-threshold-major",
+      "max": "set-threshold-delegated-max",
+      "basis": "basis-total",
+      "onBound": "upper-and-flag"
+    },
+    {
+      "slot": "class-major-large",
+      "label": "Major, large",
+      "min": "set-threshold-delegated-max",
+      "basis": "basis-total",
+      "onBound": "lower-and-flag"
+    }
+  ],
+  "categories": [
+    {
+      "slot": "cat-equipment",
+      "label": "Equipment",
+      "enabled": true
+    },
+    {
+      "slot": "cat-infrastructure",
+      "label": "Infrastructure",
+      "enabled": false
+    },
+    {
+      "slot": "cat-embedded-infrastructure",
+      "label": "Infrastructure within another project",
+      "enabled": false
+    },
+    {
+      "slot": "cat-digital",
+      "label": "Digital",
+      "enabled": false
+    },
+    {
+      "slot": "cat-restricted-access",
+      "label": "Restricted-access programme",
+      "enabled": false
+    },
+    {
+      "slot": "cat-munitions",
+      "label": "Munitions",
+      "enabled": false
+    },
+    {
+      "slot": "cat-operating",
+      "label": "Operating-funded investment",
+      "enabled": false
+    }
+  ],
+  "projectTypes": [
+    {
+      "slot": "type-standard",
+      "label": "Standard"
+    },
+    {
+      "slot": "type-multi-phase",
+      "label": "Multi-phase"
+    },
+    {
+      "slot": "type-cyclical",
+      "label": "Cyclical"
+    },
+    {
+      "slot": "type-small",
+      "label": "Small"
+    },
+    {
+      "slot": "type-urgent",
+      "label": "Urgent"
+    },
+    {
+      "slot": "type-programme",
+      "label": "Programme"
+    },
+    {
+      "slot": "type-enduring",
+      "label": "Enduring programme"
+    },
+    {
+      "slot": "type-portfolio",
+      "label": "Portfolio"
+    }
+  ],
+  "bodies": [
+    {
+      "slot": "board-capability",
+      "label": "Capability board",
+      "kind": "board",
+      "verbs": [
+        "approve",
+        "direct",
+        "note",
+        "return",
+        "defer"
+      ]
+    },
+    {
+      "slot": "board-programme",
+      "label": "Programme management board",
+      "kind": "board",
+      "verbs": [
+        "approve",
+        "endorse",
+        "direct",
+        "note",
+        "return",
+        "defer"
+      ]
+    },
+    {
+      "slot": "board-resources",
+      "label": "Resource management committee",
+      "kind": "board",
+      "verbs": [
+        "approve",
+        "direct",
+        "note",
+        "return",
+        "defer"
+      ]
+    },
+    {
+      "slot": "board-project-review",
+      "label": "Project review board",
+      "kind": "board",
+      "verbs": [
+        "endorse",
+        "note",
+        "review"
+      ]
+    },
+    {
+      "slot": "board-infrastructure",
+      "label": "Infrastructure board",
+      "kind": "board",
+      "verbs": [
+        "endorse",
+        "approve",
+        "note"
+      ]
+    },
+    {
+      "slot": "board-digital",
+      "label": "Digital board",
+      "kind": "board",
+      "verbs": [
+        "review",
+        "endorse",
+        "return"
+      ]
+    },
+    {
+      "slot": "board-procurement-strategy",
+      "label": "Procurement strategy committee",
+      "kind": "board",
+      "verbs": [
+        "review",
+        "endorse",
+        "approve"
+      ]
+    },
+    {
+      "slot": "board-financial-inputs",
+      "label": "Financial inputs committee",
+      "kind": "board",
+      "verbs": [
+        "review",
+        "endorse"
+      ]
+    },
+    {
+      "slot": "board-change-control",
+      "label": "Change control board",
+      "kind": "board",
+      "verbs": [
+        "approve",
+        "return",
+        "defer"
+      ]
+    },
+    {
+      "slot": "panel-independent-review",
+      "label": "Independent review panel",
+      "kind": "panel",
+      "verbs": [
+        "review",
+        "note"
+      ]
+    },
+    {
+      "slot": "authority-minister",
+      "label": "Minister",
+      "kind": "authority",
+      "verbs": [
+        "grant",
+        "approve",
+        "return"
+      ]
+    },
+    {
+      "slot": "authority-central",
+      "label": "Central approving authority",
+      "kind": "authority",
+      "verbs": [
+        "grant",
+        "approve",
+        "return"
+      ]
+    },
+    {
+      "slot": "authority-central-staff",
+      "label": "Central agency staff",
+      "kind": "authority",
+      "verbs": [
+        "review",
+        "note"
+      ]
+    },
+    {
+      "slot": "authority-deputy-head",
+      "label": "Deputy head",
+      "kind": "authority",
+      "verbs": [
+        "grant",
+        "approve",
+        "return"
+      ]
+    },
+    {
+      "slot": "authority-delegated",
+      "label": "Delegated senior authority",
+      "kind": "authority",
+      "verbs": [
+        "approve",
+        "return"
+      ]
+    },
+    {
+      "slot": "authority-contracting",
+      "label": "Contracting authority",
+      "kind": "authority",
+      "verbs": [
+        "approve",
+        "review",
+        "return"
+      ]
+    }
+  ],
+  "roles": [
+    {
+      "slot": "role-project-leader",
+      "label": "Project leader",
+      "verbs": [
+        "approve",
+        "endorse",
+        "note"
+      ]
+    },
+    {
+      "slot": "role-sponsor",
+      "label": "Project sponsor",
+      "verbs": [
+        "approve",
+        "endorse",
+        "review"
+      ]
+    },
+    {
+      "slot": "role-implementer",
+      "label": "Project implementer",
+      "verbs": [
+        "approve",
+        "endorse"
+      ]
+    },
+    {
+      "slot": "role-project-director",
+      "label": "Project director",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-project-manager",
+      "label": "Project manager",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-sponsor-executive",
+      "label": "Sponsor's senior executive",
+      "verbs": [
+        "endorse",
+        "review"
+      ]
+    },
+    {
+      "slot": "role-capability-development",
+      "label": "Capability development staff",
+      "verbs": [
+        "review",
+        "endorse",
+        "approve"
+      ]
+    },
+    {
+      "slot": "role-programme-coordination",
+      "label": "Programme coordination staff",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-finance-officer",
+      "label": "Chief financial officer",
+      "verbs": [
+        "approve"
+      ]
+    },
+    {
+      "slot": "role-costing-authority",
+      "label": "Costing authority",
+      "verbs": [
+        "review",
+        "approve"
+      ]
+    },
+    {
+      "slot": "role-submissions-office",
+      "label": "Submissions office",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-infrastructure-authority",
+      "label": "Infrastructure authority",
+      "verbs": [
+        "approve",
+        "review"
+      ]
+    },
+    {
+      "slot": "role-digital-authority",
+      "label": "Digital authority",
+      "verbs": [
+        "approve",
+        "review"
+      ]
+    },
+    {
+      "slot": "role-security-officer",
+      "label": "Chief security officer",
+      "verbs": [
+        "approve",
+        "review"
+      ]
+    },
+    {
+      "slot": "role-benefits-authority",
+      "label": "Industrial benefits authority",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-infrastructure-contracting",
+      "label": "Infrastructure contracting agent",
+      "verbs": [
+        "approve"
+      ]
+    },
+    {
+      "slot": "role-legal-advisor",
+      "label": "Legal advisor",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-integration-analyst",
+      "label": "Joint integration analyst",
+      "verbs": [
+        "review"
+      ]
+    },
+    {
+      "slot": "role-capability-board-chair",
+      "label": "Capability board chair",
+      "verbs": [
+        "approve"
+      ]
+    },
+    {
+      "slot": "role-senior-official",
+      "label": "Appointed senior official",
+      "verbs": [
+        "approve"
+      ]
+    },
+    {
+      "slot": "role-operations-certifier",
+      "label": "Operational necessity certifier",
+      "verbs": [
+        "approve"
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "slot": "phase-1",
+      "label": "Need identification",
+      "order": 1,
+      "exitRequires": [
+        "gate-1",
+        "gate-2"
+      ]
+    },
+    {
+      "slot": "phase-2",
+      "label": "Options analysis",
+      "order": 2,
+      "exitRequires": [
+        "gate-3",
+        "gate-4"
+      ]
+    },
+    {
+      "slot": "phase-3",
+      "label": "Transition to definition",
+      "order": 3,
+      "exitRequires": [
+        "dec-1"
+      ]
+    },
+    {
+      "slot": "phase-4",
+      "label": "Definition",
+      "order": 4,
+      "exitRequires": [
+        "dec-16"
+      ]
+    },
+    {
+      "slot": "phase-5",
+      "label": "Transition to delivery",
+      "order": 5,
+      "exitRequires": [
+        "gate-5",
+        "dec-2",
+        "dec-3"
+      ]
+    },
+    {
+      "slot": "phase-6",
+      "label": "Delivery",
+      "order": 6,
+      "exitRequires": [
+        "gate-6",
+        "gate-7",
+        "dec-5"
+      ]
+    },
+    {
+      "slot": "phase-7",
+      "label": "Close-out",
+      "order": 7,
+      "exitRequires": [
+        "dec-6"
+      ]
+    }
+  ],
+  "exceptionStates": [
+    {
+      "slot": "state-extended-closeout",
+      "label": "Extended close-out"
+    },
+    {
+      "slot": "state-withdrawn",
+      "label": "Withdrawn"
+    },
+    {
+      "slot": "state-cancelled",
+      "label": "Cancelled"
+    },
+    {
+      "slot": "state-closed",
+      "label": "Closed"
+    }
+  ],
+  "gates": [
+    {
+      "slot": "gate-1",
+      "label": "Priority confirmed",
+      "order": 1,
+      "phase": "phase-1",
+      "chain": [
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-priority-form"
+      ]
+    },
+    {
+      "slot": "gate-2",
+      "label": "Need and context confirmed",
+      "order": 2,
+      "phase": "phase-1",
+      "chain": [
+        {
+          "actor": "role-sponsor-executive",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-strategic-case",
+        "doc-high-level-requirements",
+        "doc-management-plan",
+        "doc-complexity-rating",
+        "doc-benefits-plan",
+        "doc-schedule",
+        "doc-capability-impact",
+        "doc-capability-board-package"
+      ]
+    },
+    {
+      "slot": "gate-3",
+      "label": "Option chosen",
+      "order": 3,
+      "phase": "phase-2",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-business-case",
+        "doc-scope-tiers",
+        "doc-requirements-preliminary",
+        "doc-high-level-requirements",
+        "doc-capability-board-package"
+      ]
+    },
+    {
+      "slot": "gate-4",
+      "label": "Governance confirmed",
+      "order": 4,
+      "phase": "phase-2",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-charter",
+        "doc-management-plan",
+        "doc-review-record"
+      ]
+    },
+    {
+      "slot": "gate-5",
+      "label": "Departmental approval",
+      "order": 5,
+      "phase": "phase-5",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-digital",
+          "verb": "review"
+        },
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-programme-board-package",
+        "doc-project-brief",
+        "doc-capability-impact",
+        "doc-requirements-statement",
+        "doc-management-plan",
+        "doc-complexity-rating",
+        "doc-cost-report",
+        "doc-approval-submission"
+      ]
+    },
+    {
+      "slot": "gate-6",
+      "label": "Initial capability accepted",
+      "order": 6,
+      "phase": "phase-6",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-initial-capability-certificate"
+      ]
+    },
+    {
+      "slot": "gate-7",
+      "label": "Full capability accepted",
+      "order": 7,
+      "phase": "phase-6",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ],
+      "package": [
+        "doc-full-capability-certificate"
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "slot": "dec-1",
+      "label": "Definition investment approval",
+      "phase": "phase-3",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-digital",
+          "verb": "review"
+        },
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        },
+        {
+          "actor": "authority-minister",
+          "verb": "grant"
+        },
+        {
+          "actor": "authority-central",
+          "verb": "grant"
+        }
+      ]
+    },
+    {
+      "slot": "dec-2",
+      "label": "Delivery investment approval",
+      "phase": "phase-5",
+      "chain": [
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        },
+        {
+          "actor": "authority-minister",
+          "verb": "grant"
+        },
+        {
+          "actor": "authority-central",
+          "verb": "grant"
+        }
+      ]
+    },
+    {
+      "slot": "dec-3",
+      "label": "Contracting approval",
+      "phase": "phase-5",
+      "chain": [
+        {
+          "actor": "authority-contracting",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-4",
+      "label": "Conditional release under the tailored process",
+      "phase": "phase-5",
+      "chain": [
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-5",
+      "label": "Close-out entry",
+      "phase": "phase-6",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-6",
+      "label": "Close-out complete",
+      "phase": "phase-7",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-programme-coordination",
+          "verb": "review"
+        }
+      ]
+    },
+    {
+      "slot": "dec-7",
+      "label": "Extended close-out plan",
+      "phase": "phase-7",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-8",
+      "label": "Withdrawal",
+      "phase": "any",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "note"
+        }
+      ]
+    },
+    {
+      "slot": "dec-9",
+      "label": "Cancellation",
+      "phase": "any",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-programme",
+          "verb": "endorse"
+        },
+        {
+          "actor": "authority-deputy-head",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-10",
+      "label": "Fixed budget approach",
+      "phase": "phase-3",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-11",
+      "label": "Funding change",
+      "phase": "phase-3",
+      "chain": [
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-12",
+      "label": "Significant requirement change",
+      "phase": "any",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-13",
+      "label": "Complexity rating acknowledgement",
+      "phase": "phase-3",
+      "chain": [
+        {
+          "actor": "authority-central-staff",
+          "verb": "review"
+        }
+      ]
+    },
+    {
+      "slot": "dec-14",
+      "label": "Definition waived or accelerated",
+      "phase": "phase-3",
+      "chain": [
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-15",
+      "label": "Contingency release",
+      "phase": "phase-6",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "review"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ]
+    },
+    {
+      "slot": "dec-16",
+      "label": "Definition complete",
+      "phase": "phase-4",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ]
+    }
+  ],
+  "paths": [
+    {
+      "slot": "path-1",
+      "label": "Small project path",
+      "approvingAuthority": "authority-delegated"
+    },
+    {
+      "slot": "path-2",
+      "label": "Delegated major path",
+      "approvingAuthority": "authority-deputy-head"
+    },
+    {
+      "slot": "path-3",
+      "label": "Ministerial path",
+      "approvingAuthority": "authority-minister"
+    },
+    {
+      "slot": "path-4",
+      "label": "Central authority path",
+      "approvingAuthority": "authority-central"
+    }
+  ],
+  "pathRules": [
+    {
+      "id": "rule-1",
+      "when": {
+        "costBelow": "set-threshold-small-floor",
+        "basis": "basis-acquisition"
+      },
+      "outcome": "flag",
+      "reason": "Below the small project path's lower bound"
+    },
+    {
+      "id": "rule-2",
+      "when": {
+        "costBelow": "set-threshold-major",
+        "basis": "basis-total"
+      },
+      "outcome": "path-1"
+    },
+    {
+      "id": "rule-3",
+      "when": {
+        "ratingAbove": "set-limit-rating-delegation"
+      },
+      "outcome": "path-4"
+    },
+    {
+      "id": "rule-4",
+      "when": {
+        "ratingEquals": "rating-3"
+      },
+      "outcome": "path-3"
+    },
+    {
+      "id": "rule-5",
+      "when": {
+        "ratingAtMost": "rating-2",
+        "costAtMost": "set-threshold-delegated-max",
+        "basis": "basis-total"
+      },
+      "outcome": "path-2"
+    },
+    {
+      "id": "rule-6",
+      "when": {},
+      "outcome": "flag",
+      "reason": "Not covered by the rules: a person decides"
+    }
+  ],
+  "estimateClasses": [
+    {
+      "slot": "est-1",
+      "label": "Order-of-magnitude estimate",
+      "accuracyLowPercent": 50,
+      "accuracyHighPercent": 50,
+      "earliestDecision": "gate-2"
+    },
+    {
+      "slot": "est-2",
+      "label": "Preliminary estimate",
+      "accuracyLowPercent": 30,
+      "accuracyHighPercent": 30,
+      "earliestDecision": "dec-1",
+      "detailAbovePercentOfValue": 8
+    },
+    {
+      "slot": "est-3",
+      "label": "Committed estimate",
+      "accuracyLowPercent": 12,
+      "accuracyHighPercent": 12,
+      "earliestDecision": "dec-2",
+      "detailAbovePercentOfValue": 4
+    }
+  ],
+  "settings": [
+    {
+      "slot": "set-threshold-major",
+      "label": "Lower bound of a major project",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 40,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-small-floor",
+      "label": "Lower bound of the small project path",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 0.4,
+      "basis": "basis-acquisition"
+    },
+    {
+      "slot": "set-threshold-delegated-max",
+      "label": "Upper bound of the delegated major path",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 400,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-project-number",
+      "label": "Cost at which an initiative gets a project number",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 4,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-rating-required",
+      "label": "Cost at which a complexity and risk rating is required",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 42,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-formal-costing",
+      "label": "Cost at which the costing authority prepares the estimate",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 44,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-oversight-report",
+      "label": "Cost at which the central oversight report is required",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 45,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-appointment-letter",
+      "label": "Cost at which a rating-3 project needs an appointed senior official",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 150,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-leader-senior",
+      "label": "Cost above which a rating 1 or 2 project needs a more senior project leader",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 420,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-independent-review",
+      "label": "Cost at which the independent review panel applies",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 160,
+      "basis": "basis-base-year-ex-tax"
+    },
+    {
+      "slot": "set-threshold-procurement-governance",
+      "label": "Procurement value at which the procurement strategy committee applies",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 32,
+      "basis": "basis-procurement-value"
+    },
+    {
+      "slot": "set-threshold-industrial-benefits",
+      "label": "Value above which industrial benefits apply",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 170,
+      "basis": "basis-procurement-value"
+    },
+    {
+      "slot": "set-threshold-industrial-benefits-review",
+      "label": "Value from which industrial benefits are reviewed case by case",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 33,
+      "basis": "basis-procurement-value"
+    },
+    {
+      "slot": "set-threshold-sustainment-case",
+      "label": "Sustainment value at which a sustainment business case is required",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 34,
+      "basis": "basis-sustainment"
+    },
+    {
+      "slot": "set-threshold-internal-contracting",
+      "label": "Contract value above which an external contracting authority acts",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 8,
+      "basis": "basis-procurement-value"
+    },
+    {
+      "slot": "set-threshold-programme-board-max",
+      "label": "Cost above which the programme board's approval is conditional on the resource committee",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 175,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-operating-board-min",
+      "label": "Operating-funded proposals: lower bound for the programme board",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 36,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-operating-board-max",
+      "label": "Operating-funded proposals: upper bound for the programme board",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 70,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-tailored-board-split",
+      "label": "Tailored release: cost above which the resource committee acts",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 75,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-urgent-small",
+      "label": "Urgent projects: upper bound of the small urgent process",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 46,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-urgent-max",
+      "label": "Urgent projects: upper bound of the delegated urgent process",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 410,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-investment-plan",
+      "label": "Cost at which a project is listed in the investment plan",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 4.5,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-threshold-ministerial-base",
+      "label": "Base approval limit before the department's class is applied",
+      "kind": "threshold",
+      "unit": "currency-millions",
+      "value": 3.5,
+      "basis": "basis-total"
+    },
+    {
+      "slot": "set-limit-rating-delegation",
+      "label": "Highest rating the department may approve itself",
+      "kind": "limit",
+      "unit": "rating",
+      "value": "rating-3"
+    },
+    {
+      "slot": "set-band-tailored-secretarial",
+      "label": "Tailored release: cost change within which release is by paper",
+      "kind": "limit",
+      "unit": "percent",
+      "value": 8
+    },
+    {
+      "slot": "set-band-tailored-board",
+      "label": "Tailored release: cost change within which a board releases",
+      "kind": "limit",
+      "unit": "percent",
+      "value": 18
+    },
+    {
+      "slot": "set-limit-paper-cost-change",
+      "label": "Capability board: cost change above which a paper decision is not allowed",
+      "kind": "limit",
+      "unit": "percent",
+      "value": 24
+    },
+    {
+      "slot": "set-limit-paper-schedule-change",
+      "label": "Capability board: schedule change above which a paper decision is not allowed",
+      "kind": "limit",
+      "unit": "months",
+      "value": 4
+    },
+    {
+      "slot": "set-band-risk-schedule",
+      "label": "Risk tolerance for delay to capability milestones",
+      "kind": "band",
+      "unit": "months",
+      "value": {
+        "low": {
+          "max": 4
+        },
+        "medium": {
+          "min": 4,
+          "max": 8
+        },
+        "high": {
+          "min": 8
+        }
+      }
+    },
+    {
+      "slot": "set-band-risk-cost",
+      "label": "Risk tolerance for cost against contingency",
+      "kind": "band",
+      "unit": "rule",
+      "value": {
+        "low": "within contingency",
+        "medium": "uses all remaining contingency",
+        "high": "beyond contingency"
+      }
+    },
+    {
+      "slot": "set-limit-significant-schedule-change",
+      "label": "Schedule change that counts as a significant baseline change",
+      "kind": "limit",
+      "unit": "calendar-days",
+      "value": 200
+    },
+    {
+      "slot": "set-scale-risk",
+      "label": "Risk likelihood and impact scales",
+      "kind": "scale",
+      "unit": "levels",
+      "value": {
+        "likelihood": 4,
+        "impact": 4
+      }
+    },
+    {
+      "slot": "set-band-scope-changes",
+      "label": "Indicator: changes to the project definition",
+      "kind": "band",
+      "unit": "count",
+      "value": {
+        "green": {
+          "max": 0
+        },
+        "amber": {
+          "min": 1,
+          "max": 1
+        },
+        "red": {
+          "min": 1
+        }
+      }
+    },
+    {
+      "slot": "set-band-milestone-slippage",
+      "label": "Indicator: slippage to the next planned milestone",
+      "kind": "band",
+      "unit": "percent",
+      "value": {
+        "green": {
+          "max": 8
+        },
+        "amber": {
+          "min": 8,
+          "max": 18
+        },
+        "red": {
+          "min": 18
+        }
+      }
+    },
+    {
+      "slot": "set-band-capability-slippage",
+      "label": "Indicator: slippage of the capability milestones",
+      "kind": "band",
+      "unit": "percent",
+      "value": {
+        "green": {
+          "max": 8
+        },
+        "amber": {
+          "min": 8,
+          "max": 18
+        },
+        "red": {
+          "min": 18
+        }
+      }
+    },
+    {
+      "slot": "set-band-impact-analyses",
+      "label": "Indicator: requests for more resources",
+      "kind": "band",
+      "unit": "count",
+      "value": {
+        "green": {
+          "max": 0
+        },
+        "amber": {
+          "min": 1,
+          "max": 2
+        },
+        "red": {
+          "min": 2
+        }
+      }
+    },
+    {
+      "slot": "set-band-spend-midyear",
+      "label": "Indicator: actual against forecast spend at mid-year",
+      "kind": "band",
+      "unit": "percent",
+      "value": {
+        "green": {
+          "min": 32,
+          "max": 68
+        },
+        "amber": {
+          "below": 32,
+          "above": 68
+        },
+        "red": {
+          "below": 12,
+          "above": 88
+        }
+      }
+    },
+    {
+      "slot": "set-band-spend-yearend",
+      "label": "Indicator: actual against forecast spend at year end",
+      "kind": "band",
+      "unit": "percent",
+      "value": {
+        "green": {
+          "min": 88
+        },
+        "amber": {
+          "min": 78,
+          "max": 88
+        },
+        "red": {
+          "below": 78
+        }
+      }
+    },
+    {
+      "slot": "set-band-authority-spent",
+      "label": "Indicator: share of spending authority spent, committed and forecast",
+      "kind": "band",
+      "unit": "percent",
+      "value": null
+    },
+    {
+      "slot": "set-limit-business-case-pages-full",
+      "label": "Business case page limit, full version",
+      "kind": "limit",
+      "unit": "pages",
+      "value": 45
+    },
+    {
+      "slot": "set-limit-business-case-pages-light",
+      "label": "Business case page limit, light version",
+      "kind": "limit",
+      "unit": "pages",
+      "value": 22
+    },
+    {
+      "slot": "set-limit-gap-statement-pages",
+      "label": "Capability gap statement length",
+      "kind": "limit",
+      "unit": "pages",
+      "value": 3
+    },
+    {
+      "slot": "set-limit-need-sentences",
+      "label": "Business need length",
+      "kind": "limit",
+      "unit": "sentences",
+      "value": 3
+    },
+    {
+      "slot": "set-limit-brief-minutes",
+      "label": "Board briefing length",
+      "kind": "limit",
+      "unit": "minutes",
+      "value": 12
+    },
+    {
+      "slot": "set-limit-brief-slides",
+      "label": "Board briefing slide count",
+      "kind": "limit",
+      "unit": "slides",
+      "value": 8
+    },
+    {
+      "slot": "set-limit-brief-languages",
+      "label": "Languages a board briefing must be in",
+      "kind": "limit",
+      "unit": "languages",
+      "value": [
+        "en"
+      ]
+    },
+    {
+      "slot": "set-limit-rated-criteria-min",
+      "label": "Minimum rated criteria in the options analysis",
+      "kind": "limit",
+      "unit": "count",
+      "value": 6
+    },
+    {
+      "slot": "set-deadline-review-record",
+      "label": "Project review board decision record circulated",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 11,
+      "anchor": "after:meeting:board-project-review"
+    },
+    {
+      "slot": "set-deadline-review-frequency",
+      "label": "Project review board meets at least every",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 11,
+      "anchor": "after:meeting:board-project-review"
+    },
+    {
+      "slot": "set-deadline-first-review",
+      "label": "First project review board after the need gate",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 4,
+      "anchor": "after:gate-2"
+    },
+    {
+      "slot": "set-deadline-launch-meeting",
+      "label": "Launch meeting after the need gate",
+      "kind": "deadline",
+      "unit": "weeks",
+      "value": 3,
+      "anchor": "after:gate-2"
+    },
+    {
+      "slot": "set-deadline-charter",
+      "label": "Charter after options analysis starts",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 75,
+      "anchor": "after:enter:phase-2"
+    },
+    {
+      "slot": "set-deadline-independent-review-first",
+      "label": "First independent review after the need gate",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 3,
+      "anchor": "after:gate-2"
+    },
+    {
+      "slot": "set-deadline-options-duration",
+      "label": "Expected length of options analysis",
+      "kind": "deadline",
+      "unit": "years",
+      "value": 3,
+      "anchor": "after:enter:phase-2"
+    },
+    {
+      "slot": "set-deadline-capability-board-review",
+      "label": "Capability board: case to central staff for review before the meeting",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 42,
+      "anchor": "before:meeting:board-capability"
+    },
+    {
+      "slot": "set-deadline-capability-board-package",
+      "label": "Capability board: signed package before the meeting",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 14,
+      "anchor": "before:meeting:board-capability"
+    },
+    {
+      "slot": "set-deadline-capability-board-deck",
+      "label": "Capability board: briefing after the pre-brief",
+      "kind": "deadline",
+      "unit": "hours",
+      "value": 36,
+      "anchor": "after:prebrief:board-capability"
+    },
+    {
+      "slot": "set-deadline-capability-board-final-deck",
+      "label": "Capability board: final briefing before the meeting",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 2,
+      "anchor": "before:meeting:board-capability"
+    },
+    {
+      "slot": "set-deadline-programme-board-package",
+      "label": "Programme board: package to the coordinating analyst before the meeting",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 13,
+      "anchor": "before:meeting:board-programme"
+    },
+    {
+      "slot": "set-deadline-programme-board-members",
+      "label": "Programme board: package to members before the meeting",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 8,
+      "anchor": "before:meeting:board-programme"
+    },
+    {
+      "slot": "set-deadline-programme-board-concurrence",
+      "label": "Programme board: concurrence before the meeting",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 4,
+      "anchor": "before:meeting:board-programme"
+    },
+    {
+      "slot": "set-deadline-planning-meeting",
+      "label": "Planning meeting after its readiness check",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 21,
+      "anchor": "after:readiness-check"
+    },
+    {
+      "slot": "set-deadline-planning-review",
+      "label": "Central staff review before the planning meeting",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 16,
+      "anchor": "before:planning-meeting"
+    },
+    {
+      "slot": "set-deadline-charter-age",
+      "label": "Charter signed no longer ago than this at the planning meeting",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 11,
+      "anchor": "before:planning-meeting"
+    },
+    {
+      "slot": "set-deadline-document-age",
+      "label": "Brief, rating and impact annex reviewed no longer ago than this at the planning meeting",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 4,
+      "anchor": "before:planning-meeting"
+    },
+    {
+      "slot": "set-deadline-tailored-brief-age",
+      "label": "Brief signed no longer ago than this in a tailored release package",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 11,
+      "anchor": "before:dec-4"
+    },
+    {
+      "slot": "set-deadline-transition-minister",
+      "label": "Minimum length of the transition to definition on the ministerial path",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 4,
+      "anchor": "after:enter:phase-3"
+    },
+    {
+      "slot": "set-deadline-transition-central",
+      "label": "Minimum length of the transition to definition on the central authority path",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 8,
+      "anchor": "after:enter:phase-3"
+    },
+    {
+      "slot": "set-deadline-costing-min",
+      "label": "Shortest costing period",
+      "kind": "deadline",
+      "unit": "weeks",
+      "value": 8,
+      "anchor": "after:costing-request"
+    },
+    {
+      "slot": "set-deadline-costing-max",
+      "label": "Longest typical costing period",
+      "kind": "deadline",
+      "unit": "weeks",
+      "value": 28,
+      "anchor": "after:costing-request"
+    },
+    {
+      "slot": "set-deadline-rating-review",
+      "label": "Central agency review of the rating",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 8,
+      "anchor": "after:submit:dec-13"
+    },
+    {
+      "slot": "set-deadline-rating-review-assumed",
+      "label": "Central agency review after which agreement may be assumed",
+      "kind": "deadline",
+      "unit": "working-days",
+      "value": 13,
+      "anchor": "after:submit:dec-13"
+    },
+    {
+      "slot": "set-deadline-oversight-report",
+      "label": "Central oversight report after each approval",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 21,
+      "anchor": "after:approval"
+    },
+    {
+      "slot": "set-deadline-oversight-report-team",
+      "label": "Project team completes the oversight report draft",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 5,
+      "anchor": "after:draft-received"
+    },
+    {
+      "slot": "set-deadline-stalled",
+      "label": "No recorded progress before a project is flagged as stalled",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 11,
+      "anchor": "after:last-progress"
+    },
+    {
+      "slot": "set-deadline-fixed-budget-update",
+      "label": "Fixed budget status update",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 11,
+      "anchor": "after:dec-10"
+    },
+    {
+      "slot": "set-deadline-indicator-compile",
+      "label": "Indicators compiled every",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 2,
+      "anchor": "periodic"
+    },
+    {
+      "slot": "set-deadline-red-indicator",
+      "label": "Unscheduled review after a red indicator",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 0,
+      "anchor": "after:indicator-red"
+    },
+    {
+      "slot": "set-deadline-high-risk-escalation",
+      "label": "Escalation of a high risk in definition or delivery",
+      "kind": "deadline",
+      "unit": "calendar-days",
+      "value": 0,
+      "anchor": "after:risk-high"
+    },
+    {
+      "slot": "set-deadline-closeout",
+      "label": "Close-out after full capability",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 4,
+      "anchor": "after:gate-7"
+    },
+    {
+      "slot": "set-deadline-post-review-min",
+      "label": "Earliest post-implementation review after close-out",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 2,
+      "anchor": "after:dec-6"
+    },
+    {
+      "slot": "set-deadline-post-review-max",
+      "label": "Latest post-implementation review after close-out",
+      "kind": "deadline",
+      "unit": "months",
+      "value": 4,
+      "anchor": "after:dec-6"
+    },
+    {
+      "slot": "set-deadline-lessons",
+      "label": "Lessons recorded at the end of every phase",
+      "kind": "deadline",
+      "unit": "event",
+      "value": "phase-end",
+      "anchor": "at:phase-end"
+    }
+  ],
+  "overlays": [
+    {
+      "slot": "ovl-project-number",
+      "label": "Project number in the financial system",
+      "when": {
+        "costAtLeast": "set-threshold-project-number"
+      },
+      "adds": []
+    },
+    {
+      "slot": "ovl-document-portal",
+      "label": "Core documents in the project portal",
+      "when": {
+        "costAtLeast": "set-threshold-major"
+      },
+      "adds": []
+    },
+    {
+      "slot": "ovl-rating-required",
+      "label": "Complexity and risk rating",
+      "when": {
+        "costAtLeast": "set-threshold-rating-required"
+      },
+      "adds": [
+        "doc-complexity-rating",
+        "dec-13"
+      ]
+    },
+    {
+      "slot": "ovl-formal-costing",
+      "label": "Estimate by the costing authority",
+      "when": {
+        "costAtLeast": "set-threshold-formal-costing"
+      },
+      "adds": [
+        "doc-cost-report",
+        "doc-finance-attestation"
+      ]
+    },
+    {
+      "slot": "ovl-oversight-report",
+      "label": "Central oversight report",
+      "when": {
+        "costAtLeast": "set-threshold-oversight-report"
+      },
+      "adds": [
+        "doc-oversight-report"
+      ]
+    },
+    {
+      "slot": "ovl-appointment-letter",
+      "label": "Appointed senior official",
+      "when": {
+        "any": [
+          {
+            "ratingAtLeast": "rating-4"
+          },
+          {
+            "ratingAtLeast": "rating-3",
+            "costAtLeast": "set-threshold-appointment-letter"
+          }
+        ]
+      },
+      "adds": [
+        "doc-appointment-letter"
+      ]
+    },
+    {
+      "slot": "ovl-leader-level",
+      "label": "Seniority of the project leader",
+      "when": {
+        "always": true
+      },
+      "adds": [],
+      "seniority": [
+        {
+          "when": {
+            "ratingAtLeast": "rating-4"
+          },
+          "leader": "Top executive"
+        },
+        {
+          "when": {
+            "ratingEquals": "rating-3"
+          },
+          "leader": "Senior executive"
+        },
+        {
+          "when": {
+            "ratingAtMost": "rating-2",
+            "costAbove": "set-threshold-leader-senior"
+          },
+          "leader": "Executive"
+        },
+        {
+          "when": {
+            "ratingAtMost": "rating-2"
+          },
+          "leader": "Manager"
+        }
+      ]
+    },
+    {
+      "slot": "ovl-independent-review",
+      "label": "Independent review panel",
+      "when": {
+        "any": [
+          {
+            "costAtLeast": "set-threshold-independent-review"
+          },
+          {
+            "ratingAbove": "set-limit-rating-delegation"
+          },
+          {
+            "path": [
+              "path-3",
+              "path-4"
+            ]
+          }
+        ]
+      },
+      "adds": [
+        "panel-independent-review",
+        "doc-independent-review-responses"
+      ]
+    },
+    {
+      "slot": "ovl-procurement-governance",
+      "label": "Procurement strategy committee",
+      "when": {
+        "costAtLeast": "set-threshold-procurement-governance"
+      },
+      "adds": [
+        "board-procurement-strategy"
+      ]
+    },
+    {
+      "slot": "ovl-industrial-benefits",
+      "label": "Industrial benefits",
+      "when": {
+        "costAtLeast": "set-threshold-industrial-benefits-review"
+      },
+      "adds": [
+        "doc-industrial-benefits"
+      ]
+    },
+    {
+      "slot": "ovl-sustainment-case",
+      "label": "Sustainment business case",
+      "when": {
+        "costAtLeast": "set-threshold-sustainment-case",
+        "categoryNot": [
+          "cat-infrastructure"
+        ]
+      },
+      "adds": [
+        "doc-sustainment-case"
+      ]
+    },
+    {
+      "slot": "ovl-contracting-authority",
+      "label": "External contracting authority",
+      "when": {
+        "costAtLeast": "set-threshold-internal-contracting"
+      },
+      "adds": [
+        "authority-contracting"
+      ]
+    },
+    {
+      "slot": "ovl-approval-board",
+      "label": "Which board grants departmental approval",
+      "when": {
+        "always": true
+      },
+      "adds": [
+        "board-programme",
+        "board-resources"
+      ],
+      "routes": [
+        {
+          "when": {
+            "costAtMost": "set-threshold-programme-board-max"
+          },
+          "bodies": [
+            "board-programme"
+          ]
+        },
+        {
+          "when": {
+            "costAbove": "set-threshold-programme-board-max"
+          },
+          "bodies": [
+            "board-programme",
+            "board-resources"
+          ],
+          "note": "conditional at the first, then the second"
+        }
+      ]
+    },
+    {
+      "slot": "ovl-tailored-process",
+      "label": "Tailored approval process",
+      "when": {
+        "path": [
+          "path-3"
+        ]
+      },
+      "adds": [
+        "dec-4",
+        "doc-tailored-package"
+      ]
+    },
+    {
+      "slot": "ovl-paper-decision-limits",
+      "label": "Limits on paper decisions at the capability board",
+      "when": {
+        "always": true
+      },
+      "adds": []
+    },
+    {
+      "slot": "ovl-urgent-process",
+      "label": "Urgent project processes",
+      "when": {
+        "type": [
+          "type-urgent"
+        ]
+      },
+      "adds": [
+        "role-operations-certifier"
+      ]
+    },
+    {
+      "slot": "ovl-investment-plan",
+      "label": "Investment plan listing",
+      "when": {
+        "costAtLeast": "set-threshold-investment-plan"
+      },
+      "adds": []
+    },
+    {
+      "slot": "ovl-digital",
+      "label": "Digital gate and concept case",
+      "when": {
+        "category": [
+          "cat-digital"
+        ]
+      },
+      "adds": [
+        "board-digital",
+        "doc-digital-concept-case",
+        "doc-shared-services-requirements"
+      ]
+    },
+    {
+      "slot": "ovl-infrastructure",
+      "label": "Infrastructure authority involvement",
+      "when": {
+        "category": [
+          "cat-infrastructure",
+          "cat-embedded-infrastructure"
+        ]
+      },
+      "adds": [
+        "role-infrastructure-authority",
+        "doc-infrastructure-requirements",
+        "board-infrastructure"
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "slot": "doc-capability-gap",
+      "label": "Capability gap statement",
+      "kind": "document",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "note"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "gap",
+          "description": "The gap stated as an effect the organization cannot achieve, not a product",
+          "check": "review"
+        },
+        {
+          "id": "cause",
+          "description": "Why the gap exists",
+          "check": "heading"
+        },
+        {
+          "id": "current",
+          "description": "How the need is met today",
+          "check": "heading"
+        },
+        {
+          "id": "do-nothing",
+          "description": "Consequences of doing nothing",
+          "check": "heading"
+        },
+        {
+          "id": "urgency",
+          "description": "Urgency",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-priority-form",
+      "label": "Investment priority input",
+      "kind": "register",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "options-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "data",
+          "description": "Initiative data for priority scoring",
+          "check": "field"
+        }
+      ]
+    },
+    {
+      "slot": "doc-high-level-requirements",
+      "label": "High-level requirements",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "levels",
+          "description": "Each requirement has a minimum and a desired level",
+          "check": "field"
+        },
+        {
+          "id": "measurable",
+          "description": "Each requirement is measurable pass or fail",
+          "check": "field"
+        },
+        {
+          "id": "effect",
+          "description": "Each requirement states an effect, not a solution",
+          "check": "review"
+        },
+        {
+          "id": "trace",
+          "description": "Each requirement traces to the need",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-strategic-case",
+      "label": "Strategic case and option screening",
+      "kind": "document",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "options-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor-executive",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "fit",
+          "description": "Strategic fit, scope, dependencies and stakeholders",
+          "check": "heading"
+        },
+        {
+          "id": "need",
+          "description": "Business need, drivers, outcomes, assumptions and constraints",
+          "check": "heading"
+        },
+        {
+          "id": "screening",
+          "description": "Screening criteria, option list, screening results and rationale",
+          "check": "heading"
+        },
+        {
+          "id": "recommendation",
+          "description": "Options recommended for analysis",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-business-case",
+      "label": "Business case",
+      "kind": "document",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "options-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-capability",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "rated",
+          "description": "Viable options rated on at least the minimum criteria",
+          "check": "register"
+        },
+        {
+          "id": "method",
+          "description": "Scoring and weighting method explained",
+          "check": "heading"
+        },
+        {
+          "id": "recommendation",
+          "description": "Recommendation with deciding factors",
+          "check": "heading"
+        },
+        {
+          "id": "costs",
+          "description": "Costs per option from calculator records",
+          "check": "link"
+        },
+        {
+          "id": "risks",
+          "description": "Risks per option",
+          "check": "link"
+        },
+        {
+          "id": "implementation",
+          "description": "Implementation plan",
+          "check": "heading"
+        },
+        {
+          "id": "management",
+          "description": "Governance and management approach",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-scope-tiers",
+      "label": "Scope tiers",
+      "kind": "annex",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "options-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "minimum",
+          "description": "First tier is the minimum requirement",
+          "check": "field"
+        },
+        {
+          "id": "preferred",
+          "description": "A preferred tier exists",
+          "check": "field"
+        },
+        {
+          "id": "cost",
+          "description": "Each tier has a cost with confidence",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-complexity-rating",
+      "label": "Complexity and risk rating",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-3"
+      ],
+      "owner": "risk-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor-executive",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        },
+        {
+          "actor": "authority-central-staff",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "level",
+          "description": "The rating level and the answers behind it",
+          "check": "field"
+        },
+        {
+          "id": "evidence",
+          "description": "Evidence per question",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-management-plan",
+      "label": "Project management plan",
+      "kind": "plan",
+      "phases": [
+        "phase-1",
+        "phase-3",
+        "phase-4"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "baselines",
+          "description": "Baselines for scope, schedule, cost and risk",
+          "check": "heading"
+        },
+        {
+          "id": "organization",
+          "description": "Organization and work package responsibilities",
+          "check": "heading"
+        },
+        {
+          "id": "subsidiary",
+          "description": "Subsidiary plans, separate or included as the rating requires",
+          "check": "link"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-schedule",
+      "label": "Project schedule",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2",
+        "phase-4",
+        "phase-6"
+      ],
+      "owner": "schedule-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "wbs",
+          "description": "Work breakdown and cost breakdown",
+          "check": "register"
+        },
+        {
+          "id": "critical",
+          "description": "Critical path",
+          "check": "field"
+        },
+        {
+          "id": "range",
+          "description": "Range estimate for key dates",
+          "check": "field"
+        },
+        {
+          "id": "milestones",
+          "description": "Required milestones",
+          "check": "register"
+        }
+      ],
+      "smallCellOwner": "schedule-risk-analyst"
+    },
+    {
+      "slot": "doc-benefits-plan",
+      "label": "Benefits realization plan",
+      "kind": "plan",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "benefits-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "benefits",
+          "description": "Benefits with indicator, baseline, target, owner and date",
+          "check": "register"
+        },
+        {
+          "id": "results",
+          "description": "Link to the organization's results framework",
+          "check": "link"
+        },
+        {
+          "id": "disbenefits",
+          "description": "Dis-benefits",
+          "check": "heading"
+        },
+        {
+          "id": "handover",
+          "description": "Hand-over after close-out",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-capability-impact",
+      "label": "Capability impact annex",
+      "kind": "annex",
+      "phases": [
+        "phase-1",
+        "phase-2"
+      ],
+      "owner": "impact-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor-executive",
+          "verb": "review"
+        },
+        {
+          "actor": "role-infrastructure-authority",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "lines",
+          "description": "Every impact line the profile lists",
+          "check": "heading"
+        },
+        {
+          "id": "costs",
+          "description": "Second and third order costs with funding source",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-charter",
+      "label": "Project charter",
+      "kind": "document",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "mandate",
+          "description": "Mandate",
+          "check": "heading"
+        },
+        {
+          "id": "leader",
+          "description": "Named project leader and terms of reference",
+          "check": "field"
+        },
+        {
+          "id": "board",
+          "description": "Review board membership",
+          "check": "heading"
+        },
+        {
+          "id": "authorities",
+          "description": "Delegated authorities",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-project-brief",
+      "label": "Project brief",
+      "kind": "document",
+      "phases": [
+        "phase-2",
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-sponsor-executive",
+          "verb": "endorse"
+        },
+        {
+          "actor": "board-project-review",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "narrative",
+          "description": "Project narrative and policy links",
+          "check": "heading"
+        },
+        {
+          "id": "costs",
+          "description": "Indicative costs with accuracy and inclusions",
+          "check": "link"
+        },
+        {
+          "id": "risk",
+          "description": "Risk summary in the required parts",
+          "check": "heading"
+        },
+        {
+          "id": "baseline",
+          "description": "Baseline scope, schedule, cost and range",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-requirements-preliminary",
+      "label": "Preliminary operational requirements",
+      "kind": "document",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-capability-development",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "approved",
+          "description": "Contains every approved high-level requirement",
+          "check": "link"
+        },
+        {
+          "id": "criteria",
+          "description": "Critical performance criteria",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-requirements-statement",
+      "label": "Operational requirements statement",
+      "kind": "document",
+      "phases": [
+        "phase-4"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-capability-development",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "approved",
+          "description": "Contains every approved high-level requirement and none exceeded",
+          "check": "link"
+        },
+        {
+          "id": "acceptance",
+          "description": "Acceptance criteria",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-infrastructure-requirements",
+      "label": "Infrastructure requirements",
+      "kind": "document",
+      "phases": [
+        "phase-3",
+        "phase-4"
+      ],
+      "owner": "impact-analyst",
+      "chain": [
+        {
+          "actor": "role-infrastructure-authority",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "requirements",
+          "description": "Infrastructure requirements",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-sustainment-case",
+      "label": "Sustainment business case",
+      "kind": "document",
+      "phases": [
+        "phase-2",
+        "phase-4"
+      ],
+      "owner": "procurement-planner",
+      "chain": [
+        {
+          "actor": "board-procurement-strategy",
+          "verb": "review"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "strategy",
+          "description": "Sustainment strategy against performance, value for money, flexibility and economic benefits",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-costing-data",
+      "label": "Cost breakdown and costing data",
+      "kind": "register",
+      "phases": [
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "cost-analyst",
+      "chain": [
+        {
+          "actor": "role-costing-authority",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "records",
+          "description": "Every element a calculator record",
+          "check": "register"
+        },
+        {
+          "id": "checklist",
+          "description": "Every costing checklist item answered",
+          "check": "register"
+        }
+      ],
+      "smallCellOwner": "cost-analyst"
+    },
+    {
+      "slot": "doc-cost-report",
+      "label": "Independent cost report",
+      "kind": "report",
+      "phases": [
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "cost-analyst",
+      "chain": [
+        {
+          "actor": "role-costing-authority",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "model",
+          "description": "Cost model on the base-year basis",
+          "check": "link"
+        },
+        {
+          "id": "contingency",
+          "description": "Contingency from quantitative risk analysis",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-finance-attestation",
+      "label": "Finance attestation",
+      "kind": "document",
+      "phases": [
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "cost-analyst",
+      "chain": [
+        {
+          "actor": "role-finance-officer",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "assertions",
+          "description": "Each attestation assertion with its evidence",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-funding-change-proposal",
+      "label": "Funding change proposal",
+      "kind": "document",
+      "phases": [
+        "phase-3"
+      ],
+      "owner": "cost-analyst",
+      "chain": [
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "impact",
+          "description": "Effect on the investment plan",
+          "check": "heading"
+        },
+        {
+          "id": "options",
+          "description": "Options across scope, cost and schedule",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-funding-impact-analysis",
+      "label": "Funding change impact analysis",
+      "kind": "document",
+      "phases": [
+        "phase-3"
+      ],
+      "owner": "finance-analyst",
+      "chain": [
+        {
+          "actor": "role-programme-coordination",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "impact",
+          "description": "Effect on the portfolio",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-approval-submission",
+      "label": "Approval submission",
+      "kind": "document",
+      "phases": [
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        },
+        {
+          "actor": "role-submissions-office",
+          "verb": "review"
+        },
+        {
+          "actor": "authority-minister",
+          "verb": "grant"
+        },
+        {
+          "actor": "authority-central",
+          "verb": "grant"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "sections",
+          "description": "Every required section",
+          "check": "heading"
+        },
+        {
+          "id": "appendices",
+          "description": "Every required appendix",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-equity-assessment",
+      "label": "Equity and inclusion assessment",
+      "kind": "document",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "assessments-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "findings",
+          "description": "Findings and where each lands in other documents",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-environmental-assessment",
+      "label": "Strategic environmental assessment",
+      "kind": "document",
+      "phases": [
+        "phase-1",
+        "phase-3"
+      ],
+      "owner": "assessments-analyst",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "scan",
+          "description": "Preliminary scan, then detailed analysis where required",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-rights-assessment",
+      "label": "Treaty and rights implications assessment",
+      "kind": "document",
+      "phases": [
+        "phase-3"
+      ],
+      "owner": "assessments-analyst",
+      "chain": [
+        {
+          "actor": "role-legal-advisor",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "implications",
+          "description": "Implications identified and addressed",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-oversight-report",
+      "label": "Central oversight report",
+      "kind": "report",
+      "phases": [
+        "phase-3",
+        "phase-5",
+        "phase-7"
+      ],
+      "owner": "performance-reporter",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "baseline",
+          "description": "Baseline scope, schedule, cost and risk",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-review-record",
+      "label": "Project review board record",
+      "kind": "record",
+      "phases": [
+        "phase-2",
+        "phase-3",
+        "phase-4",
+        "phase-5",
+        "phase-6",
+        "phase-7"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "decisions",
+          "description": "Decisions with the verb each body used",
+          "check": "register"
+        },
+        {
+          "id": "risks",
+          "description": "Risks and responses raised",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-capability-board-package",
+      "label": "Capability board package",
+      "kind": "brief",
+      "phases": [
+        "phase-1",
+        "phase-2"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "review"
+        },
+        {
+          "actor": "role-capability-board-chair",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "case",
+          "description": "The signed case",
+          "check": "link"
+        },
+        {
+          "id": "summary",
+          "description": "One-page summary",
+          "check": "heading"
+        },
+        {
+          "id": "briefing",
+          "description": "Briefing within the time and slide limits",
+          "check": "field"
+        }
+      ]
+    },
+    {
+      "slot": "doc-programme-board-package",
+      "label": "Programme board package",
+      "kind": "brief",
+      "phases": [
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-programme-coordination",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "brief",
+          "description": "Latest signed brief with decisions sought",
+          "check": "link"
+        },
+        {
+          "id": "annex",
+          "description": "Capability impact annex",
+          "check": "link"
+        },
+        {
+          "id": "costs",
+          "description": "Indicative cost by year and operating costs",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-tailored-package",
+      "label": "Conditional release package",
+      "kind": "brief",
+      "phases": [
+        "phase-5"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-programme",
+          "verb": "approve"
+        },
+        {
+          "actor": "board-resources",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-3"
+      ],
+      "requiredContents": [
+        {
+          "id": "contents",
+          "description": "Earlier approval, current brief, cost report, rating and sponsor's note",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-independent-review-responses",
+      "label": "Independent review response matrix",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "role-project-director",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "responses",
+          "description": "Each panel issue with the project's response",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-market-engagement",
+      "label": "Market engagement drafts",
+      "kind": "document",
+      "phases": [
+        "phase-2",
+        "phase-4"
+      ],
+      "owner": "procurement-planner",
+      "chain": [
+        {
+          "actor": "authority-contracting",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "questions",
+          "description": "Questions to industry and the information sought",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-bid-evaluation-plan",
+      "label": "Bid evaluation plan",
+      "kind": "plan",
+      "phases": [
+        "phase-4"
+      ],
+      "owner": "procurement-planner",
+      "chain": [
+        {
+          "actor": "authority-contracting",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "criteria",
+          "description": "Mandatory and rated criteria",
+          "check": "register"
+        },
+        {
+          "id": "scoring",
+          "description": "Scoring and selection method",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "procurement-planner"
+    },
+    {
+      "slot": "doc-solicitation",
+      "label": "Solicitation requirements",
+      "kind": "document",
+      "phases": [
+        "phase-4"
+      ],
+      "owner": "procurement-planner",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "endorse"
+        },
+        {
+          "actor": "authority-contracting",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "requirements",
+          "description": "Requirements extract traced to the requirements statement",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-initial-capability-certificate",
+      "label": "Initial capability certificate",
+      "kind": "certificate",
+      "phases": [
+        "phase-6"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        },
+        {
+          "actor": "role-implementer",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "accepted",
+          "description": "Capability accepted against the requirements statement",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-full-capability-certificate",
+      "label": "Full capability certificate",
+      "kind": "certificate",
+      "phases": [
+        "phase-6"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        },
+        {
+          "actor": "role-implementer",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "accepted",
+          "description": "Capability accepted against the requirements statement",
+          "check": "link"
+        },
+        {
+          "id": "deficiencies",
+          "description": "Deficiencies listed where scope is not all delivered",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-extended-closeout-plan",
+      "label": "Extended close-out plan",
+      "kind": "plan",
+      "phases": [
+        "phase-7"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "contents",
+          "description": "Every required close-out plan item",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-completion-report",
+      "label": "Project completion report",
+      "kind": "report",
+      "phases": [
+        "phase-7"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "outcomes",
+          "description": "Outcomes against the baseline",
+          "check": "link"
+        },
+        {
+          "id": "open",
+          "description": "Outstanding issues and owners",
+          "check": "register"
+        },
+        {
+          "id": "lessons",
+          "description": "Key lessons",
+          "check": "link"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-closeout-checklist",
+      "label": "Close-out checklist",
+      "kind": "register",
+      "phases": [
+        "phase-7"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "items",
+          "description": "Every close-out item with its state",
+          "check": "register"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-cancellation-report",
+      "label": "Cancellation report",
+      "kind": "report",
+      "phases": [
+        "state-cancelled"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "endorse"
+        },
+        {
+          "actor": "authority-deputy-head",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "contents",
+          "description": "Every required cancellation item",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-withdrawal-report",
+      "label": "Withdrawal report",
+      "kind": "report",
+      "phases": [
+        "state-withdrawn"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-sponsor",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "reason",
+          "description": "Reason and resources released",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-closure-notice",
+      "label": "Closure notice",
+      "kind": "document",
+      "phases": [
+        "phase-7"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "notice",
+          "description": "Notice to the approving authority and stakeholders",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-small-project-form",
+      "label": "Small project submission",
+      "kind": "document",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "small-project-lead",
+      "chain": [
+        {
+          "actor": "authority-delegated",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1"
+      ],
+      "requiredContents": [
+        {
+          "id": "treatment",
+          "description": "Treatment, stakeholders and signing authorities",
+          "check": "field"
+        },
+        {
+          "id": "policies",
+          "description": "Socio-economic policy considerations",
+          "check": "field"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-digital-concept-case",
+      "label": "Digital concept case",
+      "kind": "document",
+      "phases": [
+        "phase-1"
+      ],
+      "owner": "options-analyst",
+      "chain": [
+        {
+          "actor": "role-digital-authority",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "concept",
+          "description": "Concept, architecture fit and business owner",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-shared-services-requirements",
+      "label": "Shared IT services requirements",
+      "kind": "document",
+      "phases": [
+        "phase-3"
+      ],
+      "owner": "impact-analyst",
+      "chain": [
+        {
+          "actor": "role-digital-authority",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "requirements",
+          "description": "Requirements for the shared services provider",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-security-package",
+      "label": "Security requirements package",
+      "kind": "document",
+      "phases": [
+        "phase-2",
+        "phase-4"
+      ],
+      "owner": "assessments-analyst",
+      "chain": [
+        {
+          "actor": "role-security-officer",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "checklists",
+          "description": "Security requirement checklists, threat and risk assessment, security plan",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-risk-register",
+      "label": "Risk register",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2",
+        "phase-3",
+        "phase-4",
+        "phase-5",
+        "phase-6"
+      ],
+      "owner": "risk-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "fields",
+          "description": "Every required field per risk",
+          "check": "register"
+        },
+        {
+          "id": "aggregate",
+          "description": "Aggregated cost, schedule and scope exposure",
+          "check": "field"
+        }
+      ],
+      "smallCellOwner": "schedule-risk-analyst"
+    },
+    {
+      "slot": "doc-risk-plan",
+      "label": "Risk management plan",
+      "kind": "plan",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "risk-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "topics",
+          "description": "Threats and opportunities, roles, method, tolerances, contingency use, reviews and escalation triggers",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-performance-plan",
+      "label": "Performance management plan",
+      "kind": "plan",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "benefits-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "framework",
+          "description": "Indicators and targets for scope, schedule and budget, and a review schedule",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-performance-report",
+      "label": "Performance report",
+      "kind": "report",
+      "phases": [
+        "phase-4",
+        "phase-5",
+        "phase-6"
+      ],
+      "owner": "benefits-analyst",
+      "chain": [
+        {
+          "actor": "role-project-manager",
+          "verb": "review"
+        },
+        {
+          "actor": "board-project-review",
+          "verb": "note"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "indicators",
+          "description": "Indicators against the bands, period and to date",
+          "check": "register"
+        },
+        {
+          "id": "trend",
+          "description": "Trend, forecast and risks",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-appointment-letter",
+      "label": "Senior official appointment letter",
+      "kind": "document",
+      "phases": [
+        "phase-2"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "authority-deputy-head",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "appointment",
+          "description": "Named senior official and accountabilities",
+          "check": "field"
+        }
+      ]
+    },
+    {
+      "slot": "doc-lessons",
+      "label": "Lessons learned entries",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2",
+        "phase-3",
+        "phase-4",
+        "phase-5",
+        "phase-6",
+        "phase-7"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "lessons",
+          "description": "Lessons by area at the end of each phase",
+          "check": "register"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-requirements-trace",
+      "label": "Requirements traceability matrix",
+      "kind": "register",
+      "phases": [
+        "phase-2",
+        "phase-4",
+        "phase-6"
+      ],
+      "owner": "requirements-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "chain",
+          "description": "Gap, drivers, need, outcomes, benefits, high-level requirements, requirements statement, acceptance",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-procurement-plan",
+      "label": "Procurement strategy",
+      "kind": "plan",
+      "phases": [
+        "phase-2",
+        "phase-3"
+      ],
+      "owner": "procurement-planner",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        },
+        {
+          "actor": "authority-contracting",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "approach",
+          "description": "Market engagement, contracting and evaluation approach",
+          "check": "heading"
+        },
+        {
+          "id": "overlays",
+          "description": "Procurement overlays that apply",
+          "check": "link"
+        }
+      ],
+      "smallCellOwner": "procurement-planner"
+    },
+    {
+      "slot": "doc-industrial-benefits",
+      "label": "Industrial benefits plan",
+      "kind": "plan",
+      "phases": [
+        "phase-2",
+        "phase-4"
+      ],
+      "owner": "procurement-planner",
+      "chain": [
+        {
+          "actor": "role-benefits-authority",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "proposition",
+          "description": "Value proposition and benefits plan",
+          "check": "heading"
+        }
+      ]
+    },
+    {
+      "slot": "doc-assumptions-register",
+      "label": "Assumptions and constraints register",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2"
+      ],
+      "owner": "options-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "rows",
+          "description": "Each assumption with owner, status and invalidation trigger",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-interdependency-register",
+      "label": "Interdependency register",
+      "kind": "register",
+      "phases": [
+        "phase-1",
+        "phase-2",
+        "phase-6"
+      ],
+      "owner": "impact-analyst",
+      "chain": [
+        {
+          "actor": "role-project-leader",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "rows",
+          "description": "Each dependency on another project with owner and risk",
+          "check": "register"
+        }
+      ]
+    },
+    {
+      "slot": "doc-fixed-budget-status",
+      "label": "Fixed budget status update",
+      "kind": "report",
+      "phases": [
+        "phase-4",
+        "phase-6"
+      ],
+      "owner": "cost-analyst",
+      "chain": [
+        {
+          "actor": "board-project-review",
+          "verb": "note"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "status",
+          "description": "Status against the fixed budget",
+          "check": "link"
+        }
+      ]
+    },
+    {
+      "slot": "doc-change-request",
+      "label": "Change request",
+      "kind": "document",
+      "phases": [
+        "phase-4",
+        "phase-6"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "board-change-control",
+          "verb": "approve"
+        }
+      ],
+      "paths": [
+        "path-1",
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "effect",
+          "description": "Effect on cost, schedule, scope and benefits, and the body that may approve it",
+          "check": "heading"
+        }
+      ],
+      "smallCellOwner": "small-project-lead"
+    },
+    {
+      "slot": "doc-planning-readiness-package",
+      "label": "Planning meeting readiness package",
+      "kind": "brief",
+      "phases": [
+        "phase-3",
+        "phase-5"
+      ],
+      "owner": "project-office-lead",
+      "chain": [
+        {
+          "actor": "role-programme-coordination",
+          "verb": "review"
+        }
+      ],
+      "paths": [
+        "path-2",
+        "path-3",
+        "path-4"
+      ],
+      "requiredContents": [
+        {
+          "id": "items",
+          "description": "Every readiness item present and current",
+          "check": "register"
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "slot": "chk-complete-01",
+      "label": "Every document the path and phase require exists with an owner and a state",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-complete-02",
+      "label": "Strategic case has every required part",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-strategic-case"
+      }
+    },
+    {
+      "slot": "chk-complete-03",
+      "label": "Rated criteria include at least the minimum set",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-business-case",
+        "setting": "set-limit-rated-criteria-min"
+      }
+    },
+    {
+      "slot": "chk-complete-04",
+      "label": "Recommendation and management parts of the business case are complete",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-business-case"
+      }
+    },
+    {
+      "slot": "chk-complete-05",
+      "label": "Approval submission has every required section and appendix",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-approval-submission"
+      }
+    },
+    {
+      "slot": "chk-complete-06",
+      "label": "Project brief covers every required element and risk summary part",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-project-brief"
+      }
+    },
+    {
+      "slot": "chk-complete-07",
+      "label": "Benefits plan has every minimum element",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-benefits-plan"
+      }
+    },
+    {
+      "slot": "chk-complete-08",
+      "label": "Risk register rows have every required field",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-risk-register"
+      }
+    },
+    {
+      "slot": "chk-complete-09",
+      "label": "Risk plan covers every required topic",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-risk-plan"
+      }
+    },
+    {
+      "slot": "chk-complete-10",
+      "label": "Capability impact annex addresses every impact line",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-capability-impact"
+      }
+    },
+    {
+      "slot": "chk-complete-11",
+      "label": "Subsidiary plans are separate or included as the rating requires",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-management-plan"
+      }
+    },
+    {
+      "slot": "chk-complete-12",
+      "label": "Planning meeting readiness package is complete",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-planning-readiness-package"
+      }
+    },
+    {
+      "slot": "chk-complete-13",
+      "label": "Cancellation report and extended close-out plan are complete",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "documents": [
+          "doc-cancellation-report",
+          "doc-extended-closeout-plan"
+        ]
+      }
+    },
+    {
+      "slot": "chk-complete-14",
+      "label": "Bid evaluation plan has criteria, scoring and selection method",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-bid-evaluation-plan"
+      }
+    },
+    {
+      "slot": "chk-complete-15",
+      "label": "Performance plan has indicators, targets and a review schedule",
+      "family": "completeness",
+      "kind": "lint",
+      "params": {
+        "document": "doc-performance-plan"
+      }
+    },
+    {
+      "slot": "chk-cost-01",
+      "label": "Every figure cites a calculator record",
+      "family": "cost",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-02",
+      "label": "Figures state their basis and what they include",
+      "family": "cost",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-03",
+      "label": "Each threshold test uses the basis the profile names",
+      "family": "cost",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-04",
+      "label": "Estimate class fits the approval sought",
+      "family": "cost",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-05",
+      "label": "Estimate range and detail fit the class's band",
+      "family": "cost",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-06",
+      "label": "Low-accuracy estimates stay out of external and plan documents",
+      "family": "cost",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-07",
+      "label": "Sustainment, operating and infrastructure costs estimated to the same accuracy, with funding source",
+      "family": "cost",
+      "kind": "review",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-08",
+      "label": "Contingency derived from risk analysis and used within scope",
+      "family": "cost",
+      "kind": "review",
+      "params": {}
+    },
+    {
+      "slot": "chk-cost-09",
+      "label": "Each scope tier carries a cost with confidence",
+      "family": "cost",
+      "kind": "lint",
+      "params": {
+        "document": "doc-scope-tiers"
+      }
+    },
+    {
+      "slot": "chk-cost-10",
+      "label": "Tailored release band computed and routed to the right body",
+      "family": "cost",
+      "kind": "lint",
+      "params": {
+        "settings": [
+          "set-band-tailored-secretarial",
+          "set-band-tailored-board",
+          "set-threshold-tailored-board-split"
+        ]
+      }
+    },
+    {
+      "slot": "chk-consistency-01",
+      "label": "Same figures, quantities and places across documents",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-02",
+      "label": "Business case parts agree, tables match text, scoring complete",
+      "family": "consistency",
+      "kind": "lint-and-review",
+      "params": {
+        "document": "doc-business-case"
+      }
+    },
+    {
+      "slot": "chk-consistency-03",
+      "label": "Every outcome links to a requirement and a screening criterion",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-04",
+      "label": "Options failing screening are marked not viable; status quo kept",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-05",
+      "label": "Operational requirements contain every approved high-level requirement and exceed none",
+      "family": "consistency",
+      "kind": "lint-and-review",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-06",
+      "label": "Equity findings appear in every document that must reflect them",
+      "family": "consistency",
+      "kind": "lint-and-review",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-07",
+      "label": "Trace from gap to acceptance is unbroken",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {
+        "document": "doc-requirements-trace"
+      }
+    },
+    {
+      "slot": "chk-consistency-08",
+      "label": "Milestones agree everywhere and change only with a new approval",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-09",
+      "label": "Project leader named fits the phase and the delegation level",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-consistency-10",
+      "label": "Rating agrees across the assessment, the brief and the path",
+      "family": "consistency",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-quality-01",
+      "label": "Business need within the sentence limit and traceable",
+      "family": "quality",
+      "kind": "lint-and-review",
+      "params": {
+        "setting": "set-limit-need-sentences"
+      }
+    },
+    {
+      "slot": "chk-quality-02",
+      "label": "Outcomes avoid vague terms and are measurable",
+      "family": "quality",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-quality-03",
+      "label": "Each high-level requirement has levels, is pass or fail, and states an effect",
+      "family": "quality",
+      "kind": "lint-and-review",
+      "params": {}
+    },
+    {
+      "slot": "chk-quality-04",
+      "label": "Business case within its page limit",
+      "family": "quality",
+      "kind": "lint",
+      "params": {
+        "settings": [
+          "set-limit-business-case-pages-full",
+          "set-limit-business-case-pages-light"
+        ]
+      }
+    },
+    {
+      "slot": "chk-quality-05",
+      "label": "Scoring explained; deciding factors when the top score is not recommended",
+      "family": "quality",
+      "kind": "lint-and-review",
+      "params": {}
+    },
+    {
+      "slot": "chk-quality-06",
+      "label": "Scope tiers start at the minimum requirement and include a preferred tier",
+      "family": "quality",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-quality-07",
+      "label": "Gap statement describes a gap, not equipment",
+      "family": "quality",
+      "kind": "review",
+      "params": {}
+    },
+    {
+      "slot": "chk-quality-08",
+      "label": "Board briefings within time, slide and language rules",
+      "family": "quality",
+      "kind": "lint",
+      "params": {
+        "settings": [
+          "set-limit-brief-minutes",
+          "set-limit-brief-slides",
+          "set-limit-brief-languages"
+        ]
+      }
+    },
+    {
+      "slot": "chk-risk-01",
+      "label": "Risk level matches the heat map value",
+      "family": "risk",
+      "kind": "lint",
+      "params": {
+        "setting": "set-scale-risk"
+      }
+    },
+    {
+      "slot": "chk-risk-02",
+      "label": "High risks in definition or delivery have an escalation record",
+      "family": "risk",
+      "kind": "lint",
+      "params": {
+        "setting": "set-deadline-high-risk-escalation"
+      }
+    },
+    {
+      "slot": "chk-risk-03",
+      "label": "Cost and schedule risk impacts classed against the tolerance table",
+      "family": "risk",
+      "kind": "lint",
+      "params": {
+        "settings": [
+          "set-band-risk-schedule",
+          "set-band-risk-cost"
+        ]
+      }
+    },
+    {
+      "slot": "chk-risk-04",
+      "label": "Action plans say what and when; residual risk assessed",
+      "family": "risk",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-risk-05",
+      "label": "Cost, schedule and scope risks aggregated",
+      "family": "risk",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-risk-06",
+      "label": "Harmful assumptions also registered as risks",
+      "family": "risk",
+      "kind": "review",
+      "params": {}
+    },
+    {
+      "slot": "chk-risk-07",
+      "label": "Interdependency risks recorded and reported",
+      "family": "risk",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-risk-08",
+      "label": "Mandatory considerations raised",
+      "family": "risk",
+      "kind": "lint-and-review",
+      "params": {}
+    },
+    {
+      "slot": "chk-benefits-01",
+      "label": "Every benefit has a results link, indicator, baseline, target and owner",
+      "family": "benefits",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-benefits-02",
+      "label": "Benefits plan updated at each gate and handed over at close-out",
+      "family": "benefits",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-benefits-03",
+      "label": "Indicators computed with the profile's bands, period and to date",
+      "family": "benefits",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-benefits-04",
+      "label": "A red indicator triggers an unscheduled review",
+      "family": "benefits",
+      "kind": "lint",
+      "params": {
+        "setting": "set-deadline-red-indicator"
+      }
+    },
+    {
+      "slot": "chk-benefits-05",
+      "label": "Outcomes are not outputs",
+      "family": "benefits",
+      "kind": "review",
+      "params": {}
+    },
+    {
+      "slot": "chk-governance-01",
+      "label": "No agent text records a decision as made",
+      "family": "governance",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-governance-02",
+      "label": "Recorded verb fits the body",
+      "family": "governance",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-governance-03",
+      "label": "Every deadline tracked; overdue raises an item",
+      "family": "governance",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-governance-04",
+      "label": "Lessons entered at the end of each phase",
+      "family": "governance",
+      "kind": "lint",
+      "params": {
+        "setting": "set-deadline-lessons"
+      }
+    },
+    {
+      "slot": "chk-governance-05",
+      "label": "Oversight report filed within its deadline",
+      "family": "governance",
+      "kind": "lint",
+      "params": {
+        "setting": "set-deadline-oversight-report"
+      }
+    },
+    {
+      "slot": "chk-governance-06",
+      "label": "Stalled projects flagged",
+      "family": "governance",
+      "kind": "lint",
+      "params": {
+        "setting": "set-deadline-stalled"
+      }
+    },
+    {
+      "slot": "chk-governance-07",
+      "label": "Appointment letter present where required",
+      "family": "governance",
+      "kind": "lint",
+      "params": {
+        "overlay": "ovl-appointment-letter"
+      }
+    },
+    {
+      "slot": "chk-governance-08",
+      "label": "Every overlay that applies has been applied",
+      "family": "governance",
+      "kind": "lint",
+      "params": {}
+    },
+    {
+      "slot": "chk-governance-09",
+      "label": "Significant baseline change routed to the approving authority",
+      "family": "governance",
+      "kind": "lint",
+      "params": {
+        "setting": "set-limit-significant-schedule-change"
+      }
+    },
+    {
+      "slot": "chk-governance-10",
+      "label": "Close-out within its deadline or an approved extended plan",
+      "family": "governance",
+      "kind": "lint",
+      "params": {
+        "setting": "set-deadline-closeout"
+      }
+    }
+  ],
+  "teamOfTeamsWhen": {
+    "any": [
+      {
+        "ratingAtLeast": "rating-4"
+      },
+      {
+        "ratingAtLeast": "rating-3",
+        "costAtLeast": "set-threshold-appointment-letter"
+      },
+      {
+        "type": [
+          "type-programme"
+        ]
+      }
+    ]
+  },
+  "restrictedSources": {
+    "titles": [],
+    "phraseFingerprints": [],
+    "note": "Your organization adds its own internal titles and passage fingerprints here."
+  },
+  "vocabulary": []
+}
