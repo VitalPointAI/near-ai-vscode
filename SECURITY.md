@@ -837,9 +837,16 @@ ledger recorded; after the approval the J3 writer writes it there, the J5 is
 refused and proposes instead, and status names the new writer and the
 approval that moved it. A version still open under the J5 at that point is
 withdrawn by a person (or by its J5 owner) before the J3 writes the next one.
-The Staff Room panel only reads: the ledger, the event log and the files
-under `.planning/staff/`. Its page gets display data only, through
-`textContent`, under a content security policy with no inline script. Every
+The Staff Room panel only reads: the ledger, the event log, the files
+under `.planning/staff/` and the observation store. Its page gets display data
+only, through `textContent`, under the COP map's content security policy (see
+"COP map" below): no inline script, no `'unsafe-eval'`, no `'unsafe-inline'`
+and no remote source. The panel may load files only from its own folder, the
+shared stylesheet, `media/staff/` (the map component) and `media/vendor/` (the
+vendored map libraries). The COP picture it sends holds only the observations
+the person's clearance covers: the rows come from the store's reader view,
+which drops every row the gate's own check does not cover before anything is
+built from them, and with no gate in the window no observation is read. Every
 message from the page is checked for its type, exact keys and the form of
 each value. A decision button sends only the product and the version hash the
 person saw; the extension then runs the same person-only command, which asks
@@ -961,6 +968,17 @@ second kept 60 frames a second with no long task (5,000 doubled the slowest
 frames, so the map draws at most 2,000 tracks and says how many it left out).
 Without WebGL, or if the library cannot start, the page falls back to a 2D
 SVG map behind the same interface and says why.
+
+The Staff Room embeds this component in the J2 workspace and the war room
+through the same interface, under the same policy, and keeps its own SVG map
+as the fallback, with the reason on the map. Checked on 2026-11-18 with
+`scripts/spike-cop-map-csp.mjs <chrome> --room`, which loads the Staff Room
+page exactly as the panel writes it: no policy violation, MapLibre running,
+and the only requests the page's own files, the vendored files and the worker
+blob. With `--no-webgl` the room shows its SVG map and the line "2D map:
+WebGL is not available in this window.", and no two of its 44 name labels
+overlap as the browser measures them. Map names are drawn by MapLibre from
+the system's own font, so no glyph is fetched.
 
 ## The outbound check
 
