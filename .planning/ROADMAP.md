@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
@@ -25,7 +25,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (integer numbering: Phases 26 to 29 so far) when 0.4.x work is planned with GSD.
+Next phases are added here (integer numbering: Phases 26 to 35 so far) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -145,6 +145,98 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 29 to break down)
 
+### Staff collaboration: multi-user staff workspaces (Phases 30 to 35, added 2026-11-19)
+
+Design: `.planning/research/multiuser-sync/DESIGN.md` (research beside it in `RESEARCH.md`). Owner decisions of 2026-11-19: everyone can co-edit products from the first release; concurrent conflicting decisions show "contested" and need a fresh decision; your organization's sync hub is built in the first phases and runs standing watches, which supersedes note 11's Q5 ("attended runs only") for multi-user projects with a hub; the hub is its own service in the relay's Docker Compose stack; Team Mode (L2) moves onto this layer. Until Phase 33 ships, staff projects are single-machine, and the README says so from 0.4.35.
+
+These phases ship in the 0.4.x line as two staff collaboration drops, like staff drops 1 and 2: **drop A** is Phases 30 to 33 (live multi-user staff projects through the hub), **drop B** is Phases 34 and 35 (offline transports, shared agent work, observations, hub watches). They need nothing from Phases 71 to 74: identities and clearances stay declared by the staff lead and every surface says so; Phase 70's labels (on `main`) give the label cells. Requirement ids MUS-01 to MUS-12 are defined in the design (section 18) and are added to REQUIREMENTS.md when Phase 30 is planned.
+
+### Phase 30: Replication contract and co-editing core
+**Goal**: Every machine that holds the same signed entries computes the same staff state, and product text can be edited by several people and agents at once with every change attributed.
+**Depends on**: Nothing in flight (builds on Phase 69's signer and key status, Phase 70's labels, the staff release state machine)
+**Requirements**: MUS-01, MUS-02, MUS-03
+**Success Criteria** (what must be TRUE):
+  1. Entry format version 2 (per-writer, per-stream hash chains with cited heads, sealed bodies, blobs), the deterministic fold and the state digest exist as pure code, and property tests show any delivery order, duplication or partition of entries from up to five writers folds to the same state and digest. (MUS-01)
+  2. Two signed entries at one position by one writer produce a proof and quarantine that device on every machine, whatever the arrival order; a changed old entry breaks only that writer's chain. (MUS-01)
+  3. Product text is a Yjs document carried in signed entries; random concurrent edits by persons and agents converge, every character's author is the writer that inserted it, and an update under another writer's client id is rejected. Yjs and `lib0` are vendored at pinned versions with licences (owner question 1). (MUS-02)
+  4. Versions pin a content hash that must equal the text at the state vector named; concurrent conflicting decisions on one version fold to "contested" and only a fresh decision that has seen them settles it; no agent actor can approve, reject, release or supersede. (MUS-03)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 30 to break down)
+
+### Phase 31: Staff roster, cell keys and migration
+**Goal**: A staff lead turns a staff project multi-user, invites people by signed file, and decides what each person may see, and today's ledgers move into the new format without loss.
+**Depends on**: Phase 30
+**Requirements**: MUS-04, MUS-05, MUS-06
+**Success Criteria** (what must be TRUE):
+  1. Genesis and a single-writer, linear roster (members, seats, decision roles, declared clearances, devices, the hub member) exist; two lead devices changing the roster offline produce a visible split that only the lead's choice resolves. (MUS-04)
+  2. Invite and join work by file alone (signed invitation, signed join request with the one-time secret, six-word safety code, admission), and expired, reused or wrong-secret invitations are refused. (MUS-04)
+  3. Each label cell has its own epoch key wrapped only to devices cleared for it; removing a member or device rekeys the affected cells, and the UI says that what they already received stays with them. (MUS-05)
+  4. Turning a project multi-user verifies today's product, decision, calculator and wargame ledgers, imports each with its legacy head hash, keeps the legacy chains verifiable, rewrites `.planning/staff/**` as projections, and is idempotent; a project that never turns on multi-user behaves exactly as before. (MUS-06)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 31 to break down)
+
+### Phase 32: Your organization's sync hub
+**Goal**: Your organization runs one small service that carries staff projects live between people, keeps ciphertext for cells it is not cleared for, and can do no worse than withhold, which clients detect.
+**Depends on**: Phase 30 (formats); Phase 31 at integration (roster checks). May run beside Phase 31.
+**Requirements**: MUS-07, MUS-08
+**Success Criteria** (what must be TRUE):
+  1. A `hub/` workspace beside `relay/`, built like the relay (Node 26, `node:sqlite`, no runtime dependencies, distroless image, secrets from files, redacting logger, health check, required CI job), runs as its own service and profile in the relay's Compose stack with the relay's hardening, its own volume and secrets, and TLS ended at the hub. (MUS-07)
+  2. The hub checks every append against the roster and the cell's access list, serves live updates and presence over server-sent events, signs checkpoints, and accepts join requests only with a valid invitation secret. (MUS-07)
+  3. A malicious-hub harness (withhold, delay, replay, reorder, roll back, fork the view, inject, corrupt a blob, serve another project's stream) is detected and named by clients or is harmless, and a restore from an old backup is refused as a rollback and refilled by clients. (MUS-08)
+  4. The hub reads only the roster and the cells granted to it; a byte capture shows only ciphertext for every other cell. The operator section covers certificates, pins, backups and the restore drill. (MUS-08)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 32 to break down)
+
+### Phase 33: Live multi-user staff projects
+**Goal**: Several people work one staff project at the same time from their own machines, see each other and each other's edits live, and decide products with signed, verifiable decisions.
+**Depends on**: Phases 30, 31 and 32
+**Requirements**: MUS-09
+**Success Criteria** (what must be TRUE):
+  1. Product editors are bound to the shared text: local and remote edits interleave without echo, undo removes only your own edits, other people's cursors show with names, and Show Who Wrote This attributes every part to a person or to an agent on a named person's machine. (MUS-09)
+  2. The Staff Room shows who is online and what they work on, the sync control shows every connection state in one plain sentence with one action, and an offline banner explains that work is kept and may become contested. (MUS-09)
+  3. Two- and three-person scenarios over a real hub pass: co-edit, propose, guard, approve on another machine with equal digests; approve offline and reject online shows contested until a fresh decision; a late joiner loads from a compaction. (MUS-09)
+  4. A two-compartment label leak test over the hub passes, README and SECURITY describe multi-user staff projects with the self-declared and not-accreditation sentences, and drop A is released in 0.4.x. (MUS-09)
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 33 to break down)
+
+### Phase 34: Offline transports for staff projects
+**Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
+**Depends on**: Phase 33
+**Requirements**: MUS-10
+**Success Criteria** (what must be TRUE):
+  1. Git with one ref per writer per stream syncs without push races, never touches project branches, and does not lock the Phase 27 or Team Mode mirrors (isolation test). (MUS-10)
+  2. Export for... writes a sealed bundle of what the recipients lack within a chosen label ceiling, and Import Staff Bundle verifies, folds and reports what arrived, including decisions that became contested. (MUS-10)
+  3. A LAN peer link runs only after the person agrees, with device-key-pinned certificates and mutual signed challenges bound to the TLS session. (MUS-10)
+  4. Two sites cut off for a simulated day converge to the same state by bundle, then by hub, and any mix of transports converges. (MUS-10)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 34 to break down)
+
+### Phase 35: Shared agent work, observations and hub watches
+**Goal**: Agent teams on different people's machines coordinate instead of duplicating work, observations reach the people cleared for them without flooding links, and standing watches keep running on the hub when nobody is at a computer.
+**Depends on**: Phase 33 (Phase 34 not required)
+**Requirements**: MUS-11, MUS-12
+**Success Criteria** (what must be TRUE):
+  1. Run summaries, lanes and claims with leases are shared; two people's runs on one product take different sections, a double claim after a partition is shown with Let Theirs Continue or Keep Mine, and transcripts and chats stay per person. (MUS-11)
+  2. Observation segments travel as sealed blobs by slice (cell, feed, area, time), high-rate positions are coalesced keeping first and last, per-link budgets set the source `degraded` rather than dropping silently. (MUS-11)
+  3. A watch can be assigned to the hub (granted cells only) with fallback to an attended machine; the hub writes only matches and drafts, never decisions; rate limits, a daily spend cap, routing by label and three kill switches (lead's signed switch, per-watch pause, operator's file switch) are each tested; match ids are the same on hub and edge. Note 11's Q5 is superseded for these projects only. (MUS-12)
+  4. Drop B is released in 0.4.x with the operator section for hub watches. (MUS-12)
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 35 to break down)
+
 ## Milestone v0.5.0: Governed agent platform
 
 **Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
@@ -173,6 +265,7 @@ Plans:
 | 4 | **Phase 69, Team Mode reconciliation** (`feat/team-fix-pass` archived on GitHub at 4207080): done, PR 1 #59 and PR 2 #61 merged 2026-11-15 | Phase 70's signed policy, Phase 71's grants and Phase 80's approvals all need device identities and the signed log. Building them a second time would leave two trust cores. |
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (done, see openshell-spike.md) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
 | 4b | **0.4.33** (the release PR from `release/0.4.33`: Phase 70's part 4e, the trust badge, and the new team's icon fix), then **the follow-up patch** (the review follow-ups carried from Phase 70's part 4 PRs) | `main` is strict, so the extension line goes first, and the follow-ups touch the gate code that Phases 71 to 74 build on. |
+| 4c | **Staff collaboration drops A and B, Phases 30 to 35** (owner, 2026-11-19): multi-user staff workspaces on signed per-writer logs, co-edited products, your organization's sync hub with live updates, presence and hub watches, then offline transports. Drop A is Phases 30 to 33, drop B Phases 34 and 35. May run beside Stage 1; needs nothing from Phases 71 to 74 | Staff projects are single-machine until then (README from 0.4.35), and the owner wants real-time shared staff work; the hub shares only the relay's build and Compose patterns, so it can be built before the relay phases. |
 | 5 | **Stage 1, Phases 70 to 74**: gate, manifests and classification labels, identities, credentials and delegation, execution backends, credential broker, run contracts. Phase 70 is executed (every PR merged by 2026-11-18, part 4e last as #95; its verification record is still to write). **Phase 29** (cleanup member and CleanUp tool) follows Phase 70 | The vocabulary and the gate come first because everything else is checked by them; delegation narrows what the gate checks; backends make protected folders absent; the broker needs the backends' network fence; contracts refer to capabilities, grants and backends. |
 | 5a | **Stage gate**: Stage 1 verified and merged before the data platform reads your organization's data (Phase 88 on) and before Phase 77 starts. v0.8.0 is deferred to the end (owner, 2026-11-15) | The relay must not run tools, and the data platform must not read real data, before verified clearances, the broker, contracts and sandboxes exist. |
 | 6 | **v0.6.0 Data platform, Phases 85 to 101** (owner, 2026-11-18): the host and local inference (L1a), the data map, sources connected in one click and collectors installed by device management, extraction, classification and labels, erasure and the personal mark, holds and requests, search, ask and analytics, the model factory and the opportunity agent. Phases 85 and 86 may start during Phases 72 to 74 (the host and a test tenant only) | The owner put it after Stage 1 and before the relay. It extends the Stage 1 gate (labels, clearances, the broker, contracts) and needs all of it before it reads real data. |
@@ -1214,6 +1307,7 @@ The full record, with the archive evidence and a disposition for every one of th
 
 Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 already moved chats, run records, checkpoints and project spend history into each project's own state folder, so with one copy of the project per person those are per person already; what remains is the editor-wide spend ledger and daily limit per person, a recovery code that unlocks an encrypted backup of the person's device key and own NEAR AI key, and "Replace my device" (the lead accepts the person back as the same member).
 **Depends on**: Phase 69 and v0.5.0 Stage 1.
+**Moves onto the staff replication layer (owner, 2026-11-19):** when L2 starts, Team Mode's coordination log moves onto the per-writer signed logs, roster and transports of Phases 30 to 34 (`.planning/research/multiuser-sync/DESIGN.md`, section 18.1), so there is one multi-writer log in the product. Kept: the canonical form, payload signer, key status and history, device identity, git runner, scheduler, team file, Enable and the audit mirror; event bodies and role rules become entry kinds and fold checks; `materialize.ts` becomes a fold. Replaced: `eventLog.ts`, `gitTransport.ts` and `transport.ts` (the compare-and-swap branch is retired after an import). The transport privacy flag below is then met by the per-cell keys of that layer.
 **Research flags**: Drift: the branch forked at 0.4.11; every month on the archive raises the cost of landing 61 and 62. The Team Mode branch ids that collide with live ids carry a `TM-` prefix (Phase 69). Transport privacy (Calimero evaluation, 2026-11-15, section 5.4, recommended instead of Calimero): encrypt each Team Mode event payload to the member device keys over the existing git transport, leaving signatures and hashes in clear, so the git host and the network see only ciphertext and sizes; removing a member re-encrypts future events only; roots over the ciphertext hashes can still be anchored in L4, written at fixed intervals so timing reveals nothing. Phase 69's plaintext signed log is not changed by this; it is a decision for this milestone.
 **Phases**: TBD (the planner may reuse the Team Mode branch phase content under new numbers).
 
@@ -1260,6 +1354,12 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 27. Project state follows the project (0.4.20) | 36/36 | Complete: shipped in 0.4.20; owner host check passed | 2026-11-17 (released 2026-11-14) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
+| 30. Replication contract and co-editing core | 0/TBD | Not started (staff collaboration drop A) | - |
+| 31. Staff roster, cell keys and migration | 0/TBD | Not started (drop A) | - |
+| 32. Your organization's sync hub | 0/TBD | Not started (drop A; may run beside Phase 31) | - |
+| 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
+| 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
+| 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
