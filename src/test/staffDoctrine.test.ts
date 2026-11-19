@@ -86,9 +86,12 @@ test('the annex letters the design names, per profile', () => {
   assert.equal(annexLetter('us-joint', 'health-services'), 'Q');
   assert.equal(annexLetter('us-joint', 'interagency'), 'V');
   assert.equal(annexLetter('us-joint', 'contracting-finance'), 'W');
-  // O and P in the JP 5-0 (2020) order.
-  assert.equal(annexLetter('us-joint', 'foreign-disclosure'), 'O');
+  // The joint list has no annex O: P is host-nation support and foreign disclosure has no letter, so the orders tool asks a person (JP 5-0, 2017, app. A).
+  assert.equal(annexLetter('us-joint', 'foreign-disclosure'), undefined);
+  assert.equal(DOCTRINE_PROFILES['us-joint'].annexes['foreign-disclosure'].kind, 'not-lettered');
+  assert.equal(annexSubjectFor('us-joint', 'O'), undefined);
   assert.equal(annexLetter('us-joint', 'host-nation-support'), 'P');
+  assert.deepEqual(DOCTRINE_PROFILES['us-joint'].annexes['communication-strategy'], { kind: 'annex', letter: 'Y', title: 'Communication Synchronization' });
   assert.deepEqual(DOCTRINE_PROFILES['us-joint'].annexes.fires, { kind: 'appendix', toAnnex: 'C' });
   assert.equal(annexLetter('us-army', 'fires'), 'D');
   assert.equal(annexLetter('us-army', 'logistics'), 'F');
@@ -96,6 +99,15 @@ test('the annex letters the design names, per profile', () => {
   assert.equal(annexLetter('nato-ca', 'logistics'), 'R');
   assert.equal(annexLetter('nato-ca', 'movements'), 'S');
   assert.equal(annexLetter('nato-ca', 'operations'), 'A');
+  // NATO/Canadian follows the COPD letters (owner decision): V2.0 with the V3.0 StratCom changes, not the CFJP 5.0 (2008) letters.
+  const nato = (subject: Parameters<typeof annexLetter>[1]) => annexLetter('nato-ca', subject);
+  assert.deepEqual(
+    { ops: nato('operations'), task: nato('task-organization'), health: nato('health-services'), info: nato('information'), stratcom: nato('communication-strategy'), pa: nato('public-affairs'), engineer: nato('engineer'), fires: nato('fires'), assessment: nato('assessment') },
+    { ops: 'A', task: 'B', health: 'QQ', info: 'SS2', stratcom: 'SS', pa: 'TT', engineer: 'EE', fires: 'II', assessment: 'OO' });
+  assert.equal(DOCTRINE_PROFILES['nato-ca'].annexes.operations.kind === 'annex' && DOCTRINE_PROFILES['nato-ca'].annexes.operations.title, 'Concept of Operations');
+  for (const retired of ['K', 'O', 'X']) assert.equal(annexSubjectFor('nato-ca', retired), undefined, `the CFJP 5.0 letter ${retired} is gone`);
+  assert.match('SS2', ANNEX_LETTER_PATTERN, 'a COPD V3.0 sub-annex is a well-formed letter');
+  assert.doesNotMatch('S22', ANNEX_LETTER_PATTERN);
   // The trap the design names: Annex D is a different subject under each profile.
   assert.deepEqual(STAFF_PROFILE_IDS.map((id) => annexSubjectFor(id, 'D')), ['logistics', 'fires', 'intelligence']);
   assert.equal(annexSubjectFor('us-army', 'ZZ'), undefined);
@@ -120,11 +132,11 @@ test('step names: JP 5-0 (2025) steps, plan evaluation as the fourth planning fu
   assert.equal(CROSSWALK.filter((row) => row.human).map((row) => row.step).join(), '6');
 });
 
-test('intelligence preparation: JIPOE at joint levels and IPB at tactical level, never JIPB outside the CFJP 5.0 reference column', () => {
+test('intelligence preparation: JIPOE at joint levels, IPOE (US Army) or IPB (NATO/Canadian) at tactical level, never JIPB outside the CFJP 5.0 reference column', () => {
   assert.equal(resolveProfile(settings('nato-ca', 'operational')).process.intelligencePreparation, 'JIPOE');
   assert.equal(resolveProfile(settings('nato-ca', 'tactical')).process.intelligencePreparation, 'IPB');
   assert.equal(resolveProfile(settings('us-joint', 'strategic')).process.intelligencePreparation, 'JIPOE');
-  assert.equal(resolveProfile(settings('us-army', 'tactical')).process.intelligencePreparation, 'IPB');
+  assert.equal(resolveProfile(settings('us-army', 'tactical')).process.intelligencePreparation, 'IPOE');
   for (const process of Object.values(STAFF_PROCESSES)) assert.ok(!JSON.stringify(process).includes('JIPB'), process.id);
 });
 

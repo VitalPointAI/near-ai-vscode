@@ -161,10 +161,15 @@ test('every FRAGO is a staff product the release guard checks and a person relea
     const execute = template.workflow.find((step) => step.step === 8)!;
     assert.ok(execute.humanGate);
     assert.match(execute.gate, /through the release state machine/);
-    assert.match(member(options, 'release-guard')!.instructions, /every (?:FRAGORD|FRAGO) above all/);
+    assert.match(member(options, 'release-guard')!.instructions, /every (?:FRAGORD|Frag O) above all/);
   }
   assert.match(member({ settings: settings() }, 'future-ops-planner')!.instructions, /FRAGORD/);
-  assert.match(member({ settings: settings({ profile: 'nato-ca', nation: 'ca' }) }, 'future-ops-planner')!.instructions, /\bFRAGO\b/);
+  // NATO/Canadian writes "Frag O", spaced like Wng O, Op O and Impl O (CACSC-PUB-500, 2018), never FRAGO.
+  for (const nation of ['ca', 'nato'] as const) {
+    const text = member({ settings: settings({ profile: 'nato-ca', nation }) }, 'future-ops-planner')!.instructions;
+    assert.match(text, /\bFrag O\b/);
+    assert.doesNotMatch(text, /\bFRAGO\b/);
+  }
 });
 
 test('fires and targeting: both review marks on every package and workbook row, notional targets, the six-phase targeting cycle', () => {
@@ -172,7 +177,8 @@ test('fires and targeting: both review marks on every package and workbook row, 
     const fires = member(options, 'fires-effects-coordinator')!.instructions;
     assert.ok(fires.includes(`${STAFF_MARKERS.decisionFor} commander or delegate`) && fires.includes(STAFF_MARKERS.legalReview), label(options));
     assert.match(fires, /never nominate or approve real targets/);
-    assert.match(fires, /1\. End state and commander's objectives;.*6\. Assessment/);
+    // JP 3-60 (2018): phase 1 is the commander's objectives, targeting guidance, and intent, and phase 6 is combat assessment.
+    assert.match(fires, /1\. Commander's objectives, targeting guidance, and intent;.*6\. Combat assessment/);
     const targeting = member(options, 'targeting-officer')!.instructions;
     assert.ok(targeting.includes(STAFF_MARKERS.legalReview) && targeting.includes(COMMANDER_REVIEW_MARK), label(options));
     assert.match(targeting, /Notional entries in the exercise box only/);
@@ -272,15 +278,15 @@ test('the level variants: strategic campaigns across the continuum; tactical fol
   assert.match(influence, /not information operations/);
 });
 
-test('the annex letters come from the profile: operations C, C or A; fires an appendix to C, Annex D or within A', () => {
+test('the annex letters come from the profile: operations C, C or A; fires an appendix to C, Annex D or Annex II', () => {
   const director = (extra: Partial<StaffSettings>) => j3Template({ settings: settings(extra) }).members[0].instructions;
   const fires = (extra: Partial<StaffSettings>) => j3Template({ settings: settings(extra) }).members.find((entry) => entry.name === 'fires-effects-coordinator')!.instructions;
   assert.match(director({}), /the operations annex is Annex C \(Operations\)/);
   assert.match(director({ profile: 'us-army', level: 'tactical' }), /the operations annex is Annex C/);
-  assert.match(director({ profile: 'nato-ca', nation: 'nato' }), /the operations annex is Annex A \(Conduct of Operations\)/);
+  assert.match(director({ profile: 'nato-ca', nation: 'nato' }), /the operations annex is Annex A \(Concept of Operations\)/);
   assert.match(fires({}), /filed as Appendix to Annex C/);
   assert.match(fires({ profile: 'us-army', level: 'tactical' }), /filed as Annex D \(Fires\)/);
-  assert.match(fires({ profile: 'nato-ca', nation: 'nato' }), /filed as No letter in the profile|filed as Part of Annex A/);
+  assert.match(fires({ profile: 'nato-ca', nation: 'nato' }), /filed as Annex II \(Joint Targeting\)/);
 });
 
 test('the template files: PROFILE.md and the two skills, each at its path', () => {

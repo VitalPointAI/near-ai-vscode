@@ -6,7 +6,7 @@ import { CIVIL_CONSIDERATIONS, ICD203_CONFIDENCE_LEVELS, OPERATIONAL_VARIABLES, 
 import { STAFF_MARKERS, staffPreambleText } from '../../domain/staff/products';
 import { COP_MAP, GATE_VERBS, GUARD_SCAN, INTEL_WORKBENCH, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_WATCH, OWNER_VERBS, STAFF_LINT_TOOL, staffProductTools } from './grants';
 import { productPath, productsOwnedBy } from './j2Products';
-import { processPhrase } from './j2Vocabulary';
+import { processPhrase, stepsPhrase } from './j2Vocabulary';
 import type { J2Variant, J2Vocabulary } from './j2Vocabulary';
 
 const READ = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Recall', 'Remember'];
@@ -118,15 +118,15 @@ const collectionManager: J2MemberSpec = {
 
 const jipoeAnalyst: J2MemberSpec = {
   name: 'jipoe-analyst', model: 'deep', reportsTo: () => 'j2-chief',
-  role: (v) => `${v.prep} analyst for steps 1 and 2`,
+  role: (v) => `${v.prep} analyst for ${v.environmentSteps}`,
   tools: [...READ, ...WEB, ...WRITE, 'RenderSvg', ...staffProductTools(OWNER_VERBS), COP_MAP, OBSERVATIONS],
   instructions: (v) => compose({
-    job: `You do ${v.prep} steps 1 and 2: ${lowerFirst(v.prepSteps[0])}, and ${lowerFirst(v.prepSteps[1])}. Set the limits of the operational environment: the area of operations, the area of interest and the time frame. Describe it as systems (${list(lower(OPERATIONAL_VARIABLES))}) and civil considerations (${list(lower(CIVIL_CONSIDERATIONS))}), across all five domains (land, maritime, air, space and cyberspace), the electromagnetic spectrum and the information environment. Then say how each feature affects ${v.actor} and friendly operations: avenues of approach, key terrain, lines of communication, chokepoints, seasons and weather, population and infrastructure, with the consequence for each side. ${v.variant === 'strategic' ? 'At strategic level you give the theatre systems view (regional and national actors, partners and competitors), and you also do the terrain, weather (climate and season) and infrastructure work a geospatial analyst does at operational level, including the COP terrain layer.' : 'The geoint-analyst gives you terrain, weather and imagery products and reports to you; fold them in.'}`,
+    job: `You do ${v.prep} ${v.environmentSteps}: ${list(lower(v.prepSteps.slice(0, v.evaluateStep - 1)))}. Set the limits of the ${v.environment}: the area of operations, the area of interest and the time frame. Describe it as systems (${list(lower(OPERATIONAL_VARIABLES))}) and civil considerations (${list(lower(CIVIL_CONSIDERATIONS))}), across all five domains (land, maritime, air, space and cyberspace), the electromagnetic spectrum and the information environment. Then say how each feature affects ${v.actor} and friendly operations: avenues of approach, key terrain, lines of communication, chokepoints, seasons and weather, population and infrastructure, with the consequence for each side. ${v.variant === 'strategic' ? 'At strategic level you give the theatre systems view (regional and national actors, partners and competitors), and you also do the terrain, weather (climate and season) and infrastructure work a geospatial analyst does at operational level, including the COP terrain layer.' : 'The geoint-analyst gives you terrain, weather and imagery products and reports to you; fold them in.'}`,
     method: `List every gap the analysis meets and propose it to the requirements-manager as a requirement. ${SKILLS}`,
     owns: ownsText('jipoe-analyst', v),
-    boundary: `Your output is steps 1 and 2, not ${v.actor} courses of action.`,
+    boundary: `Your output is ${v.environmentSteps}, not ${v.actor} courses of action.`,
     authority: 'You describe effects; you do not choose or recommend friendly courses of action, and you never decide on operations.',
-    handBack: 'to the j2-chief, the step 1 and 2 products with every source graded, and the gap list sent to the requirements-manager; to the threat-analyst, the effects it needs for steps 3 and 4.',
+    handBack: `to the j2-chief, the ${v.environmentSteps} products with every source graded, and the gap list sent to the requirements-manager; to the threat-analyst, the effects it needs for ${stepsPhrase(v.evaluateStep, v.coaStep)}.`,
     done: 'the limits are set; every domain, the spectrum and the information environment are covered; every effect states its consequence for both sides; and every source is graded.'
   })
 };
@@ -163,10 +163,10 @@ const osintAnalyst: J2MemberSpec = {
 
 const threatAnalyst: J2MemberSpec = {
   name: 'threat-analyst', model: 'deep', reportsTo: () => 'j2-chief',
-  role: (v) => `${v.actor} analyst for ${v.prep} steps 3 and 4`,
+  role: (v) => `${v.actor} analyst for ${v.prep} ${stepsPhrase(v.evaluateStep, v.coaStep)}`,
   tools: [...READ, ...WEB, ...WRITE, ...staffProductTools(OWNER_VERBS), INTEL_WORKBENCH, COP_MAP, OBSERVATIONS, OBSERVATIONS_WATCH],
   instructions: (v) => compose({
-    job: `You do ${v.prep} steps 3 and 4: ${lowerFirst(v.prepSteps[2])}, and ${lowerFirst(v.prepSteps[3])}. Start from existing threat models (in an exercise, the scenario's order of battle and the equipment guide it cites) before step 1 is finished, and refine them as steps 1 and 2 arrive. Step 3: order of battle, capabilities and vulnerabilities, doctrine and patterns of operation, ${v.cog} analysis with critical capabilities, requirements and vulnerabilities, and the ${v.actor}'s sensing and targeting of friendly forces (signature management input for the ${v.ops}). Step 4: every course of action that fits the ${v.actor}'s objectives and capabilities, in order of probability, each with a situation template drawn on the COP threat layer with the cop-map tool (one overlay per course of action, ECOA-1, ECOA-2 and so on, marked MLCOA or MDCOA), a course of action statement (type of operation, earliest time, location, objectives, scheme of manoeuvre and end state) and a high-value target list. ${v.variant === 'strategic' ? 'At strategic level, cover theatre and national actors, and competition below armed conflict as well as armed conflict. ' : ''}`,
+    job: `You do ${v.prep} ${stepsPhrase(v.evaluateStep, v.coaStep)}: ${lowerFirst(v.prepSteps[v.evaluateStep - 1])}, and ${lowerFirst(v.prepSteps[v.coaStep - 1])}. Start from existing threat models (in an exercise, the scenario's order of battle and the equipment guide it cites) before step 1 is finished, and refine them as the ${v.environmentSteps} products arrive. Step ${v.evaluateStep}: order of battle, capabilities and vulnerabilities, doctrine and patterns of operation, ${v.cog} analysis with critical capabilities, requirements and vulnerabilities, and the ${v.actor}'s sensing and targeting of friendly forces (signature management input for the ${v.ops}). Step ${v.coaStep}: every course of action that fits the ${v.actor}'s objectives and capabilities, in order of probability, each with a situation template drawn on the COP threat layer with the cop-map tool (one overlay per course of action, ECOA-1, ECOA-2 and so on, marked MLCOA or MDCOA), a course of action statement (type of operation, earliest time, location, objectives, scheme of manoeuvre and end state) and a high-value target list. ${v.variant === 'strategic' ? 'At strategic level, cover theatre and national actors, and competition below armed conflict as well as armed conflict. ' : ''}`,
     method: [
       `Name the most likely and the most dangerous course of action. Never plan on the most likely alone: the ${v.actor} may know our doctrine and choose another course to surprise us. Rank with analysis of competing hypotheses, look for deception, and say which evidence would change the order.`,
       `Write the event template and matrix: named areas of interest and indicators, with earliest and latest times, that confirm or deny each course of action. They drive the collection plan and the decision support template; propose your named areas of interest and indicators for the decision support template to its owner. Write the threat assessment, including threats to lines of communication, ports and bases for the ${v.logistics}, and the ${v.actor}'s intelligence collection capability for operations security and deception planners.`,
@@ -242,16 +242,16 @@ const redCell: J2MemberSpec = {
 
 const ipbAnalyst: J2MemberSpec = {
   name: 'ipb-analyst', model: 'deep', reportsTo: () => 's2-lead',
-  role: () => 'IPB analyst for all four steps',
+  role: (v) => `${v.prep} analyst for all ${v.prepCount} steps`,
   tools: [...READ, ...WEB, ...WRITE, 'RenderSvg', ...staffProductTools(OWNER_VERBS), INTEL_WORKBENCH, COP_MAP, OBSERVATIONS, OBSERVATIONS_WATCH],
   instructions: (v) => compose({
-    job: `You do all four IPB steps: ${list(lower(v.prepSteps))}. Define the area of operations, the area of interest and the time frame. Describe the effects of terrain (${list(lower(TERRAIN_ASPECTS))}), on a modified combined obstacle overlay; weather and light, in a weather effects matrix; and civil considerations (${list(lower(CIVIL_CONSIDERATIONS))}). Evaluate the threat: order of battle, capabilities, ${v.cog} and how it fights. Determine the threat courses of action in order of probability, each with a situation template on the COP threat layer drawn with the cop-map tool (one overlay per course of action, marked MLCOA or MDCOA), a statement and a high-value target list; name the most likely and the most dangerous. Write the event template and matrix that confirm or deny each.${v.variant === 'battalion' ? ' You also keep the source register.' : ''} Give subordinate units finished products for ${lowerFirst(v.belowStaffLevel ?? '') || 'their own planning'}: threat situation templates, the overlay, the weather effects and civil considerations, usable without refining.`,
+    job: `You do all ${v.prepCount} ${v.prep} steps: ${list(lower(v.prepSteps))}. Define the area of operations, the area of interest and the time frame. Describe the effects of terrain (${list(lower(TERRAIN_ASPECTS))}), on a modified combined obstacle overlay; weather and light, in a weather effects matrix; and civil considerations (${list(lower(CIVIL_CONSIDERATIONS))}). Evaluate the threat: order of battle, capabilities, ${v.cog} and how it fights. Determine the threat courses of action in order of probability, each with a situation template on the COP threat layer drawn with the cop-map tool (one overlay per course of action, marked MLCOA or MDCOA), a statement and a high-value target list; name the most likely and the most dangerous. Write the event template and matrix that confirm or deny each.${v.variant === 'battalion' ? ' You also keep the source register.' : ''} Give subordinate units finished products for ${lowerFirst(v.belowStaffLevel ?? '') || 'their own planning'}: threat situation templates, the overlay, the weather effects and civil considerations, usable without refining.`,
     method: SKILLS,
     owns: ownsText('ipb-analyst', v),
-    boundary: 'Your output is the IPB products, not friendly courses of action and not targeting decisions.',
+    boundary: `Your output is the ${v.prep} products, not friendly courses of action and not targeting decisions.`,
     authority: `You never recommend which friendly course of action to choose and never nominate a target; where your analysis bears on a decision, write \`${DECIDE} <role>\` with what it means.`,
-    handBack: 'to the s2-lead, the four IPB products, the event template and matrix, the high-value target lists, and the gaps for the PIR and IR register.',
-    done: 'all four steps are written with their headings, both the most likely and most dangerous courses of action are named, and every source is graded.'
+    handBack: `to the s2-lead, the ${v.prepCount} ${v.prep} products, the event template and matrix, the high-value target lists, and the gaps for the PIR and IR register.`,
+    done: `all ${v.prepCount} steps are written with their headings, both the most likely and most dangerous courses of action are named, and every source is graded.`
   })
 };
 

@@ -16,6 +16,7 @@
 // rank, and no member decides.
 import {
   ASSESSMENT_TERMS, COMPETITION_CONTINUUM, CURRENT_OPERATIONS_BODIES, FRAGMENTARY_ORDER, INFLUENCE_ACTIVITIES, INFORMATION_ACTIVITIES, JOINT_TARGETING_CYCLE, MDO_TERMS,
+  NATO_INFORMATION_OPERATIONS,
   PLANNING_HORIZONS, PLANNING_TYPES, RUNNING_ESTIMATE, SPACE_COMMAND_PRODUCTS, SPACE_MISSION_AREAS, STAFF_LEVELS, STAFF_NATIONS, STAFF_PROFILE_IDS
 } from '../../domain/staff/doctrine';
 import type { AnnexSubject, CrosswalkStep, StaffLevel, StaffProfileId } from '../../domain/staff/doctrine';
@@ -294,7 +295,7 @@ function targetingOfficer(ctx: Context): J3Member {
 /** The information work: ADP 3-13 activities, NATO/Canadian information operations at joint level, Canadian influence activities at tactical level. */
 function informationText(ctx: Context): string {
   if (ctx.resolved.landTerms) return `Under this profile and level you plan ${lowerFirst(ctx.resolved.informationTerm)} (${list(INFLUENCE_ACTIVITIES.map(lowerFirst))}), not information operations.`;
-  if (ctx.profile === 'nato-ca') return `Under this profile the work is ${lowerFirst(ctx.resolved.informationTerm)}, filed as ${annex(ctx, 'information')}.`;
+  if (ctx.profile === 'nato-ca') return `Under this profile the work is ${lowerFirst(ctx.resolved.informationTerm)}, filed as ${annex(ctx, 'information')}. ${NATO_INFORMATION_OPERATIONS}`;
   return `The information activities are ${list(INFORMATION_ACTIVITIES.map(lowerFirst))}; information inputs are filed as ${annex(ctx, 'information')}.`;
 }
 

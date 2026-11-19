@@ -118,14 +118,25 @@ test('a member\'s output is checked for its required headings: all present passe
   assert.ok(estimate.headings(v).includes('Adversary courses of action in order of probability'));
 });
 
-test('the words follow the profile: JIPOE or IPB, Annex B or D, the staff code, the process, requirements management and the planning lead', () => {
+test('the words follow the profile: JIPOE, IPOE or IPB, Annex B or D, the staff code, the process, requirements management and the planning lead', () => {
   const joint = renderJ2Team(US_JOINT);
   const army = renderJ2Team(US_ARMY);
   const canadian = renderJ2Team(NATO_CA);
   const nato = renderJ2Team(NATO);
-  // JIPOE at joint levels, IPB at tactical level, never the other way round, and OAKOC only at tactical level.
-  for (const text of [joint, canadian, nato, renderJ2Team(settings({ level: 'strategic' }))]) { assert.match(text, /\bJIPOE\b/); assert.doesNotMatch(text, /\bIPB\b|OAKOC/); }
-  for (const text of [army, renderJ2Team(US_ARMY, { echelon: 'battalion' }), renderJ2Team(settings({ profile: 'nato-ca', level: 'tactical', nation: 'ca' }))]) { assert.match(text, /\bIPB\b/); assert.doesNotMatch(text, /\bJIPOE\b|JIPB/); }
+  // JIPOE at joint levels; at tactical level IPOE under US Army (FM 5-0, 2024; ADP 2-0, 2026) and IPB under NATO/Canadian; OAKOC only at tactical level.
+  for (const text of [joint, canadian, nato, renderJ2Team(settings({ level: 'strategic' }))]) { assert.match(text, /\bJIPOE\b/); assert.doesNotMatch(text, /\bIPB\b|\bIPOE\b|OAKOC/); }
+  for (const text of [army, renderJ2Team(US_ARMY, { echelon: 'battalion' })]) { assert.match(text, /\bIPOE\b/); assert.doesNotMatch(text, /\bJIPOE\b|JIPB|\bIPB\b/); }
+  { const text = renderJ2Team(settings({ profile: 'nato-ca', level: 'tactical', nation: 'ca' })); assert.match(text, /\bIPB\b/); assert.doesNotMatch(text, /\bJIPOE\b|JIPB|\bIPOE\b/); }
+  // NATO JIPOE has three steps on the operating environment (AJP-10.1, 2023): the jipoe-analyst does step 1, the threat-analyst steps 2 and 3.
+  for (const text of [canadian, nato]) {
+    assert.match(member(text, 'jipoe-analyst').instructions, /^Job: You do JIPOE step 1: describe and evaluate the operating environment\. Set the limits of the operating environment:/m);
+    assert.match(member(text, 'threat-analyst').instructions, /^Job: You do JIPOE steps 2 and 3: evaluate actors in the operating environment, and determine actor courses of action\./m);
+    assert.match(text, /JIPOE step 3 \(adversary course of action set\)/);
+    assert.doesNotMatch(text, /JIPOE steps? 4|steps 3 and 4/);
+  }
+  assert.match(member(joint, 'jipoe-analyst').instructions, /^Job: You do JIPOE steps 1 and 2: define the operational environment and describe the impact of the operational environment\./m);
+  // The US Army intelligence process: six steps, no continuing activities (ADP 2-0, 2026).
+  assert.doesNotMatch(army, /throughout\)|analyze and assess/i);
   // The annex letter from the profile: B under US Joint and US Army, D under NATO/Canadian; the joint estimate as appendix 11 to annex B.
   assert.match(member(joint, 'j2-chief').instructions, /The intelligence annex is Annex B \(Intelligence\), and the intelligence estimate goes in as Appendix 11 to Annex B/);
   assert.match(member(army, 's2-lead').instructions, /The intelligence annex is Annex B \(Intelligence\)\./);
@@ -139,7 +150,7 @@ test('the words follow the profile: JIPOE or IPB, Annex B or D, the staff code, 
   assert.match(renderJ2Team(settings({ profile: 'nato-ca', level: 'tactical', nation: 'nato' }), { echelon: 'battalion' }), /^name: S2 Intelligence \(battalion\)$/m);
   // The intelligence process and requirements management per profile and nation.
   assert.match(member(joint, 'j2-chief').instructions, /joint intelligence process \(planning and direction; collection; processing and exploitation; analysis and production; dissemination and integration; evaluation and feedback\)/);
-  assert.match(member(army, 's2-lead').instructions, /intelligence process \(plan and direct; collect and process; produce; disseminate; with analyze and assess throughout\)/);
+  assert.match(member(army, 's2-lead').instructions, /intelligence process \(plan and direct; collect; process and exploit; analyze and produce; disseminate and integrate; evaluate and provide feedback\)/);
   assert.match(member(canadian, 'j2-chief').instructions, /intelligence cycle \(direction; collection; processing; dissemination\)/);
   assert.match(member(joint, 'requirements-manager').instructions, /CRM and COM/);
   assert.match(member(canadian, 'requirements-manager').instructions, /requirements management for the section: CCIRM/);
@@ -185,7 +196,7 @@ test('every member has the preamble, a doctrinal job, a boundary, a no-decide ru
     'warning-analyst': /^Boundary: Your output is warning: [^\n]*; not policy advice and not the response\.$/m,
     'target-analyst': /^Boundary: Your output is intelligence on notional target systems in a fictional scenario, never a named real person or place and never an engagement recommendation\.$/m,
     'red-cell': /^Boundary: Your output is the adversary's play, not an independent critique of the plan \(that is the red team\)\.$/m,
-    'ipb-analyst': /^Boundary: Your output is the IPB products, not friendly courses of action and not targeting decisions\.$/m,
+    'ipb-analyst': /^Boundary: Your output is the (?:IPOE|IPB) products, not friendly courses of action and not targeting decisions\.$/m,
     'tradecraft-reviewer': /^Boundary: You check; you never rewrite another member's judgement\.$/m,
     'release-guard': /^Boundary: You advise; a person releases\. Your output is a verdict and reasons; you never release and you never fix\.$/m
   };
@@ -288,8 +299,11 @@ test('the two skills: the ICD 203 scale and the separate-sentence rule; reliabil
   const nato = sourceGradingSkill('nato-ca');
   const us = sourceGradingSkill('us-joint');
   assert.match(nato, /two separate scales[\s\S]*Judge them independently/);
-  assert.match(nato, /\| 1 \| Completely credible \|[\s\S]*Older Canadian doctrine reads it as "confirmed by other sources"/);
+  // NATO grade 1 is "Confirmed by other sources" (never "Completely credible"); the US Army table labels it "Confirmed".
+  assert.match(nato, /\| 1 \| Confirmed by other sources \|[\s\S]*Grade 1 means an independent source confirms the item/);
+  assert.doesNotMatch(nato, /completely credible/i);
   assert.match(us, /\| 1 \| Confirmed by other sources \|/);
+  assert.match(sourceGradingSkill('us-army'), /\| 1 \| Confirmed \|\n\| 2 \| Probably true \|/);
   assert.match(us, /\| A \| Completely reliable \|[\s\S]*\| F \| Reliability cannot be judged \|[\s\S]*\| 6 \| Truth cannot be judged \|/);
   assert.match(us, /Reports that share an origin are one report/);
   const files = j2Template(NATO_CA).files.map((file) => file.path);

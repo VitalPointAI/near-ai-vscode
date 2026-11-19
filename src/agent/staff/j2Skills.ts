@@ -82,9 +82,7 @@ export function sourceGradingSkill(profile: StaffProfileId): string {
     `| 1 | ${one} |`,
     ...INFORMATION_CREDIBILITY_GRADES.filter((grade) => grade !== CONFIRMED_CREDIBILITY).map((grade) => `| ${grade} | ${INFORMATION_CREDIBILITY[grade]} |`),
     '',
-    profile === 'nato-ca'
-      ? 'Grade 1 follows AJP-2.1. Older Canadian doctrine reads it as "confirmed by other sources"; under either reading, give grade 1 only when an independent source confirms the item.'
-      : 'Grade 1 means an independent source confirms the item; give it only then.',
+    'Grade 1 means an independent source confirms the item; give it only then.',
     '',
     '## Rules',
     '',

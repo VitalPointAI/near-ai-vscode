@@ -65,9 +65,15 @@ export function orderKind(profile: StaffProfileId, id: string): OrderKind | unde
   return ORDER_KINDS[profile].find((kind) => kind.id === id);
 }
 
-/** Annex letters sort A to Z, then AA, BB and so on (the two-letter annexes follow the single ones). */
+/**
+ * Annex letters sort A to Z, then AA, BB and so on (the two-letter annexes follow the single ones); a numbered COPD sub-annex follows its own annex
+ * (SS, SS2, SS4, then TT).
+ */
 export function compareLetters(a: string, b: string): number {
-  return a.length - b.length || a.localeCompare(b);
+  const split = (letter: string) => { const match = /^([A-Z]*)(\d*)$/.exec(letter); return { letters: match?.[1] ?? letter, number: Number(match?.[2] || 0) }; };
+  const left = split(a);
+  const right = split(b);
+  return left.letters.length - right.letters.length || left.letters.localeCompare(right.letters) || left.number - right.number;
 }
 
 const describe = (placement: AnnexPlacement): string => {
