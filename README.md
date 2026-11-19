@@ -374,7 +374,24 @@ in its description and in **Map as table**. The J2 workspace also lists the
 live feed reports the project's observation store holds, newest first and
 only what your clearances cover; a running exercise feed simulation fills it.
 While the room is open it runs track decay, so tracks go stale and then lost.
-The J5, J3 and J4 workspaces say what they will hold.
+
+The **J5**, **J3** and **J4** workspaces each show their section's real state,
+read from the project: its products with owner, version and release state, the
+decisions waiting for a named person in gold (the same signed buttons), and the
+agents' work in violet. **J5** shows the COA cells with their themes and the
+profile's validity tests, the comparison against the criteria and weights a
+person approved (totals recomputed from the matrix), the wargame ledger turn by
+turn (action, reaction, counteraction), the decision brief with every dissent
+unedited, and the annex tracker held to the ledger by the orders check. **J3**
+shows current operations (the event log with escalations and CCIR matches, on
+the COP map), the decision support matrix and the synchronization matrix with
+who owns them (the J5 while planning, the J3 once a person approves the
+transition brief), FRAGO drafts waiting for a person, and the battle rhythm
+with open suspenses. **J4** shows LOGSTAT by unit with its bands, reports held
+back until corrected, every calculator result with its formula, the movement
+and readiness boards, supportability per COA and the logistics annex. Long
+registers show a page at a time. **NEAR AI: Open Staff Room** opens on a
+section when a command passes it one (`j5`, `j3`, `j4`).
 
 **Standing watches.** A standing watch binds a PIR's indicator to an area, a
 time window and the weakest source grade it counts, until the PIR's latest

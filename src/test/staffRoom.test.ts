@@ -65,7 +65,7 @@ test('the room is built from the real project: rail states, squads, ledger, deci
   // One clock: the next decision deadline.
   assert.match(model.clock.dtg, /^191200Z NOV 26$/);
   assert.match(model.clock.next!.label, /Concept of operations decision due, for the commander/);
-  assert.equal(model.coming.j5.lines.length >= 3, true);
+  assert.ok(model.j5 && model.j3 && model.j4, 'the J5, J3 and J4 workspaces are in the picture');
   assert.deepEqual([...STAFF_ROOM_WORKSPACES], ['war-room', 'j2', 'j5', 'j3', 'j4']);
 });
 
@@ -323,9 +323,10 @@ test('the Staff Room page loads only the vendored map files, under a policy with
   assert.ok(scripts.length >= 3);
   for (const attributes of scripts) {
     assert.match(attributes, new RegExp(`nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`));
-    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
+    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffWorkspaces\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
   }
   assert.ok(html.indexOf('staff/copMap.js') < html.indexOf('staffRoom/staffMap.js'), 'the COP map is loaded before the room\'s map');
+  assert.ok(html.indexOf('staffRoom/staffWorkspaces.js') < html.indexOf('staffRoom/staffRoom.js'), 'the section workspaces are loaded before the room that builds them');
   assert.ok(html.includes('staff/declutter.js') && html.indexOf('staff/declutter.js') < html.indexOf('staff/copMap.js'), 'the shared label placement is loaded before both maps');
   const resources = JSON.parse(/data-cop-resources="([^"]+)"/.exec(html)![1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
   assert.deepEqual(Object.keys(resources).sort(), ['maplibre', 'milsymbol', 'worker']);
