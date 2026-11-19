@@ -323,7 +323,7 @@ test('the Staff Room page loads only the vendored map files, under a policy with
   assert.ok(scripts.length >= 3);
   for (const attributes of scripts) {
     assert.match(attributes, new RegExp(`nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`));
-    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffWorkspaces\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
+    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffWorkspaces\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/layerDrawer\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
   }
   assert.ok(html.indexOf('staff/copMap.js') < html.indexOf('staffRoom/staffMap.js'), 'the COP map is loaded before the room\'s map');
   assert.ok(html.indexOf('staffRoom/staffWorkspaces.js') < html.indexOf('staffRoom/staffRoom.js'), 'the section workspaces are loaded before the room that builds them');

@@ -11,6 +11,7 @@ import type { CopPicture } from '../domain/staff/cop';
 import { parseScenarioText } from '../domain/staff/scenario';
 import { buildStaffRoomModel, handoffsFor } from '../domain/staff/staffRoom';
 import type { StaffRoomModel } from '../domain/staff/staffRoom';
+import { scenarioEnvironment } from '../staff/envPack';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { modelOf, NOW, project, SCENARIO, sectionsProject } from './helpers/staffRoomFixture';
 
@@ -121,6 +122,7 @@ async function runPage(options: { reduced?: boolean; state?: Record<string, unkn
   });
   // The page's order (staffRoomPanel.ts): the shared label placement, the COP map, the room's map, the room.
   vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'declutter.js'), 'utf8'), sandbox, { timeout: 1000 });
+  vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'layerDrawer.js'), 'utf8'), sandbox, { timeout: 1000 });
   if (options.copMap) vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'copMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffWorkspaces.js'), 'utf8'), sandbox, { timeout: 1000 });
@@ -757,4 +759,115 @@ test('opener adds its hint only to a label the card already has, and never repla
   assert.equal(named.getAttribute('aria-label'), 'COA A. Approved version 2. Opens its provenance.', 'no doubled full stop');
   for (const card of [bare, named]) { card.fire('keydown', { key: 'Enter' }); card.fire('keydown', { key: ' ' }); card.click(); assert.equal(card.tabIndex, 0); }
   assert.equal(opened, 6);
+});
+
+// ---- The map's room (owner direction, D-48 of 0.4.34): the map is the main panel, Full map, and the layer drawer on the SVG map too ---------------
+
+test('once a scenario is loaded the rail and the section cards fold into the room bar, which opens them again and remembers it', async () => {
+  const { model } = await fixtureModel();
+  assert.equal(model.map.available, true, 'the fixture has a scenario on the map');
+  const page = await runPage({ reduced: true });
+  const app = page.doc.getElementById('app')!;
+  assert.ok(!app.classList.contains('compact'), 'nothing folds before the room has a picture');
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const bar = page.byClass('roombar')[0];
+  assert.equal(bar.hidden, false);
+  assert.ok(app.classList.contains('compact'), 'folded: the map has the room');
+  assert.match(page.byClass('roombar-t')[0].textContent, /^Step \d+ of \d+: .+ · \d+ of 5 sections working/);
+  const toggle = bar.children.find((node) => node.tagName === 'button')!;
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(toggle.getAttribute('aria-controls'), 'room-process room-squads');
+  assert.ok(page.doc.getElementById('room-process') && page.doc.getElementById('room-squads'), 'the button names what it opens');
+  toggle.click();
+  assert.ok(!app.classList.contains('compact'));
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(page.states.at(-1)!.roomOpen, true, 'remembered for the next time the room opens');
+  assert.equal(page.doc.animations.length, 0, 'still under reduced motion');
+  toggle.click();
+  assert.ok(app.classList.contains('compact'));
+  // A room whose scenario has no map keeps the rail and the cards open.
+  const empty = await runPage({ reduced: true });
+  empty.dispatch({ type: 'staff-room', model: { ...model, map: { ...model.map, available: false } }, cues: [] });
+  assert.ok(!empty.doc.getElementById('app')!.classList.contains('compact'));
+  assert.equal(empty.byClass('roombar')[0].hidden, true);
+});
+
+test('the map is sized to the room left below its top, so it fills the panel without scrolling', async () => {
+  const { model } = await fixtureModel();
+  const page = await runPage({ reduced: true, window: { innerHeight: 1000, scrollY: 0 } });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // The stand-in DOM puts every box at top 10: 1000 - 10 - 14 of padding.
+  assert.equal(page.doc.getElementById('app')!.style['--map-h'], '976px');
+  // With under 300px left below its top, the map keeps a usable height and the page scrolls to it.
+  const small = await runPage({ reduced: true, window: { innerHeight: 300, scrollY: 0 } });
+  small.dispatch({ type: 'staff-room', model, cues: [] });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(small.doc.getElementById('app')!.style['--map-h'], '320px');
+});
+
+test('Full map fills the Staff Room with the map, and Escape or the button brings the room back; nothing moves under reduced motion or Calm', async () => {
+  const { model } = await fixtureModel();
+  for (const options of [{}, { reduced: true }, { state: { calm: true } }] as const) {
+    const page = await runPage({ ...options });
+    page.dispatch({ type: 'staff-room', model, cues: [] });
+    const box = page.byClass('mapbox')[0];
+    const full = page.byClass('map-full')[0];
+    const before = page.doc.animations.length;
+    full.click();
+    assert.ok(box.classList.contains('full'));
+    assert.equal(full.getAttribute('aria-pressed'), 'true');
+    assert.equal(full.textContent, 'Exit full map');
+    assert.equal(box.getAttribute('role'), 'dialog');
+    assert.equal(box.getAttribute('aria-modal'), 'true');
+    const moved = page.doc.animations.length - before;
+    if ('reduced' in options || 'state' in options) assert.equal(moved, 0, `still: ${JSON.stringify(options)}`);
+    else {
+      assert.equal(moved, 1, 'one entrance');
+      for (const frame of page.doc.animations.at(-1)!.frames as Array<Record<string, unknown>>) assert.deepEqual(Object.keys(frame).sort(), ['opacity', 'transform']);
+    }
+    page.doc.key('Escape');
+    assert.ok(!box.classList.contains('full'), 'Escape returns');
+    assert.equal(box.getAttribute('role'), 'region');
+    assert.equal(page.doc.activeElement, full, 'focus back on the button');
+    full.click();
+    full.click();
+    assert.ok(!box.classList.contains('full'), 'the button returns too');
+    // A model update while the full map is on keeps it on.
+    full.click();
+    page.dispatch({ type: 'staff-room', model: { ...model, now: model.now + 1, map: { ...model.map, units: model.map.units.slice(1) } }, cues: [] });
+    assert.ok(box.classList.contains('full'));
+  }
+});
+
+test('without WebGL the room\'s SVG map uses the same layer drawer and draws the terrain pack\'s land, hillshade and contours', async () => {
+  const { model } = await fixtureModel();
+  const parsed = parseScenarioText(await readFile(SCENARIO, 'utf8'));
+  assert.ok(parsed.ok);
+  const env = await scenarioEnvironment(parsed.value);
+  const picture = buildCopPicture({ marking: parsed.value.marking, frame: parsed.value.region.frame, geography: syntheticGeography(parsed.value), scenario: parsed.value, layers: [], environment: env!.environment });
+  const page = await runPage({ reduced: true, copMap: true });
+  page.dispatch({ type: 'staff-room', model, cues: [], picture, pictureNow: NOW });
+  await settle();
+  assert.match(page.byClass('mapnote')[0].textContent, /^2D map: /);
+  const box = page.byClass('mapbox')[0];
+  const hills = box.all().filter((node) => node.classList.contains('env-hill'));
+  assert.equal(hills.length, picture.environment!.hillshade.features.length, 'every hillshade cell');
+  assert.ok(box.all().some((node) => node.classList.contains('env-contour')) && box.all().some((node) => node.classList.contains('env-coast')), 'contours and the coastline');
+  assert.ok(box.all().filter((node) => node.classList.contains('land')).length >= 1, 'the synthetic land');
+  // The drawer: the staff layers and the terrain pack's, each a switch.
+  const button = page.byClass('ld-button')[0];
+  assert.match(button.getAttribute('aria-label')!, /^Layers, \d+ of \d+ on$/);
+  button.click();
+  const panel = page.byClass('ld-panel')[0];
+  assert.equal(panel.hidden, false);
+  const hill = panel.all().find((node) => node.getAttribute('data-layer') === 'env-hillshade')!;
+  assert.equal(page.doc.activeElement, panel.all().find((node) => node.getAttribute('role') === 'switch'), 'focus on the first switch');
+  hill.click();
+  assert.equal(box.all().find((node) => node.getAttribute('data-layer') === 'env-hillshade')!.getAttribute('visibility'), 'hidden');
+  assert.ok((page.states.at(-1)!.hiddenLayers as string[]).includes('env-hillshade'), 'remembered like any layer');
+  // Escape closes the drawer (its own key handler) and focus goes back to the button.
+  panel.fire('keydown', { key: 'Escape' });
+  assert.equal(panel.hidden, true);
+  assert.equal(page.doc.activeElement, button);
 });

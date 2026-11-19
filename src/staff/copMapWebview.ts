@@ -21,6 +21,8 @@ import { scenarioEnvironment } from './envPack';
 export const COP_MAP_FILES = {
   /** The SVG maps' shared label placement (window.nearDeclutter): loaded before the map script and the Staff Room's map. */
   declutter: 'staff/declutter.js',
+  /** The layer drawer both maps share (window.nearLayerDrawer): loaded before the map script and the Staff Room's map. */
+  drawer: 'staff/layerDrawer.js',
   script: 'staff/copMap.js',
   style: 'staff/copMap.css',
   maplibre: 'vendor/maplibre-gl/maplibre-gl.mjs',
