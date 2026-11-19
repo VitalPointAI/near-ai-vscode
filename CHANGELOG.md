@@ -146,7 +146,10 @@ persona name or a rank.
   the profile's letter (the sustainment annex under US Army), with the concept of support in the
   profile's words (COLS under US Joint). Product titles keep staff abbreviations in capitals
   (COA, DSM, LOGSTAT) on every screen. Nothing moves under reduced motion or Calm, every view works from the
-  keyboard, and long registers show a page at a time.
+  keyboard (Enter or Space on a COA cell opens its provenance), and long registers show a page at a
+  time. A new escalation in the J3 event log is announced even when it is past the first page, and
+  only new entries move. A battle rhythm event shows its next time for once, daily and weekly
+  events; any other repeat shows "repeat not shown" instead of a wrong date.
 - **IRON LANTERN on the globe, and its directions fixed.** The starter scenario's grid references
   now grow northward, so "north of Saltmere", "along PL COPPER north of Ashby Ford", "south of
   Kell" and the artillery reach statements all hold on the map. Scenario files gain version 2
@@ -292,8 +295,9 @@ persona name or a rank.
   sign ("51.10 N, 11.10 E", "45.42, -75.69"). Those are still checked against the exercise box.
 - **A COP merge never loses a proposal.** When the merged copy of a proposal cannot be kept, the
   merge is refused and the proposal stays where it is. A stray merged copy left by an earlier
-  attempt no longer blocks the merge: the same copy is kept, a different one is replaced, and it is
-  put back if the merge is refused.
+  attempt no longer blocks the merge: the same copy is kept, and a different one is never
+  overwritten. It is moved aside to `merged/<name>.stray-<time>` (never over a file already there),
+  the merge result names where it went, and it is put back if the merge is refused.
 - **Staff Room notices stay up their full time.** A newer notice is no longer hidden early by the
   timer of the one before it.
 - **Updated doctrine terms.** US Army teams use the six-step intelligence process of ADP 2-0
@@ -303,9 +307,10 @@ persona name or a rank.
   and source grade 1 reads "Confirmed by other sources" (NATO) or "Confirmed" (US Army).
 - **Standing watches and the release guard, tightened.** A watch nobody signed shows as proposed in
   the Staff Room whatever the file says, and only the watch grant (`mcp__observations__watch_*`)
-  gives the watch tools. With an exercise box set, two plain numbers that read as a position outside
-  it go to the release guard to check, and a feed import whose parser cannot start is refused at
-  once.
+  gives the watch tools. With an exercise box set, two plain numbers presented as a position outside
+  it (after words such as lat, lon, grid, position, located or at) go to the release guard to check,
+  while prices, scores and measures such as "12.50, 3.50" are left alone; and a feed import whose
+  parser cannot start is refused at once.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

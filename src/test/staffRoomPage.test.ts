@@ -669,3 +669,76 @@ test('the J3 and J4 workspaces name the fragmentary order and the logistics anne
   assert.match(view(page, 'j4tab-annex').textContent, /^Sustainment annex/);
   assert.match(view(page, 'j3tab-fragos').textContent, /^FRAGORDs/);
 });
+
+test('a COA cell opens its provenance from the keyboard as from the pointer, and every clickable card in the workspaces does', async () => {
+  const { model: base } = await sectionsModel();
+  // A COA cell tied to its product (a product in the room's ledger), as the host sends it once the cell has drafted.
+  const ledger = base.ledger[0];
+  const tied = { product: ledger.product, title: ledger.title, version: ledger.version, display: ledger.display, pill: 'draft', owner: ledger.owner };
+  const model = { ...base, j5: { ...base.j5, cells: base.j5.cells.length ? base.j5.cells.map((cell, index) => (index === 0 ? { ...cell, product: tied } : cell)) : [{ coa: 'COA A', owner: '', theme: '', differs: '', validity: [], distinctFrom: '', product: tied }] } };
+  const page = await runPage({ reduced: true, state: { workspace: 'j5' } });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const pop = page.byClass('pop')[0];
+  const card = view(page, 'pane-j5').all().find((node) => node.classList.contains('coa-cell') && node.classList.contains('opens'))!;
+  assert.ok(card, 'a drafted COA cell opens its provenance');
+  assert.equal(card.tabIndex, 0);
+  assert.match(card.getAttribute('aria-label')!, /Opens its provenance\.$/);
+  for (const key of ['Enter', ' ']) {
+    pop.hidden = true;
+    card.fire('keydown', { key });
+    assert.equal(pop.hidden, false, `${JSON.stringify(key)} opens the card`);
+  }
+  // A key on a control inside the card, or another key, does nothing to the card.
+  pop.hidden = true;
+  card.fire('keydown', { key: 'Enter', target: card.children[0] });
+  card.fire('keydown', { key: 'a' });
+  assert.equal(pop.hidden, true);
+  // The class: in the workspaces, only a button or a card made through opener() takes a click.
+  const source = await readFile(path.join(MEDIA, 'staffWorkspaces.js'), 'utf8');
+  const clicks = [...source.matchAll(/(\w+)\.addEventListener\('click'/g)].map((match) => match[1]);
+  assert.deepEqual([...new Set(clicks)].sort(), ['b', 'node', 'tab'], 'b and tab are buttons; node is opener()\'s card, which also takes Enter and Space');
+});
+
+test('the J3 event log announces a new escalation wherever it is in the log, and moves only genuinely new rows when paging', async () => {
+  const { model } = await sectionsModel();
+  const timers = manualTimers();
+  const row = (n: number, status = 'logged') => ({ id: `E${n}`, time: `2026-11-19T${String(10 + Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}:00Z`, source: 'watch', report: `Report ${n}`, ccir: '', decisionPoint: '', status });
+  const rows = Array.from({ length: 60 }, (_, n) => row(59 - n));
+  const page = await runPage({ timers, state: { workspace: 'j3' } });
+  page.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, eventLog: { total: 60, escalated: 0, rows } } }, cues: [] });
+  timers.fire(900);
+  const announced = () => view(page, 'announce').textContent;
+  // A new escalated entry past the first page (row 50 of the newest-first log) is still announced.
+  const later = [...rows.slice(0, 50), row(200, 'escalated'), ...rows.slice(50)];
+  page.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, eventLog: { total: 61, escalated: 1, rows: later } } }, cues: [] });
+  timers.fire(900);
+  assert.match(announced(), /Event log: E200 escalated\./);
+  // Paging to the rest moves only the new row, never the old ones.
+  const before = page.doc.animations.length;
+  view(page, 'pane-j3').all().find((node) => node.tagName === 'button' && /^Show 21 more of 21$/.test(node.textContent))!.click();
+  const evs = view(page, 'pane-j3').all().filter((node) => node.classList.contains('ev'));
+  assert.equal(evs.length, 61);
+  const moved = evs.filter((node) => node.animations.length > 0);
+  assert.deepEqual(moved.map((node) => node.all().find((child) => child.textContent === 'E200') ? 'E200' : 'other'), ['E200'], 'only the new row moves');
+  assert.ok(page.doc.animations.length - before <= 1);
+  // The same log again: nothing is new, nothing is announced again, nothing moves.
+  view(page, 'announce').textContent = '';
+  const settled = page.doc.animations.length;
+  page.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, eventLog: { total: 61, escalated: 1, rows: later } } }, cues: [] });
+  timers.fire(900);
+  assert.equal(announced(), '');
+  assert.equal(view(page, 'pane-j3').all().filter((node) => node.classList.contains('ev') && node.animations.length > 0).length, 0);
+  assert.ok(page.doc.animations.length >= settled);
+});
+
+test('a battle rhythm event whose repeat the host does not know shows "repeat not shown" and no date', async () => {
+  const { model } = await sectionsModel();
+  const events = [{ id: 'BR-9', title: 'Targeting board', kind: 'board', next: '', minutes: 60, repeat: 'repeat not shown', chair: 'chief of staff', inputs: '', outputs: '' }];
+  const page = await runPage({ reduced: true, state: { workspace: 'j3', wsTabs: { j3: 'rhythm' } } });
+  page.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, rhythm: { events } } }, cues: [] });
+  const item = view(page, 'j3panel-rhythm').all().find((node) => node.classList.contains('calev'))!;
+  assert.match(item.textContent, /^No dateTargeting board/);
+  assert.match(item.textContent, /repeat not shown/);
+  assert.doesNotMatch(item.textContent, /NaN|Invalid/);
+  assert.equal(item.getAttribute('aria-label'), 'Targeting board, no date: repeat not shown, chaired by chief of staff');
+});

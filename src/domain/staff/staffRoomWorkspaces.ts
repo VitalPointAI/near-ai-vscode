@@ -15,6 +15,7 @@ import type { OrderProductFacts } from './orders';
 import { writerOf } from './ownership';
 import type { StaffWriter } from './ownership';
 import type { ProductView } from './readModels';
+import { BATTLE_RHYTHM_REPEAT_DAYS } from './registers';
 import type { RegisterRow } from './registers';
 import { productTitle } from './productTitle';
 import { PHASE_SIDE } from './wargame';
@@ -145,7 +146,7 @@ export interface J3Workspace extends SectionCommon {
   /** The fragmentary order in the profile's words: FRAGORD under the US profiles, Frag O under NATO/Canadian. */
   readonly frago: string;
   readonly fragos: readonly WorkspaceProduct[];
-  readonly rhythm: { readonly events: ReadonlyArray<{ readonly id: string; readonly title: string; readonly kind: string; readonly next: string; readonly minutes: number; readonly repeat: string; readonly chair: string; readonly inputs: string; readonly outputs: string }>; readonly product?: WorkspaceProduct };
+  readonly rhythm: { readonly events: ReadonlyArray<{ readonly id: string; readonly title: string; readonly kind: string; /** ISO time, or empty when the repeat is not shown. */ readonly next: string; readonly minutes: number; readonly repeat: string; readonly chair: string; readonly inputs: string; readonly outputs: string }>; readonly product?: WorkspaceProduct };
   readonly suspenses: ReadonlyArray<{ readonly id: string; readonly from: string; readonly to: string; readonly question: string; readonly suspense: string; readonly overdue: boolean }>;
 }
 
@@ -412,12 +413,22 @@ function buildJ5(ctx: WorkspaceContext): J5Workspace {
 
 const SYNC_ORDER = ['enemy', 'collection', 'manoeuvre', 'fires', 'sustainment', 'information', 'protection', 'decision-points'];
 
-/** The next time a battle rhythm event happens at or after `now`, or undefined when a one-off event is over. */
-export function nextOccurrence(start: string, repeat: string, now: number): number | undefined {
+/** The words shown for an event whose repeat the room does not know, in place of a date it would get wrong. */
+export const REPEAT_NOT_SHOWN = 'repeat not shown';
+
+/**
+ * The next time a battle rhythm event happens at or after `now`, or undefined when a one-off event is over (or its start is not a time). A repeat the
+ * battle rhythm does not define (BATTLE_RHYTHM_REPEAT_DAYS) gives 'unknown' once its first start has passed: the room says "repeat not shown" rather than
+ * guess a date.
+ */
+export function nextOccurrence(start: string, repeat: string, now: number): number | 'unknown' | undefined {
   const first = Date.parse(start);
   if (!Number.isFinite(first)) return undefined;
-  if (first >= now || repeat === 'once') return first >= now ? first : undefined;
-  const step = repeat === 'weekly' ? 7 * 86_400_000 : 86_400_000;
+  if (first >= now) return first;
+  const days = Object.prototype.hasOwnProperty.call(BATTLE_RHYTHM_REPEAT_DAYS, repeat) ? BATTLE_RHYTHM_REPEAT_DAYS[repeat as keyof typeof BATTLE_RHYTHM_REPEAT_DAYS] : undefined;
+  if (days === undefined) return 'unknown';
+  if (days === 0) return undefined;
+  const step = days * 86_400_000;
   return first + Math.ceil((now - first) / step) * step;
 }
 
@@ -453,9 +464,11 @@ function buildJ3(ctx: WorkspaceContext): J3Workspace {
   const fragos = ctx.registry.filter((view) => /(^|-)frago(-|$)/.test(view.product) || (view.section === 'j3' && view.kind === 'order')).slice(0, CAP.products).map((view) => productOf(ctx, view));
   const rhythmView = find(ctx, 'battle-rhythm-calendar');
   const rhythm = {
+    // An event whose repeat the room does not know comes last, with no date and "repeat not shown" (next is then empty).
     events: (registers.battleRhythm ?? []).map((row) => ({ row, next: nextOccurrence(String(row.start), String(row.repeat), ctx.now) }))
-      .filter((entry): entry is { row: RegisterRow; next: number } => entry.next !== undefined).sort((a, b) => a.next - b.next).slice(0, 40)
-      .map(({ row, next }) => ({ id: str(row, 'id', 40), title: str(row, 'title', 160), kind: str(row, 'kind', 20), next: new Date(next).toISOString(), minutes: Number(row.durationMinutes) || 0, repeat: str(row, 'repeat', 10), chair: str(row, 'chair', 80), inputs: str(row, 'inputs', 300), outputs: str(row, 'outputs', 300) })),
+      .filter((entry): entry is { row: RegisterRow; next: number | 'unknown' } => entry.next !== undefined)
+      .sort((a, b) => (a.next === 'unknown' ? Number.MAX_SAFE_INTEGER : a.next) - (b.next === 'unknown' ? Number.MAX_SAFE_INTEGER : b.next)).slice(0, 40)
+      .map(({ row, next }) => ({ id: str(row, 'id', 40), title: str(row, 'title', 160), kind: str(row, 'kind', 20), next: next === 'unknown' ? '' : new Date(next).toISOString(), minutes: Number(row.durationMinutes) || 0, repeat: next === 'unknown' ? REPEAT_NOT_SHOWN : str(row, 'repeat', 10), chair: str(row, 'chair', 80), inputs: str(row, 'inputs', 300), outputs: str(row, 'outputs', 300) })),
     ...(rhythmView ? { product: productOf(ctx, rhythmView) } : {})
   };
   const suspenses = (registers.rfi ?? []).filter((row) => row.status === 'open').sort((a, b) => String(a.suspense).localeCompare(String(b.suspense))).slice(0, CAP.rows)
