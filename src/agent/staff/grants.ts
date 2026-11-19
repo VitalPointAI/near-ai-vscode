@@ -27,3 +27,15 @@ export const STAFF_LINT_TOOL = 'mcp__staff-products__lint';
  */
 export const INTEL_WORKBENCH = 'mcp__intel-workbench__*';
 export const GUARD_SCAN = 'mcp__guard-scan__*';
+/** The observations server (research note 11, section 5): slices, tracks, changes, corroboration, timelines and feed status, read-only. */
+export const OBSERVATIONS = 'mcp__observations__*';
+
+/**
+ * The members that read the feeds, by section (research note 11, 1 and 6.1): the J2's integrator and the analysts who build the threat picture, warning
+ * and collection from observations; the J3's integrator, current operations and the liaison that owns the maritime and air pictures. Gates, the red cell,
+ * the targeting analyst and the requirements manager work from products, not from raw observations, and are not granted it.
+ */
+export const OBSERVATIONS_GRANTEES: Readonly<Record<'j2' | 'j3', readonly string[]>> = {
+  j2: ['j2-chief', 's2-lead', 'collection-manager', 'jipoe-analyst', 'geoint-analyst', 'osint-analyst', 'threat-analyst', 'watch-officer', 'warning-analyst', 'ipb-analyst'],
+  j3: ['j3-director', 's3-lead', 'joc-chief', 'current-ops-chief', 'watch-officer', 'airspace-maritime-liaison']
+};

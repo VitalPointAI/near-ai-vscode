@@ -267,8 +267,11 @@ the **NEAR AI: Staff** commands approve, reject or release a product. It then
 offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. The built-in staff servers (`mcp:staff-products`,
-`mcp:guard-scan`, `mcp:intel-workbench`) are listed on the Tools page and in
-the Team Studio tool picker; only a staff team's run gets them.
+`mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`) are listed on the
+Tools page and in the Team Studio tool picker; only a staff team's run gets
+them. `mcp:observations` reads the feed reports kept in
+`.planning/staff/observations/` (not committed), shows only what your
+clearances cover, and says when a limit cut an answer.
 
 For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
 exercise scenario into `.planning/staff/scenario/` for the team to read. The

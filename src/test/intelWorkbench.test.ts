@@ -140,7 +140,8 @@ test('a staff team\'s run is given the workbench beside the catalog; a plain tea
   const plain = runTools({});
   const chat = runTools(undefined);
   assert.deepEqual(staff.filter((name) => name.startsWith('mcp__intel-workbench__')), [...INTEL_WORKBENCH_TOOL_NAMES]);
-  assert.deepEqual(staff.filter((name) => !name.startsWith('mcp__intel-workbench__')), plain, 'everything else is unchanged');
+  // The observations server is the other built-in local server a staff run gets (src/test/staffObservations.test.ts covers it).
+  assert.deepEqual(staff.filter((name) => !name.startsWith('mcp__intel-workbench__') && !name.startsWith('mcp__observations__')), plain, 'everything else is unchanged');
   assert.equal(plain.some((name) => name.startsWith('mcp__intel-workbench__')), false);
   assert.equal(chat.some((name) => name.startsWith('mcp__intel-workbench__')), false);
   const catalog = new Set(builtInTools().map((tool) => tool.name));
