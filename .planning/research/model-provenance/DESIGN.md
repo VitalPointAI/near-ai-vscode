@@ -523,13 +523,13 @@ States: `received`, `tier-derived`, `passport-resolved`, `checked`, `allowed`, `
 
 ### 13.2 Owner confirmations
 
-| # | Item | Recommendation |
-|---|---|---|
-| O1 | `report` mode for installs with no organization policy until a Western private model exists (8.5) | Accept: it keeps today's chats working and makes the gap visible |
-| O2 | Staff projects at T3, and T2 when marked an exercise on fictional data (6.1) | Accept |
-| O3 | Maximum risk acceptance length of 90 days | Accept |
-| O4 | Who may sign a T1 acceptance before Phase 71's credentials (a device-key signature with the self-declared notice, as for staff approvals) | Accept |
-| O5 | Shipped Western passports at T2, never T3 | Accept |
+| # | Item | Recommendation | Decision |
+|---|---|---|---|
+| O1 | `report` mode for installs with no organization policy until a Western private model exists (8.5) | Accept: it keeps today's chats working and makes the gap visible | Accepted (owner, 2026-11-19) |
+| O2 | Staff projects at T3, and T2 when marked an exercise on fictional data (6.1) | Accept | Accepted (owner, 2026-11-19) |
+| O3 | Maximum risk acceptance length of 90 days | Accept | Accepted (owner, 2026-11-19) |
+| O4 | Who may sign a T1 acceptance before Phase 71's credentials (a device-key signature with the self-declared notice, as for staff approvals) | Accept | Accepted (owner, 2026-11-19) |
+| O5 | Shipped Western passports at T2, never T3 | Accept | Accepted (owner, 2026-11-19) |
 
 ### 13.3 Risks
 
