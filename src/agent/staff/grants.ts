@@ -35,6 +35,8 @@ export const GUARD_SCAN = 'mcp__guard-scan__*';
  * director.
  */
 export const ORDERS = 'mcp__orders__*';
+/** FRAGO drafting only (owner, 2026-11-19): the current operations chief drafts an immediate FRAGO against a released order when a drill or CCIR match needs one. */
+export const ORDERS_FRAGO = 'mcp__orders__frago';
 /** The battle-rhythm server (design 10, 6.2; WP-ORD): the calendar, its .ics export and import, and the suspenses. Granted whole to its writer. */
 export const BATTLE_RHYTHM = 'mcp__battle-rhythm__*';
 /** The battle rhythm, read only: the members the design gives `mcp:battle-rhythm` (read). */

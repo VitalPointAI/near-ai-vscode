@@ -324,7 +324,8 @@ test('orders and battle-rhythm are built-in staff servers, granted where the des
     for (const rendering of template.renderings()) for (const member of parseTeam(rendering.team, '/p/t.md').members) if (member.tools.some((tool) => tool.startsWith(`mcp__${server}__`) || tool === `mcp:${server}`)) out.add(member.name);
     return out;
   };
-  assert.deepEqual([...grantees('j3-operations', ORDERS_SERVER)].sort(), ['future-ops-planner', 'j3-director', 's3-lead']);
+  // The current operations chief drafts an immediate FRAGO (owner, 2026-11-19): the frago tool only, not the whole server.
+  assert.deepEqual([...grantees('j3-operations', ORDERS_SERVER)].sort(), ['current-ops-chief', 'future-ops-planner', 'j3-director', 'joc-chief', 's3-lead']);
   assert.deepEqual([...grantees('j3-operations', BATTLE_RHYTHM_SERVER)].sort(), ['current-ops-chief', 'information-planner', 'joc-chief']);
   assert.deepEqual([...grantees('j5-plans', ORDERS_SERVER)].sort(), ['lead-planner', 'plans-writer']);
   assert.deepEqual([...grantees('j4-logistics', ORDERS_SERVER)].sort(), ['j4-director', 's4-lead']);
@@ -346,4 +347,10 @@ test('orders and battle-rhythm are built-in staff servers, granted where the des
   assert.equal(await write.forbidden!({ rows: [] } as never, asMember('joc-chief')), undefined);
   const frago = run.find((tool) => tool.name === 'mcp__orders__frago')!;
   assert.match(String(await frago.forbidden!({} as never, asMember('watch-officer'))), /mcp:orders/);
+  const joc = team.members.find((member) => member.name === 'joc-chief')!;
+  assert.ok(joc.tools.includes('mcp__orders__frago') && !joc.tools.includes('mcp__orders__*'), 'the JOC chief gets FRAGO drafting only');
+  assert.match(joc.instructions, /mcp__orders__frago/);
+  assert.equal(await frago.forbidden!({} as never, asMember('joc-chief')), undefined, 'the JOC chief may draft a FRAGO');
+  const assemble = run.find((tool) => tool.name === 'mcp__orders__assemble')!;
+  assert.match(String(await assemble.forbidden!({} as never, asMember('joc-chief'))), /mcp:orders/, 'but not assemble an order');
 });

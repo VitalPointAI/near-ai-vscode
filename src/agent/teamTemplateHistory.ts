@@ -984,7 +984,7 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
   'j3-operations': [
     {
       version: 1,
-      definition: '5a9c648a99c357d8',
+      definition: '26e4cea4b58cebb5',
       guidance: [
         '72c995694f3baa60',
         '3be6d6fee96d4cee',
@@ -1056,7 +1056,11 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'a10be0a8b0714a51',
           '6de22d3e41a66e39',
           '72bd9c3a06faf04f',
-          '6299dde8bd9e2e8a'
+          '6299dde8bd9e2e8a',
+          '6f74a713e6f9c0d9',
+          '39eafa060378e1d9',
+          '5bedb9d896ec1611',
+          'a56a5749d2e2a821'
         ],
         'watch-officer': [
           'f2f3913f65648b6b',
@@ -1197,7 +1201,10 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           '7b3facbcf13d162a',
           '650425e456c80978',
           'f6742ea484806fba',
-          'be2c63904830d167'
+          'be2c63904830d167',
+          '4d333a0077885154',
+          'b5254d1c79a83701',
+          'a66421b9dd0e731e'
         ],
         'information-cyber-space-planner': [
           'c9e8a7fe1f3f647e',

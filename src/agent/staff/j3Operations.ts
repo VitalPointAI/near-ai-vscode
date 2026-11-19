@@ -30,7 +30,7 @@ import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
 import {
-  BATTLE_RHYTHM, BATTLE_RHYTHM_READ, COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, ORDERS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL,
+  BATTLE_RHYTHM, BATTLE_RHYTHM_READ, COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, ORDERS, ORDERS_FRAGO, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL,
   STAFF_WARGAME_TOOL, staffProductTools
 } from './grants';
 
@@ -219,7 +219,7 @@ function currentOpsChief(ctx: Context): J3Member {
     `Job: you run current operations in the ${lowerFirst(ctx.centre)}${tactical ? `, with ${CURRENT_OPERATIONS_BODIES.tacticalDuties}` : ''}. You own the operations layer of the COP and merge the other sections' layers into the published picture (the plans layer never merges into it). You keep the event log, give the shift brief, run battle drills from their checklists, and keep the battle rhythm calendar when no chief of staff team is present.`,
     'Event log: the watch officer has no Write; it proposes entries with the register tool to the event-log register. Merge them in order, check each against the CCIR register and the DSM triggers, and escalate a match at once: tell the lead, mark the entry escalated, and name the decision point and the person who decides. Interpretation is yours, never the watch\'s.',
     `Feed layers (friendly positions, and the air and maritime pictures from the liaison) are views, not products: you set which channels and grades the friendly positions layer shows, and nobody writes a feed layer by hand.`,
-    `Immediate changes: when a battle drill or a CCIR match needs a change within the current operations horizon, draft an immediate ${ctx.frago} with the changes only. ${fragoPath(ctx)}`,
+    `Immediate changes: when a battle drill or a CCIR match needs a change within the current operations horizon, draft an immediate ${ctx.frago} with the changes only, with mcp__orders__frago, which refuses an order a person has not released (it writes the draft and registers it for you). ${fragoPath(ctx, true)}`,
     'Battle rhythm: keep a calendar of the shift change brief, the commander\'s update brief, the operations synchronization meeting, the targeting working group and board, the information and assessment working groups, and the logistics synchronization meeting, each with its inputs, outputs and owner. Names vary by headquarters; the person edits the defaults in .planning/staff/skills/execution-loop.md. Keep it with the battle-rhythm tools: mcp__battle-rhythm__events_write for the events, ics_export to write the .ics file a person opens in a calendar program, ics_import to read one a person put in the project, and suspense for the open RFIs and the decisions waiting on a person.',
     owns('cop', 'cop-operations-layer', 'event-log', 'shift-brief', 'battle-drill-checklists', 'battle-rhythm-calendar', 'immediate-frago'),
     `Boundary: "Your output is the current picture and drafts; ${ctx.frago} release is a person's."`,
@@ -227,7 +227,7 @@ function currentOpsChief(ctx: Context): J3Member {
   ].join('\n\n');
   return {
     name: ctx.currentOps, role: tactical ? `Current operations cell chief (${lowerFirst(CURRENT_OPERATIONS_BODIES.tactical.split(',')[0])})` : `Current operations: ${lowerFirst(ctx.centre)}, COP, event log, battle rhythm`,
-    model: 'standard', tools: [...READ, ...WRITE, ...OWNER, COP_MAP, BATTLE_RHYTHM], reportsTo: ctx.director, instructions: text
+    model: 'standard', tools: [...READ, ...WRITE, ...OWNER, COP_MAP, BATTLE_RHYTHM, ORDERS_FRAGO], reportsTo: ctx.director, instructions: text
   };
 }
 
