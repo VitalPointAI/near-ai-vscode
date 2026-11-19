@@ -61,6 +61,22 @@ test('the geofence: inside the box passes, outside is held, and with no box ever
   assert.deepEqual(grid, { rules: ['grid-reference'], hold: false }, 'a grid reference is for the guard to check by hand');
 });
 
+test('two-decimal coordinates are held and geofenced too; money, versions, percentages and short measures are not coordinates', () => {
+  // Review round 5 of drop 1: "45.42, -75.69" (about a kilometre) was never held.
+  assert.deepEqual(scan('Rally point 45.42, -75.69').rules, ['coordinates-without-box']);
+  assert.deepEqual(scan('Rally point 45.42, -75.69', { config: BOX }).rules, ['outside-exercise-box']);
+  assert.deepEqual(scan('Rally point 51.10, 11.10', { config: BOX }).rules, [], 'inside the box');
+  assert.deepEqual(scan('Rally point 51.10, 13.10', { config: BOX }).rules, ['outside-exercise-box']);
+  assert.deepEqual(coordinatesIn('at 45.42 N, 75.69 W')[0].point, [-75.69, 45.42]);
+  assert.deepEqual(coordinatesIn('at -5.25, 39.10')[0].point, [39.1, -5.25], 'a minus sign reads as a position');
+  for (const text of [
+    'Costs 1.25, 3.50 and 12.5', 'Prices $12.50, $13.75 and €10.20, 11.40', 'Upgrade from v10.12, v11.04', 'Shares 45.42%, 54.58%', 'Version 1.2.3, 4.5.6',
+    'Ratios 1.25, 2.50', 'Totals 1,245.42, 2,075.69', 'Rates 0.25, 0.50', 'Release 10.12.04, 11.04.01'
+  ]) assert.deepEqual(scan(text).rules, [], text);
+  assert.equal(coordinatesIn('Not a pair: 45.42 then 75.69').length, 0, 'a pair is separated by a comma');
+  assert.equal(coordinatesIn('Out of range 95.42, 75.69').length, 0, 'a latitude past 90 is no position');
+});
+
 test('names on the real-entity list are held, as whole words in any case', () => {
   const config: GuardConfig = { realEntities: ['Fort Example', 'Northfield Base'] };
   assert.deepEqual(scan('Moves to fort example by night', { config }).rules, ['real-entity']);
