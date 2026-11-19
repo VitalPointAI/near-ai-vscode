@@ -925,7 +925,8 @@
         ...(state.terrain === 'on' && B && B.frame.terrain ? { terrain: { source: 'terrain-dem', exaggeration: state.exaggeration } } : {}),
         sources: {
           ...basemapSources(B), grid: { type: 'geojson', data: empty },
-          landcover: { type: 'geojson', data: B && B.frame.landcover ? B.frame.landcover : empty },
+          // Empty at first: the page fetches the land cover itself (loadLandcover), never MapLibre's worker (see there).
+          landcover: { type: 'geojson', data: empty },
           ground: { type: 'geojson', data: empty }, cop: { type: 'geojson', data: empty }, terrain: { type: 'geojson', data: empty }, weather: { type: 'geojson', data: empty },
           // Point symbols on their own source, clustered: at the frame view, units that would cover each other draw as one stacked symbol with a count.
           units: {
@@ -1124,9 +1125,30 @@
       }
     });
 
-    const ready = new Promise(function (resolve) { map.once('load', resolve); });
+    // Ready once the style is in: the sources and layers exist, so the picture can be drawn and the camera moved. Never wait for 'load', which
+    // waits for every source and tile: one tile or file that never answers (a webview resource asked for from a worker, D-48 of 0.4.35) held
+    // 'load' for ever, and the picture, the first view and Globe and Map with it.
+    const ready = new Promise(function (resolve) { map.once('style.load', resolve); map.once('load', resolve); });
+
+    /**
+     * The pack's land cover (the host's checked address), fetched by the page and handed to MapLibre as data. Never as an address: MapLibre fetches
+     * a GeoJSON address from its web worker, and a webview serves its resources to the page only, so the worker's request never answered.
+     */
+    let landcoverFrom;
+    function loadLandcover() {
+      const B = state.basemap;
+      const from = B && B.frame && typeof B.frame.landcover === 'string' ? B.frame.landcover : undefined;
+      if (!from || from === landcoverFrom || typeof fetch !== 'function') return;
+      landcoverFrom = from;
+      Promise.resolve().then(function () { return fetch(from); }).then(function (response) { return response.json(); }).then(function (json) {
+        if (landcoverFrom !== from || !json || json.type !== 'FeatureCollection' || !Array.isArray(json.features)) return;
+        ready.then(function () { const source = map.getSource('landcover'); if (source) source.setData(json); });
+      }, function () { state.errors = (state.errors || []).concat(['The land cover could not be read.']).slice(-5); });
+    }
+    loadLandcover();
     let framed = false;
     let lastGrid;
+    let onMap = { units: 0, shapes: 0, frame: false };
     let shown = [];
 
     function markHighlight() {
@@ -1148,7 +1170,8 @@
           const env = environmentNow(state);
           map.getSource('terrain').setData({ type: 'FeatureCollection', features: env.terrain });
           map.getSource('weather').setData({ type: 'FeatureCollection', features: env.weather });
-          map.getSource('frame').setData({ type: 'FeatureCollection', features: frameFeatures(picture) });
+          const frameDrawn = frameFeatures(picture);
+          map.getSource('frame').setData({ type: 'FeatureCollection', features: frameDrawn });
           const gridKey = JSON.stringify(picture.frame || null);
           if (gridKey !== lastGrid && map.getSource('grid')) { lastGrid = gridKey; map.getSource('grid').setData({ type: 'FeatureCollection', features: gridFeatures(picture.frame) }); }
           shown = drawn(state);
@@ -1163,6 +1186,8 @@
           ensureImages(points);
           map.getSource('units').setData({ type: 'FeatureCollection', features: points });
           map.getSource('cop').setData({ type: 'FeatureCollection', features: others });
+          // What the map itself was given (not what the picture holds), for the real-window check.
+          onMap = { units: points.length, shapes: others.length, frame: frameDrawn.length > 0 };
           markHighlight();
           if (!framed && picture.frame) {
             framed = true;
@@ -1242,7 +1267,7 @@
           for (const id of Object.keys(sources)) if (!map.getSource(id)) map.addSource(id, sources[id]);
           const vis = function (id) { return { visibility: groundVisibility(state)[id] !== false ? 'visible' : 'none' }; };
           for (const before of ['graticule', 'land', 'env-hillshade']) for (const layer of rasterLayers(B, before, vis)) if (!map.getLayer(layer.id)) map.addLayer(layer, before);
-          if (B.frame.landcover && map.getSource('landcover')) map.getSource('landcover').setData(B.frame.landcover);
+          loadLandcover();
           renderer.applyGround();
           renderer.applyTerrain(false);
         });
@@ -1250,6 +1275,13 @@
       /** Moves the camera to a view (centre, zoom, pitch, bearing), a flight when motion is allowed. */
       look: function (camera, instant) { ready.then(function () { if (instant && typeof map.jumpTo === 'function') map.jumpTo(camera); else move(camera); }); },
       pitch: function () { return typeof map.getPitch === 'function' ? map.getPitch() : undefined; },
+      /** What the map was last given to draw, and where it looks (centre, zoom), for the real-window check. */
+      onMap: function () { return Object.assign({}, onMap); },
+      camera: function () {
+        if (typeof map.getCenter !== 'function' || typeof map.getZoom !== 'function') return undefined;
+        const c = map.getCenter();
+        return { centre: [c.lng, c.lat], zoom: map.getZoom() };
+      },
       /** A PNG data URL of the map as drawn, taken in the next frame (the drawing buffer is only readable while it is drawn). For the e2e check. */
       snapshot: function () {
         return ready.then(function () {
@@ -1534,7 +1566,10 @@
     view.inspect = function (lngLat) {
       const B = state.basemap;
       const tiles = B ? { globe: Boolean(B.globe.imagery), frame: Boolean(B.frame.imagery), terrain: Boolean(B.frame.terrain), problems: B.problems } : undefined;
-      return Object.assign(view.state(), { renderer: view.renderer, height: lngLat ? renderer.terrainHeight(lngLat) : undefined, tiles: tiles, errors: (state.errors || []).slice(), pitch: renderer.pitch ? renderer.pitch() : undefined });
+      const camera = renderer.camera ? renderer.camera() : undefined;
+      const b = state.picture && state.picture.frame ? state.picture.frame.bounds : undefined;
+      if (camera && b) camera.inFrame = camera.centre[0] >= b[0] && camera.centre[0] <= b[2] && camera.centre[1] >= b[1] && camera.centre[1] <= b[3];
+      return Object.assign(view.state(), { renderer: view.renderer, height: lngLat ? renderer.terrainHeight(lngLat) : undefined, tiles: tiles, errors: (state.errors || []).slice(), pitch: renderer.pitch ? renderer.pitch() : undefined, onMap: renderer.onMap ? renderer.onMap() : undefined, camera: camera });
     };
     if (options.clock && options.clock.subscribe) unsubscribe = options.clock.subscribe(function (t) { view.setTime(t); });
     // Never wait forever for the map: after 15 seconds the view is returned and the map finishes loading behind it. When the map is ready first, the

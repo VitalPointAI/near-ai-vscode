@@ -104,7 +104,7 @@
             if (!cop) return undefined;
             try {
               const g = cop.inspect([-123.4208, -49.0655]);
-              return { base: g.base, terrain: g.terrain, terrainReason: g.terrainReason, projection: g.projection, renderer: g.renderer, height: g.height, tiles: g.tiles, errors: g.errors, pitch: g.pitch };
+              return { base: g.base, terrain: g.terrain, terrainReason: g.terrainReason, projection: g.projection, renderer: g.renderer, height: g.height, tiles: g.tiles, errors: g.errors, pitch: g.pitch, onMap: g.onMap, camera: g.camera };
             } catch (error) { return { base: '', terrain: '', terrainReason: String(error && error.message), projection: '', renderer: '' }; }
           })(),
           origins: [...new Set((performance.getEntriesByType ? performance.getEntriesByType('resource') : []).map((entry) => { try { return new URL(entry.name).origin; } catch (error) { return 'unparsed'; } }))].slice(0, 20),

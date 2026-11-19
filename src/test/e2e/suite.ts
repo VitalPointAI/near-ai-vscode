@@ -420,6 +420,34 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }],
+    ['once a scenario is loaded the Staff Room\'s map draws its units and the exercise frame, and the first view is the exercise area, not the world (D-48 of 0.4.35)', async () => {
+      // The scenario the test above wrote is still in the project; the real host sends the room its picture and its checked tile addresses. In 0.4.35
+      // a land cover file MapLibre's worker could not fetch held the map's load, so the room showed the whole world with no units and no frame.
+      samples.delete('staff-room');
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
+        await waitForProbe('staff-room');
+        await editorAreaOnly();
+        let report = await probe('staff-room');
+        for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
+        if (!report.map?.maplibre) {
+          // Without WebGL (the default run) the room draws its 2D map from the host's model; NEAR_AI_E2E_WEBGL=1 checks the COP map.
+          console.log(`[real-window] COP map picture check skipped: ${report.map?.note || 'no WebGL'}`);
+          assert.match(report.map?.note ?? '', /2D map/);
+          return;
+        }
+        const drawn = (r: typeof report) => Boolean(r.map?.ground?.onMap && r.map.ground.onMap.units > 0 && r.map.ground.onMap.frame && r.map.ground.camera?.inFrame);
+        for (let waited = 0; waited < 40_000 && !drawn(report); waited += 500) { await pause(500); report = await probe('staff-room'); }
+        const ground = report.map?.ground;
+        const seen = JSON.stringify({ onMap: ground?.onMap, camera: ground?.camera, errors: ground?.errors, tiles: ground?.tiles });
+        assert.ok((ground?.onMap?.units ?? 0) > 0, `the map was given the scenario's units (${seen})`);
+        assert.equal(ground?.onMap?.frame, true, `the map draws the exercise frame (${seen})`);
+        assert.equal(ground?.camera?.inFrame, true, `the first view looks at the exercise area (${seen})`);
+        assert.ok((ground?.camera?.zoom ?? 0) >= 5, `the first view is the exercise area, not the world (${seen})`);
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      }
+    }],
     ['the Staff Room\'s map draws the bundled imagery and 3D terrain from the extension alone: no policy violation, no other origin, Harrow Ridge stands over 150 m (real-window check)', async () => {
       // The scenario the test above wrote is still in the project; the real host sends the room with its checked tile addresses.
       const extension = vscode.extensions.getExtension(EXTENSION_ID)!;

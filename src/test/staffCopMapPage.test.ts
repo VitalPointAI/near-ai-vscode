@@ -87,7 +87,12 @@ class FakeMap {
   public projections: unknown[] = [];
   public data = new Map<string, unknown>();
   private handlers = new Map<string, Array<(event?: unknown) => void>>();
-  public constructor(public readonly options: { style: unknown }) { FakeMap.last = this; setTimeout(() => this.fire('load'), 0); }
+  /**
+   * The events the map fires once it starts. A real map fires 'style.load' when its style is in and 'load' only when every source and tile has
+   * answered; `['style.load']` is a map with a file that never answers (D-48 of 0.4.35).
+   */
+  public static starts: readonly string[] = ['style.load', 'load'];
+  public constructor(public readonly options: { style: unknown }) { FakeMap.last = this; const starts = FakeMap.starts; setTimeout(() => { for (const type of starts) this.fire(type); }, 0); }
   public addControl(): void {}
   public on(type: string, handler: (event?: unknown) => void): void { this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]); }
   public once(type: string, handler: (event?: unknown) => void): void { this.on(type, handler); }
@@ -142,7 +147,7 @@ function pageClearTimeout(handle: ReturnType<typeof setTimeout> | undefined): vo
   clearTimeout(handle);
 }
 
-function page(options: { reduced?: boolean } = {}): Page {
+function page(options: { reduced?: boolean; files?: Readonly<Record<string, unknown>> } = {}): Page {
   requests = [];
   liveTimers.clear();
   focused = undefined;
@@ -161,7 +166,8 @@ function page(options: { reduced?: boolean } = {}): Page {
   const context: Record<string, unknown> = {
     window, document, console, setTimeout: pageSetTimeout, clearTimeout: pageClearTimeout, Date, Math, JSON, Promise, Map, Object, Array, Number, String, Boolean, Error, isFinite,
     matchMedia: (query: string) => ({ matches: Boolean(options.reduced) && /reduce/.test(query) }),
-    fetch: record('fetch'),
+    // A file the test serves (the page's own fetch of an extension resource) answers with its JSON; anything else is offline.
+    fetch: (url: unknown) => options.files && String(url) in options.files ? (requests.push(`fetch ${String(url)}`), Promise.resolve({ json: () => Promise.resolve(options.files![String(url)]) })) : record('fetch')(url),
     XMLHttpRequest: class { public open(_method: string, url: string) { requests.push(`xhr ${url}`); } public send() {} },
     WebSocket: class { public constructor(url: string) { requests.push(`websocket ${url}`); } },
     EventSource: class { public constructor(url: string) { requests.push(`eventsource ${url}`); } },
@@ -830,6 +836,42 @@ test('the SVG map offers Topographic and Plain, says why there is no Imagery or 
   assert.equal(bad('https://x/"onload=1/{z}/{x}/{y}.webp'), undefined, 'no quote');
   assert.equal(bad('https://x/tiles.webp'), undefined, 'a template');
   assert.equal(check({ frame: { terrain: { ...BASEMAP.frame.terrain, minzoom: 12, maxzoom: 3 } } }).frame.terrain, undefined, 'sane zooms');
+});
+
+test('the picture is drawn, the first view fits the frame and Globe and Map work when a source never finishes loading (only the style is in)', async () => {
+  // D-48 of 0.4.35: in a real webview the land cover's address, fetched by MapLibre's worker, never answered, so 'load' never came and the room's
+  // map stayed on the whole world with no units and no frame. The page now draws once the style is in, and fetches the land cover itself.
+  const LANDCOVER = 'https://file+.vscode-resource.vscode-cdn.net/ext/resources/staff/env/iron-lantern/landcover.geojson';
+  const cover = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[-123.5, -49], [-123.4, -48.9]] }, properties: { kind: 'road' } }] };
+  const { window, container } = page({ files: { [LANDCOVER]: cover } });
+  FakeMap.starts = ['style.load'];
+  try {
+    const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
+      renderer: 'auto', projection: 'map', still: true, motion: () => false, basemap: { ...BASEMAP, frame: { ...BASEMAP.frame, landcover: LANDCOVER } },
+      libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class {} }, renderer: 'ANGLE (NVIDIA GeForce)' }
+    });
+    assert.equal(view.renderer, 'maplibre');
+    const map = FakeMap.last!;
+    const sources = (map.options.style as { sources: Record<string, { type: string; data?: unknown }> }).sources;
+    for (const [id, source] of Object.entries(sources)) if (source.type === 'geojson') assert.equal(typeof source.data, 'object', `the ${id} source is data, never an address MapLibre's worker would fetch`);
+    const scenario = starter();
+    view.setPicture(buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [] }));
+    await wait();
+    assert.ok((map.data.get('units') as { features: unknown[] }).features.length > 0, 'the units are drawn');
+    assert.ok((map.data.get('frame') as { features: unknown[] }).features.length > 0, 'the exercise frame is drawn');
+    assert.ok(map.camera.some(([kind]) => kind === 'fitBounds'), 'the first view fits the exercise area');
+    const seen = view.inspect();
+    assert.ok(seen.onMap.units > 0 && seen.onMap.frame, 'the real-window check reads what the map itself was given');
+    assert.equal(seen.camera.inFrame, true);
+    same(map.data.get('landcover'), cover, 'the page fetched the land cover itself and gave MapLibre the data');
+    assert.ok(requests.includes(`fetch ${LANDCOVER}`));
+    view.setProjection('globe');
+    await wait(10);
+    view.setProjection('map');
+    await wait(10);
+    same(map.projections, [{ type: 'globe' }, { type: 'mercator' }], 'Globe and Map still move the map');
+    view.destroy();
+  } finally { FakeMap.starts = ['style.load', 'load']; }
 });
 
 // Last in the file on purpose: node:test runs each file in its own process, so this reads the peak resident memory of every test above.
