@@ -8,7 +8,7 @@ import { applyUpdate, createFoldDoc, createLocalDoc, decodeSnapshot, docText, lo
 import { GENESIS_PREV } from '../domain/replica/entry';
 import type { EntryBody, EntryHeader } from '../domain/replica/entry';
 import { MAX_UPDATE_BYTES } from '../domain/replica/kindSchemas/doc';
-import { REPLICA_KINDS, SCHEMA_PENDING, validateData } from '../domain/replica/kinds';
+import { REPLICA_KINDS, SCHEMA_PENDING, kindFamily, validateData } from '../domain/replica/kinds';
 import { ROSTER_ROLE_PATTERNS, staticRosterView } from '../domain/replica/rosterView';
 import { verifyEntry } from '../domain/replica/verify';
 import { createWorld, fixedSigner, updateData } from './helpers/replicaWorld';
@@ -16,13 +16,15 @@ import type { Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
 
-test('every known kind except the doc kinds fails closed with the schema-pending reason', () => {
+// The 30-02 stubs refused every non-doc kind with SCHEMA_PENDING. Wave 3 (30-04, 30-05, 30-06, 30-08) replaced every stub with its
+// family schema, so the contract is now: an empty data object still fails closed for every non-doc kind, with a real schema reason.
+test('every known kind except the doc kinds fails closed on empty data with its family schema reason, not the pending stub', () => {
   const others = REPLICA_KINDS.filter((kind) => !kind.startsWith('doc.'));
   assert.equal(others.length, 47);
   for (const kind of others) {
     const check = validateData(kind, {});
     assert.equal(check.ok, false, kind);
-    if (!check.ok) assert.ok(check.reason.startsWith(SCHEMA_PENDING), `${kind}: ${check.reason}`);
+    if (!check.ok) assert.ok(!check.reason.startsWith(SCHEMA_PENDING), `${kind}: ${check.reason}`);
   }
 });
 
@@ -55,15 +57,16 @@ test('valid doc.client and doc.update samples still validate, and the invalid on
   assert.equal(validateData('doc.update', { product: PRODUCT, update: huge }).ok, false);
 });
 
-test('validateData dispatches each family to its own file: the reason names the family of the kind', () => {
+test('validateData dispatches each family to its own file: every sample kind belongs to its family and gets a real schema refusal', () => {
   const expected: Array<[string, string]> = [
     ['project.genesis', 'project'], ['member.admit', 'roster'], ['product.create', 'versions'], ['register.row', 'registers'],
     ['watch.define', 'watches'], ['run.start', 'runs'], ['obs.segment', 'obs'], ['digest.report', 'integrity']
   ];
   for (const [kind, family] of expected) {
+    assert.equal(kindFamily(kind), family, kind);
     const check = validateData(kind, {});
-    assert.equal(check.ok, false);
-    if (!check.ok) assert.equal(check.reason, `${SCHEMA_PENDING}: ${family} ${kind}`);
+    assert.equal(check.ok, false, kind);
+    if (!check.ok) assert.ok(!check.reason.startsWith(SCHEMA_PENDING), `${kind}: ${check.reason}`);
   }
   assert.equal(validateData('no.such.kind', {}).ok, false);
 });
