@@ -28,3 +28,19 @@ export const GUARD_SCAN = 'mcp__guard-scan__*';
 /** The orders and battle rhythm servers (design 10, 6.2; WP-ORD). A member's instructions never depend on them: without them it writes Markdown products. */
 export const ORDERS = 'mcp__orders__*';
 export const BATTLE_RHYTHM = 'mcp__battle-rhythm__*';
+
+/**
+ * The logistics server (design 10, 6.2; built by WP-LOG), granted by tool family so each J4 member gets only what its job needs. WP-LOG names its tools
+ * with these prefixes: `calc_` (the consumption calculator: user-entered factors times the force list times days, the formula shown on every result,
+ * each result kept as a record at .planning/staff/calculator/<id>.json and cited in a product as calc:<id>), `logstat_` (submit, validate, consolidate,
+ * diff against the forecast), `movement_` (notional movement tables, lift feasibility, local routing) and `readiness_` (readiness import). It ships no
+ * government factor tables.
+ */
+export const LOGISTICS_SERVER = 'logistics';
+export const LOGISTICS_CALCULATOR = 'mcp__logistics__calc*';
+export const LOGISTICS_LOGSTAT = 'mcp__logistics__logstat*';
+export const LOGISTICS_LOGSTAT_READ = 'mcp__logistics__logstat_read';
+export const LOGISTICS_LOGSTAT_VALIDATE = 'mcp__logistics__logstat_validate';
+export const LOGISTICS_MOVEMENT = 'mcp__logistics__movement*';
+export const LOGISTICS_MOVEMENT_READ = 'mcp__logistics__movement_read';
+export const LOGISTICS_READINESS = 'mcp__logistics__readiness*';

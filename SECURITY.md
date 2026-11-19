@@ -823,6 +823,14 @@ list from both files, so a name in either is held in products and refused in
 scenarios. Staff templates are for exercise and fictional
 data only: labels are not accreditation.
 
+In a J4 logistics team, guard-scan holds any number that has no calculator
+record on its line (`calc:<id>`), or a record id with no file in
+`.planning/staff/calculator/`. That check proves a record file exists, not that
+the calculator wrote it: the folder is ordinary project files, which a member
+with Write could also write, so review changes to it as you would any product.
+The LOGSTAT analyst has no file tools at all, so it can flag a report but
+never change one.
+
 ### Exercise scenarios for staff teams
 
 **NEAR AI: Load Staff Exercise Scenario** reads the starter scenario shipped

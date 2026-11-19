@@ -34,7 +34,8 @@ export const RELEASE_GUARD_VARIANTS: Readonly<Partial<Record<StaffSectionId, rea
     'J3 variant: orders drafts (FRAGOs included) go through the release state machine like every product. Fires and targeting products carry both review marks, `' + STAFF_MARKERS.legalReview + '` and the commander or delegate review mark; hold any that lacks one.'
   ],
   j4: [
-    'J4 variant: every number in a J4 product traces to a calculator record (a calc:<id> on the same line). guard-scan holds a number without one; do not argue it away.'
+    'J4 variant: every number in a J4 product traces to a calculator record (a calc:<id> on the same line). guard-scan holds a number without one; do not argue it away.',
+    'Hold any product that holds what looks like real stock levels, real unit holdings or real contract values, or a health services product without `' + STAFF_MARKERS.surgeonReview + '`.'
   ],
   j5: [
     'J5 variant: COA products and the comparison keep dissent (from the red team and others) beside the recommendation, unedited. Hold a product that drops or softens recorded dissent, or that names a COA as chosen.'

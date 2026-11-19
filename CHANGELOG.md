@@ -2,14 +2,14 @@
 
 ## Unreleased
 
-**Military staff teams.** Set up a J2 intelligence, J5 plans or J3 operations staff team for your project in your
+**Military staff teams.** Set up a J2 intelligence, J5 plans, J3 operations or J4 logistics staff team for your project in your
 staff profile's own terms (US Joint, US Army MDMP or NATO/Canadian), load a fictional exercise
 scenario, and let the members draft in parallel while every product passes the team's gates and a
 named person makes every decision. Staff teams are private, unclassified and for exercise and
 fictional data only; labels are not accreditation, and no member has a persona name or a rank.
 
 - **Set Up a Staff Team.** **NEAR AI: Set Up a Staff Team**, also a button in Team Studio, asks
-  for the section (J2, J5 or J3), the doctrine profile, the level, the nation (NATO/Canadian), the
+  for the section (J2, J5, J3 or J4), the doctrine profile, the level, the nation (NATO/Canadian), the
   planning type and the section's own options, then shows the roster: the person who decides, and
   each member with its role and who it reports to. It saves the private team to your teams, writes
   PROFILE.md and the section's skills under `.planning/staff/`, the staff settings in the
@@ -46,6 +46,23 @@ fictional data only; labels are not accreditation, and no member has a persona n
   officer has no Write: it proposes event-log rows and reports CCIR triggers through the staff
   tools, and the extension refuses its file writes. Two skills: running estimate and execution
   loop.
+- **J4 logistics team.** 12 members at strategic and operational level and 9 at tactical level:
+  the section's integrator, a logistics plans officer, the logistics current-operations chief
+  (always named in full, for example the JTF J4 JLOC), one planner for each core logistics
+  function (supply, maintenance, deployment and distribution, engineering, operational contract
+  support, health services, and logistic services with mortuary affairs), a LOGSTAT analyst with
+  no file tools, so it can flag a report but never fix one, and the release guard. Support planning
+  starts at step 1, alongside force planning, with the functional planners working at once. Every
+  number in a J4 product cites the calculator record that produced it (`calc:<id>` on the same
+  line, from factors a person entered); the release guard cannot clear a product with a number
+  that has no record, or a record that does not exist. The words follow the profile: Annex D
+  (Logistics) under US Joint, Annex F (Sustainment) under US Army, Annex R (Logistics) with
+  movements in Annex S under NATO/Canadian, and combat service support (CSS) at Canadian tactical
+  level. With the Canadian nation setting the team also writes the weekly logistics and ammunition
+  reports for the CJOC J4 desk alongside the LOGSTAT. One skill: LOGSTAT definitions, with the
+  plausibility rules, colour bands you set, your profile's classes of supply and the calculator
+  record convention. Health products carry SURGEON REVIEW REQUIRED, and mortuary affairs products
+  hold no personal data.
 - **Products with a person's decision.** Products live in `.planning/staff/products/<section>/`
   and move from draft through the gates to a person's decision, recorded in a signed, chained
   ledger in `.planning/staff/ledger/`. This computer keeps a signed record of the ledger's head
