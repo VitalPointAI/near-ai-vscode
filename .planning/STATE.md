@@ -2,21 +2,21 @@
 gsd_state_version: "1.0"
 milestone: v0.5.0
 milestone_name: Governed agent platform
-current_plan: 12
+current_plan: 16
 status: executing
-stopped_at: Phase 70 executed (part 4e merged as
-last_updated: "2026-11-19T22:20:05.000Z"
-state_head: 50b66ce41602fb73ba7fdf8d557dbc5425c45505
+stopped_at: Phase 70 executed (part 4e merged as #95); 0.4.33 release in preparation; data platform adopted as the plan of record on docs/data-platform-research (PR #97)
+last_updated: "2026-11-18T23:30:00.000Z"
+state_head: 40a3182d32b057cb0afad76a4cc002590245202d
 progress:
-  total_phases: 9
+  total_phases: 21
   completed_phases: 1
-  total_plans: 55
+  total_plans: 95
   completed_plans: 67
-  percent: 11
+  percent: 5
 last_activity: 2026-11-19
 current_phase: 70
-current_phase_name: replication-contract-and-co-editing-core
-last_activity_desc: "Owner decisions on the data platform (2026-11-18); its milestone (Phases 85-101) adopted after Stage 1 and before the relay, which became its own milestone; milestone versions renumbered to start at 0.5; Phase 70 part 4e merged (#95)"
+current_phase_name: "Capability vocabulary, manifests and one gate with a floor"
+last_activity_desc: Owner decisions on the data platform (2026-11-18); its milestone (Phases 85-101) adopted after Stage 1 and before the relay, which became its own milestone; milestone versions renumbered to start at 0.5; Phase 70 part 4e merged (#95)
 ---
 
 # Project State
@@ -29,13 +29,13 @@ Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2
 0.4.x line: 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29: the enforced floor #74, Build a team's new start #75, the gate answers #76); 0.4.23 to 0.4.28 published before it (see CHANGELOG). Phase 27 shipped as 0.4.20; its record closed 2026-11-17 after the owner's host check passed (27-UAT test 8 with 0.4.29). Then 0.4.30 to 0.4.32 went out through release PRs #84, #88 and #93; 0.4.33 is in preparation on `release/0.4.33`.
 Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the disposition of the former v0.6.0 Team Mode branch plan). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. All 15 plans are executed and both PRs are merged: PR 1 (#59, 1cbcb9b) and PR 2 (#61, plans 09-15, f2ca69e), so Phase 69 is complete.
 Phase 70 (Capability vocabulary, manifests and one gate with a floor): planned 2026-11-16 on `docs/phase-70-plan`, 32 plans in 32 waves (28 as first planned) for 18 requirements (GATE-01..07, OFFL-01..03, CLAS-01..08). After the planning PR: PR 1 plans 01-07 (`feat/gate-vocabulary`, pure domain, no behaviour change), PR 2 plans 08-15 (`feat/gate-shadow`, manifests, signed policy file, gate on every path in shadow; an invalid policy file fails closed), PR 3 plans 16-18 (`feat/gate-floor`, the floor with SECURITY.md and README), part 4 as five PRs after the 2026-11-17 replan (D-49; 32 plans in 32 waves): 4a plans 19 and 28a (`feat/gate-route-check`, route check and records), 4b plans 20, 21 and 28b (`feat/gate-labels`, labels and clearance checks), 4c plans 22, 23, 24 and 28c (`feat/gate-session-mark`, the chat's label routes its requests), 4d plans 25 and 28d (`feat/gate-attested-routing`, connection binding and the after-answer check), 4e plans 26, 27 and 28e (`feat/gate-trust-badge`, the trust badge and the phase close-out). The owner ratified CLAS-05 on 2026-11-16 with a pre-send check that the connection is bound to the enclave (else local-only) and added CLAS-08, the trust badge on every cloud answer. Decisions D-01..D-48 were made on the owner's behalf in 70-CONTEXT.md with their undo cost; D-48: no release carrying PR 2 is published before the owner's fresh code-server check. Plans 70-01 to 70-07 are executed on `feat/gate-vocabulary`: PR 1 (#66, nothing in the extension calls the new code yet) is merged on main (cbe4ef3). Plans 70-08 to 70-14 are executed on `feat/gate-shadow` (base cbe4ef3); plan 70-15 rebased onto main (9d7ea56) and opened PR 2 as #70. Done since: PR 2 merged as #70, PR 3 as #74 (floor enforced) with the owner's answers in #76; 0.4.28 and 0.4.29 shipped after the D-48 check passed. Part 4 was replanned on 2026-11-17 into five PRs (4a to 4e, D-49 to D-56; 32 plans in all, 70-28 split into 70-28a to 70-28e). Since then every part 4 PR is merged (4a #81, 4b #85, 4c #87, 4d #89, 4e #95, the last on 2026-11-18), so all 32 plans are executed; the verification record (70-VERIFICATION.md) is still to write.
-Current Plan: 12
-Total Plans in Phase: 12
+Current Plan: 19
+Total Plans in Phase: 32
 Plans 69-01 to 69-08 done on `feat/team-core-on-main` (the pure domain core, then the git transport, runner and identities, then the event log, team.json, audit mirror and Enable, all from ae5e9e1, byte-identical, 97, 96 and 82 tests green; then fix 3e11c0e on main's file lock under the team's own lock name, `team.json` refusing sync's branch names, and the team-versus-sync isolation test; then the VS Code adapters, `registerTeamMode` in activation with solo parity, and fix 9e49bc5; then the `nearAi.team.preview` setting with the Command Palette gating and the `nearAi.team.active` context key, the plain-words Phase 60 strings with the command titles kept, and the manifest and import boundary tests; then one Ed25519 identity per person per install, the D-22 rollback rule and the Team Mode e2e in a real window); plan 69-08 pushed the branch and opened PR #59 into main (all eight required checks and the agent review green; merged by the owner as 1cbcb9b); plans 69-09 to 69-15 (device.rotated, the payload signer and key status, the local signed key history, the identity writing its own history, rotation and revocation of the person's key, the disposition record of the former v0.6.0 Team Mode branch plan, then the rebase onto main, the gate and PR 2) are done on `feat/team-signed-payloads`.
 Identity design (owner, 2026-11-15; PROJECT.md Platform direction decisions 8-13): standard DIDs, verifiable credentials for authority, clearance, roles and compartments, classification labels with routing by label, delegation that narrows at every link, and roots-only anchoring. Folded into Phase 70 (CLAS-01..07), Phase 71 (now "Identities, credentials and delegation that only narrows": VCRD-01..07, DLGT-08, a research step first) and the L4 and L5 outlines. Phase 69 is unchanged.
 Agent authorization on NEAR (owner, 2026-11-16; PROJECT.md Platform direction decisions 14-17; evidence `.planning/research/platform-direction/agent-authz-prior-art.md`): NEAR function-call access keys only for agents' and nodes' on-chain calls (option (a)), off-chain capabilities in private credentials checked by Phase 73's broker (option (b), a public key registry with hashed names, declined), the automatic trust badge check, and the designs borrowed from prior art. Folded into Phase 73 (CRED-08, research flags 4 and 5), a Phase 71 research flag (9), the Phase 70 trust badge plans (now the owner's decision) and L4 (draft ANCH-09..15 and research flags 8-13).
 
-Phase 30 (Replication contract and co-editing core, staff collaboration drop A in 0.4.x, MUS-01..03): planned 2026-11-19 on `plan/phase-30`, 12 plans in 5 waves (1 {01}; 2 {02, 03}; 3 {04 to 09}; 4 {10, 11}; 5 {12}), led by a tracer (30-02). Decisions D-01..D-37 in 30-CONTEXT.md from the multi-user sync design and the owner's decisions of 2026-11-19 (lib0 pinned at 0.2.119 by the two-week rule). MUS-01..MUS-12 added to REQUIREMENTS.md. Plan checker passed. Next: `/gsd-execute-phase 30` on `feat/replica-contract`.
+Phase 30 (Replication contract and co-editing core; staff collaboration drop A, shipping in 0.4.x; MUS-01..03): planned and executed 2026-11-19 on `plan/phase-30` (PR #125), 12 plans in 5 waves led by a tracer (30-02). Full suite 4754 pass, 0 fail, 8 skipped; replica tests 281 pass. Verification is human_needed, not failing: four owner decisions are open in 30-UAT.md and are prerequisites of Phase 31 in ROADMAP.md (bind Yjs client ids to writers, late joiners starting from a signed checkpoint, a byte limit before any update is decoded, and scheduling review warnings WR-01..09). After merging, the main checkout needs `npm ci` (Yjs and lib0 are new devDependencies).
 
 Next, in order (owner, 2026-11-18):
 1. Finish 0.4.33: the release PR from `release/0.4.33` (Phase 70's part 4e, the trust badge, and the new team's icon fix), then publishing once the owner approves that version.

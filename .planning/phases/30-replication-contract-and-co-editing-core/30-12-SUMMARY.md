@@ -129,6 +129,8 @@ Every Phase 30 reducer is registered, convergence is proven over every family wi
 | `git diff bfdde162 -- package.json` | only the `lib0` 0.2.119 and `yjs` 13.6.33 devDependency lines |
 | SECURITY.md | read against what was built (bundle path `vendor/yjs/yjs.cjs`, manifest `scripts/crdt-vendor.json`, the three checks, "does not use it yet"); every fact matches, so it is unchanged; 0 em-dashes, "replica core" appears 3 times |
 
+After the code review fixes (CR-01..CR-03) the suite was run once more: 4762 tests, 4754 pass, 0 fail, 8 skipped. That is the figure in the PR description.
+
 The 8 skipped tests are environmental and unrelated to Phase 30: two ripgrep tests (not installed here), one Open-GSD runtime test (`NEAR_GSD_HOME` unset) and five live NEAR AI tests (`NEAR_AI_API_KEY` unset).
 
 Time of the new property file under the 4 GB wrapper: about 17 to 30 seconds for all five tests (the 200-seed property alone 17 to 30 s depending on machine load), under the 60 s guide, so no seed was cut. The 200-seed property printed these counts on the last run: 200 worlds, 4568 applied entries, 37 worlds with a released version, 18 with a cloned device, 24 with a tampered entry, 19 with a future-dated one, 37 with held entries, 122 with refused entries, 182 with kept entries, 72 with two streams, widest world 5 writers. The test asserts floors on these so a quiet generator cannot pass.

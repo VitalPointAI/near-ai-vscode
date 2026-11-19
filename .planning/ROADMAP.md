@@ -180,6 +180,12 @@ Plans:
 **Goal**: A staff lead turns a staff project multi-user, invites people by signed file, and decides what each person may see, and today's ledgers move into the new format without loss.
 **Depends on**: Phase 30
 **Requirements**: MUS-04, MUS-05, MUS-06
+**Prerequisites from Phase 30** (open owner decisions in 30-UAT.md; each must be settled and built before any transport or store feeds the fold):
+  1. Bind each Yjs client id to its writer through the signed roster, so no admitted writer can take another's attribution by registering the id first.
+  2. Late joiners: decide whether a writer's log may start from a signed checkpoint that records each writer's head (this may add a lamport per head to the checkpoint format, so decide before Phase 32 signs checkpoints).
+  3. Refuse an update above a byte limit before Yjs decodes it, and decode in a memory-capped worker (a 4 MiB hostile update used about 1.16 GB in a probe).
+  4. Schedule the Phase 30 review warnings WR-01..WR-09, recommended as the first plan of this phase.
+
 **Success Criteria** (what must be TRUE):
   1. Genesis and a single-writer, linear roster (members, seats, decision roles, declared clearances, devices, the hub member) exist; two lead devices changing the roster offline produce a visible split that only the lead's choice resolves. (MUS-04)
   2. Invite and join work by file alone (signed invitation, signed join request with the one-time secret, six-word safety code, admission), and expired, reused or wrong-secret invitations are refused. (MUS-04)
