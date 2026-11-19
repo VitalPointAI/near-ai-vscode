@@ -331,6 +331,14 @@ follows the J2 demo script and holds when the mid-demo report lands.
 resumes, steps and sets the speed: 0.5x, 1x, 2x or 4x. The inject script that
 drives it, `resources/staff/scenarios/iron-lantern.sim.jsonl`, and the message
 shapes are described in `src/domain/staff/sim/`.
+**NEAR AI: Staff: Import Feed File...** brings your own GeoJSON, KML, Cursor
+on Target, RSS, Atom or AIS (NMEA) file into the project's observation store.
+The file is read in a separate process, never in the editor; you see how many
+reports it holds, the format, the label and the time span, and what is held
+back because it lies outside the exercise frame, and nothing is written until
+you choose Import. Imported reports name the file they came from, and
+importing the same file twice adds nothing.
+
 **NEAR AI: Open Staff Room** (also **Open the Staff Room** in Team Studio once
 you have a staff team) shows the project's staff run as a war room. The process
 rail across the top shows each step in your profile's own words and whether it

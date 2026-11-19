@@ -940,6 +940,29 @@ person who started the simulation is recorded as the person who approved its
 feeds. The partner feed is never taken in this way. Stopping the simulation
 pauses its feeds in the store.
 
+**Feed file import** (**NEAR AI: Staff: Import Feed File...**) is run by a
+person only: no agent tool runs a VS Code command, and a new import feed must
+be approved by the named person who confirms the import. The chosen file is
+never parsed in the extension host. The extension starts a separate Node
+process for it with a 256 MB heap limit, an environment that holds nothing
+but the switch that makes the editor's runtime act as Node (no tokens, keys
+or proxy settings), no standard input or output, and a 20 second limit after
+which the process is killed. Files over 16 MB are refused before any process
+starts, and text that is not UTF-8 is refused. The parser opens no network
+connection, writes no file and returns only plain records, which the extension
+checks again one by one. XML (CoT, KML, RSS, Atom) is read by the extension's
+own small reader, not a third-party parser: a document type declaration is
+refused outright, only the five predefined XML entities and character
+references are read, nothing external is ever resolved, and nesting depth,
+element and attribute counts and value lengths are capped. This choice
+follows the entity expansion flaws found in popular JavaScript XML parsers in
+2026. AIS sentences are accepted only with a correct NMEA checksum. Every
+imported report is placed inside the scenario's exercise frame or held back
+(with no frame loaded, everything with a position is held), is stamped with a
+label inside the staff template ceiling (never below its feed's), is never
+marked simulated, and enters the observation store through its one append
+path, which checks the label and stamp again. No dependency was added.
+
 ### COP map
 
 The `cop-map` server (`mcp:cop-map`) is built in and runs inside the

@@ -385,6 +385,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.importFeedFile",
+        "title": "Staff: Import Feed File...",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"

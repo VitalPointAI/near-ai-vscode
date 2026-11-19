@@ -1,0 +1,14 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "id": "obs-1", "geometry": { "type": "Point", "coordinates": [-123.5, -48.95] }, "properties": { "name": "EXERCISE: dug-in position", "time": "2027-05-19T06:10:00Z", "description": "Fictional observation for the importer tests." } },
+    { "type": "Feature", "geometry": { "type": "LineString", "coordinates": [[-123.6, -49.0], [-123.5, -49.05], [-123.4, -49.1]] }, "properties": { "name": "EXERCISE: track of a patrol" } },
+    { "type": "Feature", "geometry": { "type": "Polygon", "coordinates": [[[-123.7, -49.2], [-123.6, -49.2], [-123.6, -49.1], [-123.7, -49.1], [-123.7, -49.2]]] }, "properties": { "name": "EXERCISE: imagery footprint", "timestamp": "2027-05-19T07:00:00Z" } },
+    { "type": "Feature", "geometry": { "type": "MultiPoint", "coordinates": [[-123.2, -48.8], [-123.21, -48.81]] }, "properties": { "title": "EXERCISE: two contacts" } },
+    { "type": "Feature", "geometry": { "type": "Point", "coordinates": [-126.0, -47.0] }, "properties": { "name": "EXERCISE: outside the frame, over empty ocean" } },
+    { "type": "Feature", "geometry": { "type": "Point", "coordinates": [-123.5, 200] }, "properties": { "name": "malformed latitude" } },
+    { "type": "Feature", "geometry": { "type": "Polygon", "coordinates": [[[-123.7, -49.2], [-123.6, -49.2], [-123.6, -49.1], [-123.7, -49.1]]] }, "properties": { "name": "ring that does not close" } },
+    { "type": "Feature", "geometry": { "type": "Point", "coordinates": ["-123.5", "-48.9"] }, "properties": { "name": "coordinates as strings" } },
+    { "type": "Feature", "geometry": null, "properties": { "name": "no geometry" } }
+  ]
+}

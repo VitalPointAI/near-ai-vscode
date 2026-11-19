@@ -27,6 +27,7 @@ import type { Geography } from './geography';
 import { ENV_LAYERS } from './environment';
 import type { PictureEnvironment } from './environment';
 import { feedLayer } from '../obs/layers';
+import { cotSidc } from '../obs/codecs/cot';
 
 /** The most feed tracks the map draws at once (measured; see the header). */
 export const COP_TRACK_BUDGET = 2000;
@@ -253,7 +254,7 @@ function feedFeatures(feeds: PictureFeeds, limit: number): { features: PictureFe
         features.push({
           type: 'Feature', id: `${layer}/${row.obsId}`, geometry: { type: 'Point', coordinates: [row.geometry.coordinates[0], row.geometry.coordinates[1]] },
           properties: {
-            layer, kind: 'track', name, ...(row.observedType && /^[0-9]{20}$/.test(row.observedType) ? { sidc: row.observedType } : {}),
+            layer, kind: 'track', name, ...(feedTrackSidc(row, layer) ? { sidc: feedTrackSidc(row, layer) } : {}),
             vf: parseIsoMillis(row.validAt), ...(vt !== undefined ? { vt } : {}), ka: parseIsoMillis(row.knownAt), ...(sup ? { sup: parseIsoMillis(sup) } : {}),
             track: track.key, ...(track.view ? { state: track.view.state === 'closed' ? 'lost' : track.view.state } : {}), ...(row.simulated ? { sim: true } : {}), label,
             card: [
@@ -267,6 +268,19 @@ function feedFeatures(feeds: PictureFeeds, limit: number): { features: PictureFe
     }
   }
   return { features, perLayer, tracks: tracks.length, shown: kept.length };
+}
+
+/**
+ * The symbol a feed track is drawn with: a 20-digit code as the feed reported it, or a CoT atom type through the one CoT-to-symbol table
+ * (obs/codecs/cot.ts). A feed's affiliation is a claim, not the J2's assessment (note 11, 6.2), so a CoT track is drawn as a friend only on the friendly
+ * positions layer when it claims to be one, and as unknown everywhere else; the card still says what the feed claimed.
+ */
+export function feedTrackSidc(row: Pick<Observation, 'observedType' | 'claimedIdentity'>, layer: string): string | undefined {
+  const type = row.observedType;
+  if (!type) return undefined;
+  if (/^[0-9]{20}$/.test(type)) return type;
+  const friendly = layer === 'cop-feed-friendly' && (row.claimedIdentity === 'friend' || row.claimedIdentity === 'assumed-friend');
+  return cotSidc(type, friendly ? row.claimedIdentity! : 'unknown');
 }
 
 /** Builds the picture: product layers (with their writers), feed layers as views, the scenario for reference, the budget and the time span. */

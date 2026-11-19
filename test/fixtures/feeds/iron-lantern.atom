@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>EXERCISE SIM: Peninsula digest (fictional)</title>
+  <id>urn:exercise:peninsula-digest</id>
+  <updated>2027-05-19T07:00:00Z</updated>
+  <entry>
+    <title>EXERCISE SIM: Video shows vehicles near Ashby Ford</title>
+    <id>urn:exercise:peninsula-digest:1</id>
+    <link href="https://exercise.invalid/digest/1"/>
+    <updated>2027-05-19T06:50:00Z</updated>
+    <summary>EXERCISE SIM. Fictional video description.</summary>
+  </entry>
+  <entry>
+    <title>EXERCISE SIM: Power cut on the eastern edge</title>
+    <id>urn:exercise:peninsula-digest:2</id>
+    <published>2027-05-19T06:55:00Z</published>
+    <content type="html">&lt;p&gt;EXERCISE SIM. Fictional power cut.&lt;/p&gt;</content>
+  </entry>
+</feed>
