@@ -9,7 +9,9 @@ import type { FoldResult } from '../domain/replica/fold';
 import type { Dep, SealedEntry } from '../domain/replica/entry';
 import { checkpointOrder, kahnOrder, totalOrder } from '../domain/replica/order';
 import type { ProductTextOutput } from '../domain/replica/textFold';
-import { WORLD_AT, createWorld, rng } from './helpers/replicaWorld';
+import { docText } from '../domain/replica/doc';
+import { signCheckpoint } from '../domain/replica/checkpoint';
+import { WORLD_AT, createWorld, fixedSigner, rng, shuffled } from './helpers/replicaWorld';
 import type { Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
@@ -164,4 +166,95 @@ test('checkpointOrder puts each covered set in order first and the rest after, a
     ...totalOrder(entries.filter((entry) => !second.has(entry.hash)))
   ].map((entry) => entry.hash);
   assert.deepEqual(ordered, expected);
+});
+
+// A random co-editing history: 2 to 5 writers, at most 60 entries, each writer registers a client id and then inserts text into its own document,
+// citing random earlier entries as deps.
+function randomTextHistory(seed: number): { world: ReturnType<typeof createWorld>; all: Written[] } {
+  const random = rng(seed * 7919);
+  const names = ['A', 'B', 'C', 'D', 'E'].slice(0, 2 + random.int(4));
+  const world = createWorld({ members: names.map((name) => ({ member: `mbr-${name.toLowerCase()}${name.toLowerCase()}`, devices: [name] })) });
+  const editors = new Map(names.map((name, index) => [name, world.editor(name, PRODUCT, 100 + index)]));
+  const registered = new Set<string>();
+  const all: Written[] = [];
+  const total = 2 + random.int(59);
+  while (all.length < total) {
+    const name = random.pick(names);
+    const editor = editors.get(name) as NonNullable<ReturnType<typeof editors.get>>;
+    const deps: Written[] = [];
+    if (all.length > 0) {
+      for (let count = random.int(3); count > 0; count -= 1) {
+        const pick = random.pick(all);
+        if (!deps.includes(pick)) deps.push(pick);
+      }
+    }
+    if (!registered.has(name)) {
+      registered.add(name);
+      all.push(editor.register({ deps }));
+      continue;
+    }
+    const length = docText(editor.doc).length;
+    if (length > 3 && random.chance(0.3)) all.push(editor.remove(random.int(length - 1), 1 + random.int(2), { deps }));
+    else all.push(editor.insert(random.int(length + 1), `${name}${random.int(100)} `, { deps }));
+  }
+  return { world, all };
+}
+
+function deliver(state: ReturnType<typeof createFoldState>, items: readonly SealedEntry[], parts: number): ReturnType<typeof createFoldState> {
+  let current = state;
+  const size = Math.max(1, Math.ceil(items.length / parts));
+  for (let from = 0; from < items.length; from += size) current = addEntries(current, items.slice(from, from + size));
+  return current;
+}
+
+test('incremental folding equals the from-scratch fold for any delivery order, duplication and partition (200 seeds)', () => {
+  for (let seed = 1; seed <= 200; seed += 1) {
+    const { world, all } = randomTextHistory(seed);
+    const ctx = world.ctx();
+    const entries = sealed(...all);
+    const reference = foldEntries(entries, ctx);
+    assert.equal(reference.applied.length, all.length, `seed ${seed}: every entry applies`);
+    const random = rng(seed + 100000);
+    for (let round = 0; round < 4; round += 1) {
+      const order = shuffled(entries, random);
+      const duplicates = Array.from({ length: 5 }, () => random.pick(entries));
+      const delivery = shuffled([...order, ...duplicates], random);
+      const state = deliver(createFoldState(ctx), delivery, 4);
+      sameResult(state.result, reference, `seed ${seed} round ${round}`);
+    }
+    // Two partitions folded separately, then joined in either direction.
+    const split = shuffled(entries, random);
+    const middle = Math.floor(split.length / 2);
+    const left = deliver(createFoldState(ctx), split.slice(0, middle), 2);
+    const right = deliver(createFoldState(ctx), split.slice(middle), 2);
+    sameResult(deliver(left, split.slice(middle), 2).result, reference, `seed ${seed} left then right`);
+    sameResult(deliver(right, split.slice(0, middle), 2).result, reference, `seed ${seed} right then left`);
+  }
+});
+
+test('incremental folding under random checkpoints equals the from-scratch fold, including refolds from the prefix snapshot (100 seeds)', () => {
+  const hub = fixedSigner('hub-property');
+  for (let seed = 1; seed <= 100; seed += 1) {
+    const { world, all } = randomTextHistory(seed + 5000);
+    const ctx = world.ctx();
+    const entries = sealed(...all);
+    const random = rng(seed + 300000);
+    // The fold reads only the heads of a checkpoint (the count and tip are checked by recomputeCheckpoint, tested in replicaCheckpoint.test.ts).
+    const checkpoints = [random.pick(all), random.pick(all)].map((head) => signCheckpoint(hub.signer, {
+      type: 'checkpoint', v: 1, project: 'project-main', signer: hub.writer, rosterHead: world.rosterHash,
+      streams: [{ stream: head.stream, heads: [{ writer: head.writer, seq: head.seq, hash: head.hash }], count: 0, orderTip: '0'.repeat(64) }]
+    }));
+    const options = { checkpoints };
+    const reference = foldEntries(entries, ctx, options);
+    for (let round = 0; round < 4; round += 1) {
+      const delivery = shuffled([...entries, ...Array.from({ length: 3 }, () => random.pick(entries))], random);
+      const state = deliver(createFoldState(ctx, options), delivery, 5);
+      sameResult(state.result, reference, `seed ${seed} round ${round}`);
+      assert.equal(state.result.checkpoint, reference.checkpoint, `seed ${seed} round ${round}: checkpoint`);
+      assert.deepEqual(state.result.checkpointConflicts, reference.checkpointConflicts, `seed ${seed} round ${round}: conflicts`);
+    }
+    // The order is the same whatever order the checkpoints are listed in.
+    const flipped = foldEntries(entries, ctx, { checkpoints: [...checkpoints].reverse() });
+    assert.deepEqual(flipped.order, reference.order, `seed ${seed}: checkpoint list order`);
+  }
 });

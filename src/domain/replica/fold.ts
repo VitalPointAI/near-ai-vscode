@@ -110,7 +110,12 @@ interface Prepared {
   graph: CausalGraph;
   ordered: VerifiedEntry[];
   plan: CheckpointPlan;
+  // How many of the first entries in the order are final under the checkpoints.
+  prefix: number;
 }
+
+// The reducers' states as they stood at the end of the final prefix, kept so a late entry outside the prefix refolds from there.
+interface Snapshot { count: number; run: Run }
 
 export interface FoldState {
   readonly result: FoldResult;
@@ -121,6 +126,7 @@ export interface FoldState {
   readonly store: Store;
   readonly prepared: Prepared;
   readonly run: Run;
+  readonly snapshot: Snapshot | undefined;
 }
 
 function emptyStore(): Store {
@@ -227,7 +233,10 @@ function prepare(store: Store, ctx: ReplicaContext, options: FoldOptions): Prepa
   const chains = classifyChains(verified, ctx);
   const graph = buildCausalGraph(chains.admitted);
   const plan = planCheckpoints(options.checkpoints ?? [], graph);
-  return { verifyHeld, verifyRejected, chains, graph, ordered: checkpointOrder(chains.admitted, plan.sets), plan };
+  const ordered = checkpointOrder(chains.admitted, plan.sets);
+  let prefix = 0;
+  while (prefix < ordered.length && plan.final.has(ordered[prefix].hash)) prefix += 1;
+  return { verifyHeld, verifyRejected, chains, graph, ordered, plan, prefix };
 }
 
 function freshRun(reducers: readonly AnyReducer[]): Run {
@@ -256,10 +265,17 @@ function viewOf(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldView {
   };
 }
 
-// The one apply loop: each entry from `from` on lands in exactly one list.
-function applyFrom(run: Run, prepared: Prepared, ctx: ReplicaContext, from: number): void {
+// The one apply loop: each entry from `from` on lands in exactly one list. It returns the snapshot at the end of the final prefix: the one given when it
+// is for this prefix, otherwise a copy taken as the loop passes the end of the prefix, or none when the loop starts beyond it.
+function applyFrom(run: Run, prepared: Prepared, ctx: ReplicaContext, from: number, keep?: Snapshot): Snapshot | undefined {
   const view = viewOf(prepared, run, ctx);
+  const end = prepared.prefix;
+  let snapshot = keep !== undefined && keep.count === end ? keep : undefined;
+  const take = (): void => {
+    if (end > 0 && snapshot === undefined) snapshot = { count: end, run: cloneRun(run) };
+  };
   for (let index = from; index < prepared.ordered.length; index += 1) {
+    if (index === end) take();
     const entry = prepared.ordered[index];
     if (prepared.chains.excluded.has(entry.hash)) continue;
     const family = kindFamily(entry.body.kind);
@@ -282,6 +298,8 @@ function applyFrom(run: Run, prepared: Prepared, ctx: ReplicaContext, from: numb
     else if (outcome.status === 'refused') run.refused.push({ hash: entry.hash, reason: outcome.reason, family });
     else run.held.push({ hash: entry.hash, stream: entry.header.stream, writer: entry.header.writer, seq: entry.header.seq, stage: 'fold', reason: outcome.reason, family });
   }
+  if (end === prepared.ordered.length && from <= end) take();
+  return snapshot;
 }
 
 // Outputs, digests and the sorted lists.
@@ -338,11 +356,13 @@ export function createFoldState(ctx: ReplicaContext, options: FoldOptions = {}):
   const store = emptyStore();
   const prepared = prepare(store, ctx, options);
   const run = freshRun(options.reducers ?? DEFAULT_REDUCERS);
-  return { result: buildResult(prepared, run, ctx), refolds: 0, ctx, options, store, prepared, run };
+  return { result: buildResult(prepared, run, ctx), refolds: 0, ctx, options, store, prepared, run, snapshot: undefined };
 }
 
 // Does the order start with the old order, with the same entries skipped as quarantined?
 function extendsOrder(before: Prepared, after: Prepared): boolean {
+  // Nothing was applied yet, so there is nothing to start again.
+  if (before.ordered.length === 0) return true;
   if (after.ordered.length < before.ordered.length) return false;
   // What is final at apply time (isFinal) must not have changed under the entries already applied.
   if (before.plan.used !== after.plan.used || before.plan.final.size !== after.plan.final.size) return false;
@@ -352,6 +372,18 @@ function extendsOrder(before: Prepared, after: Prepared): boolean {
     if (before.chains.excluded.has(hash) !== after.chains.excluded.has(hash)) return false;
   }
   return true;
+}
+
+// How many leading entries are the same in both orders, with the same ones skipped as quarantined.
+function commonPrefix(before: Prepared, after: Prepared): number {
+  const limit = Math.min(before.ordered.length, after.ordered.length);
+  let index = 0;
+  while (index < limit) {
+    const hash = before.ordered[index].hash;
+    if (after.ordered[index].hash !== hash || before.chains.excluded.has(hash) !== after.chains.excluded.has(hash)) break;
+    index += 1;
+  }
+  return index;
 }
 
 // Folds more entries into a state and returns the next one; the state passed in is never changed. An entry already seen changes nothing. ctx
@@ -370,15 +402,18 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
 
   const prepared = prepare(store, next, state.options);
   let run: Run;
+  let snapshot: Snapshot | undefined;
   let refolds = state.refolds;
   if (extendsOrder(state.prepared, prepared)) {
     // Everything new sorts after what was applied: append.
     run = cloneRun(state.run);
-    applyFrom(run, prepared, next, state.prepared.ordered.length);
+    snapshot = applyFrom(run, prepared, next, state.prepared.ordered.length, state.snapshot);
   } else {
     refolds += 1;
-    run = freshRun(state.options.reducers ?? DEFAULT_REDUCERS);
-    applyFrom(run, prepared, next, 0);
+    const kept = state.snapshot !== undefined && state.snapshot.count <= commonPrefix(state.prepared, prepared) ? state.snapshot : undefined;
+    // Start again from the end of the final prefix when nothing at or before it changed, otherwise from the start.
+    run = kept === undefined ? freshRun(state.options.reducers ?? DEFAULT_REDUCERS) : cloneRun(kept.run);
+    snapshot = applyFrom(run, prepared, next, kept === undefined ? 0 : kept.count, kept);
   }
-  return { result: buildResult(prepared, run, next), refolds, ctx: next, options: state.options, store, prepared, run };
+  return { result: buildResult(prepared, run, next), refolds, ctx: next, options: state.options, store, prepared, run, snapshot };
 }

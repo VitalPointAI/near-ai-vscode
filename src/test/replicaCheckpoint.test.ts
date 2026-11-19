@@ -8,7 +8,7 @@ import type { Checkpoint, SignedCheckpoint } from '../domain/replica/checkpoint'
 import { buildCausalGraph } from '../domain/replica/causal';
 import { REPLICA_SIGNED_AT } from '../domain/replica/entry';
 import type { Dep, SealedEntry } from '../domain/replica/entry';
-import { foldEntries } from '../domain/replica/fold';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
 import { totalOrder } from '../domain/replica/order';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { ReplicaContext } from '../domain/replica/rosterView';
@@ -17,6 +17,10 @@ import { textReducer } from '../domain/replica/textFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
+import { entryHash, parseHeaderShape } from '../domain/replica/entry';
+import type { SealedBlob } from '../domain/replica/entry';
+import type { ReplicaTransport } from '../domain/replica/transport';
+import { createFakeTransport } from './helpers/replicaFakeTransport';
 import { createWorld, fixedSigner } from './helpers/replicaWorld';
 import type { World, Written } from './helpers/replicaWorld';
 
@@ -274,4 +278,108 @@ test('a later checkpoint whose ordered prefix does not reproduce the earlier tip
   assert.equal(checkpointConflict(broken, wider, everything)?.reason, 'not-nested');
   // Without enough entries nothing can be judged.
   assert.equal(checkpointConflict(early, dishonest, everything.slice(0, 1)), undefined);
+});
+
+// A replica for the transport tests: what it holds, and a sync that pushes everything it has and pulls what the other end has beyond its own heads.
+class Replica {
+  public readonly held = new Map<string, SealedEntry>();
+  public constructor(entries: readonly SealedEntry[]) {
+    for (const entry of entries) this.held.set(this.hashOf(entry), entry);
+  }
+  private hashOf(entry: SealedEntry): string {
+    const shape = parseHeaderShape(entry.header);
+    assert.ok(shape.ok);
+    return entryHash((shape as { header: SealedEntry['header'] }).header);
+  }
+  private heads(stream: string): Map<string, number> {
+    const result = new Map<string, number>();
+    for (const entry of this.held.values()) {
+      if (entry.header.stream === stream) result.set(entry.header.writer, Math.max(result.get(entry.header.writer) ?? -1, entry.header.seq));
+    }
+    return result;
+  }
+  public async sync(transport: ReplicaTransport, streams: readonly string[], blobs: Iterable<SealedBlob>): Promise<void> {
+    const pushed = await transport.push([...this.held.values()], [...blobs]);
+    assert.deepEqual(pushed.refused, []);
+    const remote = await transport.heads(streams);
+    const want = remote.streams.flatMap((item) => item.heads
+      .filter((head) => head.seq > (this.heads(item.stream).get(head.writer) ?? -1))
+      .map((head) => ({ stream: item.stream, writer: head.writer, fromSeq: (this.heads(item.stream).get(head.writer) ?? -1) + 1 })));
+    for await (const item of transport.pull(want)) {
+      if ('header' in item) this.held.set(this.hashOf(item), item);
+    }
+  }
+}
+
+test('two replicas that each hold their own writers entries exchange them through the in-memory transport and reach equal digests', async () => {
+  const s = setup();
+  const transport = createFakeTransport();
+  assert.deepEqual([transport.kind, transport.live, transport.enforcesAppend], ['bundle', false, false]);
+  const one = new Replica(sealed(...s.a.slice(0, 3)));
+  const two = new Replica(sealed(...s.c, ...s.a.slice(0, 1)));
+  const streams = [s.world.stream];
+  await one.sync(transport, streams, s.world.blobs.values());
+  await two.sync(transport, streams, s.world.blobs.values());
+  await one.sync(transport, streams, s.world.blobs.values());
+  assert.equal(one.held.size, 5);
+  assert.equal(two.held.size, one.held.size);
+  const foldOne = foldEntries([...one.held.values()], s.ctx);
+  const foldTwo = foldEntries([...two.held.values()], s.ctx);
+  assert.deepEqual(foldOne.digests, foldTwo.digests);
+  assert.deepEqual([foldOne.checkpoint, foldTwo.checkpoint], [null, null]);
+  assert.deepEqual(foldOne.digests, foldEntries(sealed(...s.a.slice(0, 3), ...s.c), s.ctx).digests);
+  // Pushing again changes nothing, and the transport reports the heads it holds.
+  assert.equal((await transport.push(sealed(s.a[0]), [])).accepted.length, 1);
+  assert.equal(transport.held().length, 5);
+  assert.equal(transport.heldBlobs().length, 0);
+  const heads = await transport.heads(streams);
+  assert.deepEqual(heads.streams[0].heads.map((head) => head.seq).sort(), [1, 2]);
+});
+
+// A reducer that counts how often each entry is applied, so a refold from the prefix snapshot can be told from one from the start.
+function counting(): { reducer: typeof textReducer; counts: Map<string, number> } {
+  const counts = new Map<string, number>();
+  const reducer = { ...textReducer, apply: (state: Parameters<typeof textReducer.apply>[0], entry: VerifiedEntry, view: FoldView) => {
+    counts.set(entry.hash, (counts.get(entry.hash) ?? 0) + 1);
+    return textReducer.apply(state, entry, view);
+  } };
+  return { reducer, counts };
+}
+
+test('a late concurrent entry outside the final prefix refolds from the prefix snapshot, and the prefix entries are not applied again', () => {
+  const s = setup();
+  const signed = sign(s, makeCheckpoint(s, s.a.slice(0, 3)));
+  const { reducer, counts } = counting();
+  const options = { checkpoints: [signed], reducers: [reducer] };
+  const first = addEntries(createFoldState(s.ctx, options), sealed(...s.a));
+  assert.equal(first.refolds, 0);
+  const second = addEntries(first, sealed(...s.c));
+  assert.equal(second.refolds, 1);
+  for (const item of s.a.slice(0, 3)) assert.equal(counts.get(item.hash), 1, 'a prefix entry is applied once');
+  assert.equal(counts.get(s.a[3].hash), 2, 'an entry after the prefix is applied again');
+  for (const item of s.c) assert.equal(counts.get(item.hash), 1);
+  const scratch = foldEntries(sealed(...s.a, ...s.c), s.ctx, { checkpoints: [signed] });
+  assert.deepEqual(second.result.families, scratch.families);
+  assert.deepEqual(second.result.digests, scratch.digests);
+  assert.deepEqual(second.result.order, scratch.order);
+  assert.equal(second.result.checkpoint, checkpointHash(signed));
+  // Without a checkpoint the same late entry refolds from the start: the first entry is applied twice.
+  const plain = counting();
+  const unchecked = addEntries(addEntries(createFoldState(s.ctx, { reducers: [plain.reducer] }), sealed(...s.a)), sealed(...s.c));
+  assert.equal(unchecked.refolds, 1);
+  assert.equal(plain.counts.get(s.a[0].hash), 2);
+  assert.deepEqual(unchecked.result.digests, foldEntries(sealed(...s.a, ...s.c), s.ctx).digests);
+});
+
+test('entries inside the final prefix that arrive late refold from the start and still equal the from-scratch fold', () => {
+  const s = setup();
+  const signed = sign(s, makeCheckpoint(s, s.a.slice(0, 3)));
+  const options = { checkpoints: [signed] };
+  const early = addEntries(createFoldState(s.ctx, options), sealed(s.a[0], s.a[1], s.a[3], s.c[0]));
+  const later = addEntries(early, sealed(s.a[2], s.c[1]));
+  const scratch = foldEntries(sealed(...s.a, ...s.c), s.ctx, options);
+  assert.deepEqual(later.result.order, scratch.order);
+  assert.deepEqual(later.result.families, scratch.families);
+  assert.deepEqual(later.result.digests, scratch.digests);
+  assert.equal(later.result.checkpoint, scratch.checkpoint);
 });
