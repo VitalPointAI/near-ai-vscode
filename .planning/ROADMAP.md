@@ -160,7 +160,7 @@ These phases ship in the 0.4.x line as two staff collaboration drops, like staff
   2. Two signed entries at one position by one writer produce a proof and quarantine that device on every machine, whatever the arrival order; a changed old entry breaks only that writer's chain. (MUS-01)
   3. Product text is a Yjs document carried in signed entries; random concurrent edits by persons and agents converge, every character's author is the writer that inserted it, and an update under another writer's client id is rejected. Yjs and `lib0` are vendored at pinned versions with licences (owner question 1). (MUS-02)
   4. Versions pin a content hash that must equal the text at the state vector named; concurrent conflicting decisions on one version fold to "contested" and only a fresh decision that has seen them settles it; no agent actor can approve, reject, release or supersede. (MUS-03)
-**Plans:** 11/12 plans executed in 5 waves (1 {01}; 2 {02, 03}; 3 {04, 05, 06, 07, 08, 09}; 4 {10, 11}; 5 {12})
+**Plans:** 12/12 plans executed in 5 waves (1 {01}; 2 {02, 03}; 3 {04, 05, 06, 07, 08, 09}; 4 {10, 11}; 5 {12})
 
 Plans:
 - [x] 30-01-PLAN.md — Vendor Yjs 13.6.33 and lib0 0.2.119 (automatic pin gate, hash manifest checked at compile, test and release), the staff-replica purpose, SECURITY.md
@@ -174,7 +174,7 @@ Plans:
 - [x] 30-09-PLAN.md — Total order against a topological reference, checkpoints with order tips, incremental fold and refold, transport types
 - [x] 30-10-PLAN.md — Decisions on versions through the fold: every 15.4 and 15.5 row, forbidden acts, attribution summary, source changed
 - [x] 30-11-PLAN.md — Canonical vectors for Phases 31 and 32 and the hub; the replica import boundary
-- [ ] 30-12-PLAN.md — Integration: default reducers, convergence properties across every family, full suite and release check once
+- [x] 30-12-PLAN.md — Integration: default reducers, convergence properties across every family, full suite and release check once
 
 ### Phase 31: Staff roster, cell keys and migration
 **Goal**: A staff lead turns a staff project multi-user, invites people by signed file, and decides what each person may see, and today's ledgers move into the new format without loss.
@@ -1365,7 +1365,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 27. Project state follows the project (0.4.20) | 36/36 | Complete: shipped in 0.4.20; owner host check passed | 2026-11-17 (released 2026-11-14) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
-| 30. Replication contract and co-editing core | 11/12 | In Progress (staff collaboration drop A) | - |
+| 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/TBD | Not started (drop A) | - |
 | 32. Your organization's sync hub | 0/TBD | Not started (drop A; may run beside Phase 31) | - |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
