@@ -10,38 +10,19 @@ import { openRaw } from '../domain/state/keys';
 import { orderTipOf, recomputeCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import { acceptableProof, proofHash, verifyProof } from '../domain/replica/equivocation';
 import { blobAad, entryHash, fromWire, headerAad, openBlob, sha256Hex, verifyHeader } from '../domain/replica/entry';
-import type { SealedBlob } from '../domain/replica/entry';
-import { staticRosterView } from '../domain/replica/rosterView';
-import type { ReplicaContext } from '../domain/replica/rosterView';
+import { foldEntries } from '../domain/replica/fold';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
 import { replicaVersionHash } from '../domain/replica/versions';
-import { buildVectors, vectorDifferences } from './helpers/replicaVectors';
+import { buildVectors, vectorContext, vectorDifferences } from './helpers/replicaVectors';
 import type { ReplicaVectors } from './helpers/replicaVectors';
-import { epochKey, streamId } from './helpers/replicaWorld';
+import { epochKey, shuffled, rng, streamId } from './helpers/replicaWorld';
 
 const FIXTURE = path.resolve(__dirname, '..', '..', 'test', 'fixtures', 'replica', 'vectors.json');
 const committed = (): ReplicaVectors => JSON.parse(readFileSync(FIXTURE, 'utf8')) as ReplicaVectors;
 const copy = (): ReplicaVectors => JSON.parse(JSON.stringify(committed())) as ReplicaVectors;
 
-// The reader's context, built from the vector labels and the fixture's public values only.
-function contextFor(vectors: ReplicaVectors): ReplicaContext {
-  const key = epochKey(vectors.epochKeys[0].label);
-  const stream = streamId(vectors.labels.stream);
-  const blobs = new Map<string, SealedBlob>(vectors.blobs.map((blob) => [blob.hash, { hash: blob.hash, bytes: blob.bytes }]));
-  return {
-    roster: staticRosterView({
-      rosters: [{
-        hash: vectors.roster.hash,
-        members: vectors.writers.map((writer, index) => ({ member: index === 0 ? 'writer-a' : 'writer-b', name: writer.label, roles: ['member'], devices: [{ writer: writer.writer, publicKey: writer.publicKey }] })),
-        checkpointSigners: [vectors.roster.checkpointSigner]
-      }]
-    }),
-    keys: (forStream, epoch) => (forStream === stream && epoch === 0 ? key : undefined),
-    blobs: (hash) => blobs.get(hash),
-    now: new Date('2026-11-19T12:00:00.000Z')
-  };
-}
+const contextFor = vectorContext;
 
 test('the committed vectors equal what the builder makes, and the builder is deterministic', () => {
   const built = buildVectors();
@@ -132,6 +113,24 @@ test('the version hash rows equal replicaVersionHash, and a CRLF text hashes lik
   assert.equal(new Set(vectors.versionHashes.map((row) => row.hash)).size, vectors.versionHashes.length);
 });
 
+test('the digests vector is the digest of each stream when the committed entries are folded with the default reducers, in any delivery order', () => {
+  const vectors = committed();
+  const ctx = contextFor(vectors);
+  const stream = streamId(vectors.labels.stream);
+  assert.deepEqual(Object.keys(vectors.digests), [stream]);
+  assert.match(vectors.digests[stream], /^[0-9a-f]{64}$/);
+  const entries = vectors.entries.map((entry) => ({ header: entry.header, body: entry.bodyWire }));
+  const result = foldEntries(entries, ctx);
+  assert.deepEqual([result.held, result.rejected, result.refused, result.kept, result.excluded], [[], [], [], [], []]);
+  assert.equal(result.applied.length, entries.length);
+  assert.deepEqual(result.digests, vectors.digests);
+  const random = rng(11);
+  for (let round = 0; round < 5; round += 1) assert.deepEqual(foldEntries(shuffled(entries, random), ctx).digests, vectors.digests);
+  // The state is pinned, not only the bytes: without the second writer's entries the digest is another one.
+  const alone = foldEntries(entries.filter((entry) => entry.header.writer === vectors.writers[0].writer), ctx);
+  assert.notEqual(alone.digests[stream], vectors.digests[stream]);
+});
+
 test('a changed AAD, signature, entry hash, checkpoint field or version hash is reported by name', () => {
   const flip = (value: string): string => `${value.slice(0, -1)}${value.endsWith('A') ? 'B' : 'A'}`;
   const cases: Array<[string, (vectors: ReplicaVectors) => void]> = [
@@ -140,7 +139,8 @@ test('a changed AAD, signature, entry hash, checkpoint field or version hash is 
     ['entries.2.entryHash', (vectors) => { vectors.entries[2].entryHash = vectors.entries[2].entryHash.replace(/^./, (first) => (first === '0' ? '1' : '0')); }],
     ['checkpoint.unsigned.streams.0.orderTip', (vectors) => { vectors.checkpoint.unsigned.streams[0].orderTip = '1'.repeat(64); }],
     ['versionHashes.0.hash', (vectors) => { vectors.versionHashes[0].hash = '2'.repeat(64); }],
-    ['proof.proofHash', (vectors) => { vectors.proof.proofHash = '3'.repeat(64); }]
+    ['proof.proofHash', (vectors) => { vectors.proof.proofHash = '3'.repeat(64); }],
+    [`digests.${streamId('near-ai replica vector stream')}`, (vectors) => { vectors.digests[streamId('near-ai replica vector stream')] = '4'.repeat(64); }]
   ];
   for (const [field, mutate] of cases) {
     const changed = copy();

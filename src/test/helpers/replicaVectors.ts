@@ -13,9 +13,12 @@ import { checkpointHash, orderTipOf, signCheckpoint } from '../../domain/replica
 import type { Checkpoint } from '../../domain/replica/checkpoint';
 import { createLocalDoc, localInsert } from '../../domain/replica/doc';
 import { canonicalProof, proofHash } from '../../domain/replica/equivocation';
+import { foldEntries } from '../../domain/replica/fold';
 import { GENESIS_PREV, SEALED_OVERHEAD, blobAad, entryHash, headerAad, sha256Hex, signHeader, toWire } from '../../domain/replica/entry';
-import type { Actor, EntryBody, EntryHeader, UnsignedHeader } from '../../domain/replica/entry';
+import type { Actor, EntryBody, EntryHeader, SealedBlob, UnsignedHeader } from '../../domain/replica/entry';
 import { totalOrder } from '../../domain/replica/order';
+import { staticRosterView } from '../../domain/replica/rosterView';
+import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { replicaVersionHash } from '../../domain/replica/versions';
 import { epochKey, fixedSigner, streamId, updateData } from './replicaWorld';
 import type { FixedSigner } from './replicaWorld';
@@ -73,6 +76,8 @@ export interface ReplicaVectors {
   checkpoint: VectorCheckpoint;
   proof: VectorProof;
   versionHashes: VectorVersionHash[];
+  // The digest of each stream when the vector entries are folded with the default reducers (plan 30-12): the state, not only the bytes, is pinned.
+  digests: Record<string, string>;
 }
 
 const b64 = (bytes: Buffer | Uint8Array): string => Buffer.from(bytes).toString('base64url');
@@ -95,6 +100,26 @@ function filler(length: number): string {
 }
 
 interface Chain { signer: FixedSigner; seq: number; prev: string; lamport: number }
+
+// The reader's context for a vector set, from its public values only: the roster of the two writers, the epoch key from its label, the blobs by hash and
+// a fixed clock. The vectors test builds the same context from the committed fixture.
+export function vectorContext(vectors: Pick<ReplicaVectors, 'roster' | 'writers' | 'epochKeys' | 'blobs' | 'labels'>): ReplicaContext {
+  const key = epochKey(vectors.epochKeys[0].label);
+  const stream = streamId(vectors.labels.stream);
+  const blobs = new Map<string, SealedBlob>(vectors.blobs.map((blob) => [blob.hash, { hash: blob.hash, bytes: blob.bytes }]));
+  return {
+    roster: staticRosterView({
+      rosters: [{
+        hash: vectors.roster.hash,
+        members: vectors.writers.map((writer, index) => ({ member: index === 0 ? 'writer-a' : 'writer-b', name: writer.label, roles: ['member'], devices: [{ writer: writer.writer, publicKey: writer.publicKey }] })),
+        checkpointSigners: [vectors.roster.checkpointSigner]
+      }]
+    }),
+    keys: (forStream, epoch) => (forStream === stream && epoch === 0 ? key : undefined),
+    blobs: (hash) => blobs.get(hash),
+    now: new Date('2026-11-19T12:00:00.000Z')
+  };
+}
 
 export function buildVectors(): ReplicaVectors {
   const a = fixedSigner(VECTOR_LABELS.writerA);
@@ -171,17 +196,27 @@ export function buildVectors(): ReplicaVectors {
     { text: 'Line one\r\nLine two\r\n', pins: [{ product: 'product-one', hash: hashOfText('product-one text') }, { product: 'product-two', hash: hashOfText('product-two text') }] }
   ];
 
-  return {
-    note: VECTOR_NOTE,
+  const base = {
     labels: VECTOR_LABELS,
     roster: { hash: rosterHash, checkpointSigner: a.writer },
     writers: [a, b].map((who, index) => ({ label: index === 0 ? VECTOR_LABELS.writerA : VECTOR_LABELS.writerB, publicKey: who.publicKey, writer: who.writer })),
     epochKeys: [{ label: VECTOR_LABELS.epoch }],
+    blobs
+  };
+  const digests = foldEntries(entries.map((entry) => ({ header: entry.header, body: entry.bodyWire })), vectorContext(base)).digests;
+
+  return {
+    note: VECTOR_NOTE,
+    labels: base.labels,
+    roster: base.roster,
+    writers: base.writers,
+    epochKeys: base.epochKeys,
     entries,
     blobs,
     checkpoint: { unsigned, orderTips: [{ stream, order, orderTip }], signed, hash: checkpointHash(signed), signerLabel: VECTOR_LABELS.writerA },
     proof: { proof, proofHash: proofHash(proof), secondIvLabel: 'vector iv a1 second' },
-    versionHashes: versionRows.map((row) => ({ ...row, hash: replicaVersionHash(row.text, row.pins) }))
+    versionHashes: versionRows.map((row) => ({ ...row, hash: replicaVersionHash(row.text, row.pins) })),
+    digests
   };
 }
 

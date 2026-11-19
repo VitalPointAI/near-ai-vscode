@@ -358,7 +358,8 @@ test('a late concurrent entry outside the final prefix refolds from the prefix s
   for (const item of s.a.slice(0, 3)) assert.equal(counts.get(item.hash), 1, 'a prefix entry is applied once');
   assert.equal(counts.get(s.a[3].hash), 2, 'an entry after the prefix is applied again');
   for (const item of s.c) assert.equal(counts.get(item.hash), 1);
-  const scratch = foldEntries(sealed(...s.a, ...s.c), s.ctx, { checkpoints: [signed] });
+  // The from-scratch fold uses the same one-reducer list: the default list now folds four families (plan 30-12), and `families` is compared whole.
+  const scratch = foldEntries(sealed(...s.a, ...s.c), s.ctx, { checkpoints: [signed], reducers: [counting().reducer] });
   assert.deepEqual(second.result.families, scratch.families);
   assert.deepEqual(second.result.digests, scratch.digests);
   assert.deepEqual(second.result.order, scratch.order);
@@ -368,7 +369,7 @@ test('a late concurrent entry outside the final prefix refolds from the prefix s
   const unchecked = addEntries(addEntries(createFoldState(s.ctx, { reducers: [plain.reducer] }), sealed(...s.a)), sealed(...s.c));
   assert.equal(unchecked.refolds, 1);
   assert.equal(plain.counts.get(s.a[0].hash), 2);
-  assert.deepEqual(unchecked.result.digests, foldEntries(sealed(...s.a, ...s.c), s.ctx).digests);
+  assert.deepEqual(unchecked.result.digests, foldEntries(sealed(...s.a, ...s.c), s.ctx, { reducers: [counting().reducer] }).digests);
 });
 
 test('entries inside the final prefix that arrive late refold from the start and still equal the from-scratch fold', () => {
