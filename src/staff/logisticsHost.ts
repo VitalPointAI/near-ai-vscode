@@ -8,7 +8,8 @@
 // - LOGSTAT reports:    .planning/staff/logistics/logstat/reports/<id>.json, and the validation log beside them (validation.jsonl)
 // - the road graph:     .planning/staff/logistics/roads.json
 // A record is written to a temporary file, entered in the ledger, then renamed into place, all under the ledger lock, so two members never take one id.
-import { appendFile, lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { snapshotOfBytes, writeIfUnchanged } from './staffFiles';
 import * as path from 'node:path';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -143,16 +144,16 @@ export class LogisticsHost {
       if (exists || replay.records.has(record.id)) return fail(`calc:${record.id} already exists. A record never changes; use a new id (for example ${record.id}-v2)${record.kind === 'movement' ? ' and name this one in supersedes' : ''}.`);
       const text = renderRecord(record);
       const hash = recordHash(text);
-      const temporary = path.join(recordDir, `.${record.id}.${process.pid}.${this.now()}.tmp`);
-      await writeFile(temporary, text, { encoding: 'utf8', flag: 'wx' });
+      // The record goes in only where no file is (staffFiles.ts, drop 1 review round 4): a file a member put at that name first is never replaced, and
+      // the calculator refuses instead. Then the ledger entry; if that fails, the record is taken back out, but only if it is still the bytes written here.
+      if (!(await writeIfUnchanged(final, { exists: false }, text))) return fail(`calc:${record.id} already exists. A record never changes; use a new id (for example ${record.id}-v2).`);
       try {
         const signer = await this.options.signer();
         const entry: CalcLedgerEntry = { v: CALC_LEDGER_ENTRY_VERSION, type: 'calculator-record', seq: replay.entries, prev: replay.head, at, run, member, record: record.id, kind: record.kind, hash };
         const envelope = signPayload(signer, 'staff-ledger', entry, { now: () => new Date(Date.parse(at)) });
         await appendFile(path.join(ledgerDir, CALC_LEDGER_FILE), `${JSON.stringify(envelope)}\n`, 'utf8');
-        await rename(temporary, final);
       } catch (error) {
-        await unlink(temporary).catch(() => undefined);
+        await writeIfUnchanged(final, snapshotOfBytes(Buffer.from(text, 'utf8')), undefined).catch(() => undefined);
         throw error;
       }
       return { ok: true, value: { record, hash } };

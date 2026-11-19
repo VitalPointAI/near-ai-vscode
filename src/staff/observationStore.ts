@@ -38,7 +38,11 @@ import type { TrackState } from '../domain/staff/obs/tracks';
 import { isNamedPerson } from '../domain/staff/release';
 import type { PersonActor } from '../domain/staff/release';
 import { withFileLock } from '../services/stateMirrorLock';
-import { writeFileAtomic } from '../team/teamFile';
+import { readWhole as readStaffWhole, snapshotOf, snapshotOfBytes, writeIfUnchanged } from './staffFiles';
+import type { FileSnapshot } from './staffFiles';
+
+/** An index file changed outside the store between its read and the store's write. */
+export class StoreChangedError extends Error {}
 
 const LOCK = 'observations.lock';
 const GITIGNORE = '# Observations are not committed (research note 11, 9.2): they live only in this project folder.\n*\n';
@@ -94,15 +98,12 @@ interface CachedSegment { readonly bytes: number; readonly mtimeMs: number; read
 
 type WholeRead = { readonly kind: 'missing' } | { readonly kind: 'text'; readonly buffer: Buffer; readonly mtimeMs: number } | { readonly kind: 'unreadable'; readonly reason: string };
 
+/** The shared reader (staffFiles.ts), with the store's own size limits and the file's modification time for the segment cache. */
 async function readWhole(file: string, max: number): Promise<WholeRead> {
-  let info;
-  try { info = await stat(file); } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', reason: `it could not be opened (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
-  }
-  if (info.size > max) return { kind: 'unreadable', reason: `it is larger than ${Math.round(max / (1024 * 1024))} MB` };
-  try { return { kind: 'text', buffer: await readFile(file), mtimeMs: info.mtimeMs }; } catch (error) {
-    return { kind: 'unreadable', reason: `it could not be read (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
-  }
+  let mtimeMs = 0;
+  try { mtimeMs = (await stat(file)).mtimeMs; } catch { /* the shared reader says why */ }
+  const read = await readStaffWhole(file, max);
+  return read.kind === 'text' ? { kind: 'text', buffer: read.bytes, mtimeMs } : read;
 }
 
 function isoOf(ms: number): string {
@@ -114,6 +115,8 @@ const sha256 = (data: Buffer | string): string => createHash('sha256').update(da
 export class ObservationStore {
   private readonly now: () => number;
   private readonly cache = new Map<string, CachedSegment>();
+  /** What the store last read of each index file (manifest, registry): its next write replaces only those bytes. */
+  private readonly indexRead = new Map<string, FileSnapshot>();
 
   public constructor(private readonly options: ObservationStoreOptions) {
     this.now = options.now ?? Date.now;
@@ -184,6 +187,8 @@ export class ObservationStore {
 
   private async readIndex<T>(name: string, parse: (value: unknown) => T | undefined): Promise<{ kind: 'missing' } | { kind: 'value'; value: T } | { kind: 'problem'; message: string }> {
     const read = await readWhole(this.file(name), OBS_INDEX_MAX_BYTES);
+    // The bytes read are the only bytes the next index write may replace (writeIndex).
+    this.indexRead.set(name, read.kind === 'text' ? snapshotOfBytes(read.buffer) : read.kind === 'missing' ? { exists: false } : { exists: true, hash: 'unreadable' });
     if (read.kind === 'missing') return read;
     const where = `${OBS_STORE_DIR}/${name}`;
     const wayOut = 'Move it aside by hand: the store rebuilds the segment index from the segments, and a person registers the feeds again.';
@@ -260,16 +265,37 @@ export class ObservationStore {
   }
 
   private async writeManifest(manifest: StoreManifest): Promise<void> {
-    await writeFileAtomic(this.file(OBS_MANIFEST_FILE), `${JSON.stringify(manifest, null, 1)}\n`);
+    await this.writeIndex(OBS_MANIFEST_FILE, `${JSON.stringify(manifest, null, 1)}\n`);
   }
 
   private async writeRegistry(registry: FeedRegistry): Promise<void> {
-    await writeFileAtomic(this.file(OBS_REGISTRY_FILE), `${JSON.stringify(registry, null, 1)}\n`);
+    await this.writeIndex(OBS_REGISTRY_FILE, `${JSON.stringify(registry, null, 1)}\n`);
   }
 
-  private async locked<T>(work: () => Promise<T>): Promise<T> {
+  /**
+   * An index write is a compare-and-swap against the bytes the store last read under its lock (staffFiles.ts, drop 1 review round 4): the store's
+   * folder sits in the project, so a member's Write could land there, and the store never writes over bytes it did not read. A changed index is left as
+   * it is, and the next load reports it.
+   */
+  private async writeIndex(name: string, text: string): Promise<void> {
+    const file = this.file(name);
+    const expected = this.indexRead.get(name) ?? await snapshotOf(file);
+    if (!(await writeIfUnchanged(file, expected, text))) {
+      this.indexRead.delete(name);
+      throw new StoreChangedError(`${OBS_STORE_DIR}/${name} was changed outside the store after it was read, so the store did not write over it; the next read reports the file.`);
+    }
+    this.indexRead.set(name, snapshotOfBytes(Buffer.from(text, 'utf8')));
+  }
+
+  /** Every write runs under the store's lock; an index that changed outside the store ends the write with a refusal, never a write over it. */
+  private async locked<T extends { readonly ok: boolean }>(work: () => Promise<T>): Promise<T | { readonly ok: false; readonly message: string }> {
     await this.ensureFolder();
-    return withFileLock(this.folder, LOCK, work);
+    try {
+      return await withFileLock(this.folder, LOCK, work);
+    } catch (error) {
+      if (error instanceof StoreChangedError) return { ok: false, message: error.message };
+      throw error;
+    }
   }
 
   private run(): string | null {
@@ -360,7 +386,7 @@ export class ObservationStore {
    */
   public async append(input: { rows: readonly unknown[]; raw?: Readonly<Record<string, string>> }): Promise<AppendResult> {
     if (input.rows.length > OBS_APPEND_MAX_ROWS) return { ok: false, appended: 0, duplicates: 0, refused: [], message: `One append takes at most ${OBS_APPEND_MAX_ROWS} rows.` };
-    return this.locked(async () => {
+    const result = await this.locked(async () => {
       const loaded = await this.load();
       if (!loaded.ok) return { ok: false, appended: 0, duplicates: 0, refused: [], message: `${STORE_FAILURES['store-unreadable']} ${loaded.message}` };
       const { registry, manifest } = loaded.value;
@@ -445,6 +471,7 @@ export class ObservationStore {
       await this.emit([...events, ...ticked.events]);
       return { ok: refused.length === 0, appended, duplicates, refused };
     });
+    return 'appended' in result ? result : { ok: false, appended: 0, duplicates: 0, refused: [], message: result.message };
   }
 
   /** Keeps the raw messages of a stream's rows in the segment's raw file, bounded per message and per segment; past either bound, only the hash is kept. */

@@ -8,7 +8,8 @@
 // Layer ownership is enforced here and again by the host: only a product layer's one writer (resolved for the roster, so a member that stands in for a
 // folded job writes it) changes it, and the change becomes a new version in the release state machine. Anyone else proposes, and the writer merges.
 // Feed layers are views: no tool writes a feature into one; their settings owner is sent proposals. No tool approves, rejects or releases anything.
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
+import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
 import * as path from 'node:path';
 import {
   buildCopFeature, COP_FEATURE_KINDS, copLayerIds, copLayerTitle, describeSymbol, featureLine, isCopLayer, isProductLayer, layerAccess, layerLabel, layerPath,
@@ -60,22 +61,21 @@ async function withLock<T>(key: string, work: () => Promise<T>): Promise<T> {
   try { return await run; } finally { if (locks.get(key) === settled) locks.delete(key); }
 }
 
-async function readSmall(file: string): Promise<string | undefined> {
-  try {
-    const bytes = await readFile(file);
-    if (bytes.length > MAX_FILE_BYTES) throw new ToolError(`${path.basename(file)} is larger than 2 MB, so it was not read. Nothing was changed.`);
-    return bytes.toString('utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
+/** A file members can also write, read whole with the shared reader (staffFiles.ts): missing is undefined, and unreadable is never empty. */
+async function readSmallBytes(file: string): Promise<Buffer | undefined> {
+  const read = await readWhole(file);
+  if (read.kind === 'missing') return undefined;
+  if (read.kind === 'unreadable') throw new ToolError(`${path.basename(file)} was not read: ${read.reason}. Nothing was changed.`);
+  return read.bytes;
 }
 
-async function writeAtomic(file: string, text: string): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, text, 'utf8');
-  await rename(temporary, file);
+async function readSmall(file: string): Promise<string | undefined> {
+  return (await readSmallBytes(file))?.toString('utf8');
+}
+
+/** A new file only: never over one that is there (a member's or another proposal's). */
+async function writeNew(file: string, text: string): Promise<void> {
+  if (!(await writeIfUnchanged(file, { exists: false }, text))) throw new ToolError(`${path.basename(file)} is already there, so nothing was written. Try again.`);
 }
 
 /** The loaded scenario's exercise frame: every position on the map is inside it. */
@@ -113,7 +113,10 @@ function fenced(lines: readonly string[]): string {
 interface LayerFile { readonly exists: boolean; readonly header: string; readonly body: string; readonly features: readonly CopFeature[]; readonly problems: readonly string[] }
 
 async function readLayer(root: string, layer: ProductLayer, frame: ExerciseFrame | undefined): Promise<LayerFile> {
-  const text = await readSmall(path.join(root, layerPath(layer)));
+  return layerFrom(layer, await readSmall(path.join(root, layerPath(layer))), frame);
+}
+
+function layerFrom(layer: ProductLayer, text: string | undefined, frame: ExerciseFrame | undefined): LayerFile {
   if (text === undefined) return { exists: false, header: '', body: '', features: [], problems: [] };
   const parts = splitProductFile(text);
   const body = parts ? parts.body : text;
@@ -143,17 +146,23 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
     const file = path.join(context.root, layerPath(layer));
     return withLock(file, async () => {
       const frame = await frameOf(context.root);
-      const before = await readLayer(context.root, layer, frame);
+      // The bytes read here are the only bytes this write may replace (staffFiles.ts, drop 1 review round 4): a member's Write or Edit to the layer file
+      // takes no lock, so the write below is a compare-and-swap against them.
+      const bytes = await readSmallBytes(file);
+      const read = snapshotOfBytes(bytes);
+      const before = layerFrom(layer, bytes?.toString('utf8'), frame);
       if (before.problems.length) throw new ToolError(`The ${layer} file has features that cannot be read, so nothing was changed. Remove or fix them first (remove takes their ids):\n${before.problems.map((line) => `- ${line}`).join('\n')}`);
       const next = change(before.features);
-      const previous = before.exists ? await readFile(file, 'utf8') : undefined;
+      const previous = bytes?.toString('utf8');
       await context.checkpoints?.capture?.(file);
-      await writeAtomic(file, `${before.header}${renderLayerBody(next, before.body)}`);
+      const written = `${before.header}${renderLayerBody(next, before.body)}`;
+      if (!(await writeIfUnchanged(file, read, written))) throw new ToolError(`The ${layer} file changed while this change was being made (another write landed there), so nothing was written. Read the layer again and repeat the change.`);
       const joined = label ?? layerLabel(next);
       const result = await hostOf().propose(callerOf(context), { product: layer, kind: 'map-layer', ...(joined ? { label: joined } : {}) });
       if (!result.ok) {
-        if (previous === undefined) await rm(file, { force: true }); else await writeAtomic(file, previous);
-        throw new ToolError(`${result.message} The layer file is back as it was.`);
+        // Put back only over the bytes written here: a write that landed since stands.
+        const restored = await writeIfUnchanged(file, snapshotOfBytes(Buffer.from(written, 'utf8')), previous);
+        throw new ToolError(`${result.message} ${restored ? 'The layer file is back as it was.' : 'The layer file was changed again after this write, so that change was left as it is.'}`);
       }
       await hostOf().record({ type: 'staff.cop.updated', run: access.run, at: now(), layer, owner: { section: access.team.section, member: context.agentLabel! }, featureCount: next.length, summary: summary.slice(0, 200) });
       return `${result.text}\nThe ${copLayerTitle(layer).toLowerCase()} layer now holds ${next.length} feature${next.length === 1 ? '' : 's'}, labelled ${joined ?? 'with labels on different scales'}.`;
@@ -248,8 +257,7 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
       if (allowed.kind === 'feed') {
         if (input.features !== undefined || (input.remove as string[]).length) throw new ToolError(`${layer} is a view over observations: nobody writes its features, by hand or by tool. Its settings owner (${writerText(allowed.settingsOwner)}) chooses which channels, grades and decay it shows; give settings to propose a change.`);
         const settings = textArg(input, 'settings', 1000);
-        await mkdir(folder, { recursive: true });
-        await writeFile(path.join(folder, name), `${JSON.stringify({ layer, kind: 'settings', from: { section: access.team.section, member }, summary: input.summary, settings }, null, 2)}\n`, 'utf8');
+        await writeNew(path.join(folder, name), `${JSON.stringify({ layer, kind: 'settings', from: { section: access.team.section, member }, summary: input.summary, settings }, null, 2)}\n`);
         return `Proposed a settings change for ${layer} in ${layerProposalFolder(layer)}${name}. Its settings owner, ${writerText(allowed.settingsOwner)}, decides whether to change them.`;
       }
       if (allowed.kind !== 'product') throw new ToolError(`There is no layer ${layer}.`);
@@ -265,8 +273,7 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
         }, input.summary as string);
       }
       if ((input.remove as string[]).length) throw new ToolError(`Only the layer's writer (${writerText(allowed.writer)}) removes features. Propose the change in words in summary instead, with the features you want in their place.`);
-      await mkdir(folder, { recursive: true });
-      await writeFile(path.join(folder, name), `${JSON.stringify({ layer, kind: 'features', from: { section: access.team.section, member }, summary: input.summary, features }, null, 2)}\n`, 'utf8');
+      await writeNew(path.join(folder, name), `${JSON.stringify({ layer, kind: 'features', from: { section: access.team.section, member }, summary: input.summary, features }, null, 2)}\n`);
       return `You do not write ${layer}; ${writerText(allowed.writer)} does. Proposed ${features.length} feature${features.length === 1 ? '' : 's'} in ${layerProposalFolder(layer)}${name} for them to merge.`;
     }
   };
@@ -316,8 +323,9 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
       if (!allowed.mayWrite) throw new ToolError(`Only ${writerText(allowed.writer)} merges into ${layer}.`);
       const folder = path.join(context.root, layerProposalFolder(layer));
       const file = path.join(folder, `${String(input.proposal)}.json`);
-      const text = await readSmall(file);
-      if (text === undefined) throw new ToolError(`There is no proposal ${String(input.proposal)} for ${layer}.`);
+      const proposalBytes = await readSmallBytes(file);
+      if (proposalBytes === undefined) throw new ToolError(`There is no proposal ${String(input.proposal)} for ${layer}.`);
+      const text = proposalBytes.toString('utf8');
       let value: { features?: unknown[]; from?: { member?: string }; summary?: string };
       try { value = JSON.parse(text); } catch { throw new ToolError('The proposal is not valid JSON.'); }
       if (!Array.isArray(value.features)) throw new ToolError('The proposal holds no features.');
@@ -340,9 +348,11 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
         if (!merged.ok) throw new ToolError(merged.message);
         return merged.value;
       }, `Merged ${by}'s proposal: ${value.summary ?? ''}`);
-      await mkdir(path.join(folder, 'merged'), { recursive: true });
-      await rename(file, path.join(folder, 'merged', path.basename(file)));
-      return `${out}\nMerged ${features.length} feature${features.length === 1 ? '' : 's'} from ${by}.`;
+      // The proposal moves to merged/ as the bytes that were merged; a proposal edited since stays where it is, to be looked at again.
+      const kept = path.join(folder, 'merged', path.basename(file));
+      await writeIfUnchanged(kept, { exists: false }, text);
+      const moved = await writeIfUnchanged(file, snapshotOfBytes(proposalBytes), undefined);
+      return `${out}\nMerged ${features.length} feature${features.length === 1 ? '' : 's'} from ${by}.${moved ? '' : ' The proposal file was changed after it was read, so it stays in the proposals for you to look at again.'}`;
     }
   };
 

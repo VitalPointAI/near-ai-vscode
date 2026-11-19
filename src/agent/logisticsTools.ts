@@ -28,7 +28,7 @@ import type { StaffTeamInfo } from '../staff/staffHost';
 import { declareManifest, fromArgument, INTERACTIVE_AND_UNATTENDED } from './tools';
 import type { AgentTool, ToolContext } from './tools';
 import { resolveInWorkspace, ToolError } from './workspace';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
 import * as path from 'node:path';
 
 /** The server name a team file grants (`mcp:logistics`, or a family such as `mcp__logistics__calc*`). */
@@ -407,16 +407,14 @@ export function logisticsTools(access: LogisticsToolAccess): AgentTool<any>[] {
 async function writeValidationProduct(context: ToolContext, body: string): Promise<string> {
   const relative = staffProductPath('j4', LOGSTAT_VALIDATION_PRODUCT);
   const absolute = await resolveInWorkspace(context.root, relative);
-  let header = '';
-  try {
-    const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(await readFile(absolute, 'utf8'));
-    if (match) header = match[0];
-  } catch { /* a new file */ }
+  // Read whole with the shared reader and written only over the bytes read (staffFiles.ts): a member's write that lands in between stands.
+  const read = await readWhole(absolute);
+  if (read.kind === 'unreadable') throw new ToolError(`${relative} was not read: ${read.reason}. Nothing was written.`);
+  const header = read.kind === 'text' ? (/^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(read.text)?.[0] ?? '') : '';
   await context.checkpoints.capture(absolute);
-  await mkdir(path.dirname(absolute), { recursive: true });
-  const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, `${header}${body}`, 'utf8');
-  await rename(temporary, absolute);
+  if (!(await writeIfUnchanged(absolute, snapshotOfBytes(read.kind === 'text' ? read.bytes : undefined), `${header}${body}`))) {
+    throw new ToolError(`${relative} changed while the validation log was being written, so it was not replaced. Run logstat_validate again.`);
+  }
   return relative;
 }
 
