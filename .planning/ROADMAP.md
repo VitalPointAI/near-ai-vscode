@@ -160,10 +160,10 @@ These phases ship in the 0.4.x line as two staff collaboration drops, like staff
   2. Two signed entries at one position by one writer produce a proof and quarantine that device on every machine, whatever the arrival order; a changed old entry breaks only that writer's chain. (MUS-01)
   3. Product text is a Yjs document carried in signed entries; random concurrent edits by persons and agents converge, every character's author is the writer that inserted it, and an update under another writer's client id is rejected. Yjs and `lib0` are vendored at pinned versions with licences (owner question 1). (MUS-02)
   4. Versions pin a content hash that must equal the text at the state vector named; concurrent conflicting decisions on one version fold to "contested" and only a fresh decision that has seen them settles it; no agent actor can approve, reject, release or supersede. (MUS-03)
-**Plans:** 12 plans in 5 waves (1 {01}; 2 {02, 03}; 3 {04, 05, 06, 07, 08, 09}; 4 {10, 11}; 5 {12})
+**Plans:** 1/12 plans executed in 5 waves (1 {01}; 2 {02, 03}; 3 {04, 05, 06, 07, 08, 09}; 4 {10, 11}; 5 {12})
 
 Plans:
-- [ ] 30-01-PLAN.md — Vendor Yjs 13.6.33 and lib0 0.2.119 (automatic pin gate, hash manifest checked at compile, test and release), the staff-replica purpose, SECURITY.md
+- [x] 30-01-PLAN.md — Vendor Yjs 13.6.33 and lib0 0.2.119 (automatic pin gate, hash manifest checked at compile, test and release), the staff-replica purpose, SECURITY.md
 - [ ] 30-02-PLAN.md — Tracer: two writers each sign and seal one doc.update; same text and digest in both orders; every layer of the replica core and its shared contracts
 - [ ] 30-03-PLAN.md — CRDT spike (D-22): update sizes, full state and garbage collection for a 30-page, 20-author product
 - [ ] 30-04-PLAN.md — Entry hardening and closed schemas for the project, roster, registers, watches, runs and obs families; project reducer
@@ -1365,7 +1365,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 27. Project state follows the project (0.4.20) | 36/36 | Complete: shipped in 0.4.20; owner host check passed | 2026-11-17 (released 2026-11-14) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
-| 30. Replication contract and co-editing core | 0/TBD | Not started (staff collaboration drop A) | - |
+| 30. Replication contract and co-editing core | 1/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/TBD | Not started (drop A) | - |
 | 32. Your organization's sync hub | 0/TBD | Not started (drop A; may run beside Phase 31) | - |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |

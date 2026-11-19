@@ -21,7 +21,7 @@
     {
       "number": "30",
       "name": "Replication contract and co-editing core",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "31",
@@ -229,5 +229,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 3 of 9 · 11% · executing"
   },
-  "updated_at": "2026-11-19T19:57:28.517Z"
+  "updated_at": "2026-11-19T20:03:24.341Z"
 }
