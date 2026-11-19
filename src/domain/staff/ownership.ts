@@ -97,6 +97,20 @@ export function phaseFrom(transition: { readonly approvedVersions: readonly numb
   return transition && transition.approvedVersions.length > 0 ? 'execution' : 'planning';
 }
 
+/**
+ * Whether a shared product changes writer at transition: its table names one writer for planning and another for execution (the synchronization matrix,
+ * the DST and DSM, the assessment plan pass from the J5 to the J3). Checked in either mode, so a full staff and a standalone section team agree.
+ */
+export function handsOverAtTransition(product: string): boolean {
+  const entry = sharedProduct(product);
+  if (!entry) return false;
+  return STAFF_MODES.some((mode) => {
+    const planning = tableWriter(entry, { phase: 'planning', mode });
+    const execution = tableWriter(entry, { phase: 'execution', mode });
+    return planning !== undefined && execution !== undefined && (planning.section !== execution.section || planning.member !== execution.member);
+  });
+}
+
 export function sharedProduct(product: string): SharedProduct | undefined {
   return SHARED_PRODUCTS.find((entry) => entry.product === product);
 }

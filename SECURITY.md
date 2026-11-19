@@ -819,7 +819,11 @@ A project moves from planning to execution only when a person approves the
 transition brief (`transition-brief`); the phase is read from the signed
 ledger, so no agent can start execution, and from then on the J3 members, not
 the planners, write the synchronization matrix, the DST and DSM and the
-assessment plan.
+assessment plan. A product the J5 made in planning stays in the J5 folder the
+ledger recorded; after the approval the J3 writer writes it there, the J5 is
+refused and proposes instead, and status names the new writer and the
+approval that moved it. A version still open under the J5 at that point is
+withdrawn by a person (or by its J5 owner) before the J3 writes the next one.
 The Staff Room panel only reads: the ledger, the event log and the files
 under `.planning/staff/`. Its page gets display data only, through
 `textContent`, under a content security policy with no inline script. Every

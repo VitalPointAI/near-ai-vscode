@@ -47,7 +47,7 @@ import {
   parseLedgerHeadMark, productHash, projectHeader, RELEASE_GUARD_SLUG, replayLedger, RESERVED_MEMBER_SLUGS, TAMPER_REASONS, TRADECRAFT_REVIEWER_SLUG, TRADECRAFT_SECTIONS
 } from '../domain/staff/ledger';
 import type { DecisionRequestInput, LedgerEntry, LedgerHeadMark, LedgerReplay, ProductMetaInput, ProductState, TamperReason } from '../domain/staff/ledger';
-import { mayWrite, phaseFrom, proposalFolder, sharedProduct, TRANSITION_PRODUCT, writerIn, writerOf } from '../domain/staff/ownership';
+import { handsOverAtTransition, mayWrite, phaseFrom, proposalFolder, sharedProduct, TRANSITION_PRODUCT, writerIn, writerOf } from '../domain/staff/ownership';
 import type { StaffPhase } from '../domain/staff/ownership';
 import { isOneLine, STAFF_SLUG } from '../domain/staff/parse';
 import { LABEL_PATTERN, parseProductHeader, PRODUCT_KINDS, renderProductHeader, splitProductFile, STAFF_MARKERS } from '../domain/staff/products';
@@ -99,6 +99,23 @@ const PIR_REGISTER_ELSEWHERE = 'The PIR register is kept by the intel workbench 
 
 export function productPath(section: StaffSectionId, product: string): string {
   return staffProductPath(section, product);
+}
+
+/**
+ * Whether a product is one whose writer changes at transition (ownership.ts handsOverAtTransition), and so may be written by a member of a section other
+ * than the one that made it.
+ *
+ * Where the file stays: the J5 makes the DST and DSM and the synchronization matrix in planning, at .planning/staff/products/j5/<product>.md, and the
+ * ledger fixes a product's section at its first entry (ledger.ts apply refuses an entry for another section). After a person approves the transition
+ * brief, the J3 writer keeps writing that same file in the J5 folder. Moving it would need a second product (its history split across two ledger lines)
+ * or a ledger entry that changes a section (a new kind of step the state machine and every older ledger would have to learn), would leave gate reports
+ * and every reader that finds the product by its recorded section (the Staff Room's DSM, the J2's decision points) pointing at the old place, and would
+ * put the host in the business of moving a file members can also write. In place, the product keeps one ledger line, one file and one path; only the
+ * writer changes, and the registry and status say who writes it now and why (readModels.ts handoverOf). The J3 writes a register through the register
+ * tool, which the host writes, so no member needs Write on another section's folder.
+ */
+function handedOverInPlace(product: string): boolean {
+  return handsOverAtTransition(product);
 }
 
 /** The team a staff run works with, as the tools see it: its section, its members, and the member who leads (integrates) the section. */
@@ -679,7 +696,9 @@ export class StaffHost {
     const existing = before.products.get(input.product);
     if (existing?.tampered) return refuse(`${input.product} cannot be changed: ${existing.tampered}`);
     const section = existing?.record.section ?? caller.team.section;
-    if (section !== caller.team.section) return refuse(`${input.product} belongs to ${section}, not to this team's section. Propose your change in ${proposalFolder(input.product)}.`);
+    // A product handed over at transition stays where it was made (handedOverInPlace): its writer now, which sharedWriterProblem has just checked the
+    // caller is, writes it in the other section's folder.
+    if (section !== caller.team.section && !handedOverInPlace(input.product)) return refuse(`${input.product} belongs to ${section}, not to this team's section. Propose your change in ${proposalFolder(input.product)}.`);
     const file = await this.readProduct(caller.root, section, input.product, input.dependsOn ?? existing?.meta.dependsOn ?? []);
     if (!file.exists) return refuse(file.tooLarge ? tooLargeText(productPath(section, input.product), file.unreadable) : `Write the product first, at ${productPath(section, input.product)}, then propose it.`);
     const dependsOn = input.dependsOn ?? file.dependsOn;
@@ -702,6 +721,9 @@ export class StaffHost {
         const roles = this.rolesFor(caller, member);
         if ('ok' in roles) return roles;
         return [{ run: caller.run, product: input.product, section, roles, event: { type: 'propose', hash }, actor: { kind: 'agent', member }, meta }];
+      }
+      if (state.record.roles.owner !== member && handedOverInPlace(input.product)) {
+        return refuse(`${input.product} version ${state.record.version} is still open (${state.record.state}) under ${state.record.roles.owner}, who wrote it before the transition. A person withdraws that version with NEAR AI: Staff: Withdraw a Product (or ${state.record.roles.owner} withdraws it), then you write the next version.`);
       }
       if (state.record.roles.owner !== member) return refuse(`${input.product} is owned by ${state.record.roles.owner}. Only the owner writes it; propose your change in ${proposalFolder(input.product)}.`);
       if (hash === state.record.hash) return refuse('The product has not changed since its current version.');
@@ -975,9 +997,18 @@ export class StaffHost {
     const partWriter = input.part !== undefined ? writerIn(input.register, context, caller.team, input.part) : undefined;
     if (input.part !== undefined && (!partWriter || partWriter.member !== member || partWriter.section !== caller.team.section)) return refuse(`You do not write the ${input.part} part of ${input.register}.`);
     const owner = state?.record.roles.owner;
-    const isOwner = input.part === undefined && (state ? owner === member : !sharedProduct(input.register) || mayWrite(input.register, { section: caller.team.section, member }, context, undefined, caller.team.members));
-    if (!isOwner && input.part === undefined) return refuse(`${input.register} is written by ${owner ?? writerIn(input.register, context, caller.team)?.member ?? 'its owner'}. Propose your rows with the propose action instead.`);
-    if (section !== caller.team.section && input.part === undefined) return refuse(`${input.register} belongs to ${section}.`);
+    // A shared register is written by the writer the ownership table names now (it changes at transition for the DST and DSM and the sync matrix), not
+    // by whoever wrote its last version; any other register by its owner.
+    const shared = sharedProduct(input.register) !== undefined;
+    const isOwner = input.part === undefined && (shared ? mayWrite(input.register, { section: caller.team.section, member }, context, undefined, caller.team.members) : !state || owner === member);
+    if (!isOwner && input.part === undefined) {
+      const writer = shared ? writerIn(input.register, context, caller.team) : undefined;
+      const why = writer && handsOverAtTransition(input.register)
+        ? ` ${context.phase === 'execution' ? `The ${writer.section.toUpperCase()} writes it since a person approved the transition brief.` : 'It passes to the J3 when a person approves the transition brief.'}`
+        : '';
+      return refuse(`${input.register} is written by ${writer?.member ?? owner ?? 'its owner'}. Propose your rows with the propose action instead.${why}`);
+    }
+    if (section !== caller.team.section && input.part === undefined && !(isOwner && handedOverInPlace(input.register))) return refuse(`${input.register} belongs to ${section}.`);
     if (state?.tampered) return refuse(`${input.register} cannot be changed: ${state.tampered}`);
     if (!isOwner && state && !(['draft', 'guard-checked', 'awaiting-decision'] as const).some((value) => value === state.record.state)) {
       return refuse(`${input.register} version ${state.record.version} is ${state.record.state}; its owner writes the next version before parts can change.`);
@@ -1228,6 +1259,7 @@ export function describeView(view: ProductView): string {
     `${view.product} (${view.section}, ${view.kind}), version ${view.version}: ${view.display}.`,
     `Owner: ${view.owner}. Label: ${view.label}. Version hash: ${view.hash}.`
   ];
+  if (view.handover) lines.push(`Writer now: ${view.handover.to.member} (${view.handover.to.section}), since ${view.handover.by.name} (${view.handover.by.role}) approved the transition brief at ${view.handover.at}. In planning it was ${view.handover.from.member} (${view.handover.from.section}); the file stays at ${productPath(view.section, view.product)}.`);
   if (view.tampered) lines.push(`Tampered: ${view.tampered}`);
   if (view.heldReasons?.length) lines.push(`Held: ${view.heldReasons.map((reason, index) => `${index + 1}. ${reason}`).join(' ')}`);
   if (view.tradecraft) lines.push(`Tradecraft: ${view.tradecraft.verdict} on version ${view.tradecraft.version}.`);

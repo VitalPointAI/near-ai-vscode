@@ -268,7 +268,8 @@ offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
-synchronization matrix, the DST and DSM and the assessment plan, and every
+synchronization matrix, the DST and DSM and the assessment plan (in place,
+where the J5 made them; the J5 then proposes changes), and every
 FRAGO it drafts waits for a person to release it. The built-in staff servers (`mcp:staff-products`,
 `mcp:guard-scan`, `mcp:intel-workbench`, `mcp:observations`, `mcp:cop-map`,
 `mcp:logistics`) are listed on the Tools page and in the Team Studio tool picker; only a staff
