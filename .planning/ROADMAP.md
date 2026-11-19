@@ -7,7 +7,7 @@
 - **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
-- **v0.5.0 Governed agent platform**: Phases 68-74 (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
+- **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
 - **v0.6.0 Data platform**: Phases 85-101, after Stage 1 and before the relay (owner, 2026-11-18); it contains L1a, the host and local inference
 - **v0.7.0 Messaging relay**: Phases 75-84, split from the governed agent platform on 2026-11-18, after the data platform
 - **v0.8.0 Cybersecurity**: Phase 25 (executed; deferred by the owner until everything else in this plan is finished, may move to its own product)
@@ -158,6 +158,8 @@ Plans:
 **Amended 2026-11-15** with the identity, credential and classification design the owner approved (`.planning/PROJECT.md`, Platform direction decisions 8-13; evidence in `.planning/research/platform-direction/identity-research.md`): classification labels and routing by label join Phase 70 (CLAS-01 … CLAS-07); standard DIDs (`did:key`, `did:webvh`), verifiable credentials with status lists and delegation that narrows at every link join Phase 71 (VCRD-01 … VCRD-07, DLGT-08), which now opens with a research step; L4 and L5 change to roots-only anchoring behind a backend interface, HQ's roles and a per-level maximum offline age. Phase 69 is unchanged.
 
 **Amended 2026-11-16** with the owner's agent authorization decisions (`.planning/PROJECT.md`, Platform direction decisions 14-17; evidence in `.planning/research/platform-direction/agent-authz-prior-art.md`): NEAR function-call access keys are used only for agents' and nodes' on-chain calls, which is milestone L4 (draft ANCH-09 … ANCH-15); off-chain capabilities stay in private credentials, so Phase 73's broker gains CRED-08 (it checks a signed invocation bound to each request against the agent's credentials, with audience binding and receipts); the automatic trust badge check of CLAS-08 is now the owner's decision (Phase 70, criterion 8), and Phase 71 gains a research flag so its binding credential can later bind on-chain keys. Phases 70, 71 and 72 keep their requirements.
+
+**Amended 2026-11-19** with the owner's model provenance decisions (design in `.planning/research/model-provenance/DESIGN.md`): two phases are inserted after Phase 74 as decimals, because Phase 75 is taken by the relay. Phase 74.1 adds model passports in the signed policy (optional `ceiling.models`), use tiers T0 to T3 checked on every model request, the isolated T0 research lane, Western defaults in one place, the different-lineage rule for checking roles and provenance on outputs; PRC-origin models are allowed at T0, at T1 only with a signed, time-boxed risk acceptance by a named senior person, and never at T2 or T3. Phase 74.2 adds your organization's own attested hosting (`org-tee`). Phase 74.1 needs only Phases 69 and 70, so it may run beside Phases 71 to 74 and ship in 0.4.x as it lands. The v0.6.0 model factory (Phases 98 and 99) changes base to Nemotron 3 and uses PRC models as teachers only, in the T0 lane (amendment at the top of `.planning/research/data-platform/04-model-factory-and-opportunity-agent.md`).
 
 **Why it was one milestone, and why it split.** On 2026-11-15 (when it was numbered v0.7.0) it stayed one milestone because the owner asked for v0.7.0 to be replanned with these designs folded in, Phase 68 already shipped as "v0.7.0 Phase 68" (PR #50), and the relay's later phases depend on the governance phases in one chain (a relay run needs a contract, a sandbox and signed approvals); splitting would also have stopped Phase 75, which touches only `relay/`, from running beside Stage 1. On 2026-11-18 the owner put the data platform between Stage 1 and the relay, which made the split necessary. The chain is kept by dependencies (Phase 77 waits for the Stage 1 gate and the data platform gate), and Phase 75 keeps its permission to start early in its own worktree.
 
@@ -509,6 +511,43 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 74 to break down)
 
+### Phase 74.1: Model passports, use tiers and Western defaults (INSERTED)
+**Goal**: Every model request is checked against a signed model passport for the use tier of that request, so a model is used only for work your organization has approved it for; PRC-origin models stay available for research in an isolated lane; the extension ships Western defaults from one place; checking roles run on a different model family; and every output says which model, artifact and passport produced it.
+**Depends on**: Phase 70 (the bundle, the gate, labels and routing); Phase 69 (the signer for risk acceptances). It needs nothing from Phases 71 to 74, so it may run beside them; Phase 71 later replaces the device-key signature on acceptances with a credential.
+**Inserted**: 2026-11-19 at the owner's request (model provenance decisions 1 to 4, `.planning/research/model-provenance/DESIGN.md`).
+**Requirements**: MPRV-01, MPRV-02, MPRV-03, MPRV-04, MPRV-05, MPRV-06, MPRV-07, MPRV-08, MPRV-09, MPRV-10
+**Success Criteria** (what must be TRUE):
+  1. The signed bundle accepts an optional `ceiling.models` with passports (developer, origin, lineage, licence, legal flags, hosting class, artifact hash, evaluation reference, highest use tier, expiry, re-evaluation triggers) and T1 risk acceptances, under strict key checks; a bundle without it parses as before, and a model with no passport is usable at T0 only. (MPRV-01, MPRV-02)
+  2. Each request's use tier (T0 to T3) is worked out from local facts (tools, context, writes, role, label, project type, lane) and only rises in a session; `checkRoute` refuses a model whose passport does not cover it, before anything is sent, with a plain sentence and a list of models that would pass, and nothing ever retries on another model by itself. (MPRV-03, MPRV-04)
+  3. A PRC-origin model is refused for agent work, code, Protected B, staff and classified work, and for plain chat unless a signed, time-boxed risk acceptance by a named senior person covers that project and label; an expired passport or acceptance, or any re-evaluation trigger, drops the model to T0. (MPRV-05)
+  4. An isolated research workspace (the T0 lane) runs adversary models with no project data and no write, run, network or MCP tools, and is the only place the cyber harness and Compare Models evaluations of PRC models open. (MPRV-06)
+  5. Model defaults live only in `AGENT_DEFAULTS` and name Western passports (Nemotron 3, Command A+, Whisper, FLUX); duplicates in settings, config and the cyber handoff are gone, and a value a person set is kept. When no allowed model is available, the person sees the ways forward (organization hosting, a closed Western model only where the label allows any cloud, waiting for NEAR, the research workspace); a bundle without model rules runs in report mode until it adopts them. (MPRV-07, MPRV-08)
+  6. Reviewers, the release guard, the tradecraft reviewer, red team, editor, plan checker and the safety classifier never run on the same model family as the work they check; with no other family allowed, a person decides. (MPRV-09)
+  7. Route records, staff product headers and staff ledger entries carry the model, artifact hash and passport hash, and a per-project AI bill of materials (CycloneDX ML-BOM) lists every model used with its lineage. (MPRV-10)
+**Research flags**: (1) Owner confirmations O1 to O5 in the design (report mode for installs with no organization policy, staff tiers, 90-day acceptances, the acceptance signer before Phase 71, shipped Western passports capped at T2). (2) The questions for NEAR (N1 to N8): Western models in the TEE, provenance fields in `/v1/models`, change notice, the weights hash in attestation, a Canadian region, licence pass-through. (3) Exact Western model ids are pinned only when hosted; passports never match by brand name (Llama-Nemotron and OpenReasoning-Nemotron are different lineages). (4) Switching embeddings rebuilds the knowledge base index.
+**Undo cost**: Medium: passports and acceptances are written into signed bundles and records, so settle the schema in WP-0.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 74.1 to break down)
+
+### Phase 74.2: Your organization's attested model hosting (INSERTED)
+**Goal**: A model server your organization runs on confidential-computing hardware in a Canadian data centre counts as private once its attestation is verified, exactly like NEAR's private hardware, so Western models can serve labels that need attested hosting before NEAR hosts them.
+**Depends on**: Phase 74.1 (passports and the `org-tee` hosting class); Phase 70 (routing and connection binding).
+**Inserted**: 2026-11-19 at the owner's request (model provenance decision 1).
+**Requirements**: OTEE-01, OTEE-02, OTEE-03, OTEE-04
+**Success Criteria** (what must be TRUE):
+  1. The bundle's optional `routing.attestedHosts` names each organization host with its expected measurements, accepted hardware roots and allowed model artifact hashes; a host it does not name never counts as attested. (OTEE-01)
+  2. A request to a named host is sent only after its attestation verifies and the connection is bound to it (the D-50 rule); a wrong measurement, an unexpected weights hash or an unbound connection is refused before anything is sent, in plain words. (OTEE-02, OTEE-03)
+  3. A verified `org-tee` model satisfies `attested-cloud` and is recorded with hosting `org-tee` and its attested artifact hash. (OTEE-04)
+**Research flags**: (1) Run the same open-source private inference stack NEAR uses so one verifier serves both, or add a second verifier for NVIDIA NIM on confidential computing. (2) Attestation proves code and weights, not location: the Canadian location is recorded as a contractual fact. (3) The end-to-end check needs your organization's hosting to exist; the code and tests do not.
+**Undo cost**: Low to medium: a new optional bundle key and a new hosting class.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 74.2 to break down)
+
 **Stage gate (after Phase 74):** Phases 69-74 are verified and merged before the data platform reads your organization's data (Phase 88 on) and before Phase 77 lets the relay run tools; Phase 77 also waits for the data platform gate (owner, 2026-11-18). The extension's releases carry each Stage 1 phase as it lands. v0.8.0 waits until everything else is finished (owner, 2026-11-15).
 
 ### Requirement coverage for this milestone
@@ -522,9 +561,11 @@ Plans:
 | 72 Execution backends on a copy, with a guarded apply | EXEC-01 … EXEC-10 | 10 |
 | 73 Credential broker | CRED-01 … CRED-08 | 8 |
 | 74 Run contracts | CTRT-01 … CTRT-06, OFFL-04 | 7 |
-| **Total** | | **67** |
+| 74.1 Model passports, use tiers and Western defaults | MPRV-01 … MPRV-10 | 10 |
+| 74.2 Your organization's attested model hosting | OTEE-01 … OTEE-04 | 4 |
+| **Total** | | **81** |
 
-Before the split of 2026-11-18 one table covered Phases 68 to 84 with 134 requirements; 67 stay here and 67 moved with Phases 75 to 84 to v0.7.0 Messaging relay (its table is at the end of that milestone). RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132. The owner added CLAS-08 (the trust badge, Phase 70) on 2026-11-16: 133. The owner's agent authorization decisions of 2026-11-16 added CRED-08 (signed, request-bound invocations checked by the broker, Phase 73): 134 in total. The L4 drafts ANCH-09 … ANCH-15 are not counted.
+Before the split of 2026-11-18 one table covered Phases 68 to 84 with 134 requirements; 67 stay here and 67 moved with Phases 75 to 84 to v0.7.0 Messaging relay (its table is at the end of that milestone). RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132. The owner added CLAS-08 (the trust badge, Phase 70) on 2026-11-16: 133. The owner's agent authorization decisions of 2026-11-16 added CRED-08 (signed, request-bound invocations checked by the broker, Phase 73): 134 in total. The L4 drafts ANCH-09 … ANCH-15 are not counted. The model provenance amendment of 2026-11-19 added MPRV-01 … MPRV-10 (Phase 74.1) and OTEE-01 … OTEE-04 (Phase 74.2): 81 in this milestone; their full text is drafted in the design and goes into REQUIREMENTS.md when the phases are planned.
 
 ## Milestone v0.6.0: Data platform
 
