@@ -8,6 +8,7 @@
     title: 'This project has no team yet',
     body: 'A project team is the set of agents that work on this project and the models they use. Setting it up takes a minute.',
     team: 'Set up your project team',
+    staff: 'Set up a staff team',
     later: 'Not now',
     menu: 'All setup steps'
   };
@@ -51,7 +52,8 @@
     const title = make('h3', '', TEXT.title);
     title.id = 'setup-nudge-title';
     const actions = make('div', 'setup-nudge-actions');
-    actions.append(button(TEXT.team, 'text-button primary', 'team'), button(TEXT.later, 'text-button', 'later'), button(TEXT.menu, 'link', 'menu'));
+    // A military staff project starts from "Set up a staff team" (J2, J5, J3, J4), so it is offered here too, not only in the command palette.
+    actions.append(button(TEXT.team, 'text-button primary', 'team'), button(TEXT.staff, 'text-button', 'staff'), button(TEXT.later, 'text-button', 'later'), button(TEXT.menu, 'link', 'menu'));
     card.append(title, make('p', '', TEXT.body), actions);
     container.prepend(card);
     return card;

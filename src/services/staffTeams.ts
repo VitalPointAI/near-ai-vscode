@@ -14,7 +14,7 @@ import type { StaffSettings, StaffTeamSection } from '../domain/staff/profiles';
 import { STAFF_SECTIONS } from '../domain/staff/doctrine';
 import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staff/staffFiles';
 import { noTags, parseTeam } from '../agent/teams';
-import { PROJECT_JSON, staffTeamCandidates } from './staffSetup';
+import { PROJECT_JSON, staffTeamCandidates, staffTeamsChanged } from './staffSetup';
 
 export type StaffTeamState = 'ready' | 'missing' | 'none';
 
@@ -88,6 +88,23 @@ export async function projectStaffTeams(root: string, libraryDir: string): Promi
   return { staff: true, sections };
 }
 
+/**
+ * projectStaffTeams for the chat's card, the /team menu and Link, which never fails silently: a reason the settings do not read, or an unexpected error,
+ * goes to `log` (the NEAR AI output channel), and an error comes back as the card's reason rather than as "not a staff project", which used to put the
+ * "no team yet" card in its place with nothing said. The library folder is worked out inside, so an error there is reported the same way.
+ */
+export async function projectStaffTeamsReported(root: string, libraryDir: () => string, log: (line: string) => void): Promise<ProjectStaffTeams> {
+  try {
+    const teams = await projectStaffTeams(root, libraryDir());
+    if (teams.problem) log(`Staff teams: ${teams.problem}`);
+    return teams;
+  } catch (error) {
+    const reason = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error';
+    log(`Staff teams could not be read: ${error instanceof Error && error.stack ? error.stack : reason}`);
+    return { staff: true, sections: [], problem: `${reason}. The NEAR AI output has the details.` };
+  }
+}
+
 export type LinkResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
 /**
@@ -109,7 +126,9 @@ export async function linkStaffTeam(root: string, libraryDir: string, section: S
   const staff = staffSettingsJson({ ...read.settings, teams: { ...(read.settings.teams ?? {}), [section]: team } });
   const text = `${JSON.stringify({ ...read.config, staff }, null, 2)}\n`;
   const written = await writeIfUnchanged(path.join(root, ...parts), snapshotOfBytes(read.bytes), text);
-  return written ? { ok: true } : { ok: false, message: `${PROJECT_JSON} changed while the team was being linked. Nothing was written; try again.` };
+  if (!written) return { ok: false, message: `${PROJECT_JSON} changed while the team was being linked. Nothing was written; try again.` };
+  staffTeamsChanged(root);
+  return { ok: true };
 }
 
 /** The /team menu entries for a staff project's ready section teams, in section order, each labelled with its section. */

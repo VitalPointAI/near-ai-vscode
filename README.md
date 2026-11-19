@@ -32,7 +32,8 @@ exactly what is allowed to leave your machine.
 **NEAR AI: Set Up Project Team** asks which kind of project you have and sets
 up a team and workflow for it. Your files stay in your workspace, and work is
 sent only to the model you pick. After you connect NEAR AI, the extension
-suggests this as your next step in the chat when the project has no team yet.
+suggests this as your next step in the chat when the project has no team yet;
+the same card offers **Set up a staff team** for a military staff project.
 **NEAR AI: Project Setup** shows every setup step again: your project team, a
 spending limit and web search. **NEAR AI: Set Up a New Profile** connects
 another NEAR AI key or local runtime, and **NEAR AI: Select Profile** picks the
@@ -270,7 +271,9 @@ team, with **Task it now** (puts `/team:<name> ` in the chat's message box,
 nothing sent) and **Open the Staff Room**. In a staff project the empty chat
 shows a **Staff teams** card instead of "This project has no team yet": each
 section with its team and a **Task** button, and **Set up** for sections not set
-up yet. The `/team` menu lists the project's staff teams first, labelled by
+up yet. The card appears as soon as the setup finishes, even with the chat
+already open; if the staff settings cannot be read, it says why and the reason
+is in the **NEAR AI** output. The `/team` menu lists the project's staff teams first, labelled by
 section, and each section card in the Staff Room has **Task in chat**. A team
 file deleted or renamed in your teams shows as missing with **Set up again**. A
 project set up before this was recorded is offered the matching teams already in

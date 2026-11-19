@@ -68,7 +68,7 @@ export type ChatWebviewMessage =
   /** The welcome's "Open a folder" when no folder is open: runs VS Code's own Open Folder. */
   | { type: 'open-folder' }
   /** The empty chat's "no team yet" card: set up the team, hide the card for this project, or open all setup steps. */
-  | { type: 'setup-nudge'; action: 'team' | 'later' | 'menu' }
+  | { type: 'setup-nudge'; action: 'team' | 'staff' | 'later' | 'menu' }
   /** A staff project's "Staff teams" card: set up (or set up again) one section's team, or link a matching library team after the host confirms. */
   | { type: 'staff-teams'; action: 'set-up'; section: StaffTeamSection }
   | { type: 'staff-teams'; action: 'link'; section: StaffTeamSection; team: string }
@@ -339,7 +339,7 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   if (message.type === 'setup-nudge') {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'action')) return undefined;
-    return message.action === 'team' || message.action === 'later' || message.action === 'menu' ? { type: 'setup-nudge', action: message.action } : undefined;
+    return message.action === 'team' || message.action === 'staff' || message.action === 'later' || message.action === 'menu' ? { type: 'setup-nudge', action: message.action } : undefined;
   }
   if (message.type === 'staff-teams') {
     // Exactly these keys, each the message's own: none extra, none missing, none inherited.

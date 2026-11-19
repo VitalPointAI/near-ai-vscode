@@ -28,6 +28,13 @@
   no team yet". A staff project shows a **Staff teams** card instead: each section with its team's
   name and a **Task** button that puts `/team:<name> ` in the message box without sending it, and
   **Set up** for the sections not set up yet.
+- **The Staff teams card appears right after setup.** With the chat already open (as in a browser
+  editor such as code-server), setting up a staff team now replaces "This project has no team yet"
+  with the **Staff teams** card at once. If the staff settings cannot be read, the card says why
+  and the reason is written to the **NEAR AI** output, instead of the "no team yet" card showing
+  with nothing said.
+- **Set up a staff team from the chat.** The "This project has no team yet" card now offers **Set
+  up a staff team** beside **Set up your project team**, so a staff project can start there.
 - **Task a staff team from anywhere.** The message when setup finishes names the team and offers
   **Task it now** and **Open the Staff Room**. The `/team` menu lists the project's staff teams
   first, labelled by section, and each section card in the Staff Room shows its team with **Task

@@ -29,6 +29,22 @@ import { applyTeamUpdate, planTeamUpdate } from '../agent/teamUpdate';
 export const SET_UP_STAFF_TEAM_COMMAND = 'nearAi.setUpStaffTeam';
 export const PROJECT_JSON = '.planning/.near-ai/project.json';
 
+/**
+ * Told when this extension has written a project's staff teams (Set Up a Staff Team, Link on the chat's card), with the project folder. The chat's
+ * "Staff teams" card refreshes from this at once instead of waiting on a file watcher, which a remote editor such as code-server does not always deliver
+ * (D-48 of 0.4.35: the chat kept "no team yet" after the J2 team was set up). A listener that throws never stops the others or the write.
+ */
+const staffTeamsListeners = new Set<(root: string) => void>();
+export function onStaffTeamsChanged(listener: (root: string) => void): { dispose(): void } {
+  staffTeamsListeners.add(listener);
+  return { dispose: () => { staffTeamsListeners.delete(listener); } };
+}
+export function staffTeamsChanged(root: string): void {
+  for (const listener of [...staffTeamsListeners]) {
+    try { listener(root); } catch { /* one listener never stops the others */ }
+  }
+}
+
 /** The profile, level and nation pairs a template is written for: J2 and J4 every offered pair; J5 and J3 the pairs their option sets list. */
 export function templateOffers(template: StaffTemplate): Array<{ profile: StaffProfileId; level: StaffLevel; nation?: StaffNation }> {
   const seen = new Map<string, { profile: StaffProfileId; level: StaffLevel; nation?: StaffNation }>();
@@ -262,5 +278,6 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
     }
     throw new Error(`The staff team was not set up, and what was written is rolled back: ${error instanceof Error ? error.message : String(error)}`);
   }
+  staffTeamsChanged(root);
   return { teamFile: target.file, ...(archived ? { archived } : {}), written: done.map((entry) => path.relative(root, entry.file).split(path.sep).join('/')) };
 }

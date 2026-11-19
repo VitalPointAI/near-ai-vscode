@@ -355,6 +355,10 @@ export function setNearAiDiagnostics(sink: ((line: string) => void) | undefined)
 function diagnose(line: string): void {
   try { diagnosticsSink?.(redactSecrets(line)); } catch { /* diagnostics never break a request */ }
 }
+/** A line in the NEAR AI output channel from elsewhere in the extension (secrets redacted); nothing when no channel is set (tests). */
+export function nearAiLog(line: string): void {
+  diagnose(line);
+}
 
 /**
  * How a started stream failed: no progress for the idle limit (`stalled`), the connection broke

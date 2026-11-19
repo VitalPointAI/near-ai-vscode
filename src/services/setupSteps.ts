@@ -193,13 +193,14 @@ export function shouldShowSetupNudge(facts: { workingProfile: boolean; hasTeam: 
  * newer one started, or after `set()`, is dropped. Keeps the chat's card from coming back after
  * "Not now" when a status refresh was still being worked out.
  */
-export function latestOnly<T>(compute: () => Promise<T>, post: (value: T) => void): { refresh(): Promise<void>; set(value: T): void } {
+export function latestOnly<T>(compute: () => Promise<T>, post: (value: T) => void, failed?: (error: unknown) => void): { refresh(): Promise<void>; set(value: T): void } {
   let sequence = 0;
   return {
     async refresh() {
       const mine = ++sequence;
       let value: T;
-      try { value = await compute(); } catch { return; }
+      // A failed computation leaves the card as it was, and is reported (`failed`), never dropped without a word.
+      try { value = await compute(); } catch (error) { try { failed?.(error); } catch { /* reporting never throws */ } return; }
       if (mine === sequence) post(value);
     },
     set(value) { sequence += 1; post(value); }

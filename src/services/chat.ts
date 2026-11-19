@@ -38,6 +38,7 @@ import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
 import { AGENT_DEFAULTS } from '../domain/agentDefaults';
 import type { ModelInfo, NearAiClient } from './nearAiClient';
+import { nearAiLog } from './nearAiClient';
 import { RED_TEAM_WORKFLOW_STEP, redTeamEnabled } from '../agent/projectTypes';
 import { securityAccess } from './securityScan';
 import { webSearchProvider } from './webSearchSetup';
@@ -62,10 +63,10 @@ import { chatLabelChanged, clearChatInView, onChatNotice, setChatInView, takeCha
 import type { ChatInView } from './chatInView';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
-import { linkStaffTeam, projectStaffTeams, staffMenuEntries } from './staffTeams';
+import { linkStaffTeam, projectStaffTeamsReported, staffMenuEntries } from './staffTeams';
 import type { ProjectStaffTeams } from './staffTeams';
 import type { StaffTeamSection } from '../domain/staff/profiles';
-import { SET_UP_STAFF_TEAM_COMMAND } from './staffSetup';
+import { onStaffTeamsChanged, SET_UP_STAFF_TEAM_COMMAND } from './staffSetup';
 
 /** What the chat says when a message, Resume or Continue reaches a conversation that another editor is running right now. */
 export const RUNNING_ELSEWHERE_HOLD = 'This conversation is running in another editor right now. Wait for it to finish there, or start a new conversation here.';
@@ -155,13 +156,14 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const attestations = () => attestationView(vscode, (registration) => { context.subscriptions?.push(registration as vscode.Disposable); });
   try { attestations(); } catch { /* registered on first use instead */ }
   // The "no team yet" card: only the latest answer is posted, so a slow check never undoes "Not now".
-  const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); });
+  const cardFailed = (card: string) => (error: unknown) => nearAiLog(`The chat's ${card} card was not updated: ${error instanceof Error ? error.message : String(error)}`);
+  const setupNudge = latestOnly(() => setupNudgeShows(context, auth), (show) => { if (!disposed) void panel.webview.postMessage({ type: 'setup-nudge', show }); }, cardFailed('"no team yet"'));
   // A staff project's "Staff teams" card (in place of the "no team yet" card), and the /team menu, which lists the same teams first.
   const staffCard = latestOnly(() => staffTeamsCard(), (model) => {
     if (disposed) return;
     void panel.webview.postMessage({ type: 'staff-teams', model: model ?? null });
     void commandList(gsdHostFor(context), workspaceRoot()).then((commands) => { if (!disposed) void panel.webview.postMessage({ type: 'commands', commands }); }, () => undefined);
-  });
+  }, cardFailed('"Staff teams"'));
   const refreshTeamCards = async () => { await setupNudge.refresh(); await staffCard.refresh(); };
   const feed = sharedActivityFeed();
   // "Pick up where you left off": the last chat continued in another editor or on another computer. It only offers to reopen that chat.
@@ -721,6 +723,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (message.type === 'setup-nudge') {
       // Hidden at once; a card worked out before the flag was saved is dropped (latestOnly).
       if (message.action === 'later') { await context.workspaceState?.update(SETUP_NUDGE_DISMISSED_KEY, true); setupNudge.set(false); return; }
+      if (message.action === 'staff') { await vscode.commands.executeCommand(SET_UP_STAFF_TEAM_COMMAND); await refreshTeamCards(); return; }
       await vscode.commands.executeCommand(message.action === 'team' ? 'nearAi.setupProjectTeam' : 'nearAi.projectSetup');
       return;
     }
@@ -1103,8 +1106,15 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
   const windowWatch = typeof vscode.window.onDidChangeWindowState === 'function' ? vscode.window.onDidChangeWindowState((window) => { if (window.focused) for (const tab of tabs) tab.focusRegained?.(); }) : undefined;
   // The "no team yet" card goes away as soon as Team Studio (or anyone) saves the project's team.
   const teamWatch = watchProjectTeam(() => { if (!disposed) void refreshTeamCards(); });
+  // Set Up a Staff Team and Link say when they wrote the project's staff teams, so the card changes at once even where the file watcher is silent
+  // (code-server, D-48 of 0.4.35); and the cards are worked out again whenever the chat comes back on screen, so a message lost while it was hidden
+  // never leaves an old card.
+  const staffWritten = onStaffTeamsChanged((root) => { if (!disposed && root === workspaceRoot()) void refreshTeamCards(); });
+  const shownAgain = typeof (panel as Partial<vscode.WebviewView>).onDidChangeVisibility === 'function'
+    ? (panel as vscode.WebviewView).onDidChangeVisibility(() => { if (!disposed && (panel as vscode.WebviewView).visible) void refreshTeamCards(); })
+    : undefined;
   const stopNotices = onChatNotice((chatId) => { const tab = tabs.find((each) => each.id === chatId); if (tab !== undefined && chatId === activeId && !disposed) for (const text of takeChatNotices(chatId)) tab.post({ type: 'notice', text }); });
-  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopNotices(); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) if (tab.agent) void closeAgentConversation(tab.agent); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
+  panel.onDidDispose(() => { disposed = true; clearChatInView(activeId); stopNotices(); stopAllFollowing(); openTabSources.delete(openTabs); retentionWatch.dispose(); pickupWatch.dispose(); syncWatch.dispose(); for (const tab of tabs) if (tab.agent) void closeAgentConversation(tab.agent); policyWatch.dispose(); tokenWatch.dispose(); windowWatch?.dispose(); teamWatch?.dispose(); staffWritten.dispose(); shownAgain?.dispose(); state.spendWatch?.dispose(); if (state.spendTimer) clearTimeout(state.spendTimer); }, undefined, context.subscriptions);
   // The emergency stop stops every conversation's run; the composer's Stop stops only the one on screen.
   onDidChangeEmergencyStop(async (engaged) => {
     sendPolicyState(panel);
@@ -1236,7 +1246,7 @@ async function setupNudgeShows(context: vscode.ExtensionContext, auth: AuthServi
 /** The project's staff section teams against the person's team library: the record the card, the /team menu and the Staff Room share. */
 async function staffTeamsOf(root: string): Promise<ProjectStaffTeams> {
   await whenTeamsMoved();
-  return projectStaffTeams(root, new TeamLibrary(teamLibraryDir(homeFolder())).directory).catch(() => ({ staff: false, sections: [] }));
+  return projectStaffTeamsReported(root, () => new TeamLibrary(teamLibraryDir(homeFolder())).directory, nearAiLog);
 }
 
 /** The "Staff teams" card's model, or undefined outside a staff project (the card is removed). */
