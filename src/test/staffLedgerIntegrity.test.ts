@@ -171,7 +171,7 @@ test('every staff tool declares every project file the staff host reads, and wri
 
 // ---- 4. Only servers that exist are granted ---------------------------------------------------------------------------------------------
 
-test('every MCP grant in every staff template names a server that exists; map layers are product files until cop-map exists', () => {
+test('every MCP grant in every staff template names a server that exists, and a member told to use cop-map is granted it; map layers are product files', () => {
   const servers = new Set(builtInStaffServers().map((server) => server.id));
   for (const template of STAFF_TEMPLATES) {
     for (const rendering of template.renderings().filter((_, index) => index % 5 === 0)) {
@@ -180,7 +180,8 @@ test('every MCP grant in every staff template names a server that exists; map la
           const server = /^mcp__([^_]+(?:-[^_]+)*)__/.exec(tool)?.[1] ?? /^mcp:(.+)$/.exec(tool)?.[1];
           if (server) assert.ok(servers.has(server), `${rendering.key}/${member.name} is granted ${tool}, a server that does not exist`);
         }
-        assert.doesNotMatch(member.instructions, /cop-map/, `${member.name} is not told to use a server that does not exist`);
+        assert.ok(servers.has('cop-map'), 'the cop-map server exists');
+        if (/cop-map/.test(member.instructions)) assert.ok(member.tools.some((tool) => tool === 'mcp:cop-map' || tool.startsWith('mcp__cop-map__')), `${member.name} is told to use cop-map, so it is granted it`);
       }
     }
   }

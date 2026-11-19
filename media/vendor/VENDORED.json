@@ -1,0 +1,39 @@
+{
+  "note": "Third-party code the COP map page loads, copied byte for byte from the published npm packages at exact versions, reviewed before adoption and never fetched at run time. A test checks every file against its hash here.",
+  "packages": [
+    {
+      "name": "maplibre-gl",
+      "version": "6.16.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "maplibre-gl/LICENSE.txt",
+      "integrity": "sha512-gApO66EMtoDZuio680RUBvskR7ahFd/NNhLN4tBAs+Y7FeT4gQV8zVFgYVMRmFxQznOEzecW19w6xOd9XjZjiA==",
+      "from": [
+        "dist/maplibre-gl.mjs",
+        "dist/maplibre-gl-worker.mjs",
+        "dist/maplibre-gl.css",
+        "LICENSE.txt"
+      ],
+      "why": "The newest release at least two weeks old when vendored (published 2026-10-25); globe projection since 5.0.0."
+    },
+    {
+      "name": "milsymbol",
+      "version": "3.0.5",
+      "license": "MIT",
+      "licenseFile": "milsymbol/LICENSE",
+      "integrity": "sha512-LKEj0wnHIWwpdazKxwFie+h5NIEz9ezD0BoHaZXceMh3sbhGL8oMUQU7gjoVorYdKtdWaQTYpUEMxaorX/2SjQ==",
+      "from": [
+        "dist/milsymbol.js",
+        "LICENSE"
+      ],
+      "why": "The version the UX concept checked (12.2); published 2026-10-27."
+    }
+  ],
+  "files": {
+    "maplibre-gl/LICENSE.txt": "ee5fc05a0677eaf69601d2c7db0d9ecd6cc27c3abc1d0733bc9ed34707cf8ef2",
+    "maplibre-gl/maplibre-gl-worker.mjs": "0bf06492bdb7ba3d4132b78e435621bfba60d5250967991c02b1a73affea8cd5",
+    "maplibre-gl/maplibre-gl.css": "a90798a1953017790e590f7e1bd35ff103a8a4263972cb47290b78adf86f8c20",
+    "maplibre-gl/maplibre-gl.mjs": "fbbdf8ddd9a48e49059a4be6795a4f214a711314bb5809f72d3730b48e7897e3",
+    "milsymbol/LICENSE": "36d4dab09341705a8873a8dbc32f00388f9a3f0eb2e315c37f0bc2fe25d93fd7",
+    "milsymbol/milsymbol.js": "bcd2e1be63e75935ca318037523e01379e07d0c0b5c22cb82465ccaef59f058c"
+  }
+}
