@@ -15,7 +15,7 @@ import type { AgentTool, ToolContext } from '../agent/tools';
 import { escapeText, foldLine, MAX_ICS_BYTES, parseIcs, toIcs, unfold } from '../domain/staff/battleRhythm';
 import { DOCTRINE_PROFILES, ORDER_PARAGRAPHS, STAFF_PROFILE_IDS } from '../domain/staff/doctrine';
 import type { StaffProfileId } from '../domain/staff/doctrine';
-import { assembleOrder, checkAnnexes, fragoBody, orderKind } from '../domain/staff/orders';
+import { assembleOrder, checkAnnexes, compareLetters, fragoBody, orderKind } from '../domain/staff/orders';
 import type { OrderProductFacts } from '../domain/staff/orders';
 import { transition } from '../domain/staff/release';
 import type { RegisterRow } from '../domain/staff/registers';
@@ -72,12 +72,17 @@ test('each profile files the classic subjects under its own letters: joint D log
   assert.equal(letter('nato-ca', 'logistics'), 'R');
 });
 
+test('annex letters sort single, then doubled, and a numbered COPD sub-annex right after its own annex', () => {
+  assert.deepEqual(['TT', 'SS2', 'A', 'SS', 'II', 'D', 'SS4', 'AA'].sort(compareLetters), ['A', 'D', 'AA', 'II', 'SS', 'SS2', 'SS4', 'TT']);
+});
+
 test('assembly puts each annex under the letter its profile gives, appendices under their annex, and the five paragraphs of the profile', () => {
   const annex = (subject: 'logistics' | 'intelligence' | 'fires' | 'operations' | 'assessment', product: string) => ({ subject, product, version: 2, owner: 'owner-a', body: `# ${product}\n\nText of ${product}.\n` });
   const expected: Record<StaffProfileId, string[]> = {
     'us-joint': ['## Annex B: Intelligence', '## Annex C: Operations', '### Appendix: fires', '## Annex D: Logistics', '## Annex N: Assessments'],
     'us-army': ['## Annex B: Intelligence', '## Annex C: Operations', '## Annex D: Fires', '## Annex F: Sustainment', '## Annex M: Assessment'],
-    'nato-ca': ['## Annex A: Conduct of Operations', '### Part: fires', '### Part: assessment', '## Annex D: Intelligence', '## Annex R: Logistics']
+    // The COPD letters: single letters first, then the doubled ones (II Joint Targeting, OO Operations Assessment).
+    'nato-ca': ['## Annex A: Concept of Operations', '## Annex D: Intelligence', '## Annex R: Logistics', '## Annex II: Joint Targeting', '## Annex OO: Operations Assessment']
   };
   for (const profile of STAFF_PROFILE_IDS) {
     const kind = orderKind(profile, 'oplan')!;
@@ -198,7 +203,8 @@ test('a FRAGO is a draft against a released order: agents cannot approve or rele
   assert.match(other.text, /owned by lead-planner/);
   // The run's lead is not a member.
   assert.match((await callServer(world, tools, 'mcp__orders__frago', { product: 'frago-9', number: 9, title: 'x', base: 'opord-2', changes: { mission: 'x' } })).text, /Only a member/);
-  assert.equal(fragoBody({ profile: 'nato-ca', number: 2, title: 't', base: { product: 'p', version: 1, kind: 'order' }, changes: [] }).startsWith('# FRAGO 2'), true);
+  assert.equal(fragoBody({ profile: 'nato-ca', number: 2, title: 't', base: { product: 'p', version: 1, kind: 'order' }, changes: [] }).startsWith('# Frag O 2'), true);
+  assert.equal(fragoBody({ profile: 'us-joint', number: 2, title: 't', base: { product: 'p', version: 1, kind: 'order' }, changes: [] }).startsWith('# FRAGORD 2'), true);
 });
 
 test('no orders or battle-rhythm tool is named for a person\'s decision', () => {

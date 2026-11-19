@@ -1,7 +1,7 @@
 // The J3 skills (design 10, 6.2; research note 03, A3 to A6 and A14): the running estimate and the execution loop. Each is a Markdown file the members
 // read from `.planning/staff/skills/`, written for the project's profile and level so every term, code, horizon and annex letter in it is the profile's.
 // The person can read and edit them. Pure: no I/O, no clock, no vscode.
-import { COMPETITION_CONTINUUM, FRAGMENTARY_ORDER, JOINT_TARGETING_CYCLE, PLANNING_HORIZONS, RUNNING_ESTIMATE } from '../../domain/staff/doctrine';
+import { COMPETITION_CONTINUUM, FRAGMENTARY_ORDER, JOINT_TARGETING_CYCLE, ORDER_PARAGRAPHS, PLANNING_HORIZONS, RUNNING_ESTIMATE } from '../../domain/staff/doctrine';
 import { TRANSITION_PRODUCT } from '../../domain/staff/ownership';
 import { STAFF_MARKERS } from '../../domain/staff/products';
 import { renderProfileMarkdown, sectionCode } from '../../domain/staff/profiles';
@@ -67,7 +67,7 @@ function executionLoop(template: J3Template): string {
     `4. The release-guard checks the ${frago}'s exact version; the section's integrator submits it to the person who decides; only that person releases it.`,
     '5. The assessment-analyst runs the assessment cycle; the integrator updates the running estimate.',
     '',
-    `A ${frago}: ${FRAGMENTARY_ORDER.definition} Paragraphs: 1 Situation; 2 Mission; 3 Execution; 4 Sustainment; 5 Command and signal, each "no change" where nothing changes.`,
+    `A ${frago}: ${FRAGMENTARY_ORDER.definition} Paragraphs: ${ORDER_PARAGRAPHS[resolved.settings.profile].map((paragraph, index) => `${index + 1} ${paragraph}`).join('; ')}, each "no change" where nothing changes.`,
     '',
     '## Battle rhythm (defaults: edit them for your headquarters)',
     '',

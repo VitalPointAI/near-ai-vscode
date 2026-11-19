@@ -66,7 +66,7 @@ test('a sample written under one profile fails the fixture of another', () => {
   assert.match(details, /J2/, 'NATO/Canadian writes J2, not J-2');
   const army = checkProduct(joint, acceptanceFixture('intelligence-estimate', 'us-army', 'tactical'), SCENARIO);
   assert.ok(army.problems.some((problem) => problem.kind === 'forbidden' && /JIPOE/.test(problem.detail)), 'JIPOE is not the tactical intelligence preparation');
-  assert.ok(army.problems.some((problem) => problem.kind === 'term' && /IPB/.test(problem.detail)));
+  assert.ok(army.problems.some((problem) => problem.kind === 'term' && /IPOE/.test(problem.detail)), 'the US Army says IPOE');
 });
 
 test('fixtures follow the profile: staff codes, intelligence preparation, annex letters, COA tests and step names', () => {
@@ -76,6 +76,7 @@ test('fixtures follow the profile: staff codes, intelligence preparation, annex 
   assert.deepEqual(term(acceptanceFixture('intelligence-estimate', 'us-army', 'tactical'), 'staff code'), ['G-2', 'S-2']);
   assert.deepEqual(term(acceptanceFixture('intelligence-estimate', 'us-joint', 'operational'), 'intelligence preparation'), ['JIPOE']);
   assert.deepEqual(term(acceptanceFixture('intelligence-estimate', 'nato-ca', 'tactical'), 'intelligence preparation'), ['IPB']);
+  assert.deepEqual(term(acceptanceFixture('intelligence-estimate', 'us-army', 'tactical'), 'intelligence preparation'), ['IPOE']);
   assert.deepEqual(term(acceptanceFixture('intelligence-estimate', 'us-joint', 'strategic'), 'intelligence annex letter'), ['Annex B']);
   assert.deepEqual(term(acceptanceFixture('intelligence-estimate', 'nato-ca', 'strategic'), 'intelligence annex letter'), ['Annex D']);
   const jointCoa = acceptanceFixture('coa-statement', 'us-joint', 'operational');
@@ -181,7 +182,7 @@ test('the J2 and J5 demo scripts resolve every token for every profile and level
   assert.equal(demoScriptPath('j2'), '.planning/staff/demo/j2-demo-script.md');
 });
 
-test('demo prompts speak the profile: J-2 and JIPOE under US Joint, G-2 and IPB under US Army, J2 and Annex D under NATO/Canadian', () => {
+test('demo prompts speak the profile: J-2 and JIPOE under US Joint, G-2 and IPOE under US Army, J2 and Annex D under NATO/Canadian', () => {
   const joint = renderDemoScript('j2', settingsFor('us-joint', 'operational'), SCENARIO);
   assert.match(joint, /You are the J-2 section of JTF BEACON/);
   assert.match(joint, /Run JIPOE for Mission analysis/);
@@ -189,7 +190,8 @@ test('demo prompts speak the profile: J-2 and JIPOE under US Joint, G-2 and IPB 
   assert.match(joint, /OS-02 \(C3\) and OS-03 \(C3\)/);
   const army = renderDemoScript('j2', settingsFor('us-army', 'tactical'), SCENARIO);
   assert.match(army, /You are the G-2 section/);
-  assert.match(army, /Run IPB for Mission analysis/);
+  assert.match(army, /Run IPOE for Mission analysis/);
+  assert.doesNotMatch(army, /\bIPB\b/, 'the US Army no longer says IPB');
   const nato = renderDemoScript('j5', settingsFor('nato-ca', 'operational'), SCENARIO);
   assert.match(nato, /You are the J5 section/);
   assert.match(nato, /Feasibility, Acceptability, Completeness and compliance, Exclusivity, Suitability/);

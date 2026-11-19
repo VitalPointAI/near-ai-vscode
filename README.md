@@ -279,7 +279,8 @@ source), assembles an order or plan from released products and drafts FRAGOs, ea
 person releases. `mcp:battle-rhythm` keeps the battle rhythm calendar and exports it to an `.ics`
 file, or imports one you put in the project. `mcp:observations` reads the feed reports kept in
 `.planning/staff/observations/` (not committed), shows only what your
-clearances cover, and says when a limit cut an answer.
+clearances cover, and says when a limit cut an answer. Its standing watch tools write files,
+so only their own grant (`mcp__observations__watch_*`) gives them, never `mcp:observations`.
 A J4 logistics team starts support planning at the first step, alongside force
 planning, and every number in its products cites the calculator record that
 produced it (`calc:<id>`, a record in `.planning/staff/calculator/`); the

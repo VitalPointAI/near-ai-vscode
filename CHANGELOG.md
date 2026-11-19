@@ -25,7 +25,7 @@ persona name or a rank.
   brigade and 5 for a battalion, each with its doctrinal job, the products it owns with their
   required headings, a "your output is X, not Y" boundary, what it hands back and to whom, and
   what it never decides: PIRs, collection allocation and every release stay with people. The words
-  follow the profile (JIPOE or IPB, Annex B or Annex D, J-2, J2, G2 or S-2). Two skills come with
+  follow the profile (JIPOE, IPOE or IPB, Annex B or Annex D, J-2, J2, G2 or S-2). Two skills come with
   it: ICD 203 analytic standards, and source grading with reliability and credibility graded
   separately.
 - **J5 plans team.** A lead planner who runs the planning steps and the wargame, design before the
@@ -281,6 +281,16 @@ persona name or a rank.
   merge is refused and the proposal stays where it is.
 - **Staff Room notices stay up their full time.** A newer notice is no longer hidden early by the
   timer of the one before it.
+- **Updated doctrine terms.** US Army teams use the six-step intelligence process of ADP 2-0
+  (2026) and say IPOE instead of IPB; NATO/Canadian orders use the NATO COPD annex letters (for
+  example Annex SS2 for information operations and Annex TT for public affairs) and write
+  "Frag O"; NATO JIPOE has its three steps; the joint targeting cycle ends in combat assessment;
+  and source grade 1 reads "Confirmed by other sources" (NATO) or "Confirmed" (US Army).
+- **Standing watches and the release guard, tightened.** A watch nobody signed shows as proposed in
+  the Staff Room whatever the file says, and only the watch grant (`mcp__observations__watch_*`)
+  gives the watch tools. With an exercise box set, two plain numbers that read as a position outside
+  it go to the release guard to check. A stray merged copy no longer blocks a COP merge, and a
+  feed import whose parser cannot start is refused at once.
 
 - **A label ceiling per MCP server, and MCP tool descriptions treated as untrusted.** Your policy
   can set the highest label each add-on server may receive (`ceiling.mcpLabelCeilings`, through

@@ -17,7 +17,7 @@ depends_on: [intsum@1]
 
 ## Situation
 
-Built from IPB steps 1 to 4 on the scenario in `.planning/staff/scenario/`. 41 CSTL BDE holds the Kestrel Peninsula with two mechanized battalions, an artillery battalion and perhaps an armour company: PR-11 (B2), IM-04 (B3), EW-07 (B2). A second Dravic brigade could land at Port Calder within 72 hours of sailing if the harbour and strait are open to it: HQ-07 (B2).
+Built from IPOE steps 1 to 4 on the scenario in `.planning/staff/scenario/`. 41 CSTL BDE holds the Kestrel Peninsula with two mechanized battalions, an artillery battalion and perhaps an armour company: PR-11 (B2), IM-04 (B3), EW-07 (B2). A second Dravic brigade could land at Port Calder within 72 hours of sailing if the harbour and strait are open to it: HQ-07 (B2).
 
 ## Adversary capabilities
 

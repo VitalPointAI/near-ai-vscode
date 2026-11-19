@@ -76,28 +76,28 @@ Sources: JP 5-0 (July 2025) figures IV-2 and IV-3 and ch. IV para 3; 05 T1 and s
 
 The orders tool takes the annex list from the profile; a member never writes a letter from memory. This is the classic error the research found (03 Summary 4; 05 Summary 9).
 
-| Subject | US Joint (JP 5-0, 2025; AY26 Campaign Planning Handbook OPORD format) | US Army (FM 5-0, 2024) | NATO/Canadian (CFJP 5.0 Ch 5 Annex E App 1 list) |
+| Subject | US Joint (JP 5-0, 2025 and 2017; AY26 Campaign Planning Handbook OPORD format) | US Army (FM 5-0, 2024, app. D) | NATO/Canadian (NATO COPD letters, owner decision 19 Nov 2026) |
 |---|---|---|---|
-| Task organization | A | A | B (Task Organization and Command Relationships) |
+| Task organization | A | A | B (Task Organisation and Command Relationships) |
 | Intelligence | B | B | D |
-| Operations | C | C | A (Conduct of Operations) |
+| Operations | C | C | A (Concept of Operations) |
 | Logistics or sustainment | D (Logistics) | F (Sustainment) | R (Logistics), S (Movements) |
-| Fires | No lettered annex; an appendix to C | D | Not lettered; the template carries it in A (Conduct of Operations) |
+| Fires | No lettered annex; an appendix to C | D | II (Joint Targeting) |
 | Rules of engagement | Appendix to C | Appendix to C | E |
-| Health services | Q (Health Services) | Within F | K (HSS) |
-| Information | No lettered annex; the template carries it in C. Y is the Commander's Communication Strategy | Within C | O (Information Operations) |
+| Health services | Q (Health Services) | Within F | QQ (Medical) |
+| Information | No lettered annex; the template carries it in C (Appendix 3). Y is Communication Synchronization | Within C | SS2 (Information Operations), under SS (Strategic Communications) |
 | Communications | K (Command, Control, Communications, Computer, and Cybersecurity Systems) | H (Signal) | Q (Communications and Information Systems) |
-| Engineer | No lettered annex; L is Environmental Considerations | G | EE |
-| Legal | Appendix to E (Personnel) | SJA tab in F (note 06, FM 6-0) | AA |
-| Public affairs | F | J | X |
-| Assessment | N (Assessments) | M | Not lettered; the template carries it in A |
+| Engineer | No lettered annex; L is Environmental Considerations | G | EE (Military Engineering) |
+| Legal | Appendix to E (Personnel) | Tab C to Appendix 2 to F | AA |
+| Public affairs | F | J | TT |
+| Assessment | N (Assessments) | M | OO (Operations Assessment) |
 | Contracting and finance | W (Operational Contract Support) | W (OCS) | FF (Financial Support, with contracting) |
 | Interagency | V (Interagency-Interorganizational Coordination) | V | No separate annex; W is CIMIC |
 
 Notes:
-- **US Joint**: JP 5-0 (July 2025) names A (Task Organization), B (Intelligence), C (Operations), D (Logistics), E (Personnel), I (Knowledge, Information, and Data Management), N (Assessments), R (Reports), V (Interagency-Interorganizational Coordination) and W (Operational Contract Support), and lists A, B, C, D, J, K, S, V and Z for a level 3 CONPLAN. The AY26 Campaign Planning Handbook's OPORD format gives the full A to Z list (M not used). The two sources differ on O and P: the handbook has O Host Nation Support and P Foreign Disclosure, the 2020 JP 5-0 appendix read for note 06 has them the other way round. The profile uses the JP 5-0 2020 order (O Foreign Disclosure, P Host-Nation Support) because it came from the doctrine text; section 2.9 names the check. The fires, information, ROE and legal appendix placements come from note 06 (JP 5-0, 2020); 2025 JP 5-0 leaves formats to CJCSM 3130.03.
-- **US Army**: from FM 5-0 Appendix E as read (05 s2).
-- **NATO/Canadian**: AJP-5 does not list annexes; it points to the COPD for the CONOPS and OPLAN formats and list of annexes (AJP-5 footnote 50), and the COPD is not public. The only public list found is CFJP 5.0 Chapter 5 Annex E Appendix 1, which states that its plan format is adapted from the NATO planning guidelines of August 2000. So the NATO/Canadian column is that list, and the template uses it as stated (owner decision on Q2). **Intelligence is Annex D** in that list (it matches note 02 T5). If a COPD holder later finds a different letter, the change is one line in the profile file (section 2.9). Note the second trap this exposes: in this scheme Logistics is R and Operations is A, so "Annex D is Logistics" (joint) and "Annex D is Fires" (Army) are both wrong here.
+- **US Joint**: JP 5-0 (July 2025) names A (Task Organization), B (Intelligence), C (Operations), D (Logistics), E (Personnel), I (Knowledge, Information, and Data Management), N (Assessments), R (Reports), V (Interagency-Interorganizational Coordination) and W (Operational Contract Support), and lists A, B, C, D, J, K, S, V and Z for a level 3 CONPLAN. The AY26 Campaign Planning Handbook's OPORD format gives the full A to Z list (M not used). The handbook has O Host Nation Support and P Foreign Disclosure; the JP 5-0 (2017) annex list has no annex O and gives P to Host-Nation Support, and no source gives foreign disclosure a letter, so the profile uses P for host-nation support and asks a person where foreign disclosure goes. The 2025 JP 5-0 names neither O nor P and leaves formats to CJCSM 3130.03. The fires, information, ROE and legal placements and their sources are in the terms register (section 2.9).
+- **US Army**: from FM 5-0 (2024) Appendix D, table D-2 (the annex formats are in Appendix E).
+- **NATO/Canadian**: AJP-5 does not list annexes; it points to the COPD for the CONOPS and OPLAN formats and list of annexes. The owner decided (19 Nov 2026) to use the NATO COPD letters: the COPD Interim V2.0 (2013) list with the published COPD V3.0 (2021) changes (Info Ops SS2 and PsyOps SS4 under SS StratCom), and the V2.0 letter where the V3.0 placement is not public. These replace the CFJP 5.0 Chapter 5 Annex E Appendix 1 letters the first drop used. **Intelligence is Annex D** and Logistics is R, so "Annex D is Logistics" (joint) and "Annex D is Fires" (Army) are both wrong here.
 
 ### 2.4 What is public, and what is not
 
@@ -200,22 +200,17 @@ What changed in this design because of them:
 
 ### 2.9 Still to confirm
 
-Terms the owner's references do not settle. Each line names the document that would settle it and the design items it would change. Until then the design uses the term stated in the item, plainly.
+The status of every doctrine term the templates use is kept in one place: the terms register, [TERMS-REGISTER.md](TERMS-REGISTER.md). Each row names the profile, the term, the value in use, and whether it is confirmed (with the public source and edition), confirmed by the owner, or a best guess (with the document that would confirm it). The values themselves live only in `src/domain/staff/doctrine.ts`.
 
-| Document | What it would settle | Design items |
-|---|---|---|
-| CJCSM 3130.03 (current edition), Planning and Execution Formats and Guidance | Joint annex O and P titles (JP 5-0 2020 and the AY26 handbook disagree); placement of fires, ROE, information and legal appendices; annex Y title | 2.3 US Joint column; WP-0 annex data; `orders` tool format checks |
-| NATO COPD (current version), CONOPS and OPLAN annex list | Whether NATO uses the CFJP 5.0 letters (D Intelligence, A Conduct of Operations, R Logistics, S Movements, K HSS, AA Legal, FF Financial Support, O Information Operations, W CIMIC) | 2.3 NATO/Canadian column; UX concept 5.11; prototype labels |
-| APP-28 (full text) | Tactical step names and products; whether "Commander's decision" and "Transition" are the step names | 2.2 APP-28 column; 2.7 tactical variants; J5 and J2 tactical rosters |
-| Current Canadian Army planning and staff publications (a Canadian Army operations process or staff duties manual, and any order adopting APP-28; note 05 reports adoption from August 2026) | Whether the Canadian Army now plans with APP-28 or still the CF OPP; Canadian orders format and annex letters at brigade and battle group; G and S staff titles; battle group staff layout | 2.1 nato-ca tactical; 2.5 Canadian land terms; tactical roster names |
-| CFJP 2-0 (2011) and CFJP 4-0 (2016) | Current Canadian joint intelligence and logistics terms (JIPOE in Canadian joint use; CCIRM; lines of support; weekly logistics reports) | 2.5; J2 and J4 NATO/Canadian vocabulary; 3.5 Canadian report variant |
-| JP 2-0 (2022) and the JIPOE joint guide | US joint intelligence process names, JIPOE step names and products | J2 roster roles `jipoe-analyst` and `threat-analyst`; J2 lead workflow; intel-workbench skeletons |
-| JP 4-0 (2023) | Joint logistics core functions and product names (the seven functions, logistics estimate, concept of support) | J4 roster (one member per core function); 3.5 instructions |
-| JP 3-33 (2022) | JTF staff organization and the current ops, future ops and future plans horizons (the default 24 and 96 hours came from the 2018 edition) | `staff.horizons` default; J3 and J5 boundaries |
-| JP 3-0 (2022) chapters outside the extract | Joint phasing model and campaigning terms beyond chapter VII | `staff.phases` guidance text; J3 strategic variant |
-| FM 5-0 (2024), Appendix E | US Army annex letters for ROE, information and legal placement | 2.3 US Army column |
-| AJP-2 and AJP-10 (current editions) | NATO term for intelligence preparation (JIPOE) and for information activities at joint level | 2.5; J2 and J3 NATO/Canadian vocabulary |
-| TRADOC written reply on WEG and DATE release | Bundling demo data | Section 8 (Q5) |
+Documents that would settle the remaining best guesses, by title only:
+
+- CJCSM 3130.03A, Planning and Execution Formats and Guidance: US Joint appendix placements for fires, rules of engagement and legal.
+- The full NATO COPD V3.0: the V3.0 letters beyond the published StratCom changes, including public affairs.
+- APP-28 (full text): the tactical step names.
+- CFJP 2-0 (2011): Canadian joint JIPOE and requirements management terms.
+- JP 2-0 (2022): the US joint credibility grade 1 wording.
+- ATP 3-35 (2023): the US Army RSOI term.
+- TRADOC written reply on WEG and DATE release: bundling demo data (section 8, Q5).
 
 ---
 

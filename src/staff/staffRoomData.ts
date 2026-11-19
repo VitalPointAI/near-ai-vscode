@@ -101,14 +101,14 @@ export async function scenarioOf(root: string): Promise<{ scenario?: Scenario; p
  * the file calls armed that no signed arm decision proves is named in `unsigned` (it runs nothing until a person arms it), and a retired one is shown
  * retired whatever the file says.
  */
-export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<string, PersonDecisionEntry>): Promise<{ watches: StandingWatch[]; problems: string[]; unsigned: string[] }> {
+export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<string, PersonDecisionEntry>): Promise<{ watches: StandingWatch[]; problems: string[]; unsigned: string[]; distrusted: string[] }> {
   const read = await readSmall(path.join(root, STANDING_WATCHES_FILE));
-  if (read.problem) return { watches: [], problems: [read.problem], unsigned: [] };
-  if (read.text === undefined) return { watches: [], problems: [], unsigned: [] };
+  if (read.problem) return { watches: [], problems: [read.problem], unsigned: [], distrusted: [] };
+  if (read.text === undefined) return { watches: [], problems: [], unsigned: [], distrusted: [] };
   let value: unknown;
-  try { value = JSON.parse(read.text); } catch { return { watches: [], problems: ['The standing watches file is not JSON.'], unsigned: [] }; }
+  try { value = JSON.parse(read.text); } catch { return { watches: [], problems: ['The standing watches file is not JSON.'], unsigned: [], distrusted: [] }; }
   const entries = value && typeof value === 'object' && !Array.isArray(value) ? (value as { register?: unknown; entries?: unknown }) : undefined;
-  if (!entries || entries.register !== 'standing-watches' || !Array.isArray(entries.entries)) return { watches: [], problems: ['The standing watches file is not a standing-watches register.'], unsigned: [] };
+  if (!entries || entries.register !== 'standing-watches' || !Array.isArray(entries.entries)) return { watches: [], problems: ['The standing watches file is not a standing-watches register.'], unsigned: [], distrusted: [] };
   const watches: StandingWatch[] = [];
   const problems: string[] = [];
   entries.entries.slice(0, 200).forEach((entry, index) => {
@@ -116,17 +116,20 @@ export async function standingWatchesOf(root: string, decisions?: ReadonlyMap<st
     if (parsed.ok) watches.push(parsed.value);
     else problems.push(`Standing watch ${index + 1} was not read: ${parsed.message}`);
   });
-  // Read through the signed decisions: a retired watch shows as retired whatever the file says; one the file calls armed with no signed arm decision is
-  // flagged on its card (it runs nothing until a person arms it).
+  // Read through the signed decisions, and show the trusted state for every trust problem: a watch the file calls armed, matched, drafting or the like
+  // with no signed arm decision (or changed since) shows as proposed and is flagged on its card (it runs nothing until a person arms it); a retired one
+  // shows as retired whatever the file says. Without the decisions (no staff host) nothing can prove an arm, so every armed-family watch reads as proposed.
   const unsigned: string[] = [];
+  const distrusted: string[] = [];
+  const signed = decisions ?? new Map<string, PersonDecisionEntry>();
   const shown = watches.map((watch) => {
-    if (!decisions) return watch;
-    const trusted = trustWatch(watch, decisions.get(watch.id));
+    const trusted = trustWatch(watch, signed.get(watch.id));
     if (!trusted.problem) return watch;
-    if (trusted.watch.state === 'proposed') { unsigned.push(watch.id); return watch; }
+    distrusted.push(watch.id);
+    if (trusted.watch.state === 'proposed') unsigned.push(watch.id);
     return trusted.watch;
   });
-  return { watches: shown, problems, unsigned };
+  return { watches: shown, problems, unsigned, distrusted };
 }
 
 /** Everything the Staff Room model is built from, read now. */
@@ -172,7 +175,7 @@ export async function loadStaffRoomInput(host: StaffHost | undefined, root: stri
     ...(scenario.scenario ? { scenario: scenario.scenario } : {}), ...(scenario.problem ? { scenarioProblem: scenario.problem } : {}),
     j2: {
       ...registers, ...(dsm ? { dsm } : {}), ...(enemyCoaBody ? { enemyCoaBody } : {}), ...(enemyCoaProduct ? { enemyCoaProduct } : {}),
-      watches: watches.watches, ...(watches.unsigned.length ? { unsignedWatches: watches.unsigned } : {}), ...(options.live ? { live: options.live } : {}), problems
+      watches: watches.watches, ...(watches.unsigned.length ? { unsignedWatches: watches.unsigned } : {}), ...(watches.distrusted.length ? { distrustedWatches: watches.distrusted } : {}), ...(options.live ? { live: options.live } : {}), problems
     }
   };
 }
