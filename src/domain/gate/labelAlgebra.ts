@@ -5,7 +5,7 @@
 // source (setActiveScaleSource), and the presets are used only while no policy has been read or the policy failed closed, which is what the gate itself uses
 // then (GateHost.labelPolicy). Labels are still stored by id (`org/Confidential`); only what a person reads changes.
 import { atLeast, joinLabels } from './dominance';
-import { SCALE_PRESETS, labelKey, levelIndex, parseLabelKey, scaleOf, splitLabelKey } from './labels';
+import { SCALE_PRESETS, exportMarkingsShown, labelKey, levelIndex, parseLabelKey, scaleOf, splitLabelKey } from './labels';
 import type { Label, ScaleTable } from './labels';
 
 let source: (() => ScaleTable) | undefined;
@@ -83,4 +83,12 @@ export function labelKeyShown(label: { readonly scale: string; readonly level: s
   const split = typeof label === 'string' ? splitLabelKey(label) : label;
   if (split === undefined) return typeof label === 'string' ? label : '';
   return `${scaleShown(split.scale, scales)}: ${levelShown(split.scale, split.level)}`;
+}
+
+/**
+ * A label as a person reads it with its export markings (D-62): the scale's name and the level, then the shown words of each reserved export compartment
+ * ("Organization: Internal · ITAR"). The one helper label displays call (41-14's labelShown, 41-10's trust line); the tokens stay what records hold.
+ */
+export function labelKeyShownWithMarkings(label: { readonly scale: string; readonly level: string; readonly compartments: readonly string[] }, scales: ScaleTable = activeScales()): string {
+  return exportMarkingsShown(labelKeyShown(label, scales), label.compartments);
 }

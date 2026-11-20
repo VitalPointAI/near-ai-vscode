@@ -6,9 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { atLeast, belowOnScale, dominates, markAtLeast, meetClearance, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { DominanceContext, Mark } from '../domain/gate/dominance';
-import { SCALE_PRESETS, levelIndex, parseLabelKey } from '../domain/gate/labels';
+import { EXPORT_COMPARTMENT_SHOWN, LABEL_TOKEN_PATTERN, RESERVED_EXPORT_COMPARTMENTS, SCALE_PRESETS, exportMarkingsShown, levelIndex, parseLabelKey, shownCompartment } from '../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../domain/gate/labels';
-import { activeScales, setActiveScaleSource } from '../domain/gate/labelAlgebra';
+import { activeScales, labelKeyShownWithMarkings, setActiveScaleSource } from '../domain/gate/labelAlgebra';
 import { STAFF_TEMPLATE_LABELS } from '../domain/staff/doctrine';
 import { LICENCE_CLASS_RULES, parseFeedDescriptor } from '../domain/staff/obs/feeds';
 import type { FeedDescriptor } from '../domain/staff/obs/feeds';
@@ -312,4 +312,37 @@ test('D-35: the label module stays dependency-free: labels.ts imports only shape
   };
   assert.deepEqual(specifiers('labels.ts'), ['./shape']);
   assert.deepEqual(specifiers('dominance.ts'), ['./labels']);
+});
+
+// ---- Task 4: the reserved export compartments and their shown words (D-62) ----
+
+test('D-62: CGP, ITAR and EAR are the reserved export compartments, frozen, each a valid compartment token', () => {
+  assert.deepEqual([...RESERVED_EXPORT_COMPARTMENTS], ['CGP', 'ITAR', 'EAR']);
+  assert.ok(Object.isFrozen(RESERVED_EXPORT_COMPARTMENTS) && Object.isFrozen(EXPORT_COMPARTMENT_SHOWN));
+  for (const token of RESERVED_EXPORT_COMPARTMENTS) assert.match(token, LABEL_TOKEN_PATTERN);
+  assert.deepEqual(Object.keys(EXPORT_COMPARTMENT_SHOWN).sort(), ['CGP', 'EAR', 'ITAR']);
+});
+
+test('D-62: a reserved compartment is shown in its words; any other token, or a near miss, comes back unchanged', () => {
+  assert.equal(shownCompartment('CGP'), 'Controlled goods (Canada)');
+  assert.equal(shownCompartment('ITAR'), 'ITAR');
+  assert.equal(shownCompartment('EAR'), 'US export-controlled (EAR)');
+  for (const token of ['ALPHA', 'itar', 'ITAR2', 'cgp', 'EAR ', '__proto__', 'constructor', 'toString', '']) assert.equal(shownCompartment(token), token, JSON.stringify(token));
+  for (const shown of Object.values(EXPORT_COMPARTMENT_SHOWN)) assert.ok(!shown.includes('\u2014'), 'no em-dash in a shown word');
+});
+
+test('D-62: the reserved markings follow the shown level, joined by a middle dot, in the reserved order; other compartments add nothing', () => {
+  assert.equal(exportMarkingsShown('Organization: Internal', ['ITAR']), 'Organization: Internal · ITAR');
+  assert.equal(exportMarkingsShown('Organization: Internal', ['EAR', 'ALPHA', 'CGP']), 'Organization: Internal · Controlled goods (Canada) · US export-controlled (EAR)');
+  assert.equal(exportMarkingsShown('Organization: Internal', []), 'Organization: Internal');
+  assert.equal(exportMarkingsShown('Organization: Internal', ['ALPHA', 'BRAVO', 'itar']), 'Organization: Internal');
+  assert.equal(exportMarkingsShown('Organization: Internal', ['ITAR', 'ITAR']), 'Organization: Internal · ITAR', 'a marking is shown once');
+});
+
+test('D-62: labelKeyShownWithMarkings shows the scale, the level and the export markings, keeping the organization\'s Sensitive', () => {
+  assert.equal(labelKeyShownWithMarkings({ scale: 'ca-protected', level: 'Protected B', compartments: ['CGP', 'ITAR'] }), 'Canada, Protected: Protected B · Controlled goods (Canada) · ITAR');
+  assert.equal(labelKeyShownWithMarkings({ scale: 'org', level: 'Confidential', compartments: ['ITAR'] }), 'Organization: Sensitive · ITAR');
+  assert.equal(labelKeyShownWithMarkings({ scale: 'org', level: 'Internal', compartments: [] }), 'Organization: Internal');
+  const clear = setActiveScaleSource(() => ({ ...SCALE_PRESETS, custom: { name: 'Project', levels: ['Low', 'High'] } }));
+  try { assert.equal(labelKeyShownWithMarkings({ scale: 'custom', level: 'High', compartments: ['EAR'] }), 'Project: High · US export-controlled (EAR)'); } finally { clear(); }
 });

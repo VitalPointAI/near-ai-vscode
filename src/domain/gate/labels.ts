@@ -45,6 +45,36 @@ export const RELEASABILITY_NONE = 'RELEASABLE-TO-NONE';
 /** A compartment or releasability token: upper case letters and digits, with `_` and `-` after the first character, at most 32 characters. */
 export const LABEL_TOKEN_PATTERN = /^[A-Z0-9][A-Z0-9_-]{0,31}$/;
 
+/**
+ * The reserved export compartments (D-62, CGP-ITAR design 6.1): Canada's controlled goods, ITAR and EAR. They are compartments, never levels, so they combine
+ * with any level on any scale. The tokens are what label files, signed policies and records hold, and what administrator panes show; their meaning never
+ * changes in place (D-22). Where content carrying one may go is the starting rules' `routing.compartments` entries (41-01, D-62), and the export-control
+ * rules are Phase 45's: nothing here decides anything, it only names them and gives the words a person reads.
+ */
+export const RESERVED_EXPORT_COMPARTMENTS = Object.freeze(['CGP', 'ITAR', 'EAR'] as const);
+export type ReservedExportCompartment = (typeof RESERVED_EXPORT_COMPARTMENTS)[number];
+
+/** The words a person reads for each reserved export compartment, shown after the level. */
+export const EXPORT_COMPARTMENT_SHOWN: Readonly<Record<ReservedExportCompartment, string>> = Object.freeze({
+  CGP: 'Controlled goods (Canada)',
+  ITAR: 'ITAR',
+  EAR: 'US export-controlled (EAR)'
+});
+
+/** A compartment token as a person reads it: the shown words of a reserved export compartment, any other token unchanged. Own property only. */
+export function shownCompartment(token: string): string {
+  return Object.prototype.hasOwnProperty.call(EXPORT_COMPARTMENT_SHOWN, token) ? EXPORT_COMPARTMENT_SHOWN[token as ReservedExportCompartment] : token;
+}
+
+/**
+ * A shown label followed by the shown words of each reserved export compartment it carries, in the reserved order and joined by " · "
+ * ("Organization: Internal · ITAR"). Other compartments are left to each caller's own display, so a label with none of the three is unchanged.
+ */
+export function exportMarkingsShown(shownLabel: string, compartments: readonly string[]): string {
+  const markings = RESERVED_EXPORT_COMPARTMENTS.filter((token) => compartments.includes(token)).map(shownCompartment);
+  return [shownLabel, ...markings].join(' · ');
+}
+
 function makeScale(name: string, levels: readonly string[]): Scale {
   return Object.freeze({ name, levels: Object.freeze([...levels]) });
 }
