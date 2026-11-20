@@ -18,10 +18,23 @@
 // - Version hashes: the fold names a version by replicaVersionHash, which pins dependencies by hash. Today's ledger pins by version number. A version
 //   without pins has the same hash both ways; a version with pins gets today's hash from its text, which the caller passes in `texts` when it has
 //   opened the version blob, and keeps the fold's hash otherwise.
+//
+// Imported products (plan 31-19; D-31, D-32): a project made multi-user from a single-machine one carries today's product ledger whole, in its
+// project.import entry, and each product as a live text and (when its text is known) one version, every one of those entries citing the import in its
+// deps. Older versions, gate verdicts, approvals and releases stay only as the original signed entries inside the import. So for an imported product
+// whose shared history has nothing after the imported version, the projection is the replay of the imported ledger (verified at import by the staff
+// lead, and checked here against the import's head, count and file hash), and the product carries IMPORTED_APPROVAL_TEXT for any approval it holds.
+// Once acts are written on top (Phase 33), the fold's own projection above applies.
+//
+// writeProjections, at the end of this file, is the one function here that touches files: it writes the product files and the passthrough ledgers
+// (decisions, calculator, wargame) a migrated project keeps at their usual paths, through writeIfUnchanged.
 import { createHash } from 'node:crypto';
+import * as path from 'node:path';
 import { fingerprintOf } from '../../domain/team/canonical';
 import type { Actor } from '../../domain/replica/entry';
 import type { FoldResult } from '../../domain/replica/fold';
+import type { ProjectImport, ProjectOutput } from '../../domain/replica/projectFold';
+import type { ProductTextOutput } from '../../domain/replica/textFold';
 import type { RosterView } from '../../domain/replica/rosterView';
 import type { VerifiedEntry } from '../../domain/replica/verify';
 import { actorForTransition, personForTransition } from '../../domain/replica/versions';
@@ -29,11 +42,16 @@ import type { ProductVersions, VersionAct, VersionRecord, VersionView } from '..
 import { STAFF_LEVELS, STAFF_PROFILE_IDS } from '../../domain/staff/doctrine';
 import { eventsForTransition } from '../../domain/staff/events';
 import type { StaffEvent } from '../../domain/staff/events';
-import { apply, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash, projectHeader } from '../../domain/staff/ledger';
+import { apply, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash, projectHeader, replayLedger } from '../../domain/staff/ledger';
 import type { HistoryItem, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
 import { PRODUCT_KINDS, renderProductHeader } from '../../domain/staff/products';
 import type { ProductDependency } from '../../domain/staff/products';
 import type { ProductRecord, ReleaseEvent, StaffActor } from '../../domain/staff/release';
+import { staffProductPath } from '../../domain/staff/writeLimits';
+import type { KeyStatusLookup } from '../../domain/team/keyStatus';
+import { verifyPayload } from '../../domain/team/signedPayload';
+import { isRecord } from '../../domain/team/validate';
+import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staffFiles';
 
 /** What the projection needs to know about one admitted entry, by entry hash. */
 export interface ProjectionEntry {
@@ -44,6 +62,8 @@ export interface ProjectionEntry {
   readonly data: unknown;
   /** The entry's actor, for an agent's run. */
   readonly actor?: Actor;
+  /** The hashes of the entries it depends on: a reconstructed product's entries cite their ledger's import here (31-19). */
+  readonly deps?: readonly string[];
 }
 
 export interface ProjectionInput {
@@ -62,7 +82,7 @@ export const PROJECTION_PROBLEMS = {
 
 /** The projection's view of one admitted entry. */
 export function projectionEntry(entry: VerifiedEntry): ProjectionEntry {
-  return { at: entry.body.at, writer: entry.header.writer, member: entry.member, kind: entry.body.kind, data: entry.data, actor: entry.body.actor };
+  return { at: entry.body.at, writer: entry.header.writer, member: entry.member, kind: entry.body.kind, data: entry.data, actor: entry.body.actor, deps: entry.body.deps.map((dep) => dep.hash) };
 }
 
 // ---- One product -------------------------------------------------------------------------------------------------------------------------------
@@ -77,8 +97,10 @@ interface ProjectedStep {
 
 interface ProductProjection {
   readonly stream: string;
-  readonly state: ProductState;
+  readonly state: ProjectedProductState;
   readonly steps: readonly ProjectedStep[];
+  /** For a product shown from an imported ledger: how many entries that ledger holds (counted once in the replay). */
+  readonly legacyEntries?: number;
 }
 
 interface Candidate {
@@ -309,29 +331,114 @@ function projectAll(input: ProjectionInput): Map<string, ProductProjection> {
     const projected = projectProduct(product, context);
     if (projected !== undefined) out.set(product.product, projected);
   }
+  overlayImported(input, products, out);
   return out;
 }
 
+// ---- Imported products (31-19) -----------------------------------------------------------------------------------------------------------------
+
+/** The wording every approval of an imported product carries (D-32): the original signed entry is in the import, not a replica decision. */
+export const IMPORTED_APPROVAL_TEXT = 'approved on this machine before the project became multi-user, verified at import by the staff lead';
+/** The project.import ledger name of today's product ledger. */
+export const IMPORTED_PRODUCTS_LEDGER = 'products';
+
+/** How a product came from an imported ledger: the import entry, and the approval wording when the imported ledger holds an approval. */
+export interface ImportedProduct {
+  readonly ledger: string;
+  readonly entry: string;
+  readonly approval?: typeof IMPORTED_APPROVAL_TEXT;
+}
+/** Today's ProductState, with `imported` set on a product the projection shows from an imported ledger. */
+export type ProjectedProductState = ProductState & { readonly imported?: ImportedProduct };
+
+// The imported ledger was verified at import by the staff lead with this computer's key status then; here every key is taken as the lead found it, while
+// each signature is still checked against its own key and the replay must end at the import's head and count.
+const AS_VERIFIED_AT_IMPORT: KeyStatusLookup = () => ({ state: 'active' });
+
+/** The legacy file an import carries, when its bytes match the file hash the fold lists. */
+export function importedFile(record: ProjectImport, entries: ReadonlyMap<string, ProjectionEntry>): Buffer | undefined {
+  const data = entries.get(record.entry)?.data;
+  if (record.fileHash === undefined || !isRecord(data) || typeof data.file !== 'string') return undefined;
+  const bytes = Buffer.from(data.file, 'base64url');
+  return createHash('sha256').update(bytes).digest('hex') === record.fileHash ? bytes : undefined;
+}
+
+/** The lines of a ledger file as today's host reads them: one JSON value per non-blank line, a line that does not parse kept as its text. */
+export function ledgerLinesOf(bytes: Buffer): unknown[] {
+  return bytes.toString('utf8').split('\n').filter((line) => line.trim() !== '').map((line) => { try { return JSON.parse(line) as unknown; } catch { return line; } });
+}
+
+/**
+ * Today's LedgerReplay of an imported product ledger: the file's lines replayed through today's replayLedger, every signature checked, and the result
+ * required to end at the head and count the import records and the file to match its hash. Undefined when any of that fails, so a projection never
+ * shows a product from a file the import does not vouch for.
+ */
+export function projectImportedLedger(importRecord: ProjectImport, bytes: Buffer): LedgerReplay | undefined {
+  if (importRecord.fileHash === undefined || createHash('sha256').update(bytes).digest('hex') !== importRecord.fileHash) return undefined;
+  const replay = replayLedger(ledgerLinesOf(bytes), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status: AS_VERIFIED_AT_IMPORT }));
+  if (replay.broken !== undefined || replay.head !== importRecord.legacyHead || replay.entries !== importRecord.count) return undefined;
+  return replay;
+}
+
+/** The first import of a ledger in the fold (streams in fold order, imports as the project family lists them). */
+export function importOf(fold: FoldResult, ledger: string): ProjectImport | undefined {
+  for (const stream of (fold.families.project as ProjectOutput | undefined) ?? []) {
+    const found = stream.imports.find((item) => item.ledger === ledger);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** Does the fold hold nothing for this product beyond what was reconstructed from the import (at most one version, citing it, and no act)? */
+function onlyImported(product: ProductVersions | undefined, entry: string, entries: ReadonlyMap<string, ProjectionEntry>): boolean {
+  if (product === undefined) return true;
+  if (product.versions.length > 1 || product.records.some((record) => record.acts.length > 0)) return false;
+  return product.versions.every((view) => entries.get(view.entry)?.deps?.includes(entry) === true);
+}
+
+function overlayImported(input: ProjectionInput, products: readonly ProductVersions[], out: Map<string, ProductProjection>): void {
+  const record = importOf(input.fold, IMPORTED_PRODUCTS_LEDGER);
+  if (record === undefined) return;
+  const bytes = importedFile(record, input.entries);
+  const replay = bytes === undefined ? undefined : projectImportedLedger(record, bytes);
+  if (replay === undefined) return;
+  const stream = (input.fold.families.project as ProjectOutput).find((item) => item.imports.some((found) => found.entry === record.entry))?.stream ?? '';
+  for (const [name, state] of replay.products) {
+    const folded = products.find((product) => product.product === name);
+    if (!onlyImported(folded, record.entry, input.entries)) continue;
+    const imported: ImportedProduct = {
+      ledger: record.ledger,
+      entry: record.entry,
+      ...(state.approvedVersions.length > 0 || state.record.approval !== undefined ? { approval: IMPORTED_APPROVAL_TEXT } : {})
+    };
+    const shown: ProjectedProductState = { ...state, imported };
+    out.set(name, { stream: folded?.stream ?? stream, state: shown, steps: [], legacyEntries: replay.entries });
+  }
+}
+
 /** Every product of the fold as today's ProductState. */
-export function projectProductStates(input: ProjectionInput): Map<string, ProductState> {
-  const out = new Map<string, ProductState>();
+export function projectProductStates(input: ProjectionInput): Map<string, ProjectedProductState> {
+  const out = new Map<string, ProjectedProductState>();
   for (const [product, projected] of projectAll(input)) out.set(product, projected.state);
   return out;
 }
 
 /**
- * The fold as today's LedgerReplay, which everything reading staff state uses. `entries` counts the projected ledger steps, `head` is the fold's
- * digest of the streams holding products, and the replay is never broken: the fold has already refused, held or quarantined what it does not trust,
- * and a product the projection cannot vouch for is marked tampered on its own.
+ * The fold as today's LedgerReplay, which everything reading staff state uses. `entries` counts the projected ledger steps (plus the entries of an
+ * imported ledger once, when a product is shown from it), `head` is the fold's digest of the streams holding products, and the replay is never broken:
+ * the fold has already refused, held or quarantined what it does not trust, and a product the projection cannot vouch for is marked tampered on its own.
  */
 export function projectLedgerReplay(input: ProjectionInput): LedgerReplay {
   const projected = projectAll(input);
-  const products = new Map<string, ProductState>();
+  const products = new Map<string, ProjectedProductState>();
   let entries = 0;
+  let legacy = 0;
   for (const [product, item] of projected) {
     products.set(product, item.state);
     entries += item.steps.length;
+    legacy = Math.max(legacy, item.legacyEntries ?? 0);
   }
+  entries += legacy;
   return { products, entries, head: productsHead(input.fold, [...projected.values()].map((item) => item.stream)) };
 }
 
@@ -373,4 +480,64 @@ export function productsHead(fold: FoldResult, streams: Iterable<string>): strin
   if (pairs.length === 0) return LEDGER_GENESIS;
   if (pairs.length === 1) return pairs[0][1];
   return createHash('sha256').update(pairs.map(([stream, digest]) => `${stream}:${digest}`).join('\n')).digest('hex');
+}
+
+// ---- Writing the projections (31-19; D-28, D-33) -----------------------------------------------------------------------------------------------
+
+/** A ledger a migrated project keeps at its usual path, written back from its import: its project.import name and its path from the project root. */
+export interface PassthroughLedger { readonly ledger: string; readonly path: string }
+
+/** What writeProjections did, by path from the project root. `left`: a file it did not write over, with the reason. */
+export interface ProjectionWrite {
+  readonly written: string[];
+  readonly unchanged: string[];
+  readonly left: Array<{ path: string; reason: string }>;
+}
+
+/** The live text of each product in the fold's doc family, by product name (the first stream holding the name, as for the products). */
+function foldTexts(fold: FoldResult): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const item of (fold.families.doc as ProductTextOutput[] | undefined) ?? []) if (!out.has(item.product)) out.set(item.product, item.text);
+  return out;
+}
+
+/** Writes `text` at `relative` unless the file already holds it; a file that holds something else is written over only when `replace` says so. */
+async function writeProjected(root: string, relative: string, text: string, replace: boolean, out: ProjectionWrite): Promise<void> {
+  const file = path.join(root, ...relative.split('/'));
+  const read = await readWhole(file);
+  if (read.kind === 'unreadable') { out.left.push({ path: relative, reason: `it cannot be read: ${read.reason}` }); return; }
+  if (read.kind === 'text' && read.text === text) { out.unchanged.push(relative); return; }
+  if (read.kind === 'text' && !replace) { out.left.push({ path: relative, reason: 'it holds something other than the imported ledger, so it was left as it is' }); return; }
+  const written = await writeIfUnchanged(file, read.kind === 'text' ? snapshotOfBytes(read.bytes) : { exists: false }, text);
+  if (written) out.written.push(relative);
+  else out.left.push({ path: relative, reason: 'it changed while it was being written, so the change there stands' });
+}
+
+/**
+ * Writes the files of a multi-user project from its fold (D-28, D-33): each product file as today's host would write it for the projected state (the
+ * header, then the product's live text from the fold), and each passthrough ledger (decisions, calculator, wargame) back at its usual path, byte for
+ * byte as imported. Every write is a compare-and-swap (writeIfUnchanged) and a file that already holds the projected bytes is not touched. A passthrough
+ * ledger whose path already holds other bytes is left as it is and listed, never written over; nothing is ever deleted. The events log is not written:
+ * an imported product adds no step to it (its events were sent when the steps were made), and steps written on top arrive with Phase 33's live layer.
+ */
+export async function writeProjections(root: string, input: ProjectionInput, passthrough: readonly PassthroughLedger[] = []): Promise<ProjectionWrite> {
+  const out: ProjectionWrite = { written: [], unchanged: [], left: [] };
+  const texts = foldTexts(input.fold);
+  for (const [product, item] of projectAll(input)) {
+    const body = texts.get(product);
+    if (body === undefined) continue;
+    // A product with no text in the fold and no file on disk stays without one, as today's host leaves a product file that is gone.
+    if (body === '' && (await readWhole(path.join(root, ...staffProductPath(item.state.record.section, product).split('/')))).kind === 'missing') continue;
+    await writeProjected(root, staffProductPath(item.state.record.section, product), projectProductFile(item.state, body), true, out);
+  }
+  for (const ledger of passthrough) {
+    const record = importOf(input.fold, ledger.ledger);
+    const bytes = record === undefined ? undefined : importedFile(record, input.entries);
+    if (bytes === undefined) continue;
+    const text = bytes.toString('utf8');
+    // Only bytes that read back exactly as text are written: the file must come back byte for byte, never re-encoded.
+    if (!Buffer.from(text, 'utf8').equals(bytes)) { out.left.push({ path: ledger.path, reason: 'its imported bytes are not plain text, so it was not written back' }); continue; }
+    await writeProjected(root, ledger.path, text, false, out);
+  }
+  return out;
 }
