@@ -29,7 +29,14 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/transport',
   'domain/replica/digest',
   'domain/replica/clientIds',
-  'domain/replica/updateGuard'
+  'domain/replica/updateGuard',
+  // The roster fold and its key modules (31-12): the hub folds the roster to know who may write, without Yjs. safetyCode and safetyWords are not
+  // hub-side; only the people comparing the words need them.
+  'domain/replica/roster',
+  'domain/replica/rosterMembers',
+  'domain/replica/rosterCells',
+  'domain/replica/cellKeys',
+  'domain/replica/invite'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }

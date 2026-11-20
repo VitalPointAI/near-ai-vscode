@@ -226,3 +226,57 @@ test('every roster refusal reason is a plain sentence without an em-dash', () =>
   // Every routed kind is a known kind of the closed list.
   for (const kind of Object.keys(ROSTER_KIND_OWNER)) assert.ok(KIND_FAMILIES.has(kind), kind);
 });
+
+test('ROSTER_KIND_OWNER routes each of the 18 roster kinds and project.genesis to exactly one owner module', () => {
+  const rosterKinds = [...KIND_FAMILIES].filter(([, family]) => family === 'roster').map(([kind]) => kind);
+  assert.equal(rosterKinds.length, 18);
+  assert.deepEqual(Object.keys(ROSTER_KIND_OWNER).sort(), [...rosterKinds, 'project.genesis'].sort());
+  for (const [kind, owner] of Object.entries(ROSTER_KIND_OWNER)) {
+    const expected = /^(member|device|hub|invite)\./.test(kind) ? 'members' : /^cell\./.test(kind) ? 'cells' : 'roster';
+    assert.equal(owner, expected, kind);
+  }
+  assert.deepEqual(Object.entries(ROSTER_KIND_OWNER).filter(([, owner]) => owner === 'roster').map(([kind]) => kind).sort(), ['deputy.name', 'lead.handover', 'project.genesis', 'roster.choose']);
+  assert.deepEqual(Object.entries(ROSTER_KIND_OWNER).filter(([, owner]) => owner === 'cells').map(([kind]) => kind).sort(), ['cell.create', 'cell.rekey']);
+  assert.ok(Object.isFrozen(ROSTER_KIND_OWNER));
+});
+
+// Every answer the view gives about the joiner, the lead and the base cell at a roster hash, so a test can show an entry changed none of them.
+function answersAt(state: RosterState, joined: Joined, hash: string): unknown[] {
+  const view = rosterView(state);
+  const { world, joiner } = joined;
+  return [
+    view.hasRoster(hash), view.rosterPosition(hash), view.isAdmitted(joiner.writer, hash), view.isAdmitted(world.lead.writer, hash),
+    view.memberName(JOINER_MEMBER, hash), view.hasRole(JOINER_MEMBER, 'member', hash), view.hasRole(JOINER_MEMBER, 'observer', hash),
+    view.hasRole(JOINER_MEMBER, 'deputy_lead', hash), view.hasRole(world.lead.member, 'staff_lead', hash), view.roleWithdrawnBy(JOINER_MEMBER, 'member', hash),
+    view.canRunAgent?.(JOINER_MEMBER, 'release-guard', hash), view.clientIdOwner?.(clientIdOf(2, 0), hash), view.deviceEncryptionKey?.(joiner.writer, hash),
+    view.cellGrantees?.(world.project, hash), view.cellGrantees?.('c'.repeat(32), hash), view.checkpointSigner(joiner.writer, hash), view.rosterBranchPending?.(hash)
+  ];
+}
+
+test('a roster entry of a kind whose rule is not written yet is refused roster-kind-pending and changes no answer of the view, for each owner module', () => {
+  const joined = joinScenario();
+  const { world, admit } = joined;
+  const base = [...world.entries];
+  const reference = joinerRoster(joined);
+  const keys = world.ringFor(joined.joiner);
+  const pending: Array<[string, Record<string, unknown>]> = [
+    ['member.update', { member: JOINER_MEMBER, roles: ['member', 'observer'], agentSeats: ['release-guard'] }],
+    ['member.remove', { member: JOINER_MEMBER }],
+    ['device.revoke', { member: JOINER_MEMBER, writer: joined.joiner.writer }],
+    ['invite.void', { invite: INVITE_ID }],
+    ['cell.create', { cell: 'c'.repeat(32), epoch: 1, grant: 'd'.repeat(64) }],
+    ['deputy.name', { member: JOINER_MEMBER }],
+    ['lead.handover', { to: JOINER_MEMBER, reason: 'planned' }]
+  ];
+  for (const [kind, data] of pending) {
+    const written = world.rosterEntry(world.lead, kind, data, admit.hash);
+    const state = world.foldRoster({ entries: [...base, written.entry], keys });
+    assert.deepEqual(state.refused, [{ hash: written.hash, kind, reason: 'roster-kind-pending' }], kind);
+    assert.deepEqual(state.positions, reference.positions, kind);
+    for (const hash of [...reference.positions, written.hash]) assert.deepEqual(answersAt(state, joined, hash), answersAt(reference, joined, hash), `${kind} at ${hash}`);
+  }
+  // The routing is what refuses them: the kinds sit in three different owner modules.
+  assert.deepEqual([...new Set(pending.map(([kind]) => ROSTER_KIND_OWNER[kind]))].sort(), ['cells', 'members', 'roster']);
+  // The refusal reason has its plain sentence.
+  assert.ok(ROSTER_REFUSALS['roster-kind-pending'].length > 20);
+});
