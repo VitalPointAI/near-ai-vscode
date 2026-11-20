@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { agentSystemPrompt } from '../agent/systemPrompt';
 import type { McpConnection, McpSecrets, McpServerConfig, McpToolInfo } from '../mcp/client';
-import { MCP_DESCRIPTION_LEAD, MCP_DESCRIPTION_MAX, mcpAgentTools, mcpToolChanges, mcpToolDescription, mcpToolDigest, mcpToolDigests } from '../mcp/tools';
-import { APPROVE_FAILED_TEXT, McpApproveRefused, McpRegistry, approveOrReport, toolChangesNotice } from '../services/mcpRegistry';
+import { MCP_DESCRIPTION_LEAD, MCP_DESCRIPTION_MAX, fencedDescriptionKeys, mcpAgentTools, mcpToolChanges, mcpToolDescription, mcpToolDigest, mcpToolDigests } from '../mcp/tools';
+import { APPROVE_FAILED_TEXT, MAX_TOLD_NOTICES, McpApproveRefused, McpRegistry, ToldNotices, approveOrReport, toolChangesNotice } from '../services/mcpRegistry';
 
 function memory() {
   const values = new Map<string, unknown>();
@@ -275,4 +275,63 @@ test('a fenced description is built once per listing, so the tool definitions st
   const first = mcpAgentTools(CONFIG, connection, 'partner.example.test').map((each) => each.description);
   const second = mcpAgentTools(CONFIG, connection, 'partner.example.test').map((each) => each.description);
   assert.deepEqual(second, first);
+});
+
+// PR #102 review: the window's memory of told notices and fenced descriptions is bounded and holds digests, not a server's own text.
+test('told notices are remembered as sha256 digests, at most MAX_TOLD_NOTICES of them, oldest forgotten first', () => {
+  const told = new ToldNotices(3);
+  assert.equal(told.firstTime('a'), true);
+  assert.equal(told.firstTime('a'), false, 'told once');
+  for (const key of ['b', 'c', 'd']) assert.equal(told.firstTime(key), true);
+  assert.equal(told.size, 3, 'never more than the limit');
+  assert.equal(told.firstTime('a'), true, 'the oldest was forgotten, so it may be told once more');
+  assert.equal(told.firstTime('d'), false, 'a recent one is still remembered');
+  const big = new ToldNotices();
+  for (let index = 0; index < MAX_TOLD_NOTICES + 50; index += 1) big.firstTime(`listing ${String(index)} ${'x'.repeat(1_000)}`);
+  assert.equal(big.size, MAX_TOLD_NOTICES);
+});
+
+test('the fenced-description cache is keyed by the sha256 of the description, never by its text', () => {
+  const marker = `UNIQUE-DESCRIPTION-${'y'.repeat(5_000)}`;
+  mcpToolDescription('Partner', tool('lookup', marker));
+  const keys = fencedDescriptionKeys();
+  assert.ok(keys.length > 0);
+  for (const key of keys) assert.match(key, /^[0-9a-f]{64}$/);
+  assert.equal(keys.some((key) => key.includes('UNIQUE-DESCRIPTION')), false);
+  // Still one fence per listing: the same description gives the same text.
+  assert.equal(mcpToolDescription('Partner', tool('lookup', marker)).text, mcpToolDescription('Partner', tool('lookup', marker)).text);
+});
+
+test('a server pointed at a new address, transport or program keeps no tool approval: every tool is held until the person approves again; other edits keep it', async () => {
+  const stored = (global: ReturnType<typeof memory>) => (global.get<McpServerConfig[]>('nearAi.mcp.servers') ?? [])[0]!;
+  for (const repoint of [
+    { config: {}, secrets: { url: 'https://elsewhere.example.test/mcp' } },
+    { config: { transport: 'stdio' as const, command: 'node', args: ['server.js'] }, secrets: {} }
+  ]) {
+    const { registry, global } = await registryWith([tool('lookup', 'Looks up parts.')]);
+    try {
+      assert.equal((await registry.agentTools()).tools.length, 1);
+      // Kept: a rename, the same address given again, or no address given.
+      await registry.save({ ...CONFIG, name: 'Partner renamed' }, {});
+      await registry.save({ ...CONFIG }, { url: 'https://partner.example.test/mcp' });
+      assert.deepEqual(Object.keys(stored(global).approvedTools ?? {}), ['lookup'], 'an edit that does not repoint keeps the approval');
+      // Dropped: pointed somewhere else.
+      await registry.save({ ...CONFIG, ...repoint.config }, repoint.secrets);
+      assert.equal(stored(global).approvedTools, undefined, JSON.stringify(repoint));
+      const after = await registry.agentTools();
+      assert.deepEqual(after.tools, [], `the repointed server's tools are held: ${JSON.stringify(repoint)}`);
+      assert.match(after.problems.join(' '), /new: lookup/);
+      assert.equal(stored(global).approvedTools, undefined, 'and not recorded as a first connection');
+      await registry.approveToolChanges('partner');
+      assert.equal((await registry.agentTools()).tools.length, 1, 'approving the new listing offers it again');
+      if (repoint.config.transport === 'stdio') {
+        // A local server given another program, or other arguments, is a different server too.
+        await registry.save({ ...CONFIG, ...repoint.config, args: ['other.js'] }, {});
+        assert.equal(stored(global).approvedTools, undefined, 'new arguments drop the approval');
+        assert.deepEqual((await registry.agentTools()).tools, []);
+      }
+    } finally {
+      await registry.dispose();
+    }
+  }
 });

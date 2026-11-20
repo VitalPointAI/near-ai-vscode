@@ -1802,7 +1802,11 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   approve is the listing the page shows. A tool the server no longer lists is
   reported the same way. If a server's approval record is lost after it was
   made, every tool of that server is held until you approve them again; a lost
-  record never counts as a first connection. The first listing is trusted as it is: read it on the
+  record never counts as a first connection. Editing a server to point it
+  somewhere else (a new web address, a different transport, or another local
+  program or arguments) drops its approval the same way: every tool is held
+  until you approve the new server's listing. Renaming it or changing its
+  headers keeps the approval. The first listing is trusted as it is: read it on the
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`

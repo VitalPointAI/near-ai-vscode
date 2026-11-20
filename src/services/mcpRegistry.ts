@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { AgentTool } from '../agent/tools';
 import { displayHost, McpConnection, McpSecrets, McpServerConfig, McpToolInfo } from '../mcp/client';
 import { mcpAgentTools, mcpToolChanges, mcpToolDescription, mcpToolDigest, mcpToolDigests, newServerManifest, serverManifest } from '../mcp/tools';
@@ -123,12 +124,33 @@ function manifestFacts(config: McpServerConfig, host: string, tools: McpToolInfo
   };
 }
 
+/** How many told notices of each kind a window remembers (PR #102 review): a server that changes its listing every turn cannot grow them without bound. */
+export const MAX_TOLD_NOTICES = 500;
+
+/**
+ * A set of notices already told, oldest first, holding at most `limit` (the oldest is forgotten first, and may then be told once more). Each key is kept
+ * as its sha256, so a long listing or description costs 64 characters, not its own length.
+ */
+export class ToldNotices {
+  private readonly keys = new Set<string>();
+  public constructor(private readonly limit: number = MAX_TOLD_NOTICES) {}
+  public get size(): number { return this.keys.size; }
+  /** True the first time `key` is seen (and it is remembered); false while it is still remembered. */
+  public firstTime(key: string): boolean {
+    const digest = createHash('sha256').update(key).digest('hex');
+    if (this.keys.has(digest)) return false;
+    this.keys.add(digest);
+    while (this.keys.size > this.limit) this.keys.delete(this.keys.values().next().value as string);
+    return true;
+  }
+}
+
 export class McpRegistry {
   private readonly live = new Map<string, Live>();
   /** Description warnings already told in this window, by server, tool and digest, so one description is reported once, not on every message. */
-  private readonly toldWarnings = new Set<string>();
+  private readonly toldWarnings = new ToldNotices();
   /** Tool-change notices already told in this window, by server and the digest of the approved and listed tools, so one change is told once, not every turn. */
-  private readonly toldChanges = new Set<string>();
+  private readonly toldChanges = new ToldNotices();
   /** The tail of the queue of writes to the stored server list. */
   private writing: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
@@ -157,7 +179,16 @@ export class McpRegistry {
     const previous = await this.secretsFor(config.id);
     await this.secrets.store(secretKey(config.id), JSON.stringify({ ...previous, ...Object.fromEntries(Object.entries(secrets).filter(([, value]) => value !== undefined)) }));
     // The stored form is worked out inside the write, from the list as it is then, so a record another write made meanwhile is carried over.
-    await this.writeServers((servers) => { const stored = this.withManifest(config); return [...servers.filter((server) => server.id !== config.id), stored].sort((a, b) => a.name.localeCompare(b.name)); });
+    // A server pointed somewhere else (a new web address, transport, or program) is a different server: it keeps no tool approval (PR #102 review).
+    const existing = this.servers().find((server) => server.id === config.id);
+    const repointed = existing !== undefined && (existing.transport !== config.transport || existing.command !== config.command
+      || JSON.stringify(existing.args ?? []) !== JSON.stringify(config.args ?? []) || (secrets.url !== undefined && secrets.url !== previous.url));
+    // Its id is marked as approved once, so the next connection holds every tool for the person to approve rather than recording them as a first one.
+    const dropsApproval = repointed && (existing?.approvedTools !== undefined || this.approvedOnce().includes(config.id));
+    await this.writeServers(
+      (servers) => { const stored = this.withManifest(config, repointed); return [...servers.filter((server) => server.id !== config.id), stored].sort((a, b) => a.name.localeCompare(b.name)); },
+      dropsApproval ? (ids) => (ids.includes(config.id) ? ids : [...ids, config.id]) : undefined
+    );
     await this.disconnect(config.id);
   }
 
@@ -165,11 +196,12 @@ export class McpRegistry {
    * The config as it is stored. A server added for the first time starts with the restrictive manifest; one that is already stored keeps its own, and one stored with none
    * stays without (today's behaviour, D-38). The page's save message carries no manifest, so the stored one must be carried over here or an edit would drop it.
    */
-  private withManifest(config: McpServerConfig): McpServerConfig {
+  private withManifest(config: McpServerConfig, repointed = false): McpServerConfig {
     const existing = this.servers().find((server) => server.id === config.id);
     const { manifest: _ignored, approvedTools: _approved, ...base } = config;
-    // The approved tool listing is the registry's own record (WP-GATE): an edit from the page carries none, so the stored one is kept.
-    const rest: McpServerConfig = existing?.approvedTools === undefined ? base : { ...base, approvedTools: existing.approvedTools };
+    // The approved tool listing is the registry's own record (WP-GATE): an edit from the page carries none, so the stored one is kept, unless the edit
+    // points the server somewhere else. Then the record is dropped, and approvedFor holds every tool until the person approves the new server's listing.
+    const rest: McpServerConfig = existing?.approvedTools === undefined || repointed ? base : { ...base, approvedTools: existing.approvedTools };
     const given = config.manifest ?? existing?.manifest;
     if (given === undefined) return existing ? rest : { ...rest, manifest: newServerManifest(config.id, config.transport) };
     if (existing !== undefined && existing.transport !== config.transport) {
@@ -332,8 +364,7 @@ export class McpRegistry {
         const config = this.withLocalEffects(approved === undefined ? stored : { ...stored, approvedTools: approved }, declarations, problems);
         const changes = mcpToolChanges(approved, connection.tools);
         const listing = `${id}\u0000${JSON.stringify(approved ?? {}, Object.keys(approved ?? {}).sort())}\u0000${JSON.stringify(mcpToolDigests(connection.tools), connection.tools.map((tool) => tool.name).sort())}`;
-        if (changes !== undefined && !this.toldChanges.has(listing)) {
-          this.toldChanges.add(listing);
+        if (changes !== undefined && this.toldChanges.firstTime(listing)) {
           problems.push(toolChangesNotice(config.name, changes));
         }
         const offered = mcpAgentTools(config, connection, displayHost(await this.secretsFor(id)), { onCall: (serverId, ok, ms) => this.recordCall(serverId, ok, ms) });
@@ -342,8 +373,7 @@ export class McpRegistry {
           if (disabled.has(tool.name)) continue;
           const warnings = mcpToolDescription(config.name, tool).warnings;
           const told = `${id}\u0000${tool.name}\u0000${mcpToolDigest(tool)}`;
-          if (warnings.length > 0 && !this.toldWarnings.has(told)) {
-            this.toldWarnings.add(told);
+          if (warnings.length > 0 && this.toldWarnings.firstTime(told)) {
             problems.push(descriptionWarningNotice(config.name, tool.name, warnings));
           }
         }
