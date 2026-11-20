@@ -17,6 +17,7 @@ import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/g
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
 import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_UNCHECKED_TEXT } from '../agent/outboundCheck';
+import { ENROLMENT_FILE_EXTENSION, ISSUER_WORDS_DOMAIN, ISSUER_WORDS_MATCH, MAX_ENROLMENT_FILE_BYTES, issuerWordsPrompt, issuerWordsQuestion, organizationEndedText } from '../domain/gate/enrolment';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -660,4 +661,31 @@ test('PR #143 review: SECURITY.md says classified levels stay here whatever tier
   assert.match(security, /A model on a host your organization names as local counts only when the policy names that exact host and it is reached over https; a `\*\.` pattern or plain http does not\./);
   assert.match(security, /only for a policy signed by this computer's own key, \*\*NEAR AI: Show Policy\*\* offers Reset/);
   assert.match(flat(README), /a host your organization names exactly and reaches over https/);
+});
+
+// ---- Phase 41 (D-46): the docs say what the organization policy foundation does, word for word with the code ----
+
+const ORGANIZATION_RULES_HEADING = "#### Your organization's rules on this computer";
+
+test("Phase 41: the policy section says how your organization's rules reach this computer", () => {
+  assert.equal(SECURITY.split(`\n${ORGANIZATION_RULES_HEADING}\n`).length - 1, 1, 'the block exists once');
+  const block = sectionOf(SECURITY, ORGANIZATION_RULES_HEADING);
+  assert.ok(policySection.includes(block), 'the block sits inside the policy section');
+  const words = flat(block);
+  assert.equal(MAX_ENROLMENT_FILE_BYTES, 64 * 1024, 'the cap the text names');
+  const contact = 'Security desk (security@example.org)';
+  for (const phrase of [
+    ISSUER_WORDS_DOMAIN,
+    `\`${ENROLMENT_FILE_EXTENSION}\``,
+    '64 KiB',
+    'secret storage',
+    `**${commandName('nearAi.organization.addRules')}**`,
+    issuerWordsPrompt([]).trim(),
+    issuerWordsQuestion('Example Organization'),
+    `**${ISSUER_WORDS_MATCH}**`,
+    organizationEndedText('2027-01-31', contact)
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  assert.equal(commandName('nearAi.organization.addRules'), "NEAR AI: Add Your Organization's Rules");
+  assert.ok(!block.includes(EM_DASH));
+  assert.doesNotMatch(block, /NEAR (AI )?organization/i);
 });

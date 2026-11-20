@@ -489,6 +489,41 @@ above it is refused before anything is sent, at every tier, with
 Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
+#### Your organization's rules on this computer
+
+Your organization can hand its rules to every computer that uses NEAR AI.
+Its security contact gives you a signed `.near-org-enrolment` file, and
+**NEAR AI: Add Your Organization's Rules** opens it. The file is read as
+hostile input: a file larger than 64 KiB is refused before it is read, and
+nothing in it is used until its signature checks out against the key it
+names.
+
+Before that key is trusted, NEAR AI shows twelve words computed from it,
+under its own domain (`near-ai/org-issuer/v1`), so they cannot be mistaken
+for words made for anything else. The question reads "Use the rules from
+Example Organization on this computer?" with your organization's name, and
+the details say: "Ask your organization's security contact to read their
+twelve words. Compare them with these:" followed by the words and the key's
+fingerprint. Compare them with the twelve words your organization's security
+contact reads to you over a channel you trust, such as a call you placed to
+a number you already know. The only button is **The twelve words match**.
+Closing the question, or any other answer, writes nothing.
+
+Once you confirm, the key and the date of the last rules you accepted are
+kept in VS Code's secret storage on this computer, not in a file on disk.
+From then on a newer version of your organization's rules is accepted only
+when that key signed it and it is newer than the rules in use; an older one
+is refused. A handover to a new key must be signed by the key in use, and
+you compare the new key's twelve words the same way. Rules signed with this
+computer's own key are never taken as your organization's.
+
+Your organization's rules end on the date they carry. When they have ended,
+only reading and planning run until your organization sends current ones,
+and the status bar says why, for example: "Your organization's rules ended on 2027-01-31. Ask Security desk (security@example.org) for the current rules."
+The tool your organization uses to make these files, `scripts/org-issuer.mjs`,
+keeps its key in a passphrase-protected file on the issuing computer, never
+on yours.
+
 ### Classification labels and routing
 
 **What a label is.** A label is a level on a scale (for example `org/Confidential`),
