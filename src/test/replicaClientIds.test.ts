@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CLIENT_COUNTER_BITS, CLIENT_COUNTER_SPAN, MAX_SLOT, clientIdOf, isSlot, nextClientId, slotOfClientId } from '../domain/replica/clientIds';
 import { MAX_CLIENT_ID } from '../domain/replica/kindSchemas/doc';
-import { staticRosterView } from '../domain/replica/rosterView';
+import { ROSTER_ROLE_PATTERNS, staticRosterView } from '../domain/replica/rosterView';
 import type { StaticRosterSpec } from '../domain/replica/rosterView';
+import { createWorld } from './helpers/replicaWorld';
 
 const ROSTER_0 = 'roster-0';
 const ROSTER_1 = 'roster-1';
@@ -83,4 +84,68 @@ test('a static roster without any slot has no clientIdOwner at all, so nothing i
   assert.equal('deviceEncryptionKey' in view, false);
   assert.equal('cellGrantees' in view, false);
   assert.equal('rosterBranchPending' in view, false);
+});
+
+const seatSpec: StaticRosterSpec = {
+  rosters: [
+    {
+      hash: ROSTER_0,
+      members: [
+        { member: 'mbr-x', name: 'X', roles: ['member'], devices: [device('w-x')], agentSeats: ['release-guard', 'tradecraft'] },
+        { member: 'mbr-y', name: 'Y', roles: ['member'], devices: [device('w-y')] }
+      ]
+    },
+    // At the later roster mbr-x no longer runs the release guard.
+    { hash: ROSTER_1, members: [{ member: 'mbr-x', name: 'X', roles: ['member'], devices: [device('w-x')], agentSeats: ['tradecraft'] }, { member: 'mbr-y', name: 'Y', roles: ['member'], devices: [device('w-y')] }] }
+  ]
+};
+
+test('canRunAgent answers from the agent seats listed for the member at the cited roster', () => {
+  const view = staticRosterView(seatSpec);
+  const canRun = view.canRunAgent as (member: string, seat: string, rosterHash: string) => boolean;
+  assert.equal(typeof canRun, 'function');
+  assert.equal(canRun('mbr-x', 'release-guard', ROSTER_0), true);
+  assert.equal(canRun('mbr-x', 'tradecraft', ROSTER_0), true);
+  assert.equal(canRun('mbr-x', 'release-guard', ROSTER_1), false);
+  assert.equal(canRun('mbr-x', 'tradecraft', ROSTER_1), true);
+  assert.equal(canRun('mbr-x', 'j2-chief', ROSTER_0), false);
+});
+
+test('canRunAgent denies by default: an unknown member, an unknown roster, and a member with no agent seats', () => {
+  const view = staticRosterView(seatSpec);
+  const canRun = view.canRunAgent as (member: string, seat: string, rosterHash: string) => boolean;
+  assert.equal(canRun('mbr-nobody', 'release-guard', ROSTER_0), false);
+  assert.equal(canRun('mbr-x', 'release-guard', 'roster-unknown'), false);
+  for (const seat of ['release-guard', 'tradecraft', 'j2-chief', '']) assert.equal(canRun('mbr-y', seat, ROSTER_0), false, seat);
+});
+
+test('observer is a roster role word; root still is not', () => {
+  const matches = (role: string): boolean => ROSTER_ROLE_PATTERNS.some((entry) => entry.pattern.test(role));
+  assert.equal(matches('observer'), true);
+  assert.equal(ROSTER_ROLE_PATTERNS.find((entry) => entry.role === 'observer')?.meaning, 'Reads the project and writes only presence.');
+  assert.equal(matches('root'), false);
+  assert.equal(matches('observer:j2'), false);
+});
+
+test('createWorld passes agent seats and device slots into the static roster', () => {
+  const world = createWorld({ members: [{ member: 'mbr-g', roles: ['member'], devices: ['A', 'B'], agentSeats: ['release-guard'], slots: [3, 4] }, { member: 'mbr-h', devices: ['H'] }] });
+  const roster = world.ctx().roster;
+  assert.equal(roster.canRunAgent?.('mbr-g', 'release-guard', world.rosterHash), true);
+  assert.equal(roster.canRunAgent?.('mbr-g', 'tradecraft', world.rosterHash), false);
+  assert.equal(roster.canRunAgent?.('mbr-h', 'release-guard', world.rosterHash), false);
+  assert.equal(roster.clientIdOwner?.(clientIdOf(3, 0), world.rosterHash), world.writerOf('A'));
+  assert.equal(roster.clientIdOwner?.(clientIdOf(4, 12), world.rosterHash), world.writerOf('B'));
+  // H was given no slot, so no id maps to it.
+  assert.equal(roster.clientIdOwner?.(clientIdOf(1, 0), world.rosterHash), undefined);
+});
+
+test('createWorld called as every Phase 30 test calls it gives the roster it gave before: no clientIdOwner, every seat denied', () => {
+  const world = createWorld({ members: [{ member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] }, { member: 'mbr-p', devices: ['P'] }] });
+  const roster = world.ctx().roster;
+  assert.equal('clientIdOwner' in roster, false);
+  for (const member of ['mbr-lead', 'mbr-p']) {
+    for (const seat of ['release-guard', 'tradecraft', 'j2-chief']) assert.equal(roster.canRunAgent?.(member, seat, world.rosterHash), false, `${member}/${seat}`);
+  }
+  assert.deepEqual(world.rosterSpec.rosters[0].members.map((member) => Object.keys(member).sort()), [['devices', 'member', 'name', 'roles'], ['devices', 'member', 'name', 'roles']]);
+  assert.deepEqual(world.rosterSpec.rosters[0].members.flatMap((member) => member.devices.map((entry) => Object.keys(entry).sort())), [['publicKey', 'writer'], ['publicKey', 'writer']]);
 });

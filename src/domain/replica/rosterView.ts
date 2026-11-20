@@ -119,6 +119,11 @@ export function staticRosterView(spec: StaticRosterSpec): RosterView {
       const position = positions.get(hash);
       return position !== undefined && holds(member, role, position);
     },
+    // Default deny: an unknown roster, an unknown member or a seat the member's entry does not list.
+    canRunAgent(member, seat, hash) {
+      const position = positions.get(hash);
+      return position !== undefined && memberAt(member, position)?.agentSeats?.includes(seat) === true;
+    },
     roleWithdrawnBy(member, role, hash) {
       const position = positions.get(hash);
       if (position === undefined) return undefined;

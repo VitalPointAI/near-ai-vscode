@@ -67,7 +67,9 @@ export const streamId = (label: string): string => sha256(`stream/${label}`).toS
 export const WORLD_NOW = '2026-11-19T12:00:00.000Z';
 export const WORLD_AT = '2026-11-19T11:00:00.000Z';
 
-export interface WorldMemberSpec { member: string; name?: string; roles?: string[]; devices: string[] }
+// agentSeats: the agent seats the member's devices may run (D-12). slots: one roster slot per device, in the order of devices (D-41); a world
+// where no member gives slots binds no client id to a writer, as in Phase 30.
+export interface WorldMemberSpec { member: string; name?: string; roles?: string[]; devices: string[]; agentSeats?: string[]; slots?: number[] }
 export interface WorldSpec { members: WorldMemberSpec[] }
 
 export interface Written { entry: SealedEntry; hash: string; stream: string; writer: string; seq: number; lamport: number }
@@ -116,7 +118,12 @@ export function createWorld(spec: WorldSpec): World {
         member: member.member,
         name: member.name ?? member.member,
         roles: member.roles ?? ['member'],
-        devices: member.devices.map((device) => ({ writer: (signers.get(device) as FixedSigner).writer, publicKey: (signers.get(device) as FixedSigner).publicKey }))
+        devices: member.devices.map((device, index) => {
+          const fixed = signers.get(device) as FixedSigner;
+          const slot = member.slots?.[index];
+          return slot === undefined ? { writer: fixed.writer, publicKey: fixed.publicKey } : { writer: fixed.writer, publicKey: fixed.publicKey, slot };
+        }),
+        ...(member.agentSeats === undefined ? {} : { agentSeats: [...member.agentSeats] })
       }))
     }]
   };
