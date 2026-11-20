@@ -61,6 +61,8 @@ The gap the owner names is real: today a person must already know what "TEE", "h
 
 ### 4.2 The question set
 
+> **Coherence review (2026-11-20):** Q1 asks the "kind of work" (the word "role" is kept for positions). Wherever Q2 lists levels it names the scale ("Canada, Classified: Confidential"), because `org/Confidential` and `ca-classified/Confidential` route differently. Setup's "must stay in Canada" is enforced by the gate's `route.residency` rule from Phase 41, so R3 is no longer a setup-only filter, and the mode table and `term()` are built in Phase 41 and read here. See `.planning/research/coherence/REVIEW.md`.
+
 | # | Screen heading | Choices | Shown when |
 |---|---|---|---|
 | Q1 | What will you mostly do here? | Write or review software; Staff work in a headquarters section (then: J1 to J9, or "a joint staff team"); Analyse information and data; Plan or manage capital projects; Write and research documents; Something else (free text, 60 characters) | Always; remembered for you |
@@ -357,6 +359,8 @@ The button says what it does: **Apply these settings**. Nothing changes before i
 
 ### 8.5 The record
 
+> **Coherence review (2026-11-20):** the record is the local audit record (`src/domain/gate/record.ts`, hash-chained, with periodic signed heads once that lands); it is not described as signed per record until the code signs it. In shared projects the answers, the label and the mode are project-stream entries on the replica rather than `project.json` in git. See `.planning/research/coherence/REVIEW.md`, conflicts K23 and K25.
+
 Each Apply (and each abandoned run) writes one record in the gate's decision record format (`src/domain/gate/record.ts`, new event ids `setup.guide.applied` and `setup.guide.abandoned`), signed with the device key:
 
 - answers (choice ids, never free text except the role's 60 characters, secrets scanned out), proposed label, use tier, residency;
@@ -386,12 +390,16 @@ The guide reads only a **verified** bundle (`verifyBundleEnvelope`). If the poli
 
 ### 9.2 Rules
 
+> **Coherence review (2026-11-20):** the vault step, discovery approvals and "Adopt the Western defaults" do change policy, so every such flow writes a **proposal** that opens in the one policy editor; on a personal policy the person applies it there, under an organization policy it is sent to the security contact. The guide itself still never writes the bundle. See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`, section 7.
+
 - Recommendations come only from options the bundle allows (routing tiers, `localHosts`, `attestedHosts`, `routing.vaults`, passports and `defaults`).
 - When an answer needs something the bundle does not allow, the card says "Your organization's rules do not allow {need}. Ask {contact}." There is no Edit Policy button, no suggestion to lower a label, no "use another provider anyway".
 - On a self-signed default bundle (a person with no organization policy) the same rules hold, and the card adds: "These are the starting rules. Changing them is a decision for your organization's security officer, not this guide."
 - The guide writes only what a person can already do: raise a project label, add a provider profile, set model settings inside the policy, propose sources. It never writes the bundle.
 
 ### 9.3 An optional `onboarding` key in the bundle
+
+> **Coherence review (2026-11-20):** `onboarding` becomes a section of policy bundle v2, named in `requires`. Discovery's personal approvals get an explicit key, `onboarding.discovery.personalApprovals`, default false; when true a personal approval adds an endpoint at `maxLabel org/Public` only. See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`.
 
 Parsed with the strict key checks of `checkKeys`; a bundle without it behaves as above.
 

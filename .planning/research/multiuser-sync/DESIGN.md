@@ -391,6 +391,8 @@ A heartbeat every 5 seconds, TTL 30 seconds: person, seat, runs in progress, and
 
 ### 10.6 Standing watches on the hub
 
+> **Coherence review (2026-11-20):** the hub loads your organization's policy (pinned at `hub.admit`) and runs the same pure gate core as the extension, passports included, for every watch. The daily spend cap is the lower of the policy's `limits.spend.hubDailyUsd` and the operator's file, which settles guard 4 against decision 2 (section 21). See `.planning/research/coherence/REVIEW.md`, conflict K24.
+
 **What changes.** Note 11, Q5 (2026-11-18) ran watches only in attended runs until Phase 74. Owner decision 3 (2026-11-19) supersedes it for multi-user projects with a hub: a watch may run on the hub continuously under the hub's grant. Single-machine projects and multi-user projects without a hub keep the attended rule (`watchAttendance.ts`).
 
 **Assignment.** `watch.assign` names the runner, `hub` (granted cells only) or `attended`, and optionally `fallback: attended` so a cut-off site keeps watching on its own machines.

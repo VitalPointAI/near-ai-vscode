@@ -322,6 +322,8 @@ Each military and public service term in the shipped table is checked against a 
 
 ### 5.4 Where the mode is stored
 
+> **Coherence review (2026-11-20):** the `organization` key becomes `people.organization` in policy bundle v2, named in `requires`. The mode table (`src/domain/org/modes.ts`) and `term()` are built in Phase 41 (the organization policy foundation) rather than Phase 32.1, because Phase 33.1 needs them and `mayDecline` is a security rule. See `.planning/research/coherence/REVIEW.md`.
+
 | Layer | What | Rule |
 |---|---|---|
 | Signed policy bundle | `organization: { mode, allowedModes, projectMayChoose, settings }` | It is the default for everything under the policy, parsed with strict key checks like the `onboarding` key (GUIDE 9.3). `settings` may tighten behaviour (for example `enrolAtReport`, the overdue days, dual-hatting off) but never loosen what a mode forbids. Declining can never be enabled in an assignment mode |
@@ -490,6 +492,8 @@ Lowering a publication below its sources is the existing downgrade act, a person
 **Downward publications** use the same machinery in reverse. The portfolio releases **priorities**, **allocations** (6.7), **guidance** and **gate calendar** items to the intake keys of its nodes. The portfolio never posts a person in another unit. An allocation is a tasking to the unit, which the unit's own tasker turns into postings (Part A). That keeps each unit's authority, as the J1 coordination rule does.
 
 ### 6.5 The portfolio view (Portfolio Room)
+
+> **Coherence review (2026-11-20):** this is the one Portfolio Room. The capital projects design's Portfolio Room and Project Room (capital 8) become its capital tab, built in Phase 43. See `.planning/research/coherence/REVIEW.md`, conflict K26.
 
 The Portfolio Room is a webview built from Staff Room components, extending CAP 8 from one organization's ledgers to publications from many units. It draws only from the portfolio's folded publications at the viewer's cells, never from units' own streams.
 

@@ -475,6 +475,8 @@ Based on 03 B2, B7 to B10. Seven core functions, one member each (03 Summary 3).
 
 ### 4.1 Staff products and the release state machine
 
+> **Coherence review (2026-11-20):** a person's approval is signed by that person's device key or, from Phase 71, credential, never by "the device key that signs the policy bundle", because the organization will sign the policy. Who may decide lives on the position the person holds (assigned positions design, 3.1). See `.planning/research/coherence/REVIEW.md`, conflicts K18 and K34.
+
 **Product header** (YAML at the top of each product file):
 
 ```yaml
@@ -729,6 +731,8 @@ Rules until the per-server ceiling and fenced descriptions exist (01 s4, "minimu
 ---
 
 ## 7. Safety and classification
+
+> **Coherence review (2026-11-20):** "private" here means the gate's verified check (a fresh, bound connection to private hardware, or this computer), not the catalogue's claim. The private models NEAR AI offers today all come from developers in the People's Republic of China, which the model provenance decision forbids for operational work, so staff teams say so plainly and run on fictional or exercise material until your organization approves a model for that use. See `.planning/research/coherence/REVIEW.md`, section 8 (S4, S5).
 
 1. **Unclassified templates, private by default.** Every staff team ships with `privacy: private` (NEAR TEE or local model only). Templates, skills and demo data are unclassified and fictional. The project guidance says real operational plans belong on accredited systems (05 s6).
 2. **Human decision authority.** Every approval is a human transition in the release state machine (4.1). Agents write `DECISION FOR`, never "approved". This matches doctrine (the planning responsibility is inherent in command: 05 s1 point 7; CFJP 5.0 art. 404.12 "the Commander selects") and the DND/CAF AI strategy's traceability requirement (05 s6). Targeting packages carry commander-or-delegate and legal review marks; nothing appears to automate target nomination (03 Summary 7).
