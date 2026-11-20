@@ -319,12 +319,19 @@ async function readRoster(shared: SharedProjectHost): Promise<RosterRead> {
   return { members, invites, ...(lead === undefined ? {} : { lead }), ...(self === undefined ? {} : { self }), pending: roster.pending.map((item) => ({ at: item.at, branches: [...item.branches], text: item.text })) };
 }
 
-/** A member picked from a list; names that repeat show their member id so every choice is distinct. */
+/**
+ * How a member is named in a list (D-04): the declared name, with the member id after it when another member in the list was declared with the same
+ * name, so every choice reads differently. Declared names are free text the lead typed; only the member id says who someone is.
+ */
+function memberLabel(members: readonly MemberView[], member: MemberView): string {
+  return members.filter((other) => other.name === member.name).length > 1 ? `${member.name} (${member.member})` : member.name;
+}
+
+/** A member picked from a list. Each item carries its member, and the item picked is used as it is, never matched back by its label (D-04). */
 async function pickMember(members: readonly MemberView[], title: string): Promise<MemberView | undefined> {
   if (members.length === 0) { warn('Nobody in this project can be picked for that, so nothing was changed. Invite someone first with Staff: Invite to Staff Project.'); return undefined; }
-  const label = (member: MemberView): string => (members.filter((other) => other.name === member.name).length > 1 ? `${member.name} (${member.member})` : member.name);
-  const picked = await vscode.window.showQuickPick(members.map((member) => ({ label: label(member), description: member.seat ?? '', detail: member.roles.join(', ') })), { title, placeHolder: 'Pick the member' });
-  return picked === undefined ? undefined : members.find((member) => label(member) === picked.label);
+  const picked = await vscode.window.showQuickPick(members.map((member) => ({ label: memberLabel(members, member), description: member.seat ?? '', detail: member.roles.join(', '), member })), { title, placeHolder: 'Pick the member' });
+  return picked?.member;
 }
 
 /** The sha256 of the project's signed label map (D-07), as the gate's marker records it: of its canonical JSON. Undefined when there is none. */
@@ -501,8 +508,10 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       choices.push({ label: FINISH_UNFINISHED_LABEL, description: `${parts} still on a key a removed device or a member no longer cleared holds`, choice: { kind: 'finish', count: unfinished } });
     }
     for (const member of view.members) {
-      choices.push({ label: member.name, description: `Remove ${member.name} and every device of theirs`, choice: { kind: 'member', member } });
-      for (const device of member.devices) choices.push({ label: `${member.name}, device in slot ${device.slot ?? '?'}`, description: 'Remove this one device', choice: { kind: 'device', member, writer: device.writer, ...(device.slot === undefined ? {} : { slot: device.slot }) } });
+      // A name two members share is shown with the member id, in the member's item and in their devices' items alike (D-04).
+      const name = memberLabel(view.members, member);
+      choices.push({ label: name, description: `Remove ${name} and every device of theirs`, choice: { kind: 'member', member } });
+      for (const device of member.devices) choices.push({ label: `${name}, device in slot ${device.slot ?? '?'}`, description: 'Remove this one device', choice: { kind: 'device', member, writer: device.writer, ...(device.slot === undefined ? {} : { slot: device.slot }) } });
     }
     for (const invite of view.invites) {
       choices.push(invite.expired
@@ -514,8 +523,8 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       const who = open.forMember === undefined ? open.name : `${open.name}'s other computer`;
       choices.push({ label: `${INVITE_SAVE_AGAIN_PREFIX}${who} again`, description: `Save invitation ${open.invite} again; nothing in the project changes`, choice: { kind: 'reinvite', invite: open.invite, name: who } });
     }
-    const picked = await vscode.window.showQuickPick(choices.map(({ label, description }) => ({ label, description })), { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' });
-    const choice = picked === undefined ? undefined : choices.find((item) => item.label === picked.label && item.description === picked.description)?.choice;
+    // Each item carries what it removes (the member id, and the device writer for a device), and the item picked is used as it is (D-04).
+    const choice = (await vscode.window.showQuickPick(choices, { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' }))?.choice;
     if (!choice) return;
     const { REKEY_KEEP_TEXT } = await import('../domain/replica/cellKeys');
     if (choice.kind === 'finish') {
@@ -537,7 +546,8 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       show(await membership.voidInvite(shared, choice.invite));
       return;
     }
-    const question = choice.kind === 'member' ? `Remove ${choice.member.name} from the project?` : `Remove this device of ${choice.member.name} from the project?`;
+    const who = memberLabel(view.members, choice.member);
+    const question = choice.kind === 'member' ? `Remove ${who} from the project?` : `Remove this device of ${who} from the project?`;
     const what = choice.kind === 'member' ? 'Their devices receive nothing new from the project.' : 'That device receives nothing new from the project.';
     if (!(await confirm(question, [`${what} Every part of the project it was on moves to a new key for the people still on it.`, REKEY_KEEP_TEXT], choice.kind === 'member' ? 'Remove' : 'Remove Device'))) return;
     show(await membership.removeFromProject(shared, choice.kind === 'member' ? { member: choice.member.member } : { member: choice.member.member, writer: choice.writer }));
@@ -550,10 +560,9 @@ async function addMachineCommand(context: StaffCommandContext): Promise<void> {
     const view = await readRoster(shared);
     const own = view.members.filter((member) => member.member === view.self);
     const others = view.members.filter((member) => member.member !== view.self);
-    const items = [...own.map((member) => ({ label: 'My other computer', description: member.name, member })), ...others.map((member) => ({ label: `Another computer of ${member.name}`, description: member.seat ?? '', member }))];
+    const items = [...own.map((member) => ({ label: 'My other computer', description: member.name, member })), ...others.map((member) => ({ label: `Another computer of ${memberLabel(view.members, member)}`, description: member.seat ?? '', member }))];
     if (items.length === 0) { warn('Nobody in this project can be picked for that, so nothing was changed. Ask your staff lead for help.'); return; }
-    const picked = await vscode.window.showQuickPick(items.map(({ label, description }) => ({ label, description })), { title: 'Add another computer', placeHolder: 'Whose other computer?' });
-    const member = picked === undefined ? undefined : items.find((item) => item.label === picked.label && item.description === picked.description)?.member;
+    const member = (await vscode.window.showQuickPick(items, { title: 'Add another computer', placeHolder: 'Whose other computer?' }))?.member;
     if (!member) return;
     const { INVITE_FILE_EXTENSION } = await import('../domain/replica/invite');
     const target = await saveTarget(`other-computer-${fileSlug(member.name)}${INVITE_FILE_EXTENSION}`, INVITE_FILE_EXTENSION, `Save the invitation for ${member.name}'s other computer`, 'Staff invitation');
@@ -579,8 +588,7 @@ async function chooseBranchCommand(context: StaffCommandContext): Promise<void> 
       const when = view?.at === undefined ? '' : `, ${view.at.slice(0, 16).replace('T', ' ')} UTC`;
       return { short: `change ${index + 1} of ${split.branches.length}`, label: `Change ${index + 1} of ${split.branches.length}: ${summary}`, description: `${view?.by === undefined ? '' : `by ${view.by}${when}, `}entry ${branch.slice(0, 12)}`, detail: split.text, summary, branch };
     });
-    const picked = await vscode.window.showQuickPick(items.map(({ label, description, detail }) => ({ label, description, detail })), { title: 'Choose a roster branch', placeHolder: split.text });
-    const chosen = picked === undefined ? undefined : items.find((item) => item.label === picked.label && item.description === picked.description);
+    const chosen = await vscode.window.showQuickPick(items, { title: 'Choose a roster branch', placeHolder: split.text });
     const branch = chosen?.branch;
     if (!branch) return;
     if (!(await confirm(`Use ${chosen?.short ?? 'this change'}?`, [`${chosen?.summary ?? ''}.`, split.text, 'The other change at the same point stays unapplied and is kept in the record.'], 'Use This Change'))) return;
@@ -609,8 +617,8 @@ async function handOverCommand(context: StaffCommandContext): Promise<void> {
       { label: 'Planned handover', description: 'The staff lead hands over the lead.', reason: 'planned' as const },
       { label: 'The staff lead is lost', description: 'The lead\'s computers are lost or the lead cannot act. Only then may the deputy hand over.', reason: 'lead-lost' as const }
     ];
-    const picked = await vscode.window.showQuickPick(reasons.map(({ label, description }) => ({ label, description })), { title: 'Why is the lead handed over?' });
-    const reason = picked === undefined ? undefined : reasons.find((item) => item.label === picked.label)?.reason;
+    const picked = await vscode.window.showQuickPick(reasons, { title: 'Why is the lead handed over?' });
+    const reason = picked?.reason;
     if (!reason) return;
     if (!(await confirm(`Hand the staff lead over to ${member.name}?`, [`${member.name} becomes the staff lead and decides who is in the project. Reason recorded: ${picked?.label ?? reason}.`], 'Hand Over'))) return;
     show(await membership.handOverLead(shared, { to: member.member, reason }));

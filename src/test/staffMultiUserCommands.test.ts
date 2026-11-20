@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync
 import { appendFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import test, { after } from 'node:test';
+import test, { after, beforeEach, mock } from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT } from '../domain/replica/cellKeys';
 import { INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION } from '../domain/replica/invite';
@@ -44,6 +44,11 @@ after(async () => {
   for (const subscription of current?.context.subscriptions ?? []) subscription.dispose();
   hosts.configureStaffHosts(undefined);
   uninstall();
+});
+
+// Every test starts with no answer queued, so answers a failed test left unused are never taken by the next test's dialogs.
+beforeEach(() => {
+  for (const queue of [stub.quickPickAnswers, stub.openDialogAnswers, stub.saveDialogAnswers, stub.inputAnswers, stub.messageAnswers]) queue.length = 0;
 });
 
 const C = STAFF_MULTI_USER_COMMANDS;
@@ -224,6 +229,41 @@ async function pair(label: string): Promise<{ lead: Install; joiner: Install; me
   assert.ok(member, 'the person is a member');
   use(first);
   return { lead: first, joiner, member };
+}
+
+/**
+ * A lead and two admitted people the lead declared with one name and one seat ('B. Example', j2-analyst), brought in through the commands. The two
+ * member ids come back in the order the roster lists them, which is the order the pickers list them.
+ */
+async function twins(label: string): Promise<{ lead: Install; members: [string, string] }> {
+  const first = await lead(`${label}-lead`);
+  for (const which of ['one', 'two']) {
+    const joiner = install(`${label}-${which}`);
+    const invitation = await inviteBy(first, 'B. Example');
+    const { request } = await joinBy(joiner, invitation, 'B. Example');
+    const welcome = path.join(first.out, `welcome-${which}${WELCOME_FILE_EXTENSION}`);
+    await admitBy(first, request, multi.SIX_WORDS_MATCH, welcome);
+    use(joiner);
+    stub.openDialogAnswers.push([welcome]);
+    await run(C.join);
+    assert.match(lastNotification().message, /You joined the shared staff project/);
+  }
+  const roster = await rosterOf(first);
+  const named = [...roster.members.members.keys()].filter((id) => memberAt(roster.members, id, headOf(roster))?.name === 'B. Example');
+  assert.equal(named.length, 2, 'two members share the declared name');
+  use(first);
+  return { lead: first, members: [named[0], named[1]] };
+}
+
+/**
+ * D-12: a sentence a command shows is checked by its level and by the two or three phrases that carry its meaning, not word for word, so wording
+ * can be polished without breaking a test that pins behaviour. A refusal is still compared with its constant exactly, where the test has one.
+ */
+function says(text: string, phrases: ReadonlyArray<string | RegExp>, what: string): void {
+  for (const phrase of phrases) {
+    if (typeof phrase === 'string') assert.ok(text.includes(phrase), `${what} says "${phrase}": ${text}`);
+    else assert.match(text, phrase, what);
+  }
 }
 
 // ---- a single-machine staff project ----------------------------------------------------------------------------------------------------------------
@@ -449,6 +489,43 @@ test('remove: cancelling an open invitation writes invite.void; removing one dev
   assert.match(lastNotification().message, /That device of B\. Example was removed from the project\./);
   roster = await rosterOf(first);
   assert.ok(memberAt(roster.members, member, headOf(roster)), 'the member stays');
+});
+
+test('D-04: two members with the same declared name are listed by Remove with their member ids, and picking the second removes the second', async () => {
+  const { lead: first, members: [one, two] } = await twins('remove-twins');
+  stub.quickPickAnswers.push(undefined);
+  await run(C.remove);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items.map((item) => item.label);
+  assert.ok(listed.includes(`B. Example (${one})`) && listed.includes(`B. Example (${two})`), `each is listed with their member id: ${listed.join(' | ')}`);
+  assert.equal(listed.includes('B. Example'), false, 'a repeated name is never listed bare');
+  for (const id of [one, two]) assert.ok(listed.some((label) => label.startsWith(`B. Example (${id}), device in slot`)), `the device of ${id} names the member id: ${listed.join(' | ')}`);
+  assert.equal(new Set(listed).size, listed.length, 'every item is distinct');
+
+  stub.quickPickAnswers.push(`B. Example (${two})`);
+  stub.messageAnswers.push('Remove');
+  await run(C.remove);
+  says(lastModal().message, [`B. Example (${two})`], 'the remove confirmation names the member id of a repeated name');
+  const result = lastNotification();
+  assert.equal(result.level, 'info', result.message);
+  says(result.message, ['B. Example', 'removed from the project'], 'the remove result');
+  const roster = await rosterOf(first);
+  assert.equal(memberAt(roster.members, two, headOf(roster)), undefined, 'the member picked is removed');
+  assert.ok(memberAt(roster.members, one, headOf(roster)), 'the other member of the same name stays');
+});
+
+test('D-04: Add My Other Machine with two members of the same declared name and seat offers two distinct items, and the invitation is for the member picked', async () => {
+  const { lead: first, members: [one, two] } = await twins('machine-twins');
+  stub.quickPickAnswers.push(`Another computer of B. Example (${two})`);
+  stub.saveDialogAnswers.push(path.join(first.out, 'twin-second'));
+  await run(C.addMachine);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items.map((item) => `${item.label} / ${item.description ?? ''}`);
+  assert.equal(new Set(listed).size, listed.length, `every item is distinct: ${listed.join(' | ')}`);
+  assert.ok(listed.some((item) => item.startsWith(`Another computer of B. Example (${one})`)), listed.join(' | '));
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  assert.ok(existsSync(path.join(first.out, `twin-second${INVITE_FILE_EXTENSION}`)));
+  const roster = await rosterOf(first);
+  const forMembers = [...roster.members.invites.values()].map((record) => record.forMember).filter((value) => value !== undefined);
+  assert.deepEqual(forMembers, [two], 'the invitation is for the member picked');
 });
 
 test('MJ-02: a welcome file that could not be saved is made again through Admit with the same join request, writing nothing, and it opens', async () => {
