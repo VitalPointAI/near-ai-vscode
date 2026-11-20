@@ -31,4 +31,6 @@ CONTRIBUTING.md
 docs/development-workflow.md
 # The messaging relay is its own service with its own lockfile and never ships in the extension.
 relay/**
+# Your organization's sync hub is its own service with its own lockfile and never ships in the extension (D-33).
+hub/**
 .dockerignore
