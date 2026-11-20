@@ -12,18 +12,21 @@
 // The hub reads the base cell (the roster) always, so it can check appends (D-40), and a cell more only when the lead gives it one after reading the
 // trade-off. It is never given the lead-only legacy cell (D-20, D-64). No result or message holds a key, a binding signature or the hub file's
 // enrolment secret, and this module stores neither the hub file nor its secret.
+import { parseClearance } from '../../domain/gate/labels';
 import { REKEY_KEEP_TEXT, earlierEpochGrants } from '../../domain/replica/cellKeys';
 import { HUB_FILE_REFUSALS, readHubFile } from '../../domain/replica/hubFile';
 import type { HubFilePayload } from '../../domain/replica/hubFile';
 import type { RosterState } from '../../domain/replica/roster';
-import { readLegacyCellLabel } from '../../domain/replica/productCells';
+import type { FoldResult } from '../../domain/replica/fold';
+import { clearanceProblem } from '../../domain/replica/kindSchemas/roster';
+import { baseCellHeldProducts, readLegacyCellLabel } from '../../domain/replica/productCells';
 import { epochsAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, devicesOfMemberAt, hubAt } from '../../domain/replica/rosterMembers';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
 import { isRecord } from '../../domain/team/validate';
 import { multiUserNoticeLines } from '../../domain/staff/multiUser';
 import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, unfinishedRekeys, writerProblem } from './membership';
-import type { MembershipResult, SharedProjectHost } from './membership';
+import type { Gate, MembershipResult, SharedProjectHost } from './membership';
 import { ReplicaProjectError, isProjectRefused } from './replicaProject';
 
 /** Shown to the lead at each grant of a cell to the hub (DESIGN 10.2), word for word; the lead confirms it before anything is written. */
@@ -41,7 +44,12 @@ export const HUB_MEMBERSHIP_REFUSALS = {
   'no-hub': 'This project has no hub admitted, so nothing was changed. Admit your organization\'s hub first.',
   'hub-not-named': 'This project has more than one hub admitted, so say which hub the change is for. Nothing was changed.',
   'hub-unknown': 'That hub is not in this project\'s roster, so nothing was changed. Check the hub and try again.',
-  'hub-revoked': 'That hub was removed from the project, so it is given nothing more and is never admitted again. Nothing was changed.'
+  'hub-revoked': 'That hub was removed from the project, so it is given nothing more and is never admitted again. Nothing was changed.',
+  'hub-already-admitted': 'This hub is already admitted to the project and holds the roster, so nothing was changed.',
+  'hub-file-differs': 'This hub is already in the project with another key or certificate than this hub file names, so nothing was changed. Ask the hub operator which hub file is current.',
+  'ceiling-invalid': 'The highest clearance chosen for the hub is not one this project\'s scales know, so the hub was not admitted. Choose a clearance from the project\'s scales.',
+  // D-22, word for word: a project the 0.4.35 preview made shared keeps its products where the hub must read.
+  'base-cell-held-products': 'This project was made shared by an earlier preview, and its products sit in the part of the project the hub must read. Make a single-machine copy and make that copy multi-user again; the new shared project keeps each product in its own part.'
 } as const;
 export type HubMembershipRefusal = keyof typeof HUB_MEMBERSHIP_REFUSALS;
 
@@ -108,6 +116,25 @@ function epochKeys(shared: SharedProjectHost, cell: string, epochs: ReadonlyArra
   return found;
 }
 
+/**
+ * Did the base stream ever hold product text or a legacy ledger (D-22)? A product-family entry there (baseCellHeldProducts, 32-08), or a project.import
+ * there: the 0.4.35 preview imported whole ledgers into the base cell, and Phase 32 imports into label cells and the legacy cell only. Read from the
+ * fold, which lists the entries it applied or held with their stream; an entry it refused or kept is not seen here (32-08, Known limits).
+ */
+function baseHeldProducts(fold: FoldResult, base: string): boolean {
+  if (baseCellHeldProducts(fold, base)) return true;
+  const streams = fold.families.project;
+  return Array.isArray(streams) && streams.some((item: unknown) => isRecord(item) && item.stream === base && Array.isArray(item.imports) && item.imports.length > 0);
+}
+
+/** The ceiling as hub.admit carries it: a roster clearance the project's scales read (Phase 70), copied fresh; undefined when it is not one. */
+function ceilingOf(value: unknown, gate: Gate): unknown {
+  if (clearanceProblem(value, 'ceiling') !== undefined || !isRecord(value)) return undefined;
+  const { handling: _handling, ...rest } = value;
+  if (!parseClearance(rest, gate.scales).ok) return undefined;
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
 const hubName = (file: Pick<HubFilePayload, 'hub' | 'address'>): string => `Your organization's hub at ${file.address} (${file.hub})`;
 
 export interface AdmitHubInput {
@@ -127,28 +154,52 @@ export function admitHub(shared: SharedProjectHost, hubFileText: unknown, input:
     if (!read.ok) return refused(read.reason, HUB_FILE_REFUSALS[read.reason]);
     const file = read.hubFile;
     const { project } = shared;
-    const before = (await project.state()).roster;
+    const { roster: before, fold } = await project.state();
     const problem = writerProblem(shared, before);
     if (problem !== undefined) return problem;
     const base = project.projectId;
-    if (before.members.members.has(file.hub) || before.members.hubs.has(file.hub)) return refuse('member-exists');
-    if (before.members.devices.has(file.writer)) return refuse('device-exists');
-    const slot = freeSlot(before);
-    if (slot === undefined) return refused('device-limit', MEMBER_REFUSALS['device-limit']);
+    if (baseHeldProducts(fold, base)) return refuse('base-cell-held-products');
+    if (before.members.members.has(file.hub)) return refuse('member-exists');
+    const at = headOf(before);
+    const gate = gateOf(shared);
+    // Everything is decided before the first write. A hub the roster has already is an admission stopped part way (resumed: only what is missing is
+    // written, and its ceiling stays as the roster has it), one fully admitted, or one revoked.
+    const existing = before.members.hubs.has(file.hub) ? hubOf(before, at.position, file.hub) : undefined;
+    let device: { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot: number } | undefined;
+    let ceiling: unknown;
+    if (existing !== undefined) {
+      if (isResult(existing)) return existing;
+      if (existing.writer !== file.writer || hubAt(before.members, file.hub, at.position)?.certPin !== file.certPin) return refuse('hub-file-differs');
+      if (existing.cells.includes(base) && missingEpochs(before, base, file.writer, at.position).length === 0) return refuse('hub-already-admitted');
+    } else {
+      if (before.members.devices.has(file.writer)) return refuse('device-exists');
+      ceiling = ceilingOf(input.ceiling, gate);
+      if (ceiling === undefined) return refuse('ceiling-invalid');
+      const slot = freeSlot(before);
+      if (slot === undefined) return refused('device-limit', MEMBER_REFUSALS['device-limit']);
+      device = { writer: file.writer, publicKey: file.publicKey, x25519: file.x25519, x25519Sig: file.x25519Sig, slot };
+    }
     // Every base cell key is checked before the first write, so a device that cannot give the hub the roster writes nothing.
-    if (epochKeys(shared, base, epochsAt(before.cells, base, headOf(before).position)) === undefined) return refuseMembership('no-grant-key');
-    const device = { writer: file.writer, publicKey: file.publicKey, x25519: file.x25519, x25519Sig: file.x25519Sig, slot };
-    const admitted = await append(shared, 'hub.admit', { hub: file.hub, device, certPin: file.certPin, ceiling: input.ceiling });
-    if (isResult(admitted)) return admitted;
-    const granted = await append(shared, 'hub.grant', { hub: file.hub, cell: base });
-    if (isResult(granted)) return granted;
-    const roster = granted.roster;
-    const grantedAt = roster.positionOf.get(granted.hash) as number;
+    if (epochKeys(shared, base, missingEpochs(before, base, file.writer, at.position)) === undefined) return refuseMembership('no-grant-key');
+    let roster = before;
+    if (device !== undefined) {
+      const admitted = await append(shared, 'hub.admit', { hub: file.hub, device, certPin: file.certPin, ceiling });
+      if (isResult(admitted)) return admitted;
+      roster = admitted.roster;
+    }
+    let grantedAt = grantedAtOf(roster, file.hub, base);
+    if (grantedAt === undefined) {
+      const granted = await append(shared, 'hub.grant', { hub: file.hub, cell: base });
+      if (isResult(granted)) return granted;
+      roster = granted.roster;
+      grantedAt = roster.positionOf.get(granted.hash) as number;
+    }
     const missing = epochKeys(shared, base, missingEpochs(roster, base, file.writer, headOf(roster).position));
     if (missing === undefined) return refuseMembership('no-grant-key');
     const stored = await grantEpochs(shared, { cell: base, epochs: missing, roster, grantedAt, hub: file });
     if (stored !== undefined) return stored;
-    return done(`${hubName(file)} was admitted. It can read the roster, so it can check every change sent to it, and nothing else until you give it a part of the project.`, { hub: file.hub, writer: file.writer });
+    const first = existing === undefined ? '' : 'The admission of the hub left unfinished is now finished. ';
+    return done(`${first}${hubName(file)} was admitted. It can read the roster, so it can check every change sent to it, and nothing else until you give it a part of the project.`, { hub: file.hub, writer: file.writer });
   });
 }
 
@@ -276,4 +327,26 @@ export function revokeHub(shared: SharedProjectHost, input: { hub?: string } = {
       rekeyed: [...earlier, ...rekeyed], hub: hub.hub, writer: hub.writer
     });
   });
+}
+
+/** One hub as the roster has it: its id, its device's writer id, its certificate pin, its ceiling, the cells it holds (or held when revoked). */
+export interface HubStanding { hub: string; writer?: string; certPin: string; ceiling: unknown; cells: string[]; standing: 'admitted' | 'revoked' }
+
+/** Every hub the roster has, with its standing at the head (admitted or revoked), sorted by id. Reads only: writes no entry and no grant. */
+export async function hubStanding(shared: SharedProjectHost): Promise<HubStanding[]> {
+  const { roster } = await shared.project.state();
+  const at = headOf(roster);
+  const found: HubStanding[] = [];
+  for (const [hub, versions] of [...roster.members.hubs.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const current = hubAt(roster.members, hub, at.position);
+    const record = current ?? versions[versions.length - 1];
+    if (record === undefined) continue;
+    let writer: string | undefined;
+    for (const device of roster.members.devices.values()) {
+      const last = device[device.length - 1];
+      if (last?.member === hub && last.kind === 'hub') writer = last.writer;
+    }
+    found.push({ hub, ...(writer === undefined ? {} : { writer }), certPin: record.certPin, ceiling: JSON.parse(JSON.stringify(record.ceiling)) as unknown, cells: [...record.cells], standing: current === undefined ? 'revoked' : 'admitted' });
+  }
+  return found;
 }

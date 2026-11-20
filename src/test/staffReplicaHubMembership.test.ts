@@ -2,19 +2,24 @@
 // base cell, can give it more cells after confirming the trade-off, and can revoke it, which moves every cell it held to a new key. Each transition
 // and each refusal has a test. The hub's keys come from a label (rosterDevice), the address is fictional and every person is fictional.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import * as path from 'node:path';
+import test, { mock } from 'node:test';
 import { REKEY_KEEP_TEXT, openLabel, readGrant, unwrapEpochKey } from '../domain/replica/cellKeys';
 import { signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint } from '../domain/replica/checkpoint';
-import { buildHubFile } from '../domain/replica/hubFile';
+import { HUB_FILE_REFUSALS, buildHubFile } from '../domain/replica/hubFile';
+import { PREVIEW_WAY_FORWARD_TEXT, baseCellHeldProducts } from '../domain/replica/productCells';
 import { rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { epochsAt } from '../domain/replica/rosterCells';
 import { hubAt, hubCellsAt, hubSignerAt } from '../domain/replica/rosterMembers';
-import { finishRekeys, nameDeputy, removeFromProject } from '../staff/replica/membership';
-import { HUB_GRANT_TRADE_OFF, HUB_MEMBERSHIP_REFUSALS, admitHub, grantCellToHub, revokeHub } from '../staff/replica/hubMembership';
-import { ensureLabelCell, ensureLegacyCell } from '../staff/replica/labelCells';
-import { WORLD_NOW, bringIn, grantsOn, leadWith, ok, orgClearance, orgLabel, streamEntries, syncTo } from './helpers/labelCellWorld';
+import { admitJoinRequest, finishRekeys, inviteToProject, joinFromInvite, nameDeputy, removeFromProject, updateMember } from '../staff/replica/membership';
+import type { MembershipResult } from '../staff/replica/membership';
+import { signPayload } from '../domain/team/signedPayload';
+import { HUB_GRANT_TRADE_OFF, HUB_MEMBERSHIP_REFUSALS, admitHub, grantCellToHub, hubStanding, revokeHub } from '../staff/replica/hubMembership';
+import { appendProductEntry, ensureLabelCell, ensureLegacyCell } from '../staff/replica/labelCells';
+import { WORLD_NOW, bringIn, grantsOn, install, leadWith, ok, orgClearance, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Install, Seat } from './helpers/labelCellWorld';
 import { rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice } from './helpers/replicaRosterWorld';
@@ -22,6 +27,7 @@ import type { RosterDevice } from './helpers/replicaRosterWorld';
 const HUB_ADDRESS = 'hub.example.test:8443';
 const CERT_PIN = 'b'.repeat(64);
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PRODUCT_ROLES = { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuard: 'j4-guard' };
 
 interface TestHub { device: RosterDevice; text: string; enrolmentSecret: string; certPin: string }
 
@@ -326,4 +332,234 @@ test('revoke again after an interrupted revoke finishes the rekeys; a revoke wit
   const third = await revokeHub(lead.host, { hub: id });
   assert.equal(third.reason, 'hub-revoked');
   assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
+});
+
+// ---- Task 3: refusals before any write, resumable admission, standing, no secrets ------------------------------------------------------------
+
+/** Admission is refused with the reason, and the install's store is as it was (base stream entries and grant files). */
+async function refusedUnchanged(seat: Seat, text: unknown, reason: string, ceiling: unknown = orgClearance('Internal')): Promise<MembershipResult> {
+  const before = storeCounts(seat.at, seat.p.projectId);
+  const result = await admitHub(seat.host, text, { ceiling });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, reason);
+  assert.deepEqual(storeCounts(seat.at, seat.p.projectId), before, 'nothing was written');
+  return result;
+}
+
+test('not-a-roster-writer: a member\'s device cannot admit the hub; nothing is written', async () => {
+  const lead = await leadWith();
+  const member = await bringIn(lead, 'member', 'Nell Planner', orgClearance('Internal'));
+  await refusedUnchanged(member, hubFile().text, 'not-a-roster-writer');
+});
+
+test('roster-split: admission waits until a branch is chosen; nothing is written', async () => {
+  const lead = await leadWith();
+  const deputy = await bringIn(lead, 'deputy', 'Dana Deputy', orgClearance('Internal'));
+  ok(await nameDeputy(lead.host, deputy.member), 'name the deputy');
+  await syncTo(lead, deputy);
+  ok(await updateMember(lead.host, { member: deputy.member, name: 'Dana One' }), 'the lead changes a name');
+  ok(await updateMember(deputy.host, { member: deputy.member, name: 'Dana Two' }), 'the deputy changes it too');
+  await syncTo(deputy, lead);
+  assert.equal((await lead.p.state()).roster.pending.length, 1, 'the roster is split');
+  await refusedUnchanged(lead, hubFile().text, 'roster-split');
+});
+
+test('an expired hub file is refused with the reader\'s sentence; nothing is written', async () => {
+  const lead = await leadWith();
+  const expired = hubFile('HUB-NORTH', { now: new Date(WORLD_NOW.getTime() - 8 * DAY_MS), expiresAt: new Date(WORLD_NOW.getTime() - DAY_MS).toISOString() });
+  const result = await refusedUnchanged(lead, expired.text, 'expired');
+  assert.equal(result.message, HUB_FILE_REFUSALS.expired);
+});
+
+test('a hub file with a changed byte is refused bad-signature; nothing is written', async () => {
+  const lead = await leadWith();
+  const parsed = JSON.parse(hubFile().text) as { payload: { certPin: string } };
+  parsed.payload.certPin = `${parsed.payload.certPin.slice(0, -1)}c`;
+  await refusedUnchanged(lead, JSON.stringify(parsed), 'bad-signature');
+});
+
+test('a hub file signed by another hub key than the one it names is refused bad-signature; nothing is written', async () => {
+  const lead = await leadWith();
+  const named = JSON.parse(hubFile('HUB-NORTH').text) as { payload: unknown };
+  const other = rosterDevice('HUB-SOUTH', 'hub');
+  const forged = signPayload(other.signer, 'staff-hub-file', named.payload, { now: () => WORLD_NOW });
+  await refusedUnchanged(lead, JSON.stringify(forged), 'bad-signature');
+});
+
+test('a ceiling that is not a clearance is refused ceiling-invalid; nothing is written', async () => {
+  const lead = await leadWith();
+  await refusedUnchanged(lead, hubFile().text, 'ceiling-invalid', { scale: 'org', level: 'Topmost', compartments: [], releasability: [] });
+  await refusedUnchanged(lead, hubFile().text, 'ceiling-invalid', 'org/Internal');
+});
+
+test('base-cell-held-products: a project made shared the 0.4.35 way, its products in the base stream, is refused with the D-22 sentence', async () => {
+  const lead = await leadWith();
+  // The 0.4.35 preview wrote products into the base cell; the host's appendOwn writes there when no stream is named.
+  const written = await lead.p.appendOwn('product.create', { product: 'fuel-estimate', section: 'j4', roles: { ...PRODUCT_ROLES }, title: 'Fuel estimate' });
+  assert.equal('ok' in written && written.ok, true);
+  const { fold } = await lead.p.state();
+  assert.equal(baseCellHeldProducts(fold, lead.p.projectId), true, 'the base stream holds a product');
+  const result = await refusedUnchanged(lead, hubFile().text, 'base-cell-held-products');
+  assert.equal(result.message, 'This project was made shared by an earlier preview, and its products sit in the part of the project the hub must read. Make a single-machine copy and make that copy multi-user again; the new shared project keeps each product in its own part.');
+  assert.equal(result.message, PREVIEW_WAY_FORWARD_TEXT);
+});
+
+test('base-cell-held-products: a whole legacy import in the base stream is refused too; nothing is written', async () => {
+  const lead = await leadWith();
+  const written = await lead.p.appendOwn('project.import', { ledger: 'products', legacyHead: 'd'.repeat(64), count: 3 });
+  assert.equal('ok' in written && written.ok, true);
+  await refusedUnchanged(lead, hubFile().text, 'base-cell-held-products');
+});
+
+test('base-cell-held-products: the shared project made again from a single-machine copy, each product in its own cell, is admitted', async () => {
+  const lead = await leadWith();
+  const created = await appendProductEntry(lead.host, 'product.create', { product: 'fuel-estimate', section: 'j4', roles: { ...PRODUCT_ROLES }, title: 'Fuel estimate' }, { label: 'org/Internal' });
+  assert.equal(created.ok, true, created.ok ? '' : created.message);
+  const { fold } = await lead.p.state();
+  assert.equal(baseCellHeldProducts(fold, lead.p.projectId), false);
+  assert.equal(baseCellHeldProducts(fold, created.ok ? created.stream : ''), true, 'the product is in its own cell');
+  ok(await admitHub(lead.host, hubFile().text, { ceiling: orgClearance('Internal') }), 'admit the hub');
+});
+
+test('a hub id already used by a member is refused member-exists; nothing is written', async () => {
+  const lead = await leadWith();
+  const hub = hubFile();
+  const id = hubIdOfDevice(hub.device);
+  const joiner = install('joiner');
+  const invited = ok(await inviteToProject(lead.host, { name: 'Hal Planner', seat: 'j4-planner', clearance: orgClearance('Internal') }), 'invite');
+  const joined = ok(await joinFromInvite(joiner.root, joiner.deps, (invited.file as { text: string }).text, { name: 'Hal Planner' }), 'join');
+  ok(await admitJoinRequest(lead.host, (joined.file as { text: string }).text, { codeMatched: true, member: id }), 'admit a member under the hub\'s id');
+  await refusedUnchanged(lead, hub.text, 'member-exists');
+});
+
+/** How many hub.admit and hub.grant entries this device wrote. */
+async function hubEntries(seat: Seat): Promise<{ admits: number; grants: number }> {
+  return { admits: (await seat.p.findOwnAll('hub.admit', () => true)).length, grants: (await seat.p.findOwnAll('hub.grant', () => true)).length };
+}
+
+test('resume: a stop after hub.admit is finished by a second admitHub with the same file, with no second hub.admit', async () => {
+  const lead = await leadWith();
+  const hub = hubFile();
+  const original = lead.p.appendOwn.bind(lead.p);
+  let failed = false;
+  const stop = mock.method(lead.p, 'appendOwn', (kind: string, data: unknown, options?: Parameters<typeof original>[2]) => {
+    if (kind === 'hub.grant' && !failed) {
+      failed = true;
+      return Promise.reject(new Error('the computer stopped'));
+    }
+    return original(kind, data, options);
+  });
+  try {
+    await assert.rejects(admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), /the computer stopped/);
+  } finally {
+    stop.mock.restore();
+  }
+  assert.deepEqual(await hubEntries(lead), { admits: 1, grants: 0 });
+  ok(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), 'admit again');
+  assert.deepEqual(await hubEntries(lead), { admits: 1, grants: 1 });
+  const { roster } = await lead.p.state();
+  const epochs = epochsAt(roster.cells, lead.p.projectId, head(roster).position).map((item) => item.epoch);
+  assert.deepEqual(hubOpens(lead, hub.device).get(lead.p.projectId), epochs);
+});
+
+test('resume: a stop after hub.grant and before the grants is finished by a second admitHub, writing only the grants', async () => {
+  const lead = await leadWith();
+  const hub = hubFile();
+  const stop = mock.method(lead.p, 'putGrants', () => Promise.reject(new Error('the computer stopped')));
+  try {
+    await assert.rejects(admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), /the computer stopped/);
+  } finally {
+    stop.mock.restore();
+  }
+  assert.deepEqual(await hubEntries(lead), { admits: 1, grants: 1 });
+  assert.equal(hubOpens(lead, hub.device).size, 0, 'no grant was stored');
+  const entries = streamEntries(lead.at, lead.p.projectId).length;
+  ok(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), 'admit again');
+  assert.deepEqual(await hubEntries(lead), { admits: 1, grants: 1 });
+  assert.equal(streamEntries(lead.at, lead.p.projectId).length, entries, 'no roster entry was written');
+  assert.ok(hubOpens(lead, hub.device).has(lead.p.projectId));
+});
+
+test('resume: admitHub after a full admission is refused hub-already-admitted and writes nothing', async () => {
+  const { lead, hub } = await leadAndHub();
+  await refusedUnchanged(lead, hub.text, 'hub-already-admitted');
+});
+
+test('resume: a hub file for the admitted hub with another certificate pin is refused hub-file-differs; nothing is written', async () => {
+  const lead = await leadWith();
+  const hub = hubFile();
+  const stop = mock.method(lead.p, 'putGrants', () => Promise.reject(new Error('the computer stopped')));
+  try {
+    await assert.rejects(admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }));
+  } finally {
+    stop.mock.restore();
+  }
+  await refusedUnchanged(lead, hubFile('HUB-NORTH', { certPin: 'e'.repeat(64) }).text, 'hub-file-differs');
+});
+
+test('a revoked hub\'s file is refused hub-revoked; nothing is written', async () => {
+  const { lead, hub, id } = await leadAndHub();
+  ok(await revokeHub(lead.host, { hub: id }), 'revoke');
+  await refusedUnchanged(lead, hub.text, 'hub-revoked');
+});
+
+test('hubStanding lists each hub with its id, pin, ceiling, cells and standing, and writes nothing', async () => {
+  const { lead, hub, id } = await leadAndHub();
+  const cell = await labelCell(lead);
+  ok(await grantCellToHub(lead.host, { cell, confirmed: true }), 'grant the cell');
+  const before = storeCounts(lead.at, lead.p.projectId);
+  assert.deepEqual(await hubStanding(lead.host), [{ hub: id, writer: hub.device.writer, certPin: hub.certPin, ceiling: orgClearance('Internal'), cells: [lead.p.projectId, cell], standing: 'admitted' }]);
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before, 'reads only');
+  ok(await revokeHub(lead.host, { hub: id }), 'revoke');
+  const after = await hubStanding(lead.host);
+  assert.equal(after.length, 1);
+  assert.equal(after[0]?.standing, 'revoked');
+  assert.deepEqual(after[0]?.cells, [lead.p.projectId, cell], 'the cells it held when revoked');
+});
+
+/** Every file under a folder, read as text. */
+function filesUnder(dir: string): string[] {
+  const found: string[] = [];
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return found;
+  }
+  for (const name of names) {
+    const file = path.join(dir, name);
+    const stat = statSync(file);
+    if (stat.isDirectory()) found.push(...filesUnder(file));
+    else if (stat.isFile()) found.push(readFileSync(file).toString('latin1'));
+  }
+  return found;
+}
+
+test('no secret: no message, notice, reason or result field holds the enrolment secret, a private key, the binding signature or a full key, and no file keeps the secret', async () => {
+  const lead = await leadWith();
+  const hub = hubFile();
+  const results: unknown[] = [];
+  results.push(await admitHub(lead.host, hub.text, { ceiling: { scale: 'org' } }));
+  results.push(await admitHub(lead.host, JSON.stringify({ ...JSON.parse(hub.text) as object, sig: 'A'.repeat(86) }), { ceiling: orgClearance('Internal') }));
+  results.push(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }));
+  results.push(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }));
+  const cell = await labelCell(lead);
+  results.push(await grantCellToHub(lead.host, { cell, confirmed: false }));
+  results.push(await grantCellToHub(lead.host, { cell, confirmed: true }));
+  results.push(await hubStanding(lead.host));
+  results.push(await revokeHub(lead.host, { hub: hubIdOfDevice(hub.device) }));
+  const privateKey = hub.device.x25519Private.export({ format: 'der', type: 'pkcs8' });
+  const { roster } = await lead.p.state();
+  const epochKeys = [...roster.cells.cells.keys()].flatMap((id) => epochsAt(roster.cells, id, head(roster).position).map((item) => lead.p.keys.epochKey(id, item.epoch)))
+    .filter((key): key is Buffer => key !== undefined);
+  assert.ok(epochKeys.length >= 4, 'the base and label cell keys, before and after the revoke');
+  const secrets = [
+    hub.enrolmentSecret, hub.device.x25519Sig, hub.device.publicKey, hub.device.x25519, privateKey.toString('base64url'), privateKey.toString('base64'),
+    ...epochKeys.flatMap((key) => [key.toString('base64url'), key.toString('base64'), key.toString('hex')])
+  ];
+  const text = JSON.stringify(results);
+  for (const secret of secrets) assert.equal(text.includes(secret), false, 'a result holds a secret or a key');
+  const files = [...filesUnder(lead.at.root), ...filesUnder(lead.at.global), ...lead.at.secrets.values.values()];
+  assert.ok(files.length > 0);
+  for (const file of files) assert.equal(file.includes(hub.enrolmentSecret), false, 'the enrolment secret is not kept');
 });
