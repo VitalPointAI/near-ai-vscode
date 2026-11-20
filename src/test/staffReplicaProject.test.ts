@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmS
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { MAX_GRANT_WRAPS, WRAP_BYTES, buildGrant, grantHash, wrapEpochKey } from '../domain/replica/cellKeys';
+import { MAX_GRANT_WRAPS, WRAP_BYTES, buildGrant, grantHash, newEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, localInsert } from '../domain/replica/doc';
 import { MAX_STRUCTS } from '../domain/replica/kindSchemas/doc';
@@ -25,7 +25,7 @@ import { PROJECT_REFUSALS_HOST, ReplicaProject, genesisPinFile, isProjectRefused
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { fixedSigner, updateData } from './helpers/replicaWorld';
-import { GENESIS_PREV, buildEntry } from '../domain/replica/entry';
+import { buildEntry } from '../domain/replica/entry';
 
 class MemorySecrets implements SecretStorageLike {
   public readonly values = new Map<string, string>();
@@ -416,20 +416,38 @@ test('MJ-07: an update whose key arrives later waits out of the fold, and the de
   const joined = await joinScenario(decodeHost);
   const { a, b } = joined;
   try {
+    // The lead makes a cell whose founding grant is wrapped to itself and to B, the way a key really reaches B: B takes it only once the roster
+    // entry that commits to the grant is folded (CR-01).
+    const joinerDevice = await ReplicaProject.localDevice(joined.joiner.deps);
     const cell = randomBytes(16).toString('hex');
-    const key = randomBytes(32);
-    const hostile = buildEntry({
-      signer: a.signer, key, stream: cell, seq: 0, prev: GENESIS_PREV, epoch: 1,
-      body: { deps: [], roster: joined.admit, lamport: 10, at: NOW, actor: { kind: 'person' }, kind: 'doc.update', data: updateData(PRODUCT, gcProbe(MAX_STRUCTS + 1)) }
-    });
-    const result = await b.ingestForeign([hostile.entry], hostile.blobs);
+    const key = newEpochKey();
+    const wrapTo = (writer: string, recipient: string): { writer: string; wrap: string } => ({ writer, wrap: wrapEpochKey({ cell, epoch: 1, writer, recipient, epochKey: key }) });
+    const founding = buildGrant(a.signer, { cell, epoch: 1, roster: joined.admit, labelSealed: '', wraps: [wrapTo(a.deviceWriter, a.anchor.lead.x25519), wrapTo(b.deviceWriter, joinerDevice.x25519)] });
+    await a.keys.addOwn(cell, 1, key, grantHash(founding));
+    assert.ok(!isProjectRefused(await a.putGrants([founding])));
+    const create = await a.appendOwn('cell.create', { cell, epoch: 1, grant: grantHash(founding) }, { roster: joined.admit });
+    assert.ok('ok' in create, 'the cell is created');
+    const hostile = await a.appendOwn('doc.update', updateData(PRODUCT, gcProbe(MAX_STRUCTS + 1)), { stream: cell });
+    assert.ok('ok' in hostile, 'the lead writes in the new cell');
+
+    const result = await b.ingestForeign([hostile.built.entry], hostile.built.blobs);
     assert.ok(!isProjectRefused(result));
     assert.deepEqual(result.held, []);
     assert.deepEqual(result.waiting, [{ hash: hostile.hash, reason: 'awaiting-key' }]);
     assert.equal(decodeHost.starts, 0, 'nothing could be checked yet');
     assert.equal((await b.state()).fold.order.includes(hostile.hash), false);
-    await b.keys.addOwn(cell, 1, key);
+    // The grant alone is not the key: the roster B holds has not committed to it, so the entry keeps waiting and nothing is decoded.
+    const unplaced = await b.putGrants([founding]);
+    assert.deepEqual(unplaced, { ok: true, stored: 1, opened: 0 });
+    assert.equal(b.keys.holds(cell, 1), false);
+    assert.deepEqual(b.heldForCheck(), []);
+    assert.equal(decodeHost.starts, 0, 'a grant the roster did not place decides no key and runs no check');
+    assert.equal((await b.state()).fold.order.includes(hostile.hash), false);
+    // The roster entry that commits to the grant arrives: the roster fold places the grant, the ring settles its key, and the waiting entry is checked.
+    const committed = await b.ingestForeign([create.built.entry], create.built.blobs);
+    assert.ok(!isProjectRefused(committed));
     const after = await b.state();
+    assert.deepEqual(b.keys.epochKey(cell, 1), key, 'the key the committed grant carries');
     assert.equal(decodeHost.starts, 1, 'the worker ran when the key arrived');
     assert.deepEqual(b.heldForCheck().map((item) => item.hash), [hostile.hash]);
     assert.match(b.heldForCheck()[0].reason, /too-large/);

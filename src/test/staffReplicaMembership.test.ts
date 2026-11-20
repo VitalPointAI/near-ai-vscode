@@ -797,25 +797,36 @@ test('MJ-04: a rekey whose entry is not written leaves its key unused; the next 
   assert.equal(epochAt(between.roster.cells, base, between.position), 1, 'the base cell was not rekeyed');
   const staleGrants = grantsOn(lead.at).filter((signed) => { const read = readGrant(signed); return read.ok && read.grant.cell === base && read.grant.epoch === 2; });
   assert.equal(staleGrants.length, 1, 'the failed rekey left its grant on disk');
-  // The next removal rekeys the base cell to the same epoch, with a new key.
-  ok(await removeFromProject(lead.host, { member: b.member }), 'remove B');
+  // The next removal first finishes A's (MJ-03): it rekeys the base cell to the same epoch 2 with a new key, then removes B and rekeys it to epoch 3.
+  const removedB = ok(await removeFromProject(lead.host, { member: b.member }), 'remove B');
+  assert.match(removedB.message, /A removal or clearance change left unfinished was finished first: one part of the project was moved to a new key\./);
   const { roster, position } = await head(lead.p);
-  assert.equal(epochAt(roster.cells, base, position), 2);
-  const committed = grantsOn(lead.at).find((signed) => grantHash(signed) === committedGrant(roster.cells, base, 2));
-  const read = readGrant(committed);
-  assert.ok(read.ok, 'the committed grant is on disk');
-  assert.notEqual(read.hash, grantHash(staleGrants[0]));
-  const wrap = read.grant.wraps.find((item) => item.writer === c.writer);
-  assert.ok(wrap !== undefined, 'C is on the new epoch');
+  assert.equal(epochAt(roster.cells, base, position), 3);
   const cPrivate = createPrivateKey({ key: Buffer.from(c.at.secrets.values.get(ENCRYPTION_KEY_SECRET) as string, 'base64'), format: 'der', type: 'pkcs8' });
-  const committedKey = unwrapEpochKey({ cell: base, epoch: 2, writer: c.writer, privateKey: cPrivate, wrap: wrap.wrap });
-  assert.ok(committedKey !== undefined);
+  const keyFor = (signed: unknown, epoch: number): Buffer | undefined => {
+    const read = readGrant(signed);
+    assert.ok(read.ok, 'the grant reads');
+    const wrap = read.grant.wraps.find((item) => item.writer === c.writer);
+    assert.ok(wrap !== undefined, `C is on epoch ${epoch}`);
+    return unwrapEpochKey({ cell: base, epoch, writer: c.writer, privateKey: cPrivate, wrap: wrap.wrap });
+  };
+  const committed2 = grantsOn(lead.at).find((signed) => grantHash(signed) === committedGrant(roster.cells, base, 2));
+  assert.ok(committed2 !== undefined, 'the committed grant of epoch 2 is on disk');
+  assert.notEqual(grantHash(committed2), grantHash(staleGrants[0]), 'epoch 2 commits to a new grant, not the one the failed rekey left');
+  const committedKey = keyFor(committed2, 2);
+  const staleKey = keyFor(staleGrants[0], 2);
+  assert.ok(committedKey !== undefined && staleKey !== undefined);
+  assert.notDeepEqual(committedKey, staleKey);
   assert.deepEqual(lead.p.keys.epochKey(base, 2), committedKey, 'the lead holds the committed key, not the key of the failed rekey');
+  const committed3 = grantsOn(lead.at).find((signed) => grantHash(signed) === committedGrant(roster.cells, base, 3));
+  assert.ok(committed3 !== undefined, 'the committed grant of epoch 3 is on disk');
+  const latestKey = keyFor(committed3, 3);
   await sync(lead, c);
   assert.deepEqual(c.p.keys.epochKey(base, 2), committedKey);
-  // The lead writes in the base cell at epoch 2 and C reads it.
+  assert.deepEqual(c.p.keys.epochKey(base, 3), latestKey);
+  // The lead writes in the base cell at epoch 3 and C reads it.
   const written = await writeInBase(lead.p);
-  assert.equal(written.epoch, 2);
+  assert.equal(written.epoch, 3);
   assert.equal(await reads(c.p, written), true, 'C reads what the lead wrote after the rekey');
 });
 
