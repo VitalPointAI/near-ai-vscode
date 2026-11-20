@@ -267,7 +267,6 @@ test('a roster entry of a kind whose rule is not written yet is refused roster-k
     ['device.revoke', { member: JOINER_MEMBER, writer: joined.joiner.writer }],
     ['invite.void', { invite: INVITE_ID }],
     ['cell.create', { cell: 'c'.repeat(32), epoch: 1, grant: 'd'.repeat(64) }],
-    ['deputy.name', { member: JOINER_MEMBER }],
     ['lead.handover', { to: JOINER_MEMBER, reason: 'planned' }]
   ];
   for (const [kind, data] of pending) {

@@ -12,8 +12,8 @@
 // 2. verifies each with verifyEntry against a view of the roster folded so far (so a device admitted by an earlier roster entry can be checked),
 //    opening each body once;
 // 3. refuses for good an entry that is not the pinned genesis, cites another roster than its rosterPrev, or was written by an agent;
-// 4. repeatedly takes the entries that cite the head and whose signer is a roster writer there: one candidate applies through its owner module, two or
-//    more are a split, recorded in pending, and none applies (31-17 adds the choice);
+// 4. repeatedly takes the entries that cite the head and whose signer is a roster writer there (a device of the lead or the deputy at the head): one
+//    candidate applies through its owner module, two or more are a split, recorded in pending, and none applies (31-17 adds the choice);
 // 5. after the line, places each grant it was given (signer a roster writer and every wrap a device admitted at the roster the grant names; a founding
 //    grant equal to its commitment).
 //
@@ -65,11 +65,14 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
 
 export const ROSTER_REFUSALS = {
   'roster-kind-pending': 'This kind of roster change is not applied by this version yet, so it is kept and changes nothing.',
-  'not-a-roster-writer': 'Only a device of the staff lead may change the roster, and the device that wrote this was not one at the roster it follows.',
+  'not-a-roster-writer': 'Only a device of the staff lead or the deputy lead may change the roster, and the device that wrote this was not one at the roster it follows.',
   'roster-citation-mismatch': 'This roster entry cites a different roster than the one it says it follows, so it is refused.',
   'not-the-pinned-genesis': 'This project genesis is not the one this machine pinned when it joined, so it is refused.',
   'genesis-anchor-mismatch': 'The pinned project genesis does not name the lead and device this machine pinned, so the roster cannot start from it.',
-  'person-only': 'Only a person can change the roster; an agent or the hub cannot.'
+  'person-only': 'Only a person can change the roster; an agent or the hub cannot.',
+  'deputy-cannot-name-deputy': 'Only the staff lead names the deputy lead, so this naming by the deputy is refused.',
+  'not-an-active-member': 'This names someone who is not an active member at the roster it follows.',
+  'names-the-lead': 'This names the member who already holds the staff lead role, so it is refused.'
 } as const;
 export type RosterRefusal = keyof typeof ROSTER_REFUSALS;
 
@@ -96,9 +99,10 @@ export interface RosterState {
   positionOf: Map<string, number>;
   members: MembersState;
   cells: CellsState;
-  // Who holds staff_lead and deputy_lead from which position (31-17 adds handover and naming).
+  // Who holds staff_lead and deputy_lead from which position: the anchor's lead from the origin, then each lead.handover and deputy.name at the
+  // position it takes. A deputy record without a member ends the deputy role (the deputy became the lead).
   leads: Array<{ member: string; from: number }>;
-  deputies: Array<{ member: string; from: number }>;
+  deputies: Array<{ member: string | undefined; from: number }>;
   // Roster splits: two or more entries citing one head; none of them applies until a choice (31-17).
   pending: Array<{ at: string; branches: string[] }>;
   refused: RosterRefused[];
@@ -120,7 +124,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
   };
 }
 
-const holderAt = (history: ReadonlyArray<{ member: string; from: number }>, position: number): string | undefined => {
+const holderAt = (history: ReadonlyArray<{ member: string | undefined; from: number }>, position: number): string | undefined => {
   let holder: string | undefined;
   for (const item of history) if (item.from <= position) holder = item.member;
   return holder;
@@ -129,11 +133,16 @@ const holderAt = (history: ReadonlyArray<{ member: string; from: number }>, posi
 export const leadAt = (state: RosterState, position: number): string | undefined => holderAt(state.leads, position);
 export const deputyAt = (state: RosterState, position: number): string | undefined => holderAt(state.deputies, position);
 
-// May this device write the roster at the position? An admitted device of the lead (31-17 adds the deputy).
+// May this device write the roster at the position? An admitted device of an active member who holds the staff lead or the deputy lead role there
+// (D-08, D-10). This is the one authority check of the driver and of the grants; what each kind needs beyond it is checked where the kind applies.
 export function isRosterWriterAt(state: RosterState, writer: string, position: number): boolean {
   const device = deviceAt(state.members, writer, position);
-  return device !== undefined && device.member === leadAt(state, position);
+  if (device === undefined || memberAt(state.members, device.member, position) === undefined) return false;
+  return device.member === leadAt(state, position) || device.member === deputyAt(state, position);
 }
+
+// The member whose device wrote the entry, at the roster the entry cites.
+const signerAt = (state: RosterState, entry: VerifiedEntry, position: number): string | undefined => deviceAt(state.members, entry.header.writer, position)?.member;
 
 function hasRoleAt(state: RosterState, member: string, role: string, position: number): boolean {
   const record = memberAt(state.members, member, position);
@@ -232,7 +241,27 @@ function applyGenesis(state: RosterState, entry: VerifiedEntry, position: number
   return { status: 'applied' };
 }
 
-function applyOne(state: RosterState, entry: VerifiedEntry): { status: 'applied' } | { status: 'refused'; reason: string } {
+type ApplyOutcome = { status: 'applied' } | { status: 'refused'; reason: string };
+
+// A member a lead role may be given to: active at the cited roster and not the lead there.
+function leadRoleProblem(state: RosterState, member: string, cited: number): RosterRefusal | undefined {
+  if (memberAt(state.members, member, cited) === undefined) return 'not-an-active-member';
+  if (member === leadAt(state, cited)) return 'names-the-lead';
+  return undefined;
+}
+
+// deputy.name (D-10, owner decision 5): written by the lead only; the deputy can write every other roster entry the lead can.
+function applyDeputyName(state: RosterState, entry: VerifiedEntry, position: number): ApplyOutcome {
+  const cited = position - 1;
+  if (signerAt(state, entry, cited) !== leadAt(state, cited)) return { status: 'refused', reason: 'deputy-cannot-name-deputy' };
+  const member = (entry.data as { member: string }).member;
+  const problem = leadRoleProblem(state, member, cited);
+  if (problem !== undefined) return { status: 'refused', reason: problem };
+  state.deputies.push({ member, from: position });
+  return { status: 'applied' };
+}
+
+function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   const position = state.positions.length;
   const owner = ROSTER_KIND_OWNER[entry.body.kind];
   if (entry.body.kind === 'project.genesis') return applyGenesis(state, entry, position);
@@ -241,7 +270,8 @@ function applyOne(state: RosterState, entry: VerifiedEntry): { status: 'applied'
     return applyMemberEntry(state.members, entry, { position, lead: leadAt(state, position - 1) as string, ...(deputy === undefined ? {} : { deputy }) });
   }
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
-  // lead.handover, deputy.name and roster.choose: 31-17 adds their rules.
+  if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
+  // lead.handover and roster.choose: their rules follow.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
 
