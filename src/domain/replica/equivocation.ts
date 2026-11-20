@@ -12,7 +12,10 @@ import type { EntryHeader } from './entry';
 import type { RosterView } from './rosterView';
 
 // Two different signed headers at one (stream, writer, seq), and the key that signed both, so anyone can check the pair alone.
-export interface EquivocationProof { a: EntryHeader; b: EntryHeader; publicKey: string }
+// branches is in memory only (D-01 (b), WR-03): the sorted entry hashes of every header this machine holds at the slot, a and b included, so a
+// device.release may name any branch of a fork with three or more. It is a property that is not enumerable (see withBranches), so JSON, canonical
+// bytes, proofHash and the wire form never see it, and a proof read from the wire has none.
+export interface EquivocationProof { a: EntryHeader; b: EntryHeader; publicKey: string; branches?: readonly string[] }
 // From fromSeq on, nothing of this writer in this stream is folded (and nothing in other streams that follows a forked entry).
 export interface QuarantineRecord { writer: string; stream: string; fromSeq: number }
 
@@ -23,6 +26,15 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 // The proof with its two headers sorted by entry hash, so the same fork gives the same proof on every machine.
 export function canonicalProof(a: EntryHeader, b: EntryHeader, publicKey: string): EquivocationProof {
   return entryHash(a) <= entryHash(b) ? { a, b, publicKey } : { a: b, b: a, publicKey };
+}
+
+// The same proof with its in-memory list of branches: the given hashes, a and b, and any branches it already had, sorted without duplicates. The
+// list is set as a property that is not enumerable, so a proof that carries it is byte for byte the same proof on the wire (P-31-08).
+export function withBranches(proof: EquivocationProof, hashes: Iterable<string>): EquivocationProof {
+  const all = new Set<string>([entryHash(proof.a), entryHash(proof.b), ...(proof.branches ?? []), ...hashes]);
+  const result: EquivocationProof = { a: proof.a, b: proof.b, publicKey: proof.publicKey };
+  Object.defineProperty(result, 'branches', { value: Object.freeze([...all].sort(compareText)), enumerable: false, writable: false, configurable: false });
+  return result;
 }
 
 // The proof as a plain value with parsed headers, or undefined when the input is not shaped like a proof. Whether it proves anything is verifyProof's job.
@@ -78,8 +90,8 @@ export function acceptableProof(proof: unknown, roster: RosterView): boolean {
   }
 }
 
-// One proof per (stream, writer, seq) with two or more different entry hashes: the two lowest hashes, signed with the key the roster knows. A device
-// the roster does not know yet gives no proof here (its entries are held unknown-writer).
+// One proof per (stream, writer, seq) with two or more different entry hashes: the two lowest hashes, signed with the key the roster knows, with every
+// hash at the slot as its in-memory branches. A device the roster does not know yet gives no proof here (its entries are held unknown-writer).
 export function findEquivocations(verified: ReadonlyArray<{ hash: string; header: EntryHeader }>, roster: RosterView): EquivocationProof[] {
   const slots = new Map<string, Map<string, EntryHeader>>();
   for (const entry of verified) {
@@ -97,16 +109,18 @@ export function findEquivocations(verified: ReadonlyArray<{ hash: string; header
     const [first, second] = [...slot.entries()].sort((x, y) => compareText(x[0], y[0])).slice(0, 2);
     const publicKey = roster.deviceKey(first[1].writer)?.publicKey;
     if (publicKey === undefined) continue;
-    const proof = canonicalProof(first[1], second[1], publicKey);
+    const proof = withBranches(canonicalProof(first[1], second[1], publicKey), slot.keys());
     proofs.set(proofHash(proof), proof);
   }
   return [...proofs.values()].sort((x, y) => compareText(proofHash(x), proofHash(y)));
 }
 
-// Has the roster resolved this fork with a device.release choice of one of its two branches?
+// Has the roster resolved this fork with a device.release choice of one of its branches (D-20)? Any branch counts: a or b, or any hash in the
+// proof's in-memory branches. A proof read from the wire has only a and b until the chain stage adds the branches this machine holds.
 export function forkChosen(proof: EquivocationProof, roster: RosterView): string | undefined {
   const chosen = roster.chosenBranch(proof.a.writer, proof.a.stream, proof.a.seq);
-  return chosen !== undefined && (chosen === entryHash(proof.a) || chosen === entryHash(proof.b)) ? chosen : undefined;
+  if (chosen === undefined) return undefined;
+  return chosen === entryHash(proof.a) || chosen === entryHash(proof.b) || (proof.branches ?? []).includes(chosen) ? chosen : undefined;
 }
 
 // One record per forked (writer, stream): the lowest forked seq whose fork is not resolved by a chosen branch. Sorted by writer, stream.
