@@ -1,5 +1,5 @@
 // Products and their versions on the replica layer (MUS-03; D-23, D-24, D-27, D-34, D-37; DESIGN 6.1 to 6.3, 15.4 rows 1 to 5).
-// Hub-side except for one call into doc.ts (textAtSnapshot, snapshotMissing), which takes plain bytes and so needs no Yjs types here.
+// Hub-side except for one call into doc.ts (snapshotReport), which takes plain bytes and so needs no Yjs types here.
 //
 // A product has a working text (the doc family) and frozen versions. A version.propose pins a content hash, a sealed blob of the exact text and header,
 // and a Yjs snapshot. The fold accepts it only when the blob opens, the hash matches the text and the pins, and the text at the snapshot is the blob's
@@ -15,7 +15,8 @@
 // before it in the total order. A proposal that names updates the fold has not reached is held updates-missing, not guessed at.
 import type { Actor } from './entry';
 import { blobBytesHash, openBlob } from './entry';
-import { attributionAtSnapshot, snapshotMissing, textAtSnapshot } from './doc';
+import { snapshotReport } from './doc';
+import type { AttributionRun } from './doc';
 import { attributeText, summariseAuthors } from './attribution';
 import type { AuthorSummary } from './attribution';
 import type { CausalGraph } from './causal';
@@ -34,6 +35,14 @@ import type { GuardVerdict, PersonActor, ProductRecord, ProductRoles, ReleaseEve
 // can be retuned. Nothing is ever withdrawn automatically.
 export const OWNER_PROMPT_THRESHOLD = 20;
 
+// Limits on what one writer can make this reducer build or keep (D-02, WR-05, WR-06). No honest flow comes near them.
+// Proposals one writer may make on one product. Every proposal that passes the owner check counts, refused or applied, because each one may cost a
+// blob decryption and a scratch build; a held proposal leaves no trace and does not count.
+export const MAX_PROPOSALS_PER_WRITER_PRODUCT = 200;
+// Acts (verdict, submit, decide, release, withdraw, supersede) one writer may write on one version hash. Every act of a version is judged against the
+// others in finish, so this bounds that work too.
+export const MAX_ACTS_PER_WRITER_VERSION = 32;
+
 export const VERSION_REFUSALS = {
   'not-owner': 'Only the owning member\'s agent for a person who answers for the section, a person who answers for the section, or the section lead can propose this product.',
   'not-authorised': 'Only a section lead, the staff lead or the deputy lead can do that.',
@@ -51,6 +60,8 @@ export const VERSION_REFUSALS = {
   'no-release': 'There is no release of this version in the past of this step.',
   'decline-not-pending': 'A decline can only settle decisions that were waiting for confirmation.',
   'not-gate-member': 'Only a member the roster lets run the release guard, or for the tradecraft gate the tradecraft reviewer, can give that verdict.',
+  'too-many': 'This device has already proposed this product the largest allowed number of times.',
+  'too-many-acts': 'This device has already written the largest allowed number of steps on this version.',
   'unsupported-kind': 'This kind of entry is not applied by this version.'
 } as const;
 export type VersionRefusalReason = keyof typeof VERSION_REFUSALS | ReleaseRefusalReason;
@@ -88,6 +99,9 @@ export interface VersionProposal {
   header: Record<string, unknown>;
   // The Yjs snapshot the proposal pinned, kept to read who shaped the text at that point (D-20).
   snapshot: Uint8Array;
+  // The attribution runs of the text at the snapshot, read once by the same inspection that checked the text (WR-05). Runs are joined across struct
+  // splits and the snapshot names exact structs, so later updates never change them.
+  runs: AttributionRun[];
 }
 
 export interface ProductEntry {
@@ -99,6 +113,12 @@ export interface ProductEntry {
   roles: ProductRoles;
   versions: VersionProposal[];
   acts: VersionAct[];
+  // Added by plan 31-07. Proposals counted against MAX_PROPOSALS_PER_WRITER_PRODUCT, by writer.
+  proposalCounts: Map<string, number>;
+  // Acts counted against MAX_ACTS_PER_WRITER_VERSION, by `${version hash}/${writer}`.
+  actCounts: Map<string, number>;
+  // How many snapshot inspections (scratch builds) proposals of this product cost. Read by tests only; no output or digest carries it.
+  snapshotReports: number;
 }
 export interface VersionsState { products: Map<string, ProductEntry> }
 
@@ -247,7 +267,16 @@ function applyPropose(state: VersionsState, entry: VerifiedEntry, view: FoldView
   if (product === undefined) return held('product-unknown');
   const who: Acting = { actor: entry.body.actor, member: entry.member, writer: entry.header.writer, roster: entry.body.roster };
   if (!isOwnerSide(who, product.section, [product.roles.owner], view.ctx.roster)) return refused('not-owner');
+  // The proposal cap (WR-05), checked before any blob is opened. A held outcome leaves no trace, so only an applied or refused proposal counts.
+  const writer = entry.header.writer;
+  const count = product.proposalCounts.get(writer) ?? 0;
+  if (count >= MAX_PROPOSALS_PER_WRITER_PRODUCT) return refused('too-many');
+  const outcome = checkProposal(product, entry, data, view);
+  if (outcome.status !== 'held') product.proposalCounts.set(writer, count + 1);
+  return outcome;
+}
 
+function checkProposal(product: ProductEntry, entry: VerifiedEntry, data: { product: string; hash: string; textBlob: string; snapshot: string; pins: Pin[] }, view: FoldView): ReduceOutcome {
   const read = readBlobText(view, entry, data.textBlob);
   if (!read.ok) return read.hold ? held('missing-blob') : refused('bad-blob');
   const pins = data.pins.map((pin) => ({ product: pin.product, hash: pin.hash }));
@@ -258,8 +287,11 @@ function applyPropose(state: VersionsState, entry: VerifiedEntry, view: FoldView
   const text = view.state('doc') as TextState | undefined;
   const updates = (text?.products.get(productKey(entry.header.stream, data.product))?.accepted ?? []).map((update) => update.update);
   const snapshot = Buffer.from(data.snapshot, 'base64url');
-  if (snapshotMissing(updates, snapshot)) return held('updates-missing');
-  if (textAtSnapshot(updates, snapshot) !== read.text) return refused('text-not-in-document');
+  // One scratch build answers all three questions (WR-05): are updates missing, what was the text, and who shaped it.
+  const report = snapshotReport(updates, snapshot);
+  product.snapshotReports += 1;
+  if (report?.missing === true) return held('updates-missing');
+  if (report === undefined || report.text !== read.text) return refused('text-not-in-document');
 
   product.versions.push({
     number: product.versions.length + 1,
@@ -269,7 +301,8 @@ function applyPropose(state: VersionsState, entry: VerifiedEntry, view: FoldView
     roles: product.roles,
     pins,
     header: read.header,
-    snapshot
+    snapshot,
+    runs: report.runs ?? []
   });
   return { status: 'applied' };
 }
@@ -292,7 +325,7 @@ export const versionsReducer: FamilyReducer<VersionsState, ProductVersions[]> = 
         releaseGuard: create.roles.releaseGuard,
         ...(create.roles.tradecraftReviewer === undefined ? {} : { tradecraftReviewer: create.roles.tradecraftReviewer })
       };
-      state.products.set(key, { stream: entry.header.stream, product: data.product, section: create.section, title: create.title, created: entry.hash, roles, versions: [], acts: [] });
+      state.products.set(key, { stream: entry.header.stream, product: data.product, section: create.section, title: create.title, created: entry.hash, roles, versions: [], acts: [], proposalCounts: new Map(), actCounts: new Map(), snapshotReports: 0 });
       return { status: 'applied' };
     }
     const product = state.products.get(key);
@@ -308,7 +341,12 @@ export const versionsReducer: FamilyReducer<VersionsState, ProductVersions[]> = 
     }
     if (kind === 'version.propose') return applyPropose(state, entry, view);
     if (['version.verdict', 'version.submit', 'version.withdraw', 'version.decide', 'version.release', 'version.supersede'].includes(kind)) {
-      // Judged in finish, from the whole set of acts on the version, so no step depends on which act arrived first.
+      // Judged in finish, from the whole set of acts on the version, so no step depends on which act arrived first. The act cap (WR-06) is the one
+      // check here: it reads only the acts this writer already wrote on the same version hash, which come before this one in the total order.
+      const counted = `${String((entry.data as { hash?: unknown }).hash)}/${entry.header.writer}`;
+      const acts = product.actCounts.get(counted) ?? 0;
+      if (acts >= MAX_ACTS_PER_WRITER_VERSION) return refused('too-many-acts');
+      product.actCounts.set(counted, acts + 1);
       product.acts.push(actOf(entry, view.streamPosition(entry.hash) ?? 0));
       return { status: 'applied' };
     }
@@ -364,7 +402,7 @@ export const versionsReducer: FamilyReducer<VersionsState, ProductVersions[]> = 
   clone(state) {
     const copy: VersionsState = { products: new Map() };
     for (const [key, product] of state.products) {
-      copy.products.set(key, { ...product, roles: { ...product.roles }, versions: [...product.versions], acts: [...product.acts] });
+      copy.products.set(key, { ...product, roles: { ...product.roles }, versions: [...product.versions], acts: [...product.acts], proposalCounts: new Map(product.proposalCounts), actCounts: new Map(product.actCounts) });
     }
     return copy;
   }
@@ -723,9 +761,8 @@ function deriveProduct(product: ProductEntry, text: TextState | undefined, view:
       .filter((other) => other.number < proposal.number && view.graph.concurrent(other.entry, proposal.entry))
       .map((other) => other.number);
     const record = derived.record;
-    // Who shaped the text as it stood at the snapshot (D-20). A snapshot the fold cannot read gives no rows rather than a guess.
-    const runs = productText === undefined ? undefined : attributionAtSnapshot(updates.map((update) => update.update), proposal.snapshot);
-    const attribution = runs === undefined || productText === undefined ? [] : summariseAuthors(attributeText(runs, productText.registrations));
+    // Who shaped the text as it stood at the snapshot (D-20), from the runs the proposal's own inspection read (WR-05): no scratch build here.
+    const attribution = productText === undefined ? [] : summariseAuthors(attributeText(proposal.runs, productText.registrations));
     versions.push({
       number: proposal.number,
       hash: proposal.hash,
