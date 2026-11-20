@@ -26,7 +26,7 @@ import { GENESIS_PREV, parseHeaderShape, entryHash } from './entry';
 import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
 import { slotOfClientId } from './clientIds';
-import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, granteesAt } from './rosterCells';
+import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
 import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
@@ -78,7 +78,8 @@ export const ROSTER_REFUSALS = {
   'handover-not-allowed': 'The deputy lead may hand over the lead only when the lead is lost, so this handover is refused.',
   'choose-not-allowed': 'Only the staff lead chooses a roster branch, or the deputy lead when the lead has no active device, so this choice is refused.',
   'choose-not-a-branch': 'This choice names an entry that is not one of the roster changes made at the roster it follows, so it is refused.',
-  'choose-superseded': 'A later choice at the same roster split was applied instead, so this one changes nothing.'
+  'choose-superseded': 'A later choice at the same roster split was applied instead, so this one changes nothing.',
+  'choose-branch-refused': 'The change this choice picked is itself refused, so the choice resolves nothing and the roster split stays open. Choose one of the other changes, or make the change again.'
 } as const;
 export type RosterRefusal = keyof typeof ROSTER_REFUSALS;
 
@@ -298,7 +299,8 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (entry.body.kind === 'project.genesis') return applyGenesis(state, entry, position);
   if (owner === 'members') {
     const deputy = deputyAt(state, position - 1);
-    return applyMemberEntry(state.members, entry, { position, lead: leadAt(state, position - 1) as string, ...(deputy === undefined ? {} : { deputy }) });
+    const streamKnown = (stream: string): boolean => stream === state.anchor.project || epochAt(state.cells, stream, position - 1) !== undefined;
+    return applyMemberEntry(state.members, entry, { position, lead: leadAt(state, position - 1) as string, streamKnown, ...(deputy === undefined ? {} : { deputy }) });
   }
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
@@ -387,29 +389,41 @@ export function foldRoster(input: RosterFoldInput): RosterState {
       if (problem === undefined) allowed.push(choose);
       else refuse(choose.hash, choose.body.kind, problem);
     }
+    let open = branches;
     if (allowed.length > 0) {
       const [choose, ...superseded] = latestChoice(allowed);
       for (const other of superseded) refuse(other.hash, other.body.kind, 'choose-superseded');
       const chosenHash = (choose.data as { chosen: string }).chosen;
       const chosen = branches.find((entry) => entry.hash === chosenHash) as VerifiedEntry;
       const others = branches.filter((entry) => entry !== chosen);
-      state.choices.push({ at: head, branches: branches.map((entry) => entry.hash).sort(), chosen: chosenHash, choose: choose.hash });
-      // The branches not chosen stay unapplied; what is chained after them is found below.
-      ready.push(...others);
       // The choice takes one position and changes nothing else, so the chosen entry, judged at the split point it cites, applies at the next one.
+      // Every rule checks before it changes anything, so a refused chosen entry leaves the state as it was.
       append(state, choose.hash);
       const outcome = applyOne(state, chosen);
-      if (outcome.status === 'refused') refuse(chosen.hash, chosen.body.kind, outcome.reason);
-      else append(state, chosen.hash);
-      continue;
+      if (outcome.status === 'applied') {
+        append(state, chosen.hash);
+        state.choices.push({ at: head, branches: branches.map((entry) => entry.hash).sort(), chosen: chosenHash, choose: choose.hash });
+        // The branches not chosen stay unapplied; what is chained after them is found below.
+        ready.push(...others);
+        continue;
+      }
+      // The chosen change is refused by its own rule: the choice resolves nothing (its position is taken back), so the split is not silently closed
+      // with nothing applied. The choice and the refused change are recorded as refused, and the other changes are judged as if it had not been there:
+      // two or more stay a pending split the lead can still choose between, and a single one continues the line.
+      state.positions.pop();
+      state.positionOf.delete(choose.hash);
+      refuse(chosen.hash, chosen.body.kind, outcome.reason);
+      refuse(choose.hash, choose.body.kind, 'choose-branch-refused');
+      open = others;
     }
-    if (branches.length === 0) continue;
-    if (branches.length > 1) {
-      state.pending.push({ at: head, branches: branches.map((entry) => entry.hash).sort(), text: ROSTER_SPLIT_TEXT });
-      ready.push(...branches);
+    if (open.length === 0) continue;
+    const branchesLeft = open;
+    if (branchesLeft.length > 1) {
+      state.pending.push({ at: head, branches: branchesLeft.map((entry) => entry.hash).sort(), text: ROSTER_SPLIT_TEXT });
+      ready.push(...branchesLeft);
       break;
     }
-    const entry = branches[0];
+    const entry = branchesLeft[0];
     const outcome = applyOne(state, entry);
     if (outcome.status === 'refused') {
       refuse(entry.hash, entry.body.kind, outcome.reason);

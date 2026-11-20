@@ -383,6 +383,33 @@ test('two choices at one split: the one signed later applies and the other is re
   }
 });
 
+test('a roster.choose picking a change its own rule refuses resolves nothing: the split stays pending between the others, which can still be chosen, in every delivery order', () => {
+  const t = split();
+  // A third change on the split point that its own rule refuses: the deputy naming a deputy.
+  const bad = t.s.world.rosterEntry(t.s.dee, 'deputy.name', { member: t.s.dee.member }, t.point);
+  const pickBad = t.s.world.rosterEntry(t.s.lead, 'roster.choose', { chosen: bad.hash }, t.point, { at: '2026-11-19T11:05:00.000Z' });
+  const prefix = foldWith(t.s, t.prefix).positions;
+  for (const order of permutations([t.a, t.b, bad, pickBad])) {
+    const state = foldWith(t.s, [...t.prefix, ...order.map((item) => item.entry)]);
+    const label = order.map((item) => item.hash.slice(0, 6)).join(',');
+    assert.deepEqual(state.positions, prefix, `${label}: nothing applied and the choice took no position`);
+    assert.deepEqual(state.choices, [], label);
+    assert.deepEqual(state.pending, [{ at: t.point, branches: sorted(t.a.hash, t.b.hash), text: ROSTER_SPLIT_TEXT }], `${label}: still split between the others`);
+    assert.deepEqual(refusalsOf(state).sort(), [[bad.hash, 'deputy.name', 'deputy-cannot-name-deputy'], [pickBad.hash, 'roster.choose', 'choose-branch-refused']].sort(), label);
+  }
+  // The lead can still choose: a later choice of the deputy's branch applies.
+  const pickB = t.s.world.rosterEntry(t.s.lead, 'roster.choose', { chosen: t.b.hash }, t.point, { at: '2026-11-19T11:06:00.000Z' });
+  const chosen = foldWith(t.s, [...t.prefix, t.a.entry, t.b.entry, bad.entry, pickBad.entry, pickB.entry]);
+  assert.deepEqual(chosen.positions, [...prefix, pickB.hash, t.b.hash]);
+  assert.deepEqual(chosen.pending, []);
+  assert.deepEqual(chosen.choices, [{ at: t.point, branches: sorted(t.a.hash, t.b.hash, bad.hash), chosen: t.b.hash, choose: pickB.hash }]);
+  // With only one other change left, it continues the line once the refused pick is set aside.
+  const two = foldWith(t.s, [...t.prefix, t.a.entry, bad.entry, pickBad.entry]);
+  assert.deepEqual(two.positions, [...prefix, t.a.hash]);
+  assert.deepEqual(two.pending, []);
+  assert.deepEqual(refusalsOf(two).sort(), [[bad.hash, 'deputy.name', 'deputy-cannot-name-deputy'], [pickBad.hash, 'roster.choose', 'choose-branch-refused']].sort());
+});
+
 const PRODUCT = 'intel-estimate';
 
 function productText(result: FoldResult): string | undefined {
@@ -449,7 +476,7 @@ test('the main fold holds a doc.update citing a branch nobody chose roster-branc
 
 test('every new refusal, hold and keep reason is a plain sentence without an em-dash', () => {
   const texts: Array<[string, string]> = [
-    ...['deputy-cannot-name-deputy', 'not-an-active-member', 'names-the-lead', 'handover-not-allowed', 'choose-not-allowed', 'choose-not-a-branch', 'choose-superseded']
+    ...['deputy-cannot-name-deputy', 'not-an-active-member', 'names-the-lead', 'handover-not-allowed', 'choose-not-allowed', 'choose-not-a-branch', 'choose-superseded', 'choose-branch-refused']
       .map((reason): [string, string] => [reason, (ROSTER_REFUSALS as Record<string, string>)[reason]]),
     ['roster-branch-not-chosen', VERIFY_HOLDS['roster-branch-not-chosen']],
     ['observer-only', KEEP_REASONS['observer-only']],

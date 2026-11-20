@@ -885,3 +885,33 @@ test('remakeInvite refuses a used, cancelled, expired or unknown invitation, and
   const later = { project: opened1, deps: { ...first.deps, now: () => new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) } };
   assert.equal((await remakeInvite(later, c.invite as string)).reason, 'invite-expired');
 });
+
+test('a secret file is created 0600 from the start, replaces a file chosen in the dialog, and on any failure leaves no copy of the secret behind', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-secret-save-'));
+  const secret = `secret-${'x'.repeat(40)}`;
+  // A new file: owner read and write only.
+  const fresh = path.join(dir, 'invitation.near-staff-invite');
+  await multi.saveSecretFile(fresh, secret);
+  assert.equal(readFileSync(fresh, 'utf8'), secret);
+  assert.equal(statSync(fresh).mode & 0o777, 0o600);
+  // An existing world-readable file chosen in the dialog is replaced by a 0600 file, never rewritten in place with its old mode.
+  const existing = path.join(dir, 'existing.near-staff-invite');
+  await writeFile(existing, 'old', { mode: 0o644 });
+  await multi.saveSecretFile(existing, secret);
+  assert.equal(readFileSync(existing, 'utf8'), secret);
+  assert.equal(statSync(existing).mode & 0o777, 0o600);
+  // A failure after the new file exists (the target is a folder, so the rename fails): the error is reported and no file holds the secret.
+  const folder = path.join(dir, 'a-folder');
+  mkdirSync(folder);
+  const before = readdirSync(dir).sort();
+  await assert.rejects(() => multi.saveSecretFile(folder, secret));
+  assert.deepEqual(readdirSync(dir).sort(), before, 'the unfinished copy was removed');
+  assert.deepEqual(readdirSync(folder), []);
+  for (const name of readdirSync(dir)) {
+    const file = path.join(dir, name);
+    if (statSync(file).isFile()) assert.equal(readFileSync(file, 'utf8').includes(secret) && name !== 'invitation.near-staff-invite' && name !== 'existing.near-staff-invite', false, name);
+  }
+  // A failure before anything is created (the folder does not exist) leaves nothing either.
+  await assert.rejects(() => multi.saveSecretFile(path.join(dir, 'missing', 'invitation'), secret));
+  assert.deepEqual(readdirSync(dir).sort(), before);
+});

@@ -487,13 +487,27 @@ test('15.2 active -> quarantined: two or more headers at one seq make the main f
   const after = mainFold(forked);
   assert.deepEqual(after.roster.refused, []);
   assert.equal(after.roster.positions[after.roster.positions.length - 1], quarantine.hash);
-  assert.deepEqual(after.roster.members, before.roster.members);
+  // Only the quarantine record itself is added (so the same fork position is never recorded twice); every other member state is unchanged.
+  assert.deepEqual([...after.roster.members.quarantines], [`${jo.writer}/${line.world.project}/0`]);
+  assert.deepEqual({ ...after.roster.members, quarantines: new Set() }, { ...before.roster.members, quarantines: new Set() });
   assert.deepEqual(memberAnswers(after.roster, JO, [jo], quarantine.hash), memberAnswers(after.roster, JO, [jo], head));
   assert.equal(rosterView(after.roster).chosenBranch(jo.writer, line.world.project, 0), undefined);
   // The quarantine comes from the proof in the main fold, not from the entry: it is the same with or without it.
   assert.deepEqual(after.result.quarantined, before.result.quarantined);
   // A quarantine naming a device the roster never had is refused.
   assert.equal(refusalOf(line, line.tryEntry('device.quarantine', { writer: 'a'.repeat(64), stream: line.world.project, seq: 0 })), 'device-unknown');
+  // A quarantine naming a stream that is neither the project nor one of its cells is refused, not accepted as a change that does nothing.
+  assert.equal(refusalOf(line, line.tryEntry('device.quarantine', { writer: jo.writer, stream: 'c'.repeat(32), seq: 0 })), 'quarantine-stream-unknown');
+  // The same device, stream and seq again is refused; another seq on the project stream is a new record.
+  assert.equal(refusalOf(line, line.tryEntry('device.quarantine', { writer: jo.writer, stream: line.world.project, seq: 0 })), 'quarantine-recorded');
+  const other = line.next('device.quarantine', { writer: jo.writer, stream: line.world.project, seq: 3 });
+  const later = line.fold();
+  assert.deepEqual(later.refused, []);
+  assert.equal(later.positions[later.positions.length - 1], other.hash);
+  assert.ok(later.members.quarantines.has(`${jo.writer}/${line.world.project}/3`));
+  for (const reason of ['quarantine-stream-unknown', 'quarantine-recorded'] as const) {
+    assert.ok(MEMBER_REFUSALS[reason].endsWith('.') && !MEMBER_REFUSALS[reason].includes('\u2014'), reason);
+  }
 });
 
 test('15.2 quarantined -> active: device.release naming the third of three branches feeds chosenBranch, and a fresh main fold admits that branch and its later entries', () => {

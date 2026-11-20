@@ -31,6 +31,8 @@ export const MEMBER_REFUSALS = {
   'device-exists': 'This device is already in the roster.',
   'bad-binding': 'The device did not sign its encryption key with its signing key, so the keys do not belong together.',
   'device-unknown': 'This names a device the roster does not have for that member at the roster it follows.',
+  'quarantine-stream-unknown': 'This quarantine names a stream that is neither this project nor a part of it the roster has at the roster it follows, so it records nothing.',
+  'quarantine-recorded': 'A quarantine for this device at this stream and position is already recorded, so this one records nothing new.',
   'hub-exists': 'A hub or member with this id is already in the roster, and an id is never given twice.',
   'hub-unknown': 'This names a hub the roster does not have at the roster it follows.'
 } as const;
@@ -98,11 +100,19 @@ export interface MembersState {
   releases: Map<string, string>;
   // Versions of each hub member, oldest first (D-04, D-12).
   hubs: Map<string, HubRecord[]>;
+  // device.quarantine records by writer, stream and seq (D-48): record only, kept so the same fork position is never recorded twice.
+  quarantines: Set<string>;
 }
 
 // What the driver tells this module about the entry it routes here. position is the position the entry takes when it applies; the roster it cites
 // is position - 1. lead and deputy are the members holding those roles at the cited roster.
-export interface MemberApplyContext { position: number; lead: string; deputy?: string }
+export interface MemberApplyContext {
+  position: number;
+  lead: string;
+  deputy?: string;
+  /** Whether a stream exists at the cited roster: this project's own stream or a cell the roster has there. Given by the driver. */
+  streamKnown?: (stream: string) => boolean;
+}
 
 interface DeviceDescriptor { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot?: number }
 
@@ -117,6 +127,7 @@ export function createMembersState(anchor: MembersAnchor): MembersState {
     slots: new Map(),
     invites: new Map(),
     releases: new Map(),
+    quarantines: new Set(),
     hubs: new Map()
   };
 }
@@ -408,10 +419,17 @@ interface HubAdmitData { hub: string; device: DeviceDescriptor; certPin: string;
 interface HubGrantData { hub: string; cell: string }
 interface HubRevokeData { hub: string }
 
-// device.quarantine is record only (D-48): the quarantine itself comes from an equivocation proof in the main fold, so the entry changes no state. It
-// must name a device the roster has had.
-function applyQuarantine(state: MembersState, data: SlotData): MemberApplyOutcome {
-  return deviceKeyOf(state, data.writer) === undefined ? refused('device-unknown') : { status: 'applied' };
+// device.quarantine is record only (D-48): the quarantine itself comes from an equivocation proof in the main fold, so the entry changes no other
+// state. What the roster can check, it does, so a quarantine naming the wrong place is refused with its reason instead of accepted as a no-op: the
+// device must be one the roster has had, the stream must exist at the cited roster (this project or one of its cells), and the same writer, stream
+// and seq is recorded once.
+function applyQuarantine(state: MembersState, data: SlotData, ctx: MemberApplyContext): MemberApplyOutcome {
+  if (deviceKeyOf(state, data.writer) === undefined) return refused('device-unknown');
+  if (ctx.streamKnown !== undefined && !ctx.streamKnown(data.stream)) return refused('quarantine-stream-unknown');
+  const key = `${data.writer}/${data.stream}/${data.seq}`;
+  if (state.quarantines.has(key)) return refused('quarantine-recorded');
+  state.quarantines.add(key);
+  return { status: 'applied' };
 }
 
 // device.release (DESIGN 15.2 quarantined -> active): records the branch kept at the fork slot. Which hashes are branches of the slot is the main
@@ -476,7 +494,7 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
     case 'device.revoke':
       return applyRevoke(state, entry, entry.data as RevokeData, ctx);
     case 'device.quarantine':
-      return applyQuarantine(state, entry.data as SlotData);
+      return applyQuarantine(state, entry.data as SlotData, ctx);
     case 'device.release':
       return applyRelease(state, entry.data as ReleaseData);
     case 'hub.admit':

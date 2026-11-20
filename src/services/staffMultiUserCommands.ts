@@ -16,8 +16,8 @@
 //
 // Remove from Staff Project lists, before the members, a way to finish a removal or clearance change whose rekeys were interrupted (MJ-03), and lists
 // expired invitations too, so they can be cancelled and their join secrets forgotten (MN-02).
-import { createHash } from 'node:crypto';
-import { chmod, lstat, realpath, writeFile } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { lstat, open, realpath, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -206,11 +206,36 @@ async function inside(folder: string, file: string): Promise<boolean> {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-/** Saves a file readable by this user account only: an invitation holds a one-time secret. An existing file chosen in the dialog is narrowed too. */
-async function saveFile(target: string, text: string): Promise<void> {
-  await writeFile(target, text, { encoding: 'utf8', mode: 0o600 });
-  await chmod(target, 0o600);
+/**
+ * Saves a file readable by this user account only: an invitation holds a one-time secret. The bytes go to a new file beside the target, created
+ * exclusively with mode 0600 at open time (so it is never readable by others, not even for a moment), synced, then renamed over the target; an
+ * existing file chosen in the dialog is replaced, not rewritten in place. On any failure after the new file exists it is removed before the error
+ * is reported, so no copy of the secret is left behind; if even that removal fails, the error says where the file is.
+ */
+export async function saveSecretFile(target: string, text: string): Promise<void> {
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomBytes(6).toString('hex')}.tmp`);
+  const handle = await open(temporary, 'wx', 0o600);
+  try {
+    try {
+      await handle.writeFile(text, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, target);
+  } catch (error) {
+    try {
+      await unlink(temporary);
+    } catch (cleanup) {
+      if ((cleanup as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; the unfinished copy at ${temporary} could not be removed, so delete it by hand`);
+      }
+    }
+    throw error;
+  }
 }
+
+const saveFile = saveSecretFile;
 
 /** Writes the file a flow returned to the place the person chose, and shows the flow's sentence with where it was saved. */
 async function deliver(result: MembershipResult, target: string, ifNotSaved: string): Promise<void> {
