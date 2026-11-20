@@ -12,7 +12,7 @@ import { buildGrant, grantHash, wrapEpochKey, x25519BindingBytes, x25519PrivateF
 import { checkpointHash, signCheckpoint } from '../domain/replica/checkpoint';
 import type { SignedCheckpoint } from '../domain/replica/checkpoint';
 import { GENESIS_PREV, buildEntry, entryHash } from '../domain/replica/entry';
-import type { BuiltEntry, SealedBlob, SealedEntry } from '../domain/replica/entry';
+import type { BuiltEntry, Dep, SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { certPinOf } from '../domain/replica/hubFile';
 import { WITHHELD_GRACE_MS, createWitness, readWitness, serializeWitness } from '../domain/replica/hubWitness';
 import type { WitnessState } from '../domain/replica/hubWitness';
@@ -536,7 +536,7 @@ interface SyncWorld {
   baseKey: Buffer;
   memberEntries: BuiltEntry[];
   /** The member's next entry in the base cell (a doc.update with a blob when big is set). */
-  memberWrite(options?: { big?: boolean; text?: string }): BuiltEntry;
+  memberWrite(options?: { big?: boolean; text?: string; deps?: Dep[] }): BuiltEntry;
   checkpoint(heads: ReadonlyArray<{ writer: string; seq: number; hash: string }>, count: number, orderTip?: string): SignedCheckpoint;
   /** Every entry this computer holds, in seq order per writer. */
   held(): Promise<SealedEntry[]>;
@@ -576,7 +576,7 @@ async function syncWorld(label: string): Promise<SyncWorld> {
       const data = options.big === true ? { product: 'intel-estimate', update: Buffer.alloc(20_000, seq + 1).toString('base64url') } : { text: options.text ?? `Fictional observation ${seq}` };
       const built = buildEntry({
         signer: member, key: baseKey, stream: project, seq, prev: last === undefined ? GENESIS_PREV : last.hash, epoch: 1,
-        body: { deps: [], roster: head, lamport: 100 + seq, at: NOW_TEXT, actor: { kind: 'person' }, kind: options.big === true ? 'doc.update' : 'note.add', data }
+        body: { deps: options.deps ?? [], roster: head, lamport: 100 + seq, at: NOW_TEXT, actor: { kind: 'person' }, kind: options.big === true ? 'doc.update' : 'note.add', data }
       });
       memberEntries.push(built);
       return built;
@@ -683,6 +683,25 @@ test('a gap stops that writer: nothing after it is stored, the hub\'s head stays
     assert.deepEqual(kinds(later), ['withheld']);
     assert.equal(later.findings[0]?.count, 1);
     assert.equal((await world.a.head(world.project, world.member.writer))?.seq, 1, 'still nothing past the gap');
+  });
+});
+
+test('withheld by a dep: an entry citing one the hub never serves (and no head names) is held, its dep cited, and past the grace period named withheld (D-50, D-63)', async () => {
+  await withSync('dep', async (world, fake, state) => {
+    // The cited entry is the lead's own place far ahead of its log, which neither this computer nor the hub's heads name: only the dep shows it.
+    const unseen: Dep = { writer: world.a.deviceWriter, seq: 900, hash: createHash('sha256').update('fictional unseen entry').digest('hex') };
+    const citing = world.memberWrite({ text: 'Fictional assessment of an unseen sighting', deps: [unseen] });
+    seedHub(state, [citing.entry]);
+    const first = await syncA(world, fake.address);
+    assert.equal(first.outcome, 'synced', JSON.stringify(first));
+    assert.equal(first.pulled, 1);
+    assert.deepEqual(kinds(first), []);
+    assert.deepEqual(await world.a.missingDeps(), [{ stream: world.project, writer: unseen.writer, seq: unseen.seq, hash: unseen.hash }]);
+    assert.deepEqual(witnessOf(world).waiting.map((row) => row.hash), [unseen.hash], 'the dep is cited and waiting');
+    const later = await syncA(world, fake.address, { now: new Date(SYNC_NOW.getTime() + WITHHELD_GRACE_MS) });
+    assert.deepEqual(kinds(later), ['withheld']);
+    assert.equal(later.findings[0]?.detail.writer, world.a.deviceWriter.slice(0, 12));
+    assert.equal(later.findings[0]?.detail.seq, 900);
   });
 });
 

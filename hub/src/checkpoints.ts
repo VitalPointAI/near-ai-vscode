@@ -14,8 +14,11 @@
 //
 // Kept checkpoints (D-46, D-54, D-70). Every checkpoint of this hub in the store counts, the ones clients handed back after a restore included.
 // While one of them names a head the hub does not cover, the hub signs nothing for that project and logs checkpoint.waiting; once clients re-push,
-// the next checkpoint nests after it. Kept checkpoints that do not form one chain of nested sets, or whose order the hub cannot reproduce, stop
-// signing for that project with checkpoint.conflict: never a silent guess.
+// the next checkpoint nests after it. Kept checkpoints that do not form one chain of nested sets stop signing for that project with
+// checkpoint.conflict: never a silent guess. Kept checkpoints whose order the hub cannot reproduce (order-mismatch) also stop signing with
+// checkpoint.conflict, but that one can heal: after a restore, a checkpoint the hub signed between two kept ones may be missing because the client
+// that held it has not handed it back yet (32-26 restore drill), and every later order nests after it. So an ask that hands back more checkpoints
+// checks the chain again, and signing resumes once it reproduces; until then nothing is signed.
 //
 // Timing (D-45). After entries arrive the hub signs 2 seconds after the last arrival, but never sooner than 60 seconds after its previous
 // checkpoint of that project. An ask signs at once when the covered set grew and the last ask-signed checkpoint of that project is at least
@@ -172,6 +175,8 @@ class ProjectCheckpointer {
   /** The kept chain was checked and tip is its order state. */
   private validated = true;
   private conflict: string | undefined;
+  /** The number of kept checkpoints when their order could not be reproduced: only a longer chain (more handed back) is checked again. */
+  private gapAt: number | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private timer: Timer | undefined;
   private lastSigned = Number.NEGATIVE_INFINITY;
@@ -227,7 +232,7 @@ class ProjectCheckpointer {
 
   private async attempt(trigger: 'timer' | 'ask'): Promise<AttemptOutcome> {
     if (this.isStopped()) return 'stopped';
-    if (this.conflict !== undefined) return 'conflict';
+    if (this.conflict !== undefined && (this.gapAt === undefined || !this.reloadWanted)) return 'conflict';
     if (trigger === 'ask' && this.deps.now() - this.lastAskSigned < CHECKPOINT_TIMING.askGapMs) return 'too-soon';
     // Arrivals from here on schedule a new timer; the store is read after this point, so none is lost.
     if (trigger === 'ask') this.cancel();
@@ -237,6 +242,12 @@ class ProjectCheckpointer {
     if (this.isStopped()) return 'stopped';
 
     this.loadChain();
+    if (this.conflict !== undefined) {
+      // An order gap: nothing new was handed back, so the chain still cannot be reproduced.
+      if (this.chain.length === this.gapAt) return 'conflict';
+      this.conflict = undefined;
+      this.gapAt = undefined;
+    }
     const all = this.cover(roster, undefined);
     const waiting = this.missingHeads(all.frontier);
     if (waiting > 0) {
@@ -247,6 +258,7 @@ class ProjectCheckpointer {
       const reason = this.validateChain();
       if (reason !== undefined) {
         this.conflict = reason;
+        this.gapAt = reason === 'order-mismatch' ? this.chain.length : undefined;
         this.deps.log?.('error', 'checkpoint.conflict', { project: this.project, reason, kept: this.chain.length });
         return 'conflict';
       }

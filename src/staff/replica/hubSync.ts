@@ -5,8 +5,9 @@
 //
 // syncOnce runs, in order: the session and heads (witnessHeads, witnessCheckpoint), the grants the hub lists that this computer lacks, the hand-back
 // of hub checkpoints the hub lost (when the hub's latest is older than the newest this computer kept), the pull per writer in seq order with every
-// prev checked against the stored head and every header verified against the roster, the blobs waiting entries need, the push of every entry and
-// grant the hub lacks (re-pushed after a rollback), a checkpoint ask, and the witness state saved. Nothing the witness names is stored.
+// prev checked against the stored head and every header verified against the roster, the citations still missing (heads, checkpoint heads and the
+// deps of held entries, for withheld), the blobs waiting entries need, the push of every entry and grant the hub lacks (re-pushed after a rollback),
+// a checkpoint ask, and the witness state saved. Nothing the witness names is stored.
 //
 // The end states (DESIGN 15.3) of one exchange:
 //   synced     the exchange finished and the hub showed nothing that needs a person
@@ -56,6 +57,11 @@ export interface SyncLocal {
   putCheckpoint(signed: SignedCheckpoint): Promise<void>;
   /** The streams the hub can checkpoint (the base cell and the cells granted with hub.grant), for the delayed finding (D-63). */
   covered?(hub: string): Promise<readonly string[] | undefined>;
+  /**
+   * The deps that entries this computer holds cite and it does not hold, each with the citing entry's stream (D-50, D-63). In a cell no checkpoint
+   * covers, a dep is the only sign of an entry the hub withholds while no head names it. Without it only the hub's heads and checkpoint heads are cited.
+   */
+  missingDeps?(): Promise<Citation[]>;
 }
 
 /** Where the witness state of each hub and project is kept between exchanges. */
@@ -260,7 +266,8 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     // Pull, unless the hub showed an older copy: then this computer only pushes back what it has.
     if (!rolledBack) await pull(heads.streams);
 
-    // Withheld (D-50): the hub's heads and the trusted checkpoint's heads this computer still does not hold, timed by the witness.
+    // Withheld (D-50): the hub's heads, the trusted checkpoint's heads and the deps of held entries this computer still does not hold, timed by the
+    // witness. The deps are what catches withholding in a cell no checkpoint covers when the hub also leaves the entry out of its heads (D-63).
     if (!rolledBack) {
       const cited: Citation[] = [];
       for (const stream of heads.streams) {
@@ -268,6 +275,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
       }
       const newest = state.newest === undefined ? undefined : readCheckpoint(state.newest.payload);
       for (const stream of newest?.streams ?? []) for (const head of stream.heads) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
+      if (local.missingDeps !== undefined) cited.push(...(await local.missingDeps()));
       const held = await local.holds(cited.map((item) => item.hash));
       apply(witnessCitations(state, cited, held, now()));
     }
