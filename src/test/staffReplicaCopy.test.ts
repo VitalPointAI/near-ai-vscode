@@ -29,17 +29,20 @@ import { verifyPayload } from '../domain/team/signedPayload';
 import type { DeviceIdentity } from '../team/identity';
 import { isMigrationRefused, ledgerHeadKey, makeMultiUser, projectionInputOf } from '../staff/replica/migrate';
 import type { MigrationDeps } from '../staff/replica/migrate';
-import { ledgerLinesOf, projectLedgerReplay } from '../staff/replica/projection';
-import { admitJoinRequest, inviteToProject, joinFromInvite, openWelcome, updateMember } from '../staff/replica/membership';
+import { IMPORTED_PRODUCTS_LEDGER, importedFile, ledgerLinesOf, projectLedgerReplay, scopedImportsOf } from '../staff/replica/projection';
+import { admitJoinRequest, cellOrderHook, inviteToProject, joinFromInvite, openWelcome, updateMember } from '../staff/replica/membership';
+import { cellLabelTexts } from '../staff/replica/labelCells';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ProjectRefused } from '../staff/replica/replicaProject';
-import { CONTESTED_AT_COPY_TEXT, COPY_REFUSALS, carriedApprovalName, makeSingleMachineCopy, setCopyProbe } from '../staff/replica/singleCopy';
+import { CONTESTED_AT_COPY_TEXT, COPY_REFUSALS, NOT_CLEARED_PARTS_TEXT, carriedApprovalName, makeSingleMachineCopy, setCopyProbe } from '../staff/replica/singleCopy';
 import type { CopyDeps, CopyProbe, CopyRefused, CopyResult } from '../staff/replica/singleCopy';
 import { LEDGER_DIR, LEDGER_FILE, StaffHost, WARGAME_DIR, WARGAME_FILE, productPath } from '../staff/staffHost';
 import type { StaffTeamInfo } from '../staff/staffHost';
 import { callLogistics, callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
 import { fixedSigner } from './helpers/replicaWorld';
+import { bringIn, orgClearance, syncTo } from './helpers/labelCellWorld';
+import type { Seat as CellSeat } from './helpers/labelCellWorld';
 import type { StaffWorld } from './helpers/staffFixtures';
 
 const NOW = '2026-11-20T10:00:00.000Z';
@@ -95,7 +98,7 @@ function must(result: { ok: boolean; text: string }, what: string): string {
 /** A product proposed, guard-cleared, submitted, approved and released by today's host. */
 async function releasedProduct(world: StaffWorld): Promise<void> {
   await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
-  // Labelled org/Public: Make Multi-User refuses a product labelled above the base cell (W-1).
+  // Labelled org/Public: Make Multi-User puts it into the org/Public cell, which the lead's declared clearance (org/Internal) covers (D-15, D-19).
   const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
   must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
   must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE }, 'lead-planner'), 'submit');
@@ -676,4 +679,218 @@ test('a host rooted at the copy gives the same PIR and watch decisions and warga
   assert.deepEqual(result.written, [
     `${LEDGER_DIR}/${CALC_LEDGER_FILE}`, `${LEDGER_DIR}/${DECISION_LOG_FILE}`, `${LEDGER_DIR}/${LEDGER_FILE}`, productPath('j5', CONOPS), `${WARGAME_DIR}/${WARGAME_FILE}`
   ].sort());
+});
+
+// ---- 32-11 (D-20, D-22, D-23): the copy carries every cell this device holds, and says plainly when parts were not copied ----------------------------
+
+const ESTIMATE = 'estimate';
+// A canary phrase only the org/Internal product's text holds: it must never reach a device below that cell.
+const CANARY = 'Northwind ford crossing';
+const ESTIMATE_BODY = `# Estimate\n\nThe ${CANARY} takes one battalion at a time.\n`;
+const INTERNAL_CLEARANCE = orgClearance('Internal');
+
+/** A labelled project made multi-user into label cells, its lead's open project as a label cell seat, and the cells by label. */
+interface Labelled {
+  readonly env: Env;
+  readonly lead: CellSeat;
+  readonly cells: { readonly base: string; readonly public: string; readonly internal: string };
+}
+
+/**
+ * The lead converts a project with the concept of operations (org/Public, released), an estimate (org/Internal, draft, its text holding the canary),
+ * a watch decision and a calculator record, the lead's declared clearance org/Internal (32-10).
+ */
+async function labelledProject(label: string): Promise<Labelled> {
+  const env = await freshEnv(label);
+  const world = worldOf(env);
+  await releasedProduct(world);
+  await writeBody(world.root, 'j5', ESTIMATE, ESTIMATE_BODY);
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ESTIMATE, kind: 'estimate', label: 'org/Internal' }, 'lead-planner'), 'propose estimate');
+  const watch = await world.host.signWatchDecision(world.person(), { watch: 'watch-bridge', decision: 'approved', wording: wording('watch the bridge'), reasons: [] });
+  assert.ok(watch.ok, watch.ok ? '' : watch.message);
+  await writeFactors(env.root, [FUEL]);
+  must(await callLogistics(world, J4_TEAM, 'calc_run', FUEL_CALC, 'log-plans-officer'), 'calc_run');
+  const result = await makeMultiUser(env.root, env.deps, { name: NAME, leadClearance: INTERNAL_CLEARANCE });
+  assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
+  const now = env.deps.now as () => Date;
+  const deps = { ...env.deps, cellOrder: cellOrderHook({ now }) };
+  const p = kept(await ReplicaProject.open(env.root, deps));
+  const lead: CellSeat = { at: { root: env.root, global: env.global, secrets: env.secrets as CellSeat['at']['secrets'], deps, clock: { now: now() } }, p, host: { project: p, deps }, member: `mbr-${p.deviceWriter.slice(0, 16)}`, writer: p.deviceWriter, results: [] };
+  const byLabel = new Map([...(await cellLabelTexts(p))].map(([cell, text]) => [text, cell]));
+  const cells = { base: p.projectId, public: byLabel.get('org/Public') as string, internal: byLabel.get('org/Internal') as string };
+  assert.ok(cells.public !== undefined && cells.internal !== undefined, `the lead holds both label cells (${[...byLabel.keys()].join(', ')})`);
+  return { env, lead, cells };
+}
+
+let labelledTemplate: Promise<Labelled> | undefined;
+const labelled = (): Promise<Labelled> => (labelledTemplate ??= labelledProject('labelled'));
+
+/** A member brought in with a declared clearance and given the base stream and the named cells' streams, and every grant of them on the lead's disk. */
+async function member(world: Labelled, label: string, level: 'Public' | 'Internal', streams: readonly string[]): Promise<CellSeat> {
+  const seat = await bringIn(world.lead, label, `M. Member ${label}`, orgClearance(level));
+  await syncTo(world.lead, seat, [world.cells.base, ...streams]);
+  return seat;
+}
+
+/** A copy made on a member's install, and today's host over it, signed by that member's device. */
+async function memberCopy(seat: CellSeat): Promise<{ destination: string; result: CopyResult; host: StaffHost; signer: DeviceIdentity }> {
+  const destination = path.join(path.dirname(seat.at.root), 'copy');
+  const result = await makeSingleMachineCopy(seat.at.root, destination, { ...seat.at.deps, copier: COPIER });
+  assert.ok(result.ok, result.ok ? '' : `the copy is made: ${result.message}`);
+  const { signer } = await ReplicaProject.localDevice(seat.at.deps);
+  const host = new StaffHost({ root: destination, signer: async () => signer, keyStatus: async () => trusting(signer), headStore: seat.at.secrets });
+  return { destination, result, host, signer };
+}
+
+/** Every file of a copy's staff folder: its path from the destination and its text. */
+function filesOf(destination: string): Array<[string, string]> {
+  const root = path.join(destination, '.planning', 'staff');
+  const out: Array<[string, string]> = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir).sort()) {
+      const file = path.join(dir, name);
+      if (statSync(file).isDirectory()) walk(file);
+      else out.push([path.relative(destination, file).split(path.sep).join('/'), readFileSync(file, 'utf8')]);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/** No file name or byte of the copy holds any of the words. */
+function holdsNone(destination: string, words: readonly string[]): void {
+  for (const [file, text] of filesOf(destination)) {
+    for (const word of words) {
+      assert.equal(file.includes(word), false, `the file name ${file} holds "${word}"`);
+      assert.equal(text.includes(word), false, `${file} holds "${word}"`);
+    }
+  }
+}
+
+test('not cleared: a member cleared only for org/Public copies only the org/Public product, the copy says parts were not copied, and nothing of the other cell is in it', async () => {
+  const world = await labelled();
+  const m = await member(world, 'copy-public', 'Public', [world.cells.public]);
+  const { destination, result, host } = await memberCopy(m);
+  // Only the concept of operations, from the org/Public cell's import, with its history as the lead's projection shows it.
+  const replay = await host.replay();
+  assert.equal(replay.broken, undefined, 'the copy\'s product ledger verifies with today\'s verifier');
+  assert.deepEqual([...replay.products.keys()], [CONOPS]);
+  const lead = (await sharedReplay(world.env)).products.get(CONOPS) as ProductState;
+  const state = replay.products.get(CONOPS) as ProductState;
+  assert.equal(state.record.state, 'released');
+  assert.equal(state.record.hash, lead.record.hash);
+  assert.deepEqual(state.approvedVersions, lead.approvedVersions);
+  assert.deepEqual(state.history.map((item) => item.event), lead.history.map((item) => item.event));
+  assert.equal(result.carried, 2, 'the lead\'s approval and release are carried under the copier');
+  assert.deepEqual(result.written, [`${LEDGER_DIR}/${LEDGER_FILE}`, productPath('j5', CONOPS)].sort(), 'no decision log, calculator or wargame ledger: their imports are in cells this member does not hold');
+  assert.deepEqual(result.left, [], 'a ledger in a cell this member does not hold is not listed');
+  // One fixed sentence after the D-13 lines: nothing about which parts, or how many.
+  assert.deepEqual(result.notices, [...multiUserNoticeLines(), NOT_CLEARED_PARTS_TEXT]);
+  assert.equal(NOT_CLEARED_PARTS_TEXT, 'Parts of this project you are not cleared for were not copied.');
+  holdsNone(destination, [ESTIMATE, CANARY, 'org/Internal']);
+  assert.ok(!JSON.stringify(result).includes(ESTIMATE) && !JSON.stringify(result).includes('org/Internal'), 'the result names nothing of the other cell');
+});
+
+test('not cleared: the lead holds every cell, so the lead\'s copy carries both products, the decision log and the calculator ledger, with no not-cleared notice', async () => {
+  const world = await labelled();
+  const destination = path.join(world.env.base, 'lead-copy');
+  const result = await copied(world.env, destination);
+  assert.deepEqual(result.notices, multiUserNoticeLines(), 'the lead\'s copy has no not-cleared notice');
+  assert.ok(!result.notices.includes(NOT_CLEARED_PARTS_TEXT));
+  assert.deepEqual(result.left, []);
+  assert.deepEqual(result.written, [
+    `${LEDGER_DIR}/${CALC_LEDGER_FILE}`, `${LEDGER_DIR}/${DECISION_LOG_FILE}`, `${LEDGER_DIR}/${LEDGER_FILE}`, productPath('j5', CONOPS), productPath('j5', ESTIMATE)
+  ].sort());
+  const replay = await hostAt(world.env, destination).replay();
+  assert.equal(replay.broken, undefined);
+  assert.deepEqual([...replay.products.keys()].sort(), [CONOPS, ESTIMATE].sort());
+  assert.equal(replay.products.get(ESTIMATE)?.record.state, 'draft');
+  assert.equal(replay.products.get(ESTIMATE)?.meta.label, 'org/Internal');
+  assert.ok(readFileSync(path.join(destination, productPath('j5', ESTIMATE)), 'utf8').includes(CANARY), 'the lead\'s copy holds the estimate\'s text');
+});
+
+test('cell import: a member holding the org/Public and org/Internal cells but not the legacy cell carries both products from the two cell imports and the calculator ledger, not the decision log', async () => {
+  const world = await labelled();
+  const m = await member(world, 'copy-internal', 'Internal', [world.cells.public, world.cells.internal]);
+  const { destination, result, host, signer } = await memberCopy(m);
+  const replay = await host.replay();
+  assert.equal(replay.broken, undefined, 'the copy verifies with today\'s verifier');
+  assert.deepEqual([...replay.products.keys()].sort(), [CONOPS, ESTIMATE].sort());
+  const lead = (await sharedReplay(world.env)).products;
+  for (const name of [CONOPS, ESTIMATE]) {
+    const state = replay.products.get(name) as ProductState;
+    const shared = lead.get(name) as ProductState;
+    assert.equal(state.record.state, shared.record.state, name);
+    assert.equal(state.record.hash, shared.record.hash, name);
+    assert.deepEqual(state.meta, shared.meta, name);
+    assert.deepEqual(state.history.map((item) => [item.event, item.version]), shared.history.map((item) => [item.event, item.version]), `${name}: its imported history`);
+  }
+  // The approvals came from the lead's device: carried under the copier's name, as today.
+  const people = (replay.products.get(CONOPS) as ProductState).history.filter((item) => item.actor.kind === 'person').map((item) => (item.actor as PersonActor).name);
+  assert.deepEqual(people, [carriedApprovalName('A. Demo', COPIER.name), carriedApprovalName('A. Demo', COPIER.name, 'released')]);
+  assert.equal(result.carried, 2);
+  assert.deepEqual(result.written, [`${LEDGER_DIR}/${CALC_LEDGER_FILE}`, `${LEDGER_DIR}/${LEDGER_FILE}`, productPath('j5', CONOPS), productPath('j5', ESTIMATE)].sort(), 'the calculator ledger (org/Internal cell), not the decision log (legacy cell)');
+  assert.deepEqual(result.left, [], 'the decision log, in a cell this member does not hold, is not listed as left');
+  assert.deepEqual(result.notices, [...multiUserNoticeLines(), NOT_CLEARED_PARTS_TEXT], 'the legacy cell is not held');
+  const calc = replayCalcLedger(ledgerLinesOf(readFileSync(path.join(destination, LEDGER_DIR, CALC_LEDGER_FILE))), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status: trusting(signer) }));
+  assert.equal(calc.broken, undefined);
+  assert.ok(readFileSync(path.join(destination, productPath('j5', ESTIMATE)), 'utf8').includes(CANARY));
+});
+
+test('cell import that does not verify: it is listed in left with today\'s reason, nothing of it is carried, and the copy still verifies', async () => {
+  const world = await labelledProject('bad-import');
+  // The lead writes a second products import into the org/Internal cell: the estimate's lines with one byte changed under a signature.
+  const { fold } = await world.lead.p.state();
+  const input = await projectionInputOf(world.lead.p, world.lead.at.deps);
+  const good = scopedImportsOf(fold, IMPORTED_PRODUCTS_LEDGER).find((item) => item.stream === world.cells.internal);
+  assert.ok(good !== undefined, 'the org/Internal cell has its products import');
+  const bytes = importedFile(good.record, input.entries) as Buffer;
+  const lines = bytes.toString('utf8').split('\n').filter(Boolean);
+  const first = JSON.parse(lines[0]) as { payload: { at: string } };
+  first.payload.at = '2026-11-18T11:59:59.000Z';
+  const changed = [JSON.stringify(first), ...lines.slice(1)];
+  const file = Buffer.from(`${changed.join('\n')}\n`, 'utf8');
+  const written = await world.lead.p.appendOwn('project.import', { ledger: IMPORTED_PRODUCTS_LEDGER, legacyHead: 'e'.repeat(64), count: good.record.count, file: file.toString('base64url'), scope: 'cell', lines: changed.length }, { stream: world.cells.internal, actor: PERSON });
+  assert.ok(!isProjectRefused(written), isProjectRefused(written) ? written.message : '');
+  // And a third that verifies (the estimate's first line alone, unchanged) but is not the import the projection shows the estimate from: not read.
+  const part = Buffer.from(`${lines[0]}\n`, 'utf8');
+  const partial = await world.lead.p.appendOwn('project.import', { ledger: IMPORTED_PRODUCTS_LEDGER, legacyHead: 'd'.repeat(64), count: good.record.count, file: part.toString('base64url'), scope: 'cell', lines: 1 }, { stream: world.cells.internal, actor: PERSON });
+  assert.ok(!isProjectRefused(partial), isProjectRefused(partial) ? partial.message : '');
+  const m = await member(world, 'bad-import-m', 'Internal', [world.cells.public, world.cells.internal]);
+  const { destination, result, host } = await memberCopy(m);
+  assert.deepEqual(result.left, [{ ledger: IMPORTED_PRODUCTS_LEDGER, reason: 'its imported entries do not verify, so it was not carried' }]);
+  assert.deepEqual(result.differs, [], 'no line is carried twice');
+  const replay = await host.replay();
+  assert.equal(replay.broken, undefined, 'the copy verifies with today\'s verifier');
+  assert.deepEqual([...replay.products.keys()].sort(), [CONOPS, ESTIMATE].sort(), 'both products are still carried, from the imports that verify');
+  const shared = (await sharedReplay(world.env)).products.get(ESTIMATE) as ProductState;
+  assert.deepEqual((replay.products.get(ESTIMATE) as ProductState).history.map((item) => [item.event, item.version]), shared.history.map((item) => [item.event, item.version]), 'the estimate\'s history comes from its own import alone');
+  assert.ok(!readFileSync(path.join(destination, LEDGER_DIR, LEDGER_FILE), 'utf8').includes('2026-11-18T11:59:59.000Z'), 'nothing of the changed import is carried');
+  // The lead holds the whole product ledger, so the lead's copy reads it and never the cell imports.
+  const leadCopy = await copied(world.env, path.join(world.env.base, 'lead-copy'));
+  assert.deepEqual(leadCopy.left, []);
+});
+
+test('preview: a project whose products sit in the base cell (a 0.4.35 preview) is copied as before, with no not-cleared notice', async () => {
+  const lead = await founded('preview');
+  const sent: Sent = { entries: [], blobs: [] };
+  const { hash } = await submitted(lead, sent);
+  const approve = await write(lead, sent, 'version.decide', { product: CONOPS, hash, outcome: 'approve', reasons: [], decisionsSeen: [] });
+  await write(lead, sent, 'version.release', { product: CONOPS, hash, decisionsSeen: [approve] });
+  const copier = await joined(lead, 'preview');
+  await deliver(copier, sent);
+  const destination = path.join(copier.env.base, 'copy');
+  const result = await copied(copier.env, destination);
+  assert.deepEqual(result.notices, multiUserNoticeLines(), 'every cell of the project is held here, so no part is said to be missing');
+  assert.deepEqual(result.left, []);
+  assert.deepEqual(result.differs, []);
+  assert.equal(result.carried, 2);
+  assert.deepEqual(result.written, [`${LEDGER_DIR}/${LEDGER_FILE}`, productPath('j5', CONOPS)].sort());
+  const replay = await hostAt(copier.env, destination).replay();
+  assert.equal(replay.broken, undefined);
+  assert.equal(replay.products.get(CONOPS)?.record.state, 'released');
+  // The lead's own copy of the preview project: the same products, the same notices.
+  const own = await copied(lead.env, path.join(lead.env.base, 'copy'));
+  assert.deepEqual(own.notices, multiUserNoticeLines());
+  assert.deepEqual(own.written, result.written);
 });
