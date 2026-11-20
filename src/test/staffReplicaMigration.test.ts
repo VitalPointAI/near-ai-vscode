@@ -536,3 +536,166 @@ test('a folder with no staff project is refused no-staff-project and nothing is 
   assert.equal(refused.refused, 'no-staff-project');
   assert.equal(existsSync(path.join(env.root, '.planning')), false);
 });
+
+// ---- Task 3: idempotent ----------------------------------------------------------------------------------------------------------------------------
+
+// Fixed randomness for one conversion, so two installs that start from the same bytes write the same entries: every random draw is a hash of the place
+// in the code that asks and how many times that place has asked. A place that asks a different number of times on two runs (a lock token, a temporary
+// file name) cannot move another place's draws. X25519 key pairs are made from such a draw as a seed. The real functions are put back afterwards.
+const nodeCrypto = require('node:crypto') as typeof import('node:crypto');
+const realRandomBytes = nodeCrypto.randomBytes;
+const realKeyPair = nodeCrypto.generateKeyPairSync;
+
+async function withFixedRandomness<T>(work: () => Promise<T>): Promise<T> {
+  const counters = new Map<string, number>();
+  const draw = (site: string, size: number): Buffer => {
+    const count = counters.get(site) ?? 0;
+    counters.set(site, count + 1);
+    const out = Buffer.alloc(size);
+    for (let block = 0, filled = 0; filled < size; block += 1, filled += 32) createHash('sha256').update(`${site}#${count}#${block}`).digest().copy(out, filled);
+    return out;
+  };
+  const caller = (): string => (new Error().stack ?? '').split('\n')[3] ?? '';
+  (nodeCrypto as { randomBytes: unknown }).randomBytes = (size: number, callback?: (error: Error | null, bytes: Buffer) => void) => {
+    const bytes = draw(caller(), size);
+    if (callback === undefined) return bytes;
+    process.nextTick(callback, null, bytes);
+    return undefined;
+  };
+  (nodeCrypto as { generateKeyPairSync: unknown }).generateKeyPairSync = (type: string, options?: unknown) => {
+    if (type !== 'x25519') return (realKeyPair as (type: string, options?: unknown) => unknown)(type, options);
+    const privateKey = x25519PrivateFromSeed(draw(caller(), 32));
+    return { privateKey, publicKey: nodeCrypto.createPublicKey(privateKey) };
+  };
+  try {
+    return await work();
+  } finally {
+    nodeCrypto.randomBytes = realRandomBytes;
+    nodeCrypto.generateKeyPairSync = realKeyPair;
+  }
+}
+
+interface Capture {
+  /** Every stored entry hash, by stream and writer, in seq order. */
+  entries: string[];
+  digests: Record<string, string>;
+  proofs: number;
+  imports: Array<[string, string, number, string]>;
+  importEntries: number;
+  files: Map<string, string>;
+  replay: Array<[string, unknown]>;
+}
+
+async function capture(env: Env): Promise<Capture> {
+  const store = await ReplicaStore.open(env.root, {
+    secrets: env.secrets, signer: async () => env.signer, keyStatus: () => localKeyStatus(identityDir(env.global), env.secrets), now: () => new Date(NOW)
+  });
+  assert.ok(store instanceof ReplicaStore, 'the store opens');
+  const entries = store.entries().map((entry) => ({ key: `${entry.header.stream}/${entry.header.writer}`, seq: entry.header.seq, hash: entryHash(entry.header) }))
+    .sort((a, b) => (a.key === b.key ? a.seq - b.seq : a.key < b.key ? -1 : 1)).map((item) => `${item.key}/${item.seq}/${item.hash}`);
+  const project = await opened(env);
+  try {
+    const { fold } = await project.state();
+    let importEntries = 0;
+    await project.findOwn('project.import', () => { importEntries += 1; return false; });
+    const input = await projectionInputOf(project, env.deps);
+    return {
+      entries,
+      digests: fold.digests,
+      proofs: fold.proofs.length,
+      imports: importsOf(input).map((item) => [item.ledger, item.legacyHead, item.count, item.entry]),
+      importEntries,
+      files: tree(env.root),
+      replay: [...projectLedgerReplay(input).products.entries()].map(([name, state]) => [name, withoutImported(state)])
+    };
+  } finally {
+    await project.close();
+  }
+}
+
+/** One conversion run without a stop, from the full template, with fixed randomness. */
+let uninterrupted: Promise<Capture> | undefined;
+function reference(): Promise<Capture> {
+  uninterrupted ??= (async () => {
+    const env = await cloneOf(await full(), 'reference');
+    await withFixedRandomness(() => migrate(env));
+    return capture(env);
+  })();
+  return uninterrupted;
+}
+
+async function interruptedAfter(step: MigrationStep): Promise<void> {
+  const env = await cloneOf(await full(), `stop-${step}`);
+  await withFixedRandomness(async () => {
+    const stopped = await migrate(env, { stopAfter: step });
+    assert.equal(stopped.completed, step);
+    const again = await makeMultiUser(env.root, env.deps, { name: NAME });
+    if (step === 'complete') {
+      // A run after a finished conversion is refused already-shared, and writes nothing.
+      assert.ok(isMigrationRefused(again) && again.refused === 'already-shared', 'refused already-shared');
+    } else {
+      assert.ok(!isMigrationRefused(again), isMigrationRefused(again) ? again.message : '');
+      assert.equal(again.completed, 'complete');
+    }
+  });
+  const got = await capture(env);
+  const want = await reference();
+  assert.deepEqual(got.entries, want.entries, 'the same entries, in the same order per writer');
+  assert.deepEqual(got.digests, want.digests, 'the same fold digests');
+  assert.deepEqual(got.files, want.files, 'the same files');
+  assert.deepEqual(got.replay, want.replay, 'the same projected products');
+  assert.deepEqual(got.imports, want.imports);
+  assert.equal(got.proofs, 0, 'no equivocation proof');
+  assert.equal(got.importEntries, 4, 'one import entry per ledger, never a second');
+}
+
+test('interrupted after verify, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('verify'); });
+test('interrupted after genesis, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('genesis'); });
+test('interrupted after import, then run again: the same entries, digests and files as one run, and no second import', async () => { await interruptedAfter('import'); });
+test('interrupted after reconstruct, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('reconstruct'); });
+test('interrupted after move-legacy, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('move-legacy'); });
+test('interrupted after projections, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('projections'); });
+test('interrupted after complete, then run again: refused already-shared and the same entries, digests and files as one run', async () => { await interruptedAfter('complete'); });
+
+test('the interruption tests cover every step, in the order the conversion runs them', () => {
+  assert.deepEqual([...MIGRATION_STEPS], ['verify', 'genesis', 'import', 'reconstruct', 'move-legacy', 'projections', 'complete']);
+});
+
+test('a project already made multi-user is refused already-shared and nothing changes', async () => {
+  const env = await cloneOf(await full(), 'shared');
+  await migrate(env);
+  const files = tree(env.root, true);
+  const secrets = new Map(env.secrets.values);
+  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  assert.ok(isMigrationRefused(refused));
+  assert.equal(refused.refused, 'already-shared');
+  assert.equal(refused.message, MIGRATION_REFUSALS['already-shared']);
+  assert.deepEqual(tree(env.root, true), files);
+  assert.deepEqual(env.secrets.values, secrets);
+});
+
+test('a resumed move never writes over or duplicates a file already in the legacy folder, and a file a member put at a usual path is left as it is', async () => {
+  const env = await cloneOf(await full(), 'resumed-move');
+  await migrate(env, { stopAfter: 'move-legacy' });
+  const legacy = new Map(LEGACY_LEDGERS.map((item) => [item.legacyPath, readFileSync(path.join(env.root, ...item.legacyPath.split('/')))]));
+  // A member writes a decisions file at the usual path before the conversion is run again.
+  const stray = path.join(env.root, ...LEGACY_LEDGERS[1].path.split('/'));
+  await writeFile(stray, 'a member wrote this\n');
+  const result = await migrate(env);
+  for (const [relative, bytes] of legacy) assert.deepEqual(readFileSync(path.join(env.root, ...relative.split('/'))), bytes, `${relative} not written over`);
+  const files = [...tree(env.root).keys()].filter((file) => file.startsWith(LEGACY_DIR)).sort();
+  assert.deepEqual(files, LEGACY_LEDGERS.map((item) => item.legacyPath).sort(), 'one legacy file per ledger, no copies');
+  assert.equal(readFileSync(stray, 'utf8'), 'a member wrote this\n', 'the member\'s file stands');
+  assert.ok(result.projections?.left.some((item) => item.path === LEGACY_LEDGERS[1].path), 'and it is listed as left');
+  assert.equal(existsSync(path.join(env.root, LEDGER_DIR, LEDGER_FILE)), false);
+});
+
+test('the legacy paths keep each ledger\'s path under .planning/staff inside the legacy folder', () => {
+  assert.deepEqual(LEGACY_LEDGERS.map((item) => [item.ledger, item.path, item.legacyPath, item.marked]), [
+    ['products', '.planning/staff/ledger/products.jsonl', '.planning/staff/legacy/ledger/products.jsonl', true],
+    ['decisions', '.planning/staff/ledger/decisions.jsonl', '.planning/staff/legacy/ledger/decisions.jsonl', false],
+    ['calculator', '.planning/staff/ledger/calculator.jsonl', '.planning/staff/legacy/ledger/calculator.jsonl', false],
+    ['wargame', '.planning/staff/wargame/ledger.jsonl', '.planning/staff/legacy/wargame/ledger.jsonl', false]
+  ]);
+  assert.deepEqual(PASSTHROUGH_LEDGERS.map((item) => item.ledger), ['decisions', 'calculator', 'wargame']);
+});
