@@ -21,6 +21,7 @@
 
 - [ ] User-visible change: CHANGELOG entry in plain language (or noted for the next release PR)
 - [ ] README updated if features, settings, commands or troubleshooting changed
+- [ ] Docs site pages (`docs/`, `docs-site/content/`) updated if this changes what they describe; `npm run docs:build` passes
 - [ ] Not user-visible: no docs needed
 
 ## Rollback

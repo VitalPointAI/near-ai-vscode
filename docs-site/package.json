@@ -1,0 +1,39 @@
+{
+  "name": "near-ai-vscode-docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The NEAR AI for VS Code documentation site. A separate workspace: nothing here ships in the extension.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0"
+  },
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "start": "node scripts/sync-docs.mjs && NO_UPDATE_NOTIFIER=1 docusaurus start --host 127.0.0.1 --port 3211 --no-open",
+    "build": "node scripts/sync-docs.mjs && NO_UPDATE_NOTIFIER=1 DOCUSAURUS_SSG_WORKER_THREADS=1 TERSER_PARALLEL=2 docusaurus build",
+    "serve": "node scripts/serve.mjs --host 127.0.0.1 --port 3210",
+    "clear": "NO_UPDATE_NOTIFIER=1 docusaurus clear",
+    "version:snapshot": "node scripts/snapshot-version.mjs",
+    "service:install": "sh scripts/install-service.sh",
+    "service:uninstall": "sh scripts/uninstall-service.sh",
+    "audit": "npm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/plugin-content-docs": "3.10.2",
+    "@docusaurus/theme-classic": "3.10.2",
+    "@docusaurus/theme-mermaid": "3.10.2",
+    "@easyops-cn/docusaurus-search-local": "0.55.3",
+    "@mdx-js/react": "3.1.1",
+    "clsx": "2.1.1",
+    "prism-react-renderer": "2.4.1",
+    "react": "19.2.9",
+    "react-dom": "19.2.9",
+    "sirv": "3.0.2"
+  },
+  "overrides": {
+    "serialize-javascript": "7.1.4",
+    "tinypool": "2.1.2",
+    "uuid": "11.1.1"
+  }
+}
