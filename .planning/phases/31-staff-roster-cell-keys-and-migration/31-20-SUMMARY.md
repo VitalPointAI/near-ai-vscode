@@ -203,7 +203,7 @@ All are listed in the frontmatter `key-decisions`. There was no checkpoint. Task
 **4. [Rule 2] SharedProjectHost as the first argument** (see key-decisions).
 
 **5. [Rule 1: Bug] Literal em-dashes in three test regexes**
-- **Fix:** written as `—`. Commit `15bdc3f1`.
+- **Fix:** written as the escape `\u2014`. Commit `15bdc3f1`.
 
 ### Notes
 
