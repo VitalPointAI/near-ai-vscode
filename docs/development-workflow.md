@@ -434,10 +434,13 @@ asking. It runs on `workflow_run` after CI succeeds for a PR, and on `workflow_d
 - **The PR is data, not instructions.** Everything the author controls (title, branch,
   description, file names, diff) is wrapped in blocks marked with a random nonce, which the content
   cannot close, and the model is told it is data to review and never instructions. The diff is
-  capped at 1 MB (`MAX_DIFF_BYTES` in `scripts/lib/ci-review.mjs`). Code is budgeted first and bulk
-  files last (any `vendor/` folder, minified bundles, source maps, lockfiles), and a file too big to
-  fit is skipped without dropping the files after it; files left out are named, and such a PR waits
-  for the owner like a gate change.
+  capped at 1 MB per model call (`MAX_DIFF_BYTES` in `scripts/lib/ci-review.mjs`). A larger diff
+  is reviewed in up to three parts (`MAX_REVIEW_PARTS`), each a separate call with the same prompt
+  that names its part; the review passes only when every part passes, and each part's findings
+  stay in the one review comment. Code is placed first and bulk files last (any `vendor/` folder,
+  minified bundles, source maps, lockfiles), and a file too big for any part is skipped without
+  dropping the files after it; files left out are named, and such a PR waits for the owner like a
+  gate change.
 - **The verdict is checked mechanically.** The reply is judged by the same `parseReview` and
   `reviewDecision` as any review file: an open BLOCKER, a missing or second verdict, a verdict for
   another commit, or a PASS whose recommendation is not MERGE all fail the gate. The workflow also

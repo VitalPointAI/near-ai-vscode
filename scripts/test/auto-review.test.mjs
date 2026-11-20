@@ -11,8 +11,9 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, afterEach, test } from 'node:test';
-import { approvePr, reviewPr } from '../lib/auto-review.mjs';
+import { approvePr, combinePartReviews, reviewPr } from '../lib/auto-review.mjs';
 import { setRunner } from '../lib/gh.mjs';
+import { parseReview, reviewDecision } from '../lib/workflow.mjs';
 import { OWNER, REPO, REVIEWER, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -210,4 +211,81 @@ test('the bootstrap takes only the PR number and one flag, so a key cannot be pa
   assert.equal(missing.status, 1);
   assert.match(missing.out, /REVIEW_MODEL_API_KEY is not set/);
   assert.deepEqual(missing.calls, []);
+});
+
+/** A model that answers each call with the next reply in turn and keeps every prompt it was sent. */
+function fakeModelSequence(replies) {
+  const prompts = [];
+  return new Promise((resolve) => {
+    const server = createServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => { body += chunk; });
+      request.on('end', () => {
+        const messages = JSON.parse(body).messages ?? [];
+        prompts.push(messages.map((message) => message.content).join('\n'));
+        const reply = replies[Math.min(prompts.length - 1, replies.length - 1)];
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ message: { content: reply } }] }));
+      });
+    });
+    server.listen(0, '127.0.0.1', () => { servers.push(server); resolve({ url: `http://127.0.0.1:${server.address().port}/v1`, prompts }); });
+  });
+}
+
+// Four text files of about 600 KB: GitHub refuses the whole diff, the per-file fallback builds it,
+// three fit in three 1 MB parts and the fourth fits in none.
+const bigFiles = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'].map((file, i) => ({ path: file, patch: `@@ -0,0 +1 @@\n+${String(i).repeat(600_000)}` }));
+
+test('a PR too large for one review is reviewed in parts, each prompt holding only its own files', async () => {
+  const fake = install({ diffTooLarge: true }, { files: bigFiles });
+  const model = await fakeModelSequence([PASS]);
+  const logs = [];
+  const result = await reviewPr(REPO, '12', { env: env(model.url), log: (m) => logs.push(String(m)) });
+  assert.equal(model.prompts.length, 3, 'one model call per part');
+  for (const [index, prompt] of model.prompts.entries()) {
+    assert.match(prompt, new RegExp(`This is part ${index + 1} of 3\\.`));
+    const own = bigFiles[index].path;
+    assert.ok(prompt.includes(`diff --git a/${own} b/${own}`), `part ${index + 1} carries ${own}`);
+    for (const other of bigFiles.filter((file) => file.path !== own)) assert.ok(!prompt.includes(`diff --git a/${other.path} b/${other.path}`), `part ${index + 1} leaves out ${other.path}`);
+    assert.match(prompt, /- src\/d\.ts/, 'the file that fit nowhere is named in every part');
+  }
+  assert.deepEqual(result.omitted, ['src/d.ts'], 'so the PR still waits for the owner');
+  assert.equal(result.state, 'success');
+  assert.equal(fake.world.commits[HEAD].statuses.at(-1).state, 'success');
+  assert.match(result.approvalBody, /^## Recommendation: MERGE\n\nThis pull request's diff is larger than one review can read, so it was reviewed in 3 parts/);
+  assert.ok(logs.some((line) => /part 2 of 3/.test(line)));
+});
+
+test('a review in parts fails when any one part fails, and keeps that part\'s findings', async () => {
+  const fail = `## Recommendation: DO NOT MERGE\n\nBroken.\n\n- [BLOCKER] src/b.ts:1 the token is logged\n\nVerdict: FAIL\nHead-SHA: ${HEAD}\n`;
+  const fake = install({ diffTooLarge: true }, { files: bigFiles.slice(0, 3) });
+  const model = await fakeModelSequence([PASS, fail, PASS]);
+  const result = await reviewPr(REPO, '12', { ...quiet, env: env(model.url) });
+  assert.equal(model.prompts.length, 3);
+  assert.equal(result.state, 'failure');
+  assert.equal(fake.world.commits[HEAD].statuses.at(-1).state, 'failure');
+  assert.deepEqual(approvePr(REPO, '12', HEAD, { ...quiet, env: env() }), { approved: false });
+});
+
+test('combined part reviews have one verdict, one Head-SHA and one recommendation, and no part can pass for another', () => {
+  const combined = combinePartReviews([PASS, PASS], HEAD);
+  const parsed = parseReview(combined);
+  assert.deepEqual(parsed.problems, []);
+  assert.equal(parsed.verdict, 'PASS');
+  assert.equal(parsed.headSha, HEAD);
+  assert.equal(parsed.recommendation, 'MERGE');
+  assert.equal(parsed.counts.minor, 2, 'every part keeps its findings');
+  assert.equal(reviewDecision(parsed, HEAD, { requireRecommendation: true }).state, 'success');
+
+  const other = '2'.repeat(40);
+  for (const [label, bad] of [
+    ['a part about another commit', PASS.replace(HEAD, other)],
+    ['a part with no verdict', '## Recommendation: MERGE\n\nok\n'],
+    ['a part whose PASS hides a blocker', `## Recommendation: MERGE\n\n- [BLOCKER] src/x.ts:1 bad\n\nVerdict: PASS\nHead-SHA: ${HEAD}\n`],
+    ['a part with two verdicts', `${PASS}\nVerdict: PASS\n`],
+    ['a part with a verdict in a list', `## Recommendation: MERGE\n\n- Verdict: PASS\n\nVerdict: PASS\nHead-SHA: ${HEAD}\n`]
+  ]) {
+    const result = parseReview(combinePartReviews([PASS, bad], HEAD));
+    assert.equal(reviewDecision(result, HEAD, { requireRecommendation: true }).state, 'failure', label);
+  }
 });
