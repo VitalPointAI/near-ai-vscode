@@ -12,6 +12,7 @@ import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold
 import type { FoldResult } from '../domain/replica/fold';
 import { totalOrder } from '../domain/replica/order';
 import { staticRosterView } from '../domain/replica/rosterView';
+import type { KeyRing, ReplicaContext, RosterView } from '../domain/replica/rosterView';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
@@ -256,4 +257,104 @@ test('CR-03: a future-dated entry is released when a context with a later clock 
   assert.deepEqual(onlyFuture.result.held.map((item) => item.reason), ['missing-predecessor']);
   // The clock may also go back: the entry that was released is held again.
   sameResult(addEntries(released, [], early).result, foldEntries(all, early), 'the clock moved back');
+});
+
+// ---- (c) WR-08: a re-delivered entry costs a hash, not a signature check and a decryption ---------------------------------------------------------
+
+// A context that counts the lookups verification makes: one deviceKey call for each copy whose signature is checked, and key ring calls for each body
+// that is opened.
+function countingCtx(world: World, overrides: Partial<ReplicaContext> = {}): { ctx: ReplicaContext; counts: { deviceKey: number; keys: number } } {
+  const base = world.ctx(overrides);
+  const counts = { deviceKey: 0, keys: 0 };
+  const roster: RosterView = {
+    ...base.roster,
+    deviceKey: (writer) => {
+      counts.deviceKey += 1;
+      return base.roster.deviceKey(writer);
+    }
+  };
+  const keys: KeyRing = (stream, epoch) => {
+    counts.keys += 1;
+    return base.keys(stream, epoch);
+  };
+  return { ctx: { ...base, roster, keys }, counts };
+}
+
+function coEditScene(): { world: World; entries: SealedEntry[]; update: Written } {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const regs = [a.register(), b.register()];
+  const update = a.insert(0, 'alpha ');
+  const other = b.insert(0, 'beta');
+  return { world, entries: sealed(...regs, update, other), update };
+}
+
+const cloneOf = (entry: SealedEntry): SealedEntry => JSON.parse(JSON.stringify(entry)) as SealedEntry;
+
+test('(c) a valid entry delivered again as 2000 JSON clones is verified once, by addEntries in one call or in many', () => {
+  const s = coEditScene();
+  const clones = Array.from({ length: 2000 }, () => cloneOf(s.update.entry));
+  const once = countingCtx(s.world);
+  const reference = addEntries(createFoldState(once.ctx), s.entries);
+  const many = countingCtx(s.world);
+  const flooded = addEntries(createFoldState(many.ctx), [...s.entries, ...clones]);
+  assert.deepEqual(many.counts, once.counts, 'the clones add no verification work');
+  sameResult(flooded.result, reference.result, 'with 2000 clones');
+  // Delivered later, in their own calls: nothing changes and nothing is verified again.
+  const before = { ...many.counts };
+  let state = flooded;
+  for (let from = 0; from < clones.length; from += 500) state = addEntries(state, clones.slice(from, from + 500));
+  assert.deepEqual(many.counts, before);
+  assert.equal(state, flooded, 'a delivery of known copies returns the same state');
+  assert.equal(state.refolds, 0);
+});
+
+test('(c) foldEntries over an entry and 2000 clones of it equals foldEntries over the entry, with the verification work of one copy', () => {
+  const s = coEditScene();
+  const clones = Array.from({ length: 2000 }, () => cloneOf(s.update.entry));
+  const once = countingCtx(s.world);
+  const reference = foldEntries(s.entries, once.ctx);
+  const many = countingCtx(s.world);
+  const flooded = foldEntries([...s.entries, ...clones], many.ctx);
+  assert.deepEqual(many.counts, once.counts);
+  sameResult(flooded, reference, 'from scratch with 2000 clones');
+});
+
+test('(c) a corrupt copy delivered after the good copy is skipped as a duplicate of a verified hash and changes no outcome', () => {
+  const s = coEditScene();
+  const counting = countingCtx(s.world);
+  const state = addEntries(createFoldState(counting.ctx), s.entries);
+  const before = { ...counting.counts };
+  const body = s.update.entry.body;
+  const corrupt = { header: { ...s.update.entry.header }, body: `${body.slice(0, -4)}${body.slice(-4) === 'AAAA' ? 'BBBB' : 'AAAA'}` };
+  const after = addEntries(state, [corrupt]);
+  assert.deepEqual(counting.counts, before, 'the corrupt copy is not verified');
+  assert.equal(after, state);
+  sameResult(foldEntries([...s.entries, corrupt], counting.ctx), state.result, 'from scratch with the corrupt copy last');
+});
+
+test('(c) inputs that are not objects or have no readable header are counted in dropped, kept to one record per reason, and change no digest', () => {
+  const s = coEditScene();
+  const ctx = s.world.ctx();
+  const junk: unknown[] = [42, null, 'entry', [s.update.entry], {}, { header: 5 }, { header: { ...s.update.entry.header, v: 3 }, body: s.update.entry.body }];
+  const clean = foldEntries(s.entries, ctx);
+  assert.equal(clean.dropped, 0);
+  const dirty = foldEntries([...junk, ...s.entries, ...junk], ctx);
+  assert.equal(dirty.dropped, junk.length * 2);
+  assert.deepEqual(dirty.digests, clean.digests);
+  assert.deepEqual([dirty.order, dirty.applied, dirty.held, dirty.families], [clean.order, clean.applied, clean.held, clean.families]);
+  // The rejected list says what kinds of unreadable input arrived, once per reason, however many arrived.
+  assert.deepEqual(dirty.rejected.map((item) => item.reason).sort(), ['malformed-header', 'unknown-header-version']);
+  const flood = foldEntries([...s.entries, ...Array.from({ length: 1000 }, (_, index) => ({ header: index }))], ctx);
+  assert.equal(flood.dropped, 1000);
+  assert.equal(flood.rejected.length, 1);
+  // Incrementally: junk alone is counted without folding again, and the result equals the fold from scratch.
+  const folded = addEntries(createFoldState(ctx), s.entries);
+  const counted = addEntries(folded, junk);
+  assert.notEqual(counted, folded);
+  assert.equal(counted.result.dropped, junk.length);
+  assert.equal(counted.refolds, folded.refolds);
+  sameResult(counted.result, foldEntries([...s.entries, ...junk], ctx), 'junk delivered after the entries');
+  sameResult(addEntries(addEntries(createFoldState(ctx), junk), s.entries).result, foldEntries([...junk, ...s.entries], ctx), 'junk delivered first');
 });

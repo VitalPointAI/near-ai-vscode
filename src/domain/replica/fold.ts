@@ -25,7 +25,7 @@ import { DEFAULT_REDUCERS } from './reducers';
 import type { AnyReducer, FoldView } from './reducers';
 import type { ReplicaContext } from './rosterView';
 import { verifyEntry } from './verify';
-import type { KeepReason, VerifiedEntry, VerifyOutcome } from './verify';
+import type { KeepReason, VerifiedEntry, VerifyOutcome, VerifyRejection } from './verify';
 
 export interface FoldOptions {
   reducers?: readonly AnyReducer[];
@@ -57,21 +57,12 @@ export interface FoldResult {
   checkpoint: string | null;
   // Checkpoints that did not nest with the chain used.
   checkpointConflicts: CheckpointNote[];
+  // How many inputs were not objects or had no readable header. They are counted and dropped, never kept; the rejected list shows one record per
+  // reason. Not part of any digest.
+  dropped: number;
 }
 
 const byHash = (a: { hash?: string }, b: { hash?: string }): number => ((a.hash ?? '') < (b.hash ?? '') ? -1 : (a.hash ?? '') > (b.hash ?? '') ? 1 : 0);
-
-// The entry hash of one input, or undefined when its header is not readable. This is how exact duplicates are recognised before any real work.
-function hashOf(input: unknown): string | undefined {
-  try {
-    const record = input as { header?: unknown };
-    const shape = parseHeaderShape(record?.header);
-    return shape.ok ? entryHash(shape.header) : undefined;
-  } catch {
-    // An input whose header cannot be read has no hash.
-    return undefined;
-  }
-}
 
 function rank(outcome: VerifyOutcome): string {
   return outcome.status === 'verified' ? '0' : `1:${outcome.status}:${outcome.reason}`;
@@ -79,10 +70,12 @@ function rank(outcome: VerifyOutcome): string {
 
 // What the caller keeps from one delivery to the next. An earlier FoldState is never changed by addEntries.
 interface Chosen { outcome: VerifyOutcome; retry: unknown[] }
+// chosen is keyed by entry hash, so it is also the record of what has been seen: a copy is recognised by its header, never by object identity.
 interface Store {
   chosen: Map<string, Chosen>;
+  // One record per reason for inputs without a readable header.
   unreadable: Map<string, VerifyOutcome>;
-  seen: Set<unknown>;
+  dropped: number;
 }
 
 // The reducers' working states and the lists the apply loop fills.
@@ -130,26 +123,49 @@ export interface FoldState {
 }
 
 function emptyStore(): Store {
-  return { chosen: new Map(), unreadable: new Map(), seen: new Set() };
+  return { chosen: new Map(), unreadable: new Map(), dropped: 0 };
 }
 
 function copyStore(store: Store): Store {
   const chosen = new Map<string, Chosen>();
   for (const [hash, entry] of store.chosen) chosen.set(hash, { outcome: entry.outcome, retry: [...entry.retry] });
-  return { chosen, unreadable: new Map(store.unreadable), seen: new Set(store.seen) };
+  return { chosen, unreadable: new Map(store.unreadable), dropped: store.dropped };
+}
+
+type Copy = { status: 'known' } | { status: 'new'; hash: string } | { status: 'unreadable'; outcome: VerifyOutcome & { status: 'rejected' } };
+
+// What the store already knows of one input, found with a header-shape check and a hash only: no signature check and no decryption (WR-08). A copy
+// whose entry is already verified is known, whatever its body holds, because the verified copy is the one the fold uses. An input that is not an
+// object or has no readable header gets the outcome verifyEntry would give it, without a hash.
+function knownCopy(store: Store, input: unknown): Copy {
+  const unreadable = (reason: VerifyRejection): Copy => ({ status: 'unreadable', outcome: { status: 'rejected', reason } });
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return unreadable('malformed-header');
+  let hash: string;
+  try {
+    const shape = parseHeaderShape((input as { header?: unknown }).header);
+    if (!shape.ok) return unreadable(shape.reason);
+    hash = entryHash(shape.header);
+  } catch {
+    // A header that cannot be read is refused as verifyEntry refuses it.
+    return unreadable('malformed-header');
+  }
+  return store.chosen.get(hash)?.outcome.status === 'verified' ? { status: 'known' } : { status: 'new', hash };
 }
 
 // Verifies one input and records it. Returns true when it changed what the store knows. When copies of one entry differ (a damaged body next to a
-// good one), the verified copy wins; otherwise the choice is by a fixed rule, never by arrival order.
+// good one), the verified copy wins; otherwise the choice is by a fixed rule, never by arrival order. A copy of an entry already verified costs a
+// hash and nothing more.
 function ingest(store: Store, item: unknown, ctx: ReplicaContext): boolean {
-  const outcome = verifyEntry(item, ctx);
-  const hash = outcome.status === 'verified' ? outcome.entry.hash : outcome.hash ?? hashOf(item);
-  if (hash === undefined) {
-    if (outcome.status === 'verified') return false;
-    const known = store.unreadable.get(outcome.reason);
-    store.unreadable.set(outcome.reason, outcome);
-    return known === undefined;
+  const copy = knownCopy(store, item);
+  if (copy.status === 'known') return false;
+  if (copy.status === 'unreadable') {
+    store.dropped += 1;
+    if (store.unreadable.has(copy.outcome.reason)) return false;
+    store.unreadable.set(copy.outcome.reason, copy.outcome);
+    return true;
   }
+  const outcome = verifyEntry(item, ctx);
+  const hash = copy.hash;
   const current = store.chosen.get(hash);
   if (current === undefined || rank(outcome) < rank(current.outcome)) {
     store.chosen.set(hash, { outcome, retry: outcome.status === 'held' ? [item] : [] });
@@ -312,7 +328,7 @@ function applyFrom(run: Run, prepared: Prepared, ctx: ReplicaContext, from: numb
 }
 
 // Outputs, digests and the sorted lists.
-function buildResult(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldResult {
+function buildResult(prepared: Prepared, run: Run, ctx: ReplicaContext, dropped: number): FoldResult {
   const { chains, ordered } = prepared;
   const view = viewOf(prepared, run, ctx);
   const families: Record<string, unknown> = {};
@@ -343,29 +359,26 @@ function buildResult(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldRes
     families,
     digests,
     checkpoint: prepared.plan.used,
-    checkpointConflicts: prepared.plan.conflicts
+    checkpointConflicts: prepared.plan.conflicts,
+    dropped
   };
 }
 
 // The from-scratch fold. It shares ingest, prepare and the apply loop with the incremental path and nothing else is different.
 export function foldEntries(input: readonly unknown[], ctx: ReplicaContext, options: FoldOptions = {}): FoldResult {
   const store = emptyStore();
-  for (const item of input) {
-    if (store.seen.has(item)) continue;
-    store.seen.add(item);
-    ingest(store, item, ctx);
-  }
+  for (const item of input) ingest(store, item, ctx);
   const prepared = prepare(store, ctx, options);
   const run = freshRun(options.reducers ?? DEFAULT_REDUCERS);
   applyFrom(run, prepared, ctx, 0);
-  return buildResult(prepared, run, ctx);
+  return buildResult(prepared, run, ctx, store.dropped);
 }
 
 export function createFoldState(ctx: ReplicaContext, options: FoldOptions = {}): FoldState {
   const store = emptyStore();
   const prepared = prepare(store, ctx, options);
   const run = freshRun(options.reducers ?? DEFAULT_REDUCERS);
-  return { result: buildResult(prepared, run, ctx), refolds: 0, ctx, options, store, prepared, run, snapshot: undefined };
+  return { result: buildResult(prepared, run, ctx, 0), refolds: 0, ctx, options, store, prepared, run, snapshot: undefined };
 }
 
 // Does the order start with the old order, with the same entries skipped as quarantined?
@@ -425,13 +438,13 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
   const replaced = next !== state.ctx;
   const store = copyStore(state.store);
   let changed = false;
-  for (const item of inputs) {
-    if (store.seen.has(item)) continue;
-    store.seen.add(item);
-    if (ingest(store, item, next)) changed = true;
-  }
+  for (const item of inputs) if (ingest(store, item, next)) changed = true;
   if (retryHeld(store, next)) changed = true;
-  if (!changed && !replaced) return state;
+  if (!changed && !replaced) {
+    if (store.dropped === state.store.dropped) return state;
+    // Only unreadable inputs arrived: the count changes and nothing is folded again.
+    return { ...state, store, result: { ...state.result, dropped: store.dropped } };
+  }
 
   const prepared = prepare(store, next, state.options);
   let run: Run;
@@ -453,5 +466,5 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
     run = kept === undefined ? freshRun(state.options.reducers ?? DEFAULT_REDUCERS) : cloneRun(kept.run);
     snapshot = applyFrom(run, prepared, next, kept === undefined ? 0 : kept.count, kept);
   }
-  return { result: buildResult(prepared, run, next), refolds, ctx: next, options: state.options, store, prepared, run, snapshot };
+  return { result: buildResult(prepared, run, next, store.dropped), refolds, ctx: next, options: state.options, store, prepared, run, snapshot };
 }
