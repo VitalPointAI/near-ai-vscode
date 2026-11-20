@@ -88,43 +88,61 @@ async function hashOfFile(file: string): Promise<string | undefined> {
   }
 }
 
+/** How many `<name>.stray-<stamp>[-n]` names one move aside tries before it gives up with a plain refusal. */
+const ASIDE_ATTEMPTS = 50;
+
 /**
  * Moves `from` (whose bytes hash to `hash` when the host looked) to a new name next to it, never over a file that is there. The bytes are compared by
  * hash only, so a binary or large file moves like any other. An aside copy already holding the same bytes (from an attempt that stopped) is reused, so a
- * retry never makes another; otherwise the bytes are copied to the first free `<name>.stray-<stamp>[-n]`. The original name is removed only if it still
- * holds the same bytes. 'changed' means the original changed meanwhile: the copy is left too, so nothing is lost either way.
+ * retry never makes another (`reused` says so); otherwise the bytes are copied to the first free `<name>.stray-<stamp>[-n]`, and when all
+ * ASIDE_ATTEMPTS names are taken it refuses with a ToolError that says what to do. The original name is removed only if it still holds the same
+ * bytes. 'changed' means the original changed meanwhile: the copy is left too, so nothing is lost either way.
  */
-async function moveAside(from: string, hash: string, stamp: string): Promise<{ moved: string } | { changed: string }> {
+async function moveAside(from: string, hash: string, stamp: string): Promise<{ moved: string; reused: boolean } | { changed: string }> {
   const folder = path.dirname(from);
   const prefix = `${path.basename(from)}.stray-`;
   let target: string | undefined;
+  let reused = false;
   for (const entry of (await readdir(folder)).filter((name) => name.startsWith(prefix)).sort()) {
-    if ((await hashOfFile(path.join(folder, entry))) === hash) { target = path.join(folder, entry); break; }
+    if ((await hashOfFile(path.join(folder, entry))) === hash) { target = path.join(folder, entry); reused = true; break; }
   }
   if (!target) {
     for (let attempt = 1; ; attempt += 1) {
       const candidate = `${from}.stray-${stamp}${attempt === 1 ? '' : `-${attempt}`}`;
       try { await copyFile(from, candidate, fsConstants.COPYFILE_EXCL); target = candidate; break; } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || attempt >= 50) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (attempt >= ASIDE_ATTEMPTS) {
+          throw new ToolError(`${path.basename(from)} could not be moved aside: ${ASIDE_ATTEMPTS} aside copies named ${path.basename(from)}.stray-${stamp}… are already there, so nothing was moved or overwritten. Move the older aside copies out of ${path.basename(folder)}/, then try again.`);
+        }
       }
     }
     if ((await hashOfFile(target)) !== hash) return { changed: target };
   }
   if (!(await writeIfUnchanged(from, { exists: true, hash }, undefined))) return { changed: target };
-  return { moved: target };
+  return { moved: target, reused };
 }
 
 /**
  * Moves a stray copy back to `to` only while `to` is free, comparing bytes by hash. On a restore whose bytes match, `from` is removed (only if it still
- * holds them). False when `to` is taken, the restored bytes differ, or `from` changed: every copy is then left where it is.
+ * holds them) unless `keepFrom` (an older aside copy that was reused, which was there before this merge). Returns undefined when it is back, or why
+ * not: `to` is taken, or `from` no longer holds the bytes that were moved (someone changed it). In that last case the copy just written to `to` is moved
+ * aside again, so a wrong copy never sits under the kept name to block the next merge; every other copy is left where it is.
  */
-async function moveBackFrom(from: string, to: string, hash: string): Promise<boolean> {
+async function moveBackFrom(from: string, to: string, hash: string, stamp: string, keepFrom = false): Promise<{ taken: true } | { changed: string } | undefined> {
   try { await copyFile(from, to, fsConstants.COPYFILE_EXCL); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return { taken: true };
     throw error;
   }
-  if ((await hashOfFile(to)) !== hash) return false;
-  return writeIfUnchanged(from, { exists: true, hash }, undefined);
+  const restored = await hashOfFile(to);
+  if (restored !== hash) {
+    if (restored !== undefined) {
+      const aside = await moveAside(to, restored, stamp);
+      return { changed: 'changed' in aside ? aside.changed : aside.moved };
+    }
+    return { changed: from };
+  }
+  if (keepFrom) return undefined;
+  return (await writeIfUnchanged(from, { exists: true, hash }, undefined)) ? undefined : { changed: from };
 }
 
 /** A new file only: never over one that is there (a member's or another proposal's). */
@@ -403,20 +421,25 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
       const proposalSnapshot = snapshotOfBytes(proposalBytes);
       const keptAlready = before !== undefined && proposalSnapshot.exists && before === proposalSnapshot.hash;
       let strayFile: string | undefined;
+      let strayReused = false;
+      const stamp = now().replace(/[:.]/g, '-');
       if (before !== undefined && !keptAlready) {
-        const aside = await moveAside(kept, before, now().replace(/[:.]/g, '-'));
+        const aside = await moveAside(kept, before, stamp);
         if ('changed' in aside) {
           throw new ToolError(`${keptName} changed while the merge was moving it aside, so the proposal was not merged and stays where it is. A copy is at ${mergedDir}${path.basename(aside.changed)}; look at both, then merge again.`);
         }
         strayFile = aside.moved;
+        strayReused = aside.reused;
       }
       const strayName = strayFile ? `${mergedDir}${path.basename(strayFile)}` : undefined;
       // Puts a moved stray copy back under its own name (only if that name is free again). Returns why not, or undefined when it is back.
       const putStrayBack = async (): Promise<string | undefined> => {
         if (!strayFile || before === undefined) return undefined;
         try {
-          const back = await moveBackFrom(strayFile, kept, before);
-          return back ? undefined : `the copy that was there before is kept at ${strayName}`;
+          const back = await moveBackFrom(strayFile, kept, before, stamp, strayReused);
+          if (!back) return undefined;
+          if ('taken' in back) return `the copy that was there before is kept at ${strayName}`;
+          return `the copy that was there before is kept at ${strayName}, which was changed during the merge, so it was not put back under ${keptName}${back.changed !== strayFile ? ` (the changed bytes are also at ${mergedDir}${path.basename(back.changed)})` : ''}`;
         } catch (failure) {
           return `the copy that was there before is kept at ${strayName} (${(failure as NodeJS.ErrnoException).code ?? (failure as Error).message})`;
         }
@@ -453,7 +476,7 @@ export function copMapTools(access: CopMapAccess): AgentTool<any>[] {
       }
       // A proposal edited since it was read stays where it is, to be looked at again.
       const moved = await writeIfUnchanged(file, snapshotOfBytes(proposalBytes), undefined);
-      return `${out}\nMerged ${features.length} feature${features.length === 1 ? '' : 's'} from ${by}.${strayName ? ` A different copy was already at ${keptName}; it was moved to ${strayName}, not overwritten.` : ''}${moved ? '' : ' The proposal file was changed after it was read, so it stays in the proposals for you to look at again.'}`;
+      return `${out}\nMerged ${features.length} feature${features.length === 1 ? '' : 's'} from ${by}.${strayName ? (strayReused ? ` A different copy was already at ${keptName}; the same bytes were already kept aside at ${strayName} (an older aside copy, reused), so it was removed from ${keptName}, not overwritten.` : ` A different copy was already at ${keptName}; it was moved to ${strayName}, not overwritten.`) : ''}${moved ? '' : ' The proposal file was changed after it was read, so it stays in the proposals for you to look at again.'}`;
     }
   };
 

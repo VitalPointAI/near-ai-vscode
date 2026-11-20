@@ -312,6 +312,43 @@ function matchParen(text: string, start: number): number {
   return -1;
 }
 
+const ANSI_C_SIMPLE: Readonly<Record<string, string>> = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', '\'': '\'', '"': '"', '?': '?' };
+
+/**
+ * The text of a `$'…'` word whose body starts at `start`, decoded as bash decodes it, and the index of its closing quote; undefined when it never closes.
+ * `unknown` is set when an escape is one the rules do not decode (`\c`), so the word's text is not what the shell would pass.
+ */
+function ansiCQuoted(text: string, start: number): { text: string; close: number; unknown: boolean } | undefined {
+  let out = '';
+  let unknown = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (char === '\'') return { text: out, close: index, unknown };
+    if (char !== '\\') { out += char; continue; }
+    const next = text[index + 1];
+    if (next === undefined) return undefined;
+    index += 1;
+    if (ANSI_C_SIMPLE[next] !== undefined) { out += ANSI_C_SIMPLE[next]; continue; }
+    const digits = (pattern: RegExp, max: number): string => {
+      let found = '';
+      while (found.length < max && index + 1 < text.length && pattern.test(text[index + 1]!)) { found += text[index + 1]; index += 1; }
+      return found;
+    };
+    if (/[0-7]/.test(next)) { const octal = next + digits(/[0-7]/, 2); out += String.fromCharCode(parseInt(octal, 8) & 0xff); continue; }
+    if (next === 'x' || next === 'u' || next === 'U') {
+      const hex = digits(/[0-9A-Fa-f]/, next === 'x' ? 2 : next === 'u' ? 4 : 8);
+      const code = hex === '' ? undefined : parseInt(hex, 16);
+      if (code === undefined || code > 0x10ffff) { out += `\\${next}${hex}`; unknown = true; continue; }
+      out += String.fromCodePoint(code);
+      continue;
+    }
+    // Any other escape is kept as written, as bash keeps it; `\c` (a control character) is not decoded, so the word is not known for certain.
+    out += `\\${next}`;
+    if (next === 'c') unknown = true;
+  }
+  return undefined;
+}
+
 function lex(command: string): Lexed {
   const segments: Segment[] = [];
   const substitutions: string[] = [];
@@ -362,7 +399,16 @@ function lex(command: string): Lexed {
       if (/[A-Za-z_]/.test(next)) while (end + 1 < command.length && /[A-Za-z0-9_]/.test(command[end + 1])) end += 1;
       return end;
     }
-    if (next === '\'' && !inDouble) { markOpaque('it uses $\'…\' quoting'); }
+    if (next === '\'' && !inDouble) {
+      // ANSI-C quoting is decoded as the shell decodes it, so `gh $'auth' token` or `git $'\x70ush'` reads as the words it runs (gate follow-up): leaving
+      // it as text let a printer or a push hide behind it. An escape the rules do not decode (`\c`) makes the word decided at run time.
+      const decoded = ansiCQuoted(command, index + 2);
+      if (decoded === undefined) return { broken: 'an unterminated $\' quote' };
+      current.text += decoded.text;
+      current.quoted = true;
+      if (decoded.unknown) { current.expansion = true; markOpaque('it uses a $\'…\' escape the rules do not decode'); }
+      return decoded.close;
+    }
     current.text += '$';
     return index;
   };
@@ -1307,19 +1353,73 @@ function installerReachesNetwork(name: string, args: readonly Word[]): string | 
   return undefined;
 }
 
-/** git commands that talk to another repository over the network (D-18). */
-const GIT_REMOTE_COMMANDS: ReadonlySet<string> = new Set(['push', 'fetch', 'pull', 'clone', 'ls-remote', 'send-email', 'request-pull']);
+/** git commands that always talk to another repository over the network (D-18), the plumbing that pushes and fetches included. */
+const GIT_REMOTE_COMMANDS: ReadonlySet<string> = new Set(['push', 'fetch', 'pull', 'clone', 'ls-remote', 'send-email', 'request-pull', 'send-pack', 'fetch-pack', 'http-push', 'http-fetch']);
+/** `git remote` actions that read the remote itself: `update` fetches, `show` and `prune` ask the remote for its branches (unless `-n`/`--dry-run` says not). */
+const GIT_REMOTE_REMOTE_ACTIONS: ReadonlySet<string> = new Set(['update', 'show', 'prune']);
+/** git-lfs commands that work on this computer only. Every other one (fetch, pull, push, clone, smudge, lock, prune, migrate, one the rules do not know) is network. */
+const GIT_LFS_LOCAL: ReadonlySet<string> = new Set(['', 'ls-files', 'status', 'track', 'untrack', 'env', 'version', 'install', 'uninstall', 'logs', 'fsck', 'pointer', 'checkout', 'ext', 'clean', 'update', 'merge-driver', 'post-checkout', 'post-commit', 'post-merge', 'help']);
+
+/** The action of `git remote`, past its own `-v`/`--verbose`. */
+function gitRemoteAction(rest: readonly Word[]): { action: string; after: readonly Word[] } {
+  let at = 0;
+  while (at < rest.length && (rest[at]!.text === '-v' || rest[at]!.text === '--verbose')) at += 1;
+  return { action: rest[at]?.text ?? '', after: rest.slice(at + 1) };
+}
+
+/**
+ * Why a git subcommand reaches the network, or undefined when the rules know it does not. The one place git's network use is decided (gate follow-up,
+ * PR #76 review): classifyGit reads the subcommand once and asks this, so the network note and the verdict can never be read from different words.
+ */
+function gitNetworkReason(sub: string, rest: readonly Word[]): string | undefined {
+  if (GIT_REMOTE_COMMANDS.has(sub)) return `git ${sub} talks to another repository`;
+  if (sub === 'archive' && rest.some((arg) => /^--remote(?:=|$)/.test(arg.text))) return 'git archive --remote talks to another repository';
+  if (sub === 'submodule' && rest.some((arg) => arg.text === 'update' || arg.text === 'add' || arg.text === 'foreach')) return 'git submodule talks to another repository';
+  if (sub === 'remote') {
+    const { action, after } = gitRemoteAction(rest);
+    const offline = after.some((arg) => arg.text === '-n' || arg.text === '--dry-run') && action === 'show';
+    if (GIT_REMOTE_REMOTE_ACTIONS.has(action) && !offline) return `git remote ${action} talks to another repository`;
+    if (action === 'add' && after.some((arg) => arg.text === '-f' || arg.text === '--fetch')) return 'git remote add --fetch talks to another repository';
+    if (action === 'set-head' && after.some((arg) => arg.text === '-a' || arg.text === '--auto')) return 'git remote set-head --auto talks to another repository';
+    return undefined;
+  }
+  if (sub === 'lfs') {
+    const action = rest.find((arg) => !looksLikeOption(arg.text));
+    if (action !== undefined && action.expansion) return 'git lfs with an action decided at run time may talk to its server';
+    return GIT_LFS_LOCAL.has(action?.text ?? '') ? undefined : `git lfs ${action?.text ?? ''} talks to the large-file server`.replace('  ', ' ');
+  }
+  return undefined;
+}
+
+/** `git credential` actions that change a stored login rather than print one. */
+const GIT_CREDENTIAL_CHANGES: ReadonlySet<string> = new Set(['approve', 'reject', 'erase']);
+/** git credential helper actions (`git credential-store store`) that change a stored login, and those that print nothing (`git credential-cache exit`). */
+const GIT_HELPER_CHANGES: ReadonlySet<string> = new Set(['store', 'erase']);
+const GIT_HELPER_QUIET: ReadonlySet<string> = new Set(['exit']);
+
+/**
+ * A git credential helper run by hand (`git credential-store get`, `git-credential-libsecret get`): `get` prints the stored login, so it is refused by the
+ * floor like `gh auth token`; `store` and `erase` change it (an ask). Any other action, none, or one decided at run time is taken as `get` (fail closed).
+ */
+function gitCredentialHelper(shown: string, rest: readonly Word[]): CommandClassification {
+  const action = rest.find((arg) => !looksLikeOption(arg.text));
+  if (action !== undefined && !action.expansion && GIT_HELPER_QUIET.has(action.text)) return unknownRead(`${shown} ${action.text}`);
+  if (action !== undefined && !action.expansion && GIT_HELPER_CHANGES.has(action.text)) {
+    noteCredentialChange(`${shown} ${action.text} changes a stored git login.`);
+    return risky(`${shown} ${action.text} changes a stored git login`);
+  }
+  notePrintsCredential(`${shown}${action === undefined ? '' : ` ${action.text}`}`);
+  return risky(`${shown} prints a stored git login`);
+}
 
 function classifyGit(args: Word[], state: SegmentState, context: CommandContext): CommandClassification {
   let index = 0;
   while (index < args.length && args[index].text === '--no-pager') index += 1;
-  const named = args[index]?.text ?? '';
-  if (GIT_REMOTE_COMMANDS.has(named) || (named === 'archive' && args.some((arg) => /^--remote(?:=|$)/.test(arg.text))) || (named === 'submodule' && args.some((arg) => arg.text === 'update'))) {
-    noteNetwork(`git ${named} talks to another repository`);
-  }
   if (index < args.length && looksLikeOption(args[index].text)) return unknown('git options before the subcommand (-C, -c, --git-dir) change what it acts on');
   const sub = args[index]?.text ?? '';
   const rest = args.slice(index + 1);
+  const network = gitNetworkReason(sub, rest);
+  if (network !== undefined) noteNetwork(network);
   const words = rest.map((arg) => arg.text);
   const has = (...flags: string[]) => words.some((word) => flags.includes(word) || flags.some((flag) => flag.startsWith('--') && word.startsWith(`${flag}=`)));
   const shortFlag = (letters: string) => words.some((word) => /^-[A-Za-z]+$/.test(word) && [...letters].some((letter) => word.includes(letter)));
@@ -1406,10 +1506,36 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
       if (words[0] === 'list' || words[0] === 'show') return safe(`git stash ${words[0]} only reads`);
       if (!words.length || (['push', 'save', 'pop', 'apply'].includes(words[0]) && words.slice(1).every((word) => ['-m', '--message', '-u', '--include-untracked', '--index', '-q'].includes(word) || !looksLikeOption(word)))) return safe('git stash sets changes aside or brings them back, keeping them recoverable');
       return unknownRead('git stash changes the working tree');
-    case 'remote':
-      if (!words.length || (words.length === 1 && (words[0] === '-v' || words[0] === '--verbose'))) return safe('git remote lists remotes');
-      if (['add', 'remove', 'rm', 'set-url', 'rename', 'prune', 'set-head', 'set-branches'].includes(words[0])) return risky('git remote changes where this repository pushes and fetches');
-      return unknownRead('git remote');
+    case 'remote': {
+      const { action } = gitRemoteAction(rest);
+      if (action === '') return safe('git remote lists remotes');
+      if (['add', 'remove', 'rm', 'set-url', 'rename', 'prune', 'set-head', 'set-branches'].includes(action)) return risky('git remote changes where this repository pushes and fetches');
+      return unknownRead(network ?? 'git remote');
+    }
+    // The plumbing under push and fetch (gate follow-up, PR #76 review): send-pack and http-push change the remote like git push.
+    case 'send-pack': case 'http-push': return risky(`${label} changes a remote repository`, publishTo('git-remote'));
+    case 'fetch-pack': case 'http-fetch': return unknownRead(`${label} downloads from another repository`);
+    case 'lfs': {
+      const action = rest.find((arg) => !looksLikeOption(arg.text))?.text;
+      if (action === 'push' || action === 'pre-push') return risky(`git lfs ${action} uploads large files to a remote server`, publishTo('git-remote'));
+      return unknownRead(network ?? `git lfs ${action ?? ''}`.trim());
+    }
+    case 'submodule':
+      // foreach runs a shell command the rules do not read, in every submodule.
+      if (rest.some((arg) => arg.text === 'foreach')) return unknown('git submodule foreach runs a command the rules do not read');
+      return unknownRead(network ?? 'git submodule is not one the rules know');
+    case 'credential': {
+      // `fill` asks the stored helpers for a login and prints it (gate follow-up): refused by the floor like `gh auth token`. approve, reject and erase
+      // change the stored login (an ask); capability prints nothing secret. Any other action, or one decided at run time, is taken as a printer.
+      const action = rest.find((arg) => !looksLikeOption(arg.text));
+      if (action !== undefined && !action.expansion && GIT_CREDENTIAL_CHANGES.has(action.text)) {
+        noteCredentialChange(`git credential ${action.text} changes a stored git login.`);
+        return risky(`git credential ${action.text} changes a stored git login`);
+      }
+      if (action !== undefined && !action.expansion && action.text === 'capability') return unknownRead('git credential capability lists what git credential supports');
+      notePrintsCredential(`git credential${action === undefined ? '' : ` ${action.text}`}`);
+      return risky('git credential prints a stored git login');
+    }
     case 'config':
       if (has('--global', '--system')) return risky('git config --global changes git settings outside this workspace');
       {
@@ -1467,7 +1593,9 @@ function classifyGit(args: Word[], state: SegmentState, context: CommandContext)
       const file = rest.slice(1).find((arg) => !looksLikeOption(arg.text));
       return file === undefined ? unknown('git bundle create without a file') : writeResult(`git bundle create writes ${file.text}`, [file], state, context);
     }
-    default: return GIT_BUILTINS.has(sub) ? unknownRead(`git ${sub} is not one the rules know`) : unknown(`git ${sub || '(no subcommand)'} is not one the rules know`);
+    default:
+      if (/^credential-/.test(sub)) return gitCredentialHelper(`git ${sub}`, rest);
+      return GIT_BUILTINS.has(sub) ? unknownRead(`git ${sub} is not one the rules know`) : unknown(`git ${sub || '(no subcommand)'} is not one the rules know`);
   }
 }
 
@@ -1594,6 +1722,11 @@ function couldPrintCredential(name: string, args: readonly Word[]): string | und
     return at < 0 ? undefined : words.slice(at + 1).find((word) => then.includes(word));
   };
   if (PACKAGE_MANAGERS.has(name)) return words.includes('token') ? `${name} token` : undefined;
+  // git's credential command or a helper anywhere among the words (gate follow-up): `git -C "$D" credential fill` cannot be read whole, so it is a printer.
+  if (name === 'git') {
+    const helper = words.find((word) => word === 'credential' || /^credential-[\w.-]+$/.test(word));
+    return helper === undefined ? undefined : `git ${helper}`;
+  }
   if (name === 'gh' || name === 'glab') {
     if (after('auth', 'token') !== undefined) return `${name} auth token`;
     const showsToken = args.some((arg) => arg.text === '--show-token' || (/^-[A-Za-z]*t[A-Za-z]*$/.test(arg.text) && !arg.text.startsWith('--')));
@@ -1980,7 +2113,7 @@ function classifyAfterGlobals(name: string, program: string, args: Word[], state
   if ('unknown' in found) { backstopPrinter(name, args); return beyondReach(found.unknown); }
   let moved = state;
   if (found.folder !== undefined) {
-    if (found.folder.expansion || found.folder.glob) return beyondReach(`${name} works in a folder decided at run time`);
+    if (found.folder.expansion || found.folder.glob) { backstopPrinter(name, args); return beyondReach(`${name} works in a folder decided at run time`); }
     moved = { ...state, cwd: path.resolve(state.cwd, found.folder.text) };
   }
   if (found.rest.length === 0) return unknownRead(`${name} ${found.skipped.join(' ')}`.trim());
@@ -2121,6 +2254,8 @@ function classifyProgram(name: string, program: string, args: Word[], state: Seg
     return classifyAfterGlobals(name, program, args, state, context, depth, viaNpx);
   }
   // Docker's credential helpers print what a registry login stored (A5): refused by the floor.
+  // git's credential helpers run by their own name (`git-credential-store get`): the same as `git credential-store get`.
+  if (/^git-credential-[\w.-]+$/.test(name)) return gitCredentialHelper(name, args);
   if (DOCKER_CREDENTIAL_HELPER.test(name)) {
     notePrintsCredential(`${name}${args[0] === undefined ? '' : ` ${args[0].text}`}`);
     return risky(`${name} prints a stored registry login`);

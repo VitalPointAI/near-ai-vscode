@@ -62,8 +62,8 @@
   }
 
   function renderNow(running) {
-    // 0.4.28: a run with agents of its own can be watched as a team.
-    $('watch-team').hidden = !running.some((agent) => agent.sub);
+    // A run that leads or works with a team can be watched as a team, from its start (while its lead works alone too); a run with no team cannot.
+    $('watch-team').hidden = !running.some((agent) => agent.team);
     $('now-empty').hidden = running.length > 0;
     $('now-wrap').hidden = running.length === 0;
     syncRows($('now').querySelector('tbody'), running, (agent) => agent.agentId, (row, agent) => {

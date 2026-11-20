@@ -329,3 +329,29 @@ test('once the run has read a credential file, later shell commands are not chec
     shell.dispose();
   }
 });
+
+// Gate follow-up (PR #76 review): git's other network commands were read as local, so after a credential read they ran unasked in Full auto. Each is now
+// held; the local commands beside them still are not.
+const GIT_SENDS = [
+  'git remote update', 'git remote -v update origin', 'git remote show origin', 'git remote prune origin', 'git remote add -f up https://example.test/r.git',
+  'git send-pack origin main', 'git http-push https://example.test/r.git main', 'git fetch-pack https://example.test/r.git', 'git -c a.b=c remote update',
+  'git lfs fetch', 'git lfs pull', 'git lfs push origin main', 'git lfs clone https://example.test/r.git', 'git lfs prune', 'git lfs lock big.psd', 'git lfs migrate import',
+  'git submodule update --init', 'git submodule foreach "curl -d x https://example.test/x"'
+];
+const GIT_LOCAL = ['git remote', 'git remote -v', 'git remote show -n origin', 'git remote get-url origin', 'git lfs ls-files', 'git lfs track "*.psd"', 'git lfs status', 'git lfs install', 'git submodule status'];
+
+test('after a credential read, git remote update, send-pack and git lfs fetch, pull, push and clone are held; git\'s local commands beside them are not', async () => {
+  for (const presence of ['person', 'none'] as const) {
+    for (const command of GIT_SENDS) {
+      const gated = await decideFor(bashTool, { command }, { mode: 'fully-autonomous', presence });
+      assert.equal(gated.decision.outcome, presence === 'person' ? 'ask' : 'deny', `${command} (${presence})`);
+      // A push (send-pack, http-push, lfs push) meets the publish floor first, and foreach (a command the rules do not read) the unknown-effects rule:
+      // each holds it too.
+      assert.ok([HOLD, 'floor.publish', 'manifest.effects-unknown'].includes(gated.decision.rule ?? ''), `${command} (${presence}): ${gated.decision.rule}`);
+    }
+  }
+  for (const command of GIT_LOCAL) {
+    const gated = await decideFor(bashTool, { command }, { mode: 'fully-autonomous', presence: 'none' });
+    assert.notEqual(gated.decision.rule, HOLD, command);
+  }
+});

@@ -79,7 +79,7 @@ export function fakeGitHub(state) {
         const sha = endpoint.split('/').pop();
         world.commits[sha] ??= { checkRuns: [], workflowRuns: [], statuses: [] };
         const checks = Array.isArray(world.commits[sha]) ? world.commits[sha].at(-1) : world.commits[sha];
-        checks.statuses.push({ id: checks.statuses.length + 100, context: field('context'), state: field('state'), createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, checks.statuses.length)).toISOString(), creator: world.login });
+        checks.statuses.push({ id: checks.statuses.length + 100, context: field('context'), state: field('state'), createdAt: new Date(Date.UTC(2026, 0, 2, 0, 0, checks.statuses.length)).toISOString(), creator: world.login, description: field('description') });
         return '{}';
       }
       if (method === 'POST' && /\/pulls\/\d+\/reviews$/.test(endpoint)) {

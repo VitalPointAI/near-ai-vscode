@@ -20,6 +20,21 @@ export const MAX_DIFF_BYTES = 1_000_000;
 export const MAX_REVIEW_PARTS = 3;
 
 /**
+ * The whole review, every part and every attempt, shares one time budget and one pool of retries,
+ * so it always ends inside the review job's limit (`timeout-minutes` of the review job in
+ * .github/workflows/agent-review.yml, checked by scripts/test/workflow-files.test.mjs) and posts a
+ * failure status when it runs out, instead of being cancelled with nothing posted. The rest of the
+ * job (checkout, gathering the PR, posting) gets the difference.
+ */
+export const REVIEW_BUDGET_SECONDS = 300 * 60;
+/** Time the review job keeps for everything but the model calls; budget + this <= the job limit. */
+export const REVIEW_JOB_MARGIN_MINUTES = 30;
+/** The most attempts one model call makes (scripts/ci-review-call.mjs). */
+export const MAX_CALL_ATTEMPTS = 3;
+/** Retries shared by all the parts of one review: every part gets its first attempt, and these on top. */
+export const SHARED_REVIEW_RETRIES = MAX_CALL_ATTEMPTS - 1;
+
+/**
  * Wraps untrusted text (anything the PR author controls) in a block whose delimiters carry a
  * random nonce. The content cannot close the block, because it cannot know the nonce; if it
  * happens to contain it, the caller picks another nonce.
@@ -230,8 +245,9 @@ export function buildReviewPrompt({ number, pr, checks, files, diff, maxDiffByte
           '## Reviewed in parts',
           '',
           `This pull request's diff is larger than one review can read, so it is reviewed in ${part.total} parts,`,
-          `each by its own call with this same prompt. This is part ${part.index} of ${part.total}. The diff below holds`,
-          `only this part's ${part.files.length} file(s); the other parts are reviewed separately and every part must pass.`,
+          `each by its own call with this same prompt. This is part ${part.index} of ${part.total}. The changed files`,
+          `listed above and the diff below hold only this part's ${part.files.length} file(s); the other ${part.otherCount ?? 0} changed`,
+          'file(s) are in the other parts, which are reviewed separately, and every part must pass.',
           'Judge the changes in this part. Do not report files of the other parts as missing or unreviewed,',
           'but do report a defect here that depends on code you cannot see as a finding to check.',
           ''

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { tidyTree } from '../agent/teamLiveLayout';
 import { agentState, buildTeamLive, combinedState, edgeState, LiveAgentStat, LiveState, STATE_WORD, teamLiveEvents, toolIcon } from '../agent/teamLiveState';
 import { parseTeam } from '../agent/teams';
+import { chatPage, StubNode } from './helpers/chatPage';
 
 // 0.4.28 (Team Live): the layout and the state machine behind the live team view. The page draws what these return; animations are decoration on top and
 // never a source of state.
@@ -197,6 +198,28 @@ test('events: the run ending stops everything once, and a nested hand-off goes f
   assert.deepEqual(teamLiveEvents(v1, buildTeamLive({ runId: 'run-2', stats: [stat('main-run-2', 'agent', { runId: 'run-2' })] })), []);
 });
 
+test('events: an agent stopped while it waited for a slot gets no hand-off, only that it stopped (seen queued or not seen at all)', () => {
+  const base = [lead()];
+  const v0 = buildTeamLive({ runId: 'run-1', team: TEAM, stats: base });
+  const queued = stat('writer-bbb111', 'writer', { phase: 'queued', task: 'Draft it', neverStarted: true });
+  const v1 = buildTeamLive({ runId: 'run-1', team: TEAM, stats: [...base, queued] });
+  const cancelled = buildTeamLive({ runId: 'run-1', team: TEAM, stats: [...base, { ...queued, status: 'cancelled' }] });
+  assert.deepEqual(teamLiveEvents(v1, cancelled), [{ kind: 'announce', text: 'writer stopped.' }]);
+  assert.deepEqual(teamLiveEvents(v0, cancelled), [{ kind: 'announce', text: 'writer stopped.' }], 'first seen already stopped');
+  // The run stopped with it still queued: it shows as stopped, and nothing was handed to it either.
+  const runStopped = buildTeamLive({ runId: 'run-1', team: TEAM, stats: [lead({ status: 'cancelled' }), queued] });
+  assert.equal(teamLiveEvents(v1, runStopped).filter((event) => event.kind === 'delegate').length, 0);
+});
+
+test('a project agent that took a member\'s name is drawn as a helper, never as that member; a run from history (no flag) still matches by name', () => {
+  const view = buildTeamLive({ runId: 'run-1', team: TEAM, stats: [lead(), stat('writer-bbb111', 'writer', { member: false, task: 'Project writer' }), stat('researcher-aaa111', 'researcher', { member: true })] });
+  assert.equal(view.nodes.find((node) => node.id === 'm:writer')!.state, 'bench', 'the member was never asked');
+  assert.equal(view.nodes.find((node) => node.id === 'g:lead>writer')!.kind, 'guest');
+  assert.equal(view.nodes.find((node) => node.id === 'm:researcher')!.state, 'working');
+  const fromHistory = buildTeamLive({ runId: 'run-1', team: TEAM, stats: [lead(), stat('writer-bbb111', 'writer')] });
+  assert.equal(fromHistory.nodes.find((node) => node.id === 'm:writer')!.state, 'working');
+});
+
 test('tool icons come from what the tool lets the agent do', () => {
   assert.deepEqual(['Read', 'Edit', 'Bash', 'WebFetch', 'Agent', 'Recall', 'GenerateImage', 'CreatePdf', 'mcp__github__issue', 'Mystery', undefined].map(toolIcon), ['read', 'change', 'run', 'web', 'plan', 'memory', 'media', 'documents', 'connected', 'other', undefined]);
 });
@@ -235,4 +258,23 @@ test('the state the chat\'s team dots show comes from the activity feed\'s phase
     [false, 'waiting-agents', 'waiting'], [false, 'tool', 'working'], [false, undefined, 'working']
   ];
   for (const [paused, phase, want] of cases) assert.equal(agentDotState({ paused }, phase ? { phase: phase as never } : undefined), want, `${paused} ${phase}`);
+});
+
+test('the chat strip lists queued agents with their own dot and no Check now, and shows the dots and Watch the team only for a run with a team', () => {
+  const page = chatPage();
+  const row = (id: string, state: string) => ({ id, label: id.replace(/-[a-f0-9]{6}$/, ''), model: 'z-ai/glm-5.3', paused: false, background: false, activity: state === 'queued' ? 'Waiting for a free slot' : 'Thinking', state, activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 });
+  const panel = page.nodes.get('agents') as StubNode;
+  const dots = () => panel.all((node) => node.className.split(/\s+/).includes('team-dot'));
+  const buttons = (text: string) => panel.all((node) => node.tagName === 'button' && node.textContent === text);
+  page.send({ type: 'agents', count: 1, team: true, agents: [row('researcher-aaa111', 'working'), row('writer-bbb111', 'queued')] });
+  assert.deepEqual(dots().map((node) => node.className), ['team-dot dot-working', 'team-dot dot-queued'], 'the queued agent has its dot');
+  assert.equal(buttons('Watch the team').length, 1);
+  assert.equal(buttons('Check now').length, 1, 'an agent waiting for a slot has nothing to check');
+  assert.equal(buttons('Stop').length, 2, 'a queued agent can still be stopped');
+  assert.ok(panel.all((node) => /Agents running · 1 · 1 queued/.test(node.textContent)).length, 'queued agents are counted apart');
+  // A run with no team: the agents are listed, without team dots or Watch the team.
+  page.send({ type: 'agents', count: 1, agents: [row('gsd-planner-ccc111', 'working')] });
+  assert.equal(dots().length, 0);
+  assert.equal(buttons('Watch the team').length, 0);
+  assert.equal(buttons('Stop').length, 1);
 });

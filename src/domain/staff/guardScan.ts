@@ -205,11 +205,16 @@ const NOT_A_POSITION_BEFORE = /\b(?:prices?|priced|costs?|costing|fees?|budget|p
 /** A unit or score word right after the pair that makes it a measure, not a position. */
 const NOT_A_POSITION_AFTER = /^\s*(?:points?|pts|goals?|runs?|km|kms|m|mi|nm|nmi|ft|kg|kgs|g|lb|lbs|t|tonnes?|tons?|l|litres?|liters?|gal|hours?|hrs?|h|mins?|minutes?|secs?|seconds?|days?|weeks?|dollars?|cents?|cad|usd|eur|gbp|percent|per ?cent|each|apiece|ea|kph|km\/h|kts?|knots?|mph)\b/i;
 
+/** A line that holds nothing but the pair: list or quote markers before it, at most a full stop after it ("- 45.42, 75.69", "45.42, 75.69."). */
+const ALONE_BEFORE = /^\s*(?:(?:[-*+•>]|\d{1,3}[.)])\s*)*$/;
+const ALONE_AFTER = /^\s*\.?\s*$/;
+
 /**
  * The unmarked two-decimal pairs in a line that read as a plausible latitude and longitude ([longitude, latitude] points): "Rally point 45.42, 75.69".
  * Money, scores and measures look the same ("12.50, 3.50"), so a pair counts only when it is presented as a position: a coordinate cue in the few words
  * before it (lat, lon, grid, position, located, at, rally point and the like), with no money, score or measure word before it and no unit or score word
- * after it. Guard-scan looks at them only against an exercise box a person set.
+ * after it; or when the line holds the pair and nothing else (a list of points), since a price, score or measure is written with what it measures.
+ * Guard-scan looks at them only against an exercise box a person set.
  */
 export function unmarkedPairsIn(line: string): Array<{ point: [number, number]; index: number; text: string }> {
   return twoDecimalPairs(line)
@@ -218,6 +223,7 @@ export function unmarkedPairsIn(line: string): Array<{ point: [number, number]; 
       const before = line.slice(Math.max(0, pair.index - 48), pair.index);
       const after = line.slice(pair.index + pair.text.length);
       if (NOT_A_POSITION_AFTER.test(after) || NOT_A_POSITION_BEFORE.test(before)) return false;
+      if (ALONE_BEFORE.test(line.slice(0, pair.index)) && ALONE_AFTER.test(after)) return true;
       return POSITION_CUE.test(before);
     })
     .map(({ point, index, text }) => ({ point, index, text }));

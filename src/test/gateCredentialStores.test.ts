@@ -313,3 +313,32 @@ test('a token printer is refused whatever options come before its verb, and only
     }
   }
 });
+
+// Gate follow-up (PR #76 review): `git credential fill` and git's credential helpers print a stored git login, and a printer behind `$'…'` quoting was read
+// as text the rules could not parse (an ask, never a refusal). Both are refused now; the commands beside them are not.
+const GIT_AND_QUOTED_PRINTERS = [
+  'git credential fill', 'printf "protocol=https\\nhost=example.test\\n" | git credential fill', 'git credential', 'git credential "$ACTION"', 'git -c credential.helper=store credential fill',
+  'git --no-pager credential fill', 'git -C "$DIR" credential fill', 'git credential-store get', 'git credential-cache get', 'git credential-libsecret --weird get',
+  'git-credential-store get', '/usr/lib/git-core/git-credential-libsecret get', 'git-credential-manager get',
+  "gh $'auth' token", "gh $'\\x61uth' $'tok\\145n'", "npm $'token' list", "aws $'sts' get-session-token", "git $'credential' fill"
+];
+const GIT_AND_QUOTED_NOT_PRINTERS = [
+  'git credential approve', 'git credential reject', 'git credential capability', 'git credential-cache exit', 'git config --get credential.helper',
+  'git commit -m "git credential fill"', "echo $'gh auth token'", "gh $'auth' status", "npm $'token' revoke abc"
+];
+
+test('git credential fill, git\'s credential helpers and a printer behind $\'…\' quoting are refused; the commands beside them are not', async () => {
+  const wrong: string[] = [];
+  for (const command of GIT_AND_QUOTED_PRINTERS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore === undefined) wrong.push(`${command} → ${JSON.stringify(facts)}`);
+  }
+  for (const command of GIT_AND_QUOTED_NOT_PRINTERS) {
+    const facts = await floorFactsFor({ command, root: ROOT, cwd: ROOT, ...LOCATIONS });
+    if (facts.facts.credentialStore !== undefined) wrong.push(`${command} is refused: ${facts.facts.credentialStore}`);
+  }
+  assert.deepEqual(wrong, []);
+  // Changing the stored git login asks, as signing in does.
+  assert.match((await floorFactsFor({ command: 'git credential approve', root: ROOT, cwd: ROOT, ...LOCATIONS })).facts.credentialChange ?? '', /changes a stored git login/);
+  assert.match((await floorFactsFor({ command: 'git credential-store store', root: ROOT, cwd: ROOT, ...LOCATIONS })).facts.credentialChange ?? '', /changes a stored git login/);
+});

@@ -243,6 +243,7 @@
     work.awaitingStart = null;
     // A request left behind is no longer waited on here (PR #75 review): the buttons are offered again, and the host still answers a second request.
     work.busy = false;
+    work.busyFor = null;
     // The same for a recommendation asked for on a screen the person has left: its reply is dropped.
     work.recommendSeq = null;
     focusLater(focusId || 'step-heading');
@@ -929,6 +930,8 @@
   function wizardIconField() {
     const wrap = el('div', 'field icon-field');
     const heading = el('span', 'field-label', 'Team icon'); heading.id = 'icon-label';
+    // The heading names the preview and its line (PR #94 review: its id was never used).
+    wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-labelledby', heading.id);
     const row = el('div', 'icon-row');
     const slot = el('span', 'icon-slot'); slot.id = 'icon-preview-slot';
     const hint = el('p', 'hint', isClone()
@@ -1044,7 +1047,7 @@
   function pickerEntries() {
     if (picker) return picker;
     // Names come from the host (PR #75 review): the page has no naming rules of its own, so what it shows is what the host saves.
-    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.name || point.label, cloneName: point.name || point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
+    return (ctx ? ctx.startingPoints : []).map((point) => ({ id: point.id, source: 'builtin', group: point.group, label: point.label, name: point.name || point.label, description: point.description, members: point.members, memberCount: point.members.length, origin: 'Built in' }));
   }
   /**
    * The teams the picker offers under the current filter. "Start empty" is not a team: From scratch is its own choice now. The recommendation is not
@@ -1223,7 +1226,7 @@
 
   function answersChanged(redraw) {
     const waiting = work.recommendSeq !== null;
-    if (waiting) { work.recommendSeq = null; work.busy = false; }
+    if (waiting) { work.recommendSeq = null; work.busy = false; work.busyFor = null; }
     if (!work.recommendation && !waiting) return;
     work.recommendation = null;
     work.recommendStale = true;
@@ -1259,7 +1262,7 @@
       const chips = el('ul', 'chips'); chips.setAttribute('aria-label', 'Members');
       for (const member of shown.members) chips.append(el('li', 'chip', member.name + (member.role && member.role !== member.name ? ' · ' + member.role : '')));
       result.append(chips);
-      const point = { id: 'recommend', source: 'builtin', name: shown.name, cloneName: shown.cloneName, ...(shown.saveAs ? { saveAs: shown.saveAs } : {}), members: shown.members.map((member) => member.name), answers: shown.answers };
+      const point = { id: 'recommend', source: 'builtin', name: shown.name, ...(shown.saveAs ? { saveAs: shown.saveAs } : {}), members: shown.members.map((member) => member.name), answers: shown.answers };
       pickButtons(result, point, true);
     } else if (work.recommendStale) result.append(el('p', 'hint', STALE_RECOMMENDATION));
     root.append(result);
@@ -1270,19 +1273,30 @@
     if (work.busy) return;
     recommendSeq += 1;
     work.recommendSeq = recommendSeq;
-    work.busy = true;
+    waitFor('recommend');
     vscode.postMessage(Object.assign({ type: 'recommend', seq: recommendSeq }, currentAnswers()));
     render();
   }
 
   function startAnswers(point, message) {
     if (point.source !== 'builtin') return message;
-    // The recommendation shown carries the answers it was made from, and sends exactly those.
+    // The recommendation shown carries the answers it was made from, and sends exactly those (it is never offered without them: sectionRecommend).
     if (point.answers) return Object.assign(message, point.answers);
     message.goal = work.options.goal.slice(0, 400);
     message.locality = work.options.locality;
-    if (point.id === 'recommend') { message.workShape = work.options.workShape; message.riskLevel = work.options.riskLevel; }
     return message;
+  }
+
+  /**
+   * The number of the request Use as is and Clone and modify wait on (PR #75 review): a starting point's reply (or its error) frees them only when it
+   * answers that request, so the reply to a Clone the person left behind cannot free them while a Use as is is still being answered.
+   */
+  let startSeq = 0;
+  function waitFor(kind) {
+    startSeq += 1;
+    work.busy = true;
+    work.busyFor = kind + ':' + startSeq;
+    return startSeq;
   }
 
   /** Use as is: the host makes it this project's team, or puts it in the chat. Unsaved work in the builder is only dropped after the host asks. */
@@ -1290,10 +1304,10 @@
     if (work.busy) return;
     const message = startAnswers(point, { type: 'use-team', id: point.id });
     if (isWizardDirty()) message.discard = true;
-    announce('Using ' + entryName(point) + ' as it is.');
+    // Nothing is announced yet (PR #75 review): the host may still ask, or refuse. Its answer (the team, used, declined, or an error) is announced.
     vscode.postMessage(message);
-    // Until the host answers (the team, used, declined, or an error), Use as is and Clone and modify wait, so a double click sends one request.
-    work.busy = true;
+    // Until the host answers, Use as is and Clone and modify wait, so a double click sends one request.
+    waitFor('use');
     render();
   }
 
@@ -1303,10 +1317,10 @@
     const label = entryName(point);
     // The recommendation is cloned on its own screen; its path is `existing`, which a 0.4.29 build also reads, and Back finds its screen from the starting
     // point (backFromPurpose).
-    work.awaitingStart = { id: point.id, clone: true, stage: work.stage, path: work.stage === 'recommend' || work.pickMode === 'existing' ? 'existing' : 'clone', label, name: point.cloneName || label, goal: point.answers ? point.answers.goal : point.source === 'builtin' ? work.options.goal : '' };
-    const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality });
+    const seq = waitFor('start');
+    work.awaitingStart = { id: point.id, seq, clone: true, stage: work.stage, path: work.stage === 'recommend' || work.pickMode === 'existing' ? 'existing' : 'clone', label, goal: point.answers ? point.answers.goal : point.source === 'builtin' ? work.options.goal : '' };
+    const message = startAnswers(point, { type: 'starting-point', id: point.id, goal: '', locality: work.options.locality, seq });
     vscode.postMessage(message);
-    work.busy = true;
     render();
   }
 
@@ -1381,8 +1395,9 @@
    * from it, as it did when the draft was saved.
    */
   function applyLegacyStart() {
-    work.awaitingStart = { id: work.startingPoint, legacy: true };
-    const message = { type: 'starting-point', id: work.startingPoint, goal: work.draft.description.slice(0, 400), locality: work.options.locality };
+    startSeq += 1;
+    work.awaitingStart = { id: work.startingPoint, seq: startSeq, legacy: true };
+    const message = { type: 'starting-point', id: work.startingPoint, goal: work.draft.description.slice(0, 400), locality: work.options.locality, seq: startSeq };
     if (work.startingPoint === 'recommend') { message.workShape = work.options.workShape; message.riskLevel = work.options.riskLevel; }
     vscode.postMessage(message);
   }
@@ -1651,7 +1666,8 @@
 
   /** Earlier icons (0.4.30): each one the team had before a change or Remove, newest first, with Restore. */
   function iconHistory(root) {
-    const earlier = work.iconHistory || [];
+    if (work.iconHistory === null || work.iconHistory === undefined) { root.append(el('p', 'hint', 'Loading earlier icons…')); return; }
+    const earlier = work.iconHistory;
     if (!earlier.length) return;
     root.append(el('h3', '', 'Earlier icons'));
     const list = el('ul', 'rows icon-history');
@@ -2008,7 +2024,9 @@
     const same = keepTab && work && work.mode === 'editor' && work.id === message.id;
     // The same team reopened after a Save keeps its Improve panel: pending suggestions stay, and any whose field changed show as Stale.
     work = { mode: 'editor', id: message.id, kind: message.kind, file: message.file, command: message.command, base: message.base, draft: message.draft, clean: JSON.stringify(message.draft), teamPrivacy: message.teamPrivacy || null, tab: same ? work.tab : 0, versions: message.versions || [], review: null, versionView: null, improve: same ? work.improve : null,
-      icon: message.icon || null, iconHistory: Array.isArray(message.iconHistory) ? message.iconHistory : [], iconAi: message.iconAi || null, iconBusy: false };
+      icon: message.icon || null, iconHistory: same ? work.iconHistory : null, iconAi: message.iconAi || null, iconBusy: false };
+    // The earlier icons come with the History tab (PR #82 review): a team reopened on it asks for them again.
+    if (work.tab === TAB_HISTORY) vscode.postMessage({ type: 'versions', id: work.id });
   }
 
   // ---------- Improve with AI (0.4.27) ----------
@@ -2361,6 +2379,12 @@
         dash = message.dashboard || dash;
         if (!work) render();
         break;
+      // A run of the open team started or ended: the Team shape tab's Watch it live link follows, drawn again only on that tab and only on a change.
+      case 'live-run':
+        if (!work || work.mode !== 'editor' || work.id !== message.id || currentLive === (message.liveRun === true)) break;
+        currentLive = message.liveRun === true;
+        if (work.tab === TAB_SHAPE) render();
+        break;
       case 'rated':
         // The host kept it on this computer (never in the team file, so an open editor has nothing to catch up on).
         pendingRating.delete(message.id);
@@ -2495,11 +2519,11 @@
         updateDirty();
         break;
       case 'starting-point': {
-        // Any reply frees Use as is and Clone and modify again, even one that is dropped below.
-        if (work && work.mode === 'wizard' && work.busy) { work.busy = false; if (work.stage === 'pick' || work.stage === 'recommend') render(); }
-        // Only the reply to the request still waiting: one for a screen the person has left (Back, another team) is dropped.
+        // The reply to the request the buttons wait on frees them, even when it is dropped below; a reply to any other request leaves them as they are.
+        if (work && work.mode === 'wizard' && work.busy && work.busyFor === 'start:' + message.seq) { work.busy = false; work.busyFor = null; if (work.stage === 'pick' || work.stage === 'recommend') render(); }
+        // Only the reply to the request still waiting, matched by its number: one for a screen the person has left (Back, another team) is dropped.
         const pending = work && work.mode === 'wizard' ? work.awaitingStart : null;
-        if (!pending || pending.id !== message.id) break;
+        if (!pending || pending.id !== message.id || pending.seq !== message.seq) break;
         // The person left the picker: this reply is dropped for good, so a later one cannot move the builder either (PR #75 review).
         if (pending.clone && work.stage !== (pending.stage || 'pick')) { work.awaitingStart = null; break; }
         work.awaitingStart = null;
@@ -2518,8 +2542,8 @@
         // earlier clone filled in, so nothing the person wrote is replaced.
         const before = work.cloned || {};
         const cloned = {};
-        // The copy's name is the host's, resolved against the library when it sent the members.
-        if (!work.draft.name.trim() || work.draft.name === work.defaultName || work.draft.name === before.name) { work.draft.name = (message.cloneName || pending.name).slice(0, 80); cloned.name = work.draft.name; }
+        // The copy's name is the host's, resolved against the library when it sent the members; the page never makes one up (PR #75 review).
+        if (typeof message.cloneName === 'string' && message.cloneName && (!work.draft.name.trim() || work.draft.name === work.defaultName || work.draft.name === before.name)) { work.draft.name = message.cloneName.slice(0, 80); cloned.name = work.draft.name; }
         const description = (pending.goal || '').trim() || draft.description || '';
         if (!work.draft.description.trim() || work.draft.description === before.description) { work.draft.description = description.slice(0, 600); cloned.description = work.draft.description; }
         work.draft.members = draft.members;
@@ -2537,18 +2561,19 @@
         // Only the reply to the request still waiting, on the screen it was asked from.
         if (!work || work.mode !== 'wizard' || work.stage !== 'recommend' || work.recommendSeq === null || message.seq !== work.recommendSeq) break;
         // Made from answers that are no longer the ones on screen: not shown (answersChanged has normally ended the request already).
-        if (!sameAnswers(message.answers, currentAnswers())) { work.recommendSeq = null; work.busy = false; work.recommendStale = true; render(); break; }
+        if (!sameAnswers(message.answers, currentAnswers())) { work.recommendSeq = null; work.busy = false; work.busyFor = null; work.recommendStale = true; render(); break; }
         work.recommendSeq = null;
         work.busy = false;
+        work.busyFor = null;
         work.recommendStale = false;
-        work.recommendation = { answers: currentAnswers(), name: String(message.name || ''), cloneName: String(message.cloneName || message.name || ''), ...(message.saveAs ? { saveAs: String(message.saveAs) } : {}), description: String(message.description || ''), members: Array.isArray(message.members) ? message.members.map((member) => ({ name: String(member.name || ''), role: String(member.role || '') })) : [] };
+        work.recommendation = { answers: currentAnswers(), name: String(message.name || ''), ...(message.saveAs ? { saveAs: String(message.saveAs) } : {}), description: String(message.description || ''), members: Array.isArray(message.members) ? message.members.map((member) => ({ name: String(member.name || ''), role: String(member.role || '') })) : [] };
         render();
         announce('Recommended ' + work.recommendation.name + ': ' + work.recommendation.members.length + ' members. Use it as it is, or clone it and change it.');
         break;
       }
       case 'used':
         // Use as is was declined (the project's team, or the builder's unsaved work, is kept): nothing changed, so the builder stays where it is.
-        if (message.declined) { if (work && work.mode === 'wizard') { work.busy = false; render(); } if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
+        if (message.declined) { if (work && work.mode === 'wizard') { work.busy = false; work.busyFor = null; render(); } if (message.text) { showBanner(message.text, 'info'); announce(message.text); } break; }
         askTarget = 'user';
         pendingAsk = null;
         // Use as is finished without a project team to open (a saved team put in the chat, or a built-in saved to My teams first): back to the library.
@@ -2576,7 +2601,9 @@
       case 'icon-updated':
         if (work && work.mode === 'editor' && work.id === message.id) {
           work.icon = message.icon || null;
-          work.iconHistory = Array.isArray(message.iconHistory) ? message.iconHistory : [];
+          // The earlier icons changed too: asked for again when History is open, and dropped otherwise until it opens.
+          work.iconHistory = null;
+          if (work.tab === TAB_HISTORY) vscode.postMessage({ type: 'versions', id: work.id });
           // The team file gained or lost its icon line; the host moved this editor to that version, so a save is not taken for an outside edit.
           if (message.base) work.base = message.base;
           work.iconBusy = false;
@@ -2610,7 +2637,7 @@
         showBanner('Not saved: ' + (message.errors[0] ? message.errors[0].message : 'fix the problems listed under Checks.'), 'error');
         break;
       case 'versions':
-        if (work && work.mode === 'editor' && work.id === message.id) { work.versions = message.versions; if (work.tab === TAB_HISTORY) render(); }
+        if (work && work.mode === 'editor' && work.id === message.id) { work.versions = message.versions; if (Array.isArray(message.iconHistory)) work.iconHistory = message.iconHistory; if (work.tab === TAB_HISTORY) render(); }
         break;
       case 'version':
         if (work && work.mode === 'editor' && work.id === message.id) { work.versionView = { ref: message.ref, label: message.label, diff: message.diff }; render(); }
@@ -2625,10 +2652,14 @@
         // A failed draft leaves the ask box replaced by "Drafting the team..." with no way back, because only team-proposal cleared this: clear it and
         // draw the box again so the person can retry or change what they wrote.
         if (drafting) { drafting = false; if (work && work.mode === 'wizard' && work.stage === 'ai') render(); }
-        // A starting point that could not be read, or a Use as is that failed: their buttons work again.
-        if (work && work.mode === 'wizard') { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; render(); } }
-        // A rating that was not saved: the cards show the saved ratings again.
-        // (One still waiting to be sent is kept: the error was about something else.)
+        // The project's team was written, but a step after it failed (the host says which): the builder's work is saved, so it closes, and the
+        // listing shows the new team.
+        if (message.written && work && work.mode === 'wizard') { work = null; render(); break; }
+        // A starting point that could not be read, or a Use as is that failed: their buttons work again. An error for a numbered starting-point
+        // request counts only when it is the request they wait on (PR #75 review).
+        if (work && work.mode === 'wizard' && (message.seq === undefined || work.busyFor === 'start:' + message.seq)) { work.awaitingStart = null; work.recommendSeq = null; if (work.busy) { work.busy = false; work.busyFor = null; render(); } }
+        // A rating that was not saved: the cards show the saved ratings again. (One still waiting to be sent is kept: the error was about something else.)
+        // With the builder or an editor open the cards are not on the page; they are drawn from the saved ratings when the dashboard comes back.
         if (pendingRating.size) { for (const id of [...pendingRating.keys()]) if (!ratingQueue.has(id)) pendingRating.delete(id); if (!work) render(); }
         // An icon request that was refused or failed: its buttons work again.
         if (work && work.mode === 'editor' && work.iconBusy) { work.iconBusy = false; render(); }

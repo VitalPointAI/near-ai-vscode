@@ -27,8 +27,8 @@
 // the person turns a layer on or off in the drawer.
 //
 // Layout (owner direction, D-48 of 0.4.34). The map fills the box and everything floats over it: the classification strip, the controls, the layer
-// drawer (media/staff/layerDrawer.js, shared with the Staff Room's SVG map) and the time slider. The first view fits what is on the map (the land,
-// the named places and the units, contentBounds) with a margin, inside the exercise frame, whose dashed line stays drawn; at that view units that would
+// drawer (media/staff/layerDrawer.js, shared with the Staff Room's SVG map) and the time slider. The first view fits the exercise (the units, the
+// control measures and the named places, contentBounds) with a margin, inside the exercise frame, whose dashed line stays drawn; at that view units that would
 // cover each other draw as one stacked symbol with a count, and symbols are smaller until the map is zoomed in. Globe flies out until the curve of the
 // earth is plain, with the frame ringed in gold and a graticule; Map flies back to the same first view.
 //
@@ -578,9 +578,10 @@
   }
 
   /**
-   * What the first view fits (owner direction, 0.4.35): the land (the synthetic geography's land and marsh, the terrain pack's coastline), the named
-   * places and the units (every point the picture places), with a margin of a tenth of the larger side (at least 3% of the frame) and kept inside the
-   * exercise frame. The frame's own bounds when nothing is placed, so an empty scenario still opens on its frame.
+   * What the first view fits: the exercise's own picture (every unit, objective, area and control measure the picture places inside the exercise frame)
+   * and the named places, with a margin of 15% of the larger side (at least 3% of the frame) and at least a fifth of the frame each way, kept inside the
+   * frame. The land and the coastline are drawn but no longer widen the view (0.4.35 follow-up: the first view was too far out when the land filled most
+   * of the frame and the exercise sat in one corner of it). The frame's own bounds when nothing is placed, so an empty scenario still opens on its frame.
    */
   function contentBounds(picture) {
     const frame = picture && picture.frame ? picture.frame.bounds : [-1, -1, 1, 1];
@@ -593,22 +594,29 @@
       } else if (Array.isArray(c)) c.forEach(take);
     };
     for (const g of (picture.geography && picture.geography.features) || []) {
-      const p = g.properties || {};
-      if (!g.geometry) continue;
-      if (p.kind === 'land' || p.kind === 'marsh' || (g.geometry.type === 'Point' && p.name)) take(g.geometry.coordinates);
+      if (g.geometry && g.geometry.type === 'Point' && g.properties && g.properties.name) take(g.geometry.coordinates);
     }
-    const contours = picture.environment && picture.environment.contours;
-    for (const c of (contours && contours.features) || []) if (c.properties && c.properties.kind === 'coastline' && c.geometry) take(c.geometry.coordinates);
-    for (const feature of picture.features || []) if (feature.geometry && feature.geometry.type === 'Point') take(feature.geometry.coordinates);
-    if (!(box[2] > box[0]) || !(box[3] > box[1])) return frame;
+    for (const feature of picture.features || []) if (feature.geometry) take(feature.geometry.coordinates);
+    if (!(box[2] >= box[0]) || !(box[3] >= box[1])) return frame;
     const side = Math.max(box[2] - box[0], box[3] - box[1]);
-    const padX = Math.max(side * 0.1, (frame[2] - frame[0]) * 0.03);
-    const padY = Math.max(side * 0.1, (frame[3] - frame[1]) * 0.03);
-    return [Math.max(frame[0], box[0] - padX), Math.max(frame[1], box[1] - padY), Math.min(frame[2], box[2] + padX), Math.min(frame[3], box[3] + padY)];
+    const fw = frame[2] - frame[0], fh = frame[3] - frame[1];
+    // One axis: the content with its margin, grown about its middle to the least span, then slid (not cut) to stay inside the frame.
+    const axis = function (lo, hi, flo, fhi, span) {
+      const pad = Math.max(side * 0.15, span * 0.03);
+      let a = lo - pad, z = hi + pad;
+      const least = span * 0.2;
+      if (z - a < least) { const mid = (a + z) / 2; a = mid - least / 2; z = mid + least / 2; }
+      if (a < flo) { z = Math.min(fhi, z + (flo - a)); a = flo; }
+      if (z > fhi) { a = Math.max(flo, a - (z - fhi)); z = fhi; }
+      return [a, z];
+    };
+    const x = axis(box[0], box[2], frame[0], frame[2], fw);
+    const y = axis(box[1], box[3], frame[1], frame[3], fh);
+    return [x[0], y[0], x[1], y[1]];
   }
   /**
    * The part of the frame the SVG map draws: everything the picture places and every named place, with a margin; the whole frame when empty. Tighter
-   * than contentBounds (no land): the SVG map has no zoom to come apart with, so it keeps its names readable this way.
+   * than contentBounds (no least span, every feature counted): the SVG map has no zoom to come apart with, so it keeps its names readable this way.
    */
   function extent(picture) {
     const frame = picture.frame ? picture.frame.bounds : [-1, -1, 1, 1];
@@ -1085,7 +1093,7 @@
       else if (typeof map.jumpTo === 'function') map.jumpTo(camera);
     }
 
-    /** Fits the first view: the land, the places and the units with a margin (contentBounds), inside the frame, clear of the floating controls. */
+    /** Fits the first view: the exercise's picture and the places with a margin (contentBounds), inside the frame, clear of the floating controls. */
     function fitFrame(animate) {
       const picture = state.picture;
       if (!picture || !picture.frame || typeof map.fitBounds !== 'function') return;

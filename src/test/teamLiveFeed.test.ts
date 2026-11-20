@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DEFAULT_RULES } from '../agent/permissions';
+import { parseTeam } from '../agent/teams';
 import { buildWindowSummary } from '../services/activityOverview';
 import { ActivityStore } from '../services/activityStore';
 import { ActivityFeed, AgentStats, TASK_LABEL_MAX, taskLabel } from '../services/agentActivity';
@@ -373,4 +374,55 @@ test('a sub-agent stopped just as its helper\'s report is taken passes that repo
   }
   assert.equal(stopped, true, 'the lead was stopped while it waited for its helper');
   assert.equal(parentHeard, true, 'the planner\'s report reached the run\'s lead');
+});
+
+test('the agents strip lists an agent waiting for a slot as queued, and says when the run has a team', { timeout: 20_000 }, async () => {
+  const { posted, feed, conversation, request } = await nestedProject();
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      if (who(messages) === 'planner') { await held; yield reply('planner report'); return; }
+      const results = messages.filter((message) => message.role === 'tool').length;
+      yield results ? reply('done') : reply(null, [call('p1', 'Agent', { subagent_type: 'gsd-planner', description: 'First', prompt: 'one' }), call('p2', 'Agent', { subagent_type: 'gsd-planner', description: 'Second', prompt: 'two' })]);
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const running = conversation.send(request(client, { maxParallelAgents: 1 }));
+  let queued: AgentStats | undefined;
+  for (let attempt = 0; attempt < 400 && !queued; attempt += 1) { queued = feed.agentStats().find((stat) => stat.phase === 'queued' && stat.status === 'running'); if (!queued) await new Promise((resolve) => setTimeout(resolve, 5)); }
+  try {
+    assert.ok(queued, 'one planner waits for the only slot');
+    const strip = posted.filter((message) => message.type === 'agents').at(-1) as { team?: boolean; agents: Array<{ id: string; state: string }> };
+    assert.deepEqual(strip.agents.find((agent) => agent.id === queued!.agentId)?.state, 'queued', 'the queued agent is on the strip, with its state');
+    assert.equal(strip.team, undefined, 'a run with no team says nothing about a team');
+  } finally {
+    release?.();
+    await running.catch(() => undefined);
+    conversation.dispose();
+  }
+});
+
+test('a project agent that took a team member\'s name is not that member on the feed, and the strip says the run has a team', { timeout: 20_000 }, async () => {
+  const { root, posted, feed, conversation, request } = await nestedProject();
+  const team = parseTeam('---\nname: Web\ndescription: Builds pages\n---\n\n## writer\nrole: writer\n\nYou are the team writer.\n\n## reviewer\nrole: reviewer\n\nYou are the team reviewer.\n', path.join(root, 'web.md'));
+  const projectAgents = [{ name: 'writer', description: 'Writes for this project', tools: ['Read'], body: 'You are the project writer.', file: path.join(root, '.near-ai', 'agents', 'writer.md') }];
+  const client = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const system = String(messages[0]?.content);
+      if (system.startsWith('You are the project writer.') || system.startsWith('You are the team reviewer.')) { yield reply('written'); return; }
+      const results = messages.filter((message) => message.role === 'tool').length;
+      yield results ? reply('done') : reply(null, [call('w1', 'Agent', { subagent_type: 'writer', description: 'Write it', prompt: 'write' }), call('r1', 'Agent', { subagent_type: 'reviewer', description: 'Review it', prompt: 'review' })]);
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  try {
+    await conversation.send(request(client, { memberTeam: team, projectAgents }));
+  } finally {
+    conversation.dispose();
+  }
+  const stats = feed.agentStats();
+  assert.equal(stats.find((stat) => stat.agent === 'writer')?.member, false, 'the project agent is not the team\'s writer');
+  assert.equal(stats.find((stat) => stat.agent === 'reviewer')?.member, true);
+  assert.ok(posted.some((message) => message.type === 'agents' && message.team === true), 'the strip knows the run has a team');
 });

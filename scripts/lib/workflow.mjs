@@ -58,6 +58,8 @@ export function parseReview(text) {
   const verdicts = [];
   const headShas = [];
   const recommendations = [];
+  // The 0-based line numbers of the lines counted above, so a caller can rewrite exactly those.
+  const counted = { verdict: [], headSha: [], recommendation: [] };
   const problems = [];
   const openBlockers = [];
   const counts = { blocker: 0, major: 0, minor: 0, nit: 0, resolved: 0 };
@@ -114,15 +116,15 @@ export function parseReview(text) {
     }
     if (indent > 3) continue;
     const recommendation = /^#{1,6}\s*recommendation\s*:\s*(.*)$/i.exec(plain);
-    if (recommendation) recommendations.push(recommendation[1].trim());
+    if (recommendation) { recommendations.push(recommendation[1].trim()); counted.recommendation.push(index); }
     if (/^verdict\b/i.test(plain)) {
       const value = /^verdict\s*:\s*(.*)$/i.exec(plain)?.[1];
-      if (value === 'PASS' || value === 'FAIL') verdicts.push(value);
+      if (value === 'PASS' || value === 'FAIL') { verdicts.push(value); counted.verdict.push(index); }
       else problems.push(`line ${index + 1} ("${line.slice(0, 80)}") is not exactly "Verdict: PASS" or "Verdict: FAIL"`);
     }
     if (/^head-sha\b/i.test(plain)) {
       const value = /^head-sha\s*:\s*([0-9a-f]{40})$/i.exec(plain)?.[1];
-      if (value) headShas.push(value.toLowerCase());
+      if (value) { headShas.push(value.toLowerCase()); counted.headSha.push(index); }
       else problems.push(`line ${index + 1} ("${line.slice(0, 80)}") is not exactly "Head-SHA: <40-character commit>"`);
     }
   }
@@ -134,7 +136,7 @@ export function parseReview(text) {
   const verdict = verdicts.length === 1 ? verdicts[0] : undefined;
   const headSha = headShas.length === 1 ? headShas[0] : undefined;
   const recommendation = recommendations.length === 1 ? recommendations[0] : undefined;
-  return { verdict, headSha, recommendation, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length };
+  return { verdict, headSha, recommendation, openBlockers, counts, problems, verdictLines: verdicts.length, headShaLines: headShas.length, counted };
 }
 
 const SEVERITIES = ['BLOCKER', 'MAJOR', 'MINOR', 'NIT'];

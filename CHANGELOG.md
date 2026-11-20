@@ -1,5 +1,89 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Agents that start together in their own git worktrees no longer fail at random.** When a team
+  started several members with worktree isolation in one repository, git could refuse one of the
+  worktrees ("failed to read .../commondir") because they were created at the same moment. They
+  are now created, and removed, one at a time per repository.
+- **Team Live and the agents strip.** The run picker in Team Live now offers finished runs too, so
+  the last finished run stays reachable while another team run is live. An agent stopped while it
+  waited for a free slot no longer shows a task travelling to it. A project agent that shares its
+  name with a team member is drawn as a helper, not as that member. Team Live's clock stops when
+  there is nothing to show, and a closed panel is sent nothing more.
+- **Watch the team only where there is a team.** The chat's team dots and Watch the team show only
+  for a run that leads or works with a team, and agents waiting for a slot are listed there with a
+  queued dot. Agent Activity offers Watch the team for a team run from its start, even while the
+  lead works alone. Team Studio's Watch it live link on the Team shape tab now appears and goes as
+  a run of the open team starts and ends.
+- **No secrets in the activity history.** The description an agent gives when it starts another
+  agent, and the role it names, are redacted before they are saved to the project's activity
+  history, as the live view already showed them.
+- **More git commands count as reaching the network.** After an agent reads a credential file, `git
+  remote update`, `git remote show` and `prune`, `git send-pack`, `git fetch-pack`, git lfs fetch,
+  pull, push and clone, and `git submodule update` now ask in every mode, like `git fetch` and
+  `git push` already did.
+- **git's stored logins stay private.** `git credential fill` and git's credential helpers run by
+  hand (`git credential-store get` and the like) are refused in every mode, like `gh auth token`;
+  `git credential approve`, `reject` and `erase` ask first. A command spelled with `$'…'` quoting
+  is now read as the shell reads it, so it cannot hide one of these.
+- **A repointed MCP server is approved again.** Editing an MCP server to a new address, transport
+  or program holds all its tools until you approve them on the MCP page; renaming it keeps the
+  approval.
+- **The project's key folder is safer from searches.** A search or copy that runs through
+  `.near-ai` or its state folder (`grep -r`, `rg`, `find`, `tar`, `cp -r` and the like) is
+  refused, as reading the key folder directly already was.
+- **The War room opens closer.** The COP map's first view now fits the exercise itself, its
+  units, control measures and named places, with a margin, instead of all the land in the
+  exercise frame.
+- **A staff lead is offered only the staff tools it can use.** Reading the wargame record is now
+  its own tool, so a staff run's lead can read it without being offered recording and deriving,
+  which only the team's members can do. Run **NEAR AI: Update Team…** on a J5 or J3 team to give its
+  wargame members the new read tool.
+- **The J3 event log announces every escalation.** An entry already in the log whose status turns
+  to escalated is now announced to a screen reader, once, like a new escalated entry.
+- **guard-scan notices a coordinate pair on a line of its own.** With an exercise box set, a line
+  holding only two decimal numbers such as "45.42, 75.69" outside the box now goes to the release
+  guard to check, as a pair after a word like "position" already did.
+- **Merging a COP proposal handles stray copies more carefully.** When 50 aside copies are already
+  there, the merge stops with a plain message instead of a file system error; a result that reused
+  an older aside copy now says so; and a stray copy changed during a refused merge is no longer
+  put back under the kept name, where it would block the next merge.
+- **The chat's Staff teams card ignores a malformed team list.** A section's matching library
+  teams are shown only when they are real team names, so a damaged record never shows an empty
+  "Found" line.
+- **Team Studio: a project team that was written but not fully recorded says so.** When the project's
+  team file was written and a later step failed (keeping it in History, noting where its members
+  came from, or writing the project type's guidance to AGENTS.md), Team Studio used to say the team
+  was not used. It now says the team was written and which step did not happen, and shows the new
+  team.
+- **Team Studio: Use as is and Clone and modify no longer get each other's answers.** A late answer
+  to a Clone you had left behind could turn the buttons back on while Use as is was still being
+  answered. Use as is is also announced only once Team Studio has answered.
+- **Team Studio: very large pictures are refused before they are opened.** An uploaded or generated
+  picture is checked for its size in pixels first (at most 16 megapixels, 8192 pixels a side), so a
+  small file that describes a huge picture cannot stall the editor.
+- **Team Studio: icon fixes.** A failed icon change no longer leaves a copy of the icon that is still
+  in use in History; Duplicate makes the copy even when its icon cannot be copied, and says it has
+  the default icon; earlier icons load when you open the History tab instead of with every team.
+- **Team Studio dashboard fixes.** Setting up the same project team again keeps your rating and its
+  role-test health, and replacing it with another team says in the question that they are cleared.
+  A team archived before the dashboard arrived gets its role-test health back. A team whose local
+  check has not run shows "not known" instead of "needs fixing", and a file problem that names a
+  one-part path such as `/home` no longer shows that path.
+- **Team Live: the project team's run from history.** A run of the project team saved in the history
+  is shown with the project team, not with a team in My teams that happens to be called "team".
+- **Team Studio: clones stay clones.** A cloned team is still checked for a name of its own after you
+  reword every member, and a team made after Use as is is no longer taken for a clone.
+- **Parallel-work suggestions fire when they should.** The suggestions to give each member its own
+  area and to say who brings the parts together now look for those things being said, rather than
+  any use of words like "own" or "merge". The research team's investigators that run at the same
+  time each write their own findings file, which the lead combines, instead of writing parts of one
+  shared file. Update Team offers the new research team wording.
+
+
 ## 0.4.35
 
 The COP map now looks like the ground: photo-like imagery with 3D terrain by default, a

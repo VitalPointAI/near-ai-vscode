@@ -66,7 +66,15 @@ const MAX_VERSIONS = 20;
 const MAX_ICON_VERSIONS = 20;
 
 export function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'team';
+  return slugWhole(value).slice(0, SLUG_MAX) || 'team';
+}
+
+/** The longest file name (without `.md`) slugify gives: a longer name is cut to this. */
+export const SLUG_MAX = 40;
+
+/** A name as slugify spells it, before it is cut to SLUG_MAX characters: so a caller can tell whether the cut would drop part of it. */
+export function slugWhole(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 /**
@@ -450,6 +458,16 @@ export class TeamLibrary {
     return await exists(file) ? parseTeam(await readFile(file, 'utf8'), file) : undefined;
   }
 
+  /**
+   * The team a run's `/team:<slug>` names, as the dashboard reads it (teamForSlug): `project` is the project's team, and so is `team`, its file's own name
+   * (team.md), while the project has one; any other slug is a team in My teams. Team Live reads a run from the history this way (PR 86 review: it took
+   * /team:team for a team in My teams named team).
+   */
+  public async findRunTeam(slug: string, root?: string): Promise<TeamDefinition | undefined> {
+    if (root && (slug === 'project' || (slug === 'team' && await exists(TeamLibrary.projectTeamFile(root))))) return this.find('project', root);
+    return this.find(slug, root);
+  }
+
   public async create(name: string, content = newTeamTemplate(name)): Promise<string> {
     await mkdir(this.directory, { recursive: true });
     let slug = slugify(name);
@@ -463,6 +481,14 @@ export class TeamLibrary {
   }
 
   public async duplicate(file: string, name: string): Promise<string> {
+    return (await this.duplicateTeam(file, name)).file;
+  }
+
+  /**
+   * Duplicate, saying what happened to the icon: `copied`, `none` (the team had none), or `default` when its icon could not be copied. The copy is made
+   * by then, so a failed icon copy leaves it with the default icon rather than failing the whole duplicate (and the caller says so).
+   */
+  public async duplicateTeam(file: string, name: string): Promise<{ file: string; icon: 'copied' | 'none' | 'default' }> {
     const text = await readFile(file, 'utf8');
     const team = parseTeam(text, file);
     const copy = await this.create(name, renderTeam(name, team.description, team.members, { private: team.private, ...(team.staff ? { staff: team.staff } : {}) }));
@@ -470,8 +496,15 @@ export class TeamLibrary {
     if (await this.isPendingImport(file)) await this.markImported(copy, 'derived', team.name);
     // The copy looks the same in the library: it gets its own copy of the icon (0.4.30).
     const icon = await this.readIcon(file, text);
-    if (icon) await this.setIcon(copy, icon);
-    return copy;
+    if (!icon) return { file: copy, icon: 'none' };
+    try {
+      await this.setIcon(copy, icon);
+      return { file: copy, icon: 'copied' };
+    } catch {
+      // setIcon puts things back as they were when it fails, so the copy shows the default icon. When even that failed, the line is taken out here.
+      await this.removeIcon(copy).catch(() => undefined);
+      return { file: copy, icon: 'default' };
+    }
   }
 
   // ---- icons (0.4.30) ----
@@ -512,7 +545,8 @@ export class TeamLibrary {
     const dir = this.iconVersionsDir(teamFile);
     await mkdir(dir, { recursive: true });
     const kept = await copyAsVersion(file, dir, '.png');
-    if (move) await rm(file, { force: true });
+    // The icon file could not be taken away: the copy is dropped from History again, so History never shows an icon the team still has.
+    if (move) await rm(file, { force: true }).catch(async (error) => { await rm(kept, { force: true }).catch(() => undefined); throw error; });
     const versions = (await readdir(dir)).filter((name) => name.endsWith('.png')).sort(compareVersionNames);
     for (const old of versions.slice(0, Math.max(0, versions.length - MAX_ICON_VERSIONS))) await rm(path.join(dir, old), { force: true });
     return kept;
@@ -535,8 +569,16 @@ export class TeamLibrary {
     const file = this.iconFile(teamFile);
     const kept = await this.keepIcon(teamFile, false);
     const temporary = `${file}.${process.pid}-${Date.now()}.tmp`;
-    await writeFile(temporary, png);
-    await rename(temporary, file).catch(async (error) => { await rm(temporary, { force: true }); throw error; });
+    try {
+      await writeFile(temporary, png);
+      await rename(temporary, file);
+    } catch (error) {
+      // The new icon is not in place, so the old one is still the team's icon: its copy in History goes again (PR #82 review), and so does the
+      // half-written file.
+      await rm(temporary, { force: true }).catch(() => undefined);
+      if (kept) await rm(kept, { force: true }).catch(() => undefined);
+      throw error;
+    }
     return () => this.restoreIconFile(teamFile, kept);
   }
 
@@ -600,8 +642,9 @@ export class TeamLibrary {
     if (!await exists(source)) return;
     const target = this.iconFile(to);
     if (source === target) return;
-    await this.keepIcon(to, true);
-    await rename(source, target);
+    const kept = await this.keepIcon(to, true);
+    // The move failed: the icon that was at the target comes back out of History, so neither team's icon changes.
+    await rename(source, target).catch(async (error) => { if (kept) await rename(kept, target).catch(() => undefined); throw error; });
     const text = await readFile(to, 'utf8').catch(() => undefined);
     if (text !== undefined && iconReference(text) === TeamLibrary.iconName(from) && TeamLibrary.iconName(from) !== TeamLibrary.iconName(to)) await writeFile(to, withIconReference(text, TeamLibrary.iconName(to)), 'utf8');
   }

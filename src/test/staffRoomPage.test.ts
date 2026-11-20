@@ -96,6 +96,7 @@ class FakeDoc {
   createElementNS(_ns: string, tag: string) { return new FakeNode(tag, this); }
   createTextNode(text: string) { const node = new FakeNode('#text', this); node.textContent = text; return node; }
   addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
+  removeEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, (this.listeners.get(type) ?? []).filter((each) => each !== listener)); }
   key(key: string, target?: FakeNode) { for (const listener of this.listeners.get('keydown') ?? []) listener({ key, target: target ?? this.activeElement ?? this.body, preventDefault() {} }); }
 }
 
@@ -700,10 +701,38 @@ test('a COA cell opens its provenance from the keyboard as from the pointer, and
   card.fire('keydown', { key: 'Enter', target: card.children[0] });
   card.fire('keydown', { key: 'a' });
   assert.equal(pop.hidden, true);
-  // The class: in the workspaces, only a button or a card made through opener() takes a click.
-  const source = await readFile(path.join(MEDIA, 'staffWorkspaces.js'), 'utf8');
-  const clicks = [...source.matchAll(/(\w+)\.addEventListener\('click'/g)].map((match) => match[1]);
-  assert.deepEqual([...new Set(clicks)].sort(), ['b', 'node', 'tab'], 'b and tab are buttons; node is opener()\'s card, which also takes Enter and Space');
+  // The class, checked on the drawn page (#121 review: by behaviour, not by reading the source): in every workspace and every one of its tabs, each
+  // node that takes a click is a button, or a focusable card on which Enter and Space do exactly what a click does.
+  let cards = 0;
+  for (const workspace of ['j2', 'j5', 'j3', 'j4']) {
+    const room = await runPage({ reduced: true, state: { workspace } });
+    room.dispatch({ type: 'staff-room', model, cues: [] });
+    const pane = view(room, `pane-${workspace}`);
+    const roomPop = room.byClass('pop')[0];
+    const subtabs = pane.all().filter((node) => node.tagName === 'button' && node.getAttribute('role') === 'tab');
+    for (const subtab of [undefined, ...subtabs]) {
+      if (subtab) subtab.click();
+      // What a press did: the provenance card shown, and what went to the host.
+      const effect = (press: () => void): string => {
+        roomPop.hidden = true;
+        const sent = room.posts.length;
+        press();
+        return JSON.stringify({ pop: roomPop.hidden, posts: room.posts.slice(sent) });
+      };
+      // The shared map, moved into the pane, has its own keyboard flow and tests (Enter or Space on a symbol selects it); the walk is the workspaces'.
+      const onMap = new Set(pane.all().filter((each) => each.classList.contains('mapbox')).flatMap((box) => [box, ...box.all()]));
+      for (const node of pane.all().filter((each) => !onMap.has(each) && (each.listeners.get('click') ?? []).length > 0)) {
+        if (node.tagName === 'button') continue;
+        const where = `${workspace}${subtab ? '/' + subtab.dataset.view : ''}: <${node.tagName} class="${node.className}">`;
+        cards += 1;
+        assert.equal(node.tabIndex, 0, `${where} takes focus`);
+        const clicked = effect(() => node.click());
+        assert.notEqual(clicked, JSON.stringify({ pop: true, posts: [] }), `${where}: a click does something`);
+        for (const key of ['Enter', ' ']) assert.equal(effect(() => node.fire('keydown', { key })), clicked, `${where}: ${JSON.stringify(key)} does what a click does`);
+      }
+    }
+  }
+  assert.ok(cards > 0, 'the walk met clickable cards (the tied COA cell at least)');
 });
 
 test('the J3 event log announces a new escalation wherever it is in the log, and moves only genuinely new rows when paging', async () => {
@@ -736,6 +765,18 @@ test('the J3 event log announces a new escalation wherever it is in the log, and
   assert.equal(announced(), '');
   assert.equal(view(page, 'pane-j3').all().filter((node) => node.classList.contains('ev') && node.animations.length > 0).length, 0);
   assert.ok(page.doc.animations.length >= settled);
+  // An entry already in the log whose status turns to escalated is announced too, once, and does not move as if it were new (#121 review).
+  const raised = later.map((entry) => entry.id === 'E5' ? { ...entry, status: 'escalated', ccir: 'PIR-2' } : entry);
+  const moving = page.doc.animations.length;
+  page.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, eventLog: { total: 61, escalated: 2, rows: raised } } }, cues: [] });
+  timers.fire(900);
+  assert.match(announced(), /Event log: E5 escalated on CCIR PIR-2\./);
+  assert.doesNotMatch(announced(), /E200/, 'an escalation already announced is not announced again');
+  assert.equal(page.doc.animations.length, moving, 'an old row that changes status does not move');
+  view(page, 'announce').textContent = '';
+  page.dispatch({ type: 'staff-room', model: { ...model, j3: { ...model.j3, eventLog: { total: 61, escalated: 2, rows: raised } } }, cues: [] });
+  timers.fire(900);
+  assert.equal(announced(), '', 'once only');
 });
 
 test('a battle rhythm event whose repeat the host does not know shows "repeat not shown" and no date', async () => {
@@ -842,6 +883,22 @@ test('Full map fills the Staff Room with the map, and Escape or the button bring
     full.click();
     page.dispatch({ type: 'staff-room', model: { ...model, now: model.now + 1, map: { ...model.map, units: model.map.units.slice(1) } }, cues: [] });
     assert.ok(box.classList.contains('full'));
+  }
+});
+
+test('a destroyed map takes its document key listener (Escape, Tab) with it: making and destroying maps leaves none behind (#124 review)', async () => {
+  const { model } = await fixtureModel();
+  const page = await runPage({ reduced: true });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const baseline = (page.doc.listeners.get('keydown') ?? []).length;
+  const api = (page.window as { NearAiStaffMap: { create(container: FakeNode, options: Record<string, unknown>): { destroy(): void; setFull(on: boolean): void; fullShown(): boolean; render(model: unknown): void } } }).NearAiStaffMap;
+  for (let round = 0; round < 3; round += 1) {
+    const slot = page.doc.createElement('div');
+    page.doc.body.append(slot);
+    const map = api.create(slot, {});
+    assert.equal((page.doc.listeners.get('keydown') ?? []).length, baseline + 1, 'one listener while the map lives');
+    map.destroy();
+    assert.equal((page.doc.listeners.get('keydown') ?? []).length, baseline, `round ${round}: destroy() removed it`);
   }
 });
 

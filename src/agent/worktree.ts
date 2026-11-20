@@ -21,13 +21,32 @@ function git(cwd: string, args: string[]): Promise<string> {
   });
 }
 
+/** How worktree changes reach git; tests wrap it to watch what overlaps. */
+export const worktreeGit = { run: git };
+
+/**
+ * One repository's worktree changes run one at a time. Agents in one wave start together, and two `git worktree add` (or `remove`) in one repository
+ * at once race on its .git/worktrees administration ("fatal: failed to read .git/worktrees/<name>/commondir"), so one agent's worktree failed for no
+ * reason of its own. Keyed by the repository's top level; a failed change never blocks the next one.
+ */
+const repoQueues = new Map<string, Promise<unknown>>();
+function inRepoOrder<T>(repo: string, change: () => Promise<T>): Promise<T> {
+  const key = path.resolve(repo);
+  const previous = repoQueues.get(key) ?? Promise.resolve();
+  const next = previous.then(change, change);
+  const settled = next.then(() => undefined, () => undefined);
+  repoQueues.set(key, settled);
+  void settled.then(() => { if (repoQueues.get(key) === settled) repoQueues.delete(key); });
+  return next;
+}
+
 export async function createAgentWorktree(root: string, baseDir: string, agentId: string): Promise<AgentWorktree> {
   const repo = await git(root, ['rev-parse', '--show-toplevel']).catch(() => { throw new ToolError('isolation "worktree" needs a git repository; this workspace is not one.'); });
   const base = await git(repo, ['rev-parse', '--verify', 'HEAD']).catch(() => { throw new ToolError('isolation "worktree" needs at least one commit to branch from.'); });
   const dir = path.join(baseDir, createHash('sha256').update(repo).digest('hex').slice(0, 12), `agent-${agentId}`);
   await mkdir(path.dirname(dir), { recursive: true });
   const branch = `worktree-agent-${agentId}`;
-  await git(repo, ['worktree', 'add', '--quiet', '-b', branch, dir, base]);
+  await inRepoOrder(repo, () => worktreeGit.run(repo, ['worktree', 'add', '--quiet', '-b', branch, dir, base]));
   const { root: placed, createdEmpty } = await worktreeRoot(repo, root, dir);
   return { path: dir, branch, base, repo, root: placed, ...(placed === dir && path.resolve(await realpath(root).catch(() => root)) !== path.resolve(repo) ? { rootUnmatched: true } : {}), ...(createdEmpty ? { rootCreatedEmpty: true } : {}) };
 }
@@ -53,9 +72,11 @@ export async function finishAgentWorktree(worktree: AgentWorktree): Promise<'rem
   const status = await git(worktree.path, ['status', '--porcelain']).catch(() => undefined);
   const head = await git(worktree.path, ['rev-parse', 'HEAD']).catch(() => undefined);
   if (status !== '' || head !== worktree.base) return 'kept';
-  await git(worktree.repo, ['worktree', 'remove', worktree.path]);
-  // -d, not -D: the branch has no commits of its own, so this can never discard work.
-  await git(worktree.repo, ['branch', '-d', worktree.branch]).catch(() => undefined);
+  await inRepoOrder(worktree.repo, async () => {
+    await worktreeGit.run(worktree.repo, ['worktree', 'remove', worktree.path]);
+    // -d, not -D: the branch has no commits of its own, so this can never discard work.
+    await worktreeGit.run(worktree.repo, ['branch', '-d', worktree.branch]).catch(() => undefined);
+  });
   return 'removed';
 }
 

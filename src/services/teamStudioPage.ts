@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { PROJECT_TYPES, projectTypeTeam, type ProjectType } from '../agent/projectTypes';
 import { detectTemplate, stampTeam } from '../agent/teamUpdate';
 import { checkDraft, draftFromMarkdown, handWrittenTeamPrivacy, lineDiff, type DiffLine, type DraftIssue, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
-import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, slugify, TeamLibrary, teamIsPrivate, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
+import { DEFAULT_TOOLS, parseTeam, recommendedProjectTeam, SLUG_MAX, slugify, slugWhole, TeamLibrary, teamIsPrivate, teamKnowledgeKey, type TeamDefinition } from '../agent/teams';
 import type { AgentDiscoveryAnswers } from '../domain/agents';
 import { buildTeamGraph } from '../agent/teamGraph';
 import { checkNotes, checkTeam, checkWarnings } from '../agent/teamCheck';
@@ -20,7 +20,7 @@ import type { TeamKnowledge } from '../domain/teamKnowledge';
 import { teamRating, withTeamRating } from '../agent/teamFrontMatter';
 import { buildDashboard, legacyRoleTestKey, migrateRoleTests, moveKept, parseRatings, parseRoleTests, projectIdentity, teamKey, withRating, type CheckCounts, type DashboardTeam, type RatingRecord, type RoleTestRecord, type RunningTeam, type TeamDashboard } from '../domain/teamDashboard';
 import type { ActivitySessionSummary } from '../domain/activity';
-import { checkTeamIcon, decodeIconBase64, ICON_VARIATIONS, iconDataUri, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, TeamIconPartialError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
+import { checkTeamIcon, decodeIconBase64, ICON_VARIATIONS, iconDataUri, iconPixelProblem, iconSourceProblem, iconSourceType, MAX_GENERATED_IMAGE_BYTES, MAX_ICON_SOURCE_BYTES, TeamIconError, TeamIconPartialError, teamIconPrompt, withIconReference, type IconSourceType } from '../agent/teamIcon';
 
 /** The facts, relations and grading of each node, so the page can show a card without being sent the whole graph twice. */
 function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: string; source?: string }>; functions: string[]; grading?: unknown; origin: string; mentions: number }>; edges: Array<{ from: string; to: string; kind: string; tension: number | null; basis?: string; grading?: unknown }> }): Record<string, unknown> {
@@ -158,13 +158,14 @@ export function savedTeamName(name: string): string {
  */
 export function cloneNameFor(name: string, taken: readonly TakenTeamName[]): string {
   const source = savedTeamName(name) || 'Team';
-  const fullSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  // slugify's own spelling and limit (PR #90 review: a copy of its rules here could drift from the file name really used).
+  const cut = (value: string) => slugWhole(value).length > SLUG_MAX;
   const fit = (suffix: string) => {
     let base = source.slice(0, TEAM_NAME_MAX - suffix.length).trim();
     // Only a name whose file name would be cut is shortened further; one with no usable letters keeps its own name, told apart by the name itself.
-    while (base.length > 1 && fullSlug(`${base}${suffix}`).length > 40) {
+    while (base.length > 1 && cut(`${base}${suffix}`)) {
       const word = base.lastIndexOf(' ');
-      base = (word > 0 && fullSlug(`${base.slice(0, word)}${suffix}`).length <= 40 ? base.slice(0, word) : base.slice(0, -1)).trim();
+      base = (word > 0 && !cut(`${base.slice(0, word)}${suffix}`) ? base.slice(0, word) : base.slice(0, -1)).trim();
     }
     return `${base || 'Team'}${suffix}`;
   };
@@ -438,10 +439,10 @@ function checkCounts(text: string, file: string): CheckCounts | undefined {
 }
 
 /**
- * An actual path in a message (PR 86 review, round 5): an absolute Unix path of two or more parts, a drive letter, a home path (~/), or any backslash
- * (a Windows or UNC path). A model id (vendor/model) or a /team: command is not one.
+ * An actual path in a message (PR 86 review, round 5): an absolute Unix path, a single part included (`/home`), a drive letter, a home path (~/), or any
+ * backslash (a Windows or UNC path). A model id (vendor/model) or a /team: command is not one.
  */
-const NAMES_A_PATH = /\\|(?:^|[\s'"(\[=,])(?:\/[^\s/'"]+\/[^\s'"]*|~\/|[A-Za-z]:\/)/;
+export const NAMES_A_PATH = /\\|(?:^|[\s'"(\[=,])(?:\/(?!team:)[^\s'"]|~\/|[A-Za-z]:\/)/;
 
 /** What the page shows for a team file whose reason names a path. */
 export const UNREADABLE_TEAM = 'The team file cannot be read as a team. Open it as Markdown to fix it.';
@@ -525,7 +526,8 @@ export type StudioMessage =
   | { type: 'staff-setup' }
   | { type: 'staff-room' }
   | { type: 'draft-team'; idea: string; outputFormat?: string; depth?: 'quick' | 'thorough'; private?: boolean }
-  | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel'] }
+  /** `seq`: the page's number for this request, sent back with the reply, so a reply to an earlier request is never taken for this one's (PR #75 review). */
+  | { type: 'starting-point'; id: string; goal: string; locality: 'cloud' | 'local' | 'hybrid'; workShape?: AgentDiscoveryAnswers['workShape']; riskLevel?: AgentDiscoveryAnswers['riskLevel']; seq?: number }
   /**
    * Use as is (owner, 2026-11-17): an existing team, unchanged and with no name asked. With a project open it becomes the project's team; with none it
    * goes to the chat (a built-in is saved to My teams first). `discard`: the builder holds unsaved work, so the host asks before it is dropped.
@@ -676,9 +678,13 @@ export function parseStudioMessage(value: unknown): StudioMessage | undefined {
       return draft ? { type: 'save-draft', draft, step: message.step as number, target: message.target, ...(message.startingPoint !== undefined ? { startingPoint: message.startingPoint as string } : {}), ...(message.path !== undefined ? { path: message.path as BuilderPath } : {}) } : undefined;
     }
     case 'starting-point': {
-      if (!exactKeys(message, ['type', 'id', 'goal', 'locality'], ['workShape', 'riskLevel']) || !text(message.goal, 400)) return undefined;
+      if (!exactKeys(message, ['type', 'id', 'goal', 'locality'], ['workShape', 'riskLevel', 'seq']) || !text(message.goal, 400)) return undefined;
+      // Where the models may run decides the members' tools, so it is always given (PR #75 review): a missing or undefined one is refused, never
+      // taken for the cloud.
+      if (!(LOCALITIES as readonly unknown[]).includes(message.locality)) return undefined;
+      if (message.seq !== undefined && !Number.isSafeInteger(message.seq)) return undefined;
       const start = startRequest(message, true);
-      return start ? { type: 'starting-point', ...start, goal: message.goal, locality: start.locality ?? 'cloud' } : undefined;
+      return start ? { type: 'starting-point', ...start, goal: message.goal, locality: message.locality as 'cloud', ...(message.seq !== undefined ? { seq: message.seq as number } : {}) } : undefined;
     }
     case 'use-team': {
       if (!exactKeys(message, ['type', 'id'], ['goal', 'locality', 'workShape', 'riskLevel', 'discard']) || (message.goal !== undefined && !text(message.goal, 400))) return undefined;
@@ -942,6 +948,13 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (deps.roleTests?.set) {
       const records = parseRoleTests(deps.roleTests.get());
       const moves = keyed.flatMap(({ team, key }) => (key && legacyRoleTestKey(team.file) in records ? [{ from: legacyRoleTestKey(team.file), to: key }] : []));
+      // A team archived before the upgrade was tested where it lived then, in the library folder (PR 86 review): its record is looked for under that
+      // path, and under the name it had before the archive told it apart with a number (web-team-2.md archived from web-team.md).
+      for (const entry of library.archived) {
+        const name = path.basename(entry.file);
+        const from = [entry.file, path.join(deps.library.directory, name), path.join(deps.library.directory, name.replace(/-\d+\.md$/, '.md'))].map(legacyRoleTestKey).find((candidate) => candidate in records);
+        if (from) moves.push({ from, to: entry.id });
+      }
       const moved = migrateRoleTests(records, moves);
       if (moved.changed) await deps.roleTests.set(moved.records).catch(() => undefined);
     }
@@ -1044,6 +1057,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     dashboardTimer = setTimeout(() => { dashboardTimer = undefined; void dashboardOf().then((dashboard) => post({ type: 'dashboard', dashboard }), () => undefined); }, 150);
     dashboardTimer.unref?.();
   };
+  /** A run of the open team started or ended: its Team shape tab's Watch it live link follows (it was only set when the team was opened). */
+  const liveSoon = () => {
+    if (!open || !deps.liveRun) return;
+    post({ type: 'live-run', id: open.id, liveRun: deps.liveRun(slugify(path.basename(open.file, '.md'))) === true });
+  };
   const soon = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => { timer = undefined; void refreshLibrary(); }, 150);
@@ -1117,7 +1135,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     // 0.4.28: while a run of this team is going, the Team shape tab links to Team Live.
     const live = deps.liveRun?.(slugify(path.basename(file, '.md'))) === true;
     const icon = await iconOf(file, textNow);
-    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), iconAi: await iconAiFor(textNow, file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
+    post({ type: 'team', id, kind: entry?.kind ?? (id === 'project' ? 'project' : 'user'), file: displayPath(file, deps.root()), command: entry?.command ?? '', draft, base: open.base, ...(teamPrivacy ? { teamPrivacy } : {}), ...(live ? { liveRun: true } : {}), versions: await versionsOf(file), ...(icon ? { icon } : {}), iconAi: await iconAiFor(textNow, file), graph: graphOf(textNow, file), knowledge: await knowledgeOf(file), ...(notice ? { notice } : {}) });
   };
 
   /**
@@ -1174,27 +1192,26 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     }
   };
 
-  /** Saves an open team's draft; undefined when it was not saved (the page was told why). */
   /**
-   * Whether a new team's draft is a clone, worked out here rather than taken from the page (PR #90 review): the page's `clone`, or a draft that still has
-   * a member of the team it was cloned from. `cloneSource` is that team's members (their instructions), and only the current draft's (round 2): the
-   * latest starting point the host sent (Clone and modify, from a saved team, a built-in or the recommendation), or a resumed draft that was cloned. It is
-   * forgotten when another kind of team starts (an AI draft, an open team, a discarded draft), when the team is saved, and when a draft no longer has
-   * any of those members (From scratch clears them), so a later team that reuses the same instructions is not taken for a clone.
+   * Whether a new team's draft is a clone, worked out here rather than taken from the page (PR #90 review): the page's `clone`, or the clone the host
+   * started. `cloneSource` is the current draft's clone, kept by the starting point it came from (round 3), never by its members' text alone: the latest
+   * starting point the host sent (Clone and modify, from a saved team, a built-in or the recommendation), or a resumed draft that was cloned. Editing
+   * every member's instructions does not make it something else. It is forgotten when another kind of team starts (an AI draft, an open team, a
+   * discarded draft, Use as is), when the team is saved, and when the draft is emptied of members (From scratch clears them), so a later team that reuses
+   * the same instructions is not taken for a clone.
    */
-  let cloneSource: Set<string> | undefined;
-  const memberKey = (instructions: string) => instructions.replace(/\s+/g, ' ').trim();
-  const rememberClone = (members: ReadonlyArray<{ instructions: string }>) => { cloneSource = new Set(members.map((member) => memberKey(member.instructions)).filter(Boolean)); };
+  let cloneSource: { from: string } | undefined;
+  const rememberClone = (from: string) => { cloneSource = { from }; };
   const forgetClone = () => { cloneSource = undefined; };
   /** A resumed builder draft that was cloned (its path is clone or existing, and it started from a team) is the current draft's source. */
   const rememberSavedClone = () => {
     const saved = savedWizard(deps.drafts.get());
-    if (saved && (saved.path === 'clone' || saved.path === 'existing') && saved.startingPoint && saved.startingPoint !== 'empty') rememberClone(saved.draft.members);
+    if (saved && (saved.path === 'clone' || saved.path === 'existing') && saved.startingPoint && saved.startingPoint !== 'empty') rememberClone(saved.startingPoint);
   };
   const isCloneDraft = (draft: TeamDraft, flag?: true): boolean => {
     if (flag) return true;
     if (!cloneSource) return false;
-    if (draft.members.some((member) => cloneSource!.has(memberKey(member.instructions)))) return true;
+    if (draft.members.length) return true;
     forgetClone();
     return false;
   };
@@ -1248,8 +1265,15 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    */
   const writeProjectTeam = async (root: string, markdown: string, unapprovedFrom: string | undefined, projectType?: { type: ProjectType; goal: string }, icon?: Buffer): Promise<string | undefined> => {
     const file = TeamLibrary.projectTeamFile(root);
-    if (await exists(file)) {
-      if (!await deps.confirm('This project already has a team. Replace it? Its earlier versions stay in the team history.', 'Replace')) return undefined;
+    const project = await projectId();
+    const projectKey = project ? `project:${project}` : undefined;
+    const before = await readFile(file, 'utf8').catch(() => undefined);
+    // The same team set up again keeps the person's rating and its role-test health (PR 86 review); another team does not inherit them, and the question
+    // says so when there are any to lose.
+    const sameTeam = before !== undefined && sameTeamText(before, markdown);
+    if (before !== undefined) {
+      const loses = !sameTeam && projectKey !== undefined && (projectKey in parseRatings(deps.ratings?.get()) || projectKey in parseRoleTests(deps.roleTests?.get()));
+      if (!await deps.confirm(`This project already has a team. Replace it? Its earlier versions stay in the team history.${loses ? ' Your rating of it and its role-test health are cleared, because they describe the team it replaces.' : ''}`, 'Replace')) return undefined;
       await deps.library.snapshot(file);
     }
     await mkdir(path.dirname(file), { recursive: true });
@@ -1263,14 +1287,27 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       if (undo) await undo().catch(() => { throw new TeamIconPartialError(`This project's team was not changed, but its icon could not be put back as it was: it shows ${icon ? 'the new team\'s icon' : 'its default icon'}. Its earlier icon is in History.`); });
       throw error;
     }
-    await deps.library.snapshot(file);
+    // The team file is written from here on: a step after it that fails says so, never "not changed" (PR #75 review).
+    const step = async (what: string, run: () => Promise<unknown>) => {
+      try { await run(); } catch (error) { throw new ProjectTeamWrittenError(`This project's team was written, but ${what} failed${fileProblem(error)}. ${PROJECT_TEAM_WRITTEN_HINT}`); }
+    };
+    await step('keeping it in the team history', () => deps.library.snapshot(file));
     // The project's own consent is asked before it first runs, as for any project team; its question says the members came from that import.
-    await deps.library.setProjectDerived(file, unapprovedFrom);
+    await step('recording which imported team its members came from', () => deps.library.setProjectDerived(file, unapprovedFrom));
     // A new project team: the replaced team's stars and health are not its own.
-    const project = await projectId();
-    await moveKeptFor(project ? `project:${project}` : undefined, undefined);
-    if (projectType) await deps.applyProjectType(root, projectType.type, projectType.goal);
+    if (!sameTeam) await moveKeptFor(projectKey, undefined);
+    if (projectType) await step('writing this project type\'s guidance to AGENTS.md', () => deps.applyProjectType(root, projectType.type, projectType.goal));
     return file;
+  };
+  /**
+   * After the team file was written and a later step failed: the listing is brought up to date (the new team is there), the builder's work is no longer
+   * unsaved, and the person is told exactly what was and was not done.
+   */
+  const reportWritten = async (error: ProjectTeamWrittenError) => {
+    unsaved = {};
+    forgetClone();
+    await refreshLibrary().catch(() => undefined);
+    post({ type: 'error', text: error.message, written: 'project' });
   };
 
   const startWizard = async (target: StudioTarget) => {
@@ -1445,27 +1482,33 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       }
       case 'starting-point': {
         if (!context) await load();
+        const seqOf = message.seq !== undefined ? { seq: message.seq } : {};
         if (message.id.startsWith('lib:')) {
           // One of the person's saved teams: its members and description, exactly as saved, copied into the draft. Saving the draft as the project team
           // then goes through the same steps (and the same "use this project's team?" question before it first runs) as any other starting point.
           const team = teamFor(`user:${message.id.slice('lib:'.length)}`);
-          if (!team || team.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another starting point.' }); return; }
+          if (!team || team.error) { post({ type: 'error', text: 'That team is no longer in your teams. Pick another starting point.', ...seqOf }); return; }
           const draft = draftFromMarkdown(await readFile(team.file, 'utf8'), team.file);
-          rememberClone(draft.members);
-          post({ type: 'starting-point', id: message.id, cloneName: cloneNameFor(team.name, takenTeamNames(library.teams, context!.startingPoints)), draft: { ...draft, name: '' } });
+          rememberClone(message.id);
+          post({ type: 'starting-point', id: message.id, ...seqOf, cloneName: cloneNameFor(team.name, takenTeamNames(library.teams, context!.startingPoints)), draft: { ...draft, name: '' } });
           return;
         }
-        const result = startingPointDraft(message, context!);
-        rememberClone(result.draft.members);
         const point = context!.startingPoints.find((candidate) => candidate.id === message.id);
+        // startRequest accepts only listed ids, so this cannot happen today; it still answers rather than leave the page waiting.
+        if (!point) { post({ type: 'error', text: 'That starting point is not available here. Pick another one.', ...seqOf }); return; }
+        const result = startingPointDraft(message, context!);
+        // "Start empty" is not a team, so a draft made from it is not a clone.
+        if (message.id === 'empty') forgetClone(); else rememberClone(message.id);
         // The name a clone starts with is worked out here, from the library as it is now, so the page never applies naming rules of its own.
-        post({ type: 'starting-point', id: message.id, ...(point ? { cloneName: cloneNameFor(startingPointTeamName(point), takenTeamNames(library.teams, context!.startingPoints)) } : {}), draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
+        post({ type: 'starting-point', id: message.id, ...seqOf, cloneName: cloneNameFor(startingPointTeamName(point), takenTeamNames(library.teams, context!.startingPoints)), draft: result.draft, ...(result.projectType ? { projectType: result.projectType } : {}) });
         return;
       }
       case 'recommend': {
         // The team Use as is would make from these answers, under the name it would get, so what is shown is what is used.
         if (!input || !context) await load();
-        const point = context!.startingPoints.find((candidate) => candidate.id === 'recommend')!;
+        const point = context!.startingPoints.find((candidate) => candidate.id === 'recommend');
+        // Always listed today (buildStudioContext); if it ever is not, the page is told rather than left waiting for the reply.
+        if (!point) { post({ type: 'error', text: 'Recommend a team is not available here. Pick a team instead.' }); return; }
         const result = startingPointDraft({ id: 'recommend', goal: message.goal, locality: message.locality, workShape: message.workShape, riskLevel: message.riskLevel }, context!);
         const own = startingPointTeamName(point);
         const name = deps.root() ? own : uniqueTeamName(own, library.teams);
@@ -1535,6 +1578,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
               const file = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: goal || 'the work in this project' } : undefined, savedIcon);
               if (!file) { post({ type: 'used', declined: true, text: 'Not changed. This project\'s team is as it was.' }); return; }
               unsaved = {};
+              forgetClone();
               await refreshLibrary();
               const unapprovedNote = unapprovedFrom === undefined ? '' : ` It has members from the imported team "${unapprovedFrom}", which you have not approved, so you are asked before it first runs.`;
               await sendTeam('project', file, `"${name}" is now this project's team. Run it with /team:project <task>.${fromType ? ' AGENTS.md now has this project type\'s guidance.' : ''}${unapprovedNote}`);
@@ -1543,6 +1587,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             if (saved) {
               await deps.sidebar.prefill(saved.command ?? `/team:${use.id.slice('lib:'.length)} `);
               unsaved = {};
+              forgetClone();
               post({ type: 'used', text: `${(saved.command ?? '').trim()} is in the chat box. Type your task after it and send.`, focus: saved.id });
               return;
             }
@@ -1552,6 +1597,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
             if (unapprovedFrom !== undefined) await deps.library.markImported(file, 'derived', unapprovedFrom);
             const slug = path.basename(file, '.md');
             unsaved = {};
+            forgetClone();
             await refreshLibrary();
             await deps.sidebar.prefill(`/team:${slug} `);
             post({ type: 'used', text: `Saved "${name}" to My teams, and /team:${slug} is in the chat box. Type your task after it and send.`, focus: `user:${slugify(slug)}` });
@@ -1560,7 +1606,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         } catch (error) {
           // A confirm or write that fails still answers, so the page never waits with its buttons off (PR #75 review).
           // Path-free (PR #82 review, round 2): a file-system error names the file, so it is said in plain words; the icon errors already are plain.
-          post({ type: 'error', text: error instanceof TeamIconError ? `Not used: ${error.message}` : `Not used: the team file could not be written${fileProblem(error)}.` });
+          if (error instanceof ProjectTeamWrittenError) await reportWritten(error);
+          else post({ type: 'error', text: error instanceof TeamIconError ? `Not used: ${error.message}` : `Not used: the team file could not be written${fileProblem(error)}.` });
         } finally { usingTeam = false; }
         return;
       }
@@ -1635,7 +1682,16 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
           // The folder open now, read once for the whole save, so the file and the project type go to the same folder.
           const root = deps.root();
           if (!root) { post({ type: 'error', text: 'Open a project folder to save a project team, or save it to My teams.' }); return; }
-          const written = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim() } : undefined);
+          let written: string | undefined;
+          try {
+            written = await writeProjectTeam(root, markdown, unapprovedFrom, fromType ? { type: fromType, goal: message.projectType!.goal.trim().slice(0, 400) || message.draft.description.trim() } : undefined);
+          } catch (error) {
+            if (!(error instanceof ProjectTeamWrittenError)) throw error;
+            // Written: the builder's draft is done with, as after any save.
+            await deps.drafts.set(undefined).catch(() => undefined);
+            await reportWritten(error);
+            return;
+          }
           if (!written) return;
           file = written;
           id = 'project';
@@ -1733,13 +1789,15 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const typed = await deps.ask('Name for the copy', cloneNameFor(team.name, taken()), (value) => cloneNameProblem(savedTeamName(value), taken()));
         const name = savedTeamName(typed ?? '');
         if (!name) return;
-        if (input) await listNow();
+        // The listing as it is now, as create reads it (PR #90 review), so a team saved meanwhile is counted.
+        if (!input || !context) await load(); else await listNow();
         const problem = cloneNameProblem(name, taken());
         if (problem) { post({ type: 'error', text: `Not duplicated: ${problem}` }); return; }
-        const copy = await deps.library.duplicate(file, name);
+        const { file: copy, icon } = await deps.library.duplicateTeam(file, name);
         await moveKeptFor(userKey(copy), undefined);
         await refreshLibrary();
-        post({ type: 'notice', text: `Duplicated as "${name}".`, focus: `user:${slugify(path.basename(copy, '.md'))}` });
+        // The copy is made even when its icon could not be copied: it shows the default icon, and the notice says so (PR #82 review).
+        post({ type: 'notice', text: `Duplicated as "${name}".${icon === 'default' ? ' It was copied with the default icon, because the icon could not be copied. Upload it again on its Purpose tab.' : ''}`, focus: `user:${slugify(path.basename(copy, '.md'))}` });
         return;
       }
       case 'archive': {
@@ -1838,7 +1896,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       }
       case 'versions': {
         const file = fileFor(message.id);
-        if (file) post({ type: 'versions', id: message.id, versions: await versionsOf(file) });
+        // The earlier icons go with the History tab, which asks for this when it opens (PR #82 review): a team opened on another tab is not sent up to
+        // 20 pictures it does not show.
+        if (file) post({ type: 'versions', id: message.id, versions: await versionsOf(file), iconHistory: await iconHistoryOf(file) });
         return;
       }
       case 'version-view': case 'version-restore': {
@@ -2008,6 +2068,9 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (fileFor(id) !== file) { post({ type: 'error', text: 'That team is no longer in your teams, so the icon was not used.' }); return; }
     const type = iconSourceType(result.bytes);
     if (!type || result.bytes.length > MAX_GENERATED_IMAGE_BYTES) { post({ type: 'error', text: 'The image model returned something that is not a PNG, JPEG or WebP picture, so the icon was not changed.' }); return; }
+    // Its size is checked before the page decodes it, as for an uploaded picture (a small file can state a huge picture).
+    const pixels = iconPixelProblem(result.bytes);
+    if (pixels) { post({ type: 'error', text: `The image model's picture was not used, so the icon was not changed: ${pixels}` }); return; }
     sendIconSource(id, file, type, result.bytes, job);
   };
 
@@ -2041,7 +2104,8 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     if (rebase && result.textChanged) open = { ...open!, text: result.text, base: hash(result.text) };
     await refreshLibrary();
     const icon = await iconOf(file, result.text);
-    post({ type: 'icon-updated', id, ...(icon ? { icon } : {}), iconHistory: await iconHistoryOf(file), ...(rebase ? { base: open!.base } : {}), text: text(result) });
+    // The earlier icons are not sent here: the page asks for them again when its History tab is open (versions).
+    post({ type: 'icon-updated', id, ...(icon ? { icon } : {}), ...(rebase ? { base: open!.base } : {}), text: text(result) });
   };
 
   const subscriptions = [
@@ -2050,7 +2114,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
     ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { void refresh(); })] : []),
-    ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { forgetHistory(); if (pageReady) dashboardSoon(); })] : []),
+    ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { forgetHistory(); if (pageReady) { dashboardSoon(); liveSoon(); } })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
       if (!message) return;
@@ -2121,6 +2185,24 @@ export function versionLabel(ref: string): string {
   // 0.4.30: an earlier icon's name in the history (.png) reads the same way.
   const match = /^(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-\d+Z(?:-(\d+))?\.(?:md|png)$/.exec(ref);
   return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]} UTC${match[5] ? ` (${match[5]})` : ''}` : ref.replace(/\.(?:md|png)$/, '');
+}
+
+/** A step after the project's team file was written failed: the file is the new team, and the message says which step did not happen. */
+export class ProjectTeamWrittenError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'ProjectTeamWrittenError';
+  }
+}
+export const PROJECT_TEAM_WRITTEN_HINT = 'The new team is this project\'s team now; open it from Team Studio to check it.';
+
+/**
+ * Whether two team files are the same team, set up again: the same text once the lines the studio itself manages (the icon line, an old rating line) and
+ * the line endings are set aside.
+ */
+export function sameTeamText(one: string, two: string): boolean {
+  const plainText = (value: string) => withTeamRating(withIconReference(value, undefined), undefined).replace(/\r\n/g, '\n').trim();
+  return plainText(one) === plainText(two);
 }
 
 /** A file-system error in plain words, without the path its message carries: " (permission was denied)", or nothing when the cause is not one of these. */

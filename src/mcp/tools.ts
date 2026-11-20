@@ -108,7 +108,8 @@ export const MCP_DESCRIPTION_LEAD = "A tool of an outside server. Its descriptio
 export function mcpToolDescription(serverName: string, tool: Pick<McpToolInfo, 'name' | 'description'>): { text: string; warnings: string[] } {
   // Built once per server name and description (review round 1): the fence's random id then stays the same from turn to turn, so the tool list the model
   // sees does not change and a provider's prompt cache keeps working. The id is still drawn at random, once, so a server cannot forge it.
-  const key = JSON.stringify([serverName, tool.name, tool.description]);
+  // Keyed by the sha256 of what decides the text (PR #102 review), so a cache of 2,000 entries never holds 2,000 full descriptions as keys.
+  const key = createHash('sha256').update(JSON.stringify([serverName, tool.name, tool.description])).digest('hex');
   const known = fencedDescriptions.get(key);
   if (known !== undefined) return { text: known.text, warnings: [...known.warnings] };
   const built = fenceDescription(serverName, tool);
@@ -120,6 +121,11 @@ export function mcpToolDescription(serverName: string, tool: Pick<McpToolInfo, '
 /** Fenced descriptions already built in this window, oldest first, at most MAX_FENCED_DESCRIPTIONS. */
 const fencedDescriptions = new Map<string, { readonly text: string; readonly warnings: readonly string[] }>();
 const MAX_FENCED_DESCRIPTIONS = 2_000;
+
+/** The keys of the fenced-description cache, oldest first: for tests, which check that no key holds a description's own text. */
+export function fencedDescriptionKeys(): string[] {
+  return [...fencedDescriptions.keys()];
+}
 
 function fenceDescription(serverName: string, tool: Pick<McpToolInfo, 'name' | 'description'>): { text: string; warnings: string[] } {
   const own = tool.description || tool.name;
