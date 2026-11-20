@@ -6,14 +6,18 @@ import { classifyChains, withholdingReport } from '../domain/replica/chain';
 import type { RefusedPlace } from '../domain/replica/chain';
 import { GENESIS_PREV } from '../domain/replica/entry';
 import type { SealedEntry } from '../domain/replica/entry';
-import { foldEntries } from '../domain/replica/fold';
+import { canonicalProof, findEquivocations, quarantineRecords } from '../domain/replica/equivocation';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
+import type { FoldResult } from '../domain/replica/fold';
+import { integrityReducer } from '../domain/replica/integrityFold';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { ReplicaContext } from '../domain/replica/rosterView';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
 import { forkAt, futureEntry, tamperHeader } from './helpers/replicaForks';
-import { WORLD_NOW, createWorld, rng, shuffled } from './helpers/replicaWorld';
-import type { Written } from './helpers/replicaWorld';
+import { textReducer } from '../domain/replica/textFold';
+import { WORLD_AT, WORLD_NOW, createWorld, permutations, rng, shuffled } from './helpers/replicaWorld';
+import type { World, Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
 const MEMBERS = [
@@ -195,4 +199,233 @@ test('the chain stage is a function of the set: the same entries in any order gi
     assert.deepEqual([...result.excluded].sort(), [...reference.excluded].sort());
     assert.deepEqual([result.held, result.rejected, result.quarantined, result.proofs], [reference.held, reference.rejected, reference.quarantined, reference.proofs]);
   }
+});
+
+// Forks with three or more branches (31-06, D-01 (b), WR-03, D-20). W writes seq 0, then `count` different headers at seq 1 that all follow seq 0,
+// and two later entries chained on every branch. X writes one entry. A line is a branch header and its two later entries.
+interface Branched { world: World; w0: Written; x0: Written; lines: Written[][] }
+
+// The next entry of W's log after the given one, on that entry's branch.
+const after = (world: World, parent: Written): Written => world.writeRaw('W', {
+  stream: parent.stream, seq: parent.seq + 1, prev: parent.hash,
+  body: { deps: [], roster: world.rosterHash, lamport: parent.lamport + 1, at: WORLD_AT, actor: { kind: 'person' }, ...reg() }
+});
+
+function branchedWorld(count: number): Branched {
+  const world = createWorld({ members: MEMBERS });
+  const w0 = world.write('W', reg());
+  const x0 = world.write('X', reg());
+  const heads = [world.write('W', reg()), ...Array.from({ length: count - 1 }, () => forkAt(world, 'W', world.stream, 1, reg()))];
+  const lines = heads.map((head) => {
+    const one = after(world, head);
+    return [head, one, after(world, one)];
+  });
+  return { world, w0, x0, lines };
+}
+
+const hashesOf = (items: readonly Written[]): string[] => items.map((item) => item.hash).sort();
+const choose = (world: World, seq: number, hash: string): ReplicaContext => world.ctx({ roster: staticRosterView({ ...world.rosterSpec, chosenBranches: [{ writer: world.writerOf('W'), stream: world.stream, seq, hash }] }) });
+const REDUCERS = { reducers: [textReducer, integrityReducer] };
+
+// The same set in chunks of three through the incremental fold, starting with the later entries (held until their branch header arrives).
+function chunked(ctx: ReplicaContext, entries: readonly SealedEntry[]): FoldResult {
+  let state = createFoldState(ctx, REDUCERS);
+  for (let from = 0; from < entries.length; from += 3) state = addEntries(state, entries.slice(from, from + 3));
+  return state.result;
+}
+
+function sameOutcome(result: FoldResult, reference: FoldResult, label: string): void {
+  assert.deepEqual(result.excluded, reference.excluded, label);
+  assert.deepEqual([...result.applied].sort(), [...reference.applied].sort(), label);
+  assert.deepEqual(result.quarantined, reference.quarantined, label);
+  assert.deepEqual(result.proofs, reference.proofs, label);
+  assert.deepEqual(result.held, reference.held, label);
+  assert.deepEqual(result.digests, reference.digests, label);
+}
+
+// Every choice of branch, in every delivery order of the fork headers, from scratch and in chunks: the chosen line is applied, every other line
+// is excluded, and the quarantine is lifted.
+function checkEveryChoice(count: number): number {
+  const { world, w0, x0, lines } = branchedWorld(count);
+  const heads = lines.map((line) => line[0]);
+  const later = lines.flatMap((line) => line.slice(1));
+  let folds = 0;
+  for (const [index, line] of lines.entries()) {
+    const ctx = choose(world, 1, line[0].hash);
+    const others = lines.filter((_, other) => other !== index).flat();
+    const reference = foldEntries(world.entries, ctx, REDUCERS);
+    assert.deepEqual(reference.quarantined, [], `branch ${index} chosen`);
+    assert.deepEqual(reference.excluded, hashesOf(others), `branch ${index} chosen`);
+    assert.deepEqual([...reference.applied].sort(), hashesOf([w0, x0, ...line]), `branch ${index} chosen`);
+    assert.deepEqual(reference.held, []);
+    // Every seq where the lines differ is a slot with two or more signed headers, so seq 2 and 3 have proofs too; the release resolves them all.
+    assert.deepEqual(reference.proofs.map((proof) => proof.a.seq).sort(), [1, 2, 3]);
+    const atFork = reference.proofs.filter((proof) => proof.a.seq === 1);
+    assert.deepEqual(atFork[0].branches, hashesOf(heads), 'the proof lists every branch at the slot');
+    assert.deepEqual(reference.proofs.find((proof) => proof.a.seq === 3)?.branches, hashesOf(lines.map((each) => each[2])));
+    for (const order of permutations(heads)) {
+      sameOutcome(foldEntries(sealed(w0, x0, ...order, ...later), ctx, REDUCERS), reference, `branch ${index}, from scratch`);
+      sameOutcome(chunked(ctx, sealed(...[...later].reverse(), ...order, x0, w0)), reference, `branch ${index}, in chunks`);
+      folds += 2;
+    }
+  }
+  return folds;
+}
+
+test('a three-branch fork: a release naming any branch admits it and its later entries and excludes the others, in all 6 orders, from scratch and in chunks', () => {
+  assert.equal(checkEveryChoice(3), 3 * 6 * 2);
+});
+
+test('a four-branch fork: a release naming any of the four branches resolves it the same way in all 24 orders, from scratch and in chunks', () => {
+  assert.equal(checkEveryChoice(4), 4 * 24 * 2);
+});
+
+test('with no choice, or a choice that is not a branch at the fork seq, every branch from the fork seq on stays excluded and the writer quarantined', () => {
+  const { world, w0, x0, lines } = branchedWorld(4);
+  const writer = world.writerOf('W');
+  const quarantined = [{ writer, stream: world.stream, fromSeq: 1 }];
+  for (const ctx of [world.ctx(), choose(world, 1, 'e'.repeat(64)), choose(world, 1, w0.hash), choose(world, 2, lines[3][1].hash)]) {
+    const result = foldEntries(world.entries, ctx, REDUCERS);
+    assert.deepEqual(result.quarantined, quarantined);
+    assert.deepEqual(result.excluded, hashesOf(lines.flat()));
+    assert.deepEqual([...result.applied].sort(), hashesOf([w0, x0]));
+    for (const order of permutations(lines.map((line) => line[0]))) {
+      const again = foldEntries(sealed(x0, ...order, ...lines.flatMap((line) => line.slice(1)), w0), ctx, REDUCERS);
+      assert.deepEqual([again.quarantined, again.excluded], [quarantined, result.excluded]);
+    }
+  }
+});
+
+test('a carried proof of two branches, then the third branch arriving: a release naming the third resolves the fork, in every arrival order', () => {
+  const { world, w0, x0, lines } = branchedWorld(3);
+  const [line0, line1, line2] = lines;
+  const writer = world.writerOf('W');
+  // X saw branches 0 and 1 and sent the proof as an entry. This machine never receives branch 1.
+  const carried = canonicalProof(line0[0].entry.header, line1[0].entry.header, world.signerOf('W').publicKey);
+  const proofEntry = world.write('X', { kind: 'equivocation.proof', data: carried });
+  const ctx = choose(world, 1, line2[0].hash);
+
+  // Before the third branch arrives this machine knows of branches 0 and 1 only: the choice names no branch it knows, so the writer stays quarantined.
+  const before = foldEntries(sealed(w0, x0, ...line0, proofEntry), ctx, REDUCERS);
+  assert.deepEqual(before.quarantined, [{ writer, stream: world.stream, fromSeq: 1 }]);
+  assert.deepEqual(before.excluded, hashesOf(line0));
+
+  const machine = sealed(w0, x0, ...line0, proofEntry, ...line2);
+  const reference = foldEntries(machine, ctx, REDUCERS);
+  assert.deepEqual(reference.quarantined, [], 'the release of the third branch resolves the fork');
+  assert.deepEqual(reference.excluded, hashesOf(line0));
+  assert.deepEqual([...reference.applied].sort(), hashesOf([w0, x0, proofEntry, ...line2]));
+  const atFork = reference.proofs.filter((proof) => proof.a.seq === 1);
+  assert.equal(atFork.length, 2, 'the fork this machine found (0 and 2) and the carried proof (0 and 1)');
+  for (const proof of atFork) assert.deepEqual(proof.branches, hashesOf([line0[0], line1[0], line2[0]]), 'each proof lists every branch known at the slot');
+  assert.deepEqual(reference.proofs.map((proof) => proof.a.seq).sort(), [1, 1, 2, 3], 'lines 0 and 2 differ at seq 2 and 3 as well');
+
+  // The incremental fold that held the proof first and then gets the third branch gives the same result.
+  const late = addEntries(createFoldState(ctx, REDUCERS), sealed(w0, x0, ...line0, proofEntry));
+  assert.deepEqual(late.result.quarantined, before.quarantined);
+  sameOutcome(addEntries(late, sealed(...line2)).result, reference, 'the third branch arriving after the proof');
+
+  // Every order of the proof and the two branch headers, one entry at a time, then the later entries.
+  let count = 0;
+  for (const order of permutations(sealed(proofEntry, line0[0], line2[0]))) {
+    let state = createFoldState(ctx, REDUCERS);
+    for (const entry of [...sealed(w0, x0), ...order, ...sealed(line0[1], line0[2], line2[1], line2[2])]) state = addEntries(state, [entry]);
+    sameOutcome(state.result, reference, 'one at a time');
+    sameOutcome(foldEntries([...order, ...sealed(x0, line2[2], line0[2], line2[1], line0[1], w0)], ctx, REDUCERS), reference, 'from scratch');
+    count += 1;
+  }
+  assert.equal(count, 6);
+  for (const seed of [11, 12, 13, 14]) sameOutcome(foldEntries(shuffled(machine, rng(seed)), ctx, REDUCERS), reference, `seed ${seed}`);
+
+  // A machine that holds every branch and the proof entry excludes branch 1 as well and applies the same entries.
+  const everything = foldEntries(world.entries, ctx, REDUCERS);
+  assert.deepEqual(everything.quarantined, []);
+  assert.deepEqual(everything.excluded, hashesOf([...line0, ...line1]));
+  assert.deepEqual([...everything.applied].sort(), [...reference.applied].sort());
+});
+
+const chooseMany = (world: World, choices: ReadonlyArray<[number, string]>): ReplicaContext => world.ctx({
+  roster: staticRosterView({ ...world.rosterSpec, chosenBranches: choices.map(([seq, hash]) => ({ writer: world.writerOf('W'), stream: world.stream, seq, hash })) })
+});
+
+test('after a release, a new fork on the kept branch needs its own choice, and a later choice of a set-aside branch lifts nothing', () => {
+  const { world, w0, x0, lines } = branchedWorld(3);
+  const [line0, line1, line2] = lines;
+  // A second header at seq 2 that also follows the kept branch: a new fork on the kept history, not a leftover of the first one.
+  const sibling = forkAt(world, 'W', world.stream, 2, reg());
+  assert.equal(sibling.entry.header.prev, line0[0].hash);
+  const setAside = hashesOf([...line1, ...line2]);
+  const quarantinedAt2 = [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 2 }];
+
+  const once = foldEntries(world.entries, choose(world, 1, line0[0].hash), REDUCERS);
+  assert.deepEqual(once.quarantined, quarantinedAt2, 'two branches follow the kept one at seq 2');
+  assert.deepEqual(once.excluded, [...setAside, ...hashesOf([line0[1], line0[2], sibling])].sort());
+  assert.deepEqual([...once.applied].sort(), hashesOf([w0, x0, line0[0]]));
+
+  const keepSibling = foldEntries(world.entries, chooseMany(world, [[1, line0[0].hash], [2, sibling.hash]]), REDUCERS);
+  assert.deepEqual(keepSibling.quarantined, []);
+  assert.deepEqual(keepSibling.excluded, [...setAside, ...hashesOf([line0[1], line0[2]])].sort());
+  assert.deepEqual([...keepSibling.applied].sort(), hashesOf([w0, x0, line0[0], sibling]));
+
+  const keepLine = foldEntries(world.entries, chooseMany(world, [[1, line0[0].hash], [2, line0[1].hash]]), REDUCERS);
+  assert.deepEqual(keepLine.quarantined, []);
+  assert.deepEqual(keepLine.excluded, [...setAside, sibling.hash].sort());
+  assert.deepEqual([...keepLine.applied].sort(), hashesOf([w0, x0, ...line0]));
+
+  // Forbidden: a choice at seq 2 of a branch that follows a set-aside line is not a way out of the new fork.
+  const contradicting = foldEntries(world.entries, chooseMany(world, [[1, line0[0].hash], [2, line1[1].hash]]), REDUCERS);
+  assert.deepEqual(contradicting.quarantined, quarantinedAt2);
+  assert.deepEqual(contradicting.excluded, once.excluded);
+});
+
+test('a release of a branch with no later entries resolves the fork while the set-aside branches go on and fork among themselves, in all 24 orders', () => {
+  const world = createWorld({ members: MEMBERS });
+  const w0 = world.write('W', reg());
+  const x0 = world.write('X', reg());
+  const [h0, h1, h2] = [world.write('W', reg()), forkAt(world, 'W', world.stream, 1, reg()), forkAt(world, 'W', world.stream, 1, reg())];
+  const l1a = after(world, h1);
+  const l1b = after(world, h1);
+  const l2a = after(world, h2);
+  const ctx = choose(world, 1, h0.hash);
+  const setAside = hashesOf([h1, h2, l1a, l1b, l2a]);
+
+  const before = foldEntries(world.entries, ctx, REDUCERS);
+  assert.deepEqual(before.quarantined, [], 'no branch at seq 2 follows the kept one, so nothing there needs a choice');
+  assert.deepEqual(before.excluded, setAside);
+  assert.deepEqual([...before.applied].sort(), hashesOf([w0, x0, h0]));
+
+  // The kept branch goes on: its seq 2 is the only branch there that follows it, and it is applied.
+  const next = after(world, h0);
+  const reference = foldEntries(world.entries, ctx, REDUCERS);
+  assert.deepEqual(reference.quarantined, []);
+  assert.deepEqual(reference.excluded, setAside);
+  assert.deepEqual([...reference.applied].sort(), hashesOf([w0, x0, h0, next]));
+  let count = 0;
+  for (const order of permutations(sealed(next, l1a, l1b, l2a))) {
+    sameOutcome(foldEntries([...sealed(w0, x0, h1, h0, h2), ...order], ctx, REDUCERS), reference, 'from scratch');
+    count += 1;
+  }
+  assert.equal(count, 24);
+  // Without the release the writer is quarantined from the first fork, as before.
+  assert.deepEqual(foldEntries(world.entries, world.ctx(), REDUCERS).quarantined, [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 1 }]);
+});
+
+test('a later fork whose branches cannot be traced back to the release keeps the quarantine; given the headers between, the release covers it', () => {
+  const { world, lines } = branchedWorld(3);
+  const [line0, line1, line2] = lines;
+  const roster = choose(world, 1, line0[0].hash).roster;
+  const verifiedLike = (items: readonly Written[]): Array<{ hash: string; header: SealedEntry['header'] }> => items.map((item) => ({ hash: item.hash, header: item.entry.header }));
+  // Proofs of the fork at seq 1 and of the set-aside lines at seq 3 only: nothing says where the seq 3 headers come from.
+  const proofs = [...findEquivocations(verifiedLike([line0[0], line1[0], line2[0]]), roster), ...findEquivocations(verifiedLike([line1[2], line2[2]]), roster)];
+  assert.deepEqual(proofs.map((proof) => proof.a.seq).sort(), [1, 3]);
+  const writer = world.writerOf('W');
+  assert.deepEqual(quarantineRecords(proofs, roster), [{ writer, stream: world.stream, fromSeq: 3 }], 'doubt keeps the quarantine');
+  const between = new Map([line1[1], line2[1]].map((item) => [item.hash, item.entry.header]));
+  assert.deepEqual(quarantineRecords(proofs, roster, between), [], 'both seq 3 branches follow set-aside lines');
+  // With a third seq 3 header on the kept line the slot has one live branch, still resolved. Every header of the slot is held here, as in the chain
+  // stage; a branch known by its hash alone would count as possibly kept.
+  const kept = findEquivocations(verifiedLike([line0[2], line1[2], line2[2]]), roster);
+  const withKept = new Map([line0[1], line1[1], line2[1], line0[2], line1[2], line2[2]].map((item) => [item.hash, item.entry.header]));
+  assert.deepEqual(quarantineRecords([...proofs.filter((proof) => proof.a.seq === 1), ...kept], roster, withKept), []);
+  assert.deepEqual(quarantineRecords([...proofs.filter((proof) => proof.a.seq === 1), ...kept], world.ctx().roster, withKept), [{ writer, stream: world.stream, fromSeq: 1 }], 'no release: quarantined from the first fork');
 });
