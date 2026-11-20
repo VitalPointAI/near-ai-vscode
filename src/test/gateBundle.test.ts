@@ -732,3 +732,17 @@ test('S6 (PR #143 review): a policy whose content cannot be read is marked as th
   assert.equal(bad.state === 'failed-closed' && bad.reason, 'bad-signature');
   assert.equal(bad.state === 'failed-closed' && bad.ownPolicy, undefined);
 });
+
+test('S6 (Phase 41 schema): a feature id may carry an @N version; an unknown one such as x@1 is needs-update and says update, never Reset; a malformed version is wrong-type', () => {
+  const signer = makeSigner();
+  for (const feature of ['x@1', 'labels@1', 'endpoints@12', 'models']) {
+    const state = check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer);
+    assert.equal(failedWith(state), 'needs-update', feature);
+    const sentence = state.state === 'failed-closed' ? state.sentence : '';
+    assert.match(sentence, /Update the NEAR AI extension/);
+    assert.ok(!/Reset/.test(sentence), feature);
+  }
+  for (const feature of ['x@0', 'x@', 'x@01', 'x@12345', 'X@1', 'x@1@2', '@1']) {
+    assert.equal(failedWith(check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer)), 'wrong-type', feature);
+  }
+});

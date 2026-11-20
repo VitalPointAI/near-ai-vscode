@@ -107,7 +107,8 @@ const BUNDLE_FIELDS = [
  * policy was written for a newer version. A feature is added here, with its meaning, in the release that implements it.
  */
 export const KNOWN_BUNDLE_FEATURES: readonly string[] = Object.freeze([]);
-const FEATURE_ID_PATTERN = /^[a-z][a-z0-9.-]{0,63}$/;
+/** A feature id: a lowercase name with an optional `@N` version (`endpoints@1`), as the policy schema names them. */
+const FEATURE_ID_PATTERN = /^[a-z][a-z0-9.-]{0,63}(@[1-9][0-9]{0,3})?$/;
 const MAX_REQUIRES = 32;
 
 /**
