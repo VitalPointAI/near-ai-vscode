@@ -13,7 +13,9 @@
 //    opening each body once;
 // 3. refuses for good an entry that is not the pinned genesis, cites another roster than its rosterPrev, or was written by an agent;
 // 4. repeatedly takes the entries that cite the head and whose signer is a roster writer there (a device of the lead or the deputy at the head): one
-//    candidate applies through its owner module, two or more are a split, recorded in pending, and none applies (31-17 adds the choice);
+//    candidate applies through its owner module, two or more are a split, recorded in pending with ROSTER_SPLIT_TEXT, and none applies. A
+//    roster.choose citing the split point and naming one of its branches, from an allowed chooser, takes the next position and the chosen branch
+//    the one after it; the other branches and everything chained after them stay unapplied (notChosen, rosterBranchPending);
 // 5. after the line, places each grant it was given (signer a roster writer and every wrap a device admitted at the roster the grant names; a founding
 //    grant equal to its commitment).
 //
@@ -26,7 +28,7 @@ import { readGrant } from './cellKeys';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
-import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
+import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
 import { verifyEntry } from './verify';
@@ -73,9 +75,15 @@ export const ROSTER_REFUSALS = {
   'deputy-cannot-name-deputy': 'Only the staff lead names the deputy lead, so this naming by the deputy is refused.',
   'not-an-active-member': 'This names someone who is not an active member at the roster it follows.',
   'names-the-lead': 'This names the member who already holds the staff lead role, so it is refused.',
-  'handover-not-allowed': 'The deputy lead may hand over the lead only when the lead is lost, so this handover is refused.'
+  'handover-not-allowed': 'The deputy lead may hand over the lead only when the lead is lost, so this handover is refused.',
+  'choose-not-allowed': 'Only the staff lead chooses a roster branch, or the deputy lead when the lead has no active device, so this choice is refused.',
+  'choose-not-a-branch': 'This choice names an entry that is not one of the roster changes made at the roster it follows, so it is refused.',
+  'choose-superseded': 'A later choice at the same roster split was applied instead, so this one changes nothing.'
 } as const;
 export type RosterRefusal = keyof typeof ROSTER_REFUSALS;
+
+// What the fold reports for a roster split (D-09). Phase 33 shows it in the Staff Room; the command that writes roster.choose shows it too.
+export const ROSTER_SPLIT_TEXT = 'The roster was changed in two places at once. The lead or the deputy must choose.';
 
 export interface RosterFoldInput {
   // Any entries; only roster-stream entries of a routed kind are read.
@@ -104,8 +112,13 @@ export interface RosterState {
   // position it takes. A deputy record without a member ends the deputy role (the deputy became the lead).
   leads: Array<{ member: string; from: number }>;
   deputies: Array<{ member: string | undefined; from: number }>;
-  // Roster splits: two or more entries citing one head; none of them applies until a choice (31-17).
-  pending: Array<{ at: string; branches: string[] }>;
+  // Roster splits not chosen yet: two or more entries citing one head (the split point at); none of them applies until a choice (D-09).
+  pending: Array<{ at: string; branches: string[]; text: string }>;
+  // Splits a person chose: the roster.choose took the position after the split point and the chosen branch the one after it; the other branches stay
+  // unapplied and are listed here.
+  choices: Array<{ at: string; branches: string[]; chosen: string; choose: string }>;
+  // Every roster hash on a branch nobody chose (pending or set aside by a choice), with every roster entry chained after it (D-11).
+  notChosen: Set<string>;
   refused: RosterRefused[];
   held: RosterHeld[];
 }
@@ -120,6 +133,8 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     leads: [{ member: anchor.lead.member, from: 0 }],
     deputies: [],
     pending: [],
+    choices: [],
+    notChosen: new Set(),
     refused: [],
     held: []
   };
@@ -201,7 +216,7 @@ export function rosterView(state: RosterState): RosterView {
       const position = at(hash);
       return position === undefined ? undefined : granteesAt(state.cells, cell, position, (writer) => deviceAt(state.members, writer, position) !== undefined);
     },
-    rosterBranchPending: (hash) => state.pending.some((split) => split.branches.includes(hash))
+    rosterBranchPending: (hash) => state.notChosen.has(hash)
   };
 }
 
@@ -288,11 +303,30 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
-  // roster.choose: its rule follows.
+  // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
 
 const isRouted = (kind: string): boolean => Object.prototype.hasOwnProperty.call(ROSTER_KIND_OWNER, kind);
+const byHash = (a: { hash: string }, b: { hash: string }): number => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0);
+
+// Why this roster.choose at the split point cannot resolve it, or undefined (D-09, D-48). The chooser is the lead at the split point, or the deputy
+// there when the lead has no active device (a lead who has handed over is no longer the lead, so the member they handed over to chooses). The chosen
+// hash must be one of the other roster changes citing the split point. Nothing else ever picks a branch (P-31-22).
+function chooseProblem(state: RosterState, choose: VerifiedEntry, position: number, branches: readonly VerifiedEntry[]): RosterRefusal | undefined {
+  const signer = signerAt(state, choose, position);
+  const lead = leadAt(state, position) as string;
+  const leadless = devicesOfMemberAt(state.members, lead, position).length === 0;
+  if (signer !== lead && !(signer === deputyAt(state, position) && leadless)) return 'choose-not-allowed';
+  const chosen = (choose.data as { chosen: string }).chosen;
+  return branches.some((entry) => entry.hash === chosen) ? undefined : 'choose-not-a-branch';
+}
+
+// The person's choice at a split point: of the allowed choices, the one signed latest (every allowed choice there is by the same member, so this is
+// that person's last word), ties to the smaller hash. The others are refused choose-superseded.
+function latestChoice(chooses: readonly VerifiedEntry[]): VerifiedEntry[] {
+  return [...chooses].sort((a, b) => Date.parse(b.body.at) - Date.parse(a.body.at) || byHash(a, b));
+}
 
 export function foldRoster(input: RosterFoldInput): RosterState {
   const state = createRosterState(input.anchor);
@@ -300,7 +334,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
   // verifyEntry runs against the roster folded so far, except that the probe says yes to every roster hash: each body is then opened once, and the
   // driver itself checks the roster an entry cites against the line (it must be the head, and the device must be a roster writer there). Without
   // the probe, a body citing a roster not applied yet would be opened again after every roster entry.
-  const probe: ReplicaContext = { roster: { ...view, hasRoster: () => true }, keys: input.keys, blobs: input.blobs, now: input.now };
+  const probe: ReplicaContext = { roster: { ...view, hasRoster: () => true, rosterBranchPending: () => false }, keys: input.keys, blobs: input.blobs, now: input.now };
 
   // Roster-stream inputs by entry hash; the first copy of a hash is the one read.
   const waiting = new Map<string, unknown>();
@@ -345,28 +379,77 @@ export function foldRoster(input: RosterFoldInput): RosterState {
       else refuse(entry.hash, entry.body.kind, 'not-a-roster-writer');
     }
     if (candidates.length === 0) continue;
-    if (candidates.length > 1) {
-      state.pending.push({ at: head, branches: candidates.map((entry) => entry.hash).sort() });
-      ready.push(...candidates);
+    // A roster.choose citing the head is not a branch: it names one of the other candidates (the branches) and lets that one continue the line.
+    const branches = candidates.filter((entry) => entry.body.kind !== 'roster.choose');
+    const allowed: VerifiedEntry[] = [];
+    for (const choose of candidates.filter((entry) => entry.body.kind === 'roster.choose')) {
+      const problem = chooseProblem(state, choose, headPosition, branches);
+      if (problem === undefined) allowed.push(choose);
+      else refuse(choose.hash, choose.body.kind, problem);
+    }
+    if (allowed.length > 0) {
+      const [choose, ...superseded] = latestChoice(allowed);
+      for (const other of superseded) refuse(other.hash, other.body.kind, 'choose-superseded');
+      const chosenHash = (choose.data as { chosen: string }).chosen;
+      const chosen = branches.find((entry) => entry.hash === chosenHash) as VerifiedEntry;
+      const others = branches.filter((entry) => entry !== chosen);
+      state.choices.push({ at: head, branches: branches.map((entry) => entry.hash).sort(), chosen: chosenHash, choose: choose.hash });
+      // The branches not chosen stay unapplied; what is chained after them is found below.
+      ready.push(...others);
+      // The choice takes one position and changes nothing else, so the chosen entry, judged at the split point it cites, applies at the next one.
+      append(state, choose.hash);
+      const outcome = applyOne(state, chosen);
+      if (outcome.status === 'refused') refuse(chosen.hash, chosen.body.kind, outcome.reason);
+      else append(state, chosen.hash);
+      continue;
+    }
+    if (branches.length === 0) continue;
+    if (branches.length > 1) {
+      state.pending.push({ at: head, branches: branches.map((entry) => entry.hash).sort(), text: ROSTER_SPLIT_TEXT });
+      ready.push(...branches);
       break;
     }
-    const entry = candidates[0];
+    const entry = branches[0];
     const outcome = applyOne(state, entry);
     if (outcome.status === 'refused') {
       refuse(entry.hash, entry.body.kind, outcome.reason);
       continue;
     }
-    state.positions.push(entry.hash);
-    state.positionOf.set(entry.hash, state.positions.length - 1);
+    append(state, entry.hash);
   }
 
+  markNotChosen(state, ready);
   for (const hash of waiting.keys()) state.held.push({ hash, reason: 'unknown-writer' });
-  // Verified entries that never reached the head: they follow a roster that is not on this machine's line, or a split that is not chosen yet.
-  for (const entry of ready) state.held.push({ hash: entry.hash, reason: 'roster-prev-not-applied' });
-  state.held.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+  // Verified entries that never reached the head: on a branch nobody chose (D-11), or following a roster that is not on this machine's line.
+  for (const entry of ready) state.held.push({ hash: entry.hash, reason: state.notChosen.has(entry.hash) ? 'roster-branch-not-chosen' : 'roster-prev-not-applied' });
+  state.held.sort(byHash);
 
   placeGrants(state, input.grants);
   return state;
+}
+
+function append(state: RosterState, hash: string): void {
+  state.positions.push(hash);
+  state.positionOf.set(hash, state.positions.length - 1);
+}
+
+// The branches of every pending split and the branches a choice set aside, then every unapplied entry chained after one of them by rosterPrev.
+function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]): void {
+  for (const split of state.pending) for (const hash of split.branches) state.notChosen.add(hash);
+  for (const choice of state.choices) for (const hash of choice.branches) if (hash !== choice.chosen) state.notChosen.add(hash);
+  const after = new Map<string, string[]>();
+  for (const entry of unapplied) {
+    const prev = rosterPrevOf(entry);
+    if (prev !== undefined) after.set(prev, [...(after.get(prev) ?? []), entry.hash]);
+  }
+  const queue = [...state.notChosen];
+  while (queue.length > 0) {
+    for (const next of after.get(queue.pop() as string) ?? []) {
+      if (state.notChosen.has(next)) continue;
+      state.notChosen.add(next);
+      queue.push(next);
+    }
+  }
 }
 
 function placeGrants(state: RosterState, grants: readonly unknown[]): void {

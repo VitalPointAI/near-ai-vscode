@@ -4,12 +4,18 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { foldEntries } from '../domain/replica/fold';
-import { rosterView } from '../domain/replica/roster';
+import { clientIdOf } from '../domain/replica/clientIds';
+import { createLocalDoc, localInsert } from '../domain/replica/doc';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
+import type { FoldResult } from '../domain/replica/fold';
+import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, rosterView } from '../domain/replica/roster';
+import type { ProductTextOutput } from '../domain/replica/textFold';
+import { KEEP_REASONS, VERIFY_HOLDS } from '../domain/replica/verify';
 import type { RosterState } from '../domain/replica/roster';
 import type { SealedEntry } from '../domain/replica/entry';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
+import { permutations, updateData } from './helpers/replicaWorld';
 import type { Written } from './helpers/replicaWorld';
 
 const secretHash = (label: string): string => createHash('sha256').update(`join-secret/${label}`, 'utf8').digest('hex');
@@ -240,4 +246,217 @@ test('after a handover the main fold still accepts the genesis and a product cre
   assert.ok(result.applied.includes(byNew.hash));
   const products = result.families.versions as Array<{ product: string; roles: { owner: string } }>;
   assert.equal(products.find((product) => product.product === 'intel-estimate')?.roles.owner, 'j2-chief-3');
+});
+
+// ---- Task 3: split, choose, and entries that cite a branch nobody chose ------------------------------------------------------------------------
+
+interface Split {
+  s: Staff;
+  // The split point: the roster after the lead named Dee deputy.
+  point: string;
+  // Everything written up to the split point, in writing order.
+  prefix: SealedEntry[];
+  // Two roster changes on the split point, by the lead (a) and by the deputy (b), and one later change on each branch.
+  a: Written;
+  b: Written;
+  a2: Written;
+  b2: Written;
+}
+
+function split(): Split {
+  const s = staff();
+  const named = s.world.rosterEntry(s.lead, 'deputy.name', { member: s.dee.member }, s.head);
+  const prefix = [...s.world.entries];
+  const a = inviteBy(s.world, s.lead, named.hash, 'inv-branch-a');
+  const b = inviteBy(s.world, s.dee, named.hash, 'inv-branch-b');
+  const a2 = inviteBy(s.world, s.lead, a.hash, 'inv-branch-a2');
+  const b2 = inviteBy(s.world, s.dee, b.hash, 'inv-branch-b2');
+  return { s, point: named.hash, prefix, a, b, a2, b2 };
+}
+
+const heldOf = (state: RosterState): Map<string, string> => new Map(state.held.map((item) => [item.hash, item.reason]));
+const sorted = (...hashes: string[]): string[] => [...hashes].sort();
+
+test('15.1 roster head -> split: two roster writers change the roster on one head; in every delivery order the prefix applies, neither branch applies, and one split is reported', () => {
+  const t = split();
+  const reference = foldWith(t.s, t.prefix);
+  assert.equal(headOf(reference), t.point);
+  for (const order of permutations([t.a, t.b, t.a2, t.b2])) {
+    const state = foldWith(t.s, [...t.prefix, ...order.map((item) => item.entry)]);
+    const label = order.map((item) => item.hash.slice(0, 6)).join(',');
+    assert.deepEqual(state.positions, reference.positions, label);
+    assert.deepEqual(state.pending, [{ at: t.point, branches: sorted(t.a.hash, t.b.hash), text: ROSTER_SPLIT_TEXT }], label);
+    assert.deepEqual(state.choices, [], label);
+    assert.deepEqual(state.refused, [], label);
+    const view = rosterView(state);
+    for (const item of [t.a, t.b, t.a2, t.b2]) {
+      assert.equal(view.rosterBranchPending?.(item.hash), true, label);
+      assert.equal(view.hasRoster(item.hash), false, label);
+      assert.equal(heldOf(state).get(item.hash), 'roster-branch-not-chosen', label);
+    }
+    assert.equal(view.rosterBranchPending?.(t.point), false, label);
+    // Neither branch changed the members state.
+    for (const id of ['inv-branch-a', 'inv-branch-b', 'inv-branch-a2', 'inv-branch-b2']) assert.ok(!state.members.invites.has(id), `${label} ${id}`);
+  }
+  assert.equal(ROSTER_SPLIT_TEXT, 'The roster was changed in two places at once. The lead or the deputy must choose.');
+});
+
+test('15.1 split -> chosen branch: the lead\'s roster.choose naming the deputy\'s branch applies, that branch continues in order, and the other branch stays unapplied and is listed, in every delivery order', () => {
+  const t = split();
+  const choose = t.s.world.rosterEntry(t.s.lead, 'roster.choose', { chosen: t.b.hash }, t.point);
+  const prefix = foldWith(t.s, t.prefix).positions;
+  for (const order of permutations([t.a, t.b, t.a2, t.b2, choose])) {
+    const state = foldWith(t.s, [...t.prefix, ...order.map((item) => item.entry)]);
+    const label = order.map((item) => item.hash.slice(0, 6)).join(',');
+    assert.deepEqual(state.positions, [...prefix, choose.hash, t.b.hash, t.b2.hash], label);
+    assert.deepEqual(state.pending, [], label);
+    assert.deepEqual(state.choices, [{ at: t.point, branches: sorted(t.a.hash, t.b.hash), chosen: t.b.hash, choose: choose.hash }], label);
+    assert.deepEqual(state.refused, [], label);
+    assert.deepEqual([...heldOf(state)].filter(([, reason]) => reason !== 'unknown-writer').sort(), sorted(t.a.hash, t.a2.hash).map((hash) => [hash, 'roster-branch-not-chosen']), label);
+    const view = rosterView(state);
+    assert.equal(view.rosterBranchPending?.(t.a.hash), true, label);
+    assert.equal(view.rosterBranchPending?.(t.a2.hash), true, label);
+    assert.equal(view.rosterBranchPending?.(t.b.hash), false, label);
+    assert.equal(view.hasRoster(t.b2.hash), true, label);
+    assert.ok(state.members.invites.has('inv-branch-b') && state.members.invites.has('inv-branch-b2'), label);
+    assert.ok(!state.members.invites.has('inv-branch-a') && !state.members.invites.has('inv-branch-a2'), label);
+  }
+});
+
+test('the deputy\'s roster.choose is refused choose-not-allowed while the lead has an active device and has not handed over, and applies once the deputy holds the lead', () => {
+  const t = split();
+  const base = [...t.prefix, t.a.entry, t.b.entry];
+  const byDeputy = t.s.world.rosterEntry(t.s.dee, 'roster.choose', { chosen: t.b.hash }, t.point);
+  const refused = foldWith(t.s, [...base, byDeputy.entry]);
+  assert.deepEqual(refusalsOf(refused), [[byDeputy.hash, 'roster.choose', 'choose-not-allowed']]);
+  assert.deepEqual(refused.pending.map((item) => item.at), [t.point]);
+  assert.equal(headOf(refused), t.point);
+  // A plain member's choice never reaches the choice rule: the member may not write the roster.
+  const byMember = t.s.world.rosterEntry(t.s.em, 'roster.choose', { chosen: t.b.hash }, t.point);
+  assert.deepEqual(refusalsOf(foldWith(t.s, [...base, byMember.entry])), [[byMember.hash, 'roster.choose', 'not-a-roster-writer']]);
+
+  // The lead is lost: the deputy hands over to itself with reason lead-lost (on a fresh line, before any split), names a deputy, and a split between
+  // the two is then the new lead's to choose.
+  const s = staff();
+  const named = s.world.rosterEntry(s.lead, 'deputy.name', { member: s.dee.member }, s.head);
+  const handover = s.world.rosterEntry(s.dee, 'lead.handover', { to: s.dee.member, reason: 'lead-lost' }, named.hash);
+  const next = s.world.rosterEntry(s.dee, 'deputy.name', { member: s.eve.member }, handover.hash);
+  const one = inviteBy(s.world, s.dee, next.hash, 'inv-one');
+  const two = inviteBy(s.world, s.eve, next.hash, 'inv-two');
+  const pendingState = s.world.foldRoster();
+  assert.deepEqual(pendingState.pending, [{ at: next.hash, branches: sorted(one.hash, two.hash), text: ROSTER_SPLIT_TEXT }]);
+  const chosen = s.world.rosterEntry(s.dee, 'roster.choose', { chosen: two.hash }, next.hash);
+  const state = s.world.foldRoster();
+  assert.deepEqual(state.refused, []);
+  assert.deepEqual(state.positions.slice(-3), [next.hash, chosen.hash, two.hash]);
+  assert.deepEqual(state.pending, []);
+  assert.ok(state.members.invites.has('inv-two') && !state.members.invites.has('inv-one'));
+  // The new deputy may not choose while the new lead has an active device.
+  const byNewDeputy = s.world.rosterEntry(s.eve, 'roster.choose', { chosen: one.hash }, next.hash);
+  const contested = s.world.foldRoster({ entries: s.world.entries.filter((entry) => entry !== chosen.entry) });
+  assert.deepEqual(refusalsOf(contested), [[byNewDeputy.hash, 'roster.choose', 'choose-not-allowed']]);
+  assert.equal(contested.pending.length, 1);
+});
+
+test('a roster.choose naming a hash that is not a child of the split point is refused choose-not-a-branch and the split stays pending', () => {
+  const t = split();
+  const base = [...t.prefix, t.a.entry, t.b.entry, t.a2.entry];
+  for (const chosen of [t.a2.hash, t.point, 'f'.repeat(64)]) {
+    const choose = t.s.world.rosterEntry(t.s.lead, 'roster.choose', { chosen }, t.point);
+    const state = foldWith(t.s, [...base, choose.entry]);
+    assert.deepEqual(refusalsOf(state), [[choose.hash, 'roster.choose', 'choose-not-a-branch']], chosen);
+    assert.deepEqual(state.pending, [{ at: t.point, branches: sorted(t.a.hash, t.b.hash), text: ROSTER_SPLIT_TEXT }], chosen);
+    assert.equal(headOf(state), t.point, chosen);
+  }
+});
+
+test('two choices at one split: the one signed later applies and the other is refused choose-superseded, so a person can always change the choice', () => {
+  const t = split();
+  const base = [...t.prefix, t.a.entry, t.b.entry];
+  const first = t.s.world.rosterEntry(t.s.lead, 'roster.choose', { chosen: t.a.hash }, t.point, { at: '2026-11-19T11:05:00.000Z' });
+  const second = t.s.world.rosterEntry(t.s.lead, 'roster.choose', { chosen: t.b.hash }, t.point, { at: '2026-11-19T11:06:00.000Z' });
+  for (const order of permutations([first, second])) {
+    const state = foldWith(t.s, [...base, ...order.map((item) => item.entry)]);
+    assert.deepEqual(refusalsOf(state), [[first.hash, 'roster.choose', 'choose-superseded']]);
+    assert.deepEqual(state.positions.slice(-2), [second.hash, t.b.hash]);
+    assert.equal(rosterView(state).rosterBranchPending?.(t.a.hash), true);
+  }
+});
+
+const PRODUCT = 'intel-estimate';
+
+function productText(result: FoldResult): string | undefined {
+  const products = result.families.doc as ProductTextOutput[];
+  return products.find((product) => product.product === PRODUCT)?.text;
+}
+
+test('a doc.update from an observer is kept observer-only and changes no text, while a member admitted in the same roster writes normally', () => {
+  const s = staff();
+  const observer = s.world.device('OBS', 'mbr-obs');
+  const watched = admit(s.world, s.lead, s.head, observer, 5, ['observer']);
+  const roster = watched.admit.hash;
+  const memberDoc = createLocalDoc(clientIdOf(3, 0));
+  const memberClient = s.world.write(s.em, { kind: 'doc.client', data: { product: PRODUCT, clientId: clientIdOf(3, 0), actor: { kind: 'person' } }, roster });
+  const memberUpdate = s.world.write(s.em, { kind: 'doc.update', data: updateData(PRODUCT, localInsert(memberDoc, 0, 'Enemy holds the ridge.')), roster, deps: [memberClient] });
+  const observerDoc = createLocalDoc(clientIdOf(5, 0));
+  const observerClient = s.world.write(observer, { kind: 'doc.client', data: { product: PRODUCT, clientId: clientIdOf(5, 0), actor: { kind: 'person' } }, roster });
+  const observerUpdate = s.world.write(observer, { kind: 'doc.update', data: updateData(PRODUCT, localInsert(observerDoc, 0, 'Observer text. ')), roster, deps: [observerClient] });
+  const state = s.world.foldRoster();
+  assert.equal(headOf(state), roster);
+  const view = rosterView(state);
+  assert.equal(view.hasRole(observer.member, 'observer', roster), true);
+  assert.equal(view.hasRole(observer.member, 'member', roster), false);
+  const result = foldEntries(s.world.entries, s.world.ctxFor(state, s.world.ringFor(s.lead)));
+  assert.deepEqual(result.kept.filter((item) => item.reason === 'observer-only').map((item) => item.hash).sort(), sorted(observerClient.hash, observerUpdate.hash));
+  assert.ok(result.applied.includes(memberClient.hash) && result.applied.includes(memberUpdate.hash));
+  assert.ok(!result.applied.includes(observerUpdate.hash));
+  assert.equal(productText(result), 'Enemy holds the ridge.');
+});
+
+test('the main fold holds a doc.update citing a branch nobody chose roster-branch-not-chosen, and applies the one citing the chosen branch once the context is replaced after the choice', () => {
+  const t = split();
+  const { s } = t;
+  const doc = createLocalDoc(clientIdOf(3, 0));
+  const client = s.world.write(s.em, { kind: 'doc.client', data: { product: PRODUCT, clientId: clientIdOf(3, 0), actor: { kind: 'person' } }, roster: t.point });
+  const onB = s.world.write(s.em, { kind: 'doc.update', data: updateData(PRODUCT, localInsert(doc, 0, 'Ridge held.')), roster: t.b.hash, deps: [client] });
+  const onA = s.world.write(s.em, { kind: 'doc.update', data: updateData(PRODUCT, localInsert(doc, 11, ' Bridge down.')), roster: t.a.hash, deps: [onB] });
+  const keys = s.world.ringFor(s.lead);
+
+  // Before the choice: both updates wait, kept and never applied; nothing is rejected.
+  const splitRoster = s.world.foldRoster();
+  assert.equal(splitRoster.pending.length, 1);
+  const before = addEntries(createFoldState(s.world.ctxFor(splitRoster, keys)), s.world.entries);
+  const heldBefore = new Map(before.result.held.map((item) => [item.hash, item.reason]));
+  assert.equal(heldBefore.get(onB.hash), 'roster-branch-not-chosen');
+  assert.equal(heldBefore.get(onA.hash), 'roster-branch-not-chosen');
+  assert.ok(before.result.applied.includes(client.hash));
+  assert.equal(before.result.rejected.length, 0);
+  assert.equal(productText(before.result) ?? '', '');
+
+  // The lead chooses branch b; the store replaces the context with the new roster view and the held update citing b applies.
+  const choose = s.world.rosterEntry(s.lead, 'roster.choose', { chosen: t.b.hash }, t.point);
+  const chosenRoster = s.world.foldRoster();
+  assert.deepEqual(chosenRoster.pending, []);
+  const after = addEntries(before, [choose.entry], s.world.ctxFor(chosenRoster, keys));
+  assert.ok(after.result.applied.includes(onB.hash));
+  assert.equal(new Map(after.result.held.map((item) => [item.hash, item.reason])).get(onA.hash), 'roster-branch-not-chosen');
+  assert.equal(productText(after.result), 'Ridge held.');
+  // A from-scratch fold under the new roster agrees.
+  const scratch = foldEntries(s.world.entries, s.world.ctxFor(chosenRoster, keys));
+  assert.deepEqual(scratch.applied, after.result.applied);
+  assert.equal(productText(scratch), 'Ridge held.');
+});
+
+test('every new refusal, hold and keep reason is a plain sentence without an em-dash', () => {
+  const texts: Array<[string, string]> = [
+    ...['deputy-cannot-name-deputy', 'not-an-active-member', 'names-the-lead', 'handover-not-allowed', 'choose-not-allowed', 'choose-not-a-branch', 'choose-superseded']
+      .map((reason): [string, string] => [reason, (ROSTER_REFUSALS as Record<string, string>)[reason]]),
+    ['roster-branch-not-chosen', VERIFY_HOLDS['roster-branch-not-chosen']],
+    ['observer-only', KEEP_REASONS['observer-only']],
+    ['split', ROSTER_SPLIT_TEXT]
+  ];
+  for (const [reason, text] of texts) {
+    assert.ok(typeof text === 'string' && text.length > 20 && text.endsWith('.'), reason);
+    assert.ok(!text.includes('\u2014'), reason);
+  }
 });
