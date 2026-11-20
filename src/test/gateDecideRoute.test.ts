@@ -12,7 +12,9 @@ import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { DEFAULT_ROUTING, PRIVATE_FLOOR_TEXT, ROUTE_REFUSALS, decideRoute, endpointOf, parseRouting } from '../domain/gate/routing';
 import type { RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
-import { FIXED_NOW } from './helpers/policyFixtures';
+import type { AuthorizationBody } from '../domain/gate/authorizations';
+import type { VerifiedAuthorization } from '../domain/gate/routing';
+import { DAY_MS, FIXED_NOW, authorizationFor } from './helpers/policyFixtures';
 
 function label(scale: string, level: string, extra: Partial<Label> = {}): Label {
   return { scale, level, compartments: [], releasability: [], handling: [], ...extra };
@@ -157,4 +159,173 @@ test('allowedBy starts with the routing record of the strictest label, or of the
   assert.deepEqual(empty.allowedBy, [{ kind: 'routing', label: 'org/Internal' }]);
   assert.equal(decision.wouldRefuse, undefined);
   assert.equal(decision.pinTo, undefined);
+});
+
+// ---- Task 2: a pin or binding, an authorization, an accredited device and residency (D-26, D-27, D-33, D-34, D-52, D-54) ----
+
+const PROTECTED_B = label('ca-protected', 'Protected B');
+const NATO_RESTRICTED = label('nato', 'NATO Restricted');
+const SECRET = label('ca-classified', 'Secret');
+const PINS = [pin('models-ca-one'), pin('models-ca-two')].sort();
+const MODELS_CA_PB = { ...MODELS_CA, maxLabel: ['ca-protected/Protected B', 'nato/NATO Restricted', 'org/Restricted'] };
+const PB_ROUTING = routingWith({}, 'models.example.org');
+
+function verified(body: AuthorizationBody, selfSigned = false): VerifiedAuthorization {
+  return { body, selfSigned };
+}
+
+function pbFor(endpoint: string, extra: Partial<Parameters<typeof authorizationFor>[0]> = {}): VerifiedAuthorization {
+  return verified(authorizationFor({ kind: 'protected-b', id: `pb-${endpoint}`, subject: { endpoint }, ...extra }));
+}
+
+test('Protected B on your organization\'s plain server: no pin is route.endpoint-pin, a pin and no authorization is route.authorization-missing, both go with pinTo', () => {
+  const noPins = decideRoute(markOf(PROTECTED_B), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: endpoints(MODELS_CA_PB), authorizations: [pbFor('models-ca')] }));
+  assert.deepEqual({ allowed: noPins.allowed, rule: noPins.rule, reason: noPins.reason }, { allowed: false, rule: 'route.endpoint-pin', reason: ROUTE_REFUSALS['route.endpoint-pin'] });
+  const pinned = endpoints({ ...MODELS_CA_PB, tlsPins: PINS });
+  const noAuthorization = decideRoute(markOf(PROTECTED_B), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: pinned }));
+  assert.deepEqual({ allowed: noAuthorization.allowed, rule: noAuthorization.rule, reason: noAuthorization.reason }, { allowed: false, rule: 'route.authorization-missing', reason: ROUTE_REFUSALS['route.authorization-missing'] });
+  const authorization = pbFor('models-ca', { id: 'pb-007', scope: { labels: ['ca-protected/Protected B'] } });
+  const allowed = decideRoute(markOf(PROTECTED_B), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: pinned, authorizations: [authorization] }));
+  assert.deepEqual({ allowed: allowed.allowed, rule: allowed.rule }, { allowed: true, rule: 'route.local-only' });
+  assert.deepEqual(allowed.pinTo, PINS);
+  assert.deepEqual(allowed.allowedBy, [
+    { kind: 'routing', label: 'ca-protected/Protected B' },
+    { kind: 'authorization', authorizationKind: 'protected-b', id: 'pb-007', name: 'Alex Example', expiresAt: authorization.body.expiresAt, selfSigned: false, label: 'ca-protected/Protected B' }
+  ]);
+});
+
+test('T-41-102: an authorization naming another place, an expired or revoked one, one scoped to another project, label or use, or another kind refuses', () => {
+  const pinned = endpoints({ ...MODELS_CA_PB, tlsPins: PINS });
+  const refusedWith = (authorization: VerifiedAuthorization, extra: Partial<RoutePolicy> = {}, facts: RouteFacts = LOCAL_REMOTE): void => {
+    const decision = decideRoute(markOf(PROTECTED_B), PB_ROUTING, facts, undefined, undefined, policyWith({ endpoints: pinned, authorizations: [authorization], ...extra }));
+    assert.equal(decision.rule, 'route.authorization-missing', authorization.body.id);
+  };
+  refusedWith(pbFor('models-other'));
+  refusedWith(pbFor('models-ca', { id: 'expired', issuedAt: new Date(NOW - 400 * DAY_MS).toISOString(), days: 365 }));
+  refusedWith(pbFor('models-ca', { id: 'revoked', revokedBy: 'pb-008' }));
+  refusedWith(pbFor('models-ca', { id: 'other-project', scope: { projects: ['project-beta'] } }), { project: 'project-alpha' });
+  // D-54: no project is known in this phase, so a record scoped to projects covers nothing yet.
+  refusedWith(pbFor('models-ca', { id: 'scoped', scope: { projects: ['project-alpha'] } }));
+  refusedWith(pbFor('models-ca', { id: 'other-label', scope: { labels: ['nato/NATO Restricted'] } }));
+  refusedWith(pbFor('models-ca', { id: 'no-use', scope: { uses: ['t1'] } }));
+  refusedWith(pbFor('models-ca', { id: 'other-use', scope: { uses: ['t2'] } }), {}, { ...LOCAL_REMOTE, use: 'T1' });
+  refusedWith(verified(authorizationFor({ kind: 'residency-exception', id: 'other-kind', subject: { endpoint: 'models-ca' } })));
+  // The allowed side of each: the right project, and the use in lowercase.
+  const scoped = decideRoute(markOf(PROTECTED_B), PB_ROUTING, { ...LOCAL_REMOTE, use: 'T1' }, undefined, undefined, policyWith({
+    endpoints: pinned, project: 'project-alpha', authorizations: [pbFor('models-ca', { scope: { projects: ['project-alpha'], uses: ['t1'] } })]
+  }));
+  assert.equal(scoped.allowed, true);
+});
+
+test('D-52: org Restricted on that server needs neither a pin nor an authorization; NATO Restricted needs both', () => {
+  const unpinned = policyWith({ endpoints: endpoints(MODELS_CA_PB) });
+  const restricted = decideRoute(markOf(org('Restricted')), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, unpinned);
+  assert.deepEqual({ allowed: restricted.allowed, rule: restricted.rule, pinTo: restricted.pinTo }, { allowed: true, rule: 'route.local-only', pinTo: undefined });
+  assert.equal(decideRoute(markOf(NATO_RESTRICTED), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, unpinned).rule, 'route.endpoint-pin');
+  const pinned = endpoints({ ...MODELS_CA_PB, tlsPins: PINS });
+  assert.equal(decideRoute(markOf(NATO_RESTRICTED), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: pinned })).rule, 'route.authorization-missing');
+  const nato = decideRoute(markOf(NATO_RESTRICTED), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: pinned, authorizations: [pbFor('models-ca')] }));
+  assert.deepEqual({ allowed: nato.allowed, pinTo: nato.pinTo }, { allowed: true, pinTo: PINS });
+  // A pin on the entry is carried only when a level needs it.
+  assert.equal(decideRoute(markOf(org('Restricted')), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: pinned })).pinTo, undefined);
+  // This computer needs neither, for any level.
+  assert.equal(decideRoute(markOf(PROTECTED_B), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith()).allowed, true);
+});
+
+test('Protected B routed any-cloud: NEAR AI Cloud listed as private hardware needs a fresh bound connection and the authorization', () => {
+  const routing = routingWith({ 'ca-protected/Protected B': 'any-cloud' });
+  const near = endpoints({ id: 'near', class: 'nearai-tee', host: 'cloud-api.near.ai', scheme: 'https', tlsPins: [], region: 'US', maxLabel: ['ca-protected/Protected B'], provider: 'nearai' });
+  const policy = policyWith({ endpoints: near, authorizations: [pbFor('near')] });
+  assert.equal(decideRoute(markOf(PROTECTED_B), routing, NEAR_TEE).allowed, true, 'the routing table alone sends it');
+  const bound = decideRoute(markOf(PROTECTED_B), routing, NEAR_TEE_BOUND, undefined, undefined, policy);
+  assert.deepEqual({ allowed: bound.allowed, rule: bound.rule, pinTo: bound.pinTo }, { allowed: true, rule: 'route.any-cloud', pinTo: undefined });
+  for (const facts of [NEAR_TEE, { ...NEAR_TEE_BOUND, now: NOW + 3_600_000 }, { ...NEAR_TEE_BOUND, binding: { ...NEAR_TEE_BOUND.binding!, host: 'https://other.example.org' } }]) {
+    assert.equal(decideRoute(markOf(PROTECTED_B), routing, facts, undefined, undefined, policy).rule, 'route.endpoint-pin');
+  }
+  assert.equal(decideRoute(markOf(PROTECTED_B), routing, NEAR_TEE_BOUND, undefined, undefined, policyWith({ endpoints: near })).rule, 'route.authorization-missing');
+});
+
+test('Protected B routed any-cloud: a vendor region with ceiling and authorization goes (no pin rule); the implicit NEAR place cannot be named; an unnamed host is unknown', () => {
+  const routing = routingWith({ 'ca-protected/Protected B': 'any-cloud' });
+  const vendor = endpoints({ id: 'vendor-ca', class: 'vendor-region', host: 'ca.example.net', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected B'], provider: 'example' });
+  const facts: RouteFacts = { clientRoute: 'near', host: 'https://ca.example.net/v1', nearEndpoint: false, model: { id: 'example/chat', privacyBoundary: 'cloud' }, attestationFailed: false, now: NOW };
+  const allowed = decideRoute(markOf(PROTECTED_B), routing, facts, undefined, undefined, policyWith({ endpoints: vendor, authorizations: [pbFor('vendor-ca')] }));
+  assert.deepEqual({ allowed: allowed.allowed, pinTo: allowed.pinTo, place: allowed.endpoint?.id }, { allowed: true, pinTo: undefined, place: 'vendor-ca' });
+  assert.equal(decideRoute(markOf(PROTECTED_B), routing, facts, undefined, undefined, policyWith({ endpoints: vendor })).rule, 'route.authorization-missing');
+  // NEAR AI Cloud with no entry: the binding passes, but a place with no id cannot be named by an authorization.
+  assert.equal(decideRoute(markOf(PROTECTED_B), routing, NEAR_TEE_BOUND, undefined, undefined, policyWith({ authorizations: [pbFor('near')] })).rule, 'route.authorization-missing');
+  assert.equal(decideRoute(markOf(PROTECTED_B), routing, NEAR_TEE, undefined, undefined, policyWith()).rule, 'route.endpoint-pin');
+  // A host no entry names: unknown for a level that needs an authorization, allowed at any-cloud for one that does not.
+  const unnamed: RouteFacts = { ...facts, host: 'https://unlisted.example.net' };
+  assert.equal(decideRoute(markOf(PROTECTED_B), routing, unnamed, undefined, undefined, policyWith({ endpoints: vendor })).rule, 'route.endpoint-unknown');
+  assert.equal(decideRoute(markOf(org('Public')), routing, unnamed, undefined, undefined, policyWith({ endpoints: vendor })).allowed, true);
+});
+
+test('D-34: Secret on this computer with no accredited-device authorization is allowed and reported, naming the label', () => {
+  const decision = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1' }));
+  assert.deepEqual({ allowed: decision.allowed, rule: decision.rule, wouldRefuse: decision.wouldRefuse }, { allowed: true, rule: 'route.local-only', wouldRefuse: ['route.accredited-device'] });
+  assert.deepEqual(decision.notAccredited, SECRET);
+  // The first such label of the mark is the one named.
+  assert.deepEqual(decideRoute(markOf(org('Restricted'), label('nato', 'NATO Secret'), SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith()).notAccredited, label('nato', 'NATO Secret'));
+  // Protected B and org Restricted on this computer are not this-computer-only levels: nothing is reported.
+  const protectedB = decideRoute(markOf(PROTECTED_B), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith());
+  assert.deepEqual({ wouldRefuse: protectedB.wouldRefuse, notAccredited: protectedB.notAccredited }, { wouldRefuse: undefined, notAccredited: undefined });
+});
+
+test('D-34: an accredited-device authorization for this device clears the report and is recorded; one for another device does not', () => {
+  const covering = verified(authorizationFor({ kind: 'accredited-device', id: 'accredited-device-3', subject: { device: 'device-1' } }), true);
+  const decision = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [covering] }));
+  assert.deepEqual({ allowed: decision.allowed, wouldRefuse: decision.wouldRefuse, notAccredited: decision.notAccredited }, { allowed: true, wouldRefuse: undefined, notAccredited: undefined });
+  assert.deepEqual(decision.allowedBy?.[1], { kind: 'authorization', authorizationKind: 'accredited-device', id: 'accredited-device-3', name: 'Alex Example', expiresAt: covering.body.expiresAt, selfSigned: true, label: 'ca-classified/Secret' });
+  for (const policy of [policyWith({ deviceId: 'device-2', authorizations: [covering] }), policyWith({ authorizations: [covering] })]) {
+    assert.deepEqual(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policy).wouldRefuse, ['route.accredited-device']);
+  }
+});
+
+test('D-34: requireAccreditedDevice refuses only with an organization layer present; without one it still only reports', () => {
+  const required = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ organization: true, requireAccreditedDevice: true, deviceId: 'device-1' }));
+  assert.deepEqual({ allowed: required.allowed, rule: required.rule, reason: required.reason }, { allowed: false, rule: 'route.accredited-device', reason: ROUTE_REFUSALS['route.accredited-device'] });
+  for (const [organization, requireAccreditedDevice] of [[false, true], [true, false], [false, false]] as const) {
+    const reported = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ organization, requireAccreditedDevice, deviceId: 'device-1' }));
+    assert.deepEqual({ allowed: reported.allowed, wouldRefuse: reported.wouldRefuse }, { allowed: true, wouldRefuse: ['route.accredited-device'] }, `${String(organization)} ${String(requireAccreditedDevice)}`);
+  }
+  // A covering authorization lets it go under the switch too.
+  const covering = verified(authorizationFor({ kind: 'accredited-device', subject: { device: 'device-1' } }));
+  assert.equal(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ organization: true, requireAccreditedDevice: true, deviceId: 'device-1', authorizations: [covering] })).allowed, true);
+});
+
+test('D-33: route.residency refuses a place outside the regions your rules name; a place inside them, this computer and no residency section go', () => {
+  const routing = routingWith({}, 'models.example.org');
+  const us = endpoints({ ...MODELS_CA, region: 'US' });
+  const residency = { v: 1 as const, required: ['CA' as const] };
+  const refused = decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: us, residency }));
+  assert.deepEqual({ allowed: refused.allowed, rule: refused.rule, reason: refused.reason }, { allowed: false, rule: 'route.residency', reason: ROUTE_REFUSALS['route.residency'] });
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: endpoints(MODELS_CA), residency })).allowed, true);
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: us })).allowed, true, 'no residency section');
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_OK, undefined, undefined, policyWith({ endpoints: us, residency })).allowed, true, 'this computer');
+  // NEAR AI Cloud's implicit place states no region, so it never satisfies a residency rule.
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE_BOUND, undefined, undefined, policyWith({ residency })).rule, 'route.residency');
+  // At any-cloud a host no entry names counts as unstated.
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, { ...LOCAL_REMOTE, clientRoute: 'near' }, undefined, undefined, policyWith({ residency })).rule, 'route.residency');
+  // byLevel holds only the labels it names.
+  const byLevel = { v: 1 as const, byLevel: { 'org/Internal': ['CA' as const] } };
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: us, residency: byLevel })).rule, 'route.residency');
+  assert.equal(decideRoute(markOf(org('Public')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: us, residency: byLevel })).allowed, true);
+});
+
+test('D-33: a residency exception covering the place lets it go and is recorded as what allowed it', () => {
+  const routing = routingWith({}, 'models.example.org');
+  const us = endpoints({ ...MODELS_CA, region: 'US' });
+  const exception = verified(authorizationFor({ kind: 'residency-exception', id: 'residency-exception-2', subject: { endpoint: 'models-ca' }, scope: { labels: ['org/Internal'] } }));
+  const decision = decideRoute(markOf(org('Internal')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: us, residency: { v: 1, required: ['CA'] }, authorizations: [exception] }));
+  assert.equal(decision.allowed, true);
+  assert.deepEqual(decision.allowedBy?.[1], { kind: 'authorization', authorizationKind: 'residency-exception', id: 'residency-exception-2', name: 'Alex Example', expiresAt: exception.body.expiresAt, selfSigned: false });
+});
+
+test('D-36 order: the ceiling is decided before residency, and a pin before residency', () => {
+  const routing = routingWith({}, 'models.example.org');
+  const residency = { v: 1 as const, required: ['EU' as const] };
+  assert.equal(decideRoute(markOf(org('Confidential')), routing, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: endpoints(MODELS_CA), residency })).rule, 'route.endpoint-ceiling');
+  assert.equal(decideRoute(markOf(PROTECTED_B), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: endpoints(MODELS_CA_PB), residency, authorizations: [pbFor('models-ca')] })).rule, 'route.endpoint-pin');
+  assert.equal(decideRoute(markOf(PROTECTED_B), PB_ROUTING, LOCAL_REMOTE, undefined, undefined, policyWith({ endpoints: endpoints({ ...MODELS_CA_PB, tlsPins: PINS }), residency })).rule, 'route.authorization-missing');
 });

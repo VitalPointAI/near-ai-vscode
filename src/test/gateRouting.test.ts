@@ -5,6 +5,7 @@
 // (route.authorization-missing), an accredited device (route.accredited-device, reported unless your organization turns refusal on), residency
 // (route.residency), the passport (route.passport, reported only) and clearance (route.clearance). gateDecideRoute.test.ts holds their behaviour.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import * as config from '../domain/config';
 import { isLoopbackHost, isSecureEndpoint } from '../domain/config';
@@ -87,6 +88,9 @@ function policyOf(...entries: Array<Record<string, unknown>>): RoutePolicy {
 }
 
 const MODELS_INTERNAL = { id: 'models', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Internal'] };
+const MODELS_PROTECTED_B = { ...MODELS_INTERNAL, maxLabel: ['ca-protected/Protected B', 'org/Restricted'] };
+/** A TLS pin's shape (SHA-256 hex), made at test time from a word. */
+const TEST_PIN = createHash('sha256').update('routing-test-pin', 'utf8').digest('hex');
 
 test('every rule id can be reached, and every refusing rule has one plain sentence that says nothing was sent', () => {
   const reached = new Set<string>();
@@ -109,7 +113,11 @@ test('every rule id can be reached, and every refusing rule has one plain senten
     // Phase 41 (D-36, D-37): the policy steps, each reached by a request the checks above allowed.
     [markOf(org('Public')), DEFAULT_ROUTING, { ...NEAR_CLOUD, allowedModels: ['example/other-model'] }],
     [markOf(org('Restricted')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf()],
-    [markOf(org('Restricted')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf(MODELS_INTERNAL)]
+    [markOf(org('Restricted')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf(MODELS_INTERNAL)],
+    [markOf(label('ca-protected', 'Protected B')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf(MODELS_PROTECTED_B)],
+    [markOf(label('ca-protected', 'Protected B')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf({ ...MODELS_PROTECTED_B, tlsPins: [TEST_PIN] })],
+    [markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, LOCAL_OK, { ...policyOf(), organization: true, requireAccreditedDevice: true }],
+    [markOf(org('Internal')), withLocalHosts('models.example.org'), LOCAL_REMOTE, { ...policyOf(MODELS_INTERNAL), residency: { v: 1, required: ['EU'] } }]
   ];
   for (const [mark, routing, facts, policy] of cases) reached.add(decideRoute(mark, routing, facts, undefined, undefined, policy).rule);
   assert.deepEqual([...reached].sort(), [...ROUTE_RULES].sort());
