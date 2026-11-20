@@ -138,7 +138,7 @@ completed: 2026-11-20
 2. **Task 2: rollback, tampered mark, torn tail, blob size:** `8be2fcb3` (test). The guards themselves landed in the Task 1 store; this commit adds the tests, each checked against the guard disabled.
 3. **Task 3: register lock and two processes:** `41de9926` (feat)
 4. **Task 4: foreign entries, held list, grants, checkpoints, SECURITY.md:** `807ea99d` (feat)
-5. **Follow-up:** `e1316b04` (test). The two em-dash checks in the test now use `—` instead of the literal character.
+5. **Follow-up:** `e1316b04` (test). The two em-dash checks in the test now spell the character as a regular expression escape (backslash u2014) instead of the literal character.
 
 ## Test results
 
