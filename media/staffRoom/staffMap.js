@@ -188,26 +188,26 @@
     tableButton.addEventListener('click', () => showTable(!tableOn));
     fullButton.addEventListener('click', () => setFull(!full));
     // Escape leaves the full map (a drawer open over it closes first, and stops the key there); Tab stays inside the full map while it covers the room.
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-      document.addEventListener('keydown', (event) => {
-        if (!full || destroyed) return;
-        if (event.key === 'Escape') {
-          if ((drawer && drawer.isOpen()) || (copView && copView.layers && copView.layers())) return;
-          if (event.preventDefault) event.preventDefault();
-          setFull(false);
-          if (typeof fullButton.focus === 'function') fullButton.focus();
-          return;
-        }
-        if (event.key === 'Tab' && drawerApi) {
-          const list = drawerApi.focusables(box);
-          if (!list.length) return;
-          const active = document.activeElement;
-          const first = list[0], last = list[list.length - 1];
-          if (event.shiftKey && (active === first || !drawerApi.within(box, active))) { if (event.preventDefault) event.preventDefault(); last.focus(); }
-          else if (!event.shiftKey && (active === last || !drawerApi.within(box, active))) { if (event.preventDefault) event.preventDefault(); first.focus(); }
-        }
-      });
-    }
+    // The listener is on the document, so destroy() takes it off again: a map made and destroyed many times leaves no handler behind.
+    const onDocumentKey = (event) => {
+      if (!full || destroyed) return;
+      if (event.key === 'Escape') {
+        if ((drawer && drawer.isOpen()) || (copView && copView.layers && copView.layers())) return;
+        if (event.preventDefault) event.preventDefault();
+        setFull(false);
+        if (typeof fullButton.focus === 'function') fullButton.focus();
+        return;
+      }
+      if (event.key === 'Tab' && drawerApi) {
+        const list = drawerApi.focusables(box);
+        if (!list.length) return;
+        const active = document.activeElement;
+        const first = list[0], last = list[list.length - 1];
+        if (event.shiftKey && (active === first || !drawerApi.within(box, active))) { if (event.preventDefault) event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && (active === last || !drawerApi.within(box, active))) { if (event.preventDefault) event.preventDefault(); first.focus(); }
+      }
+    };
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', onDocumentKey);
 
     /** The map over the whole Staff Room panel, or back in its place. Only opacity and transform animate, and not under reduced motion or Calm. */
     function setFull(on) {
@@ -802,7 +802,11 @@
       setFull, fullShown: () => full, drawer: () => drawer,
       /** Fits the COP map to the exercise frame again once its box has its new size (the map moved to another workspace). */
       refit: () => { if (copView && copView.fitFrame) setTimeout(() => { if (copView) copView.fitFrame(); }, 120); },
-      destroy: () => { destroyed = true; if (drawer) drawer.destroy(); if (copView) copView.destroy(); copView = undefined; box.remove(); }
+      destroy: () => {
+        destroyed = true;
+        if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') document.removeEventListener('keydown', onDocumentKey);
+        if (drawer) drawer.destroy(); if (copView) copView.destroy(); copView = undefined; box.remove();
+      }
     };
   }
 

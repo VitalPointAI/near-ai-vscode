@@ -96,6 +96,7 @@ class FakeDoc {
   createElementNS(_ns: string, tag: string) { return new FakeNode(tag, this); }
   createTextNode(text: string) { const node = new FakeNode('#text', this); node.textContent = text; return node; }
   addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
+  removeEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, (this.listeners.get(type) ?? []).filter((each) => each !== listener)); }
   key(key: string, target?: FakeNode) { for (const listener of this.listeners.get('keydown') ?? []) listener({ key, target: target ?? this.activeElement ?? this.body, preventDefault() {} }); }
 }
 
@@ -842,6 +843,22 @@ test('Full map fills the Staff Room with the map, and Escape or the button bring
     full.click();
     page.dispatch({ type: 'staff-room', model: { ...model, now: model.now + 1, map: { ...model.map, units: model.map.units.slice(1) } }, cues: [] });
     assert.ok(box.classList.contains('full'));
+  }
+});
+
+test('a destroyed map takes its document key listener (Escape, Tab) with it: making and destroying maps leaves none behind (#124 review)', async () => {
+  const { model } = await fixtureModel();
+  const page = await runPage({ reduced: true });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const baseline = (page.doc.listeners.get('keydown') ?? []).length;
+  const api = (page.window as { NearAiStaffMap: { create(container: FakeNode, options: Record<string, unknown>): { destroy(): void; setFull(on: boolean): void; fullShown(): boolean; render(model: unknown): void } } }).NearAiStaffMap;
+  for (let round = 0; round < 3; round += 1) {
+    const slot = page.doc.createElement('div');
+    page.doc.body.append(slot);
+    const map = api.create(slot, {});
+    assert.equal((page.doc.listeners.get('keydown') ?? []).length, baseline + 1, 'one listener while the map lives');
+    map.destroy();
+    assert.equal((page.doc.listeners.get('keydown') ?? []).length, baseline, `round ${round}: destroy() removed it`);
   }
 });
 
