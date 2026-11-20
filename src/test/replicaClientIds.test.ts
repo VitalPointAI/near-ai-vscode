@@ -6,7 +6,11 @@ import { CLIENT_COUNTER_BITS, CLIENT_COUNTER_SPAN, MAX_SLOT, clientIdOf, isSlot,
 import { MAX_CLIENT_ID } from '../domain/replica/kindSchemas/doc';
 import { ROSTER_ROLE_PATTERNS, staticRosterView } from '../domain/replica/rosterView';
 import type { StaticRosterSpec } from '../domain/replica/rosterView';
-import { createWorld } from './helpers/replicaWorld';
+import { applyRemote, docText, encodeFullState, inspectUpdate } from '../domain/replica/doc';
+import { foldEntries } from '../domain/replica/fold';
+import type { ProductTextOutput } from '../domain/replica/textFold';
+import { createWorld, permutations, rng, updateData } from './helpers/replicaWorld';
+import type { Editor, World, Written } from './helpers/replicaWorld';
 
 const ROSTER_0 = 'roster-0';
 const ROSTER_1 = 'roster-1';
@@ -148,4 +152,146 @@ test('createWorld called as every Phase 30 test calls it gives the roster it gav
   }
   assert.deepEqual(world.rosterSpec.rosters[0].members.map((member) => Object.keys(member).sort()), [['devices', 'member', 'name', 'roles'], ['devices', 'member', 'name', 'roles']]);
   assert.deepEqual(world.rosterSpec.rosters[0].members.flatMap((member) => member.devices.map((entry) => Object.keys(entry).sort())), [['publicKey', 'writer'], ['publicKey', 'writer']]);
+});
+
+// ---- Client ids bound to the writer's slot in the text reducer (D-03, D-41, plan 31-04) ----------------------------------------------------------
+
+const PRODUCT = 'intel-estimate';
+const sealed = (items: readonly Written[]) => items.map((item) => item.entry);
+const reasons = (result: ReturnType<typeof foldEntries>): Array<[string, string]> => result.refused.map((item): [string, string] => [item.hash, item.reason]).sort();
+
+function productOf(result: ReturnType<typeof foldEntries>): ProductTextOutput {
+  const products = result.families.doc as ProductTextOutput[];
+  assert.equal(products.length, 1);
+  return products[0];
+}
+
+// A holds slot 1 and B slot 2; N is admitted but has no slot.
+function slottedWorld(): World {
+  return createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'], slots: [1] }, { member: 'mbr-bbbb', devices: ['B'], slots: [2] }, { member: 'mbr-nnnn', devices: ['N'] }] });
+}
+
+test('with slots in the roster a writer registers ids of its own slot only: an id of another writer\'s slot is refused foreign-client-id', () => {
+  const world = slottedWorld();
+  const regA = world.editor('A', PRODUCT, clientIdOf(1, 0)).register();
+  const intoA = world.editor('B', PRODUCT, clientIdOf(1, 5)).register();
+  const b = world.editor('B', PRODUCT, clientIdOf(2, 0));
+  const regB = b.register();
+  const typed = b.insert(0, 'own range');
+  const result = foldEntries(sealed([regA, intoA, regB, typed]), world.ctx());
+  assert.deepEqual(reasons(result), [[intoA.hash, 'foreign-client-id']]);
+  assert.deepEqual(result.applied.slice().sort(), [regA.hash, regB.hash, typed.hash].sort());
+  const product = productOf(result);
+  assert.deepEqual(product.registrations.map((registration) => [registration.clientId, registration.writer]), [[clientIdOf(1, 0), world.writerOf('A')], [clientIdOf(2, 0), world.writerOf('B')]]);
+  assert.equal(product.text, 'own range');
+});
+
+test('two writers registering one id at once is not a race: in every delivery order the slot owner keeps it and the other is refused foreign-client-id', () => {
+  const world = slottedWorld();
+  const a = world.editor('A', PRODUCT, clientIdOf(1, 0));
+  const b = world.editor('B', PRODUCT, clientIdOf(1, 0));
+  const regB = b.register();
+  const regA = a.register();
+  const typedA = a.insert(0, 'from A');
+  const typedB = b.insert(0, 'from B');
+  const all = [regA, regB, typedA, typedB];
+  const reference = foldEntries(sealed(all), world.ctx());
+  assert.equal(reasons(reference).some(([hash, reason]) => hash === regB.hash && reason === 'foreign-client-id'), true);
+  for (const order of permutations(sealed(all))) {
+    const result = foldEntries(order, world.ctx());
+    assert.equal(result.applied.includes(regA.hash) && result.applied.includes(typedA.hash), true);
+    assert.deepEqual(result.refused.find((item) => item.hash === regB.hash)?.reason, 'foreign-client-id');
+    assert.equal(result.applied.includes(typedB.hash), false);
+    assert.deepEqual(result.digests, reference.digests);
+    assert.equal(productOf(result).text, 'from A');
+    assert.deepEqual(productOf(result).registrations.map((registration) => registration.writer), [world.writerOf('A')]);
+  }
+});
+
+test('when the roster names owners, an id below 2^20, an id of a slot nobody holds and any id of a device without a slot are refused foreign-client-id', () => {
+  const world = slottedWorld();
+  const low = world.editor('A', PRODUCT, 11).register();
+  const top = world.editor('A', PRODUCT, clientIdOf(1, 0) - 1).register();
+  const empty = world.editor('A', PRODUCT, clientIdOf(9, 0)).register();
+  const unslotted = world.editor('N', PRODUCT, clientIdOf(3, 0)).register();
+  const result = foldEntries(sealed([low, top, empty, unslotted]), world.ctx());
+  assert.deepEqual(reasons(result), [low, top, empty, unslotted].map((item): [string, string] => [item.hash, 'foreign-client-id']).sort());
+  assert.deepEqual(result.applied, []);
+});
+
+test('inside its own range a device that registers an id again under another actor is still refused client-collision', () => {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'], slots: [1], agentSeats: ['j2-analyst'] }] });
+  const first = world.editor('A', PRODUCT, clientIdOf(1, 3)).register();
+  const again = world.editor('A', PRODUCT, clientIdOf(1, 3)).register();
+  const asAgent = world.editor('A', PRODUCT, clientIdOf(1, 3)).register({ actor: { kind: 'agent', member: 'j2-analyst', run: 'r-1' } });
+  const result = foldEntries(sealed([first, again, asAgent]), world.ctx());
+  assert.deepEqual(reasons(result), [[asAgent.hash, 'client-collision']]);
+  assert.deepEqual(result.applied.slice().sort(), [first.hash, again.hash].sort());
+  assert.equal(productOf(result).registrations.length, 1);
+});
+
+test('a world without slots (the Phase 30 static roster) registers as before: small ids are fine and the earlier claim wins with client-collision', () => {
+  const world = createWorld({ members: [{ member: 'mbr-wwww', devices: ['W'] }, { member: 'mbr-xxxx', devices: ['X'] }] });
+  const regX = world.editor('X', PRODUCT, 7).register();
+  const regW = world.editor('W', PRODUCT, 7).register();
+  const result = foldEntries(sealed([regX, regW]), world.ctx());
+  const loser = result.order.indexOf(regX.hash) < result.order.indexOf(regW.hash) ? regW : regX;
+  assert.deepEqual(reasons(result), [[loser.hash, 'client-collision']]);
+  assert.equal(productOf(result).registrations.length, 1);
+  assert.equal(productOf(result).registrations[0].clientId, 7);
+});
+
+test('invariant: in every fold whose roster names client id owners, every accepted update inserts only under ids of its writer\'s slot (60 seeded worlds)', () => {
+  for (let seed = 1; seed <= 60; seed += 1) {
+    const random = rng(seed);
+    const count = 2 + random.int(4);
+    const names = Array.from({ length: count }, (_, index) => `D${index}`);
+    // Distinct slots spread over the whole range, so ids of high slots (above 2^31) are exercised too.
+    const slots: number[] = [];
+    while (slots.length < count) {
+      const slot = 1 + random.int(4095);
+      if (!slots.includes(slot)) slots.push(slot);
+    }
+    const world = createWorld({ members: names.map((name, index) => ({ member: `mbr-${index}`, devices: [name], slots: [slots[index]] })) });
+    const slotOf = new Map(names.map((name, index) => [world.writerOf(name), slots[index]]));
+    const editors: Array<{ name: string; editor: Editor }> = [];
+    const written: Written[] = [];
+    const updates = new Map<string, Uint8Array>();
+    for (let step = 0; step < 18; step += 1) {
+      const name = random.pick(names);
+      const own = slots[names.indexOf(name)];
+      if (editors.length === 0 || random.chance(0.3)) {
+        // Mostly an id of the writer's own slot; sometimes another writer's id, an unheld slot or an id below 2^20.
+        const roll = random.next();
+        const clientId = roll < 0.6 ? clientIdOf(own, random.int(4)) : roll < 0.8 ? clientIdOf(random.pick(slots), random.int(4)) : roll < 0.9 ? 1 + random.int(1048575) : clientIdOf(1 + random.int(4095), 0);
+        const editor = world.editor(name, PRODUCT, clientId);
+        editors.push({ name, editor });
+        written.push(editor.register());
+        continue;
+      }
+      const chosen = random.pick(editors);
+      // A writer types on its own editors, and sometimes writes an update under an editor of another writer (a forgery attempt).
+      const writer = random.chance(0.25) ? random.pick(names) : chosen.name;
+      const other = random.pick(editors);
+      if (other !== chosen) applyRemote(chosen.editor.doc, encodeFullState(other.editor.doc));
+      const bytes = chosen.editor.insertUpdate(random.int(1 + docText(chosen.editor.doc).length), `w${random.int(100)} `);
+      const entry = world.write(writer, { kind: 'doc.update', data: updateData(PRODUCT, bytes) });
+      updates.set(entry.hash, bytes);
+      written.push(entry);
+    }
+    const result = foldEntries(sealed(written), world.ctx());
+    const byHash = new Map(written.map((item) => [item.hash, item]));
+    for (const hash of result.applied) {
+      const bytes = updates.get(hash);
+      if (bytes === undefined) continue;
+      const writerSlot = slotOf.get((byHash.get(hash) as Written).writer);
+      const inspection = inspectUpdate(bytes);
+      assert.equal('error' in inspection, false, `seed ${seed}`);
+      if ('error' in inspection) continue;
+      for (const span of inspection.clients) assert.equal(slotOfClientId(span.client), writerSlot, `seed ${seed}: client ${span.client}`);
+    }
+    for (const product of result.families.doc as ProductTextOutput[]) {
+      for (const registration of product.registrations) assert.equal(slotOfClientId(registration.clientId), slotOf.get(registration.writer), `seed ${seed}: registration`);
+    }
+  }
 });

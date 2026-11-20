@@ -59,6 +59,7 @@ export interface ProductTextOutput {
 
 export const TEXT_REFUSALS = {
   'client-collision': 'Another device already registered this client id for this product, so this device must pick a different one.',
+  'foreign-client-id': 'The client id is not in the range the roster gives this device, so this device may not register it.',
   'actor-mismatch': 'The registration names a different actor than the entry that carries it.',
   'malformed-update': 'The text update cannot be read.',
   'foreign-client': 'The update inserts text under a client id registered to another device, so it is refused as forged attribution.',
@@ -115,10 +116,14 @@ function inspectionRefusal(error: InspectError): ReduceOutcome {
 interface UpdateData { product: string; clientId?: number; actor?: Actor; update?: string }
 interface CompactData { product: string; covers: Dep[]; stateVector: Array<[number, number]>; textHash: string; stateBlob: string }
 
-// Registration is order independent: the claim earlier in the total order wins, and the registry is fold output rebuilt on every fold, so a refold
-// that changes the order can change the winner. One client id means one author, so a second claim by the same device under another actor is refused.
-function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData): ReduceOutcome {
+// When the roster names the owner of each client id (D-03, D-41), an id belongs to the writer whose roster slot it derives from, and only that writer
+// may register it: two writers can never race for one id. Without that answer (the Phase 30 static roster) the claim earlier in the total order wins,
+// and the registry is fold output rebuilt on every fold, so a refold that changes the order can change the winner. Inside the writer's own range the
+// earlier-claim rule stays: one client id means one author, so a second claim by the same device under another actor is refused.
+function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData, view: FoldView): ReduceOutcome {
   if (canonicalize(data.actor) !== canonicalize(entry.body.actor)) return refused('actor-mismatch');
+  const roster = view.ctx.roster;
+  if (roster.clientIdOwner !== undefined && roster.clientIdOwner(data.clientId as number, entry.body.roster) !== entry.header.writer) return refused('foreign-client-id');
   const product = productText(state, entry.header.stream, data.product);
   const clientId = data.clientId as number;
   const existing = product.registrations.get(clientId);
@@ -249,7 +254,7 @@ export const textReducer: FamilyReducer<TextState, ProductTextOutput[]> = {
   init: () => ({ products: new Map() }),
   apply(state, entry, view): ReduceOutcome {
     const data = entry.data as UpdateData;
-    if (entry.body.kind === 'doc.client') return applyClient(state, entry, data);
+    if (entry.body.kind === 'doc.client') return applyClient(state, entry, data, view);
     if (entry.body.kind === 'doc.update') return applyUpdateEntry(state, entry, data);
     if (entry.body.kind === 'doc.compact') return applyCompaction(state, entry, entry.data as CompactData, view);
     return refused('unsupported-kind');
