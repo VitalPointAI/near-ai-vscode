@@ -24,7 +24,8 @@
 // The shared project is never written (P-31-31): the destination is refused when it is the shared project's folder or inside it, and when it already
 // holds staff files. Every refusal is checked before anything is written. The copy is first written to a staging folder beside its final place
 // (.planning/staff.copy-<random>), and only when every file is there is that folder renamed to .planning/staff in one step, so a copy that fails part
-// way never looks like a staff project. Nothing is ever deleted.
+// way never looks like a staff project. The copy's signed head mark is stored after every file is staged and before that rename, and taken back when
+// the rename fails, so a copy in place always has its mark on this computer (D-07). Nothing is ever deleted.
 //
 // Not carried in Phase 31: the files no replica kind covers yet (registers, calculator record files, gate reports, proposals, settings, observations)
 // and events.jsonl; the copy's StaffHost starts its own events. A person can copy those files by hand.
@@ -487,8 +488,13 @@ function chainCalculator(bytes: Buffer, signer: PayloadSigner, signedAt: Date): 
 
 const STAFF_PREFIX = '.planning/staff/';
 
-/** Writes every file into a staging folder beside .planning/staff, then renames that folder into place in one step. Never writes over a file. */
-async function writeStaged(destination: string, files: ReadonlyMap<string, string>): Promise<string[]> {
+/** For tests only: runs at each point a copy can stop, so a test can stop it there or change what is around it (as setCasProbe does for writes). */
+export interface CopyProbe { (point: 'mark-stored', destination: string): Promise<void> | void }
+let probe: CopyProbe | undefined;
+export function setCopyProbe(next: CopyProbe | undefined): void { probe = next; }
+
+/** Writes every file into a new staging folder beside .planning/staff. Never writes over a file; the staging folder is never deleted. */
+async function stageCopy(destination: string, files: ReadonlyMap<string, string>): Promise<{ staging: string; written: string[] }> {
   const planning = path.join(destination, '.planning');
   await mkdir(planning, { recursive: true });
   const staging = path.join(planning, `staff.copy-${randomBytes(6).toString('hex')}`);
@@ -497,11 +503,27 @@ async function writeStaged(destination: string, files: ReadonlyMap<string, strin
     const file = path.join(staging, ...relative.slice(STAFF_PREFIX.length).split('/'));
     if (!(await writeIfUnchanged(file, { exists: false }, text))) throw new Error(`The copy was not finished: ${relative} appeared in its staging folder while it was being written.`);
   }
-  const target = path.join(planning, 'staff');
+  return { staging, written: [...files.keys()].sort() };
+}
+
+/** Renames a finished staging folder to .planning/staff in one step, unless a .planning/staff folder is already there. */
+async function placeCopy(destination: string, staging: string): Promise<void> {
+  const target = path.join(destination, '.planning', 'staff');
   // Checked again just before the rename, which would replace an empty folder another process made there.
   if (await exists(target)) throw new Error(`The copy was not finished: a .planning/staff folder appeared in the destination while it was being written. The copy is in ${path.relative(destination, staging)}.`);
   await rename(staging, target);
-  return [...files.keys()].sort();
+}
+
+/**
+ * Takes back the head mark this run stored, when the copy it names was not put in place (D-07): only while secret storage still holds the exact text
+ * this run stored, so a mark a later copy stored is never removed. Best effort: the error that stopped the copy is the one the person sees.
+ */
+async function takeBackMark(deps: CopyDeps, key: string, stored: string): Promise<void> {
+  try {
+    if ((await deps.secrets.get(key)) === stored) await deps.secrets.delete(key);
+  } catch {
+    // The mark stays: it names a copy that is not in place, and the next copy into this folder stores its own over it.
+  }
 }
 
 /**
@@ -578,10 +600,25 @@ export async function makeSingleMachineCopy(sharedRoot: string, destination: str
     const check = replayLedger(ledgerLinesOf(Buffer.from(files.get(`${LEDGER_DIR}/${LEDGER_FILE}`) ?? '')), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status: trusted }));
     if (check.broken !== undefined || check.entries !== ledger.count || check.head !== ledger.head) throw new Error(`The copy was not made: its own product ledger does not verify (${check.broken?.reason ?? 'its head differs'}).`);
 
-    const written = await writeStaged(target, files);
+    // Every file is staged first; then the signed head mark is stored, under the key today's host computes for the copy's folder; only then is the
+    // staging folder put in place (D-07). So a copy in place always has its mark on this computer, and a stop anywhere before leaves no staff project.
+    const { staging, written } = await stageCopy(target, files);
+    const key = ledgerHeadKey(target);
+    let stored: string | undefined;
     if (ledger.count > 0) {
       const mark: LedgerHeadMark = { v: 1, count: ledger.count, head: ledger.head };
-      await deps.secrets.store(ledgerHeadKey(target), JSON.stringify(signPayload(signer, 'staff-ledger-head', mark, { now: () => signedAt })));
+      const text = JSON.stringify(signPayload(signer, 'staff-ledger-head', mark, { now: () => signedAt }));
+      await deps.secrets.store(key, text);
+      stored = text;
+    }
+    // Outside the catch below: a stop here leaves the mark and the staging folder, and the next copy into this folder replaces both.
+    await probe?.('mark-stored', target);
+    try {
+      await placeCopy(target, staging);
+    } catch (error) {
+      // The mark names a copy that is not in place: take it back, unless another run has stored its own since.
+      if (stored !== undefined) await takeBackMark(deps, key, stored);
+      throw error;
     }
     return { ok: true, destination: path.join(target, '.planning', 'staff'), written, carried, contested: contested.sort(), differs, left, notices: multiUserNoticeLines() };
   } finally {
