@@ -22,10 +22,12 @@ import { mkdir, readFile, rename, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
-import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, inBundleOrder, parseBundle, verifyBundleEnvelope } from '../domain/gate/bundle';
+import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, inBundleOrder, parseBundle, renewalPayload, verifyBundleEnvelope } from '../domain/gate/bundle';
 import type { BundleState, PolicyBundle, PolicyEventId } from '../domain/gate/bundle';
-import { MAX_PAYLOAD_BYTES, PayloadError, signPayload } from '../domain/team/signedPayload';
+import { bundleViewOf, verifyPolicyLayer } from '../domain/gate/policyDocument';
+import { MAX_PAYLOAD_BYTES, PayloadError, signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
+import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import { identityDir, loadDeviceIdentity, loadOrCreateDeviceIdentity } from '../team/identity';
 import type { DeviceIdentity } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
@@ -63,6 +65,8 @@ export type BundleEvent = Exclude<PolicyEventId, 'policy.load'>;
 export interface BundleResult {
   readonly state: BundleState;
   readonly event?: BundleEvent;
+  /** The verified personal payload as signed (a v1 bundle or a v2 personal layer), when the state is valid. The layered load reads it (41-09). */
+  readonly stored?: unknown;
 }
 
 export interface BundleStoreOptions {
@@ -100,6 +104,43 @@ interface Disk {
   readonly state: BundleState;
   /** The parsed file, when there was one that parsed. */
   readonly envelope?: unknown;
+  /** The verified payload, when the state is valid. */
+  readonly stored?: unknown;
+}
+
+function payloadOf(envelope: unknown): unknown {
+  return typeof envelope === 'object' && envelope !== null && !Array.isArray(envelope) && Object.prototype.hasOwnProperty.call(envelope, 'payload')
+    ? (envelope as { payload: unknown }).payload
+    : undefined;
+}
+
+/** True for an envelope whose payload says bundleVersion 2: a sectioned personal layer, read by verifyPolicyLayer (D-49). Anything else takes today's v1 reader. */
+function isLayerEnvelope(envelope: unknown): boolean {
+  const payload = payloadOf(envelope);
+  return typeof payload === 'object' && payload !== null && !Array.isArray(payload) && Object.prototype.hasOwnProperty.call(payload, 'bundleVersion')
+    && (payload as { bundleVersion: unknown }).bundleVersion === 2;
+}
+
+/** The reasons a signed own-key v2 layer fails for that are not its content, so they carry no ownPolicy mark (as the v1 reader marks only content). */
+const NOT_CONTENT: ReadonlySet<string> = new Set(['signer-mismatch', 'clock-behind', 'expired']);
+
+// One envelope through the reader its wire version needs. v1: verifyBundleEnvelope, its sentences and the safety patch's ownPolicy mark unchanged. v2:
+// verifyPolicyLayer under purpose policy-bundle with this install's key history, its valid state turned into today's view (D-04, D-49).
+function verifyEnvelope(envelope: unknown, status: KeyStatusLookup, nowMs: number, lastValidAt: number | undefined, ownKeysOnly: boolean): { state: BundleState; stored?: unknown } {
+  const times = { now: nowMs, ...(lastValidAt === undefined ? {} : { lastValidAt }) };
+  if (!isLayerEnvelope(envelope)) {
+    const state = verifyBundleEnvelope(envelope, { status, ...times, ...(ownKeysOnly ? { ownKeysOnly: true } : {}) });
+    return state.state === 'valid' ? { state, stored: payloadOf(envelope) } : { state };
+  }
+  const layer = verifyPolicyLayer(envelope, { purpose: 'policy-bundle', status, ...times });
+  if (layer.state !== 'valid') {
+    const own = ownKeysOnly && !NOT_CONTENT.has(layer.reason) && verifyPayload(envelope, { purpose: 'policy-bundle', status }).ok;
+    return { state: own ? { ...layer, ownPolicy: true } : layer };
+  }
+  return {
+    state: { state: 'valid', bundle: bundleViewOf(layer.document), hash: layer.hash, signer: layer.signer, expiresAt: layer.expiresAt, renewDue: layer.renewDue },
+    stored: payloadOf(envelope)
+  };
 }
 
 // Reads the file and verifies it. Every cause the person can fix is its own reason; nothing is guessed and nothing is written.
@@ -123,19 +164,21 @@ async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, 
   const status = await localKeyStatus(identityDir(globalStorageDir), secrets);
   const lastValidAt = marker.present ? marker.at : undefined;
   // The status is this install's own key history, so a policy that verifies but cannot be read is the person's own (Show Policy may offer Reset for it).
-  const state = verifyBundleEnvelope(envelope, { status, now: nowMs, ownKeysOnly: true, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
+  const read = verifyEnvelope(envelope, status, nowMs, lastValidAt, true);
+  const state = read.state;
   // A file that verifies but is not the one this install last accepted (or is writing right now) was put there from outside: refused, never adopted.
+  // The rule is the same for both wire versions.
   if (state.state === 'valid' && marker.present && marker.hash !== undefined && state.hash !== marker.hash && state.hash !== marker.pending) {
     return { state: failedClosed('replaced'), envelope };
   }
-  return { state, envelope };
+  return read.stored === undefined ? { state, envelope } : { state, envelope, stored: read.stored };
 }
 
 function lastValidAtOf(marker: LastValid): number | undefined {
   return marker.present ? marker.at : undefined;
 }
 
-function sign(identity: DeviceIdentity, payload: PolicyBundle, at: Date): SignedPayload<PolicyBundle> {
+function sign<T>(identity: DeviceIdentity, payload: T, at: Date): SignedPayload<T> {
   try {
     return signPayload(identity, 'policy-bundle', payload, { now: () => at });
   } catch (error) {
@@ -150,10 +193,10 @@ function sign(identity: DeviceIdentity, payload: PolicyBundle, at: Date): Signed
 // Whatever happens after the marker names the new hash as `pending`, a failure leaves the marker and the file as they were: the pending hash is withdrawn, and
 // the file that was there is put back when this call replaced it. A pending hash left behind names a policy this install signed but never kept, so a copy of
 // that file put back later would be accepted as the next policy, widening a narrowed one (PR #70 third review).
-async function install(globalStorageDir: string, secrets: SecretStorageLike, envelope: SignedPayload<PolicyBundle>, nowMs: number, marker: LastValid): Promise<BundleState> {
+async function install(globalStorageDir: string, secrets: SecretStorageLike, envelope: SignedPayload<unknown>, nowMs: number, marker: LastValid): Promise<Disk> {
   const lastValidAt = lastValidAtOf(marker);
   const status = await localKeyStatus(identityDir(globalStorageDir), secrets);
-  const before = verifyBundleEnvelope(envelope, { status, now: nowMs, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
+  const before = verifyEnvelope(envelope, status, nowMs, lastValidAt, false).state;
   if (before.state !== 'valid') throw new BundleStoreError(`Nothing was written: the new policy did not verify. ${before.sentence}`);
   const file = bundleFile(globalStorageDir);
   const previous = await readFile(file, 'utf8').catch(() => undefined);
@@ -176,7 +219,7 @@ async function install(globalStorageDir: string, secrets: SecretStorageLike, env
     await withdrawNextHash(secrets).catch(() => undefined);
     throw new BundleStoreError('The new policy file was saved but did not read back as written, so it was not used.');
   }
-  return after.state;
+  return after;
 }
 
 // Stores the marker for a valid state. A store or read-back failure is the identity-unavailable state (A2): the bundle is not trusted when the install
@@ -211,28 +254,26 @@ async function installDefault(
   }
   const effective = effectiveNow(nowMs, lastValidAtOf(marker));
   const payload = defaultBundlePayload({ issuer: { fingerprint: identity.fingerprint, publicKey: identity.publicKey }, now: effective });
-  const state = await install(globalStorageDir, secrets, sign(identity, payload, new Date(effective)), nowMs, marker);
-  if (state.state !== 'valid') return { state };
-  const kept = await remember(secrets, state, effective);
-  return kept.state === 'valid' ? { state: kept, event } : { state: kept };
+  const written = await install(globalStorageDir, secrets, sign(identity, payload, new Date(effective)), nowMs, marker);
+  if (written.state.state !== 'valid') return { state: written.state };
+  const kept = await remember(secrets, written.state, effective);
+  return kept.state === 'valid' ? { state: kept, event, stored: written.stored } : { state: kept };
 }
 
-// Re-signs the same payload with fresh dates when this install's own key signed it. Any failure leaves the file as it was and the caller on the valid
-// state it already has: a renewal that did not happen is not a reason to fail closed.
+// Re-signs the stored payload with fresh dates when this install's own key signed it (D-14, D-62): renewalPayload gives unedited starting rules the
+// current starting rules and any other payload back unchanged, so a v1 bundle stays v1 and a v2 personal layer stays v2 with all its sections. The stored
+// payload is signed, never the view (41-01 contract choice 1). Any failure leaves the file as it was and the caller on the valid state it already has: a
+// renewal that did not happen is not a reason to fail closed.
 async function tryRenew(
-  globalStorageDir: string, secrets: SecretStorageLike, current: BundleState & { state: 'valid' }, nowMs: number, marker: LastValid
-): Promise<BundleState | undefined> {
+  globalStorageDir: string, secrets: SecretStorageLike, current: BundleState & { state: 'valid' }, stored: unknown, nowMs: number, marker: LastValid
+): Promise<Disk | undefined> {
   try {
     // Only this install's own key, and only the policy this install last accepted: a bundle that merely verifies is never carried forward.
-    if (!marker.present || marker.hash === undefined || marker.hash !== current.hash) return undefined;
+    if (!marker.present || marker.hash === undefined || marker.hash !== current.hash || stored === undefined) return undefined;
     const identity = await loadDeviceIdentity(secrets);
     if (identity === undefined || identity.fingerprint !== current.signer.fingerprint || identity.publicKey !== current.signer.publicKey) return undefined;
     const effective = effectiveNow(nowMs, lastValidAtOf(marker));
-    const payload: PolicyBundle = {
-      ...current.bundle,
-      issuedAt: new Date(effective).toISOString(),
-      expiresAt: new Date(effective + SELF_SIGNED_LIFETIME_DAYS * DAY_MS).toISOString()
-    };
+    const payload = renewalPayload(stored as PolicyBundle, effective);
     return await install(globalStorageDir, secrets, sign(identity, payload, new Date(effective)), nowMs, marker);
   } catch {
     return undefined;
@@ -251,6 +292,26 @@ export async function loadPolicyBundle(globalStorageDir: string, secrets: Secret
     return unavailable(error);
   }
   return (await verifyDisk(globalStorageDir, secrets, nowMs, marker)).state;
+}
+
+/**
+ * The personal layer as loadPolicyBundle reads it, with the verified payload as signed (`stored`) beside a valid state, for the layered load to compose
+ * (41-09). Changes nothing and never throws.
+ */
+export async function loadPersonalLayer(globalStorageDir: string, secrets: SecretStorageLike, options: BundleStoreOptions = {}): Promise<BundleResult> {
+  const nowMs = clockOf(options)().getTime();
+  let marker: LastValid;
+  try {
+    marker = await readLastValid(secrets);
+  } catch (error) {
+    return { state: unavailable(error) };
+  }
+  try {
+    const disk = await verifyDisk(globalStorageDir, secrets, nowMs, marker);
+    return disk.state.state === 'valid' && disk.stored !== undefined ? { state: disk.state, stored: disk.stored } : { state: disk.state };
+  } catch (error) {
+    return { state: unavailable(error) };
+  }
 }
 
 /**
@@ -279,16 +340,19 @@ export async function ensurePolicyBundle(globalStorageDir: string, secrets: Secr
     const state = found.state;
     if (state.state === 'valid') {
       let current: BundleState & { state: 'valid' } = state;
+      let stored = found.stored;
       let event: BundleEvent | undefined;
       if (state.renewDue) {
-        const renewed = await tryRenew(globalStorageDir, secrets, state, nowMs, marker);
-        if (renewed !== undefined && renewed.state === 'valid') {
-          current = renewed;
+        const renewed = await tryRenew(globalStorageDir, secrets, state, found.stored, nowMs, marker);
+        if (renewed !== undefined && renewed.state.state === 'valid') {
+          current = renewed.state;
+          stored = renewed.stored;
           event = 'policy.renewed';
         }
       }
       const kept = await remember(secrets, current, effectiveNow(nowMs, lastValidAtOf(marker)));
-      return kept.state === 'valid' && event !== undefined ? { state: kept, event } : { state: kept };
+      if (kept.state !== 'valid') return { state: kept };
+      return event !== undefined ? { state: kept, event, stored } : { state: kept, stored };
     }
     if (state.reason === 'missing') {
       // The only silent creation: this install has never had a valid bundle. With a marker, a missing file is a changed policy, never a fresh start; with
@@ -353,9 +417,9 @@ export async function resetPolicyToDefaults(globalStorageDir: string, secrets: S
         throw new BundleStoreError('Nothing was changed: the old policy file could not be kept under a new name.', { cause: error });
       }
     }
-    let state: BundleState;
+    let written: Disk;
     try {
-      state = await install(globalStorageDir, secrets, envelope, nowMs, marker);
+      written = await install(globalStorageDir, secrets, envelope, nowMs, marker);
     } catch (error) {
       // The old file goes back where it was, so a reset that failed leaves the policy as it was. Install has withdrawn the pending hash on every failure after
       // naming it; this is the same withdrawal again, for the case where it could not (the secret store failing twice), and it is harmless when there is none.
@@ -363,9 +427,9 @@ export async function resetPolicyToDefaults(globalStorageDir: string, secrets: S
       await withdrawNextHash(secrets).catch(() => undefined);
       throw error;
     }
-    if (state.state !== 'valid') return { state };
-    const kept = await remember(secrets, state, effective);
-    return kept.state === 'valid' ? { state: kept, event: 'policy.reset' } : { state: kept };
+    if (written.state.state !== 'valid') return { state: written.state };
+    const kept = await remember(secrets, written.state, effective);
+    return kept.state === 'valid' ? { state: kept, event: 'policy.reset', stored: written.stored } : { state: kept };
   });
 }
 
@@ -418,10 +482,11 @@ export async function applyPolicyDraft(globalStorageDir: string, secrets: Secret
     };
     const parsed = parseBundle(owned);
     if (!parsed.ok) throw new BundleStoreError(`Nothing was changed: the draft is not a policy this version can use. ${parsed.message}`);
-    const state = await install(globalStorageDir, secrets, sign(identity, parsed.value, new Date(effective)), nowMs, marker);
+    const written = await install(globalStorageDir, secrets, sign(identity, parsed.value, new Date(effective)), nowMs, marker);
+    const state = written.state;
     if (state.state !== 'valid') throw new BundleStoreError(`Nothing was changed: the new policy did not verify. ${state.sentence}`);
     const kept = await remember(secrets, state, effective);
     if (kept.state !== 'valid') return { state: kept, oldHash: stored.hash, newHash: state.hash };
-    return { state: kept, event: 'policy.edit', oldHash: stored.hash, newHash: state.hash };
+    return { state: kept, event: 'policy.edit', oldHash: stored.hash, newHash: state.hash, stored: written.stored };
   });
 }
