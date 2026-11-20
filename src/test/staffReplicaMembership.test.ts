@@ -14,7 +14,7 @@ import { clientIdOf } from '../domain/replica/clientIds';
 import { entryHash } from '../domain/replica/entry';
 import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
-import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, leadAt, rosterView } from '../domain/replica/roster';
+import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { committedGrant, epochAt } from '../domain/replica/rosterCells';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
@@ -474,6 +474,28 @@ test('no message, file name or result field contains a join secret, a key or the
     assert.ok(!/\u2014/.test(result.message), 'no em-dash');
   }
   for (const message of Object.values(MEMBERSHIP_REFUSALS)) assert.ok(!/\u2014/.test(message));
+  // The two texts that carry a secret by design (D-08): the join secret only at the invitation's payload.secret, the MAC only at the join request's
+  // payload.mac, and with that one field taken out, neither text holds any forbidden value.
+  const pairs = [{ invite: b.results[0], join: b.results[1] }, { invite: invited, join: joined }];
+  for (const pair of pairs) {
+    const inviteText = file(pair.invite).text;
+    const joinText = file(pair.join).text;
+    const ownSecret = (readInvite(inviteText, NOW) as { invite: { secret: string } }).invite.secret;
+    const inviteValue = JSON.parse(inviteText) as { payload: Record<string, unknown> };
+    assert.equal(inviteValue.payload.secret, ownSecret, 'the invitation carries its join secret at payload.secret');
+    delete inviteValue.payload.secret;
+    const joinValue = JSON.parse(joinText) as { payload: Record<string, unknown> };
+    const ownMac = joinValue.payload.mac;
+    assert.equal(typeof ownMac, 'string');
+    if (pair.join === joined) assert.equal(ownMac, mac);
+    delete joinValue.payload.mac;
+    const searched = [...forbidden, ownSecret, ownMac as string];
+    const inviteRest = JSON.stringify(inviteValue);
+    for (const value of searched) assert.ok(!inviteRest.includes(value), 'the invitation holds a secret outside payload.secret');
+    assert.ok(!joinText.includes(ownSecret) && !joinText.includes(secret), 'the join request holds no join secret');
+    const joinRest = JSON.stringify(joinValue);
+    for (const value of searched) assert.ok(!joinRest.includes(value), 'the join request holds a secret outside payload.mac');
+  }
 });
 
 test('only the lead or the deputy writes the roster: a member\'s invite, void, removal and update are refused not-a-roster-writer and change nothing', async () => {
@@ -500,8 +522,10 @@ test('removing a member writes member.remove and one cell.rekey for each cell it
   const t = await team();
   const base = t.lead.p.projectId;
   const removed = ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove');
-  assert.ok(removed.message.includes(REKEY_KEEP_TEXT));
-  assert.ok(removed.message.includes('They keep what they already received. They will not receive anything new.'));
+  assert.equal(removed.ok, true);
+  assert.ok(removed.message.endsWith(REKEY_KEEP_TEXT));
+  assert.match(removed.message, /\b2 parts\b/);
+  assert.match(removed.message, /moved to a new key/);
   assert.deepEqual([...(removed.rekeyed ?? [])].sort(), [base, t.x].sort());
   assert.deepEqual(removed.notices, multiUserNoticeLines());
   const { roster, hash, position } = await head(t.lead.p);
@@ -618,8 +642,10 @@ test('a cell nobody else is left on gets no rekey: the plan with no recipients i
   const removed = ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove');
   assert.ok(!(removed.rekeyed ?? []).includes(y));
   assert.deepEqual([...(removed.rekeyed ?? [])].sort(), [t.lead.p.projectId, t.x].sort());
-  assert.ok(removed.message.includes('Nobody else is on one part of the project, so no new key was made for it.'));
-  assert.ok(removed.message.includes(REKEY_KEEP_TEXT));
+  assert.equal(removed.ok, true);
+  assert.match(removed.message, /Nobody else is on one part/);
+  assert.match(removed.message, /no new key/);
+  assert.ok(removed.message.endsWith(REKEY_KEEP_TEXT));
   const { roster, position } = await head(t.lead.p);
   assert.equal(epochAt(roster.cells, y, position), 1, 'no cell.rekey was written for Y');
   assert.deepEqual(roster.refused, []);
@@ -805,7 +831,10 @@ test('MJ-04: a rekey whose entry is not written leaves its key unused; the next 
   assert.equal(staleGrants.length, 1, 'the failed rekey left its grant on disk');
   // The next removal first finishes A's (MJ-03): it rekeys the base cell to the same epoch 2 with a new key, then removes B and rekeys it to epoch 3.
   const removedB = ok(await removeFromProject(lead.host, { member: b.member }), 'remove B');
-  assert.match(removedB.message, /A removal or clearance change left unfinished was finished first: one part of the project was moved to a new key\./);
+  assert.equal(removedB.ok, true);
+  assert.deepEqual(removedB.rekeyed, [base, base], 'the base cell finished first, then moved again for B');
+  assert.match(removedB.message, /left unfinished/);
+  assert.match(removedB.message, /finished first: one part/);
   const { roster, position } = await head(lead.p);
   assert.equal(epochAt(roster.cells, base, position), 3);
   const cPrivate = createPrivateKey({ key: Buffer.from(c.at.secrets.values.get(ENCRYPTION_KEY_SECRET) as string, 'base64'), format: 'der', type: 'pkcs8' });
@@ -1047,7 +1076,9 @@ test('MJ-03: the next roster flow finishes an interrupted removal first: an admi
   const base = t.lead.p.projectId;
   assert.ok('ok' in (await t.lead.p.appendOwn('member.remove', { member: t.m.member })));
   const p = await bringIn(t.lead, 'p', 'Pat Planner', OFFICIAL);
-  assert.match(p.results[2].message, /A removal or clearance change left unfinished was finished first: 2 parts of the project were moved to a new key\./);
+  assert.equal(p.results[2].ok, true);
+  assert.match(p.results[2].message, /left unfinished/);
+  assert.match(p.results[2].message, /finished first: 2 parts/);
   const atLead = await head(t.lead.p);
   assert.equal(epochAt(atLead.roster.cells, base, atLead.position), 2);
   const grantees = rosterView(atLead.roster).cellGrantees?.(base, atLead.hash) ?? [];
@@ -1177,4 +1208,63 @@ test('describeRosterBranches skips damaged and overlong roster lines, and reads 
   } finally {
     frozen.mock.restore();
   }
+});
+
+// ---- 32-04 Task 2: the lead role moves only by a handover or naming the deputy (D-08, D-66) -------------------------------------------------------
+
+test('member.update cannot give the lead role: a direct append from the lead\'s device or the deputy\'s is refused lead-role-by-handover-only by the fold, and updateMember refuses it before anything is written', async () => {
+  // Two separate teams, so the lead's write and the deputy's never cite one head.
+  for (const by of ['lead', 'deputy'] as const) {
+    const t = await team();
+    ok(await nameDeputy(t.lead.host, t.m.member), 'name the deputy');
+    await sync(t.lead, t.m);
+    const writer = by === 'lead' ? t.lead : t.m;
+    const other = by === 'lead' ? t.m : t.lead;
+    const before = await head(writer.p);
+    const written = await writer.p.appendOwn('member.update', { member: 'mbr-lead', roles: ['member', 'staff_lead'] });
+    assert.ok('ok' in written, `${by}: the entry is written`);
+    await sync(writer, other);
+    for (const p of [writer.p, other.p]) {
+      const after = await head(p);
+      assert.deepEqual(after.roster.refused.filter((item) => item.hash === written.hash), [{ hash: written.hash, kind: 'member.update', reason: 'lead-role-by-handover-only' }], `${by}: refused by the fold`);
+      assert.equal(after.hash, before.hash, `${by}: the roster head does not move`);
+      assert.equal(leadAt(after.roster, after.position), 'mbr-lead');
+      assert.equal(deputyAt(after.roster, after.position), t.m.member);
+      assert.deepEqual(memberAt(after.roster.members, 'mbr-lead', after.position)?.roles, ['member']);
+    }
+    // The host refuses the same change, from either roster writer, before anything is written.
+    for (const roles of [['member', 'staff_lead'], ['deputy_lead']]) {
+      for (const host of [t.lead.host, t.m.host]) {
+        const at = await head(host.project);
+        const blocked = await updateMember(host, { member: t.n.member, roles });
+        assert.equal(blocked.ok, false);
+        assert.equal(blocked.reason, 'lead-role-by-handover-only');
+        assert.equal(blocked.message, MEMBER_REFUSALS['lead-role-by-handover-only']);
+        assert.equal((await head(host.project)).hash, at.hash, `${roles.join(' ')}: nothing written`);
+      }
+    }
+  }
+});
+
+test('a member.update from the deputy that leaves staff_lead out of the lead\'s roles changes no leadership: the lead is still the lead and still writes the roster', async () => {
+  const t = await team();
+  ok(await nameDeputy(t.lead.host, t.m.member), 'name the deputy');
+  await sync(t.lead, t.m);
+  const changed = ok(await updateMember(t.m.host, { member: 'mbr-lead', roles: ['member'] }), 'the deputy updates the lead');
+  assert.equal(changed.member, 'mbr-lead');
+  await sync(t.m, t.lead);
+  for (const p of [t.m.p, t.lead.p]) {
+    const at = await head(p);
+    assert.equal(at.hash, (await head(t.m.p)).hash, 'the update is applied on both computers');
+    assert.equal(leadAt(at.roster, at.position), 'mbr-lead');
+    assert.equal(deputyAt(at.roster, at.position), t.m.member);
+    assert.equal(isRosterWriterAt(at.roster, t.lead.p.deviceWriter, at.position), true, 'the lead\'s device still writes the roster');
+    const view = rosterView(at.roster);
+    assert.equal(view.hasRole('mbr-lead', 'staff_lead', at.hash), true);
+    assert.equal(view.hasRole(t.m.member, 'staff_lead', at.hash), false, 'the deputy is not the lead');
+    assert.equal(view.hasRole(t.m.member, 'deputy_lead', at.hash), true);
+  }
+  ok(await updateMember(t.lead.host, { member: t.n.member, name: 'Nell Renamed' }), 'the lead changes another member');
+  const after = await head(t.lead.p);
+  assert.equal(memberAt(after.roster.members, t.n.member, after.position)?.name, 'Nell Renamed');
 });
