@@ -72,7 +72,7 @@ async function main(): Promise<void> {
       // --password-store=basic keeps this window's secrets (Enable stores the device key) in its own temporary user data, so it never asks the
       // person's OS keyring or puts an unlock prompt on the real screen.
       launchArgs: [workspace, '--disable-extensions', '--disable-workspace-trust', `--user-data-dir=${userData}`, '--password-store=basic', '--skip-welcome', '--skip-release-notes', ...screenArgs, ...webglArgs()],
-      extensionTestsEnv: { NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace, NEAR_AI_E2E_USER_DATA: userData, ...gitEnv }
+      extensionTestsEnv: { ...(process.env.NEAR_AI_E2E_SHOTS ? { NEAR_AI_E2E_SHOTS: process.env.NEAR_AI_E2E_SHOTS } : {}), NEAR_AI_E2E: '1', NEAR_AI_E2E_SCENARIO: scenario, NEAR_AI_E2E_WORKSPACE: workspace, NEAR_AI_E2E_USER_DATA: userData, ...gitEnv }
     });
   }
 }

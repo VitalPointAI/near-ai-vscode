@@ -2,6 +2,7 @@
 // registers from the fixture files), decision buttons that only post the product and version hash, messages from the host checked before anything is
 // drawn, stillness under reduced motion and Calm, and the keyboard flow.
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,6 +12,7 @@ import type { CopPicture } from '../domain/staff/cop';
 import { parseScenarioText } from '../domain/staff/scenario';
 import { buildStaffRoomModel, handoffsFor } from '../domain/staff/staffRoom';
 import type { StaffRoomModel } from '../domain/staff/staffRoom';
+import { scenarioEnvironment } from '../staff/envPack';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { modelOf, NOW, project, SCENARIO, sectionsProject } from './helpers/staffRoomFixture';
 
@@ -19,6 +21,8 @@ const MEDIA = path.join(__dirname, '..', '..', 'media', 'staffRoom');
 type Animation = { frames: unknown[]; options: Record<string, unknown>; onfinish?: () => void; cancel(): void; finish(): void };
 
 class FakeNode {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tagName}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   children: FakeNode[] = [];
   parent?: FakeNode;
   attributes = new Map<string, string>();
@@ -75,6 +79,8 @@ class FakeNode {
   all(): FakeNode[] { return this.children.flatMap((child) => [child, ...child.all()]); }
 }
 class FakeDoc {
+  /** A short form for failure messages (see the node's). */
+  [inspect.custom](): string { return '<document>'; }
   body = new FakeNode('body', this);
   documentElement = { clientWidth: 1200 };
   activeElement: FakeNode | null = null;
@@ -121,6 +127,7 @@ async function runPage(options: { reduced?: boolean; state?: Record<string, unkn
   });
   // The page's order (staffRoomPanel.ts): the shared label placement, the COP map, the room's map, the room.
   vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'declutter.js'), 'utf8'), sandbox, { timeout: 1000 });
+  vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'layerDrawer.js'), 'utf8'), sandbox, { timeout: 1000 });
   if (options.copMap) vm.runInContext(await readFile(path.join(MEDIA, '..', 'staff', 'copMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffMap.js'), 'utf8'), sandbox, { timeout: 1000 });
   vm.runInContext(await readFile(path.join(MEDIA, 'staffWorkspaces.js'), 'utf8'), sandbox, { timeout: 1000 });
@@ -757,4 +764,186 @@ test('opener adds its hint only to a label the card already has, and never repla
   assert.equal(named.getAttribute('aria-label'), 'COA A. Approved version 2. Opens its provenance.', 'no doubled full stop');
   for (const card of [bare, named]) { card.fire('keydown', { key: 'Enter' }); card.fire('keydown', { key: ' ' }); card.click(); assert.equal(card.tabIndex, 0); }
   assert.equal(opened, 6);
+});
+
+// ---- The map's room (owner direction, D-48 of 0.4.34): the map is the main panel, Full map, and the layer drawer on the SVG map too ---------------
+
+test('once a scenario is loaded the rail and the section cards fold into the room bar, which opens them again and remembers it', async () => {
+  const { model } = await fixtureModel();
+  assert.equal(model.map.available, true, 'the fixture has a scenario on the map');
+  const page = await runPage({ reduced: true });
+  const app = page.doc.getElementById('app')!;
+  assert.ok(!app.classList.contains('compact'), 'nothing folds before the room has a picture');
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  const bar = page.byClass('roombar')[0];
+  assert.equal(bar.hidden, false);
+  assert.ok(app.classList.contains('compact'), 'folded: the map has the room');
+  assert.match(page.byClass('roombar-t')[0].textContent, /^Step \d+ of \d+: .+ · \d+ of 5 sections working/);
+  const toggle = bar.children.find((node) => node.tagName === 'button')!;
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(toggle.getAttribute('aria-controls'), 'room-process room-squads');
+  assert.ok(page.doc.getElementById('room-process') && page.doc.getElementById('room-squads'), 'the button names what it opens');
+  toggle.click();
+  assert.ok(!app.classList.contains('compact'));
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(page.states.at(-1)!.roomOpen, true, 'remembered for the next time the room opens');
+  assert.equal(page.doc.animations.length, 0, 'still under reduced motion');
+  toggle.click();
+  assert.ok(app.classList.contains('compact'));
+  // A room whose scenario has no map keeps the rail and the cards open.
+  const empty = await runPage({ reduced: true });
+  empty.dispatch({ type: 'staff-room', model: { ...model, map: { ...model.map, available: false } }, cues: [] });
+  assert.ok(!empty.doc.getElementById('app')!.classList.contains('compact'));
+  assert.equal(empty.byClass('roombar')[0].hidden, true);
+});
+
+test('the map is sized to the room left below its top, so it fills the panel without scrolling', async () => {
+  const { model } = await fixtureModel();
+  const page = await runPage({ reduced: true, window: { innerHeight: 1000, scrollY: 0 } });
+  page.dispatch({ type: 'staff-room', model, cues: [] });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // The stand-in DOM puts every box at top 10: 1000 - 10 - 14 of padding.
+  assert.equal(page.doc.getElementById('app')!.style['--map-h'], '976px');
+  // With under 300px left below its top, the map keeps a usable height and the page scrolls to it.
+  const small = await runPage({ reduced: true, window: { innerHeight: 300, scrollY: 0 } });
+  small.dispatch({ type: 'staff-room', model, cues: [] });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(small.doc.getElementById('app')!.style['--map-h'], '320px');
+});
+
+test('Full map fills the Staff Room with the map, and Escape or the button brings the room back; nothing moves under reduced motion or Calm', async () => {
+  const { model } = await fixtureModel();
+  for (const options of [{}, { reduced: true }, { state: { calm: true } }] as const) {
+    const page = await runPage({ ...options });
+    page.dispatch({ type: 'staff-room', model, cues: [] });
+    const box = page.byClass('mapbox')[0];
+    const full = page.byClass('map-full')[0];
+    const before = page.doc.animations.length;
+    full.click();
+    assert.ok(box.classList.contains('full'));
+    assert.equal(full.getAttribute('aria-pressed'), 'true');
+    assert.equal(full.textContent, 'Exit full map');
+    assert.equal(box.getAttribute('role'), 'dialog');
+    assert.equal(box.getAttribute('aria-modal'), 'true');
+    const moved = page.doc.animations.length - before;
+    if ('reduced' in options || 'state' in options) assert.equal(moved, 0, `still: ${JSON.stringify(options)}`);
+    else {
+      assert.equal(moved, 1, 'one entrance');
+      for (const frame of page.doc.animations.at(-1)!.frames as Array<Record<string, unknown>>) assert.deepEqual(Object.keys(frame).sort(), ['opacity', 'transform']);
+    }
+    page.doc.key('Escape');
+    assert.ok(!box.classList.contains('full'), 'Escape returns');
+    assert.equal(box.getAttribute('role'), 'region');
+    assert.equal(page.doc.activeElement, full, 'focus back on the button');
+    full.click();
+    full.click();
+    assert.ok(!box.classList.contains('full'), 'the button returns too');
+    // A model update while the full map is on keeps it on.
+    full.click();
+    page.dispatch({ type: 'staff-room', model: { ...model, now: model.now + 1, map: { ...model.map, units: model.map.units.slice(1) } }, cues: [] });
+    assert.ok(box.classList.contains('full'));
+  }
+});
+
+test('without WebGL the room\'s SVG map uses the same layer drawer and draws the terrain pack\'s land, hillshade and contours', async () => {
+  const { model } = await fixtureModel();
+  const parsed = parseScenarioText(await readFile(SCENARIO, 'utf8'));
+  assert.ok(parsed.ok);
+  const env = await scenarioEnvironment(parsed.value);
+  const picture = buildCopPicture({ marking: parsed.value.marking, frame: parsed.value.region.frame, geography: syntheticGeography(parsed.value), scenario: parsed.value, layers: [], environment: env!.environment });
+  const page = await runPage({ reduced: true, copMap: true });
+  page.dispatch({ type: 'staff-room', model, cues: [], picture, pictureNow: NOW });
+  await settle();
+  assert.match(page.byClass('mapnote')[0].textContent, /^2D map: /);
+  const box = page.byClass('mapbox')[0];
+  const hills = box.all().filter((node) => node.classList.contains('env-hill'));
+  assert.equal(hills.length, picture.environment!.hillshade.features.length, 'every hillshade cell');
+  assert.ok(box.all().some((node) => node.classList.contains('env-contour')) && box.all().some((node) => node.classList.contains('env-coast')), 'contours and the coastline');
+  assert.ok(box.all().filter((node) => node.classList.contains('land')).length >= 1, 'the synthetic land');
+  // The drawer: the staff layers and the terrain pack's, each a switch.
+  const button = page.byClass('ld-button')[0];
+  assert.match(button.getAttribute('aria-label')!, /^Layers, \d+ of \d+ on$/);
+  button.click();
+  const panel = page.byClass('ld-panel')[0];
+  assert.equal(panel.hidden, false);
+  const hill = panel.all().find((node) => node.getAttribute('data-layer') === 'env-hillshade')!;
+  // The drawer opens on its first Tab stop: the base map's chosen radio (one stop per radio group), never an unchosen one.
+  const chosenBase = panel.all().find((node) => node.getAttribute('role') === 'radio' && node.getAttribute('aria-checked') === 'true');
+  assert.ok(chosenBase, 'the base map choice has a chosen radio');
+  assert.ok(page.doc.activeElement === chosenBase, `focus on the chosen base radio, not ${inspect(page.doc.activeElement)}`);
+  assert.ok(!panel.all().some((node) => node.getAttribute('role') === 'radio' && node.getAttribute('aria-checked') !== 'true' && node === page.doc.activeElement), 'never on an unchosen radio');
+  hill.click();
+  assert.equal(box.all().find((node) => node.getAttribute('data-layer') === 'env-hillshade')!.getAttribute('visibility'), 'hidden');
+  assert.ok((page.states.at(-1)!.hiddenLayers as string[]).includes('env-hillshade'), 'remembered like any layer');
+  // Escape closes the drawer (its own key handler) and focus goes back to the button.
+  panel.fire('keydown', { key: 'Escape' });
+  assert.equal(panel.hidden, true);
+  assert.equal(page.doc.activeElement, button);
+});
+
+test('each set-up section card shows its team and "Task in chat"; a missing team shows "Set up again"; a section without one shows "Set up" (D-48 of 0.4.34)', async () => {
+  const { model } = await fixtureModel();
+  const withTeams = { ...model, squads: model.squads.map((squad) => squad.section === 'j2' ? { ...squad, team: { state: 'ready', name: 'j2-us-joint-operational' } }
+    : squad.section === 'j5' ? { ...squad, team: { state: 'missing', name: 'j5-us-joint-operational' } }
+      : squad.section === 'j3' ? { ...squad, team: { state: 'none' } } : squad) };
+  const page = await runPage();
+  page.dispatch({ type: 'staff-room', model: withTeams, cues: [] });
+  const pod = (section: string) => page.byClass('pod').find((node) => node.dataset.section === section)!;
+  const line = (section: string) => pod(section).all().find((node) => node.classList.contains('pod-team'));
+  assert.equal(line('command'), undefined, 'the command group has no team line');
+  assert.equal(line('j4'), undefined, 'no team line without the host\'s record');
+  const buttons = (section: string) => line(section)!.all().filter((node) => node.tagName === 'button');
+  assert.ok(line('j2')!.all().some((node) => node.textContent === '/team:j2-us-joint-operational'));
+  assert.deepEqual(buttons('j2').map((node) => node.textContent), ['Task in chat']);
+  assert.deepEqual(buttons('j5').map((node) => node.textContent), ['Set up again']);
+  assert.ok(line('j5')!.all().some((node) => /missing from your teams/.test(node.textContent)));
+  assert.equal(line('j5')!.all().some((node) => /\/team:/.test(node.textContent)), false, 'a missing team is never shown as a command');
+  assert.deepEqual(buttons('j3').map((node) => node.textContent), ['Set up']);
+  const before = page.posts.length;
+  buttons('j2')[0].click();
+  buttons('j5')[0].click();
+  buttons('j3')[0].click();
+  // The page sends only the section; the host looks the team up in what it last sent.
+  assert.deepEqual(page.posts.slice(before), [{ type: 'task-team', section: 'j2' }, { type: 'set-up-section', section: 'j5' }, { type: 'set-up-section', section: 'j3' }]);
+});
+
+test('while the room bar is folded, Staff teams opens the section cards with focus on the first team button, and Task in chat still works (0.4.35)', async () => {
+  const { model } = await fixtureModel();
+  assert.equal(model.map.available, true, 'the fixture has a scenario on the map, so the room folds');
+  const withTeams = { ...model, squads: model.squads.map((squad) => squad.section === 'j2' ? { ...squad, team: { state: 'ready', name: 'j2-us-joint-operational' } }
+    : squad.section === 'j3' ? { ...squad, team: { state: 'none' } } : squad) };
+  const page = await runPage({ reduced: true });
+  page.dispatch({ type: 'staff-room', model: withTeams, cues: [] });
+  const app = page.doc.getElementById('app')!;
+  assert.ok(app.classList.contains('compact'), 'folded: the cards are out of sight');
+  assert.match(page.byClass('roombar-t')[0].textContent, / · 1 of 2 staff teams set up$/);
+  const bar = page.byClass('roombar')[0];
+  const teams = bar.children.find((node) => node.tagName === 'button' && node.textContent === 'Staff teams')!;
+  assert.ok(teams, 'the room bar offers Staff teams');
+  assert.equal(teams.hidden, false);
+  assert.equal(teams.getAttribute('aria-controls'), 'room-squads');
+  assert.match(teams.getAttribute('aria-label')!, /^Staff teams, 1 of 2 set up/);
+  teams.click();
+  assert.ok(!app.classList.contains('compact'), 'the cards are shown');
+  assert.equal(page.states.at(-1)!.roomOpen, true, 'remembered like the room bar\'s own toggle');
+  const focused = page.doc.activeElement!;
+  assert.equal(focused.textContent, 'Task in chat', 'focus on the J2 card\'s Task in chat');
+  const before = page.posts.length;
+  focused.click();
+  assert.deepEqual(page.posts.slice(before), [{ type: 'task-team', section: 'j2' }]);
+  // Once open, Staff teams only moves focus; it never folds the cards again.
+  teams.click();
+  assert.ok(!app.classList.contains('compact'));
+  // A room without any team record has no Staff teams button and no team count.
+  const plain = await runPage({ reduced: true });
+  plain.dispatch({ type: 'staff-room', model, cues: [] });
+  const plainTeams = plain.byClass('roombar')[0].children.find((node) => node.tagName === 'button' && node.textContent === 'Staff teams')!;
+  assert.equal(plainTeams.hidden, true);
+  assert.doesNotMatch(plain.byClass('roombar-t')[0].textContent, /staff teams/);
+});
+
+// Last in the file on purpose: node:test runs each file in its own process, so this reads the peak resident memory of every test above.
+test('the page tests stay within a 1 GB memory budget (a failure that printed the fake DOM once grew past 20 GB)', () => {
+  const peakBytes = process.resourceUsage().maxRSS * 1024;
+  assert.ok(peakBytes < 1024 * 1024 * 1024, `peak resident memory ${(peakBytes / 1048576).toFixed(0)} MB is over the 1 GB budget`);
 });

@@ -220,7 +220,8 @@ function sectionActivity(ctx: WorkspaceContext, section: StaffSectionId): Worksp
     if (!('section' in event) || event.section !== section) continue;
     let line: WorkspaceActivity | undefined;
     if (event.type === 'staff.lane.started') line = { at: event.at, member: event.member, text: `started${event.product ? ` on ${titleOf(ctx, event.product)}` : ''}` };
-    else if (event.type === 'staff.lane.finished') line = { at: event.at, member: event.member, text: `${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'stopped with an error' : 'was stopped'}${event.product ? `: ${titleOf(ctx, event.product)}` : ''}` };
+    else if (event.type === 'staff.lane.finished') line = { at: event.at, member: event.member, text: `${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'stopped with an error' : 'was stopped'}${event.product ? `: ${titleOf(ctx, event.product)}` : ''}${event.outcome === 'failed' && event.reason ? `: ${event.reason}` : ''}` };
+    else if (event.type === 'staff.lane.switched') line = { at: event.at, member: event.member, text: `switched from ${event.from} to ${event.to}: ${event.reason}` };
     else if (event.type === 'staff.product.state' && event.actor.kind === 'agent') line = { at: event.at, member: event.actor.member ?? 'an agent', text: `${titleOf(ctx, event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}` };
     else if (event.type === 'staff.waiting') line = { at: event.at, member: event.member, text: `waits on ${event.waitingOn === 'human' ? 'a person' : ctx.code(event.waitingOn)}: ${event.what}` };
     else if (event.type === 'staff.step.entered') line = { at: event.at, member: ctx.code(section), text: `entered step ${event.step}${event.stepName ? `, ${event.stepName}` : ''}` };

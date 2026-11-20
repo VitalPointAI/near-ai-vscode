@@ -68,6 +68,7 @@ for (const file of ['.planning/staff/PROFILE.md', '.planning/staff/skills/icd203
 check(/US Joint/.test(read('.planning/staff/PROFILE.md')), 'PROFILE.md names the profile');
 const projectJson = JSON.parse(read('.planning/.near-ai/project.json'));
 check(projectJson.staff?.profile === 'us-joint' && projectJson.staff?.level === 'operational', 'the staff settings are in project.json');
+check(projectJson.staff?.teams?.j2 === path.basename(result.teamFile, '.md'), 'project.json records the J2 team, so the chat and the Staff Room can task it');
 const guidance = staffGuidanceIn(read('AGENTS.md'), 'j2-intelligence');
 check(Boolean(guidance) && /People decide/.test(guidance), 'AGENTS.md holds the J2 guidance between its own markers');
 for (const file of ['README.md', 'mission.md', 'reports.md', 'scenario.json']) check(has(`.planning/staff/scenario/${file}`), `scenario ${file} written`);

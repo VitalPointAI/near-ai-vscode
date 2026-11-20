@@ -853,6 +853,17 @@
     append(row);
   }
 
+  /** Puts a command in the composer, keeping any draft after it, with the cursor after the command and its space; nothing is sent. */
+  function fillCommand(text) {
+    if (typeof text !== 'string' || !text) return;
+    const next = window.nearComposer.insertCommand(input.value, text);
+    input.value = next.text;
+    input.focus();
+    input.setSelectionRange(next.caret, next.caret);
+    menu.hidden = true;
+    autosize(); updateSendState();
+  }
+
   // Slash-command menu
   function matchingCommands() {
     const query = input.value.slice(1).toLowerCase();
@@ -1379,6 +1390,8 @@
       case 'reset': post({ type: 'new-chat' }); break;
       case 'conversations': renderConversations(m); break;
       case 'setup-nudge': setupKit.renderSetupNudge(document, welcomeReady, m.show === true, post, () => input.focus()); break;
+      // A staff project's section teams, in place of the "no team yet" card: Task puts the team's command in the message box, nothing is sent.
+      case 'staff-teams': if (setupKit.renderStaffTeams) setupKit.renderStaffTeams(document, welcomeReady, m.model, post, fillCommand); break;
       case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
       case 'sync-status':
         syncKit.renderSyncControl(document, syncButton, m.model, post);

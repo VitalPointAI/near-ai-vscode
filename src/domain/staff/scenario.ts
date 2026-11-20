@@ -520,7 +520,7 @@ function readScenario(value: unknown, options: ScenarioOptions): Scenario {
 
 function readFrame(value: unknown, path: string, grid: ScenarioGrid): ExerciseFrame {
   if (grid.kind !== 'fictional') refuse('not-allowed-here', path);
-  const fields = record(value, path, ['kind', 'grid', 'squareMetres', 'origin', 'extent', 'axis']);
+  const fields = record(value, path, ['kind', 'grid', 'squareMetres', 'origin', 'extent', 'axis'], ['magneticDeclination']);
   const origin = record(ownValue(fields, 'origin'), childPath(path, 'origin'), ['latitude', 'longitude']);
   const extent = record(ownValue(fields, 'extent'), childPath(path, 'extent'), ['eastings', 'northings']);
   const number = (raw: unknown, at: string): number => {
@@ -535,11 +535,23 @@ function readFrame(value: unknown, path: string, grid: ScenarioGrid): ExerciseFr
     squareMetres: number(ownValue(fields, 'squareMetres'), childPath(path, 'squareMetres')),
     origin: { latitude: number(ownValue(origin, 'latitude'), childPath(path, 'origin.latitude')), longitude: number(ownValue(origin, 'longitude'), childPath(path, 'origin.longitude')) },
     extent: { eastings: number(ownValue(extent, 'eastings'), childPath(path, 'extent.eastings')), northings: number(ownValue(extent, 'northings'), childPath(path, 'extent.northings')) },
-    axis: choice(FRAME_AXES, ownValue(fields, 'axis'), childPath(path, 'axis'))
+    axis: choice(FRAME_AXES, ownValue(fields, 'axis'), childPath(path, 'axis')),
+    // The map's declination diagram: the scenario's own value, fictional like the rest of the frame, with the note that says so.
+    ...(ownValue(fields, 'magneticDeclination') !== undefined ? { magneticDeclination: readDeclination(ownValue(fields, 'magneticDeclination'), childPath(path, 'magneticDeclination')) } : {})
   };
   const problem = frameProblem(frame, grid.name);
   if (problem) throw new Refused({ ...scenarioRefused('frame', path), message: `${SCENARIO_FAILURES.frame} ${FRAME_FAILURES[problem]} (at ${path})` });
   return frame;
+}
+
+function readDeclination(value: unknown, path: string): { readonly degreesEast: number; readonly note: string } {
+  const fields = record(value, path, ['degreesEast', 'note']);
+  const degrees = ownValue(fields, 'degreesEast');
+  if (typeof degrees !== 'number' || !Number.isFinite(degrees) || Math.abs(degrees) > 180) refuse('wrong-type', childPath(path, 'degreesEast'));
+  const note = ownValue(fields, 'note');
+  // eslint-disable-next-line no-control-regex
+  if (typeof note !== 'string' || note.trim() === '' || note.length > SCENARIO_MAX_LINE || /[\u0000-\u001f\u007f]/.test(note)) refuse('wrong-type', childPath(path, 'note'));
+  return { degreesEast: degrees, note };
 }
 
 function readMission(value: unknown, walk: Walk, seen: Set<string>): ScenarioMission {

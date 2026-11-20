@@ -14,6 +14,7 @@ import { buildCopPicture, layerPath, PRODUCT_LAYERS, readLayerBody, syntheticGeo
 import type { CopPicture, PictureFeeds } from '../domain/staff/cop';
 import { splitProductFile } from '../domain/staff/products';
 import { parseScenarioText, SCENARIO_DIR } from '../domain/staff/scenario';
+import type { Scenario } from '../domain/staff/scenario';
 import type { StaffSectionId } from '../domain/staff/doctrine';
 import { scenarioEnvironment } from './envPack';
 
@@ -21,6 +22,8 @@ import { scenarioEnvironment } from './envPack';
 export const COP_MAP_FILES = {
   /** The SVG maps' shared label placement (window.nearDeclutter): loaded before the map script and the Staff Room's map. */
   declutter: 'staff/declutter.js',
+  /** The layer drawer both maps share (window.nearLayerDrawer): loaded before the map script and the Staff Room's map. */
+  drawer: 'staff/layerDrawer.js',
   script: 'staff/copMap.js',
   style: 'staff/copMap.css',
   maplibre: 'vendor/maplibre-gl/maplibre-gl.mjs',
@@ -56,6 +59,13 @@ async function readOptional(file: string): Promise<string | undefined> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
+}
+
+/** The project's loaded scenario (its id and region, for the map's tiles), or undefined when there is none or it does not parse. */
+export async function loadScenarioOf(root: string): Promise<Pick<Scenario, 'id' | 'region'> | undefined> {
+  const text = await readOptional(path.join(root, SCENARIO_DIR, 'scenario.json'));
+  const parsed = text === undefined ? undefined : parseScenarioText(text);
+  return parsed?.ok ? parsed.value : undefined;
 }
 
 /**

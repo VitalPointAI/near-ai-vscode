@@ -158,6 +158,17 @@ test('latestOnly drops an older answer that finishes after a newer one, or after
   assert.deepEqual(posted, [false, false]);
 });
 
+test('latestOnly reports a failed computation instead of dropping it in silence, and a failing report changes nothing', async () => {
+  const posted: boolean[] = [];
+  const reported: string[] = [];
+  const failing = latestOnly(() => Promise.reject(new Error('settings unreadable')), (value: boolean) => posted.push(value), (error) => reported.push((error as Error).message));
+  await failing.refresh();
+  assert.deepEqual([posted, reported], [[], ['settings unreadable']], 'the card stays as it was, and the reason is reported');
+  const loud = latestOnly(() => Promise.reject(new Error('x')), (value: boolean) => posted.push(value), () => { throw new Error('report failed'); });
+  await loud.refresh();
+  assert.deepEqual(posted, []);
+});
+
 test('the chat card shows only with a working profile, no team, and no "Not now"', () => {
   assert.equal(shouldShowSetupNudge({ workingProfile: true, hasTeam: false, dismissed: false }), true);
   assert.equal(shouldShowSetupNudge({ workingProfile: false, hasTeam: false, dismissed: false }), false);

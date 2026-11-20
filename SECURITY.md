@@ -695,6 +695,18 @@ forwarded model instead. New
 research teams set this on every member, and new presales teams on their
 reviewer; `privacy: any` turns it off for a member.
 
+When a team member's model is overloaded at NEAR AI or keeps sending nothing,
+the member moves to another model by itself, under the same rules: only a
+model at least as private as the one it leaves (a TEE model moves only to
+another TEE model, a local one only to another local one, and a forwarded one
+never to a local one), only a private model its route can carry for a
+`privacy: private` member, and only a TEE or local model in TEE-only mode. The
+model it moves to goes through the same route check as every request, so the
+chat's label still decides; a refused model is skipped, and if none is left the
+member stops and says it was refused by policy. The same rules now also choose
+the model a stalled reply is retried on (`nearAi.agent.modelStallSeconds`), so
+a private member is never retried on the chat's forwarded model.
+
 With `nearAi.agent.imageReview` set to `ask` (the default), a generated image
 is first saved as a draft in the project's `.near-ai/drafts/images/` folder,
 which is ignored by git (by the project's `.gitignore` and by the folder's own
@@ -877,8 +889,9 @@ under `.planning/staff/` and the observation store. Its page gets display data
 only, through `textContent`, under the COP map's content security policy (see
 "COP map" below): no inline script, no `'unsafe-eval'`, no `'unsafe-inline'`
 and no remote source. The panel may load files only from its own folder, the
-shared stylesheet, `media/staff/` (the map component) and `media/vendor/` (the
-vendored map libraries). The COP picture it sends holds only the observations
+shared stylesheet, `media/staff/` (the map component), `media/vendor/` (the
+vendored map libraries), `media/map/` (the globe's bundled world tiles) and
+`resources/staff/env/` (the bundled environment packs and their tiles). The COP picture it sends holds only the observations
 the person's clearance covers: the rows come from the store's reader view,
 which drops every row the gate's own check does not cover before anything is
 built from them, and with no gate in the window no observation is read. Every
@@ -1056,9 +1069,21 @@ observations server fences its rows itself, and its `watch_list` its text. A tes
 checks the fence.
 
 The map page draws the scenario's synthetic geography and requests no map
-tile, glyph, sprite or font: an outside tile request would reveal the area of
-interest. Its only requests are the vendored files under `media/vendor/` and
-the map worker, started from a blob. Spike result (2026-11-18): MapLibre GL
+tile, glyph, sprite or font from any server: an outside tile request would
+reveal the area of interest. Its only requests are the vendored files under
+`media/vendor/`, the map worker (started from a blob) and the bundled map
+tiles and land cover under `media/map/` and `resources/staff/env/`, all served
+by VS Code from the extension's own folder. The policy is unchanged:
+`img-src` and `connect-src` already name only the extension. Before the page
+gets any tile address, the host (`src/staff/mapTiles.ts`) checks the folder's
+`index.json` against the hash its record holds (`media/map/globe/DATA.json`,
+or the pack manifest), then every tile it lists: a regular file, at most
+512 KB, the size the index records, the PNG or WebP magic bytes its format
+claims, and its SHA-256. Tile paths are plain `z/x/y` numbers inside their
+set's zoom range and bounds, so an index cannot point outside its folder. One
+problem leaves that folder's tiles out, and the map says why and draws
+without them; organization tile servers stay off. The images are decoded by
+Chromium's own decoders inside the webview's renderer sandbox. Spike result (2026-11-18): MapLibre GL
 JS 6.16.0 runs under the page policy `default-src 'none'; script-src
 'nonce-…'; style-src <extension>; img-src <extension> data: blob:; font-src
 <extension>; worker-src blob:; connect-src <extension>` with no
@@ -1097,7 +1122,25 @@ real-data pack must carry its attribution and every source's licence. The
 contours and hillshade are computed on the host and sent to the page as
 GeoJSON inside the picture, so the page's policy is unchanged and the page
 makes no request for them. The bundled IRON LANTERN pack is synthetic, made
-from a seed, and a test makes it again and compares the bytes.
+from a seed, and a test makes it again and compares the bytes. Pack version 2
+adds `landcover.geojson` (checked like the other files) and a `tiles/` folder
+of photo-like imagery and Terrarium height tiles with its own hashed index
+(checked as described under "COP map"); a test compares the folder with its
+index file by file and draws a sample of tiles again from the seed, pixel for
+pixel. Version 1 packs stay valid, and a version 1 manifest may not name land
+cover or tiles.
+
+The globe's world tiles in `media/map/globe/` are third-party data made once
+on a developer machine (`scripts/build-globe-tiles.mjs`, which refuses a source
+image whose SHA-256 is not the one given): NASA Blue Marble Next Generation
+(NASA content is generally not subject to copyright in the United States;
+credit "NASA Earth Observatory"; no NASA logo or wording that implies NASA
+endorsement is used) and Natural Earth's cross-blended hypsometric raster
+(public domain). `media/map/globe/DATA.json` records each source's address,
+SHA-256, terms, credit and build parameters; the map shows the credit of the
+base on show, and the SBOM lists both as data components. The tile builders'
+encoders (`@jsquash/webp`, `@jsquash/jpeg`, Apache-2.0, WebAssembly) are
+build-time devDependencies only and never ship.
 
 `scripts/build-env-pack.mjs` turns real elevation and forecast files into a
 pack on a developer machine. It refuses to run when `CI` is set or GDAL is not

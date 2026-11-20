@@ -1,4 +1,5 @@
 import { stampTeam } from '../agent/teamUpdate';
+import { inspect } from 'node:util';
 import { projectType } from '../agent/projectTypes';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -641,6 +642,8 @@ test('host: closing the panel keeps unsaved work, and the next open says so', as
 // ---------- the page script in a small DOM ----------
 
 class FakeNode {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tagName}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   children: FakeNode[] = [];
   parent?: FakeNode;
   attributes = new Map<string, string>();
@@ -669,6 +672,8 @@ class FakeNode {
   }
 }
 class FakeDoc {
+  /** A short form for failure messages (see the node's). */
+  [inspect.custom](): string { return '<document>'; }
   body = new FakeNode('body', this);
   activeElement: FakeNode | null = null;
   constructor() { for (const id of ['title', 'crumbs', 'announce', 'banner', 'main']) { const node = new FakeNode('div', this); node.id = id; this.body.append(node); } }

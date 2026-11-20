@@ -15,8 +15,8 @@ import type { StandingWatch } from './obs/watches';
 import type { Observation } from './obs/observation';
 import { formatGridReference, wgs84ToGrid } from './obs/frame';
 import { STAFF_SLUG } from './parse';
-import { levelOffer, resolveProfile, sectionCode } from './profiles';
-import type { StaffSettings } from './profiles';
+import { isStaffTeamSection, levelOffer, resolveProfile, sectionCode } from './profiles';
+import type { StaffSettings, StaffTeamSection } from './profiles';
 import type { ProductView } from './readModels';
 import { currentSteps, stepBoard } from './readModels';
 import type { RegisterRow } from './registers';
@@ -75,7 +75,15 @@ export interface Squad {
   readonly members: readonly SquadMember[];
   readonly summary: string;
   readonly workspace: StaffRoomWorkspace;
+  /**
+   * The section's team, for the J2, J5, J3 and J4 when the host read the project's record (staff.teams): ready (its name, tasked with "Task in chat"),
+   * missing (named in the record but gone from the library: "Set up again"), or none ("Set up").
+   */
+  readonly team?: { readonly state: 'ready' | 'missing' | 'none'; readonly name?: string };
 }
+
+/** One section's team as the host read it (src/services/staffTeams.ts projectStaffTeams). */
+export interface StaffRoomTeam { readonly section: StaffTeamSection; readonly state: 'ready' | 'missing' | 'none'; readonly team?: string }
 
 export interface LedgerRow {
   readonly product: string;
@@ -212,6 +220,8 @@ export interface StaffRoomInput {
   readonly j2: J2Input;
   /** What the J5, J3 and J4 workspaces read; missing parts are simply not drawn yet. */
   readonly workspaces?: WorkspacesInput;
+  /** The project's section teams; without it the section cards show no team line. */
+  readonly teams?: readonly StaffRoomTeam[];
 }
 
 // ---- Small helpers -----------------------------------------------------------------------------------------------------------------------------------
@@ -304,7 +314,7 @@ function buildRail(settings: StaffSettings, board: StepBoardModel | undefined, s
   });
 }
 
-function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run: string | undefined, board: StepBoardModel | undefined, registry: readonly ProductView[]): Squad[] {
+function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run: string | undefined, board: StepBoardModel | undefined, registry: readonly ProductView[], teams?: readonly StaffRoomTeam[]): Squad[] {
   const sections = [...SQUAD_SECTIONS];
   for (const entry of board?.sections ?? []) if (!sections.includes(entry.section)) sections.push(entry.section);
   // Who waits on a person, and on whom the others wait, from the run's waiting events.
@@ -349,9 +359,16 @@ function buildSquads(settings: StaffSettings, events: readonly StaffEvent[], run
       : 'No agents tasked in this run yet';
     return {
       section, code: codeOf(settings, section), name: sectionName(settings, section), lead, ...(people.get(section) ? { person: people.get(section) } : {}), tag,
-      ...(entry ? { step: entry.step } : {}), active: working.length > 0, members, summary: clip(summary, CAP.short), workspace: workspaceOf(section)
+      ...(entry ? { step: entry.step } : {}), active: working.length > 0, members, summary: clip(summary, CAP.short), workspace: workspaceOf(section),
+      ...(teams && isStaffTeamSection(section) ? { team: squadTeam(teams.find((candidate) => candidate.section === section)) } : {})
     };
   });
+}
+
+/** A section card's team line: a name only in the library's form, so the page never shows (or tasks) anything else. */
+function squadTeam(team: StaffRoomTeam | undefined): NonNullable<Squad['team']> {
+  if (!team || team.state === 'none' || !team.team || !STAFF_SLUG.test(team.team)) return { state: 'none' };
+  return { state: team.state, name: team.team };
 }
 
 // ---- Ledger and decisions ------------------------------------------------------------------------------------------------------------------------------
@@ -417,7 +434,8 @@ export function activityLine(settings: StaffSettings, event: StaffEvent): Activi
   switch (event.type) {
     case 'staff.step.entered': return { at: event.at, section: code(event.section), kind: 'info', text: `${code(event.section)} entered step ${event.step}${event.stepName ? `, ${event.stepName}` : ''}.` };
     case 'staff.lane.started': return { at: event.at, section: code(event.section), kind: 'task', text: `${event.member} started${event.product ? ` on ${titleOf(settings, event.product)}` : ''}.` };
-    case 'staff.lane.finished': return { at: event.at, section: code(event.section), kind: event.outcome === 'done' ? 'prod' : 'info', text: `${event.member} ${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'failed' : 'was stopped'}${event.product ? `: ${titleOf(settings, event.product)}` : ''}.` };
+    case 'staff.lane.finished': return { at: event.at, section: code(event.section), kind: event.outcome === 'done' ? 'prod' : 'info', text: `${event.member} ${event.outcome === 'done' ? 'finished' : event.outcome === 'failed' ? 'failed' : 'was stopped'}${event.product ? `: ${titleOf(settings, event.product)}` : ''}${event.outcome === 'failed' && event.reason ? `: ${clip(event.reason, CAP.short)}` : ''}.` };
+    case 'staff.lane.switched': return { at: event.at, section: code(event.section), kind: 'info', text: `${event.member} switched from ${clip(event.from, 60)} to ${clip(event.to, 60)}: ${clip(event.reason, CAP.short)}.` };
     case 'staff.product.state': return { at: event.at, section: code(event.section), kind: event.actor.kind === 'person' ? 'human' : event.to === 'guard-checked' ? 'gate' : 'prod', text: `${titleOf(settings, event.product)} v${event.version}: ${event.from ?? 'new'} to ${event.to}, by ${actorWords(event.actor)}.` };
     case 'staff.gate.verdict': return { at: event.at, section: '', kind: 'gate', text: `${event.gate === 'tradecraft' ? 'Tradecraft' : 'Release-guard'} ${event.verdict} on ${titleOf(settings, event.product)} v${event.version}.` };
     case 'staff.decision.requested': return { at: event.at, section: '', kind: 'human', text: `${titleOf(settings, event.product)} v${event.version} waits for the ${event.role}. Agents stop here.` };
@@ -624,7 +642,7 @@ export function buildStaffRoomModel(input: StaffRoomInput): StaffRoomModel {
     clock: { at: new Date(input.now).toISOString(), dtg: formatDtg(input.now), ...(next ? { next } : {}) },
     runs: runs.slice(0, 20), ...(run ? { run } : {}),
     rail: buildRail(settings, board, steps),
-    squads: buildSquads(settings, input.events, run, board, input.registry),
+    squads: buildSquads(settings, input.events, run, board, input.registry, input.teams),
     ledger: buildLedger(settings, input.registry),
     decisions,
     map,
@@ -647,7 +665,11 @@ export type StaffRoomMessage =
   | { readonly type: 'decide'; readonly action: 'approve' | 'reject' | 'release'; readonly product: string; readonly hash: string }
   | { readonly type: 'open-product'; readonly product: string }
   | { readonly type: 'select-run'; readonly run: string }
-  | { readonly type: 'open'; readonly target: 'team-live' | 'load-scenario' | 'set-up-staff' | 'show-products' };
+  | { readonly type: 'open'; readonly target: 'team-live' | 'load-scenario' | 'set-up-staff' | 'show-products' }
+  /** A section card's "Task in chat": the host puts that section's team command in the chat's message box (nothing is sent). */
+  | { readonly type: 'task-team'; readonly section: StaffTeamSection }
+  /** A section card's "Set up" (or "Set up again"): runs Set Up a Staff Team for that section. */
+  | { readonly type: 'set-up-section'; readonly section: StaffTeamSection };
 
 const HASH = /^[a-f0-9]{64}$/;
 const RUN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
@@ -674,6 +696,8 @@ export function parseStaffRoomMessage(value: unknown): StaffRoomMessage | undefi
     }
     case 'open-product': return exact(message, ['type', 'product']) && typeof message.product === 'string' && STAFF_SLUG.test(message.product) && message.product.length <= 120 ? { type: 'open-product', product: message.product } : undefined;
     case 'select-run': return exact(message, ['type', 'run']) && typeof message.run === 'string' && RUN.test(message.run) ? { type: 'select-run', run: message.run } : undefined;
+    case 'task-team':
+    case 'set-up-section': return exact(message, ['type', 'section']) && isStaffTeamSection(message.section) ? { type: message.type, section: message.section } : undefined;
     case 'open': return exact(message, ['type', 'target']) && (OPEN_TARGETS as readonly unknown[]).includes(message.target) ? { type: 'open', target: message.target as (typeof OPEN_TARGETS)[number] } : undefined;
     default: return undefined;
   }

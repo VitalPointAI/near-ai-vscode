@@ -3,6 +3,7 @@
 // interface. It makes no network request of its own, its MapLibre style names no tile, glyph or sprite source, and it filters by the shared clock with the
 // same rule as the host's picture. The picture, the synthetic geography and the content security policy are checked beside it.
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -13,10 +14,12 @@ import { gridToWgs84, insideFrame, wgs84ToGrid } from '../domain/staff/obs/frame
 import type { Observation } from '../domain/staff/obs/observation';
 import { parseScenarioText } from '../domain/staff/scenario';
 import { COP_MAP_FILES, copMapCsp, copMapResources } from '../staff/copMapWebview';
+import { scenarioEnvironment } from '../staff/envPack';
 
 const REPO = path.resolve(__dirname, '..', '..');
 const SCRIPT = readFileSync(path.join(REPO, 'media', 'staff', 'copMap.js'), 'utf8');
 const DECLUTTER = readFileSync(path.join(REPO, 'media', 'staff', 'declutter.js'), 'utf8');
+const DRAWER = readFileSync(path.join(REPO, 'media', 'staff', 'layerDrawer.js'), 'utf8');
 
 function starter() {
   const parsed = parseScenarioText(readFileSync(path.join(REPO, 'resources', 'staff', 'scenarios', 'iron-lantern.json'), 'utf8'));
@@ -27,6 +30,8 @@ function starter() {
 // ---- A stand-in DOM ---------------------------------------------------------------------------------------------------------------------------
 
 class Node {
+  /** A short form for failure messages: a fake node links to its document, parent and children, and printing that whole graph grew past 20 GB. */
+  [inspect.custom](): string { return `<${this.tag}${(this as { id?: unknown }).id ? '#' + String((this as { id?: unknown }).id) : ''}${(this as { className?: unknown }).className ? '.' + String((this as { className?: unknown }).className).split(/\s+/).join('.') : ''}>`; }
   public children: Node[] = [];
   public parentNode: Node | undefined;
   public attributes = new Map<string, string>();
@@ -38,7 +43,7 @@ class Node {
   public get firstChild(): Node | undefined { return this.children[0]; }
   public get lastChild(): Node | undefined { return this.children[this.children.length - 1]; }
   public get childNodes(): Node[] { return this.children; }
-  public appendChild(child: Node): Node { child.parentNode = this; this.children.push(child); if (this.tag === 'head' && child.tag === 'script') requests.push(String(child.src)); return child; }
+  public appendChild(child: Node): Node { if (child.parentNode) child.parentNode.removeChild(child); child.parentNode = this; this.children.push(child); if (this.tag === 'head' && child.tag === 'script') requests.push(String(child.src)); return child; }
   public removeChild(child: Node): Node { this.children = this.children.filter((item) => item !== child); child.parentNode = undefined; return child; }
   public setAttribute(key: string, value: string): void { this.attributes.set(key, value); }
   public getAttribute(key: string): string | undefined { return this.attributes.get(key); }
@@ -46,23 +51,59 @@ class Node {
   public dispatch(type: string): void { for (const listener of this.listeners.get(type) ?? []) listener({}); }
   public getContext(): null { return null; }
   public all(): Node[] { return [this, ...this.children.flatMap((child) => child.all())]; }
+  // What the layer drawer (media/staff/layerDrawer.js) uses: classes, focus and the Web Animations API.
+  public className = '';
+  public get classList() {
+    const list = () => this.className.split(/\s+/).filter(Boolean);
+    return {
+      contains: (name: string) => list().includes(name),
+      add: (name: string) => { if (!list().includes(name)) this.className = [...list(), name].join(' '); },
+      remove: (name: string) => { this.className = list().filter((item) => item !== name).join(' '); },
+      toggle: (name: string, force?: boolean) => { const on = force ?? !list().includes(name); this.className = on ? [...new Set([...list(), name])].join(' ') : list().filter((item) => item !== name).join(' '); return on; }
+    };
+  }
+  public focus(): void { focused = this; }
+  public get tagName(): string { return this.tag.toUpperCase(); }
+  public animations: Array<{ frames: Array<Record<string, unknown>>; onfinish?: () => void; finish(): void; cancel(): void }> = [];
+  public animate(frames: Array<Record<string, unknown>>): { frames: Array<Record<string, unknown>>; onfinish?: () => void; finish(): void; cancel(): void } {
+    const animation = { frames, onfinish: undefined as undefined | (() => void), finish() { this.onfinish?.(); }, cancel() {} };
+    this.animations.push(animation);
+    return animation;
+  }
+  public key(key: string, shiftKey = false): boolean {
+    let prevented = false;
+    for (const listener of this.listeners.get('keydown') ?? []) listener({ key, shiftKey, preventDefault: () => { prevented = true; }, stopPropagation() {} });
+    return prevented;
+  }
+  public click(): void { for (const listener of this.listeners.get('click') ?? []) listener({}); }
 }
 
 let requests: string[] = [];
+let focused: Node | undefined;
+let documentListeners = new Map<string, Array<(event: unknown) => void>>();
 
 class FakeMap {
   public static last: FakeMap | undefined;
   public projections: unknown[] = [];
   public data = new Map<string, unknown>();
   private handlers = new Map<string, Array<(event?: unknown) => void>>();
-  public constructor(public readonly options: { style: unknown }) { FakeMap.last = this; setTimeout(() => this.fire('load'), 0); }
+  /**
+   * The events the map fires once it starts. A real map fires 'style.load' when its style is in and 'load' only when every source and tile has
+   * answered; `['style.load']` is a map with a file that never answers (D-48 of 0.4.35).
+   */
+  public static starts: readonly string[] = ['style.load', 'load'];
+  public constructor(public readonly options: { style: unknown }) { FakeMap.last = this; const starts = FakeMap.starts; setTimeout(() => { for (const type of starts) this.fire(type); }, 0); }
   public addControl(): void {}
   public on(type: string, handler: (event?: unknown) => void): void { this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]); }
   public once(type: string, handler: (event?: unknown) => void): void { this.on(type, handler); }
   public fire(type: string, event?: unknown): void { for (const handler of this.handlers.get(type) ?? []) handler(event); }
   public getSource(id: string) { return { setData: (data: unknown) => { this.data.set(id, data); } }; }
   public setProjection(projection: unknown): void { this.projections.push(projection); }
-  public fitBounds(): void {}
+  public camera: Array<[string, Record<string, unknown>]> = [];
+  public fitBounds(bounds: unknown, options: Record<string, unknown>): void { this.camera.push(['fitBounds', { bounds, ...options }]); }
+  public flyTo(options: Record<string, unknown>): void { this.camera.push(['flyTo', options]); }
+  public jumpTo(options: Record<string, unknown>): void { this.camera.push(['jumpTo', options]); }
+  public getContainer() { return { clientWidth: 800, clientHeight: 600 }; }
   public hasImage(): boolean { return false; }
   public addImage(): void {}
   public queryRenderedFeatures(): unknown[] { return []; }
@@ -73,9 +114,26 @@ class FakeMap {
   public focused = 0;
   public getCanvas() { return { focus: () => { this.focused += 1; } }; }
   public remove(): void {}
+  // The ground (base maps, 3D terrain, spin): visibility, terrain and the camera, recorded.
+  public layout: Array<[string, string, unknown]> = [];
+  public terrains: unknown[] = [];
+  public pitch = 0;
+  public setLayoutProperty(layer: string, name: string, value: unknown): void { this.layout.push([layer, name, value]); }
+  public getLayer(id: string) { return (this.options.style as { layers: Array<{ id: string }> }).layers.find((layer) => layer.id === id); }
+  public setTerrain(terrain: unknown): void { this.terrains.push(terrain); }
+  public getPitch(): number { return this.pitch; }
+  public getCenter() { return { lng: -123.4, lat: -48.9 }; }
+  public getZoom(): number { return 2; }
+  /** The visibility a layer has now: its last setLayoutProperty, else its style layout. */
+  public visibility(id: string): string {
+    const set = this.layout.filter(([layer, name]) => layer === id && name === 'visibility').at(-1);
+    if (set) return String(set[2]);
+    const layer = this.getLayer(id) as { layout?: { visibility?: string } } | undefined;
+    return layer?.layout?.visibility ?? 'visible';
+  }
 }
 
-interface Page { window: Record<string, unknown>; container: Node }
+interface Page { window: Record<string, unknown>; container: Node; document: { hidden: boolean } }
 
 /** The page's timers that have neither fired nor been cleared, with their delay: a timer the page forgets shows up here. */
 const liveTimers = new Map<ReturnType<typeof setTimeout>, number>();
@@ -89,20 +147,27 @@ function pageClearTimeout(handle: ReturnType<typeof setTimeout> | undefined): vo
   clearTimeout(handle);
 }
 
-function page(): Page {
+function page(options: { reduced?: boolean; files?: Readonly<Record<string, unknown>> } = {}): Page {
   requests = [];
   liveTimers.clear();
+  focused = undefined;
+  documentListeners = new Map();
   const head = new Node('head');
   const document = {
-    head,
+    head, hidden: false,
     createElement: (tag: string) => new Node(tag),
-    createElementNS: (_ns: string, tag: string) => new Node(tag)
+    createElementNS: (_ns: string, tag: string) => new Node(tag),
+    get activeElement() { return focused; },
+    addEventListener: (type: string, listener: (event: unknown) => void) => { documentListeners.set(type, [...(documentListeners.get(type) ?? []), listener]); },
+    removeEventListener: (type: string, listener: (event: unknown) => void) => { documentListeners.set(type, (documentListeners.get(type) ?? []).filter((item) => item !== listener)); }
   };
   const record = (kind: string) => (url: unknown) => { requests.push(`${kind} ${String(url)}`); return Promise.reject(new Error('offline')); };
   const window: Record<string, unknown> = {};
   const context: Record<string, unknown> = {
     window, document, console, setTimeout: pageSetTimeout, clearTimeout: pageClearTimeout, Date, Math, JSON, Promise, Map, Object, Array, Number, String, Boolean, Error, isFinite,
-    fetch: record('fetch'),
+    matchMedia: (query: string) => ({ matches: Boolean(options.reduced) && /reduce/.test(query) }),
+    // A file the test serves (the page's own fetch of an extension resource) answers with its JSON; anything else is offline.
+    fetch: (url: unknown) => options.files && String(url) in options.files ? (requests.push(`fetch ${String(url)}`), Promise.resolve({ json: () => Promise.resolve(options.files![String(url)]) })) : record('fetch')(url),
     XMLHttpRequest: class { public open(_method: string, url: string) { requests.push(`xhr ${url}`); } public send() {} },
     WebSocket: class { public constructor(url: string) { requests.push(`websocket ${url}`); } },
     EventSource: class { public constructor(url: string) { requests.push(`eventsource ${url}`); } },
@@ -111,8 +176,9 @@ function page(): Page {
   vm.createContext(context);
   // The page loads the shared label placement first (staffRoomPanel.ts), then the map.
   new vm.Script(DECLUTTER, { filename: 'declutter.js' }).runInContext(context);
+  new vm.Script(DRAWER, { filename: 'layerDrawer.js' }).runInContext(context);
   new vm.Script(SCRIPT, { filename: 'copMap.js' }).runInContext(context);
-  return { window, container: new Node('div') };
+  return { window, container: new Node('div'), document };
 }
 
 const wait = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -248,14 +314,19 @@ test('MapLibre places names with its collision index: symbols always stay, a nam
   assert.ok(Number(names.layout!['text-padding']) >= 2);
   assert.ok(Number(names.layout!['text-radial-offset']) >= 1.5, 'clear of its own symbol');
   const textLayers = layers.filter((layer) => layer.type === 'symbol' && layer.layout && 'text-field' in layer.layout);
-  assert.deepEqual(JSON.parse(JSON.stringify(textLayers.map((layer) => layer.id))), ['area-labels', 'line-labels', 'place-labels', 'point-labels'], 'then names of symbols, then places, then control measures');
+  // The ground's own labels (index contour heights, grid numbers) are the lowest: any picture name wins a crowded spot over them.
+  assert.deepEqual(JSON.parse(JSON.stringify(textLayers.map((layer) => layer.id))), ['contour-labels', 'grid-labels-10', 'grid-labels-1', 'area-labels', 'line-labels', 'place-labels', 'point-labels'], 'then names of symbols, then places, then control measures, then the ground');
   for (const layer of textLayers) assert.equal(layer.layout!['text-allow-overlap'], false, `${layer.id} never covers another label`);
   view.setPicture(timedPicture());
   view.setTime(Date.parse('2026-11-18T13:00:00.000Z'));
   view.setEcoa('ECOA-2');
   await wait();
-  const cop = map.data.get('cop') as { features: Array<{ properties: Record<string, unknown> }> };
-  const mech = cop.features.find((feature) => feature.properties.fid === 'cop-threat-layer/e-1-41')!;
+  // Point symbols are on their own clustered source (units); lines and areas stay on the cop source.
+  const units = map.data.get('units') as { features: Array<{ geometry: { type: string }; properties: Record<string, unknown> }> };
+  const cop = map.data.get('cop') as { features: Array<{ geometry: { type: string }; properties: Record<string, unknown> }> };
+  assert.ok(units.features.every((feature) => feature.geometry.type === 'Point') && cop.features.every((feature) => feature.geometry.type !== 'Point'));
+  const mech = units.features.find((feature) => feature.properties.fid === 'cop-threat-layer/e-1-41')!;
+  assert.equal(mech.properties.aff, 'H', 'the affiliation a stacked symbol counts');
   assert.equal(mech.properties.icon, 'sym|10061000161211020000|live', 'the symbol image is keyed without its name');
   assert.equal(mech.properties.text, '1-41 MECH', 'the name is a label of its own');
   view.highlight(['mdcoa']);
@@ -317,6 +388,208 @@ test('the COP map and the Staff Room\'s SVG map share one label placement, media
   assert.deepEqual(JSON.parse(JSON.stringify(declutter(crowd, []))), JSON.parse(JSON.stringify(declutter(crowd.slice().reverse(), []))), 'the same input in any order places the same way');
 });
 
+// ---- The layer drawer and the map's room (owner direction, D-48 of 0.4.34) -----------------------------------------------------------------
+
+type Drawer = { button: Node; panel: Node; setGroups(groups: unknown[]): void; open(): void; close(returnFocus?: boolean): void; isOpen(): boolean; destroy(): void };
+const drawerApi = (window: Record<string, unknown>) => window.nearLayerDrawer as { create: (host: Node, options: unknown) => Drawer; grouped: (items: unknown[]) => unknown[] };
+const switches = (root: Node) => root.all().filter((node) => node.getAttribute('role') === 'switch');
+const sampleGroups = (on: Record<string, boolean>) => [
+  { id: 'picture', title: 'Picture', items: [{ id: 'ops', title: 'Operations', count: 4, on: on.ops ?? true, sim: false, owner: 'j3 current-ops' }, { id: 'plans', title: 'Plans (COA sketches)', count: 0, on: on.plans ?? false, sim: false, separate: true }] },
+  { id: 'environment', title: 'Environment', items: [{ id: 'hill', title: 'Hillshade', count: 166, on: on.hill ?? true, sim: true }] },
+  { id: 'reference', title: 'Reference', items: [] }
+];
+
+test('the layer drawer: a compact Layers button with how many are on, groups with counts and SIM, a switch per layer, and Escape back to the button', () => {
+  const { window } = page();
+  const host = new Node('div');
+  const toggled: Array<[string, boolean]> = [];
+  const drawer = drawerApi(window).create(host, { onToggle: (id: string, on: boolean) => toggled.push([id, on]) });
+  host.appendChild(drawer.button);
+  drawer.setGroups(sampleGroups({}));
+  assert.equal(drawer.button.all().find((node) => node.className === 'ld-count')!.textContent, '2');
+  assert.equal(drawer.button.getAttribute('aria-label'), 'Layers, 2 of 3 on');
+  assert.equal(drawer.button.getAttribute('aria-expanded'), 'false');
+  assert.equal(drawer.panel.hidden, true, 'closed until asked');
+  assert.equal(drawer.panel.getAttribute('role'), 'dialog');
+  const titles = drawer.panel.all().filter((node) => node.className === 'ld-group-title').map((node) => node.textContent);
+  assert.deepEqual(titles, ['Picture', 'Environment'], 'an empty group is left out');
+  assert.deepEqual(drawer.panel.all().filter((node) => node.className === 'ld-tally').map((node) => node.textContent), ['1 of 2 on', '1 of 1 on']);
+  assert.ok(drawer.panel.all().some((node) => node.className === 'ld-sim'), 'the SIM badge where a layer is simulated');
+  assert.match(switches(drawer.panel).find((node) => node.getAttribute('data-layer') === 'hill')!.getAttribute('aria-label')!, /^Hillshade, 166, simulated$/);
+  assert.match(switches(drawer.panel)[0].getAttribute('aria-label')!, /written by j3 current-ops/);
+
+  drawer.button.click();
+  assert.equal(drawer.isOpen(), true);
+  assert.equal(drawer.panel.hidden, false);
+  assert.equal(drawer.button.getAttribute('aria-expanded'), 'true');
+  assert.equal(focused, switches(drawer.panel)[0], 'focus moves to the first switch');
+  switches(drawer.panel)[1].click();
+  assert.deepEqual(toggled, [['plans', true]], 'a switch asks for the opposite of its state');
+  assert.equal(drawer.panel.key('Escape'), true);
+  assert.equal(drawer.isOpen(), false);
+  assert.equal(drawer.panel.hidden, true, 'still: hidden at once');
+  assert.equal(focused, drawer.button, 'focus returns to the Layers button');
+  assert.equal(drawer.panel.animations.length, 0, 'nothing moves when motion is off');
+});
+
+test('the layer drawer keeps Tab inside while open, closes on a click outside without taking focus, and keeps focus on a switch when it redraws', () => {
+  const { window } = page();
+  const host = new Node('div');
+  let groups = sampleGroups({});
+  const drawer = drawerApi(window).create(host, { onToggle: (id: string, on: boolean) => { groups = sampleGroups({ [id]: on }); drawer.setGroups(groups); } });
+  host.appendChild(drawer.button);
+  drawer.setGroups(groups);
+  drawer.open();
+  const inside = (window.nearLayerDrawer as { focusables: (root: Node) => Node[] }).focusables(drawer.panel);
+  const close = inside[0];
+  assert.equal(close.className, 'ld-close');
+  const last = inside[inside.length - 1];
+  last.focus();
+  assert.equal(drawer.panel.key('Tab'), true, 'Tab on the last control wraps');
+  assert.equal(focused, inside[0]);
+  assert.equal(drawer.panel.key('Tab', true), true, 'Shift+Tab on the first control wraps back');
+  assert.equal(focused, last);
+  // A redraw (the person turned a layer on) keeps focus on the same layer's switch.
+  const plans = switches(drawer.panel).find((node) => node.getAttribute('data-layer') === 'plans')!;
+  plans.focus();
+  plans.click();
+  const again = switches(drawer.panel).find((node) => node.getAttribute('data-layer') === 'plans')!;
+  assert.notEqual(again, plans);
+  assert.equal(again.getAttribute('aria-checked'), 'true');
+  assert.equal(focused, again);
+  assert.equal(drawer.button.getAttribute('aria-label'), 'Layers, 3 of 3 on');
+  // A click outside closes it; focus stays where the person clicked.
+  const elsewhere = new Node('div');
+  elsewhere.focus();
+  for (const listener of documentListeners.get('pointerdown') ?? []) listener({ target: drawer.panel.children[1] });
+  assert.equal(drawer.isOpen(), true, 'a click inside keeps it open');
+  for (const listener of documentListeners.get('pointerdown') ?? []) listener({ target: elsewhere });
+  assert.equal(drawer.isOpen(), false);
+  assert.equal(focused, elsewhere);
+  drawer.destroy();
+  assert.equal((documentListeners.get('pointerdown') ?? []).length, 0, 'the outside-click listener is let go');
+});
+
+test('the layer drawer slides with transform and opacity only when motion is allowed, and hides after its exit animation', () => {
+  const { window } = page();
+  const host = new Node('div');
+  let moving = true;
+  const drawer = drawerApi(window).create(host, { motion: () => moving });
+  drawer.setGroups(sampleGroups({}));
+  drawer.open();
+  drawer.close(true);
+  assert.equal(drawer.panel.animations.length, 2);
+  for (const animation of drawer.panel.animations) for (const frame of animation.frames) assert.deepEqual(Object.keys(frame).sort(), ['opacity', 'transform']);
+  assert.equal(drawer.panel.hidden, false, 'shown until the exit animation ends');
+  drawer.panel.animations[1].finish();
+  assert.equal(drawer.panel.hidden, true);
+  moving = false;
+  drawer.open();
+  drawer.close();
+  assert.equal(drawer.panel.animations.length, 2, 'reduced motion or Calm: no new animation');
+  assert.equal(drawer.panel.hidden, true);
+});
+
+test('the COP map floats its controls over the map, groups its layers in the drawer, fits the land, places and units and flies to the globe and back', async () => {
+  const { window, container } = page();
+  const layerCalls: Array<[string, boolean]> = [];
+  let motion = true;
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
+    renderer: 'auto', still: true, motion: () => motion, onLayer: (id: string, on: boolean) => layerCalls.push([id, on]),
+    libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} }}
+  });
+  const map = FakeMap.last!;
+  const scenario = starter();
+  const read = await scenarioEnvironment(scenario);
+  const picture = buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [], environment: read!.environment });
+  view.setPicture(picture);
+  await wait();
+  // Layout: the canvas has the box; a strip, the tools and the time float over it; no list of checkboxes sits above the map any more.
+  const root = container.children[0];
+  assert.deepEqual(root.children.map((node) => node.className).slice(0, 3), ['cop-map-canvas', 'cop-map-top', 'cop-map-foot']);
+  assert.ok(!container.all().some((node) => node.tag === 'input' && node.type === 'checkbox'), 'no checkbox block');
+  const strip = container.all().find((node) => node.className === 'cop-map-strip')!;
+  assert.equal(strip.children[0].textContent, picture.marking, 'the classification line on the map');
+  // The drawer: the base map (Topographic and Plain here: no tiles were given), then three groups, environment with hillshade and contours, the
+  // scenario for reference.
+  const titles = container.all().filter((node) => node.className === 'ld-group-title').map((node) => node.textContent);
+  assert.deepEqual(titles, ['Base map', 'Picture', 'Environment', 'Reference']);
+  const ids = switches(root).map((node) => node.getAttribute('data-layer'));
+  assert.ok(['env-hillshade', 'env-contours', 'env-weather', 'cop-terrain-layer'].every((id) => ids.includes(id)));
+  const hill = switches(root).find((node) => node.getAttribute('data-layer') === 'env-hillshade')!;
+  hill.click();
+  await wait();
+  assert.deepEqual(layerCalls, [['env-hillshade', false]], 'the host hears of the change');
+  assert.equal(view.state().visible['env-hillshade'], false);
+  assert.equal(switches(root).find((node) => node.getAttribute('data-layer') === 'env-hillshade')!.getAttribute('aria-checked'), 'false');
+  // The first view fits the land, the places and the units with a margin, inside the frame (owner direction, 0.4.35), with room for the floating chrome;
+  // the frame's dashed line is still drawn.
+  const fit = map.camera.find(([kind]) => kind === 'fitBounds')!;
+  const b = picture.frame!.bounds;
+  const [[w, s], [e, n]] = JSON.parse(JSON.stringify(fit[1].bounds)) as [[number, number], [number, number]];
+  assert.deepEqual([w, s, e, n], JSON.parse(JSON.stringify((window.nearCopMap as { contentBounds: (p: unknown) => number[] }).contentBounds(picture))));
+  assert.ok(w >= b[0] && s >= b[1] && e <= b[2] && n <= b[3], 'inside the frame');
+  assert.ok((e - w) * (n - s) < 0.7 * (b[2] - b[0]) * (b[3] - b[1]), `closer than the whole frame (${JSON.stringify([w, s, e, n])} in ${JSON.stringify(b)})`);
+  const inside = (c: number[]) => c[0] >= w && c[0] <= e && c[1] >= s && c[1] <= n;
+  const coast = picture.environment!.contours.features.filter((feature) => feature.properties.kind === 'coastline');
+  assert.ok(coast.length > 0, 'the pack has a coastline');
+  for (const feature of coast) for (const c of (feature.geometry as unknown as { coordinates: number[][] }).coordinates) assert.ok(inside(c), `the coastline is in view: ${JSON.stringify(c)}`);
+  const inFrame = (c: number[]) => c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3];
+  for (const feature of picture.features) if (feature.geometry.type === 'Point' && inFrame(feature.geometry.coordinates as unknown as number[])) assert.ok(inside(feature.geometry.coordinates as unknown as number[]), `${feature.id} is in view`);
+  assert.equal(fit[1].animate, false);
+  // Hillshade drawn stronger than the pack's own tones, in the theme's colours; units clustered on their own source.
+  const style = map.options.style as { sources: Record<string, Record<string, unknown>>; layers: Array<{ id: string; paint?: Record<string, unknown>; minzoom?: number }> };
+  assert.match(JSON.stringify(style.layers.find((layer) => layer.id === 'env-hillshade')!.paint!['fill-opacity']), /1\.8/);
+  assert.equal(style.sources.units.cluster, true);
+  assert.ok(style.layers.some((layer) => layer.id === 'clusters'));
+  assert.equal(style.layers.find((layer) => layer.id === 'points')!.minzoom, 5, 'the globe shows the frame ring, not the units');
+  assert.ok((map.data.get('frame') as { features: unknown[] }).features.length === 2, 'the frame and its centre');
+  // Globe flies out to a zoom where the curve is plain; Map flies back to the same first view.
+  view.setProjection('globe');
+  await wait(10);
+  const out = map.camera.at(-1)!;
+  assert.equal(out[0], 'flyTo');
+  assert.ok(Number(out[1].zoom) < 3, `zoomed out to ${String(out[1].zoom)}`);
+  assert.deepEqual(JSON.parse(JSON.stringify(out[1].center)), JSON.parse(JSON.stringify(picture.frame!.centre)));
+  view.setProjection('map');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![0], 'fitBounds');
+  assert.equal(map.camera.at(-1)![1].animate, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(map.camera.at(-1)![1].bounds)), [[w, s], [e, n]], 'back to the same first view');
+  // Under reduced motion or Calm the same moves are instant.
+  motion = false;
+  view.setProjection('globe');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![0], 'jumpTo');
+  view.setProjection('map');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![1].animate, false);
+  // A host's tool joins the map's own controls; the drawer opens and closes through the view.
+  const extra = new Node('button');
+  view.addTool(extra);
+  assert.ok(container.all().find((node) => node.className === 'cop-map-tools')!.children.includes(extra));
+  assert.equal(view.layers(true), true);
+  assert.equal(view.layers(false), false);
+  view.destroy();
+  assert.equal((documentListeners.get('pointerdown') ?? []).length, 0);
+  assert.deepEqual(requests, []);
+});
+
+test('the COP map is still under the system\'s reduced-motion setting when the host gives no rule of its own', async () => {
+  const { window, container } = page({ reduced: true });
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'auto', libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {} } } });
+  const map = FakeMap.last!;
+  view.setPicture(timedPicture());
+  await wait();
+  view.setProjection('globe');
+  await wait(10);
+  assert.equal(map.camera.at(-1)![0], 'jumpTo');
+  view.layers(true);
+  view.layers(false);
+  const panel = container.all().find((node) => node.className.startsWith('ld-panel'))!;
+  assert.equal(panel.animations.length, 0);
+});
+
 test('the page script names no remote address and the CSP allows no eval, no inline script and no remote source', () => {
   const urls = SCRIPT.match(/https?:\/\/[^\s'")]+/g) ?? [];
   assert.deepEqual(urls, ['http://www.w3.org/2000/svg'], 'only the SVG namespace, which is never fetched');
@@ -330,6 +603,25 @@ test('the page script names no remote address and the CSP allows no eval, no inl
   const resources = copMapResources((file) => `RES/${file}`);
   assert.deepEqual(Object.keys(resources).sort(), Object.keys(COP_MAP_FILES).sort());
   for (const file of Object.values(COP_MAP_FILES)) assert.ok(readFileSync(path.join(REPO, 'media', file)).length > 0, file);
+});
+
+test('the first view: land, places and units with a margin inside the frame; the frame when nothing is placed; nothing outside the frame widens it', () => {
+  const { window } = page();
+  const contentBounds = (window.nearCopMap as { contentBounds: (p: unknown) => number[] }).contentBounds;
+  const frame = { grid: 'KQ', bounds: [0, 0, 1, 1] as const, centre: [0.5, 0.5] as const };
+  const base = { frame, features: [] as unknown[], geography: { type: 'FeatureCollection', features: [] as unknown[] } };
+  assert.deepEqual(JSON.parse(JSON.stringify(contentBounds({ ...base }))), [0, 0, 1, 1], 'nothing placed: the frame');
+  const land = { type: 'Feature', properties: { kind: 'land' }, geometry: { type: 'Polygon', coordinates: [[[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.4]]] } };
+  const unit = { id: 'u', type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [0.6, 0.7] } };
+  const away = { id: 'x', type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [5, 5] } };
+  const road = { type: 'Feature', properties: { kind: 'road' }, geometry: { type: 'LineString', coordinates: [[0.05, 0.05], [0.95, 0.95]] } };
+  const got = contentBounds({ ...base, geography: { type: 'FeatureCollection', features: [land, road] }, features: [unit, away] });
+  // The box 0.4..0.6 by 0.4..0.7, a margin of a tenth of the larger side (0.03): a road or a point outside the frame does not widen it.
+  assert.deepEqual([...got].map((x) => Number(x.toFixed(6))), [0.37, 0.37, 0.63, 0.73]);
+  // The terrain pack's coastline counts as land; the margin never leaves the frame.
+  const coast = { type: 'Feature', properties: { kind: 'coastline' }, geometry: { type: 'LineString', coordinates: [[0.01, 0.2], [0.3, 0.99]] } };
+  const wide = contentBounds({ ...base, environment: { contours: { type: 'FeatureCollection', features: [coast] } }, features: [unit] });
+  assert.deepEqual([...wide].map((x) => Number(x.toFixed(6))), [0, 0.121, 0.679, 1]);
 });
 
 // ---- The picture ------------------------------------------------------------------------------------------------------------------------------
@@ -381,4 +673,209 @@ test('the synthetic geography lies inside the frame, with the towns on land and 
   for (const [name, e, n] of [['Saltmere', 43.5, 15.5], ['Port Calder', 46.5, 36.5], ['Kell', 49.5, 33.5], ['Ashby Ford', 45.5, 28.5], ['AA OAK', 43.5, 18.5], ['Gull Island', 41.1, 42.1]] as const) assert.ok(onLand(e, n), `${name} is on land`);
   for (const [name, e, n] of [['the command ship off Saltmere', 40.5, 14.5], ['MV ORLA in the Aurel Sea', 49.5, 43.5], ['the Varn Strait', 44, 41]] as const) assert.ok(!onLand(e, n), `${name} is at sea`);
   assert.match(geography.note, /Nothing on this map is a real place/);
+});
+
+// ---- Base maps, 3D terrain, spin (research note: photo-realistic imagery, 3D terrain and topographic base) ------------------------------------
+
+/** deepEqual across the page's own realm (objects made in the vm context have other prototypes). */
+const same = (actual: unknown, expected: unknown, message?: string) => assert.deepEqual(JSON.parse(JSON.stringify(actual ?? null)), expected, message);
+const TILES = (set: string, ext = 'webp') => `https://file+.vscode-resource.vscode-cdn.net/ext/${set}/{z}/{x}/{y}.${ext}`;
+const BASEMAP = {
+  globe: { imagery: { tiles: TILES('media/map/globe/blue-marble'), minzoom: 0, maxzoom: 5, bounds: [-180, -85.051129, 180, 85.051129] }, topo: { tiles: TILES('media/map/globe/natural-earth'), minzoom: 0, maxzoom: 4, bounds: [-180, -85.051129, 180, 85.051129] }, credit: { imagery: 'NASA Earth Observatory', topo: 'Made with Natural Earth' } },
+  frame: {
+    imagery: { tiles: TILES('tiles/imagery'), minzoom: 5, maxzoom: 10, bounds: [-124.08, -49.33, -122.7, -48.42] }, imageryDetail: { tiles: TILES('tiles/imagery-detail'), minzoom: 11, maxzoom: 13, bounds: [-123.8, -49.33, -123.0, -48.8] },
+    terrain: { tiles: TILES('tiles/terrain', 'png'), minzoom: 5, maxzoom: 11, bounds: [-123.8, -49.33, -123.0, -48.8] }, relief: { tiles: TILES('tiles/relief', 'png'), minzoom: 5, maxzoom: 11, bounds: [-123.8, -49.33, -123.0, -48.8] }, synthetic: true
+  },
+  problems: []
+};
+
+async function groundMap(options: { renderer?: string; motion?: () => boolean; basemap?: unknown; mapSettings?: unknown } = {}) {
+  const { window, container, document } = page();
+  const settings: unknown[] = [];
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
+    renderer: 'auto', still: true, motion: options.motion ?? (() => true), basemap: 'basemap' in options ? options.basemap : BASEMAP, mapSettings: options.mapSettings, onMapSettings: (s: unknown) => settings.push(s),
+    libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class {} }, renderer: options.renderer ?? 'ANGLE (NVIDIA GeForce)' }
+  });
+  const scenario = starter();
+  const read = await scenarioEnvironment(scenario);
+  view.setPicture(buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [], environment: read!.environment }));
+  await wait();
+  return { view, map: FakeMap.last!, container, settings, document, window };
+}
+
+test('the style draws the host\'s checked tiles: world and frame imagery, two height sources (3D surface and relief), sky, tilt to 85 degrees, and still no remote address', async () => {
+  const { map, view } = await groundMap();
+  const options = map.options as unknown as { maxPitch: number; style: { sources: Record<string, any>; layers: Array<{ id: string; type: string }>; sky?: unknown; terrain?: { source: string; exaggeration: number } } };
+  assert.equal(options.maxPitch, 85);
+  assert.ok(options.style.sky, 'sky and atmosphere');
+  const sources = options.style.sources;
+  same(sources['globe-imagery'].tiles, [BASEMAP.globe.imagery.tiles]);
+  assert.equal(sources['frame-imagery-detail'].minzoom, 11);
+  same(sources['frame-imagery'].bounds, BASEMAP.frame.imagery.bounds, 'bounds, so MapLibre never asks for a tile that is not there');
+  for (const id of ['terrain-dem', 'relief-dem']) { assert.equal(sources[id].type, 'raster-dem'); assert.equal(sources[id].encoding, 'terrarium'); }
+  same(options.style.terrain, { source: 'terrain-dem', exaggeration: 1.5 }, '3D on from the start on a graphics card, raised 1.5 times');
+  for (const source of Object.values(sources)) for (const url of (source.tiles ?? []) as string[]) assert.match(url, /^https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\//, 'tiles only from the extension');
+  assert.equal(view.state().base, 'imagery', 'Imagery is the default base');
+  assert.equal(options.style.layers.at(-1)!.id, 'points', 'the picture stays on top');
+  assert.equal(map.visibility('globe-imagery'), 'visible');
+  assert.equal(map.visibility('land'), 'none');
+  assert.equal(map.visibility('color-relief'), 'none');
+  assert.equal(view.state().visible['env-hillshade'], false, 'no hillshade over imagery (its light is baked in)');
+  assert.ok(map.camera.some(([kind, camera]) => kind === 'jumpTo' && camera.pitch === 50), 'the first 3D view leans back');
+  view.destroy();
+});
+
+test('switching the base only changes layer visibility and the base\'s defaults; the attribution follows the base; the choice is kept', async () => {
+  const { map, view, container, settings } = await groundMap();
+  const layersBefore = JSON.stringify((map.options as unknown as { style: { layers: unknown[] } }).style.layers.map((layer) => (layer as { id: string }).id));
+  const words = () => container.all().find((node) => node.className === 'cop-map-env')!.textContent;
+  assert.match(words(), /Blue Marble: NASA Earth Observatory/);
+  assert.match(words(), /not a real place/);
+  assert.equal(view.setBase('topo'), true);
+  await wait();
+  assert.equal(map.visibility('color-relief'), 'visible');
+  assert.equal(map.visibility('globe-topo'), 'visible');
+  assert.equal(map.visibility('globe-imagery'), 'none');
+  assert.equal(map.visibility('hillshade'), 'visible');
+  assert.equal(view.state().visible['env-contours'], true, 'contours on over Topographic');
+  assert.match(words(), /Made with Natural Earth/);
+  assert.doesNotMatch(words(), /NASA/);
+  assert.equal(view.setBase('plain'), true);
+  await wait();
+  assert.equal(map.visibility('land'), 'visible');
+  assert.equal(map.visibility('color-relief'), 'none');
+  assert.doesNotMatch(words(), /NASA|Natural Earth/);
+  assert.equal(view.setBase('satellite'), false, 'an unknown base is refused');
+  assert.equal(JSON.stringify((map.options as unknown as { style: { layers: unknown[] } }).style.layers.map((layer) => (layer as { id: string }).id)), layersBefore, 'the style was never rebuilt');
+  same(settings.at(-1), { base: 'plain', terrain: true, exaggeration: 1.5, grid: true });
+  // The drawer: one radio group for the base, the chosen one checked.
+  const radios = container.all().filter((node) => node.getAttribute('role') === 'radio');
+  same(radios.map((node) => [node.textContent, node.getAttribute('aria-checked')]), [['Imagery', 'false'], ['Topographic', 'false'], ['Plain', 'true']]);
+  view.destroy();
+});
+
+test('3D terrain turns on and off with setTerrain(null), its height is 1 to 3 in quarter steps, and a saved choice wins', async () => {
+  const { map, view } = await groundMap();
+  assert.equal(view.setTerrain(false), true);
+  await wait();
+  assert.equal(map.terrains.at(-1), null);
+  assert.equal(view.setTerrain(true), true);
+  await wait();
+  same(map.terrains.at(-1), { source: 'terrain-dem', exaggeration: 1.5 });
+  view.setExaggeration(2.6);
+  await wait();
+  same(map.terrains.at(-1), { source: 'terrain-dem', exaggeration: 2.5 });
+  view.setExaggeration(9);
+  assert.equal(view.state().exaggeration, 3);
+  view.destroy();
+  const kept = await groundMap({ mapSettings: { base: 'topo', terrain: false, exaggeration: 2, grid: false } });
+  assert.equal(kept.view.state().base, 'topo');
+  assert.equal(kept.view.state().terrain, 'off');
+  assert.equal(kept.view.state().grid, false);
+  kept.view.destroy();
+  const none = await groundMap({ basemap: undefined });
+  assert.equal(none.view.setTerrain(true), false, 'no height tiles: no 3D');
+  assert.notEqual(none.view.state().base, 'imagery', 'no imagery tiles: no Imagery base');
+  none.view.destroy();
+});
+
+test('on a software renderer 3D starts off with the reason in the drawer, and the person can still turn it on', async () => {
+  const { view, container } = await groundMap({ renderer: 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))' });
+  assert.equal(view.state().terrain, 'off');
+  assert.match(view.state().terrainReason, /without a graphics card/);
+  assert.ok(container.all().some((node) => node.className === 'ld-reason' && /without a graphics card/.test(node.textContent)), 'the reason is shown in words');
+  assert.equal(view.setTerrain(true), true);
+  assert.equal(view.state().terrain, 'on');
+  assert.equal(view.state().terrainReason, '');
+  view.destroy();
+});
+
+test('spin: only on the globe, never while motion is off, stopped by the person\'s input or a hidden page, and off again on the map', async () => {
+  let motion = true;
+  const { map, view, document } = await groundMap({ motion: () => motion });
+  assert.equal(view.spin(true), false, 'not on the flat map');
+  view.setProjection('globe');
+  await wait();
+  assert.equal(view.spin(true), true);
+  await wait(60);
+  assert.ok(map.camera.some(([kind, camera]) => kind === 'jumpTo' && Array.isArray(camera.center)), 'the centre moves');
+  map.fire('mousedown', { originalEvent: {} });
+  assert.equal(view.state().spinning, false, 'the person\'s input stops it');
+  assert.equal(view.spin(true), true);
+  map.fire('zoomstart', {});
+  assert.equal(view.state().spinning, true, 'our own camera moves (no originalEvent) do not stop it');
+  document.hidden = true;
+  for (const listener of documentListeners.get('visibilitychange') ?? []) listener({});
+  assert.equal(view.state().spinning, false, 'a hidden page stops it');
+  document.hidden = false;
+  motion = false;
+  assert.equal(view.spin(true), false, 'never while motion is off (Calm, reduced motion)');
+  motion = true;
+  view.spin(true);
+  view.setProjection('map');
+  assert.equal(view.state().spinning, false, 'leaving the globe stops it');
+  view.destroy();
+  assert.equal([...liveTimers.values()].filter((ms) => ms === 16).length, 0, 'no spin frame left pending');
+});
+
+test('the SVG map offers Topographic and Plain, says why there is no Imagery or 3D, and the basemap shape is checked before use', async () => {
+  const { window, container } = page();
+  const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, { renderer: 'svg', basemap: BASEMAP });
+  const scenario = starter();
+  const read = await scenarioEnvironment(scenario);
+  view.setPicture(buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [], environment: read!.environment }));
+  await wait();
+  same(view.ground().bases, ['topo', 'plain']);
+  assert.equal(view.ground().terrain, 'unavailable');
+  assert.equal(view.state().base, 'topo', 'the 2D map shows Topographic');
+  assert.equal(view.setBase('imagery'), false);
+  view.destroy();
+  const check = (window.nearCopMap as { validBasemap: (b: unknown) => any }).validBasemap;
+  const bad = (tiles: string) => check({ globe: { imagery: { ...BASEMAP.globe.imagery, tiles } } }).globe.imagery;
+  assert.ok(bad(BASEMAP.globe.imagery.tiles));
+  assert.equal(bad('https://x/"onload=1/{z}/{x}/{y}.webp'), undefined, 'no quote');
+  assert.equal(bad('https://x/tiles.webp'), undefined, 'a template');
+  assert.equal(check({ frame: { terrain: { ...BASEMAP.frame.terrain, minzoom: 12, maxzoom: 3 } } }).frame.terrain, undefined, 'sane zooms');
+});
+
+test('the picture is drawn, the first view fits the frame and Globe and Map work when a source never finishes loading (only the style is in)', async () => {
+  // D-48 of 0.4.35: in a real webview the land cover's address, fetched by MapLibre's worker, never answered, so 'load' never came and the room's
+  // map stayed on the whole world with no units and no frame. The page now draws once the style is in, and fetches the land cover itself.
+  const LANDCOVER = 'https://file+.vscode-resource.vscode-cdn.net/ext/resources/staff/env/iron-lantern/landcover.geojson';
+  const cover = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: [[-123.5, -49], [-123.4, -48.9]] }, properties: { kind: 'road' } }] };
+  const { window, container } = page({ files: { [LANDCOVER]: cover } });
+  FakeMap.starts = ['style.load'];
+  try {
+    const view = await (window.nearCopMap as { mount: (c: Node, o: unknown) => Promise<Record<string, any>> }).mount(container, {
+      renderer: 'auto', projection: 'map', still: true, motion: () => false, basemap: { ...BASEMAP, frame: { ...BASEMAP.frame, landcover: LANDCOVER } },
+      libraries: { maplibregl: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class {} }, renderer: 'ANGLE (NVIDIA GeForce)' }
+    });
+    assert.equal(view.renderer, 'maplibre');
+    const map = FakeMap.last!;
+    const sources = (map.options.style as { sources: Record<string, { type: string; data?: unknown }> }).sources;
+    for (const [id, source] of Object.entries(sources)) if (source.type === 'geojson') assert.equal(typeof source.data, 'object', `the ${id} source is data, never an address MapLibre's worker would fetch`);
+    const scenario = starter();
+    view.setPicture(buildCopPicture({ marking: scenario.marking, frame: scenario.region.frame, geography: syntheticGeography(scenario), scenario, layers: [] }));
+    await wait();
+    assert.ok((map.data.get('units') as { features: unknown[] }).features.length > 0, 'the units are drawn');
+    assert.ok((map.data.get('frame') as { features: unknown[] }).features.length > 0, 'the exercise frame is drawn');
+    assert.ok(map.camera.some(([kind]) => kind === 'fitBounds'), 'the first view fits the exercise area');
+    const seen = view.inspect();
+    assert.ok(seen.onMap.units > 0 && seen.onMap.frame, 'the real-window check reads what the map itself was given');
+    assert.equal(seen.camera.inFrame, true);
+    same(map.data.get('landcover'), cover, 'the page fetched the land cover itself and gave MapLibre the data');
+    assert.ok(requests.includes(`fetch ${LANDCOVER}`));
+    view.setProjection('globe');
+    await wait(10);
+    view.setProjection('map');
+    await wait(10);
+    same(map.projections, [{ type: 'globe' }, { type: 'mercator' }], 'Globe and Map still move the map');
+    view.destroy();
+  } finally { FakeMap.starts = ['style.load', 'load']; }
+});
+
+// Last in the file on purpose: node:test runs each file in its own process, so this reads the peak resident memory of every test above.
+test('the page tests stay within a 1 GB memory budget (a failure that printed the fake DOM once grew past 20 GB)', () => {
+  const peakBytes = process.resourceUsage().maxRSS * 1024;
+  assert.ok(peakBytes < 1024 * 1024 * 1024, `peak resident memory ${(peakBytes / 1048576).toFixed(0)} MB is over the 1 GB budget`);
 });

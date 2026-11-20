@@ -19,9 +19,25 @@ ocean, so nothing on it is a real place or a real forecast.
 | `dem.json` | yes | A digital elevation model: whole metres on a regular latitude and longitude grid |
 | `coastline.geojson` | yes | Land polygons (`kind: land`) and coastline lines (`kind: coastline`) |
 | `weather.json` | no | One forecast model run: a regular grid and one frame of values per valid time |
+| `landcover.geojson` | no (version 2) | Land cover areas (`forest`, `scrub`, `farmland`, `beach`, `rock`, `built-up`, `marsh`) and roads and tracks (`road`, `track`) |
+| `tiles/index.json` and `tiles/` | no (version 2) | Map tiles: `imagery` (WebP z5-10 over the frame, transparent and feathered beyond it), `imagery-detail` (WebP z11-13 over the land), `terrain` (Terrarium PNG z5-11, sea at 0 m, the 3D surface) and `relief` (Terrarium PNG z5-11 with the sea floor) |
 
-The manifest can name only these four file names, so a pack can never point at
-a file outside its own folder.
+The manifest can name only these file names, so a pack can never point at a
+file outside its own folder. Version 2 adds `files.landcover` and
+`tiles: { "path": "tiles/index.json", "sha256": ..., "bytes": ... }`; version 1
+packs stay valid, and a version 1 manifest may not name either.
+
+The tile index (`"format": "near-map-tiles"`) lists each set's format, zoom
+range and bounds, and every tile as `["z/x/y", bytes, sha256, pixel digest]`,
+one per line. The pixel digest is the first 16 hex characters of the SHA-256
+of the tile's RGBA pixels before encoding, so a regeneration check compares
+pixels even where two encoder builds write different bytes. Tile paths are
+plain numbers inside the set's zoom range and bounds, at most 512 KB each, and
+must start with their format's magic bytes; the extension checks the index's
+hash and every tile before the map gets a tile address (SECURITY.md, "COP
+map"). Terrarium heights decode as `R * 256 + G + B / 256 - 32768` metres,
+MapLibre's own decoding; the bundled pack rounds them to a quarter metre and
+adds no detail, so the contours lie on the 3D surface.
 
 ## manifest.json
 
@@ -111,20 +127,35 @@ The extension refuses a pack, and says why under the map, when:
 ## On the map
 
 The COP map (and the Staff Room map that embeds it) adds three layers a person
-toggles like any other: **Hillshade** and **Contours** (every 50 m, every
-fifth line heavier, with the coastline) from the DEM, and **Weather**, off by
+toggles like any other: **Hillshade** and **Contours** (every 20 m, every
+fifth line heavier and labelled with its height, with the coastline) from the DEM, and **Weather**, off by
 default: wind arrows pointing downwind, longer for stronger wind; fog where
 visibility is under 1 km; rain at 0.5 mm an hour or more; and rough sea at sea
 state 4 or more, outlined with a dashed line. The time slider picks the weather
 frame. The J2 geoint-analyst owns these layers' settings. Synthetic packs carry
 the SIM badge.
 
+With a version 2 pack the map's **Base map** offers **Imagery** (the pack's
+imagery with 3D terrain from `terrain`), **Topographic** (colour relief and
+hillshade from `relief`, the land cover in topographic tints, contours, roads,
+tracks and the grid) and **Plain**. Hillshade and contours start off over
+Imagery, whose light is baked in, and on over Topographic. The synthetic
+imagery is drawn per pixel from the land cover, the DEM and the coastline:
+the classes in true-colour tones, fields with hedgerows, woods with crowns,
+streets and roofs in the towns, turquoise shallows to deep water, and the
+DEM's hillshade baked in; nothing in it is a real place.
+
 ## Making packs
 
 **Synthetic.** `npm run compile`, then `node scripts/generate-env-pack.mjs`
-writes the IRON LANTERN pack from its seed; `--seed <n>` makes another one, and
-`--check` fails if the committed pack is not what the seed makes. No GDAL and
-no network.
+writes the IRON LANTERN pack's files from its seed; `--tiles` also makes every
+tile and the index again (`npm run generate:env-pack`; it needs the
+devDependency `@jsquash/webp`), and `--seed <n>` makes another pack. `--check`
+fails if the committed files or the tile index are not what the seed makes, a
+tile does not match the index, or a file in `tiles/` is not listed;
+`--check-sample <n>` also draws n deep-zoom imagery tiles and every height
+tile again and compares their pixels, and `--check-tiles` draws every tile
+again (a few minutes). No GDAL and no network.
 
 **From real data.** `scripts/build-env-pack.mjs` turns a real DEM (any format
 GDAL reads, such as GeoTIFF or DTED) and, optionally, a GRIB2 or NetCDF

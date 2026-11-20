@@ -28,18 +28,20 @@ import { ShellSession } from '../agent/shell';
 import { agentSystemPrompt, projectInstructions } from '../agent/systemPrompt';
 import { GRAPHICS_TOOLS } from '../agent/graphicsTools';
 import { grantsMcpTool } from '../mcp/tools';
+import { staffLeadNote } from '../agent/staffLead';
 import { staffServerToolsForRun } from '../agent/staffServers';
 import { OBSERVATIONS_TOOL_NAMES } from '../agent/observationsTools';
 import { checkCitationsTool, checkOriginalityTool, webFetchTool, webSearchTool } from '../agent/webTools';
 import type { SearchProvider } from '../agent/webSearch';
 import { SecurityAccess, securityTool } from '../agent/securityTool';
-import { AgentTool, CORE_TOOLS, Todo, ToolContext } from '../agent/tools';
+import { AgentTool, CORE_TOOLS, offeredTools, Todo, ToolContext } from '../agent/tools';
 import type { CyberRunAccess } from './cyberRun';
 import { TaskBoard, endsWithQuestion } from '../agent/taskBoard';
 import { displayPath, ToolError } from '../agent/workspace';
 import { AgentWorktree, createAgentWorktree, finishAgentWorktree, worktreeReport } from '../agent/worktree';
 import type { ActionPolicy } from '../domain/policy';
-import { agentModelFor, expandPrompt, GsdAgent, GsdSkill, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
+import { agentModelFor, expandPrompt, fallbackModelsFor, GsdAgent, GsdSkill, PrivacyCandidate, privateModelFor, roleModelFor, tierOf } from '../gsd/library';
+import { failureReason, modelDisplayName, ModelTrouble, switchNotice } from '../agent/modelFallback';
 import { trustedPreambles } from '../gsd/preamble';
 import { gsdTools, Question } from '../gsd/tools';
 import type { ActivityFeed, AgentBoundary, AgentPhase } from './agentActivity';
@@ -172,6 +174,8 @@ export interface AgentTurnRequest {
   modelStallMs?: number;
   /** PERF-03: the model a stalled turn is retried on (at least as private as the chat's model). */
   backupModel?: string;
+  /** TEE-only mode (nearAi.privacyMode): a sub-agent's fallback model must run in a NEAR TEE or on this machine too. */
+  teeOnly?: boolean;
   /** PERF-01: sub-agents' safe and verification commands run without a card in auto and mostly-autonomous (nearAi.agent.unattendedAutoApprove, default on). */
   unattendedAutoApprove?: boolean;
   /** Model or tier per agent role (nearAi.agent.roleModels); a team member's own model line wins. */
@@ -185,15 +189,23 @@ export interface AgentTurnRequest {
  * A staff team member's lane on the step board (design 10, 4.5): `staff.lane.started` when it starts and `staff.lane.finished` when it ends. Only for a
  * member of a staff section team; a lane that cannot be recorded never stops the agent.
  */
-function staffLane(request: Pick<AgentTurnRequest, 'team'>, root: string, run: string, member: string, teamMember: boolean, status: 'started' | 'done' | 'failed' | 'cancelled'): void {
+function staffLane(request: Pick<AgentTurnRequest, 'team'>, root: string, run: string, member: string, teamMember: boolean, status: 'started' | 'done' | 'failed' | 'cancelled', reason?: string): void {
   const team = request.team ? staffTeamInfo(request.team) : undefined;
   const host = team && teamMember && team.members.includes(member) ? staffHostFor(root) : undefined;
   if (!team || !host) return;
   const at = new Date().toISOString();
   const event = status === 'started'
     ? { type: 'staff.lane.started' as const, run, at, section: team.section, member }
-    : { type: 'staff.lane.finished' as const, run, at, section: team.section, member, outcome: status };
+    : { type: 'staff.lane.finished' as const, run, at, section: team.section, member, outcome: status, ...(status === 'failed' && reason ? { reason: reason.slice(0, 300) } : {}) };
   void host.record(event).catch(() => undefined);
+}
+
+/** A staff team member moved to its next model (overloaded or silent at NEAR AI): the Staff Room's activity says so in words. */
+function staffSwitch(request: Pick<AgentTurnRequest, 'team'>, root: string, run: string, member: string, teamMember: boolean, from: string, to: string, reason: string): void {
+  const team = request.team ? staffTeamInfo(request.team) : undefined;
+  const host = team && teamMember && team.members.includes(member) ? staffHostFor(root) : undefined;
+  if (!team || !host) return;
+  void host.record({ type: 'staff.lane.switched', run, at: new Date().toISOString(), section: team.section, member, from: modelDisplayName(from), to: modelDisplayName(to), reason: reason.slice(0, 300) }).catch(() => undefined);
 }
 
 export function spendAccountOf(client: unknown): SpendAccount | undefined {
@@ -660,7 +672,7 @@ export class AgentConversation {
     if (!this.title) this.title = request.text.replace(/\s+/g, ' ').slice(0, 80);
     let prompt = request.text;
     if (request.team) this.teamSlug = request.team.slug;
-    if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''));
+    if (request.team) prompt = teamLeadPrompt(request.team, request.text.replace(/^\/team:\S+\s*/, ''), staffLeadNote(request.team));
     if (request.skill && request.gsd) {
       const skill = findSkill(request.gsd.skills, request.skill.name);
       if (!skill) throw new Error(`Open-GSD has no skill named ${request.skill.name}.`);
@@ -727,7 +739,8 @@ export class AgentConversation {
     const run = new AgentRun({
       client: request.client,
       model: request.model,
-      tools,
+      // The run's lead is offered only the tools it may call (offeredTools): a staff server's member-only tools go to the members granted them.
+      tools: offeredTools(tools, undefined),
       context,
       policy: request.policy,
       rules: request.rules,
@@ -1476,8 +1489,8 @@ export class AgentConversation {
       : [];
     // A staff section team's run (its file has a `staff:` block) gets the staff tools (design 10, 6.2) and the built-in local staff servers listed once in
     // staffServers.ts: the intel-workbench, observations, cop-map and logistics. Each of those is given only to members whose own tools line grants it,
-    // never to the run's lead (staffServerToolsForRun refuses any other caller). None of them can approve, reject or release anything, and none reaches
-    // the network.
+    // never to the run's lead: each is offered only to those members (offeredTools, below and in the run) and refuses any other caller at call time
+    // (staffServerToolsForRun). None of them can approve, reject or release anything, and none reaches the network.
     const staffTeam = request.team ? staffTeamInfo(request.team) : undefined;
     const staff = staffTeam ? staffTools({ host: () => staffHostFor(this.root), team: staffTeam, run: runId }) : [];
     const servers = staffTeam && request.team?.staff ? staffServerToolsForRun(request.team, { host: () => staffHostFor(this.root), store: () => observationStoreFor(this.root), team: staffTeam, run: runId }) : [];
@@ -1534,8 +1547,19 @@ export class AgentConversation {
         }
         // The model the agent runs on goes back to the lead with its report (and in the "Started" line of a background agent), so the lead
         // can say truthfully which model did the work; a fallback is also shown to the person.
-        const ranOn = `${label} ran on ${model}.${modelNote ? ` ${modelNote}` : ''}`;
         if (modelNote) this.post({ type: 'notice', text: `${label}: ${modelNote}` });
+        // Owner's D-48 run: the models it may move to when its model is overloaded or silent at NEAR AI, each at least as private as its own (TEE stays
+        // TEE, a private member stays private, TEE-only keeps it private). A member whose team file names its model moves too, and the notice says so.
+        const privateMember = spawn.agent?.privacy === 'private';
+        const pinnedLine = teamMember ? spawn.agent?.model?.trim() : undefined;
+        const pinned = Boolean(pinnedLine && !tierOf(pinnedLine) && !/^(?:inherit|default)$/i.test(pinnedLine) && !roleModel && !spawn.model);
+        const eligible = fallbackModelsFor({ current: model, preferred: [request.backupModel, tiers.standard, tiers.deep, tiers.fast, request.model], ...(request.modelCatalog ? { catalog: request.modelCatalog } : {}), ...(request.availableModels ? { available: request.availableModels } : {}), privateMember, teeOnly: request.teeOnly === true, allowed: (candidate) => routeAllows(request.route, candidate), max: 64 });
+        const fallbacks = eligible.slice(0, 4);
+        // PERF-03: a stalled turn's backup is the run's backup, or the chat's own model, and only one it may move to (a private member never leaves privacy).
+        const stallBackup = [request.backupModel, request.model].find((candidate) => candidate && candidate !== model && eligible.includes(candidate));
+        const switches: string[] = [];
+        // The model the agent runs on goes back to the lead with its report, so the lead can say truthfully which model did the work; a move is said too.
+        const ranOnText = (): string => `${label} ran on ${agent.model}.${modelNote ? ` ${modelNote}` : ''}${switches.length ? ` ${switches.join(' ')}` : ''}`;
         const agentBody = spawn.agent ? (gsd ? await expandPrompt(spawn.agent.body, { home: gsd.home, root: this.root }) : spawn.agent.body) : undefined;
         // Each sub-agent's Remember/Recall also reach its own private memory.
         const privateMemory = memoryFor({ kind: 'private-agent', id: `agent-${label}`.slice(0, 80) }, `${runId}-${label}`.slice(0, 100));
@@ -1547,7 +1571,9 @@ export class AgentConversation {
         // built-in staff tools it is granted stay (WRITE_LIMITED_STAFF_TOOLS): they write only the ledger, headers and gate reports, through the host.
         // The observations server's tools stay too: they only read the observation store (the J3 watch officer watches the feeds with them).
         const writeOnly = spawn.agent?.writeOnly;
-        const allowed = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
+        const limited = writeOnly ? listed.filter((tool) => tool.name === 'Write' || tool.name === 'Edit' || WRITE_LIMITED_STAFF_TOOLS.has(tool.name) || (OBSERVATIONS_TOOL_NAMES.includes(tool.name) && tool.capability === 'read') || (!WRITING_CAPABILITIES.has(tool.capability) && !tool.name.startsWith('mcp__') && tool.name !== 'Agent' && tool.name !== 'Task')) : listed;
+        // Offered only what it may call: a staff server's tools only when this member's own tools line grants them (the call-time gate stays).
+        const allowed = offeredTools(limited, label);
         // The task-list item this agent does, when the call names one that is on the list.
         const todo = spawn.task ? this.moveTask(spawn.task, 'in_progress') : undefined;
         const agent: LiveAgent = { id: `${label}-${randomBytes(3).toString('hex')}`, label, description: spawn.description, model, abort: new AbortController(), paused: false, background: spawn.background, activity: 'Waiting for a free slot', activitySince: Date.now(), startedAt: Date.now(), toolCalls: 0, turns: 0 };
@@ -1645,7 +1671,8 @@ export class AgentConversation {
               ...(childGate ? { gate: childGate } : {}),
               ...(request.unattendedAutoApprove !== false ? { unattended: { planScripts: scriptsNamedIn(spawn.prompt), runStartedAt: this.currentRunStartedAt, ...(this.currentBaseCommit ? { baseCommit: this.currentBaseCommit } : {}) } } : {}),
               // PERF-03: the sub-agent's backup is the run's backup, or the chat's own model when the backup is what it already runs on.
-              ...(request.modelStallMs ? { stallMs: request.modelStallMs, backupModel: [request.backupModel, request.model].find((candidate) => candidate && candidate !== model) } : {}),
+              ...(request.modelStallMs ? { stallMs: request.modelStallMs, ...(stallBackup ? { backupModel: stallBackup } : {}) } : {}),
+              ...(fallbacks.length ? { fallbackModels: fallbacks, modelAnswering: (candidate: string) => this.modelTrouble.answering(candidate), modelTrouble: (left: string) => this.modelTrouble.mark(left) } : {}),
               beforeTool: (signal) => this.whileRunPaused(signal),
               beforeTurn: async (transcript, lastUsage, signal) => {
                 if (this.abort) this.enforceBudget(request, this.abort);
@@ -1688,10 +1715,21 @@ export class AgentConversation {
               emit: (event) => {
                 this.track(agent.id, event);
                 this.observe(agent, event);
-                if (event.type === 'tool-start') this.forward({ ...event, callId: `${agent.id}:${event.callId}`, title: `${label} › ${event.title}` }, model, record);
-                else if (event.type === 'tool-end') this.forward({ ...event, callId: `${agent.id}:${event.callId}` }, model, record);
-                else if (event.type === 'turn') { usage.push(event.usage); extraUsage.push(event.usage); this.forward(event, model, record); }
+                if (event.type === 'tool-start') this.forward({ ...event, callId: `${agent.id}:${event.callId}`, title: `${label} › ${event.title}` }, agent.model, record);
+                else if (event.type === 'tool-end') this.forward({ ...event, callId: `${agent.id}:${event.callId}` }, agent.model, record);
+                else if (event.type === 'turn') { usage.push(event.usage); extraUsage.push(event.usage); this.forward(event, agent.model, record); }
                 else if (event.type === 'retry') this.post({ type: 'notice', text: `${label}: ${retryNotice(event)}` });
+                else if (event.type === 'model-switch') {
+                  // The member carries on on the next model: the person reads why, in the chat, the activity feed (Team Live) and the Staff Room.
+                  agent.model = event.to;
+                  const text = switchNotice(label, event.from, event.to, event.reason, pinned && event.from === model);
+                  switches.push(`It switched from ${event.from} to ${event.to}: ${event.reason}.`);
+                  this.post({ type: 'notice', text });
+                  this.activity?.modelSwitched(agent.id, event.to, text);
+                  this.postAgents();
+                  void record({ status: 'running', kind: 'model', agentId: agent.id, parentAgentId: parentId, agentRole: label, model: event.to, summary: text, errorCode: `model-switch-${event.cause}` });
+                  staffSwitch(request, this.root, runId, label, teamMember, event.from, event.to, event.reason);
+                }
               }
             });
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
@@ -1706,7 +1744,8 @@ export class AgentConversation {
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
             await this.recordReputation(request.reputation, label, result.outcome === 'completed' ? 1 : result.outcome === 'max-turns' || result.outcome === 'stuck' ? 0 : -1, agent.id);
-            void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
+            const ranOn = ranOnText();
+            void record({ status: result.outcome === 'cancelled' ? 'cancelled' : 'completed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model: agent.model, summary: `Sub-agent ${label} ${result.outcome}.`, inputTokens: total.inputTokens, outputTokens: total.outputTokens, estimatedCostUsd: total.estimatedCostUsd, durationMs: Date.now() - started });
             shell.dispose();
             worktreeState = worktree ? await finishAgentWorktree(worktree).catch(() => 'kept' as const) : undefined;
             const isolated = worktree && worktreeState ? `\n\n${worktreeReport(worktree, worktreeState)}` : '';
@@ -1719,11 +1758,18 @@ export class AgentConversation {
             return `${typeof report === 'string' && report.trim() ? boundedReport(report, label) : `${label} finished without a written report.`}${short ? `\n\n${label} did not finish. ${short}` : ''}\n\n${ranOn}${isolated}${note}`;
           } catch (error) {
             if (todo) this.moveTask(todo, 'pending');
-            this.activity?.agentEnded(agent.id, 'failed', error instanceof Error ? error.message : String(error));
-            staffLane(request, this.root, runId, label, teamMember, 'failed');
+            // Why, in words (overloaded at NEAR AI, no answer for 90 s, refused by policy), for the person and for the lead, not only the error's name.
+            const reason = failureReason(error);
+            const message = error instanceof Error ? error.message : String(error);
+            const tried = switches.length ? ` ${switches.join(' ')}` : '';
+            const said = reason ? `${label} failed: ${reason}.${tried}` : undefined;
+            this.activity?.agentEnded(agent.id, 'failed', said ?? message);
+            staffLane(request, this.root, runId, label, teamMember, 'failed', reason);
             await this.persistAgent(request, agent.id);
             await this.recordReputation(request.reputation, label, -1, agent.id);
-            void record({ status: 'failed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model, summary: `Sub-agent ${label} failed.`, errorCode: error instanceof Error ? error.name : 'unknown', durationMs: Date.now() - started });
+            const cause = error instanceof AgentRunError && error.cause instanceof Error ? error.cause : error;
+            void record({ status: 'failed', kind: 'agent', agentId: agent.id, parentAgentId: parentId, agentRole: label, action: spawn.description, model: agent.model, summary: said ? `Sub-agent ${said}` : `Sub-agent ${label} failed.`, errorCode: cause instanceof Error ? cause.name : 'unknown', durationMs: Date.now() - started });
+            if (said) throw Object.assign(new Error(`${said} ${message}`), { cause: error });
             throw error;
           } finally {
             shell?.dispose();
@@ -1748,7 +1794,7 @@ export class AgentConversation {
           .finally(() => { this.background.delete(task); owner?.pending.delete(task); });
         this.background.add(task);
         owner?.pending.add(task);
-        return `Started ${label} in the background as ${agent.id} on ${model}.${modelNote ? ` ${modelNote}` : ''} Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
+        return `Started ${label} in the background as ${agent.id} on ${model}.${modelNote ? ` ${modelNote}` : ''}${fallbacks.length ? ` If NEAR AI is overloaded on ${model} or it stops answering, it moves to ${fallbacks.join(', then ')} and says so.` : ''} Its report will arrive in a later message when it finishes; there is no output file to poll. Continue with other work, or end your turn to wait; do not sleep.`;
       }
     });
     all = [...base, ...extra.filter((tool) => gsd || (tool.name !== 'Skill' && tool.name !== 'SlashCommand'))];
@@ -2105,6 +2151,8 @@ export class AgentConversation {
   /** PERF-04: sub-agents that may run in their own git worktree at once (nearAi.agent.maxParallelWorktrees), within maxParallelAgents. */
   public maxParallelWorktrees = 4;
   private readonly worktreeSlots = new Slots();
+  /** Models a member of this conversation's runs just left as overloaded or silent: other members do not move to them for a few minutes. */
+  private readonly modelTrouble = new ModelTrouble();
 
   /** PERF-02: compact a transcript at this many tokens whatever the window (nearAi.agent.compactAtTokens; 0 uses only the window's thresholds). */
   public compactAtTokens = DEFAULT_COMPACT_AT_TOKENS;

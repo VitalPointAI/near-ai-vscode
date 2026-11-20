@@ -253,6 +253,55 @@ export function privateModelFor(wanted: string, tier: 'deep' | 'standard' | 'fas
     .sort((a, b) => (b.outputPricePerMillion ?? 0) - (a.outputPricePerMillion ?? 0) || (b.contextLength ?? 0) - (a.contextLength ?? 0) || a.id.localeCompare(b.id))[0]?.id;
 }
 
+/** How private a model is: 2 in a NEAR TEE or on this machine, 1 anything else (forwarded, or not in the catalog). */
+const privacyRank = (model: PrivacyCandidate | undefined) => (isPrivateModel(model) ? 2 : 1);
+
+/**
+ * The models a sub-agent may move to, in order, when its model is overloaded or gives no answer (owner's D-48 run): the chat's backup chain
+ * ("configured, then standard, then deep", then fast), then the lead's own model, then any other chat model of the catalog that qualifies, the
+ * highest priced first. Only a model at least as private as the one it leaves: a TEE model stays in the TEE and a local one stays local; a private
+ * member (`privacy: private`) only moves to a model `allowed` says its route can carry privately (never a cloud model); TEE-only mode keeps every move
+ * on a TEE or local model. Without a catalog only the preferred models already offered to the run (`available`) qualify, and a private member gets no
+ * fallback at all, since its privacy cannot be checked. The model it leaves is never in the chain.
+ */
+export function fallbackModelsFor(input: {
+  current: string;
+  preferred: ReadonlyArray<string | undefined>;
+  catalog?: readonly PrivacyCandidate[];
+  available?: readonly string[];
+  privateMember?: boolean;
+  teeOnly?: boolean;
+  allowed?: (candidate: PrivacyCandidate) => boolean;
+  /** At most this many models (default 4). */
+  max?: number;
+}): string[] {
+  const { current, catalog, available, privateMember, teeOnly, allowed } = input;
+  const offered = (id: string) => !available || available.includes(id);
+  if (!catalog?.length) {
+    if (privateMember || teeOnly) return [];
+    return [...new Set(input.preferred.filter((id): id is string => Boolean(id) && id !== current && offered(id!)))].slice(0, input.max ?? 4);
+  }
+  const byId = new Map(catalog.map((model) => [model.id, model]));
+  const from = byId.get(current);
+  const qualifies = (id: string): boolean => {
+    const candidate = byId.get(id);
+    if (!candidate || id === current || !offered(id) || !canChat(candidate)) return false;
+    if (privacyRank(candidate) < privacyRank(from)) return false;
+    // TEE stays TEE and local stays local: the run's one client carries one of the two, never both.
+    if (from?.privacyBoundary === 'tee' && candidate.privacyBoundary !== 'tee') return false;
+    if (from?.privacyBoundary === 'local' && candidate.privacyBoundary !== 'local') return false;
+    if (candidate.privacyBoundary === 'local' && from?.privacyBoundary !== 'local') return false;
+    if ((privateMember || teeOnly) && !isPrivateModel(candidate)) return false;
+    if (privateMember && !(allowed?.(candidate) ?? false)) return false;
+    return true;
+  };
+  const rest = catalog.filter((model) => qualifies(model.id))
+    .sort((a, b) => (b.outputPricePerMillion ?? 0) - (a.outputPricePerMillion ?? 0) || (b.contextLength ?? 0) - (a.contextLength ?? 0) || a.id.localeCompare(b.id))
+    .map((model) => model.id);
+  const chain = [...input.preferred.filter((id): id is string => Boolean(id) && qualifies(id!)), ...rest];
+  return [...new Set(chain)].slice(0, input.max ?? 4);
+}
+
 export function modelForTier(value: string | undefined, tiers: { deep: string; standard: string; fast: string }, current: string): string {
   const tier = (value ?? '').trim().toLowerCase();
   if (!tier || tier === 'inherit' || tier === 'default') return current;

@@ -6,6 +6,9 @@ import { STAFF_COMMANDS } from '../domain/staff/commands';
 import { decisionCommand, parseStaffRoomMessage } from '../domain/staff/staffRoom';
 import type { StaffRoomMessage, StaffRoomModel } from '../domain/staff/staffRoom';
 
+/** Set Up a Staff Team, run for one section from a section card. */
+const SET_UP_STAFF_TEAM = 'nearAi.setUpStaffTeam';
+
 /** The commands the panel's links open. Each is a person's own command; none decides anything. */
 export const STAFF_ROOM_OPEN_COMMANDS: Readonly<Record<Extract<StaffRoomMessage, { type: 'open' }>['target'], string>> = {
   'team-live': 'nearAi.openTeamLive',
@@ -24,6 +27,8 @@ export interface StaffRoomEffects {
   readonly refresh: () => void;
   /** A short line the page shows (and announces) when a request could not be done. */
   readonly notice: (text: string) => void;
+  /** Focuses the NEAR AI chat and puts `/team:<team> ` in its message box, nothing sent. Without it, "Task in chat" says it cannot. */
+  readonly taskInChat?: (team: string) => Promise<unknown>;
 }
 
 /** Handles one raw message from the page. Returns what it did, for the tests and the extension-host tap. */
@@ -52,6 +57,15 @@ export async function handleStaffRoomMessage(raw: unknown, effects: StaffRoomEff
       return 'done';
     }
     case 'open': await effects.runCommand(STAFF_ROOM_OPEN_COMMANDS[message.target]); return 'done';
+    case 'task-team': {
+      // Only a team the host itself last sent as ready for that section: the page names the section, never the command.
+      const team = effects.model()?.squads.find((squad) => squad.section === message.section)?.team;
+      if (team?.state !== 'ready' || !team.name) { effects.notice(`The ${message.section.toUpperCase()} has no team to task. Set it up first.`); effects.refresh(); return 'refused'; }
+      if (!effects.taskInChat) { effects.notice('The NEAR AI chat is not available here.'); return 'refused'; }
+      await effects.taskInChat(team.name);
+      return 'done';
+    }
+    case 'set-up-section': await effects.runCommand(SET_UP_STAFF_TEAM, { section: message.section }); effects.refresh(); return 'done';
     default: return 'ignored';
   }
 }

@@ -35,6 +35,8 @@
   const nodes = {};
   const pods = new Map();
   const tokens = new Map();
+  // The section cards' team buttons (Task in chat, Set up, Set up again) in card order, for the room bar's Staff teams.
+  const teamButtons = [];
   const ledgerRows = new Map();
   let seenLedger = new Map();
   let seenDecisions = new Set();
@@ -145,9 +147,20 @@
     nodes.profile.setAttribute('data-must-read', '');
     nodes.railSide.append(nodes.profile);
     railWrap.append(nodes.rail, nodes.railSide);
+    railWrap.id = 'room-process';
+    // Once a scenario is loaded the map is the room's main panel: the process rail and the section cards fold into this one line, which opens them again.
+    nodes.roomBar = el('div', 'roombar');
+    nodes.roomBar.hidden = true;
+    nodes.roomBarText = el('span', 'roombar-t', '');
+    nodes.roomBarToggle = button('Show the process and sections', 'small ghost', () => setRoomOpen(!saved.roomOpen), { 'aria-expanded': 'false', 'aria-controls': 'room-process room-squads' });
+    // The section cards' Task in chat and Set up stay one click away while folded: Staff teams opens the cards and puts focus on the first team button.
+    nodes.roomBarTeams = button('Staff teams', 'small ghost', () => openStaffTeams(), { 'aria-controls': 'room-squads' });
+    nodes.roomBarTeams.hidden = true;
+    nodes.roomBar.append(glyph('M2 4h12M2 8h12M2 12h8'), nodes.roomBarText, nodes.roomBarToggle, nodes.roomBarTeams);
 
     nodes.squads = el('section', 'squads');
     nodes.squads.setAttribute('aria-label', 'Staff sections and their agents');
+    nodes.squads.id = 'room-squads';
 
     const switcher = el('div', 'switcher');
     nodes.tabs = el('div', 'tabs');
@@ -235,7 +248,8 @@
     nodes.bannerBottom = banner();
     nodes.empty = el('div', 'roomempty');
     nodes.empty.hidden = true;
-    app.append(nodes.bannerTop, header, railWrap, nodes.squads, switcher, nodes.empty, work, status, nodes.bannerBottom);
+    nodes.header = header; nodes.railWrap = railWrap; nodes.switcher = switcher;
+    app.append(nodes.bannerTop, header, nodes.roomBar, railWrap, nodes.squads, switcher, nodes.empty, work, status, nodes.bannerBottom);
 
     nodes.fx = sv('svg', { class: 'fx', 'aria-hidden': 'true', focusable: 'false' });
     app.append(nodes.fx);
@@ -261,7 +275,11 @@
       onEmptyAction: () => vscode.postMessage({ type: 'open', target: 'load-scenario' }),
       hiddenLayers: saved.hiddenLayers || [],
       onLayers: (hidden) => { saved.hiddenLayers = hidden; save(); },
+      // The person's base map, 3D, height and grid choices, kept like the hidden layers (webview state).
+      mapSettings: isObj(saved.mapSettings) ? saved.mapSettings : undefined,
+      onMapSettings: (settings) => { saved.mapSettings = settings; save(); },
       onTable: (on) => { saved.table = on; save(); },
+      onFull: (on) => { announce(on ? 'Full map. Escape returns to the room.' : 'Back to the room.'); if (!on) fitMapSoon(); },
       cop: { resources: copResources() }
     });
     if (saved.table) map.showTable(true);
@@ -332,8 +350,9 @@
     for (const [key, pane] of nodes.panes) pane.hidden = key !== id;
     // The one map moves to the workspace on screen.
     const slot = id === 'j2' ? nodes.j2MapSlot : (id === 'j3' && workspaces && workspaces.mapSlot('j3')) || nodes.warMapSlot;
-    if (map && map.element.parentNode !== slot) slot.append(map.element);
+    if (map && map.element.parentNode !== slot) { slot.append(map.element); if (map.refit) map.refit(); }
     if (map && model && changed) { lastMapJson = ''; drawMap(false); }
+    fitMapSoon();
     moveInk();
     const pane = nodes.panes.get(id);
     if (changed && pane) anim(pane, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220 });
@@ -373,6 +392,72 @@
     for (const item of list) item.tabIndex = item === next ? 0 : -1;
     next.focus();
     if (choose) choose(next);
+  }
+
+  // ---------- the map's room ----------
+  /** Folds the process rail and the section cards into the room bar once a scenario is loaded, unless the person opened them. */
+  function updateRoomBar() {
+    if (!nodes.roomBar || !model) return;
+    const loaded = Boolean(model.map && model.map.available);
+    const compact = loaded && !saved.roomOpen;
+    const app = $('app');
+    if (app) app.classList.toggle('compact', compact);
+    nodes.roomBar.hidden = !loaded;
+    const rail = model.rail || [];
+    const current = rail.find((step) => step.status === 'waiting') || rail.find((step) => step.status === 'now') || rail.find((step) => step.status !== 'done') || rail[rail.length - 1];
+    const squads = model.squads || [];
+    const working = squads.filter((squad) => squad.members.some((member) => member.state === 'working')).length;
+    const needs = squads.filter((squad) => squad.members.some((member) => member.state === 'needs')).length;
+    const teams = squads.filter((squad) => isObj(squad.team) && ['ready', 'missing', 'none'].includes(squad.team.state) && ['j2', 'j5', 'j3', 'j4'].includes(squad.section));
+    const ready = teams.filter((squad) => squad.team.state === 'ready').length;
+    setText(nodes.roomBarText, (current ? 'Step ' + current.step + ' of ' + rail.length + ': ' + current.name + ', ' + current.statusText : 'No step yet')
+      + ' · ' + working + ' of ' + squads.length + ' sections working' + (needs ? ' · ' + needs + ' need a person' : '')
+      + (teams.length ? ' · ' + ready + ' of ' + teams.length + ' staff teams set up' : ''));
+    nodes.roomBarTeams.hidden = !teams.length;
+    nodes.roomBarTeams.setAttribute('aria-label', 'Staff teams, ' + ready + ' of ' + teams.length + ' set up: show the section cards to task or set up a team');
+    nodes.roomBarText.className = 'roombar-t' + (current ? ' s-' + current.status : '');
+    setText(nodes.roomBarToggle, compact ? 'Show the process and sections' : 'Hide the process and sections');
+    nodes.roomBarToggle.setAttribute('aria-expanded', compact ? 'false' : 'true');
+    fitMapSoon();
+  }
+  /** Opens the section cards (when folded) and puts focus on the first team button, so Task in chat and Set up are reachable from the room bar. */
+  function openStaffTeams() {
+    if (!saved.roomOpen) setRoomOpen(true);
+    const first = teamButtons[0];
+    if (first) first.focus();
+  }
+  function setRoomOpen(open) {
+    saved.roomOpen = Boolean(open);
+    save();
+    updateRoomBar();
+    if (saved.roomOpen) for (const node of [nodes.railWrap, nodes.squads]) anim(node, [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 220 });
+    announce(saved.roomOpen ? 'The process and the sections are shown.' : 'The process and the sections are folded; the map has the room.');
+  }
+
+  /**
+   * Sizes the map to the room left below its top, so it fills the panel without scrolling (--map-h on the app; staffRoom.css). A map that would get
+   * under 300px (a workspace with more above it) gets about two thirds of the panel, and the page scrolls to it. Nothing while the full map is on.
+   */
+  let fitPending = false;
+  function fitMap() {
+    fitPending = false;
+    const app = $('app');
+    if (!map || !app || !map.element || typeof window.innerHeight !== 'number' || typeof map.element.getBoundingClientRect !== 'function') return;
+    if (map.fullShown && map.fullShown()) return;
+    const rect = map.element.getBoundingClientRect();
+    if (!rect.width && !rect.height) return;
+    const viewport = window.innerHeight;
+    const scroll = window.scrollY || (document.documentElement && document.documentElement.scrollTop) || 0;
+    let height = Math.floor(viewport - (rect.top + scroll) - 14);
+    // A narrow panel, whose header and tabs wrap, still keeps the map in view down to 300px; with less room than that (a workspace with more above
+    // the map) the map takes about two thirds of the panel and the page scrolls to it.
+    if (height < 300) height = Math.max(320, Math.floor(viewport * 0.68));
+    if (app.style && typeof app.style.setProperty === 'function') app.style.setProperty('--map-h', height + 'px');
+  }
+  function fitMapSoon() {
+    if (fitPending) return;
+    fitPending = true;
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fitMap); else setTimeout(fitMap, 0);
   }
 
   // ---------- themes and calm ----------
@@ -457,6 +542,7 @@
     renderRuns();
     renderRail();
     renderSquads();
+    updateRoomBar();
     renderTabs();
     renderDecisions(previous);
     renderLedger(previous);
@@ -520,6 +606,7 @@
   function renderSquads() {
     const focusedToken = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.token : undefined;
     nodes.squads.replaceChildren();
+    teamButtons.length = 0;
     pods.clear();
     tokens.clear();
     const allTokens = [];
@@ -546,12 +633,36 @@
       }
       const callout = el('div', 'callout' + (squad.members.some((m) => m.state === 'needs') ? ' h' : ''));
       pod.append(tag, head, toks, callout);
+      const teamLine = squadTeamLine(squad);
+      if (teamLine) pod.append(teamLine);
       typeInto(callout, squad.section, squad.summary);
       pods.set(squad.section, pod);
       nodes.squads.append(pod);
     }
     const current = allTokens.find((token) => token.dataset.token === focusedToken) || allTokens[0];
     if (current) { current.tabIndex = 0; if (focusedToken && current.dataset.token === focusedToken) current.focus(); }
+  }
+
+  /**
+   * A set-up section's team and "Task in chat" (the host fills the chat's message box, nothing is sent); a team gone from the library shows as missing
+   * with "Set up again"; a section not set up shows "Set up". The page sends only the section: the host looks the team up in what it last sent.
+   */
+  function squadTeamLine(squad) {
+    const team = squad.team;
+    if (!isObj(team) || !['ready', 'missing', 'none'].includes(team.state) || !['j2', 'j5', 'j3', 'j4'].includes(squad.section)) return undefined;
+    const line = el('div', 'pod-team');
+    let action;
+    if (team.state === 'ready' && typeof team.name === 'string') {
+      const name = el('span', 'mono', '/team:' + team.name);
+      name.title = 'The ' + squad.code + ' team in your teams';
+      line.append(name, action = button('Task in chat', 'ghost', () => vscode.postMessage({ type: 'task-team', section: squad.section }), { 'aria-label': 'Task the ' + squad.code + ' team in the chat', title: 'Puts /team:' + team.name + ' in the NEAR AI chat; nothing is sent' }));
+    } else if (team.state === 'missing' && typeof team.name === 'string') {
+      line.append(el('span', 'faint', team.name + ' is missing from your teams'), action = button('Set up again', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team again' }));
+    } else {
+      line.append(el('span', 'faint', 'No team set up'), action = button('Set up', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team' }));
+    }
+    teamButtons.push(action);
+    return line;
   }
 
   function memberToken(squad, member) {
@@ -1057,7 +1168,7 @@
   }
 
   // ---------- help and keys ----------
-  const KEYS = [['1 to 5', 'War room, J2, J5, J3, J4'], ['D', 'Jump to the first decision waiting for a person'], ['F', 'Follow the action on or off'], ['M', 'Map as table'], ['C', 'Calm'], ['T', 'Theme'], ['?', 'This list'], ['Escape', 'Close a card or this list'], ['Arrow keys', 'Move along the rail, the agents, the workspaces and each workspace\'s views'], ['Home, End', 'First or last view in a row of tabs']];
+  const KEYS = [['1 to 5', 'War room, J2, J5, J3, J4'], ['D', 'Jump to the first decision waiting for a person'], ['F', 'Follow the action on or off'], ['M', 'Map as table'], ['C', 'Calm'], ['T', 'Theme'], ['?', 'This list'], ['Escape', 'Close a card, the layer list, the full map or this list'], ['Arrow keys', 'Move along the rail, the agents, the workspaces and each workspace\'s views'], ['Home, End', 'First or last view in a row of tabs']];
   function openHelp() {
     const dialog = nodes.helpDialog;
     dialog.replaceChildren();
@@ -1123,6 +1234,9 @@
   setFollow(saved.follow);
   document.addEventListener('keydown', onKey);
   // A narrower or wider panel wraps the tabs differently: the ink follows the selected tab, without moving.
+  if (typeof window.addEventListener === 'function') window.addEventListener('resize', fitMapSoon);
+  // The map's top moves when the header, the rail, the section cards or the tabs change height: it is sized again.
+  if (typeof ResizeObserver === 'function') { const watch = new ResizeObserver(() => fitMapSoon()); for (const node of [nodes.header, nodes.roomBar, nodes.railWrap, nodes.squads, nodes.switcher]) if (node) watch.observe(node); }
   if (typeof window.addEventListener === 'function') window.addEventListener('resize', () => { if (nodes.tabInk) { const tab = nodes.tabButtons.get(saved.workspace); if (tab) nodes.tabInk.style.transform = 'translateX(' + (tab.offsetLeft || 0) + 'px) scaleX(' + Math.max(0.01, (tab.offsetWidth || 0) / 100) + ')'; } });
   if (document.addEventListener) document.addEventListener('visibilitychange', () => { if (document.hidden && clockTimer) { clearInterval(clockTimer); clockTimer = undefined; } else if (!document.hidden && !clockTimer) clockTimer = setInterval(tick, 1000); });
   clockTimer = setInterval(tick, 1000);
@@ -1136,6 +1250,8 @@
       if (!validModel(message.model)) return;
       render(message.model, isArr(message.cues) ? message.cues : []);
       // The COP picture comes with the model when it changed (or the page asked for everything); the time comes every time.
+      // The checked tile addresses of the globe and the scenario's terrain (src/staff/mapTiles.ts) come when they changed; the map checks their shape again.
+      if (map && isObj(message.basemap) && map.setBasemap) map.setBasemap(message.basemap);
       if (map && ('picture' in message || 'pictureProblem' in message || 'pictureNow' in message)) {
         map.setPicture(validPicture(message.picture) ? message.picture : undefined, {
           now: typeof message.pictureNow === 'number' ? message.pictureNow : undefined,

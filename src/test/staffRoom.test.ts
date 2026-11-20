@@ -323,7 +323,7 @@ test('the Staff Room page loads only the vendored map files, under a policy with
   assert.ok(scripts.length >= 3);
   for (const attributes of scripts) {
     assert.match(attributes, new RegExp(`nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`));
-    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffWorkspaces\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
+    assert.match(attributes, /src="https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/(staffRoom\/staffMap\.js|staffRoom\/staffWorkspaces\.js|staffRoom\/staffRoom\.js|staff\/declutter\.js|staff\/layerDrawer\.js|staff\/copMap\.js|shared\/layout-probe\.js)"/);
   }
   assert.ok(html.indexOf('staff/copMap.js') < html.indexOf('staffRoom/staffMap.js'), 'the COP map is loaded before the room\'s map');
   assert.ok(html.indexOf('staffRoom/staffWorkspaces.js') < html.indexOf('staffRoom/staffRoom.js'), 'the section workspaces are loaded before the room that builds them');
@@ -333,8 +333,9 @@ test('the Staff Room page loads only the vendored map files, under a policy with
   for (const value of Object.values(resources) as string[]) assert.match(value, /^https:\/\/file\+\.vscode-resource\.vscode-cdn\.net\/ext\/media\/vendor\//);
   assert.match(html, /vendor\/maplibre-gl\/maplibre-gl\.css/);
   assert.doesNotMatch(html, /\son[a-z]+=|style="/, 'no inline handler or style');
-  // The panel may read its own folder, the shared stylesheet, the COP map and the vendored libraries, and nothing else.
-  assert.deepEqual(panel.staffRoomResourceRoots(uri('/ext') as never).map((root) => root.path), ['/ext/media/staffRoom', '/ext/media/shared', '/ext/media/staff', '/ext/media/vendor']);
+  // The panel may read its own folder, the shared stylesheet, the COP map, the vendored libraries, the globe's bundled world tiles and the bundled
+  // environment packs' tiles, and nothing else.
+  assert.deepEqual(panel.staffRoomResourceRoots(uri('/ext') as never).map((root) => root.path), ['/ext/media/staffRoom', '/ext/media/shared', '/ext/media/staff', '/ext/media/vendor', '/ext/media/map', '/ext/resources/staff/env']);
 });
 
 test('the room\'s fixed layers are sized to the viewport without its scrollbar, so a page that scrolls never reaches past its right edge', async () => {

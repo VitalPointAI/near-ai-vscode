@@ -35,7 +35,8 @@ function grantFor(server: string, tool: string): string {
 }
 
 /**
- * The server's tools a run with this team is given: only those some member is granted, each refusing a caller whose own tools line does not grant it.
+ * The server's tools a run with this team is given: only those some member is granted, each offered only to, and refusing every caller but, the
+ * members whose own tools line grants it.
  * `hint` ends the refusal (who to ask instead).
  */
 export function grantedToMembers(team: GrantedTeam, server: string, tools: readonly AgentTool<any>[], hint = ''): AgentTool<any>[] {
@@ -43,6 +44,8 @@ export function grantedToMembers(team: GrantedTeam, server: string, tools: reado
     .filter((tool) => team.members.some((member) => grantsStaffTool(member.tools, tool.name)))
     .map((tool) => ({
       ...tool,
+      // Offered exactly to the callers `forbidden` lets through: never to the run's lead, never to a member whose tools line does not grant it.
+      offeredTo: (agentLabel: string | undefined) => memberGranted(team, agentLabel, tool.name) && (tool.offeredTo?.(agentLabel) ?? true),
       forbidden: async (input: unknown, context: ToolContext) => {
         if (!memberGranted(team, context.agentLabel, tool.name)) return `${tool.name} is for the team members whose tools line grants it (${grantFor(server, tool.name)}); ${context.agentLabel ?? 'the run\'s lead'} is not one of them.${hint ? ` ${hint}` : ''}`;
         return tool.forbidden ? tool.forbidden(input as never, context) : undefined;

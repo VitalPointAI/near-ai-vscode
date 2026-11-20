@@ -21,12 +21,16 @@ import { buildStaffRoomModel, handoffsFor, STAFF_ROOM_MESSAGE, staffRoomWorkspac
 import type { StaffRoomModel, StaffRoomWorkspace } from '../domain/staff/staffRoom';
 import { labelRecordFilter } from '../agent/gateLabels';
 import type { GateHost } from '../gate/host';
-import { copMapCsp, copMapResources } from '../staff/copMapWebview';
+import { copMapCsp, copMapResources, loadScenarioOf } from '../staff/copMapWebview';
+import { copBasemap } from '../staff/mapTiles';
 import { observationStoreFor } from '../staff/observationStore';
 import type { ObsReader } from '../staff/observationStore';
 import { loadStaffRoomInput } from '../staff/staffRoomData';
 import { staffRoomPicture } from '../staff/staffRoomPicture';
 import { currentFeedRuntime } from './staffSimCommand';
+import { projectStaffTeams } from './staffTeams';
+import { TeamLibrary } from '../agent/teams';
+import { homeFolder, teamLibraryDir, whenTeamsMoved } from '../domain/teamStorage';
 
 /** How often the open Staff Room runs the store's track decay, in milliseconds. */
 export const ROOM_TICK_EVERY_MS = 10_000;
@@ -43,14 +47,25 @@ let panel: vscode.WebviewPanel | undefined;
 /** Set by the extension-host tests to observe the page's messages in both directions. */
 export const staffRoomTap: { toView?: (message: unknown) => void; fromView?: (message: unknown) => void } = {};
 
-export function registerStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>): void {
+/** Where a section card's "Task in chat" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
+export interface StaffRoomChat { prefill(text: string): Promise<void> }
+let roomChat: StaffRoomChat | undefined;
+
+export function registerStaffRoom(context: vscode.ExtensionContext, gate?: Pick<GateHost, 'runtimeFor'>, chat?: StaffRoomChat): void {
+  roomChat = chat;
   // An optional argument opens the room on one workspace ('j5', 'j3', ...); anything else is ignored and the room opens where the person left it.
   context.subscriptions.push(vscode.commands.registerCommand(OPEN_STAFF_ROOM_COMMAND, (workspace?: unknown) => openStaffRoom(context, gate, staffRoomWorkspaceOf(workspace))));
 }
 
-/** The folders the page may load from: its own, the shared stylesheet, the COP map component and the vendored map libraries. Nothing else. */
+/**
+ * The folders the page may load from: its own, the shared stylesheet, the COP map component, the vendored map libraries, the globe's bundled world
+ * tiles (media/map) and the bundled environment packs' tiles (resources/staff/env). Nothing else, and nothing from a server.
+ */
 export function staffRoomResourceRoots(extensionUri: vscode.Uri): vscode.Uri[] {
-  return [vscode.Uri.joinPath(extensionUri, 'media', 'staffRoom'), sharedMedia(extensionUri), vscode.Uri.joinPath(extensionUri, 'media', 'staff'), vscode.Uri.joinPath(extensionUri, 'media', 'vendor')];
+  return [
+    vscode.Uri.joinPath(extensionUri, 'media', 'staffRoom'), sharedMedia(extensionUri), vscode.Uri.joinPath(extensionUri, 'media', 'staff'), vscode.Uri.joinPath(extensionUri, 'media', 'vendor'),
+    vscode.Uri.joinPath(extensionUri, 'media', 'map'), vscode.Uri.joinPath(extensionUri, 'resources', 'staff', 'env')
+  ];
 }
 
 /**
@@ -83,9 +98,12 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
   let listening: Array<{ dispose(): void }> = [];
   /** The picture last sent, as text: an unchanged picture is not sent again until the page asks for everything. */
   let lastPicture: string | undefined;
+  /** The basemap last sent (tile addresses checked against their indexes), as text: sent again only when it changed or the page asked for everything. */
+  let lastBasemap: string | undefined;
   /** The workspace the open command asked for, shown once the page has its first picture. */
   let showFirst = workspace;
-  const post = (message: Record<string, unknown>) => { staffRoomTap.toView?.(message); void view.webview.postMessage(message); };
+  const webview = view.webview;
+  const post = (message: Record<string, unknown>) => { staffRoomTap.toView?.(message); void webview.postMessage(message); };
 
   const send = async () => {
     timer = undefined;
@@ -100,14 +118,23 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
       // The J2 workspace's live reports: the store's rows the person's clearance covers, read through the same reader view as the map's.
       const view = store && reader ? await store.view(reader).catch(() => undefined) : undefined;
       const input = await loadStaffRoomInput(host, root, Date.now(), wantedRun, view?.ok ? { live: view.value.rows } : {});
-      model = buildStaffRoomModel(input);
+      // Each section card's team, from the project's one record of them (staff.teams), checked against the person's team library.
+      await whenTeamsMoved();
+      const teams = await projectStaffTeams(root, new TeamLibrary(teamLibraryDir(homeFolder())).directory).catch(() => undefined);
+      model = buildStaffRoomModel({ ...input, ...(teams?.staff ? { teams: teams.sections.map((entry) => ({ section: entry.section, state: entry.state, ...(entry.team ? { team: entry.team } : {}) })) } : {}) });
       const cop = await staffRoomPicture(root, { ...(store ? { store } : {}), reader });
       const text = cop.picture ? JSON.stringify(cop.picture) : `problem:${cop.problem ?? ''}`;
       const changed = text !== lastPicture;
       lastPicture = text;
+      // The world imagery and the scenario's terrain tiles, each folder checked against its index before the page gets an address in it.
+      const basemap = await copBasemap((dir) => webview.asWebviewUri(vscode.Uri.file(dir)).toString(), await loadScenarioOf(root).catch(() => undefined)).catch(() => undefined);
+      const basemapText = basemap ? JSON.stringify(basemap) : undefined;
+      const basemapChanged = basemapText !== undefined && basemapText !== lastBasemap;
+      if (basemapChanged) lastBasemap = basemapText;
       post({
         type: STAFF_ROOM_MESSAGE, model, cues: handoffsFor(input.settings, fresh, input.registry), pictureNow: cop.now,
-        ...(changed ? (cop.picture ? { picture: cop.picture } : { pictureProblem: cop.problem }) : {})
+        ...(changed ? (cop.picture ? { picture: cop.picture } : { pictureProblem: cop.problem }) : {}),
+        ...(basemapChanged ? { basemap } : {})
       });
       if (showFirst) { post({ type: 'show-workspace', workspace: showFirst }); showFirst = undefined; }
     } catch (error) {
@@ -120,6 +147,7 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
   };
   const start = () => {
     lastPicture = undefined;
+    lastBasemap = undefined;
     if (listening.length || !root) { if (!root) void send(); return; }
     const host = staffHostFor(root);
     if (host) listening.push({ dispose: host.onEvent((event) => { pending.push(event); if (pending.length > 50) pending = pending.slice(-50); schedule(); }) });
@@ -154,8 +182,9 @@ export function openStaffRoom(context: vscode.ExtensionContext, gate?: Pick<Gate
         try { await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true }); } catch { post({ type: 'notice', text: `${relative} is not there.` }); }
       },
       selectRun: (run) => { wantedRun = run; void send(); },
-      refresh: () => { lastPicture = undefined; if (!listening.length) start(); else void send(); },
-      notice: (text) => post({ type: 'notice', text })
+      refresh: () => { lastPicture = undefined; lastBasemap = undefined; if (!listening.length) start(); else void send(); },
+      notice: (text) => post({ type: 'notice', text }),
+      ...(roomChat ? { taskInChat: (team: string) => roomChat!.prefill(`/team:${team}`) } : {})
     });
   }, undefined, context.subscriptions);
   // An open Staff Room is a person attending the project: its standing watches run while it is open, and pause when nothing attends (WP-WATCH, Q5).
@@ -180,6 +209,7 @@ export function staffRoomHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cs
 <div id="announce" class="visually-hidden" role="status" aria-live="polite"></div>
 <div id="alert" class="visually-hidden" role="alert" aria-live="assertive"></div>
 ${layoutProbeTag(nonce, layoutProbeAsset(webview, shared))}<script nonce="${nonce}" src="${cop.declutter}"></script>
+<script nonce="${nonce}" src="${cop.drawer}"></script>
 <script nonce="${nonce}" src="${cop.script}"></script>
 <script nonce="${nonce}" src="${asset('staffMap.js')}"></script>
 <script nonce="${nonce}" src="${asset('staffWorkspaces.js')}"></script>

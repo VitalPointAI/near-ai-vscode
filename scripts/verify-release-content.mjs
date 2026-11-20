@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -110,6 +111,7 @@ const required = [
   'extension/media/compare/compare.css',
   // The Staff Room page and the COP map component; declutter.js is the SVG maps' shared label placement, which both maps need.
   'extension/media/staff/declutter.js',
+  'extension/media/staff/layerDrawer.js',
   'extension/media/staff/copMap.js',
   'extension/media/staff/copMap.css',
   'extension/media/staffRoom/staffMap.js',
@@ -125,6 +127,11 @@ const required = [
   'extension/resources/staff/env/iron-lantern/dem.json',
   'extension/resources/staff/env/iron-lantern/coastline.geojson',
   'extension/resources/staff/env/iron-lantern/weather.json',
+  // Pack version 2 and the globe (the COP map's imagery, 3D terrain and topographic bases): land cover, the tile indexes and the data record.
+  'extension/resources/staff/env/iron-lantern/landcover.geojson',
+  'extension/resources/staff/env/iron-lantern/tiles/index.json',
+  'extension/media/map/globe/index.json',
+  'extension/media/map/globe/DATA.json',
   'extension/sbom.cdx.json',
   'extension/docs/marketplace/near-ai-workflow.png'
 ];
@@ -188,6 +195,33 @@ for (const [file, hash] of vendoredFiles) {
   if (actual !== hash) fail(`vendored file ${entry} does not match its recorded hash (${actual} != ${hash})`);
 }
 
+// The map tiles: every tile each packaged index lists is in the package with the size and hash the index records, and nothing unlisted is.
+const tileFolders = ['extension/media/map/globe', 'extension/resources/staff/env/iron-lantern/tiles'];
+const scratch = mkdtempSync(resolve(tmpdir(), 'near-vsix-tiles-'));
+try {
+  execFileSync('unzip', ['-q', vsixPath, ...tileFolders.map((folder) => `${folder}/*`), '-d', scratch], { cwd: root });
+  for (const folder of tileFolders) {
+    const index = JSON.parse(readFileSync(resolve(scratch, folder, 'index.json'), 'utf8'));
+    const listed = new Set([`${folder}/index.json`, `${folder}/DATA.json`]);
+    for (const [setId, set] of Object.entries(index.sets)) for (const [path, bytes, sha] of set.tiles) {
+      const entry = `${folder}/${setId}/${path}.${set.format}`;
+      listed.add(entry);
+      let data;
+      try { data = readFileSync(resolve(scratch, entry)); } catch { fail(`packaged tile ${entry} is missing`); continue; }
+      if (data.length !== bytes || createHash('sha256').update(data).digest('hex') !== sha) fail(`packaged tile ${entry} does not match its index`);
+    }
+    const strays = entries.filter((entry) => entry.startsWith(`${folder}/`) && !entry.endsWith('/') && !listed.has(entry));
+    if (strays.length) fail(`files in ${folder} that no index lists: ${strays.slice(0, 5).join(', ')}`);
+  }
+} finally { rmSync(scratch, { recursive: true, force: true }); }
+
+// The size gate (research note on the map tiles, section 6): the package stays at most 14 MiB and 4,000 files.
+const VSIX_MAX_BYTES = 14 * 1024 * 1024;
+const VSIX_MAX_ENTRIES = 4000;
+const vsixBytes = statSync(vsixPath).size;
+if (vsixBytes > VSIX_MAX_BYTES) fail(`the package is ${vsixBytes} bytes, over the ${VSIX_MAX_BYTES}-byte gate`);
+if (entries.length > VSIX_MAX_ENTRIES) fail(`the package has ${entries.length} entries, over the ${VSIX_MAX_ENTRIES}-entry gate`);
+
 // The built Yjs bundle (scripts/crdt-vendor.json): the packaged vendor/yjs/yjs.cjs must have exactly the bytes whose SHA-256 the manifest records.
 // scripts/vendor-libs.mjs checks the same hash at compile time and src/test/replicaVendor.test.ts on the working tree.
 const crdt = JSON.parse(readFileSync(resolve(root, 'scripts/crdt-vendor.json'), 'utf8'));
@@ -202,4 +236,4 @@ try {
 if (packageJson.main !== './dist/extension.js') fail(`package.json main must remain ./dist/extension.js, got ${packageJson.main}`);
 
 if (process.exitCode) process.exit();
-console.log(`Release content verified: ${entries.length} entries, ${runtimeJavaScript.length} runtime JavaScript files, and ${required.length} required release assets.`);
+console.log(`Release content verified: ${entries.length} entries (${(vsixBytes / 1048576).toFixed(2)} MiB), ${runtimeJavaScript.length} runtime JavaScript files, and ${required.length} required release assets.`);

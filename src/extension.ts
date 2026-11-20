@@ -141,7 +141,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
-  registerStaffRoom(context, gate);
+  registerStaffRoom(context, gate, sidebar);
   registerUsageExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
@@ -222,7 +222,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerRunReport(context);
   registerResearchVerifiers(context);
   registerStaffScenario(context);
-  registerStaffSetup(context);
+  registerStaffSetup(context, sidebar);
   registerStaffSimulation(context);
   registerStaffImport(context);
   registerWorkspaceCommands(context, (options) => openTeamStudio(context, auth, sidebar, options, gate));

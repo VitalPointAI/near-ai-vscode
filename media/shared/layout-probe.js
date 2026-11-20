@@ -23,6 +23,29 @@
     root.style.setProperty('--vscode-font-family', 'monospace');
     root.style.setProperty('--vscode-font-size', Math.round(size * 1.1) + 'px');
   });
+  // On request, does what a person would on the map (D-48 of 0.4.34): opens the visible layer drawer, presses Escape where focus is, or toggles
+  // the full map; or clicks one button by its selector, so a test can drive a card's button in the real page. Test-only, like the rest of this file.
+  window.addEventListener('message', (event) => {
+    if (!event.data) return;
+    if (event.data.type === 'layout-click' && typeof event.data.selector === 'string') {
+      const node = document.querySelector(event.data.selector);
+      if (node && typeof node.click === 'function') node.click();
+      return;
+    }
+    if (event.data.type !== 'layout-act') return;
+    const visible = (node) => node && node.getClientRects().length > 0;
+    const act = event.data.act;
+    if (act === 'open-layers') { const button = [...document.querySelectorAll('.ld-button')].find(visible); if (button) button.click(); }
+    if (act === 'full-map') { const button = [...document.querySelectorAll('.map-full')].find(visible); if (button) button.click(); }
+    if (act === 'escape') (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    // The COP map's ground (imagery, topographic, 3D terrain): set a base, turn 3D on or off, look somewhere, or take a picture of the map canvas.
+    const cop = window.nearCopMap && window.nearCopMap.views ? window.nearCopMap.views()[0] : undefined;
+    if (cop && act === 'map-base' && typeof event.data.base === 'string') cop.setBase(event.data.base);
+    if (cop && act === 'map-terrain') cop.setTerrain(Boolean(event.data.on));
+    if (cop && act === 'map-projection') cop.setProjection(event.data.projection === 'globe' ? 'globe' : 'map');
+    if (cop && act === 'map-look' && event.data.camera) cop.look(event.data.camera);
+    if (cop && act === 'map-snapshot' && cop.snapshot) { window.__nearMapSnapshot = undefined; cop.snapshot().then((url) => { window.__nearMapSnapshot = url; }, () => { window.__nearMapSnapshot = ''; }); }
+  });
   // Every content security policy violation the page meets from the moment this script loads, so a test can tell a page that works under its
   // policy from one the policy quietly broke.
   const violations = [];
@@ -65,7 +88,37 @@
       map: (function () {
         const canvas = document.querySelector('canvas.maplibregl-canvas');
         const note = document.querySelector('.mapnote:not([hidden])');
-        return { maplibre: Boolean(canvas && canvas.width > 0 && canvas.height > 0), cop: Boolean(document.querySelector('.has-cop')), note: note ? (note.textContent || '').trim().slice(0, 200) : '' };
+        // Where the map's box is in the page's viewport, the open layer drawer and where focus is, and whether the full map is on.
+        const box = [...document.querySelectorAll('.mapbox')].find((node) => node.getClientRects().length > 0);
+        const rect = box ? box.getBoundingClientRect() : undefined;
+        const panel = [...document.querySelectorAll('.ld-panel')].find((node) => !node.hidden && node.getClientRects().length > 0);
+        const active = document.activeElement;
+        return {
+          maplibre: Boolean(canvas && canvas.width > 0 && canvas.height > 0), cop: Boolean(document.querySelector('.has-cop')), note: note ? (note.textContent || '').trim().slice(0, 200) : '',
+          box: rect ? { top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height), viewport: window.innerHeight, scrollY: Math.round(window.scrollY) } : undefined,
+          full: Boolean(box && box.classList.contains('full')),
+          drawer: { open: Boolean(panel), focusInside: Boolean(panel && active && panel.contains(active)), buttonFocused: Boolean(active && active.classList && active.classList.contains('ld-button')), switches: panel ? panel.querySelectorAll('[role="switch"]').length : 0 },
+          // The ground's state and the 3D height at Harrow Ridge's crest (KQ 4829, by the frame's linear transform), and every origin the page loaded from.
+          ground: (function () {
+            const cop = window.nearCopMap && window.nearCopMap.views ? window.nearCopMap.views()[0] : undefined;
+            if (!cop) return undefined;
+            try {
+              const g = cop.inspect([-123.4208, -49.0655]);
+              return { base: g.base, terrain: g.terrain, terrainReason: g.terrainReason, projection: g.projection, renderer: g.renderer, height: g.height, tiles: g.tiles, errors: g.errors, pitch: g.pitch, onMap: g.onMap, camera: g.camera };
+            } catch (error) { return { base: '', terrain: '', terrainReason: String(error && error.message), projection: '', renderer: '' }; }
+          })(),
+          origins: [...new Set((performance.getEntriesByType ? performance.getEntriesByType('resource') : []).map((entry) => { try { return new URL(entry.name).origin; } catch (error) { return 'unparsed'; } }))].slice(0, 20),
+          snapshot: typeof window.__nearMapSnapshot === 'string' ? window.__nearMapSnapshot : undefined
+        };
+      })(),
+      composer: (function () {
+        const box = document.getElementById('input');
+        return box && typeof box.value === 'string' ? { value: box.value.slice(0, 400), caret: typeof box.selectionStart === 'number' ? box.selectionStart : null } : undefined;
+      })(),
+      cards: (function () {
+        if (!document.getElementById('welcome')) return undefined;
+        const staff = document.getElementById('staff-teams');
+        return { staffTeams: staff ? (staff.textContent || '').slice(0, 400) : undefined, setupNudge: Boolean(document.getElementById('setup-nudge')) };
       })()
     };
   };

@@ -22,6 +22,17 @@ const report = { scannedAt: new Date().toISOString(), components, runtimes: [], 
 const bom = cycloneDx(report, `${pkg.publisher}.${pkg.name}`, { name: 'scripts/extension-sbom.mjs', version: pkg.version });
 bom.metadata.component = { type: 'application', 'bom-ref': 'project', name: pkg.name, version: pkg.version, publisher: pkg.publisher };
 bom.components = bom.components.map((component) => ({ ...component, licenses: [{ expression: manifest.find((entry) => entry.purl === component.purl)?.license ?? 'NOASSERTION' }] }));
+// The bundled map data the COP map draws (media/map/globe/DATA.json): CycloneDX data components with their source, terms, credit and the hash of
+// the source file the tiles were made from. The synthetic IRON LANTERN pack is the extension's own (MIT) and is listed too.
+const globe = JSON.parse(readFileSync(path.join(root, 'media', 'map', 'globe', 'DATA.json'), 'utf8'));
+for (const set of globe.sets) {
+  bom.components.push({
+    type: 'data', 'bom-ref': `data:${set.id}`, name: set.name, description: `Map tiles z${set.generator.minzoom}-${set.generator.maxzoom} in media/map/globe/${set.id}/. Credit: ${set.credit}.`,
+    licenses: [{ license: { name: set.terms.slice(0, 500) } }], hashes: [{ alg: 'SHA-256', content: set.sourceSha256 }],
+    externalReferences: [{ type: 'distribution', url: set.sourceUrl }, { type: 'website', url: set.page }]
+  });
+}
+bom.components.push({ type: 'data', 'bom-ref': 'data:iron-lantern-synthetic', name: 'IRON LANTERN synthetic terrain, imagery and weather pack', description: 'Generated from a seed by scripts/generate-env-pack.mjs (resources/staff/env/iron-lantern/); not a real place.', licenses: [{ license: { id: 'MIT' } }] });
 writeFileSync(path.join(root, 'sbom.cdx.json'), `${JSON.stringify(bom, null, 2)}\n`);
 console.log(scanSummary(report));
 if (counts.critical || counts.high) { console.error('Release blocked: shipped code has a high or critical vulnerability. Upgrade it and rebuild.'); process.exit(1); }

@@ -13,8 +13,8 @@ import { lstat, mkdir, readFile, rename } from 'node:fs/promises';
 import * as path from 'node:path';
 import { DOCTRINE_PROFILES, MDO_TERMS, PLANNING_TYPES, RED_TEAM_NOTES, STAFF_LEVELS, STAFF_NATIONS, STAFF_PROFILE_IDS } from '../domain/staff/doctrine';
 import type { PlanningType, StaffLevel, StaffNation, StaffProfileId } from '../domain/staff/doctrine';
-import { defaultStaffSettings, levelOffer, parseStaffSettings, staffSettingsJson } from '../domain/staff/profiles';
-import type { StaffSettings } from '../domain/staff/profiles';
+import { defaultStaffSettings, isStaffTeamSection, levelOffer, parseStaffSettings, staffSettingsJson } from '../domain/staff/profiles';
+import type { StaffSettings, StaffTeamSection } from '../domain/staff/profiles';
 import { withStaffGuidance } from '../agent/staff/guidance';
 import { j2Renderings } from '../agent/staff/j2Template';
 import { j3OptionSets } from '../agent/staff/j3Operations';
@@ -28,6 +28,22 @@ import { applyTeamUpdate, planTeamUpdate } from '../agent/teamUpdate';
 
 export const SET_UP_STAFF_TEAM_COMMAND = 'nearAi.setUpStaffTeam';
 export const PROJECT_JSON = '.planning/.near-ai/project.json';
+
+/**
+ * Told when this extension has written a project's staff teams (Set Up a Staff Team, Link on the chat's card), with the project folder. The chat's
+ * "Staff teams" card refreshes from this at once instead of waiting on a file watcher, which a remote editor such as code-server does not always deliver
+ * (D-48 of 0.4.35: the chat kept "no team yet" after the J2 team was set up). A listener that throws never stops the others or the write.
+ */
+const staffTeamsListeners = new Set<(root: string) => void>();
+export function onStaffTeamsChanged(listener: (root: string) => void): { dispose(): void } {
+  staffTeamsListeners.add(listener);
+  return { dispose: () => { staffTeamsListeners.delete(listener); } };
+}
+export function staffTeamsChanged(root: string): void {
+  for (const listener of [...staffTeamsListeners]) {
+    try { listener(root); } catch { /* one listener never stops the others */ }
+  }
+}
 
 /** The profile, level and nation pairs a template is written for: J2 and J4 every offered pair; J5 and J3 the pairs their option sets list. */
 export function templateOffers(template: StaffTemplate): Array<{ profile: StaffProfileId; level: StaffLevel; nation?: StaffNation }> {
@@ -125,6 +141,15 @@ export function staffTeamFileName(template: StaffTemplate, options: StaffTemplat
   return slugify([template.section, options.settings.profile, options.settings.level, options.echelon === 'battalion' ? 'battalion' : undefined].filter(Boolean).join('-'));
 }
 
+/**
+ * The team names the setup gives a section under a profile and level, by the same rule as staffTeamFileName: `<section>-<profile>-<level>`, and for a
+ * tactical J2 also the battalion roster's `-battalion` name. Used to find library teams an older project set up before it recorded them.
+ */
+export function staffTeamCandidates(section: StaffTemplate['section'], settings: Pick<StaffSettings, 'profile' | 'level'>): string[] {
+  const base = slugify([section, settings.profile, settings.level].join('-'));
+  return section === 'j2' && settings.level === 'tactical' ? [base, `${base}-battalion`] : [base];
+}
+
 /** The team text with its template stamp, made the way Update Team stamps it, so a later update knows every member is unchanged. */
 export function stampedStaffTeam(team: string, settings: StaffSettings): string {
   const plan = planTeamUpdate(team, { staffSettings: settings });
@@ -149,9 +174,14 @@ export function planStaffSetup(input: { templateId: string; options: StaffTempla
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${PROJECT_JSON} is not a JSON object, so the staff settings were not written.`);
     config = value as Record<string, unknown>;
   }
+  // The project records its section teams: this section's entry is set (a re-run replaces only it), every other section's is kept as it was.
+  const section = template.section;
+  if (!isStaffTeamSection(section)) throw new Error(`${template.label} is not a section a project records a team for.`);
+  const earlier = Object.prototype.hasOwnProperty.call(config, 'staff') ? parseStaffSettings(config.staff) : undefined;
+  const teams = { ...(earlier?.ok ? earlier.value.teams ?? {} : {}), [section]: fileName };
   const writes: StaffWrite[] = [
     ...output.files.map((file) => ({ path: file.path, content: file.content })),
-    { path: PROJECT_JSON, content: `${JSON.stringify({ ...config, staff: staffSettingsJson(input.options.settings) }, null, 2)}\n` },
+    { path: PROJECT_JSON, content: `${JSON.stringify({ ...config, staff: staffSettingsJson({ ...input.options.settings, teams }) }, null, 2)}\n` },
     { path: 'AGENTS.md', content: withStaffGuidance(input.agents ?? '', template.id, output.guidance) }
   ];
   return {
@@ -162,6 +192,18 @@ export function planStaffSetup(input: { templateId: string; options: StaffTempla
       members: parsed.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.reportsTo ? { reportsTo: member.reportsTo } : {}), ...(member.model ? { model: member.model } : {}) }))
     }
   };
+}
+
+/**
+ * The section a caller asked to set up (the chat's Staff teams card or the Staff Room's "Set up"): `{ section: 'j2' }` with exactly that key, or nothing.
+ * Anything else is ignored and the person is asked as usual.
+ */
+export function requestedSection(arg: unknown): StaffTeamSection | undefined {
+  if (!arg || typeof arg !== 'object' || Array.isArray(arg)) return undefined;
+  const keys = Object.keys(arg);
+  if (keys.length !== 1 || keys[0] !== 'section') return undefined;
+  const section = (arg as Record<string, unknown>).section;
+  return isStaffTeamSection(section) ? section : undefined;
 }
 
 /** The staff settings already in a project.json text, if any parse. */
@@ -236,5 +278,6 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
     }
     throw new Error(`The staff team was not set up, and what was written is rolled back: ${error instanceof Error ? error.message : String(error)}`);
   }
+  staffTeamsChanged(root);
   return { teamFile: target.file, ...(archived ? { archived } : {}), written: done.map((entry) => path.relative(root, entry.file).split(path.sep).join('/')) };
 }
