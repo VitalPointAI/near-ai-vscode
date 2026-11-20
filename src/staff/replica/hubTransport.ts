@@ -26,6 +26,11 @@
 //
 // The event reader (D-37) keeps its own connection and session, because a stream occupies the connection it runs on. Frame ids are a per-connection
 // counter used only to report a gap; Last-Event-ID is never sent. 204 means stop, and resync or the end of the stream means run heads catch-up.
+//
+// Joining through the hub (D-48, 32-25). registerInvite and joinRequests run over the lead's or deputy's session; postJoin, like enrol, needs no
+// session and runs on a connection of its own, closed after. The check key, the hub MAC and the envelope are made by src/domain/replica/invite.ts
+// (hubJoinCheckKey, hubJoinMac, buildHubJoin), never here. enrolmentRequest gathers a project's enrolment from any replica that can list its heads,
+// entries, blobs and grants, and signs it with enrolmentMac (hubFile.ts).
 import { createHash } from 'node:crypto';
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
 import * as https from 'node:https';
@@ -34,9 +39,9 @@ import * as tls from 'node:tls';
 import type { TLSSocket } from 'node:tls';
 import { readGrant } from '../../domain/replica/cellKeys';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
-import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN } from '../../domain/replica/entry';
+import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, entryHash } from '../../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../../domain/replica/entry';
-import { SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, buildSessionAnswer, certPinOf } from '../../domain/replica/hubFile';
+import { SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, buildSessionAnswer, certPinOf, enrolmentMac } from '../../domain/replica/hubFile';
 import type { HeadSet, PullRequest, PushResult, ReplicaTransport, Unsubscribe } from '../../domain/replica/transport';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
 
@@ -153,6 +158,33 @@ export type GrantFetch = { kind: 'grant'; hash: string; signed: unknown } | { ki
 
 export interface CheckpointAnswer { project: string; kept: number; checkpoint?: unknown }
 export interface EnrolAnswer { project: string; rosterHead: string; hub: string }
+
+/** What the lead's device registers with the hub for one invitation (D-48): never the join secret, only the check key derived from it. */
+export interface InviteRegistration { invite: string; expiresAt: string; checkKey: string }
+/** held: the hub had this invitation with this check key already. */
+export interface RegisterAnswer { project: string; invite: string; held: boolean }
+/** A join post: the signed hub join envelope and the signed join request it names. */
+export interface JoinPost { join: unknown; request: unknown }
+/** held: the hub had this very request already (not a failure). */
+export interface JoinAnswer { project: string; invite: string; held: boolean }
+/** A join request the hub kept: the invitation it answers and the request's JSON text, for reviewJoinRequest and admitJoinRequest. */
+export interface PendingJoinRequest { invite: string; request: string; receivedAt: string }
+
+/** The replica reads an enrolment needs: a structural part of hubSync's SyncLocal, so ReplicaProject (syncLocalOf) and a test replica both give it. */
+export interface EnrolSource {
+  readonly project: string;
+  heads(): Promise<HeadSet['streams']>;
+  entriesAfter(stream: string, writer: string, seq: number): Promise<SealedEntry[]>;
+  blobsCitedBy(hashes: readonly string[]): Promise<Array<{ entry: string; blob: string }>>;
+  blob(hash: string): Promise<SealedBlob | undefined>;
+  grants(): Promise<Array<{ hash: string; signed: unknown }>>;
+}
+/** The hub file's enrolment id, its one-time enrolment secret and the hub id (hub- and 16 hex) it names. */
+export interface EnrolmentFile { enrolment: string; enrolmentSecret: string; hub: string }
+/** The body of POST /v1/enrol (hub/src/enrol.ts EnrolRequest). */
+export interface EnrolRequestBody { enrolment: string; project: string; entries: SealedEntry[]; grants: unknown[]; blobs: SealedBlob[]; rosterHead: string; mac: string }
+
+const INVITE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** What the event reader reports, in order. */
 export type EventReport =
@@ -620,6 +652,39 @@ export class HubTransport implements ReplicaTransport {
     }
   }
 
+  /** POST invites over this device's session (a lead or deputy device): 201 registered, 200 already held with the same check key. */
+  public async registerInvite(input: InviteRegistration): Promise<RegisterAnswer> {
+    const value = this.answerJson(await this.call('POST', `/v1/projects/${this.project}/invites`, { json: { invite: input.invite, expiresAt: input.expiresAt, checkKey: input.checkKey } }), 200, 201);
+    if (!isRecord(value) || value.invite !== input.invite || typeof value.held !== 'boolean') throw new HubTransportError('malformed');
+    this.checkLabel(value);
+    return { project: this.project, invite: input.invite, held: value.held };
+  }
+
+  /** POST join: needs no session (the joining device is not admitted yet). Runs on a connection of its own, closed afterwards. 202 when kept. */
+  public async postJoin(post: JoinPost): Promise<JoinAnswer> {
+    const connection = await this.openConnection();
+    try {
+      const answer = await connection.request('POST', '/v1/join', { json: { join: post.join, request: post.request } }, this.cap);
+      const value = this.answerJson(answer, 202);
+      if (!isRecord(value) || typeof value.invite !== 'string' || !INVITE_ID_PATTERN.test(value.invite) || typeof value.held !== 'boolean') throw new HubTransportError('malformed');
+      this.checkLabel(value);
+      return { project: this.project, invite: value.invite, held: value.held };
+    } finally {
+      connection.close();
+    }
+  }
+
+  /** GET join-requests over this device's session (a lead or deputy device): the requests the hub kept for the project in the last 7 days. */
+  public async joinRequests(): Promise<PendingJoinRequest[]> {
+    const value = this.answerJson(await this.call('GET', `/v1/projects/${this.project}/join-requests`, {}), 200);
+    if (!isRecord(value) || !Array.isArray(value.requests)) throw new HubTransportError('malformed');
+    this.checkLabel(value);
+    return value.requests.map((item) => {
+      if (!isRecord(item) || typeof item.invite !== 'string' || !INVITE_ID_PATTERN.test(item.invite) || typeof item.request !== 'string' || typeof item.receivedAt !== 'string') throw new HubTransportError('malformed');
+      return { invite: item.invite, request: item.request, receivedAt: item.receivedAt };
+    });
+  }
+
   /** The event stream on a connection and session of its own. */
   public async events(): Promise<EventReader> {
     const connection = await this.openConnection();
@@ -762,6 +827,29 @@ export class HubTransport implements ReplicaTransport {
     if (project !== this.project) throw new HubTransportError('wrong-project', { label: { project } });
     if (stream !== undefined && value.stream !== stream) throw new HubTransportError('wrong-project', { label: { project, stream: typeof value.stream === 'string' ? value.stream : '' } });
   }
+}
+
+/**
+ * The enrolment of a project (D-41): every base-stream entry of every writer the replica holds (the genesis and the roster), the blobs they use, every
+ * signed grant it holds, the roster head it claims, and enrolmentMac under the hub file's enrolment secret over the enrolment id, the hub id, the
+ * project, the genesis hash and the roster head. The secret goes into the MAC only, never into the body.
+ */
+export async function enrolmentRequest(source: EnrolSource, file: EnrolmentFile, roster: { genesisHash: string; rosterHead: string }): Promise<EnrolRequestBody> {
+  const project = source.project;
+  const entries: SealedEntry[] = [];
+  const base = (await source.heads()).find((item) => item.stream === project);
+  for (const head of [...(base?.heads ?? [])].sort((a, b) => (a.writer < b.writer ? -1 : a.writer > b.writer ? 1 : 0))) {
+    entries.push(...await source.entriesAfter(project, head.writer, -1));
+  }
+  const cited = await source.blobsCitedBy(entries.map((entry) => entryHash(entry.header)));
+  const blobs: SealedBlob[] = [];
+  for (const hash of [...new Set(cited.map((item) => item.blob))].sort()) {
+    const blob = await source.blob(hash);
+    if (blob !== undefined) blobs.push({ hash: blob.hash, bytes: blob.bytes });
+  }
+  const grants = (await source.grants()).map((item) => item.signed);
+  const mac = enrolmentMac(file.enrolmentSecret, { enrolment: file.enrolment, hub: file.hub, project, genesisHash: roster.genesisHash, rosterHead: roster.rosterHead });
+  return { enrolment: file.enrolment, project, entries: entries.map((entry) => ({ header: entry.header, body: entry.body })), grants, blobs, rosterHead: roster.rosterHead, mac };
 }
 
 /** Splits entries and grants into appends the hub takes: at most 200 entries, 64 grants and about 3 MiB each, grants in the first ones. */

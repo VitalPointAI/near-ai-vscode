@@ -14,6 +14,7 @@ import { generateKeyFile, readEncryptionKey, readSigningKey } from '../../src/ke
 import type { RateLimitOptions } from '../../src/limits';
 import type { RosterCache } from '../../src/append/rosterCache';
 import type { Checkpointer } from '../../src/checkpoints';
+import type { JoinChecks, JoinDesk } from '../../src/join';
 import type { EventHub, Scheduler } from '../../src/live/events';
 import type { PresenceHub } from '../../src/live/presence';
 import { composeHub, sweepBlobsOnce } from '../../src/main';
@@ -46,6 +47,8 @@ export interface StartOptions {
   /** The hub's key lines and TLS pair to reuse (32-22, the same hub started again); fresh ones when absent. A given TLS pair is not cleaned up. */
   keys?: { signing: string; encryption: string };
   tls?: TlsFixture;
+  /** The join post's signature and MAC checks (32-25), so a test can count them; the real ones when absent. */
+  joinChecks?: JoinChecks;
 }
 
 export interface OpenedSession {
@@ -70,6 +73,10 @@ export interface Hub {
   presence: PresenceHub;
   /** The checkpoint signer (32-22); undefined when turned off. */
   checkpoints: Checkpointer | undefined;
+  /** Invitations and join requests (32-25). */
+  join: JoinDesk;
+  /** Every join desk log line (32-25). */
+  joinLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
   /** Every checkpoint log line (32-22). */
   checkpointLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
   /** The key lines the hub runs with, to start the same hub again. */
@@ -105,6 +112,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
   const accepted: Hub['accepted'] = [];
   const equivocations: Hub['equivocations'] = [];
   const checkpointLogs: Hub['checkpointLogs'] = [];
+  const joinLogs: Hub['joinLogs'] = [];
   const readAnswer = (answer: unknown, expected: SessionExpectation): SessionRead => {
     checks += 1;
     return readSessionAnswer(answer, expected);
@@ -122,6 +130,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     readAnswer,
     signCheckpoints: options.checkpoints !== false,
     onCheckpointLog: (level, event, fields) => checkpointLogs.push({ level, event, fields }),
+    ...(options.joinChecks === undefined ? {} : { joinChecks: options.joinChecks }),
+    onJoinLog: (level, event, fields) => joinLogs.push({ level, event, fields }),
     onAccepted: (project, list, rosterChanged) => accepted.push({ project, accepted: list, rosterChanged }),
     onEquivocation: (project, proofs) => equivocations.push({ project, proofs }),
   });
@@ -141,6 +151,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     presence: composed.presence,
     checkpoints: composed.checkpoints,
     checkpointLogs,
+    join: composed.join,
+    joinLogs,
     keys,
     now: () => clock,
     advance: (ms) => {
@@ -185,6 +197,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     async close() {
       composed.checkpoints?.stop();
       await composed.checkpoints?.settled();
+      composed.join.stop();
       composed.events.closeAll();
       composed.presence.close();
       for (const connection of connections) connection.close();

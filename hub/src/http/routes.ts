@@ -1,12 +1,12 @@
 // The hub's /v1 routes (D-34 to D-39, D-41, D-43, D-44, D-46, D-69): session, enrol, heads, append, entries and blobs (32-20), and the event
-// stream, presence and the checkpoint ask (32-21). Checkpoint signing and join requests extend this table in 32-22 and 32-25; the client transport (32-23)
-// speaks exactly these shapes.
+// stream, presence and the checkpoint ask (32-21), and invitations and join requests (32-25, join.ts); the client transport (32-23) speaks exactly
+// these shapes.
 //
 // Wire rules. Every JSON answer is application/json with cache-control no-store. An error is {error: id, message: one plain sentence}, with a
 // reason for session and token refusals, and never echoes the request: no path, no token, no challenge, no body. Request bodies are read with a
 // byte cap before they are parsed (64 KiB for session, 4 MiB for append and enrol, 8 MiB for blobs) and a declared length past the cap is refused
-// 413 before the body is read. Project ids and hashes are checked against their patterns before any lookup. Session and enrol take the per-address
-// bucket before anything else (Pitfall 7).
+// 413 before the body is read. Project ids and hashes are checked against their patterns before any lookup. Session, enrol and join take the
+// per-address bucket before anything else (Pitfall 7), and join reads at most 64 KiB, so a flood costs the hub no signature check.
 //
 // Reading rules (T-32-76). heads lists only the streams whose cell names the device among its grantees at the roster head, and only the grant hashes
 // of those cells. entries answers 404 for a stream the device may not read, exactly as for one that does not exist. A blob or a grant the device may
@@ -33,6 +33,8 @@ import type { AppendRefusal, AppendResult } from '../append/checks';
 import type { ProjectRoster, RosterCache } from '../append/rosterCache';
 import { enrolProject } from '../enrol';
 import type { EnrolRefusal, HubIdentity } from '../enrol';
+import { JoinDesk } from '../join';
+import type { JoinFailure } from '../join';
 import { EventHub } from '../live/events';
 import { PresenceHub } from '../live/presence';
 import { LIMITS } from '../limits';
@@ -56,6 +58,8 @@ export interface RouteDeps {
   events?: EventHub;
   /** Presence in memory; one of its own, publishing through events, when absent. */
   presence?: PresenceHub;
+  /** Invitations and join requests (32-25); one of its own, publishing through events, when absent. */
+  join?: JoinDesk;
   /** Called after COMMIT with the entries the hub now has from an append, after the hub's own events are published. */
   onAccepted?: (project: string, accepted: readonly string[], rosterChanged: boolean) => void;
   /** Called after COMMIT with the equivocation proofs an append recorded, after the hub's own events are published. */
@@ -64,7 +68,20 @@ export interface RouteDeps {
   onFailure?: (route: RouteId, error: unknown) => void;
 }
 
-export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get' | 'events' | 'presence' | 'checkpoint';
+export type RouteId =
+  | 'session'
+  | 'enrol'
+  | 'heads'
+  | 'append'
+  | 'entries'
+  | 'blob-put'
+  | 'blob-get'
+  | 'events'
+  | 'presence'
+  | 'checkpoint'
+  | 'invites'
+  | 'join'
+  | 'join-requests';
 
 export const ROUTE_ERRORS = {
   'not-found': 'There is nothing at this address on the hub.',
@@ -187,6 +204,7 @@ export function createRoutes(deps: RouteDeps): HubHandler {
   const { store, cache, sessions, limits, identity } = deps;
   const events = deps.events ?? new EventHub({ now: deps.now });
   const presence = deps.presence ?? new PresenceHub(events, { now: deps.now, accessList: async (project, cell) => (await cache.get(project)).accessList(cell) });
+  const desk = deps.join ?? new JoinDesk({ store, cache, identity, events, now: deps.now });
 
   const addressOf = (req: http.IncomingMessage): string => req.socket.remoteAddress ?? 'unknown';
 
@@ -575,6 +593,61 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     sendError(res, 404, 'not-found');
   };
 
+  /** A refusal from join.ts: {error, message}, no reason field and nothing from the request. */
+  const sendJoinFailure = (res: http.ServerResponse, outcome: JoinFailure): void => {
+    sendJson(res, outcome.status, JSON.stringify({ error: outcome.reason, message: outcome.message }));
+  };
+
+  /** POST /v1/projects/:p/invites {invite, expiresAt, checkKey}: a lead or deputy device registers an invitation (D-48). 201 stored, 200 held. */
+  const invites: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    const auth = await authenticate(req, res, project);
+    if (auth === undefined) return;
+    const body = await readJson(req, res, LIMITS.smallBodyBytes);
+    if (body === undefined) return;
+    const outcome = await desk.register(project, auth.writer, body.value);
+    if (!outcome.ok) {
+      sendJoinFailure(res, outcome);
+      return;
+    }
+    sendJson(res, outcome.status, JSON.stringify({ project, invite: outcome.invite, held: outcome.held }));
+  };
+
+  /**
+   * POST /v1/join {join, request}: no session. The per-address bucket first, then at most 64 KiB of body (a larger declared length is refused 413
+   * before any byte is read), then join.ts's checks. 202 {project, invite, held} when the request is kept.
+   */
+  const joinPost: Handler = async (req, res) => {
+    const taken = limits.takeAddress('join', addressOf(req), deps.now());
+    if (!taken.ok) {
+      req.resume();
+      sendJson(res, 429, JSON.stringify({ error: 'rate-limited', message: ROUTE_ERRORS['rate-limited'] }), { 'retry-after': String(taken.retryAfterSeconds) });
+      return;
+    }
+    const body = await readJson(req, res, LIMITS.smallBodyBytes);
+    if (body === undefined) return;
+    const outcome = await desk.join(body.value);
+    if (!outcome.ok) {
+      sendJoinFailure(res, outcome);
+      return;
+    }
+    sendJson(res, 202, JSON.stringify({ project: outcome.project, invite: outcome.invite, held: outcome.held }));
+  };
+
+  /** GET /v1/projects/:p/join-requests: the requests kept for the project, for a lead or deputy device only. */
+  const joinRequests: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    const auth = await authenticate(req, res, project);
+    if (auth === undefined) return;
+    req.resume();
+    const outcome = await desk.list(project, auth.writer);
+    if (!outcome.ok) {
+      sendJoinFailure(res, outcome);
+      return;
+    }
+    sendJson(res, 200, JSON.stringify({ project, requests: outcome.requests }));
+  };
+
   const table: readonly RouteEntry[] = [
     { path: ['v1', 'session'], methods: { POST: { id: 'session', handler: session } } },
     { path: ['v1', 'enrol'], methods: { POST: { id: 'enrol', handler: enrol } } },
@@ -584,6 +657,9 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     { path: ['v1', 'projects', ':project', 'events'], methods: { GET: { id: 'events', handler: eventStream } } },
     { path: ['v1', 'projects', ':project', 'presence'], methods: { POST: { id: 'presence', handler: presencePost } } },
     { path: ['v1', 'projects', ':project', 'checkpoint'], methods: { POST: { id: 'checkpoint', handler: checkpoint } } },
+    { path: ['v1', 'projects', ':project', 'invites'], methods: { POST: { id: 'invites', handler: invites } } },
+    { path: ['v1', 'projects', ':project', 'join-requests'], methods: { GET: { id: 'join-requests', handler: joinRequests } } },
+    { path: ['v1', 'join'], methods: { POST: { id: 'join', handler: joinPost } } },
     { path: ['v1', 'blobs', ':hash'], methods: { PUT: { id: 'blob-put', handler: blobPut }, GET: { id: 'blob-get', handler: blobGet } } },
   ];
 
