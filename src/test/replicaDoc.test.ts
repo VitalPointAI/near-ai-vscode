@@ -6,9 +6,13 @@ import { UNATTRIBUTED_WRITER, summariseAuthors } from '../domain/replica/attribu
 import { applyRemote, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
 import type { Actor, Dep } from '../domain/replica/entry';
-import { foldEntries } from '../domain/replica/fold';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
 import { MAX_UPDATE_BYTES, validateDocData } from '../domain/replica/kindSchemas/doc';
-import type { ProductTextOutput } from '../domain/replica/textFold';
+import { DEFAULT_REDUCERS } from '../domain/replica/reducers';
+import type { AnyReducer } from '../domain/replica/reducers';
+import type { ReplicaContext } from '../domain/replica/rosterView';
+import { COMPACTION_WINDOW, MAX_PRODUCTS_PER_STREAM, MAX_REGISTRATIONS_PER_WRITER_PRODUCT, textReducer } from '../domain/replica/textFold';
+import type { ProductTextOutput, TextState } from '../domain/replica/textFold';
 import { createWorld, permutations, rng, updateData } from './helpers/replicaWorld';
 import type { Written, World } from './helpers/replicaWorld';
 import { embedUpdate, foreignFullState, formatUpdate, gcUpdate, mapUpdate, nestedArrayUpdate, nestedTypeUpdate, skipUpdate } from './helpers/replicaYjs';
@@ -531,4 +535,178 @@ test('WR-02: text typed under an allowed agent registration is attributed to the
   const result = foldEntries(sealed([register, typed]), world.ctx());
   assert.deepEqual([result.refused, result.held], [[], []]);
   assert.deepEqual(productOf(result).attribution, [{ start: 0, length: 10, clientId: 31, writer: world.writerOf('W'), member: 'mbr-wwww', actor: 'agent', agentMember: 'j2-analyst', run: 'r-7' }]);
+});
+
+// ---- WR-05 and WR-08 (text part): bounded registrations, products and compactions, a memoised scratch and a lazy document ---------------------
+
+// The default reducers with the text reducer's final working state captured, so a test can look at what the fold holds.
+function capturing(): { reducers: AnyReducer[]; state(): TextState } {
+  let captured: TextState | undefined;
+  const wrapped: AnyReducer = {
+    ...textReducer,
+    finish(state, view) {
+      captured = state as TextState;
+      return textReducer.finish(state as TextState, view);
+    }
+  };
+  return {
+    reducers: DEFAULT_REDUCERS.map((reducer) => (reducer === textReducer ? wrapped : reducer)),
+    state: () => {
+      assert.ok(captured !== undefined, 'the text reducer finished');
+      return captured;
+    }
+  };
+}
+
+// The same entries folded from scratch and delivered in chunks to the incremental fold give the same outputs and digests.
+function incrementalEqualsFresh(items: readonly Written[], ctx: ReplicaContext, chunks: number): ReturnType<typeof foldEntries> {
+  const entries = sealed(items);
+  const fresh = foldEntries(entries, ctx);
+  let state = createFoldState(ctx);
+  const size = Math.ceil(entries.length / chunks);
+  for (let start = 0; start < entries.length; start += size) state = addEntries(state, entries.slice(start, start + size));
+  assert.deepEqual(state.result.families, fresh.families, 'families');
+  assert.deepEqual(state.result.digests, fresh.digests, 'digests');
+  assert.deepEqual(reasons(state.result), reasons(fresh), 'refusals');
+  assert.deepEqual(state.result.applied.slice().sort(), fresh.applied.slice().sort(), 'applied');
+  return fresh;
+}
+
+test('a stream holds at most 1024 text products: later registrations are refused too-many-products, and a product with only registrations has no Yjs document', () => {
+  assert.equal(MAX_PRODUCTS_PER_STREAM, 1024);
+  const world = twoWriters();
+  const regs = Array.from({ length: 1100 }, (_, index) => world.write('W', { kind: 'doc.client', data: { product: `p-${index}`, clientId: 31, actor: { kind: 'person' } } }));
+  const capture = capturing();
+  const result = foldEntries(sealed(regs), world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual(reasons(result), regs.slice(1024).map((item): [string, string] => [item.hash, 'too-many-products']).sort());
+  assert.equal(result.applied.length, 1024);
+  const state = capture.state();
+  assert.equal(state.products.size, 1024);
+  assert.equal(state.productsPerStream.get(world.stream), 1024);
+  assert.equal([...state.products.values()].every((product) => product.doc === undefined), true);
+  const products = result.families.doc as ProductTextOutput[];
+  assert.equal(products.length, 1024);
+  assert.equal(products.every((product) => product.text === '' && product.stateVector.length === 0 && product.attribution.length === 0 && !product.incomplete), true);
+  // The first accepted update creates the document of its own product only.
+  const typed = world.write('W', { kind: 'doc.update', data: updateData('p-0', localInsert(createLocalDoc(31), 0, 'first words')) });
+  const later = capturing();
+  const withText = foldEntries(sealed([...regs, typed]), world.ctx(), { reducers: later.reducers });
+  assert.equal(withText.applied.includes(typed.hash), true);
+  const docs = [...later.state().products.values()].filter((product) => product.doc !== undefined);
+  assert.deepEqual(docs.map((product) => product.product), ['p-0']);
+  incrementalEqualsFresh([...regs, typed], world.ctx(), 4);
+});
+
+test('one writer registers at most 4096 client ids for one product: the 4097th is refused too-many, and re-registering a held id or another writer is unaffected', () => {
+  assert.equal(MAX_REGISTRATIONS_PER_WRITER_PRODUCT, 4096);
+  const world = twoWriters();
+  const regs = Array.from({ length: 4097 }, (_, index) => world.write('W', { kind: 'doc.client', data: { product: PRODUCT, clientId: index + 1, actor: { kind: 'person' } } }));
+  const again = world.write('W', { kind: 'doc.client', data: { product: PRODUCT, clientId: 1, actor: { kind: 'person' } } });
+  const other = world.editor('Q', PRODUCT, 9000).register();
+  const capture = capturing();
+  const result = foldEntries(sealed([...regs, again, other]), world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual(reasons(result), [[regs[4096].hash, 'too-many']]);
+  assert.equal(result.applied.includes(again.hash) && result.applied.includes(other.hash), true);
+  assert.equal(productOf(result).registrations.length, 4097);
+  const product = capture.state().products.get(`${world.stream}/${PRODUCT}`);
+  assert.deepEqual([product?.registrationCounts.get(world.writerOf('W')), product?.registrationCounts.get(world.writerOf('Q')), product?.doc], [4096, 1, undefined]);
+  incrementalEqualsFresh([...regs, again, other], world.ctx(), 4);
+});
+
+interface LiveScene { world: World; entries: Written[]; type(count: number): void; compact(writer: string): Written }
+
+// A types and B types after seeing A; A can keep typing, after the newest compaction (as an honest editor that has seen it), so each compaction
+// sits at a fixed point in A's typing. compact writes a doc.compact by the given device that covers both writers' heads.
+function liveScene(compactors: string[] = []): LiveScene {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['C', ...compactors] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const entries: Written[] = [a.register(), b.register()];
+  let headA = a.insert(0, 'alpha ');
+  applyRemote(b.doc, encodeFullState(a.doc));
+  const headB = b.insert(6, 'beta');
+  entries.push(headA, headB);
+  let newest: Written | undefined;
+  return {
+    world,
+    entries,
+    type(count) {
+      for (let index = 0; index < count; index += 1) {
+        headA = a.insert(docText(a.doc).length, 'x', newest === undefined ? {} : { deps: [newest] });
+        newest = undefined;
+        entries.push(headA);
+      }
+    },
+    compact(writer) {
+      const fold = createFoldDoc();
+      applyUpdate(fold, encodeFullState(a.doc));
+      applyUpdate(fold, encodeFullState(b.doc));
+      const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(encodeFullState(fold)));
+      world.blobs.set(blob.hash, blob);
+      const heads = [headA, headB];
+      const entry = world.write(writer, { kind: 'doc.compact', deps: heads, data: { product: PRODUCT, covers: heads.map(dep), stateVector: stateVectorOf(fold), textHash: textHashOf(docText(fold)), stateBlob: blob.hash } });
+      entries.push(entry);
+      newest = entry;
+      return entry;
+    }
+  };
+}
+
+test('a writer compacts a product again only after 50 more accepted updates: sooner is refused too-many, and the window is per writer', () => {
+  assert.equal(COMPACTION_WINDOW, 50);
+  const scene = liveScene(['K']);
+  const first = scene.compact('C');
+  scene.type(COMPACTION_WINDOW - 1);
+  const early = scene.compact('C');
+  const otherWriter = scene.compact('K');
+  scene.type(1);
+  const onTime = scene.compact('C');
+  const result = incrementalEqualsFresh(scene.entries, scene.world.ctx(), 5);
+  assert.deepEqual(reasons(result), [[early.hash, 'too-many']]);
+  assert.deepEqual(productOf(result).compactions, [first, otherWriter, onTime].map((entry) => ({ entry: entry.hash, verified: true })));
+  assert.equal(productOf(result).text, `alpha ${'x'.repeat(COMPACTION_WINDOW)}beta`);
+  // Delivered one entry at a time the incremental fold agrees too.
+  let single = createFoldState(scene.world.ctx());
+  for (const entry of sealed(scene.entries)) single = addEntries(single, [entry]);
+  assert.deepEqual(single.result.families, result.families);
+  assert.deepEqual(single.result.digests, result.digests);
+});
+
+test('compactions at one point in the log share one memoised scratch: ten in a row build it once, and a new accepted update builds it again', () => {
+  const compactors = Array.from({ length: 10 }, (_, index) => `K${index}`);
+  const scene = liveScene(compactors);
+  const ten = compactors.map((writer) => scene.compact(writer));
+  const capture = capturing();
+  const result = foldEntries(sealed(scene.entries), scene.world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).compactions.map((record) => [record.entry, record.verified]).sort(), ten.map((entry) => [entry.hash, true]).sort());
+  assert.equal(capture.state().products.get(`${scene.world.stream}/${PRODUCT}`)?.scratchBuilds, 1);
+  scene.type(1);
+  const after = scene.compact('C');
+  const next = capturing();
+  const more = foldEntries(sealed(scene.entries), scene.world.ctx(), { reducers: next.reducers });
+  assert.equal(more.applied.includes(after.hash), true);
+  assert.equal(next.state().products.get(`${scene.world.stream}/${PRODUCT}`)?.scratchBuilds, 2);
+  incrementalEqualsFresh(scene.entries, scene.world.ctx(), 3);
+});
+
+test('compactions that cover only some of the accepted updates are checked against those, and share one memoised build too', () => {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['K0', 'K1'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const regs = [a.register(), b.register()];
+  const updA = a.insert(0, 'alpha ');
+  // B types without seeing A, and its update is accepted before the compactions, which cover A's update only.
+  const updB = b.insert(0, 'beta ');
+  const onlyA = stateOf(11, [[0, 'alpha ']]);
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(onlyA.blobState));
+  world.blobs.set(blob.hash, blob);
+  const both = ['K0', 'K1'].map((writer) => world.write(writer, { kind: 'doc.compact', deps: [updA, updB], data: { product: PRODUCT, covers: [dep(updA)], stateVector: onlyA.stateVector, textHash: textHashOf(onlyA.blobText), stateBlob: blob.hash } }));
+  const capture = capturing();
+  const result = foldEntries(sealed([...regs, updA, updB, ...both]), world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).compactions, both.map((entry) => ({ entry: entry.hash, verified: true })));
+  assert.equal(productOf(result).accepted.length, 2);
+  assert.equal(capture.state().products.get(`${world.stream}/${PRODUCT}`)?.scratchBuilds, 1);
+  incrementalEqualsFresh([...regs, updA, updB, ...both], world.ctx(), 2);
 });
