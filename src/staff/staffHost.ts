@@ -25,6 +25,8 @@
 // - replay() reads the products from the fold through the projection (replica/projection.ts), so every reader of replay() (status, list, the
 //   registry, the decision queue, the header tamper check in fileDisagreement) works unchanged on the projected state. One ReplicaProject is kept per
 //   host, so its fold context is reused.
+// - every step that would write today's single-machine ledgers or staff files is refused with SHARED_PROJECT_REFUSAL before any file is touched: a
+//   method with a StaffResult returns it, a method without one throws SharedProjectError. Live multi-user writes arrive in Phase 33.
 // - the reads of the decision log, the wargame ledger, the event log and the logistics files read the files the projection wrote back at their usual
 //   paths, unchanged.
 import { decidePir as decidePirEntry, parseRegisterText, pirRegisterProductBody, registerPath, renderRegister, trustPirDecisions } from '../domain/staff/intel';
@@ -73,8 +75,10 @@ import type { TradecraftFinding } from '../domain/staff/tradecraftLint';
 import { checkOrder, deriveFromWargame, parseWargamePhase, wargameTurnEvent } from '../domain/staff/wargame';
 import type { WargameEntry } from '../domain/staff/wargame';
 import { withFileLock } from '../services/stateMirrorLock';
-import { LogisticsHost, readCalculatorCheck } from './logisticsHost';
-import { REPLICA_PROJECT_FILE } from '../domain/staff/multiUser';
+import { LogisticsHost, readCalculatorCheck, SharedProjectError } from './logisticsHost';
+import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
+
+export { SharedProjectError } from './logisticsHost';
 
 // The replica host modules, as types only: they are loaded with import() inside the methods that need them, and only for a shared project.
 type SharedProject = import('./replica/replicaProject').ReplicaProject;
@@ -438,6 +442,16 @@ export class StaffHost {
     if ('project' in opened) await opened.project.close();
   }
 
+  /** The refusal every single-machine write gives in a shared project, or undefined. Checked before any file is touched. */
+  private async sharedRefusal(): Promise<StaffResult | undefined> {
+    return (await this.isSharedProject()) ? refuse(SHARED_PROJECT_REFUSAL) : undefined;
+  }
+
+  /** For a write with no result to carry a refusal: throws SharedProjectError in a shared project, before any file is touched. */
+  private async refuseIfShared(): Promise<void> {
+    if (await this.isSharedProject()) throw new SharedProjectError();
+  }
+
   /**
    * Appends entries under the ledger lock: `decide` sees the ledger as it is now and returns the entries to write (or a refusal). Each entry is checked
    * against the state machine before anything is written, signed, chained, and written in one append, so a refusal or a failure writes nothing.
@@ -485,6 +499,8 @@ export class StaffHost {
    * state past draft then read as tampered until their owners write them again.
    */
   public async setAsideLedger(): Promise<string | undefined> {
+    // A shared project's ledger lives in the shared record: there is no single-machine ledger to set aside (D-29).
+    await this.refuseIfShared();
     const file = path.join(this.ledgerDir(), LEDGER_FILE);
     const present = (await readWhole(file)).kind !== 'missing';
     // The recorded head goes back to an empty ledger either way: a person chose to start again, including after the file was deleted or cut short.
@@ -501,6 +517,8 @@ export class StaffHost {
 
   /** How the ledger stands against the head this computer recorded (BranchLedgerCheck). Reads only. */
   public async branchLedgerCheck(): Promise<BranchLedgerCheck> {
+    // A shared project has no single-machine ledger to use, so Use This Branch's Ledger is never offered there: it says why instead (D-29).
+    if (await this.isSharedProject()) return { kind: 'broken', message: SHARED_PROJECT_REFUSAL };
     const status = await this.options.keyStatus();
     const read = await this.ledgerLines();
     if ('unreadable' in read) return { kind: 'unreadable', message: unreadableText(`${LEDGER_DIR}/${LEDGER_FILE}`, read.unreadable, SET_ASIDE_WAY_OUT) };
@@ -523,6 +541,8 @@ export class StaffHost {
    * entry in the decision log (subject `ledger-head`), and only then does the recorded head move. A broken ledger is refused: Set Aside is its way out.
    */
   public async adoptBranchLedger(person: PersonActor, expected: { readonly head: string; readonly entries: number }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
     const signer = await this.options.signer();
     if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
@@ -607,6 +627,8 @@ export class StaffHost {
    * leaves the PIR reading as awaiting a decision: a written decision counts only with its signed entry, so neither order can make one count.
    */
   public async decidePir(person: PersonActor, input: { pir: string; decision: 'approved' | 'rejected'; reasons?: readonly string[] }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
     const signer = await this.options.signer();
     if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
@@ -652,6 +674,8 @@ export class StaffHost {
    * it to the decision log. Only the watch host's person commands call it; no tool does. The person must be the one this device's key signs for.
    */
   public async signWatchDecision(person: PersonActor, input: { readonly watch: string; readonly decision: 'approved' | 'rejected'; readonly wording: string; readonly reasons: readonly string[] }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
     const signer = await this.options.signer();
     if (person.deviceFingerprint !== signer.fingerprint) return refuse(RELEASE_REFUSALS['unnamed-person']);
@@ -720,6 +744,8 @@ export class StaffHost {
   /** Writes events to the project's event log and sends them to every listener, each once. */
   public async emit(events: readonly StaffLogEvent[]): Promise<void> {
     if (!events.length) return;
+    // A shared project's events come from its shared record (Phase 33); nothing is appended to the single-machine log (D-29).
+    await this.refuseIfShared();
     await mkdir(this.ledgerDir(), { recursive: true });
     await withFileLock(this.ledgerDir(), EVENTS_LOCK, async () => {
       // An event log that cannot be read whole is not appended to: it is never read as empty and written on top of.
@@ -734,6 +760,7 @@ export class StaffHost {
 
   /** Events other parts of the extension observe (lanes, merges, nested teams, COP layers) enter the same log through here. */
   public async record(event: StaffEvent): Promise<void> {
+    await this.refuseIfShared();
     const allowed: readonly string[] = ['staff.lane.started', 'staff.lane.finished', 'staff.merge.started', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.team.nested', 'staff.cop.updated'];
     if (!allowed.includes(event.type)) throw new Error(`${event.type} is written by the staff-products host itself.`);
     await this.emit([event]);
@@ -741,6 +768,7 @@ export class StaffHost {
 
   /** Feed and watch events from the observation store, the importers, the simulator and the watches enter the same log through here. */
   public async recordFeed(events: readonly FeedEvent[]): Promise<void> {
+    if (events.length) await this.refuseIfShared();
     const wrong = events.find((event) => !isFeedEventType(event.type));
     if (wrong) throw new Error(`${String(wrong.type)} is not a feed event.`);
     await this.emit(events);
@@ -926,6 +954,8 @@ export class StaffHost {
    * owner); a later one is a revision, and after a person approved, released or withdrew the last version it starts a new line with the next number.
    */
   public async propose(caller: StaffCaller, input: { product: string; kind?: string; label?: string; dependsOn?: readonly ProductDependency[] }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     if (!STAFF_SLUG.test(input.product)) return refuse('A product name is lower case letters, digits and dashes.');
@@ -1061,6 +1091,8 @@ export class StaffHost {
    * refused while guard-scan holds that version; SIGN-OFF while the tradecraft lint has a finding. The tool writes the gate's report beside the product.
    */
   public async verdict(caller: StaffCaller, input: { product: string; gate: StaffGate; verdict: string; hash: string; reasons: readonly string[] }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     const role = await this.roleProblem(member, input.product, 'verdict', input.gate);
@@ -1113,6 +1145,8 @@ export class StaffHost {
 
   /** submit: the owner or section lead puts a guard-checked product in front of a person, with the options, their risk and the dissent. */
   public async submit(caller: StaffCaller, input: { product: string; decisionFor: string; options?: readonly DecisionOption[]; dissent?: readonly string[]; deadline?: string }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     const role = await this.roleProblem(member, input.product, 'submit');
@@ -1138,6 +1172,8 @@ export class StaffHost {
 
   /** withdraw: the owner takes back a product that no person has decided on. */
   public async withdraw(caller: StaffCaller, input: { product: string; reason: string }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     const role = await this.roleProblem(member, input.product, 'withdraw');
@@ -1178,6 +1214,8 @@ export class StaffHost {
 
   /** step: the run enters a crosswalk step for a section (the lead or a member says so); the profile's own step name is recorded with it. */
   public async enterStep(caller: StaffCaller, input: { section?: StaffSectionId; step: number }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     if (!Number.isInteger(input.step) || input.step < 1 || input.step > 8) return refuse('A step is a crosswalk row from 1 to 8.');
     const section = input.section ?? caller.team.section;
     const settings = await this.settings(caller.team);
@@ -1228,6 +1266,8 @@ export class StaffHost {
    * version goes through the state machine: the owner's write is a propose, a part writer's an edit. RFI rows that open or are answered send their events.
    */
   public async registerWrite(caller: StaffCaller, input: { register: string; rows?: readonly unknown[]; remove?: readonly string[]; part?: string; label?: string }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
@@ -1317,6 +1357,8 @@ export class StaffHost {
 
   /** propose (for a register): anyone writes rows as a proposal for the register's writer to merge. */
   public async registerPropose(caller: StaffCaller, input: { register: string; rows: readonly unknown[]; note?: string }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     if (input.register === PIR_REGISTER_PRODUCT) return refuse(PIR_REGISTER_ELSEWHERE);
@@ -1338,6 +1380,8 @@ export class StaffHost {
 
   /** trigger: a member watching the CCIRs reports that one fired (design 10, 4.5, `staff.ccir.triggered`). */
   public async ccirTrigger(caller: StaffCaller, input: { ccir: string; report: string }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     if (!isOneLine(input.report, 500)) return refuse('Say in one line what was reported.');
@@ -1360,6 +1404,8 @@ export class StaffHost {
     if (!rows) return;
     const overdue = overdueRfis(rows, this.now(), run, isoOf(this.now()));
     if (!overdue.length) return;
+    // A read never writes the single-machine event log of a shared project (D-29).
+    if (await this.isSharedProject()) return;
     const sent = new Set((await this.events()).filter((event) => event.type === 'staff.rfi.overdue').map((event) => `${(event as { rfi: string }).rfi}@${(event as { suspense: string }).suspense}`));
     await this.emit(overdue.filter((event) => !sent.has(`${event.rfi}@${event.suspense}`)));
   }
@@ -1397,6 +1443,8 @@ export class StaffHost {
 
   /** record: one phase of one wargame turn, in order (action, reaction, counteraction), by any member at the table. */
   public async wargameRecord(caller: StaffCaller, raw: unknown): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     const parsed = parseWargamePhase(raw);
@@ -1420,6 +1468,8 @@ export class StaffHost {
    * and the branch list. Otherwise the rows come back for the writer.
    */
   public async wargameDerive(caller: StaffCaller): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
     const read = await this.wargameRead();
@@ -1448,6 +1498,8 @@ export class StaffHost {
    * tool calls it, and the state machine refuses each of these from an agent in any case. A release also supersedes the older released version.
    */
   public async decide(person: PersonActor, input: { product: string; action: 'approve' | 'reject' | 'release' | 'withdraw'; hash?: string; reasons?: readonly string[]; releaseOnApproval?: boolean }): Promise<StaffResult> {
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return sharedRefused;
     if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
     const root = this.options.root;
     const fresh = await this.refresh(root, input.product, 'person');

@@ -19,9 +19,13 @@ import { isMigrationRefused, ledgerHeadKey, makeMultiUser } from '../staff/repli
 import type { MigrationDeps } from '../staff/replica/migrate';
 import type { ProjectedProductState } from '../staff/replica/projection';
 import { ReplicaProject } from '../staff/replica/replicaProject';
-import { productPath, SHARED_PROJECT_UNAVAILABLE, StaffHost } from '../staff/staffHost';
+import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
+import type { StaffEvent } from '../domain/staff/events';
+import type { FeedEvent } from '../domain/staff/obs/events';
+import type { ValidationLogEntry } from '../domain/staff/logistics';
+import { EVENTS_FILE, LEDGER_DIR, productPath, SHARED_PROJECT_UNAVAILABLE, SharedProjectError, StaffHost } from '../staff/staffHost';
 import type { StaffCaller, StaffTeamInfo } from '../staff/staffHost';
-import { callLogistics, callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
+import { callLogistics, callTool, CLEAN_BODY, hashIn, J3_TEAM, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
 
 const NOW = '2026-11-20T10:00:00.000Z';
@@ -231,4 +235,179 @@ test('a product header edited by hand after the conversion is reported with the 
   const sharedStatus = await sharedHost.status(caller(shared.root), CONOPS);
   assert.deepEqual(sharedStatus, todayStatus);
   await sharedHost.close();
+});
+
+// ---- Task 2: every writing step in a shared project is refused with one plain sentence and changes no file -------------------------------------------
+
+const sha256 = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
+
+/** Every file under .planning/staff, the replica store included, by path, with the sha256 of its bytes. */
+function staffTree(root: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const file = path.join(dir, name);
+      if (statSync(file).isDirectory()) walk(file);
+      else out.set(path.relative(root, file).split(path.sep).join('/'), sha256(readFileSync(file)));
+    }
+  };
+  walk(path.join(root, '.planning', 'staff'));
+  return out;
+}
+
+/** The SecretStorage key set, each with the hash of its value. */
+function secretState(secrets: Secrets): string[] {
+  return [...secrets.values.entries()].map(([key, value]) => `${key}=${sha256(value)}`).sort();
+}
+
+/** What a refused write gives: a StaffResult or CalcResult with the message, or a thrown SharedProjectError. */
+async function refusalOf(call: () => Promise<unknown>): Promise<string> {
+  try {
+    const result = await call();
+    assert.ok(typeof result === 'object' && result !== null && (result as { ok?: unknown }).ok === false, `refused, not ${JSON.stringify(result)}`);
+    return (result as { message: string }).message;
+  } catch (error) {
+    assert.ok(error instanceof SharedProjectError, `a SharedProjectError, not ${String(error)}`);
+    assert.equal(error.refusal, SHARED_PROJECT_REFUSAL);
+    return error.message;
+  }
+}
+
+const AT = '2026-11-21T09:00:00.000Z';
+
+/** Every writing method of the staff host and the logistics host, each called with arguments today's host would act on. */
+function writingCalls(world: StaffWorld, hashes: { annex: string; annexC: string }): Array<[string, () => Promise<unknown>]> {
+  const host = world.host;
+  const root = world.root;
+  const person = world.person();
+  const logistics = host.logistics();
+  let built = 0;
+  return [
+    ['setAsideLedger', () => host.setAsideLedger()],
+    ['adoptBranchLedger', () => host.adoptBranchLedger(person, { head: 'a'.repeat(64), entries: 1 })],
+    ['decidePir', () => host.decidePir(person, { pir: 'PIR-1', decision: 'approved' })],
+    ['signWatchDecision', () => host.signWatchDecision(person, { watch: 'watch-ford', decision: 'approved', wording: sha256('watch the ford'), reasons: [] })],
+    ['emit', () => host.emit([{ type: 'staff.step.entered', run: 'run-hostmode', at: AT, section: 'j5', step: 2, stepName: null } as StaffEvent])],
+    ['record', () => host.record({ type: 'staff.lane.started', run: 'run-hostmode', at: AT, section: 'j5', member: 'lead-planner' } as StaffEvent)],
+    ['recordFeed', () => host.recordFeed([{ type: 'feed.source.state', run: 'run-hostmode', at: AT, feed: 'feed-a', from: null, to: 'proposed', simulated: true } as unknown as FeedEvent])],
+    ['propose', () => host.propose(caller(root), { product: ANNEX, kind: 'annex' })],
+    ['verdict', () => host.verdict(caller(root, 'release-guard'), { product: ANNEX, gate: 'guard', verdict: 'CLEARED', hash: hashes.annex, reasons: [] })],
+    ['submit', () => host.submit(caller(root), { product: ANNEX, decisionFor: DECISION_ROLE, options: OPTIONS, dissent: DISSENT })],
+    ['withdraw', () => host.withdraw(caller(root), { product: ANNEX, reason: 'Overtaken by events.' })],
+    ['enterStep', () => host.enterStep(caller(root), { step: 2 })],
+    ['registerWrite', () => host.registerWrite(caller(root, 'liaison-coordinator', J3_TEAM), { register: 'rfi-tracker', rows: [{ id: 'RFI-1', from: 'j5', to: 'j2', question: 'Bridge class?', suspense: '2026-11-22T12:00:00Z', status: 'open' }] })],
+    ['registerPropose', () => host.registerPropose(caller(root, 'plans-writer'), { register: 'rfi-tracker', rows: [{ id: 'RFI-2', from: 'j5', to: 'j2', question: 'Ford depth?', suspense: '2026-11-22T12:00:00Z', status: 'open' }] })],
+    ['ccirTrigger', () => host.ccirTrigger(caller(root, 'joc-chief', J3_TEAM), { ccir: 'F1', report: 'Bridge reported down at 0400' })],
+    ['wargameRecord', () => host.wargameRecord(caller(root, 'plans-writer'), { ...TURN, phase: 'reaction' })],
+    ['wargameDerive', () => host.wargameDerive(caller(root, 'plans-writer'))],
+    ['decide', () => host.decide(person, { product: ANNEX_C, action: 'approve', hash: hashes.annexC })],
+    ['logistics.writeRecord', () => logistics.writeRecord('log-plans-officer', 'run-hostmode', () => { built += 1; return { ok: false, message: `build was called ${built} times` }; })],
+    ['logistics.submitReport', () => logistics.submitReport('jloc-chief', { ...LOGSTAT, id: 'bn1-191200z', reportedAt: '2026-11-19T12:00:00Z' })],
+    ['logistics.appendValidation', () => logistics.appendValidation([{ report: LOGSTAT.id, passed: true, findings: [], hash: 'b'.repeat(64), at: AT, by: 'logstat-analyst' } as unknown as ValidationLogEntry])]
+  ];
+}
+
+test('every writing method, in a shared project, is refused with SHARED_PROJECT_REFUSAL and changes no file under .planning/staff and no secret', async () => {
+  const env = await cloneOf(await full(), 'writes');
+  await migrate(env);
+  const world = worldOf(env, true);
+  // Read first, as a Staff Room would: the reads may record the shared store's own marks, the writes must change nothing at all.
+  const replay = await world.host.replay();
+  const hashes = { annex: replay.products.get(ANNEX)!.record.hash, annexC: replay.products.get(ANNEX_C)!.record.hash };
+  await world.host.snapshot();
+  const files = staffTree(env.root);
+  const secrets = secretState(env.secrets);
+  const calls = writingCalls(world, hashes);
+  assert.ok(calls.length >= 20, `${calls.length} writing methods`);
+  for (const [name, call] of calls) {
+    assert.equal(await refusalOf(call), SHARED_PROJECT_REFUSAL, name);
+    assert.deepEqual(staffTree(env.root), files, `${name} changed no file under .planning/staff`);
+    assert.deepEqual(secretState(env.secrets), secrets, `${name} changed no secret`);
+  }
+  // The products still read the same after every refusal.
+  assert.deepEqual((await world.host.replay()).products, replay.products);
+  await world.host.close();
+});
+
+test('the refusal is one plain sentence with no em-dash that names Make a Single-Machine Copy, and SharedProjectError carries exactly it', () => {
+  assert.doesNotMatch(SHARED_PROJECT_REFUSAL, /\u2014/);
+  assert.match(SHARED_PROJECT_REFUSAL, /Make a Single-Machine Copy/);
+  const error = new SharedProjectError();
+  assert.equal(error.message, SHARED_PROJECT_REFUSAL);
+  assert.equal(error.name, 'SharedProjectError');
+  assert.doesNotMatch(SHARED_PROJECT_UNAVAILABLE, /\u2014/);
+});
+
+test('the reading methods still answer in a shared project, from the files the conversion wrote back: decisions, watches, wargame, events, calculator and LOGSTAT', async () => {
+  const env = await cloneOf(await full(), 'reads');
+  const read = async (host: StaffHost) => {
+    const records = await host.logistics().records();
+    return {
+      pir: [...(await host.pirDecisions()).entries()],
+      watches: [...(await host.watchDecisions()).entries()],
+      wargame: await host.wargameEntries(),
+      events: await host.events(),
+      feeds: await host.feedEvents(),
+      records: { verified: [...records.verified].sort(), records: [...records.records.entries()] },
+      reports: await host.logistics().reports(),
+      validation: await host.logistics().validationLog(),
+      register: await host.pirRegister()
+    };
+  };
+  const before = await read(worldOf(env).host);
+  assert.equal(before.watches.length, 1);
+  assert.equal(before.wargame.length, 1);
+  assert.equal(before.records.verified.length, 1);
+  assert.equal(before.reports.length, 1);
+  assert.ok(before.events.length > 0);
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  assert.deepEqual(await read(host), before);
+  await host.close();
+});
+
+test('a read never writes the event log of a shared project: an overdue RFI sends no event there, as it does on a single-machine project', async () => {
+  const source = await full();
+  const today = await cloneOf(source, 'overdue-today');
+  const shared = await cloneOf(source, 'overdue-shared');
+  await migrate(shared);
+  const schema = registerSchema('rfi-tracker')!;
+  const body = renderRegisterBody(schema, [{ id: 'RFI-7', from: 'j5', to: 'j2', question: 'Bridge class?', suspense: '2026-11-18T12:00:00.000Z', status: 'open' }]);
+  const eventsFile = (root: string): string => path.join(root, LEDGER_DIR, EVENTS_FILE);
+  for (const env of [today, shared]) {
+    await mkdir(path.dirname(path.join(env.root, productPath('j3', 'rfi-tracker'))), { recursive: true });
+    writeFileSync(path.join(env.root, productPath('j3', 'rfi-tracker')), body);
+  }
+  const todayBefore = readFileSync(eventsFile(today.root), 'utf8');
+  const todayRead = await worldOf(today, true).host.registerRead(caller(today.root, 'liaison-coordinator', J3_TEAM), 'rfi-tracker');
+  assert.ok(todayRead.ok);
+  assert.match(readFileSync(eventsFile(today.root), 'utf8').slice(todayBefore.length), /staff\.rfi\.overdue/, 'a single-machine project records the overdue RFI');
+  const sharedBefore = readFileSync(eventsFile(shared.root));
+  const host = worldOf(shared, true).host;
+  const sharedRead = await host.registerRead(caller(shared.root, 'liaison-coordinator', J3_TEAM), 'rfi-tracker');
+  assert.ok(sharedRead.ok, sharedRead.ok ? '' : sharedRead.message);
+  assert.deepEqual(readFileSync(eventsFile(shared.root)), sharedBefore, 'the shared project\'s event log is unchanged');
+  await host.close();
+});
+
+test('a shared project this window cannot open shows no product and says so plainly, offers no ledger to use, and still refuses every write', async () => {
+  const env = await cloneOf(await full(), 'unopened');
+  await migrate(env);
+  // Today's extension configuration: no replica storage given to the host.
+  const plain = worldOf(env).host;
+  const snapshot = await plain.snapshot();
+  assert.equal(snapshot.registry.length, 0);
+  assert.equal(snapshot.ledgerProblem, SHARED_PROJECT_UNAVAILABLE);
+  assert.deepEqual(await plain.branchLedgerCheck(), { kind: 'broken', message: SHARED_PROJECT_REFUSAL });
+  const files = staffTree(env.root);
+  assert.equal(await refusalOf(() => plain.propose(caller(env.root), { product: ANNEX, kind: 'annex' })), SHARED_PROJECT_REFUSAL);
+  assert.equal(await refusalOf(() => plain.setAsideLedger()), SHARED_PROJECT_REFUSAL);
+  assert.deepEqual(staffTree(env.root), files);
+  // Storage that holds no pin for this project (another install's folder copied here): the project refuses to open, and the reason is shown.
+  const elsewhere = new StaffHost({ root: env.root, signer: async () => env.signer, keyStatus: async () => trusting(env.signer), headStore: memorySecrets(), replica: { globalStorageDir: mkdtempSync(path.join(tmpdir(), 'near-ai-hostmode-noglobal-')) } });
+  const refused = await elsewhere.snapshot();
+  assert.equal(refused.registry.length, 0);
+  assert.match(refused.ledgerProblem ?? '', /^This project is shared, and its shared history cannot be opened here, so its staff products are not shown\. This project folder holds a shared staff project that this computer has not joined/);
+  assert.deepEqual(staffTree(env.root), files, 'a refused open writes nothing');
 });
