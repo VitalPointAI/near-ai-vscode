@@ -6,6 +6,8 @@
 //   device of the lead or the deputy, MJ-05), the invite id, the one-time join secret (32 random bytes), the expiry and, for Add My Other Machine
 //   (D-18), forMember: the existing member whose other machine may answer it. The roster entry member.invite carries only sha256 of the secret. An
 //   invitation made before inviter existed has none and was signed by the founding lead's device; it is read with the inviter equal to the lead.
+//   For a project on your organization's sync hub (D-47) it also names hub: the hub's address, certificate pin and writer id. An invitation without
+//   hub works by file exactly as in Phase 31.
 // - Join request (purpose staff-join-request), signed by the joining device: the invite id, the genesis hash, the person's name, the device's
 //   Ed25519 and X25519 public keys, the X25519 binding signature, a fresh random nonce (an input of the safety code, see safetyCode.ts), member (only
 //   when answering a forMember invite), and mac = HMAC-SHA256 under the secret over the canonical bytes of { invite, genesisHash, name, publicKey,
@@ -13,9 +15,14 @@
 //   transit, because a stolen invite file lets anyone make a valid MAC. A request made before the nonce existed is refused malformed.
 // - Welcome (no signature of its own, D-49 adds no purpose): the genesis entry, every roster entry and blob, and the signed grants addressed to the
 //   new device. Everything in it is already signed; the joining device checks the genesis against the hash it pinned from the invite.
+// - Hub join (D-48, purpose staff-hub-join), signed by the joining device: the hub's writer id, the project, the invite id, the sha256 hex of the
+//   canonical signed join request and hubMac = HMAC-SHA256 under the hub check key over { hub, project, invite, request }. The check key is
+//   HKDF-SHA256(secret, info near-ai/hub-join/v1 followed by the invite id): the lead's device registers it with the hub and the joining device derives it
+//   from the invitation, so the hub checks a join request without ever holding the join secret or its roster hash. The joining device still sends the
+//   Phase 31 MAC, which only the lead's device checks, with the real secret, before Admit.
 // Files arrive by any channel and are read as hostile input: text is size-capped before it is parsed, fields are read as own properties only, and
 // parsed input is never spread into a result. Refusal reasons are a closed record of plain sentences that carry no secret, MAC or key.
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url, verifySignature } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
 import { MAX_PAYLOAD_BYTES, signPayload, verifyPayload } from '../team/signedPayload';
@@ -26,6 +33,7 @@ import type { EntryHeader, SealedBlob, SealedEntry } from './entry';
 import { X25519_KEY_BYTES, readGrant, x25519BindingBytes } from './cellKeys';
 import type { RosterAnchor } from './roster';
 import { safetyCode } from './safetyCode';
+import { isHubAddress } from './hubFile';
 
 export const INVITE_FILE_EXTENSION = '.near-staff-invite';
 export const JOIN_REQUEST_FILE_EXTENSION = '.near-staff-join';
@@ -43,8 +51,13 @@ const JOIN_KEYS = ['invite', 'genesisHash', 'name', 'publicKey', 'x25519', 'x255
 export const JOIN_NONCE_BYTES = 16;
 
 export interface InviteLead { member: string; writer: string; publicKey: string; x25519: string }
-/** lead is the project's anchor (the founding lead); inviter is the device that signed the invitation (equal to lead for an invitation without one). */
-export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; inviter: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string }
+/** The sync hub a project lives on (D-47): its public address, the sha256 hex pin of its certificate's public key and its writer id. */
+export interface InviteHub { address: string; certPin: string; writer: string }
+/**
+ * lead is the project's anchor (the founding lead); inviter is the device that signed the invitation (equal to lead for an invitation without one);
+ * hub is present only for a project on a sync hub.
+ */
+export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; inviter: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string; hub?: InviteHub }
 export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; nonce: string; mac: string; member?: string }
 export interface JoinMacFields { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; nonce: string; member?: string }
 
@@ -122,11 +135,22 @@ function inviteDeviceOf(value: unknown): InviteLead | undefined {
   return { member, writer, publicKey, x25519 };
 }
 
+/** The hub an invitation names, read from hostile input: exact keys, a hub address, a 64 hex pin and a 64 hex writer id. A fresh object. */
+function inviteHubOf(value: unknown): InviteHub | undefined {
+  if (!isRecord(value) || !hasKeys(value, ['address', 'certPin', 'writer'])) return undefined;
+  const [address, certPin, writer] = ['address', 'certPin', 'writer'].map((key) => own(value, key));
+  if (!isHubAddress(address) || typeof certPin !== 'string' || !HASH_PATTERN.test(certPin) || typeof writer !== 'string' || !HASH_PATTERN.test(writer)) return undefined;
+  return { address, certPin, writer };
+}
+
 function invitePayloadOf(value: unknown): InvitePayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, INVITE_KEYS, ['forMember', 'inviter'])) return undefined;
+  if (!isRecord(value) || !hasKeys(value, INVITE_KEYS, ['forMember', 'inviter', 'hub'])) return undefined;
   const [genesisHash, project, name, leadIn, invite, secret, expiresAt] = INVITE_KEYS.map((key) => own(value, key));
   const forMember = own(value, 'forMember');
   const inviterIn = own(value, 'inviter');
+  const hubIn = own(value, 'hub');
+  const hub = hubIn === undefined ? undefined : inviteHubOf(hubIn);
+  if (hubIn !== undefined && hub === undefined) return undefined;
   if (typeof genesisHash !== 'string' || !HASH_PATTERN.test(genesisHash)) return undefined;
   if (typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
   if (!isLine(name) || typeof invite !== 'string' || !SLUG.test(invite) || !isKey(secret, JOIN_SECRET_BYTES) || !isTime(expiresAt)) return undefined;
@@ -137,6 +161,7 @@ function invitePayloadOf(value: unknown): InvitePayload | undefined {
   if (lead === undefined || inviter === undefined) return undefined;
   const payload: InvitePayload = { genesisHash, project, name, lead, inviter: { ...inviter }, invite, secret, expiresAt };
   if (forMember !== undefined) payload.forMember = forMember;
+  if (hub !== undefined) payload.hub = hub;
   return payload;
 }
 
@@ -172,6 +197,8 @@ export interface BuildInviteInput {
   expiresAt: string;
   now: Date;
   forMember?: string;
+  /** The project's sync hub (D-47). Only its address, certPin and writer are copied. */
+  hub?: InviteHub;
 }
 
 // Signs an invite with the inviting device (the founding lead's, or any device of the lead or the deputy, MJ-05). With forMember it is the short
@@ -193,6 +220,11 @@ export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): Sig
     expiresAt: input.expiresAt
   };
   if (input.forMember !== undefined) payload.forMember = input.forMember;
+  if (input.hub !== undefined) {
+    const hub: unknown = input.hub;
+    if (!isRecord(hub)) throw new Error('The invitation was not made: the hub must name an address, a certificate pin and a writer id.');
+    payload.hub = { address: own(hub, 'address'), certPin: own(hub, 'certPin'), writer: own(hub, 'writer') } as InviteHub;
+  }
   if (invitePayloadOf(payload) === undefined) throw new Error('The invitation was not made: one of its fields is not valid.');
   return signPayload(signer, 'staff-invite', payload, { now: () => input.now });
 }
@@ -419,6 +451,119 @@ export function readWelcome(file: unknown, pinned: { genesisHash: string; writer
     return { ok: true, welcome, entries: [genesis, ...roster] };
   } catch {
     // Hostile input never throws out of the reader.
+    return refuse('malformed');
+  }
+}
+
+
+// ---- Joining through your organization's sync hub (D-48). ----
+
+/** The HKDF info prefix of the hub check key; the invite id's UTF-8 bytes follow it. */
+export const HUB_JOIN_INFO = 'near-ai/hub-join/v1';
+export const HUB_CHECK_KEY_BYTES = 32;
+export const HUB_JOIN_VERSION = 1;
+const HUB_JOIN_KEYS = ['v', 'hub', 'project', 'invite', 'request', 'hubMac'] as const;
+
+/** hub is the hub's writer id (the invitation's hub.writer), project the project id, request the joinRequestHash of the signed join request. */
+export interface HubJoinMacFields { hub: string; project: string; invite: string; request: string }
+export interface HubJoinPayload { v: 1; hub: string; project: string; invite: string; request: string; hubMac: string }
+
+// The hub check key of one invitation: HKDF-SHA256 over the secret's bytes with an empty salt and info HUB_JOIN_INFO followed by the invite id, 32 bytes
+// as base64url. One way: it reveals neither the secret nor the secretHash the roster carries, and each invitation has its own. Throws a plain error,
+// naming no secret, for a secret that is not 32 bytes of base64url or an invite id that is not a slug.
+export function hubJoinCheckKey(secret: string, invite: string): string {
+  if (!isKey(secret, JOIN_SECRET_BYTES) || typeof invite !== 'string' || !SLUG.test(invite)) {
+    throw new Error('The hub check key was not made: it needs the invitation\'s 32 byte join secret and its invite id.');
+  }
+  const info = Buffer.concat([Buffer.from(HUB_JOIN_INFO, 'utf8'), Buffer.from(invite, 'utf8')]);
+  return Buffer.from(hkdfSync('sha256', Buffer.from(secret, 'base64url'), Buffer.alloc(0), info, HUB_CHECK_KEY_BYTES)).toString('base64url');
+}
+
+// sha256 hex of the canonical form of a signed join request, given as JSON text or as its parsed value, so key order and spacing never change it.
+// Throws a plain error for text that is not JSON or a value with no canonical form.
+export function joinRequestHash(request: unknown): string {
+  let value: unknown;
+  try {
+    value = typeof request === 'string' ? (JSON.parse(request) as unknown) : request;
+    return createHash('sha256').update(canonicalBytes(value)).digest('hex');
+  } catch {
+    throw new Error('The join request could not be hashed: it is not a join request this version can read.');
+  }
+}
+
+function hubJoinMessage(fields: HubJoinMacFields): Buffer {
+  // Only these four fields, copied by name, so an extra property on the input is never covered.
+  return canonicalBytes({ hub: fields.hub, project: fields.project, invite: fields.invite, request: fields.request });
+}
+
+// HMAC-SHA256 under the hub check key over the canonical bytes of the four fields, as base64url. Its key is never the join secret, so it is never the
+// Phase 31 MAC, whose key is. Throws a plain error for a key that is not 32 bytes of base64url.
+export function hubJoinMac(checkKey: string, fields: HubJoinMacFields): string {
+  if (!isKey(checkKey, HUB_CHECK_KEY_BYTES)) throw new Error('The hub join MAC was not made: the hub check key must be 32 bytes written as base64url.');
+  return createHmac('sha256', Buffer.from(checkKey, 'base64url')).update(hubJoinMessage(fields)).digest('base64url');
+}
+
+// The hub's check of a hub MAC, in constant time. False, never a throw, for any other MAC, key or input.
+export function checkHubJoinMac(checkKey: string, fields: HubJoinMacFields, mac: string): boolean {
+  try {
+    if (!isKey(mac, MAC_BYTES)) return false;
+    const want = Buffer.from(hubJoinMac(checkKey, fields), 'base64url');
+    const got = Buffer.from(mac, 'base64url');
+    return want.length === got.length && timingSafeEqual(want, got);
+  } catch {
+    return false;
+  }
+}
+
+function hubJoinPayloadOf(value: unknown): HubJoinPayload | undefined {
+  if (!isRecord(value) || !hasKeys(value, HUB_JOIN_KEYS)) return undefined;
+  const [v, hub, project, invite, request, hubMac] = HUB_JOIN_KEYS.map((key) => own(value, key));
+  if (v !== HUB_JOIN_VERSION || typeof hub !== 'string' || !HASH_PATTERN.test(hub) || typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
+  if (typeof invite !== 'string' || !SLUG.test(invite) || typeof request !== 'string' || !HASH_PATTERN.test(request) || !isKey(hubMac, MAC_BYTES)) return undefined;
+  return { v: HUB_JOIN_VERSION, hub, project, invite, request, hubMac };
+}
+
+/** request: the signed join request this device made; hubMac: hubJoinMac under the check key the device derived from the invitation. */
+export interface BuildHubJoinInput { hub: string; project: string; request: SignedPayload<JoinRequestPayload>; hubMac: string; now: Date }
+
+// Signs the hub join envelope with the joining device, the device that signed the request. Throws a plain error when another device signs it or a
+// field is not valid.
+export function buildHubJoin(signer: PayloadSigner, input: BuildHubJoinInput): SignedPayload<HubJoinPayload> {
+  const request = joinPayloadOf(isRecord(input.request) ? own(input.request, 'payload') : undefined);
+  if (request === undefined || request.publicKey !== signer.publicKey) throw new Error('The hub join was not made: it must be signed by the device that made the join request.');
+  const payload: HubJoinPayload = { v: HUB_JOIN_VERSION, hub: input.hub, project: input.project, invite: request.invite, request: joinRequestHash(input.request), hubMac: input.hubMac };
+  if (hubJoinPayloadOf(payload) === undefined) throw new Error('The hub join was not made: one of its fields is not valid.');
+  return signPayload(signer, 'staff-hub-join', payload, { now: () => input.now });
+}
+
+export type HubJoinRead = { ok: true; join: HubJoinPayload; writer: string } | InviteFailure;
+
+// The hub's check of a hub join envelope (JSON text or parsed) against the signed join request posted with it (JSON text or parsed). Checks, in order:
+// size and shape of both, that the envelope's signer is the request's own device (wrong-device), the envelope's signature and the request's own
+// signature (bad-signature), then that the envelope names this request by its hash and the same invitation (wrong-device). The caller then checks that
+// hub and project are its own, the invitation's standing, and checkHubJoinMac with the registered check key. Never throws.
+export function readHubJoin(file: unknown, request: unknown): HubJoinRead {
+  try {
+    const parsed = fileValue(file, MAX_PAYLOAD_BYTES);
+    if (!parsed.ok) return parsed;
+    const parsedRequest = fileValue(request, MAX_PAYLOAD_BYTES);
+    if (!parsedRequest.ok) return parsedRequest;
+    const value = parsed.value;
+    const requestValue = parsedRequest.value;
+    const join = isRecord(value) ? hubJoinPayloadOf(own(value, 'payload')) : undefined;
+    const joinRequest = isRecord(requestValue) ? joinPayloadOf(own(requestValue, 'payload')) : undefined;
+    const signer = isRecord(value) ? own(value, 'signer') : undefined;
+    const signerKey = isRecord(signer) ? own(signer, 'publicKey') : undefined;
+    if (join === undefined || joinRequest === undefined || typeof signerKey !== 'string') return refuse('malformed');
+    if (signerKey !== joinRequest.publicKey) return refuse('wrong-device');
+    const verdict = verifyPayload<unknown>(value, { purpose: 'staff-hub-join', status: onlyKey(joinRequest.publicKey) });
+    if (!verdict.ok) return refuse(verdict.reason === 'bad-signature' || verdict.reason === 'unknown-key' ? 'bad-signature' : 'malformed');
+    const requestVerdict = verifyPayload<unknown>(requestValue, { purpose: 'staff-join-request', status: onlyKey(joinRequest.publicKey) });
+    if (!requestVerdict.ok) return refuse(requestVerdict.reason === 'bad-signature' || requestVerdict.reason === 'unknown-key' ? 'bad-signature' : 'malformed');
+    if (join.request !== joinRequestHash(requestValue) || join.invite !== joinRequest.invite) return refuse('wrong-device');
+    return { ok: true, join, writer: writerIdOf(joinRequest.publicKey) };
+  } catch {
+    // Hostile input never throws out of the check.
     return refuse('malformed');
   }
 }
