@@ -63,6 +63,8 @@ Every item is `{ slot, label, name?, sameAs? }` plus the fields below. `name` an
 
 ### 2.3 Where the profile comes from, and how it is checked
 
+> **Coherence review (2026-11-20):** the profile travels as the `directives.capital` section of policy bundle v2, named in `requires`, so no new `bundleVersion` is needed for it. See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`.
+
 The extension looks in this order and stops at the first it finds:
 
 1. **The signed policy bundle** (Phase 70, `src/domain/gate/bundle.ts`). A new optional field carries the profile or names it by fingerprint. A profile from the bundle cannot be changed by a project member. Bundle field changes follow the bundle's rule: a new `bundleVersion` beside the old one, never a change in place.
@@ -773,6 +775,8 @@ Rules:
 
 ## 8. Portfolio workspace
 
+> **Coherence review (2026-11-20):** the Portfolio Room is one screen, the one in the assigned positions and portfolio design (6.5). The views below become its capital tab and the Project Room becomes a tab of it, built in Phase 43. See `.planning/research/coherence/REVIEW.md`, conflict K26.
+
 One webview, the **Portfolio Room**, built from Staff Room components (rail, squads, ledger, decision queue), plus a **Project Room** for one project. Both draw read models only and never write.
 
 | View | Content | Answers |
@@ -834,6 +838,8 @@ Rules: the data platform's gate applies unchanged (labels only rise automaticall
 
 ### 10.2 WP-P0: generalize the staff method core
 
+> **Coherence review (2026-11-20):** WP-P0 is re-based on the replica layer: a pack is a set of stream kinds and fold rules over replica entries, not a generalization of the single-chain `ledger.ts` and `personDecisions.ts`, which the multi-user work replaces. See `.planning/research/coherence/REVIEW.md`, conflict K26.
+
 One line on why it runs alone: every later package imports the pack interface and the generalized header, so nothing else can start before it lands.
 
 Scope:
@@ -874,6 +880,8 @@ Waves: wave 0 is WP-P0; wave 1 is WP-P1 to WP-P11 in parallel (packages that nee
 - **Data handling:** fictional fixtures only; feed mappings make no network call; guard holds every marking scale shipped.
 
 ### 10.5 Roadmap placement
+
+> **Coherence review (2026-11-20):** placed as Phase 42 (capital drop 1, after Phase 33.1, on the replica layer and positions) and Phase 43 (capital drop 2, after Phase 39, as the Portfolio Room's capital tab). The v0.6.0 feed step below is unchanged. See `.planning/research/coherence/REVIEW.md`, section 9.
 
 **0.4.x feature drops after staff drop 3, before v0.6.0.**
 

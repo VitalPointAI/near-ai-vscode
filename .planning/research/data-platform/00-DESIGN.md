@@ -97,6 +97,8 @@
 
 ## 3. Components and where they run
 
+> **Coherence review (2026-11-20):** the governance facts (labels, lowerings, holds, marks, erasures) ride the replica layer as signed entries rather than a revived Phase 13 log; the item label Merkle roots stay on the host. The host is a client of your organization's sync hub for those facts, plus its own store. People call both "your organization's server". See `.planning/research/coherence/REVIEW.md`, conflicts K24 and K25.
+
 ### 3.1 Placement summary
 
 | Component | Runs on | Responsibility | Source |
@@ -294,6 +296,8 @@ Standards borrowed, not adopted as systems: DCAT 3 and Dublin Core terms for des
 Detectors propose facts; signed policy turns facts into a label; automatic steps only raise; only a person lowers, signed; access needs both the label check and the source permission (02 §1.2).
 
 ### 6.2 Gate changes
+
+> **Coherence review (2026-11-20):** aggregation rules have one evaluator in `src/domain/gate/`, built by Phase 38 (portfolio) and extended by Phase 93, with one schema carrying `effect` and `remedy`; a chat label raised by a count rule is a routing input and is recorded. See `.planning/research/coherence/REVIEW.md`, conflict K27.
 
 All in the pure gate core, so the extension and the host run the same code (02 §1.4):
 

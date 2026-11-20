@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36; Phase 33.1, assigned positions and handover, inserted 2026-11-20 after Phase 33; Phases 38 to 40, the portfolio view, added 2026-11-20 after drop B)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36; Phase 33.1, assigned positions and handover, inserted 2026-11-20 after Phase 33; Phases 38 to 40, the portfolio view, added 2026-11-20 after drop B; the coherence review of 2026-11-20 (`.planning/research/coherence/REVIEW.md`) adds a safety patch first, then Phase 41, the organization policy foundation, before Phases 32.1, 32.2, 33.1, 36 and 37, and places capital projects as Phases 42 and 43)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
@@ -25,7 +25,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (Phases 26 to 40 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
+Next phases are added here (Phases 26 to 43 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -279,7 +279,7 @@ Plans:
 ### Phase 33.1: Assigned positions and handover (INSERTED)
 **Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
-**Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 32.1 (mode table and `term()`).
+**Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 41 (mode table and `term()`, moved there from Phase 32.1 by the coherence review).
 **Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
 **Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (defined in `.planning/research/portfolio-and-assignment/DESIGN.md`; added to REQUIREMENTS.md when Phase 33.1 is planned)
 **Success Criteria** (what must be TRUE):
@@ -325,13 +325,39 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 35 to break down)
 
+### Coherence review: one system, one vocabulary, one front door (safety patch and Phase 41, added 2026-11-20)
+
+Review: `.planning/research/coherence/REVIEW.md` (with `GLOSSARY.md`, `POLICY-SCHEMA.md`, `EXPERIENCE.md` and `DEVELOPER-STRUCTURE.md` in the same folder). The owner added features one at a time and asked for them to work together as one product with professional UI, UX and DX and no confusion from the complexity. Four independent reviews were merged into one. **Gate:** no new user-facing phase (32.1, 32.2, 33.1, 36, 37, 38 to 40, 42, 43 and the 74.1 and 74.2 builds) starts until the review merges. Phase 32 (the sync hub) continues; Phases 28 and 29 are not blocked.
+
+Order: (1) the **coherence safety patch**, one small PR in the patch line for eight issues in shipped code (review section 8: `localHosts` wildcards and plain http for Protected B and above, a notice for classified work on an unaccredited computer, "private" meaning the verified connection check, the PRC-origin sentence on staff teams, `requires` and "update" texts in the bundle parser, labels ranked against the active scales, scale names shown with levels); (2) **Phase 41**; (3) Phases 32.1 and 32.2, then the rest as listed below. Milestones in plain words are in the review, section 9.
+
+### Phase 41: Organization policy foundation (F1)
+**Goal**: Your organization can hand its rules to every computer, and every feature reads them the same way: one signed policy in sections that only narrows below your organization, one list of where AI may run, one kind of signed exception, one label and routing decision, one table of organization modes and words; an older extension asks to be updated instead of reset.
+**Depends on**: Phase 70 (the bundle, labels, routing, records); the coherence safety patch. Builds **before** Phases 32.1, 32.2, 33.1, 36 and 37 (numbered 41 rather than 32.0 because GSD reads a decimal as part of its integer phase, and Phase 32 is mid-build). May run beside Phases 32 to 35 (different files: `src/domain/gate`, `src/gate`, `src/domain/org`, `src/domain/provider`).
+**Added**: 2026-11-20 by the coherence review.
+**Requirements**: FND-01 to FND-09 (defined in `.planning/research/coherence/REVIEW.md`, section 9.2; added to REQUIREMENTS.md when Phase 41 is planned)
+**Success Criteria** (what must be TRUE):
+  1. A computer enrolled with your organization's signed enrolment file (fingerprint read aloud) accepts policies from that issuer; a personal change that would widen any key is refused with the key named; Reset touches only the personal layer. (FND-01)
+  2. A bundle that names a feature this client lacks in `requires` gives "update the extension", never Reset; every v1 bundle reads as v2 unchanged. (FND-02)
+  3. Existing `routing.localHosts` entries work as `org-plain` endpoints at today's effect with a one-time notice; a Protected B request to an endpoint without a TLS pin, or with a region that breaks a residency rule, is refused before sending with a plain sentence. (FND-03, FND-05)
+  4. Protected B to a third-party endpoint, a T1 acceptance and an accredited device are each one `authorizations[]` record; one signed by the person who uses it is shown as "self-signed on this computer". (FND-04)
+  5. `privacyMode: tee-only`, Team Mode `teeOnly` and `privacy: private` all decide through `decideRoute`; staff observations, the chat label and the gate agree on a custom scale; the trust line shows where it ran, what was verified and what allowed it. (FND-06)
+  6. The mode table and `term()` produce every mode word; the copy lint and the architecture test pass with recorded baselines that can only shrink. (FND-07, FND-09)
+  7. The passport schema parses in report mode; `NearAiClient` sits behind `ModelEndpoint`; setup flows that change rules open the policy editor on a proposal. (FND-08, FND-09)
+**Research flags**: (1) Owner questions Q1, Q2, Q6, Q7 in the review. (2) Enrolment file format and fingerprint reading, checked against the safety code flow (`src/domain/replica/safetyCode.ts`).
+**Undo cost**: Medium to high: bundle v2 and the authorization record are signed into policies, so settle their schemas in the first plan.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 41 to break down)
+
 ### Guided setup: viable options, a plain recommendation and local models (Phases 32.1 and 32.2, added 2026-11-20)
 
 Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agreed shape of 2026-11-20: setup asks about the work in plain words (role; personal information; Protected A, B or classified markings; client information under a contract security clause; must it stay in Canada), turns the answers into a project label that the signed policy's routing table then decides on, so the guide is a front door to the gate and never a second gate; it offers only options that are viable on that machine (detected, configured, allowed by the policy, and answering a test request), never local models where no local server answers; it gives one recommendation with a one-sentence reason and greys ruled-out options with the reason; the policy wins, and when answers need what it does not allow the guide says who to ask and offers no workaround; Protected C and classified work get no recommendation; changes are previewed before Apply, re-runs show only differences, and answers are recorded. Then each role lands where it works, and with the data platform the guide offers the matching one-click connections. A local model manager shows what the machine can run (unified memory on Strix Halo and GB10 first), installs Western models from passports with verified hashes and licences, and assigns tiers. Both phases ship in the 0.4.x line after Phase 32 and before Phases 36 and 37, so Cohere's options arrive through the guide; they need only the Phase 70 gate, may run beside Phases 33 to 35 (different files), and share one contract before running in parallel. The data-connection step (GUIDE-09) lands in Phase 89. Requirement ids GUIDE-01 to GUIDE-09 and LMOD-01 to LMOD-07 are defined in the design (section 16) and are added to REQUIREMENTS.md when Phase 32.1 is planned. Open owner decisions D1 to D11 are in the design (section 17), each with a default.
 
 ### Phase 32.1: Guided setup with viable options and a plain recommendation (INSERTED)
 **Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
-**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records). Phase 74.1 not required: the guide reads the shipped passport rows as data until it lands.
+**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records); Phase 41 (organization policy, endpoints, residency rule, mode table and `term()`, the passport schema, the policy editor for proposals; coherence review 2026-11-20). Phase 74.1 enforcement not required: the guide reads the passport schema from Phase 41.
 **Inserted**: 2026-11-20 at the owner's request.
 **Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, ORG-01, ORG-02, ORG-03, ORG-04 (organization modes added 2026-11-20, `.planning/research/portfolio-and-assignment/DESIGN.md` section 5; the ids are defined in that design's requirements table and added to REQUIREMENTS.md when Phase 32.1 is planned)
 **Success Criteria** (what must be TRUE):
@@ -352,7 +378,7 @@ Plans:
 
 ### Phase 32.2: Local model manager (INSERTED)
 **Goal**: On the appliance or any capable computer, a person sees what local models the machine can run and how fast, installs the recommended Western models with verified hashes and accepted licences, assigns them to the tiers, and the guide then offers local AI as a viable option.
-**Depends on**: Phase 32.1's shared contract (device class, server adapters, viability); may run beside the rest of 32.1. Phase 85 later sets the appliance's default server and replaces estimates with measurements.
+**Depends on**: Phase 32.1's shared contract (device class, server adapters, viability); Phase 41 (`LocalServerAdmin`, the `models.localCatalogue` schema); may run beside the rest of 32.1. Phase 85 later sets the appliance's default server and replaces estimates with measurements.
 **Inserted**: 2026-11-20 at the owner's request.
 **Requirements**: LMOD-01, LMOD-02, LMOD-03, LMOD-04, LMOD-05, LMOD-06, LMOD-07
 **Success Criteria** (what must be TRUE):
@@ -374,7 +400,7 @@ Design: `.planning/research/cohere-model-vault/DESIGN.md`. Owner decisions of 20
 
 ### Phase 36: Cohere Model Vault provider, sovereign-region class and cost control
 **Goal**: Your organization can add Cohere vaults beside NEAR AI and local, each request goes only where the label, use tier and policy allow, a Standard vault is never treated as private hardware, Protected B reaches a vault only with a recorded authorization, and vault running costs are visible and limited.
-**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (the bundle, labels, routing, trust badge). Phase 74.1 not required: its passport check covers vault models when it lands. Phase 32.1: vaults are offered as guide options (Standard, Encrypted) through its option registry, and the vault readiness check is their viability check (`.planning/research/guided-onboarding/DESIGN.md`, section 12).
+**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (the bundle, labels, routing, trust badge). Phase 74.1 not required: its passport check covers vault models when it lands. Phase 32.1: vaults are offered as guide options (Standard, Encrypted) through its option registry, and the vault readiness check is their viability check (`.planning/research/guided-onboarding/DESIGN.md`, section 12). Phase 41: vaults are `endpoints[]` entries, Protected B authorizations are `authorizations[]` records, the client is a `ModelEndpoint` adapter, and the trust line replaces a fourth badge state (coherence review 2026-11-20).
 **Requirements**: CVLT-01, CVLT-02, CVLT-03, CVLT-04, CVLT-05, CVLT-06, CVLT-07
 **Success Criteria** (what must be TRUE):
   1. A person ticks NEAR AI, local and a Canadian Standard vault in setup and adds the key once; a chat at `org/Public` or `org/Internal` can use a model on the vault, while a label outside the vault's signed ceiling is refused for it with a plain sentence and nothing is sent. (CVLT-01, CVLT-02, CVLT-03)
@@ -392,7 +418,7 @@ Plans:
 
 ### Phase 37: Cohere Encrypted Vault as an attested endpoint
 **Goal**: An Encrypted vault counts as attested private hardware only while Cohere's proxy and this extension's own check both prove it, and nothing is sent when they do not.
-**Depends on**: Phase 36.
+**Depends on**: Phase 36 (and through it Phase 41).
 **Requirements**: CVLT-08, CVLT-09, CVLT-10, CVLT-11
 **Success Criteria** (what must be TRUE):
   1. With Docker or Podman present, setup starts Cohere's proxy from the digest pinned in the signed policy on a random loopback port, the readiness check proves the attestation, and an `org/Internal` chat is answered with the verified private badge and the vault sentence. (CVLT-08, CVLT-10, CVLT-11)
@@ -412,7 +438,7 @@ Design: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part C (section
 
 ### Phase 38: Organization tree, publications and label-safe roll-up
 **Goal**: Units of different modes agree to report to a portfolio and release signed, labelled publications into write-only intake cells, and the portfolio folds them into views whose label covers the whole under signed aggregation rules.
-**Depends on**: Phases 34 and 35 (drop B: hub changes and bundle transport); Phase 33.1 (supply from positions); Phase 32.1 (modes); Phase 70 (labels).
+**Depends on**: Phases 34 and 35 (drop B: hub changes and bundle transport); Phase 33.1 (supply from positions); Phase 41 (modes, the label module; it builds the one aggregation evaluator that Phase 93 extends); Phase 70 (labels).
 **Requirements**: PORT-01, PORT-02, PORT-03, PORT-04, PORT-05, PORT-06
 **Success Criteria** (what must be TRUE):
   1. A Military-mode unit and a Public service unit each publish status, risks and supply counts, and neither can read the other's publications or the portfolio's (byte capture on the hub). (PORT-01, PORT-02, PORT-03)
@@ -454,6 +480,30 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 40 to break down)
 
+### Capital projects on the staff method (Phases 42 and 43, added 2026-11-20)
+
+Design: `.planning/research/capital-projects/DESIGN.md` (PR #110), placed by the coherence review (`.planning/research/coherence/REVIEW.md`, section 9 and conflict K26). The method core (WP-P0) is built on the replica layer (a pack is a set of stream kinds and fold rules), not on the single-chain ledger the multi-user work replaces; the capital Portfolio Room is the portfolio view's capital tab. Fictional data only until the Stage 1 gate and an accredited host; live feeds stay with Phase 100.
+
+### Phase 42: Capital project offices on the replica (capital drop 1)
+**Goal**: A capital project office and a small-project team work an equipment project through its phases and gates on the staff method, with every figure traced to a calculator record and every gate decided by a named person.
+**Depends on**: Phase 33.1 (positions and handover); Phase 41 (the `directives.capital` section, `term()` and the Capital projects mode); Phases 30 to 33 (the replica layer).
+**Requirements**: to be defined from the capital design (sections 2 to 7 and 10) when Phase 42 is planned.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 42 to break down)
+
+### Phase 43: Programme and portfolio offices, the capital tab (capital drop 2)
+**Goal**: Programme and portfolio offices run on the same method, and the Portfolio Room shows capital projects in its capital tab, with file-import feeds.
+**Depends on**: Phase 42; Phase 39 (the Portfolio Room).
+**Requirements**: to be defined from the capital design (sections 5.4, 5.5, 8 and 9) when Phase 43 is planned.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 43 to break down)
+
 ## Milestone v0.5.0: Governed agent platform
 
 **Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
@@ -483,6 +533,7 @@ Plans:
 | 4a | In parallel: **Phase 28** (secure development workflow setup step) and the **OpenShell spike** (done, see openshell-spike.md) | Phase 28 touches only setup and templates; the spike feeds Phase 72. |
 | 4b | **0.4.33** (the release PR from `release/0.4.33`: Phase 70's part 4e, the trust badge, and the new team's icon fix), then **the follow-up patch** (the review follow-ups carried from Phase 70's part 4 PRs) | `main` is strict, so the extension line goes first, and the follow-ups touch the gate code that Phases 71 to 74 build on. |
 | 4c | **Staff collaboration drops A and B, Phases 30 to 35** (owner, 2026-11-19): multi-user staff workspaces on signed per-writer logs, co-edited products, your organization's sync hub with live updates, presence and hub watches, then offline transports. Drop A is Phases 30 to 33, drop B Phases 34 and 35. May run beside Stage 1; needs nothing from Phases 71 to 74 | Staff projects are single-machine until then (README from 0.4.35), and the owner wants real-time shared staff work; the hub shares only the relay's build and Compose patterns, so it can be built before the relay phases. |
+| 4d | **Coherence review** (2026-11-20, `.planning/research/coherence/REVIEW.md`): then the coherence safety patch, then **Phase 41** (organization policy foundation), then Phases 32.1, 32.2, 33.1, 36 and 37 on it; capital projects as Phases 42 and 43 | The features were designed one at a time on different foundations; building the shared foundation first keeps them one product and avoids breaking older clients. Phase 32 continues meanwhile |
 | 5 | **Stage 1, Phases 70 to 74**: gate, manifests and classification labels, identities, credentials and delegation, execution backends, credential broker, run contracts. Phase 70 is executed (every PR merged by 2026-11-18, part 4e last as #95; its verification record is still to write). **Phase 29** (cleanup member and CleanUp tool) follows Phase 70 | The vocabulary and the gate come first because everything else is checked by them; delegation narrows what the gate checks; backends make protected folders absent; the broker needs the backends' network fence; contracts refer to capabilities, grants and backends. |
 | 5a | **Stage gate**: Stage 1 verified and merged before the data platform reads your organization's data (Phase 88 on) and before Phase 77 starts. v0.8.0 is deferred to the end (owner, 2026-11-15) | The relay must not run tools, and the data platform must not read real data, before verified clearances, the broker, contracts and sandboxes exist. |
 | 6 | **v0.6.0 Data platform, Phases 85 to 101** (owner, 2026-11-18): the host and local inference (L1a), the data map, sources connected in one click and collectors installed by device management, extraction, classification and labels, erasure and the personal mark, holds and requests, search, ask and analytics, the model factory and the opportunity agent. Phases 85 and 86 may start during Phases 72 to 74 (the host and a test tenant only) | The owner put it after Stage 1 and before the relay. It extends the Stage 1 gate (labels, clearances, the broker, contracts) and needs all of it before it reads real data. |
@@ -824,7 +875,7 @@ Plans:
 
 ### Phase 74.1: Model passports, use tiers and Western defaults (INSERTED)
 **Goal**: Every model request is checked against a signed model passport for the use tier of that request, so a model is used only for work your organization has approved it for; PRC-origin models stay available for research in an isolated lane; the extension ships Western defaults from one place; checking roles run on a different model family; and every output says which model, artifact and passport produced it.
-**Depends on**: Phase 70 (the bundle, the gate, labels and routing); Phase 69 (the signer for risk acceptances). It needs nothing from Phases 71 to 74, so it may run beside them; Phase 71 later replaces the device-key signature on acceptances with a credential.
+**Depends on**: Phase 70 (the bundle, the gate, labels and routing); Phase 69 (the signer for risk acceptances); Phase 41 (the passport schema in report mode, the `models` section with `requires`, acceptances as `authorizations[]` records; coherence review 2026-11-20). It needs nothing from Phases 71 to 74, so it may run beside them; Phase 71 later replaces the device-key signature on acceptances with a credential.
 **Inserted**: 2026-11-19 at the owner's request (model provenance decisions 1 to 4, `.planning/research/model-provenance/DESIGN.md`).
 **Requirements**: MPRV-01, MPRV-02, MPRV-03, MPRV-04, MPRV-05, MPRV-06, MPRV-07, MPRV-08, MPRV-09, MPRV-10
 **Success Criteria** (what must be TRUE):
@@ -1553,6 +1604,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 ### L5: Edge grouping, compute pooling and HQ federation
 **Goal**: Machines at the edge link up with no internet to share work and GPU power, and federate with an HQ server when connectivity returns, syncing identities, policy, audit and results without either side being able to forge the other's records.
 **Scope**: Node identities as `did:key` bound to your organization by a credential (issued by a person with authority, revocable through the status list); local grouping by discovery on the local network with mutual authentication by node identity and binding credentials, each node's gate still deciding alone; offline verification (revised 2026-11-15, Platform direction decision 13): before going offline a device syncs your organization's DID log, the DID logs of the people it works with, all status lists, the policy bundle and the latest anchor roots with inclusion proofs, verifies locally and checks the cached copies against the roots; each level has a maximum offline age after which new access at that level fails closed; two offline devices exchange stapled status lists signed by your organization; on reconnect, sessions that ran on stale data are re-evaluated and flagged; a second site may hold its own issuer DID under a narrower delegation; compute pooling for local inference across linked machines, NVIDIA and AMD; routing extended to local, then linked machines, then the HQ cluster, then a NEAR AI Cloud burst, each hop only where policy, privacy tier and contract allow; federation sync of identities, policy (down, as signed bundles that never widen an edge's anchored authority), audit (up, hash-chained, gaps detected) and results; inference federation to an HQ cluster as one more provider.
+**Coherence review (2026-11-20):** L5 is hub-to-hub federation of the replica layer's signed streams (Phases 30 to 35); "relay" means the messaging relay only, and the portfolio's "hub-to-hub relay" below is that federation. The list that follows predates the hub.
 **Builds on**: Phase 27's encrypted sync (bundles over git with a recovery code, records merged without loss); Team Mode's signed coordination log and git transport; the ciphertext relay design of the paused former v0.5.0 knowledge-base plan (a relay that stores only ciphertext, checks signed append capabilities, and can withhold but not forge; RELAY-01/02 in `.planning/milestones/v0.5.0-paused/`); the planned `relayTransport.ts`, which this transport replaces.
 **From the data platform (2026-11-18):** catalog federation between edge and HQ, per-label-cell keys for edge devices that store data, and pooled compute for extraction and training (data platform design, section 8.2).
 **From the portfolio design (2026-11-20):** hub-to-hub relay of sealed portfolio publications with checkpoints naming their signer, verified publishers and positions across organizations, and cross-organization portfolios; the publication format does not change (`.planning/research/portfolio-and-assignment/DESIGN.md`, 6.11).
@@ -1582,13 +1634,16 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 33.1. Assigned positions and handover | 0/TBD | Not started (after Phase 33, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
-| 32.1. Guided setup with viable options and a plain recommendation | 0/TBD | Not started (after Phase 32, before Phase 36) | - |
+| 32.1. Guided setup with viable options and a plain recommendation | 0/TBD | Not started (after Phases 32 and 41, before Phase 36) | - |
 | 32.2. Local model manager | 0/TBD | Not started (after 32.1's shared contract) | - |
-| 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phase 32; may run beside 33 to 35) | - |
+| 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phases 32 and 41; may run beside 33 to 35) | - |
 | 37. Cohere Encrypted Vault as an attested endpoint | 0/TBD | Not started (after Phase 36) | - |
 | 38. Organization tree, publications and label-safe roll-up | 0/TBD | Not started (portfolio view; after drop B) | - |
 | 39. Portfolio Room, prioritization and scenarios | 0/TBD | Not started (after Phase 38) | - |
 | 40. Capacity, allocation, dependencies and gates | 0/TBD | Not started (after Phase 38; may run beside 39) | - |
+| 41. Organization policy foundation (F1) | 0/TBD | Not started (after the coherence safety patch; before 32.1, 32.2, 33.1, 36 and 37) | - |
+| 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
+| 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
