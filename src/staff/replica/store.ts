@@ -521,7 +521,23 @@ export async function sharedHistoryMissing(root: string): Promise<boolean> {
  * Runs `work` under the .planning/staff lock, refusing a symbolic link on the way first. With `lenient`, a .planning/staff this user cannot write
  * (where no Start Again can run) lets `work` run without the lock, as long as no intent is there.
  */
-async function withStartAgainLock<T>(root: string, work: () => Promise<T>, lenient: boolean): Promise<T> {
+/**
+ * In-process queue per project root, joined before any await, so two locked operations started in
+ * order in one window take the .planning/staff lock in that order (checkPath awaits before the
+ * file lock's own queue is joined).
+ */
+const startAgainQueues = new Map<string, Promise<unknown>>();
+
+function withStartAgainLock<T>(root: string, work: () => Promise<T>, lenient: boolean): Promise<T> {
+  const previous = startAgainQueues.get(root) ?? Promise.resolve();
+  const run = previous.then(() => startAgainLocked(root, work, lenient));
+  const tail = run.then(() => undefined, () => undefined);
+  startAgainQueues.set(root, tail);
+  void tail.then(() => { if (startAgainQueues.get(root) === tail) startAgainQueues.delete(root); });
+  return run;
+}
+
+async function startAgainLocked<T>(root: string, work: () => Promise<T>, lenient: boolean): Promise<T> {
   const problem = await checkPath(root, STAFF_PARTS);
   if (problem) throw new Refusal(problem);
   let entered = false;

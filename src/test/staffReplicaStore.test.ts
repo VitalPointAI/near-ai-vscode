@@ -500,6 +500,17 @@ test('two appendOwn calls at once in one process for one writer keep seq order, 
   assert.deepEqual(read.kind === 'mark' && read.mark.heads.map((head) => [head.writer, head.seq, head.count]).sort(), [[lead.writer, 24, 25], [other.writer, 4, 5]].sort());
 });
 
+test('twenty-five one-entry appendOwn calls started in order in one process are written in that order (the .planning/staff lock is joined in call order)', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const store = await opened(root, depsFor(lead, new MemorySecrets()));
+  const built = chain(lead, 25);
+  const results = await Promise.all(built.map((item) => store.appendOwn([item])));
+  assert.ok(results.every((result) => 'ok' in result && result.written === 1), JSON.stringify(results.filter((result) => !('ok' in result))));
+  const lines = readFileSync(streamFile(root, lead.writer), 'utf8').split('\n').slice(0, -1);
+  assert.deepEqual(lines.map((line) => (JSON.parse(line) as SealedEntryLine).header.seq), [...Array(25).keys()]);
+});
+
 // ---- Task 4: entries from outside, grants and checkpoints, SECURITY.md --------------------------------------------------------------------
 
 /** A check that refuses the entries whose hash is in `refuse`, and counts its calls. */
