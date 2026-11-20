@@ -5,14 +5,14 @@
 // It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
 // nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
 // verification) and the Policy step in the setup view.
-import { readFile, rm, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import { UPDATE_REASONS } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
-import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
+import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, RESERVED_EXPORT_COMPARTMENTS, SCALE_PRESETS_CAVEAT_TEXT, exportMarkingsShown, labelKey, parseLabel } from '../domain/gate/labels';
 import type { Clearance, Label } from '../domain/gate/labels';
 import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
@@ -20,7 +20,7 @@ import { chatInView, isChatInView, onChatInViewChange, queueChatNotice } from '.
 import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
-import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
+import { BundleStoreError } from '../gate/bundleStore';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
 import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError, USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
@@ -32,6 +32,15 @@ import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routin
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
 import type { GateStatusTimers } from './gateStatusBar';
+import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules, startNotices } from './organizationRules';
+import type { NoticeMemento } from './organizationRules';
+import { SELF_SIGNED_TEXT } from '../domain/gate/authorizations';
+import { contactShown } from '../domain/gate/enrolment';
+import type { PolicyLayersView } from '../gate/organizationStore';
+import { OPEN_FAILED_TEXT, defaultPolicyEditorPort, discardDraft, draftFiles, policyEditorDeps, proposeDraft } from './policyEditorWiring';
+import type { PolicyEditorPort } from './policyEditorWiring';
+export type { PolicyEditorPort } from './policyEditorWiring';
+export { NO_DRAFT_TEXT, POLICY_APPLIED_TEXT } from './policyEditorWiring';
 import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
@@ -39,6 +48,9 @@ export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
 export const SET_LABEL_COMMAND = 'nearAi.label.set';
 export const EDIT_POLICY_COMMAND = 'nearAi.policy.edit';
 export const APPLY_POLICY_DRAFT_COMMAND = 'nearAi.policy.applyDraft';
+/** NEAR AI: Policy, the editor page (D-44); Show Policy opens it too, and Show Policy as Stored keeps the read-only text view. */
+export const OPEN_POLICY_COMMAND = 'nearAi.policy.open';
+export const SHOW_POLICY_AS_STORED_COMMAND = 'nearAi.policy.showAsStored';
 export const APPLY_DRAFT_ACTION = 'Apply';
 export const DISCARD_DRAFT_ACTION = 'Discard';
 
@@ -52,8 +64,6 @@ export function editPolicyNotice(defaultLabel: Label): string {
   return `Your policy draft is open. Change it, then choose Apply, or run NEAR AI: Apply Policy Draft. NEAR AI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
 }
 
-export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
-export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Run NEAR AI: Edit Policy first.';
 export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
@@ -68,6 +78,8 @@ export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';
 export const RESET_DETAIL =
   "This replaces your policy file with the default policy and signs it with this computer's key. Your current file is kept beside it. Anything your policy narrowed is allowed again, up to what your settings allow.";
+export const RESET_DETAIL_ORGANIZATION =
+  "This replaces your own settings on this computer with the starting rules and signs them with this computer's key. Your organization's rules stay as they are. Your current file is kept beside the new one.";
 export const RESET_DONE_TEXT = 'Your policy was reset to the default. Your old policy file was kept beside the new one.';
 export const RESET_FAILED_TEXT = 'Nothing was changed: NEAR AI could not reset your policy.';
 
@@ -77,6 +89,10 @@ export interface GateActivationContext {
   readonly extension?: { readonly packageJSON?: { readonly version?: string } };
   /** Where the commands, the status bar and the setup step are kept so the editor disposes them. Optional so a test context can leave it out. */
   readonly subscriptions?: { push(...items: Array<{ dispose(): unknown }>): unknown };
+  /** Where the one-time policy notices remember what they told (D-20, D-27); without it each is told at every start. */
+  readonly globalState?: NoticeMemento;
+  /** The extension's folder, for the policy editor page (D-44); without it the policy commands open the stored view. */
+  readonly extensionUri?: vscode.Uri;
 }
 
 export interface RegisterGateOptions {
@@ -86,6 +102,8 @@ export interface RegisterGateOptions {
   readonly now?: () => Date;
   /** The timers the policy status bar refreshes itself with, for tests. */
   readonly statusTimers?: GateStatusTimers;
+  /** The policy editor page (D-44); by default the real page when the context has an extension folder. */
+  readonly policyEditor?: PolicyEditorPort;
 }
 
 function warn(message: string): void {
@@ -119,13 +137,21 @@ function mcpCeilingLines(ceilings: Readonly<Record<string, Clearance>> | undefin
   })];
 }
 
-export function policyDocumentText(state: BundleState | undefined, now: number): string {
+export function policyDocumentText(state: BundleState | undefined, now: number, layers?: PolicyLayersView): string {
   const lines: string[] = ['Your NEAR AI policy', ''];
+  // D-23: who set the rules, only when the layers are known and the policy is usable; D-21: your organization's failure is fixed by its contact, never Reset.
+  const organization = layers?.organization;
+  if (organization !== undefined && state?.state === 'valid' && policyProblem(state, now, layers) === undefined) {
+    lines.push(organization.state === 'valid'
+      ? `Rules from: your organization${organization.name === undefined ? '' : ` (${organization.name})`}. Your settings on this computer can only narrow them.`
+      : `Rules from: this computer (${SELF_SIGNED_TEXT}).`, '');
+  }
+  const organizationFailed = layers?.failedLayer === 'organization' && state?.state === 'failed-closed';
   if (state === undefined) {
     lines.push('NEAR AI is checking your policy file. Open this view again in a moment.');
     return lines.join('\n');
   }
-  const problem = policyProblem(state, now);
+  const problem = policyProblem(state, now, layers);
   const usable = problem === undefined && state.state === 'valid';
   // Edit Policy works only on a policy that can be trusted, so a failed one names only the reset (D-41).
   // A policy written for a newer version is fixed by updating, never by a reset that would discard its rules (coherence review S6).
@@ -133,7 +159,9 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   // for that own policy, saying what it discards. A policy any other key signed is never offered Reset.
   const needsUpdate = state.state === 'failed-closed' && (UPDATE_REASONS.has(state.reason) || (state.reason === 'unknown-field' && state.ownPolicy !== true));
   const ownUnknownField = state.state === 'failed-closed' && state.reason === 'unknown-field' && state.ownPolicy === true;
-  lines.push(usable
+  lines.push(organizationFailed
+    ? `This view only shows your policy. Editing it changes nothing. Your organization's rules need attention: ask ${contactShown(organization?.state === 'failed' ? organization.contacts : undefined)}.`
+    : usable
     ? 'This view only shows your policy. Editing it changes nothing. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults.'
     : ownUnknownField
       ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded.'
@@ -254,7 +282,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const clock = (): number => {
     try { return host.now(); } catch { return Date.now(); }
   };
-  registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
+  registerPolicySurfaces(context, host, tell, clock, options);
   // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
   // It is cleared at deactivation (the context's subscriptions are disposed then), and only while it is still this host's (PR 4a review).
   const clearDefaultRoute = setDefaultSessionRoute(host.sessionRouteWithoutContext());
@@ -264,9 +292,11 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const clearPrivateOnly = setPrivateOnlySetting(() => vscode.workspace.getConfiguration('nearAi').get<string>('privacyMode') === 'tee-only');
   try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }); } catch { /* replaced at the next activation */ }
   // Coherence review S1: a policy whose local hosts hold a *. pattern is told once in this window what changed and how to fix the entry.
-  void host.state().then((state) => {
+  // D-20, D-27: the one-time notices first; the migration notice names the same hosts, so the pattern notice waits for the next window after it.
+  void host.state().then(async (state) => {
+    const shown = await startNotices(host, context, tell).catch(() => ({ migrationShown: false }));
     const patterns = state.state === 'valid' ? patternLocalHosts(state.bundle.routing) : [];
-    if (patterns.length > 0) tell(localHostPatternNotice(patterns));
+    if (patterns.length > 0 && !shown.migrationShown) tell(localHostPatternNotice(patterns));
   }).catch(() => undefined);
   // D-58: every thread merge in this window judges signed lowerings with this host's key sources, and each is recorded once.
   try { context.subscriptions?.push({ dispose: host.registerLabelLowerings() }); } catch { /* with no judge every lowering from another copy is rejected */ }
@@ -286,7 +316,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
 
 // The status bar, the two commands and the setup step. Each is set up on its own, so one that cannot be (a command id already taken, a status bar that
 // the editor refuses) never stops the gate or the rest of activation.
-function registerPolicySurfaces(context: GateActivationContext, host: GateHost, tell: (message: string) => void, clock: () => number, statusTimers?: GateStatusTimers): void {
+function registerPolicySurfaces(context: GateActivationContext, host: GateHost, tell: (message: string) => void, clock: () => number, options: RegisterGateOptions): void {
+  const statusTimers = options.statusTimers;
   const keep = (item: { dispose(): unknown }): void => { try { context.subscriptions?.push(item); } catch { /* the editor owns disposal; a test context may not */ } };
   const attempt = (what: string, run: () => void): void => {
     try { run(); } catch { try { tell(`NEAR AI could not set up ${what}.`); } catch { /* ignored */ } }
@@ -298,40 +329,60 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       const mark = chat?.mark()?.current();
       return chat === undefined || mark === undefined ? undefined : { mark, defaultLabel: chat.defaultLabel() };
     };
-    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock(), layers: host.policyLayers() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const refresh = (): void => { bar.update(host.bundleState(), clock(), host.policyLayers()); };
     keep({ dispose: () => { bar.dispose(); } });
-    keep({ dispose: host.onDidChange(() => { bar.update(host.bundleState(), clock()); }) });
+    keep({ dispose: host.onDidChange(refresh) });
     // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
-    keep({ dispose: onChatInViewChange(() => { bar.update(host.bundleState(), clock()); }) });
+    keep({ dispose: onChatInViewChange(refresh) });
   });
+  let showStored = async (): Promise<void> => { tell(OPEN_FAILED_TEXT); };
   attempt('the policy view', () => {
     const changed = new vscode.EventEmitter<vscode.Uri>();
     const provider: vscode.TextDocumentContentProvider = {
       onDidChange: changed.event,
       provideTextDocumentContent: async () => {
         await host.state();
-        return policyDocumentText(host.bundleState(), clock());
+        return policyDocumentText(host.bundleState(), clock(), host.policyLayers());
       }
     };
     keep(vscode.workspace.registerTextDocumentContentProvider(POLICY_SCHEME, provider));
     keep({ dispose: host.onDidChange(() => { changed.fire(vscode.Uri.parse(POLICY_DOCUMENT_URI)); }) });
-    keep(vscode.commands.registerCommand(SHOW_POLICY_COMMAND, async () => {
+    showStored = async () => {
       try {
         await host.state();
         const uri = vscode.Uri.parse(POLICY_DOCUMENT_URI);
         changed.fire(uri);
         await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
       } catch {
-        tell('NEAR AI could not open your policy.');
+        tell(OPEN_FAILED_TEXT);
       }
-    }));
+    };
+    keep(vscode.commands.registerCommand(SHOW_POLICY_AS_STORED_COMMAND, () => showStored()));
+  });
+  // D-44: the editor page is the front door; Show Policy (the status bar, the setup step) opens it too. Without a page the stored view opens instead.
+  const port = options.policyEditor ?? defaultPolicyEditorPort(context);
+  attempt('the policy editor', () => {
+    if (port !== undefined) {
+      const wiring = policyEditorDeps(host, { secrets: context.secrets, reset: () => resetPolicy(host), showStored: () => showStored() });
+      keep({ dispose: wiring.dispose });
+      keep(port.register(wiring.deps));
+    }
+    const open = async (): Promise<void> => {
+      try { await host.state(); if (port === undefined) await showStored(); else port.open(); } catch { tell(OPEN_FAILED_TEXT); }
+    };
+    keep(vscode.commands.registerCommand(OPEN_POLICY_COMMAND, open));
+    keep(vscode.commands.registerCommand(SHOW_POLICY_COMMAND, open));
+  });
+  attempt("Add Your Organization's Rules", () => {
+    keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell, ...(context.globalState === undefined ? {} : { memento: context.globalState }) })));
   });
   attempt('Reset Policy to Defaults', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
   });
   attempt('Edit Policy', () => {
-    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
-    keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath)));
+    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath, port).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
+    keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath, port)));
   });
   attempt('Set Label', () => {
     keep(vscode.commands.registerCommand(SET_LABEL_COMMAND, async (uri?: unknown) => {
@@ -375,7 +426,8 @@ export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this c
 export const LOWERED_HERE_ONLY_TEXT = "Your other computers cannot check this computer's key yet, so the copies of this chat there keep the higher label until you lower it there too.";
 export const LOWER_CHAT_REASON_PROMPT = "Why may this chat's content now go where a lower label allows? The reason is kept with the chat, and travels with its encrypted metadata to your other computers.";
 
-function labelsShown(mark: Mark): string {
+/** A chat's mark as the label screens show it (D-62): each label as labelShown gives it. */
+export function labelsShown(mark: Mark): string {
   return mark.map((label) => labelShown(label)).join(', ');
 }
 
@@ -462,7 +514,7 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
   const before = mark.lowerByPerson(picked.mark, reason);
   if (signed === undefined) void Promise.resolve(vscode.window.showWarningMessage(LOWERING_NOT_SIGNED_TEXT)).catch(() => undefined);
   // The record's label is the strictest label of the new mark, as every label event's is (recordLabelEvent works it out from the mark).
-  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, mark: picked.mark, from: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
+  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, mark: picked.mark, from: before, reason: `Lowered from ${before.map((each) => labelRecorded(each)).join(', ')} to ${picked.mark.map((each) => labelRecorded(each)).join(', ')}: ${reason}` });
   void Promise.resolve(vscode.window.showInformationMessage(`${`This chat's label is now ${labelsShown(picked.mark)}.`} ${LOWERED_HERE_ONLY_TEXT}`)).catch(() => undefined);
   return true;
 }
@@ -500,12 +552,22 @@ export interface LabelTarget {
   readonly path: string;
 }
 
-/** A label as Set Label and Lower This Chat's Label show it: the scale's name with the level (coherence review S8), then compartments and handling. */
-function labelShown(label: Label): string {
-  const parts = [labelKeyShown(label)];
-  if (label.compartments.length > 0) parts.push(`compartments ${label.compartments.join(', ')}`);
-  if (label.handling.length > 0) parts.push(label.handling.join(', '));
-  return parts.join(', ');
+/**
+ * A label as Set Label and Lower This Chat's Label show it: the scale's name with the level (coherence review S8), each reserved export compartment as its
+ * words after the level from the label module (D-62), then the other compartments and the handling.
+ */
+export function labelShown(label: Label): string {
+  const reserved: readonly string[] = RESERVED_EXPORT_COMPARTMENTS;
+  return labelParts(exportMarkingsShown(labelKeyShown(label), label.compartments), label.compartments.filter((token) => !reserved.includes(token)), label.handling);
+}
+
+/** A label as records and administrator panes keep it (D-62): every compartment as its token. */
+export function labelRecorded(label: Label): string {
+  return labelParts(labelKeyShown(label), label.compartments, label.handling);
+}
+
+function labelParts(shown: string, compartments: readonly string[], handling: readonly string[]): string {
+  return [shown, ...(compartments.length > 0 ? [`compartments ${compartments.join(', ')}`] : []), ...(handling.length > 0 ? [handling.join(', ')] : [])].join(', ');
 }
 
 /** Said when the label file changed under Set Label so that the change became a lowering no reason was given for: nothing is written. */
@@ -662,72 +724,32 @@ async function followRenames(host: GateHost, files: ReadonlyArray<{ readonly old
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Edit Policy and Apply Policy Draft (D-41, D-53)
 
-function draftFiles(globalStorageDir: string): { readonly draft: string; readonly base: string } {
-  return { draft: path.join(gateDir(globalStorageDir), POLICY_DRAFT_FILE), base: path.join(gateDir(globalStorageDir), POLICY_DRAFT_BASE_FILE) };
-}
-
 /**
- * NEAR AI: Edit Policy. Writes the policy in force, pretty-printed and unsigned, to this extension's storage (never the project) with the hash of that
- * policy beside it, opens it, and says what Apply does, with the self-declared clearance words. Show Policy stays read-only. Returns the draft's path.
+ * NEAR AI: Edit Policy. Writes the personal layer as stored (never your organization's narrowed view, D-44), pretty-printed and unsigned, to this extension's
+ * storage (never the project) with that layer's hash beside it, opens it, and says what Apply does, with the self-declared clearance words. Returns its path.
  */
-export async function editPolicy(host: GateHost, globalStorageDir: string): Promise<string | undefined> {
+export async function editPolicy(host: GateHost, globalStorageDir: string, port?: PolicyEditorPort): Promise<string | undefined> {
   await host.state();
   const state = host.bundleState();
-  if (state.state !== 'valid') {
-    void Promise.resolve(vscode.window.showWarningMessage(`Your policy cannot be edited while it cannot be trusted. ${state.sentence}`)).catch(() => undefined);
+  const personal = host.policyLayers().personal;
+  if (state.state !== 'valid' || personal === undefined) {
+    void Promise.resolve(vscode.window.showWarningMessage(`Your policy cannot be edited while it cannot be trusted.${state.state === 'valid' ? '' : ` ${state.sentence}`}`)).catch(() => undefined);
     return undefined;
   }
   const files = draftFiles(globalStorageDir);
-  await writeFileAtomic(files.draft, `${JSON.stringify(state.bundle, null, 2)}\n`);
-  await writeFileAtomic(files.base, `${state.hash}\n`);
+  await writeFileAtomic(files.draft, `${JSON.stringify(personal.stored, null, 2)}\n`);
+  await writeFileAtomic(files.base, `${personal.hash}\n`);
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(files.draft)), { preview: false });
   void Promise.resolve(vscode.window.showInformationMessage(editPolicyNotice(state.bundle.defaultLabel), APPLY_DRAFT_ACTION, DISCARD_DRAFT_ACTION)).then(async (answer) => {
-    if (answer === APPLY_DRAFT_ACTION) await applyPolicyDraftCommand(host, globalStorageDir);
+    if (answer === APPLY_DRAFT_ACTION) await applyPolicyDraftCommand(host, globalStorageDir, port);
     else if (answer === DISCARD_DRAFT_ACTION) await discardDraft(globalStorageDir);
   }).catch(() => undefined);
   return files.draft;
 }
 
-async function discardDraft(globalStorageDir: string): Promise<void> {
-  const files = draftFiles(globalStorageDir);
-  await rm(files.draft, { force: true });
-  await rm(files.base, { force: true });
-}
-
-/**
- * NEAR AI: Apply Policy Draft. Reads the draft and the hash it was made from and hands them to the host, which applies it only when it was made from the
- * policy in force (D-53). A refused draft shows the plain reasons and changes nothing; an applied one is signed, recorded as policy.edit and its draft files
- * are removed. Returns true when the policy changed.
- */
-export async function applyPolicyDraftCommand(host: GateHost, globalStorageDir: string): Promise<boolean> {
-  const files = draftFiles(globalStorageDir);
-  // A draft open in the editor with changes not yet saved is saved first, so what is applied is what the person sees.
-  try {
-    const open = vscode.workspace.textDocuments?.find((document) => document.uri.fsPath === files.draft);
-    if (open?.isDirty === true) await open.save();
-  } catch { /* the saved draft on disk is applied */ }
-  let draft: string;
-  let base: string;
-  try {
-    draft = await readFile(files.draft, 'utf8');
-    base = (await readFile(files.base, 'utf8')).trim();
-  } catch {
-    void Promise.resolve(vscode.window.showWarningMessage(NO_DRAFT_TEXT)).catch(() => undefined);
-    return false;
-  }
-  try {
-    const result = await host.applyPolicyDraft(draft, base);
-    if (result.state.state !== 'valid') {
-      void Promise.resolve(vscode.window.showWarningMessage(result.state.sentence)).catch(() => undefined);
-      return false;
-    }
-  } catch (error) {
-    void Promise.resolve(vscode.window.showWarningMessage(error instanceof BundleStoreError ? error.message : 'Nothing was changed: NEAR AI could not apply your policy draft.')).catch(() => undefined);
-    return false;
-  }
-  await discardDraft(globalStorageDir).catch(() => undefined);
-  void Promise.resolve(vscode.window.showInformationMessage(POLICY_APPLIED_TEXT)).catch(() => undefined);
-  return true;
+/** NEAR AI: Apply Policy Draft: the draft is shown on the policy page as a proposal and applied only from there (D-44). Returns true when applied. */
+export function applyPolicyDraftCommand(host: GateHost, globalStorageDir: string, port?: PolicyEditorPort): Promise<boolean> {
+  return proposeDraft(host, globalStorageDir, port);
 }
 
 /**
@@ -769,7 +791,8 @@ export async function labelRaiseRefused(host: GateHost, root: string, message: s
 
 /** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */
 export async function resetPolicy(host: GateHost): Promise<boolean> {
-  const answer = await vscode.window.showWarningMessage(RESET_TITLE, { modal: true, detail: RESET_DETAIL }, RESET_CONFIRM_ACTION);
+  const detail = host.policyLayers().organization.state === 'none' ? RESET_DETAIL : RESET_DETAIL_ORGANIZATION;
+  const answer = await vscode.window.showWarningMessage(RESET_TITLE, { modal: true, detail }, RESET_CONFIRM_ACTION);
   if (answer !== RESET_CONFIRM_ACTION) return false;
   try {
     const result = await host.reset();
