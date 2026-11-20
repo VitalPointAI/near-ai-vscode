@@ -1319,19 +1319,38 @@ project folder.
 - **Two windows at once.** Every write takes a lock in the folder, so two editor windows or two
   processes on one machine never mix or lose each other's lines.
 - **Rollback is noticed.** After each write the device records how far it has seen the shared
-  history (the newest change and the count of changes from each writer, and the newest roster
-  change) in the editor's secret storage, outside the project, signed with the device's own key.
-  When the folder is opened again and it holds less than that record (restored from an older
-  backup, a file cut short or deleted, a change swapped for another), the store is refused with a
-  plain message and nothing is changed. A record whose signature does not verify is refused the
-  same way and is never trusted or silently replaced.
+  history (for each writer's file the newest change, the count of changes and a digest of them in
+  order, and the newest roster change) in the editor's secret storage, outside the project. The
+  device signs a short summary that commits to the whole record by one hash, so the record works
+  however many files a project has. When the folder is opened again and it holds less than that
+  record (restored from an older backup, a file cut short or deleted, a change swapped, moved or
+  put in between), the store is refused with a plain message and nothing is changed. A change the
+  device had already read that can no longer be read (a disk error, an edited file) is reported as
+  damage, not as an older copy. A record whose signature does not verify is refused the same way
+  and is never trusted or silently replaced. The record is written after the changes are on disk,
+  so a record that could not be written never stops the next write; that write records it.
+- **Starting again is a person's choice.** A refused store is never reset by itself. **Staff:
+  Start This Computer's Shared History Again** asks first and only then moves the store folder
+  aside to a folder beside it (`.planning/staff/replica.set-aside-<time>/`, still ignored by git);
+  it never deletes it. It carries this device's own signed changes, the signed key grants, the
+  sealed attachments and the project record into a new store and starts a new signed record.
+  Changes from other people are not carried: they come back with a new welcome file from the staff
+  lead (and, in a later version, from the sharing service). A store that opens is left alone.
+- **Only this device writes as this device.** A line that names this device as its writer counts
+  only when it carries this device's valid signature. Any other such line is damage, so a planted
+  line can never become this device's newest change or block its next one.
 - **No private keys in the folder.** The store holds only sealed entries, sealed attachments and
   signed grants and checkpoints. No private key, epoch key or join secret is ever written to it;
   the device key stays in the editor's secret storage.
 - **Changes from other machines are checked first.** A change that arrives from another machine is
   checked by the decode worker (above) before the shared view is built from it. A change the check
   refuses is still kept in the store, set aside with the reason, and left out of the shared view.
-  It is never silently dropped, so a person can see what was set aside and why.
+  It is never silently dropped, so a person can see what was set aside and why. The list of what
+  was set aside is part of the device's signed record in secret storage, not a file in the
+  project, so deleting or editing a file cannot let a refused change in. A change the check cannot
+  run on yet, because its key or its attachment has not arrived, waits outside the shared view
+  and is checked when they arrive; so does a change found in the folder that no check has passed
+  (copied in by hand, or written by another install of the extension).
 - **Symbolic links are refused.** If any folder or file on the way to the store is a symbolic
   link, nothing is read or written through it.
 

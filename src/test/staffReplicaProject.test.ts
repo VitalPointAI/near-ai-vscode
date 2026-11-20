@@ -1,8 +1,8 @@
 // The shared project on the host (31-18, D-07, D-19, D-24, D-44, D-46): created on disk, reopened, folded with the real roster and this device's key
 // ring through one long-lived context; joined from a welcome file on a second install; entries from outside checked by the decode worker first.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -24,7 +24,8 @@ import { ENCRYPTION_KEY_SECRET, EPOCH_KEY_SECRET_PREFIX } from '../staff/replica
 import { PROJECT_REFUSALS_HOST, ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
-import { updateData } from './helpers/replicaWorld';
+import { fixedSigner, updateData } from './helpers/replicaWorld';
+import { GENESIS_PREV, buildEntry } from '../domain/replica/entry';
 
 class MemorySecrets implements SecretStorageLike {
   public readonly values = new Map<string, string>();
@@ -381,6 +382,114 @@ test('MN-04: a grant to the most devices a project can hold is stored in the pro
   const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
   const { roster } = await reopened.state();
   assert.ok(roster.held.some((item) => item.hash === grantHash(big) && item.reason === 'missing-roster'), 'the store read the grant back and gave it to the roster fold');
+  await reopened.close();
+});
+
+// ---- 31-REVIEW CR-02, MJ-07, MJ-08 --------------------------------------------------------------------------------------------------------------
+
+test('CR-02: an entry claiming this device\'s writer id without its signature neither becomes its head nor blocks its next write', async () => {
+  const lead = install('cr02');
+  const shared = await created(lead);
+  const intruder = fixedSigner('intruder');
+  const fake = buildEntry({
+    signer: intruder.signer, key: randomBytes(32), stream: shared.projectId, seq: 999, prev: shared.anchor.genesisHash, epoch: 1,
+    body: { deps: [], roster: ORIGIN_ROSTER, lamport: 2, at: NOW, actor: { kind: 'person' }, kind: 'doc.update', data: {} }
+  });
+  const forged = { header: { ...fake.entry.header, writer: shared.deviceWriter }, body: fake.entry.body };
+  const taken = await shared.ingestForeign([forged], []);
+  assert.ok(!isProjectRefused(taken));
+  assert.deepEqual([taken.added, taken.dropped], [0, 1], 'an unsigned entry naming this device is dropped');
+  // Planted in this device's own file in the base cell, where the old store took it as the head.
+  appendFileSync(path.join(lead.root, REPLICA_DIR, 'streams', shared.projectId, `${shared.deviceWriter}.jsonl`), `${JSON.stringify(forged)}\n`);
+  const written = await shared.appendOwn('doc.client', { product: PRODUCT, clientId: clientIdOf(1, 0), actor: { kind: 'person' } });
+  assert.ok('ok' in written, 'the next own entry is written');
+  assert.equal(written.built.entry.header.seq, 1);
+  assert.equal(written.built.entry.header.prev, shared.anchor.genesisHash);
+  const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
+  const { fold } = await reopened.state();
+  assert.ok(fold.applied.includes(written.hash));
+  await reopened.close();
+});
+
+test('MJ-07: an update whose key arrives later waits out of the fold, and the decode worker checks it when the key arrives', async () => {
+  const decodeHost = new DecodeHost();
+  const joined = await joinScenario(decodeHost);
+  const { a, b } = joined;
+  try {
+    const cell = randomBytes(16).toString('hex');
+    const key = randomBytes(32);
+    const hostile = buildEntry({
+      signer: a.signer, key, stream: cell, seq: 0, prev: GENESIS_PREV, epoch: 1,
+      body: { deps: [], roster: joined.admit, lamport: 10, at: NOW, actor: { kind: 'person' }, kind: 'doc.update', data: updateData(PRODUCT, gcProbe(MAX_STRUCTS + 1)) }
+    });
+    const result = await b.ingestForeign([hostile.entry], hostile.blobs);
+    assert.ok(!isProjectRefused(result));
+    assert.deepEqual(result.held, []);
+    assert.deepEqual(result.waiting, [{ hash: hostile.hash, reason: 'awaiting-key' }]);
+    assert.equal(decodeHost.starts, 0, 'nothing could be checked yet');
+    assert.equal((await b.state()).fold.order.includes(hostile.hash), false);
+    await b.keys.addOwn(cell, 1, key);
+    const after = await b.state();
+    assert.equal(decodeHost.starts, 1, 'the worker ran when the key arrived');
+    assert.deepEqual(b.heldForCheck().map((item) => item.hash), [hostile.hash]);
+    assert.match(b.heldForCheck()[0].reason, /too-large/);
+    assert.equal(after.fold.order.includes(hostile.hash), false, 'the held entry never reaches the fold');
+    assert.equal(after.fold.held.some((item) => item.hash === hostile.hash), false);
+  } finally {
+    await joined.b.close();
+    await decodeHost.close();
+  }
+});
+
+test('MJ-07: an update whose blob arrives later waits out of the fold, and the decode worker checks it when the blob arrives', async () => {
+  const decodeHost = new DecodeHost();
+  const joined = await joinScenario(decodeHost);
+  const { a, b } = joined;
+  try {
+    const hostile = await a.appendOwn('doc.update', updateData(PRODUCT, gcProbe(MAX_STRUCTS + 1)));
+    assert.ok('ok' in hostile);
+    assert.equal(hostile.built.blobs.length, 1);
+    const result = await b.ingestForeign([hostile.built.entry], []);
+    assert.ok(!isProjectRefused(result));
+    assert.deepEqual(result.waiting, [{ hash: hostile.hash, reason: 'awaiting-blob' }]);
+    assert.equal((await b.state()).fold.order.includes(hostile.hash), false);
+    assert.equal(decodeHost.starts, 0);
+    const blob = await b.ingestForeign([], hostile.built.blobs);
+    assert.ok(!isProjectRefused(blob));
+    assert.equal(blob.blobsAdded, 1);
+    const after = await b.state();
+    assert.equal(decodeHost.starts, 1, 'the worker ran when the blob arrived');
+    assert.deepEqual(b.heldForCheck().map((item) => item.hash), [hostile.hash]);
+    assert.equal(after.fold.order.includes(hostile.hash), false);
+  } finally {
+    await joined.b.close();
+    await decodeHost.close();
+  }
+});
+
+test('MJ-08: startHistoryAgain sets a rolled-back store aside, keeps project.json so the folder stays shared, and the lead\'s project opens with its own history', async () => {
+  const lead = install('start-again');
+  const shared = await created(lead);
+  const client = await shared.appendOwn('doc.client', { product: PRODUCT, clientId: clientIdOf(1, 0), actor: { kind: 'person' } });
+  assert.ok('ok' in client);
+  await shared.state();
+  await shared.close();
+  assert.equal(await ReplicaProject.startHistoryAgain(install('none').root, lead.deps), undefined, 'a folder with no shared project');
+  const notNeeded = await ReplicaProject.startHistoryAgain(lead.root, lead.deps);
+  assert.equal(isProjectRefused(notNeeded) ? notNeeded.store : 'started', 'not-needed');
+  // The base cell file loses its last line: rolled back.
+  const file = path.join(lead.root, REPLICA_DIR, 'streams', shared.projectId, `${shared.deviceWriter}.jsonl`);
+  writeFileSync(file, `${readFileSync(file, 'utf8').split('\n')[0]}\n`);
+  const refused = await ReplicaProject.open(lead.root, lead.deps);
+  assert.equal(isProjectRefused(refused) ? refused.store : 'opened', 'rolled-back');
+  const started = await ReplicaProject.startHistoryAgain(lead.root, lead.deps);
+  assert.ok(started !== undefined && !isProjectRefused(started));
+  assert.equal(started.carried, 1, 'the genesis line that is still there');
+  assert.ok(existsSync(path.join(lead.root, started.setAside, 'project.json')), 'the old folder is set aside whole');
+  assert.ok(existsSync(path.join(lead.root, ...REPLICA_PROJECT_FILE.split('/'))), 'the folder is still a shared project');
+  const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
+  const { roster } = await reopened.state();
+  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, shared.anchor.genesisHash]);
   await reopened.close();
 });
 

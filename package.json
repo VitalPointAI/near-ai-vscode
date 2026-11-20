@@ -475,6 +475,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.startSharedHistoryAgain",
+        "title": "Staff: Start This Computer's Shared History Again",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"
@@ -1091,6 +1096,10 @@
         },
         {
           "command": "nearAi.staff.makeSingleMachineCopy",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.startSharedHistoryAgain",
           "when": "config.nearAi.staff.multiUserPreview"
         }
       ],

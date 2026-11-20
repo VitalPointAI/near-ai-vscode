@@ -23,6 +23,12 @@
   second computer, the deputy, the handover and a roster changed in two places at once. Removing
   someone or lowering their clearance tells you plainly: "They keep what they already received.
   They will not receive anything new."
+- **Start This Computer's Shared History Again.** When the shared history on this computer is
+  refused because it is older than what this device has seen, damaged, or its signed record does
+  not verify, **Staff: Start This Computer's Shared History Again** asks first, then moves the
+  folder aside without deleting it, keeps your own changes, and says how to get the rest back: a
+  new welcome file from your staff lead. A damaged line is now reported as damage, not as an
+  older copy.
 - **Make a Single-Machine Copy.** **Staff: Make a Single-Machine Copy** writes a copy you can work
   in alone into an empty folder, and says what it does not copy.
 - **Declared, not verified.** Every multi-user screen says that people and clearances are declared
