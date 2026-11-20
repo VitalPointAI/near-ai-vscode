@@ -14,6 +14,9 @@ export const STREAM_HEX = /^[0-9a-f]{32}$/;
 export const LEGACY_FILE_MAX_BYTES = 2 * 1024 * 1024;
 // The product ledger's head mark as today's host keeps it: one line of JSON (a signed staff-ledger-head envelope).
 const MARK_MAX_CHARS = 4096;
+// What a project.import carries (D-20): the whole legacy ledger, or the lines of one cell's products. No scope reads as whole.
+export const IMPORT_SCOPES = ['whole', 'cell'] as const;
+export type ImportScope = typeof IMPORT_SCOPES[number];
 // The cells a genesis may name with their first epoch and grant (D-44, D-49).
 const MAX_GENESIS_CELLS = 64;
 const ED25519_PUBLIC_BYTES = 32;
@@ -185,14 +188,26 @@ export function validateProjectData(kind: string, data: unknown, path: string): 
     return undefined;
   }
   if (kind === 'project.import') {
-    // file and mark are optional so every Phase 30 import stays valid (D-31, D-49); migration writes both where the ledger has them.
-    const keys = keyProblem(data, path, ['ledger', 'legacyHead', 'count'], ['file', 'mark']);
+    // file and mark are optional so every Phase 30 import stays valid (D-31, D-49); migration writes both where the ledger has them. scope and lines
+    // (D-20) are optional too: an import with no scope is the whole ledger, as every Phase 31 import is.
+    const keys = keyProblem(data, path, ['ledger', 'legacyHead', 'count'], ['file', 'mark', 'scope', 'lines']);
     if (keys !== undefined) return keys;
     if (!isSlug(data.ledger)) return invalidAt(`${path}.ledger`);
     if (!isHash(data.legacyHead)) return invalidAt(`${path}.legacyHead`);
     if (!isCount(data.count)) return invalidAt(`${path}.count`);
     if (hasOwn(data, 'file') && !isLegacyFile(data.file)) return invalidAt(`${path}.file`);
     if (hasOwn(data, 'mark') && !isLine(data.mark, MARK_MAX_CHARS)) return invalidAt(`${path}.mark`);
+    if (hasOwn(data, 'scope') && !(IMPORT_SCOPES as readonly unknown[]).includes(data.scope)) return invalidAt(`${path}.scope`);
+    if (hasOwn(data, 'lines') && !isCount(data.lines)) return invalidAt(`${path}.lines`);
+    // A cell import carries only the lines for one cell's products (D-20): it names how many and carries them, and it has no head mark, because the
+    // signed mark is for the whole ledger. lines means nothing on a whole import.
+    if (data.scope === 'cell') {
+      if (!hasOwn(data, 'file')) return invalidAt(`${path}.file`, 'a cell import carries its lines');
+      if (!hasOwn(data, 'lines')) return invalidAt(`${path}.lines`, 'a cell import names how many lines it carries');
+      if (hasOwn(data, 'mark')) return invalidAt(`${path}.mark`, 'only a whole import carries the head mark');
+    } else if (hasOwn(data, 'lines')) {
+      return invalidAt(`${path}.lines`, 'only a cell import names lines');
+    }
     return undefined;
   }
   return invalidAt(`${path}.kind`);
