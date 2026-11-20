@@ -447,7 +447,7 @@ test('S1: the notice for a policy with a *. pattern names the entry, what change
   assert.match(text, /\*\.example\.org/);
   assert.match(text, /exact name/);
   assert.match(text, /https/);
-  assert.match(text, /NEAR AI: Edit Policy/);
+  assert.match(text, /in NEAR AI: Policy, choose Edit my rules/);
   assert.ok(!text.includes(String.fromCharCode(0x2014)) && !/NEAR organization/i.test(text));
   assert.equal(routing.localHostMatch('https://a.example.org', ['*.example.org']), 'pattern');
   assert.equal(routing.localHostMatch('https://a.example.org', ['a.example.org']), 'exact');

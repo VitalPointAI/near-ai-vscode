@@ -448,7 +448,7 @@ test('changing one byte after signing fails closed with the bad-signature senten
   envelope.payload.defaultLabel.level = 'Internal';
   const state = check(envelope, signer);
   assert.equal(failedWith(state), 'bad-signature');
-  assert.equal(state.state === 'failed-closed' ? state.sentence : '', 'Your policy file was changed outside NEAR AI. Run NEAR AI: Reset Policy to Defaults to sign a fresh one.');
+  assert.equal(state.state === 'failed-closed' ? state.sentence : '', 'Your policy file was changed outside NEAR AI. Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.');
 });
 
 test('the same envelope offered for another purpose is refused, and a revoked or rotated key fails closed', () => {
@@ -543,14 +543,14 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
     } else if (reason === 'unknown-field') {
       // PR #143 review: a newer version's setting and a hand edit look alike here, so the sentence names both ways on and points at Show Policy, which
       // offers Reset only for the person's own policy.
-      assert.match(state.sentence, /If a newer version of NEAR AI wrote it, update the extension\. If you changed your own policy by hand, NEAR AI: Show Policy says how to go back\.$/);
+      assert.match(state.sentence, /If a newer version of NEAR AI wrote it, update the extension\. If you changed your own policy by hand, open NEAR AI: Policy and choose Show as stored to see how to go back\.$/);
       assert.ok(!/Reset/.test(state.sentence), state.sentence);
     } else if (UPDATE_REASONS.has(reason)) {
       // Coherence review S6: a policy written for a newer version is fixed by updating; Reset would discard an organization's rules, so it is never offered.
       assert.match(state.sentence, /Update the NEAR AI extension to use it\. Until then only reading and planning run, and your policy file is left as it is\.$/);
       assert.ok(!/Reset/.test(state.sentence), state.sentence);
     } else {
-      assert.match(state.sentence, /Run NEAR AI: Reset Policy to Defaults to sign a fresh one\.$/);
+      assert.match(state.sentence, /Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only\.$/);
     }
   });
 }
@@ -709,7 +709,7 @@ test('S6: an unknown required feature fails closed as needs-update, before an un
     assert.ok(!/Reset/.test(BUNDLE_FAILURES[reason]), reason);
   }
   // Every other reason keeps its own fix.
-  assert.match(BUNDLE_FAILURES['bad-signature'], /Reset Policy to Defaults/);
+  assert.match(BUNDLE_FAILURES['bad-signature'], /Reset my rules/);
 });
 
 test('S6: a requires list that is not a list of feature ids is wrong-type, never accepted', () => {

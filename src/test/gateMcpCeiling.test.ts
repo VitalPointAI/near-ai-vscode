@@ -301,7 +301,7 @@ test('the refusal sentence is plain: no em-dash, names the server, the label and
   assert.match(text, /"partner"/);
   assert.match(text, /Organization: Internal, until 2030-01-01T00:00:00\.000Z/);
   assert.match(text, /nothing was sent to it/);
-  assert.match(text, /NEAR AI: Edit Policy/);
+  assert.match(text, /in NEAR AI: Policy with Edit my rules/);
 });
 
 test('a ceiling that cannot be checked refuses with its own sentence and names no label, in the verdict and in the record', async () => {

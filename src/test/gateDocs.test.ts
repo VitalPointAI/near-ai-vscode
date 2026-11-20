@@ -17,6 +17,7 @@ import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/g
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
 import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_UNCHECKED_TEXT } from '../agent/outboundCheck';
+import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 import { ENROLMENT_FILE_EXTENSION, ISSUER_WORDS_DOMAIN, ISSUER_WORDS_MATCH, MAX_ENROLMENT_FILE_BYTES, issuerWordsPrompt, issuerWordsQuestion, organizationEndedText } from '../domain/gate/enrolment';
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -688,4 +689,80 @@ test("Phase 41: the policy section says how your organization's rules reach this
   assert.equal(commandName('nearAi.organization.addRules'), "NEAR AI: Add Your Organization's Rules");
   assert.ok(!block.includes(EM_DASH));
   assert.doesNotMatch(block, /NEAR (AI )?organization/i);
+});
+
+// ---- D-44 (41-14 took Show, Edit, Apply Policy Draft, Reset and Show Policy as Stored off the palette): every user sentence points to NEAR AI: Policy ----
+
+/** A command that left the palette, with or without the brand prefix. */
+const LEFT_THE_PALETTE = /(?:NEAR AI:\s*)?(?:Show Policy|Edit Policy|Apply Policy Draft|Reset Policy to Defaults)/;
+/** The page's own button words (media/policy/policy.js), read from the page so the docs and sentences use the page's words. */
+const POLICY_PAGE = readFileSync(path.join(ROOT, 'media', 'policy', 'policy.js'), 'utf8');
+
+test('D-44: no user sentence names a command that left the palette', async () => {
+  const { copySourceFiles, extractCopy } = await import('./helpers/copyLintScan');
+  const files = copySourceFiles(ROOT).filter((file) => file !== 'package.json');
+  assert.ok(files.some((file) => file.startsWith('media/')) && files.some((file) => file.startsWith('src/')), 'src and media are both read');
+  const found: string[] = [];
+  for (const file of files) {
+    for (const { text } of extractCopy(readFileSync(path.join(ROOT, file), 'utf8'), file)) if (LEFT_THE_PALETTE.test(text)) found.push(`${file}: ${text.slice(0, 120)}`);
+  }
+  assert.deepEqual(found, []);
+  // The check has teeth: the extractor finds a planted sentence in a source and in a page script.
+  assert.ok(extractCopy("export const PLANTED_TEXT = 'Run NEAR AI: Edit Policy first.';", 'src/x.ts').some(({ text }) => LEFT_THE_PALETTE.test(text)));
+  assert.ok(extractCopy("node.textContent = 'Use Reset Policy to Defaults';", 'media/x.js').some(({ text }) => LEFT_THE_PALETTE.test(text)));
+});
+
+test('D-44, D-21: every swept sentence names the policy page by its contributed name, and every reset offer resets your own rules only', async () => {
+  const policy = commandName('nearAi.policy.open');
+  assert.equal(policy, 'NEAR AI: Policy');
+  for (const button of ['Edit my rules', 'Apply my draft', 'Reset my rules', 'Show as stored']) assert.ok(POLICY_PAGE.includes(`'${button}'`), `the page's ${button} button`);
+  const uninstall = installVscodeStub(createVscodeStub());
+  let commands: typeof import('../services/gateCommands');
+  try {
+    commands = await import('../services/gateCommands');
+  } finally {
+    uninstall();
+  }
+  const { STALE_DRAFT_TEXT, POLICY_DRAFT_SHAPE_TEXT } = await import('../gate/bundleStore');
+  const { localHostPatternNotice, ROUTE_CHECK_FAILED_TEXT } = await import('../domain/gate/routing');
+  const { mcpCeilingText, mcpCeilingUnjudgedText } = await import('../agent/gateAdapter');
+  const { FAILED_CLOSED_LABEL_TEXT, ADD_CLEARANCE_HINT } = await import('../agent/gateLabels');
+  const { NO_SIGNING_KEY_TEXT } = await import('../gate/labelMapStore');
+  const label = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [], handling: [] };
+  const ceiling = { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] };
+  const resets = Object.values(BUNDLE_FAILURES).filter((sentence) => /reset/i.test(sentence));
+  assert.ok(resets.length > 0, 'some failure sentences offer a reset');
+  // The safety patch's update sentences never offer one (S6); every other offer names the page and its button, and says it touches your own rules only.
+  for (const sentence of resets) {
+    assert.ok(sentence.includes(`Open ${policy} and choose Reset my rules`), sentence);
+    assert.ok(sentence.includes('it resets your own rules only'), sentence);
+  }
+  const swept: Array<[string, string]> = [
+    ...resets.map((sentence): [string, string] => ['BUNDLE_FAILURES', sentence]),
+    ['BUNDLE_FAILURES unknown-field', BUNDLE_FAILURES['unknown-field']],
+    ['STALE_DRAFT_TEXT', STALE_DRAFT_TEXT],
+    ['the draft shape error', POLICY_DRAFT_SHAPE_TEXT],
+    ['NO_DRAFT_TEXT', commands.NO_DRAFT_TEXT],
+    ['editPolicyNotice', commands.editPolicyNotice(ceiling as never)],
+    ['NO_LABELS_WHILE_FAILED_TEXT', commands.NO_LABELS_WHILE_FAILED_TEXT],
+    ['notYourClearanceText', commands.notYourClearanceText(label as never)],
+    ['FAILED_CLOSED_LABEL_TEXT', FAILED_CLOSED_LABEL_TEXT],
+    ['ADD_CLEARANCE_HINT', ADD_CLEARANCE_HINT],
+    ['localHostPatternNotice', localHostPatternNotice(['*.example.test'])],
+    ['ROUTE_CHECK_FAILED_TEXT', ROUTE_CHECK_FAILED_TEXT],
+    ['mcpCeilingText', mcpCeilingText('example-server', label as never, ceiling as never)],
+    ['mcpCeilingUnjudgedText', mcpCeilingUnjudgedText('example-server')],
+    ['NO_SIGNING_KEY_TEXT', NO_SIGNING_KEY_TEXT]
+  ];
+  for (const [name, sentence] of swept) {
+    assert.ok(sentence.includes(policy), `${name} names ${policy}: ${sentence}`);
+    assert.doesNotMatch(sentence, LEFT_THE_PALETTE, name);
+    assert.ok(!sentence.includes(EM_DASH), name);
+    assert.doesNotMatch(sentence, /NEAR (AI )?organization/i, name);
+  }
+  // A pointer to change rules names the page's Edit my rules (or Apply my draft for a waiting draft).
+  for (const [name, sentence] of swept.filter(([name]) => /STALE|NO_DRAFT|shape|notYourClearance|ADD_CLEARANCE|localHost|mcpCeilingText$/.test(name))) {
+    assert.ok(sentence.includes('Edit my rules'), `${name}: ${sentence}`);
+  }
+  assert.ok(commands.editPolicyNotice(ceiling as never).includes(`Apply my draft in ${policy}`));
 });

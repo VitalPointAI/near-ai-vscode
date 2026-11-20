@@ -61,7 +61,7 @@ export function unlabelledDefaultText(defaultLabel: Label): string {
 
 /** What Edit Policy says beside the draft it opens (D-27, D-41, CLAS-07). */
 export function editPolicyNotice(defaultLabel: Label): string {
-  return `Your policy draft is open. Change it, then choose Apply, or run NEAR AI: Apply Policy Draft. NEAR AI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
+  return `Your policy draft is open. Change it, then choose Apply, or Apply my draft in NEAR AI: Policy. NEAR AI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
 }
 
 export const POLICY_SCHEME = 'near-ai-policy';
@@ -162,12 +162,12 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
   lines.push(organizationFailed
     ? `This view only shows your policy. Editing it changes nothing. Your organization's rules need attention: ask ${contactShown(organization?.state === 'failed' ? organization.contacts : undefined)}.`
     : usable
-    ? 'This view only shows your policy. Editing it changes nothing. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults.'
+    ? 'This view only shows your policy. Editing it changes nothing. To change your policy, open NEAR AI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only.'
     : ownUnknownField
-      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded.'
+      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, Reset my rules in NEAR AI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded.'
       : needsUpdate
         ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of NEAR AI: update the extension. Resetting it would discard every rule it holds.'
-        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
+        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open NEAR AI: Policy and choose Reset my rules, which resets your own rules only.', '');
   if (!usable || state.state !== 'valid') {
     lines.push('State: not usable, so only reading and planning are allowed');
     // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
@@ -379,10 +379,10 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   attempt("Add Your Organization's Rules", () => {
     keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell, ...(context.globalState === undefined ? {} : { memento: context.globalState }) })));
   });
-  attempt('Reset Policy to Defaults', () => {
+  attempt('the policy reset', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
   });
-  attempt('Edit Policy', () => {
+  attempt('policy drafts', () => {
     keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath, port).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
     keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath, port)));
   });
@@ -538,14 +538,14 @@ export const ACCEPT_BRANCH_QUESTION = "Use this branch's labels?";
 export const ACCEPT_BRANCH_DETAIL = 'The label file in this project is signed, but it is not the one this computer last checked (for example after switching branches). Using it makes its labels the current ones, signed again with this computer\'s key.';
 
 export const NO_LABELS_WHILE_FAILED_TEXT =
-  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Run NEAR AI: Show Policy to see why and what fixes it, then set the label.';
+  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Open NEAR AI: Policy to see why and what fixes it, then set the label.';
 
 /** Said after the person accepts another branch's signed labels (D-61). */
 export const BRANCH_LABELS_ACCEPTED_TEXT = "This branch's labels are now the ones NEAR AI checks in this project.";
 
 /** The words of the refusal when the person's own clearance does not cover the label they chose (D-27). */
 export function notYourClearanceText(label: Label): string {
-  return `You cannot set ${labelKeyShown(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance with NEAR AI: Edit Policy first. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+  return `You cannot set ${labelKeyShown(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance first: open NEAR AI: Policy and choose Edit my rules. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
 }
 
 /** What Set Label acts on: a project, and a project-relative path in it (a folder ends with `/`, the project itself is the empty path). */

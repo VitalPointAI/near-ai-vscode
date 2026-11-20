@@ -50,7 +50,9 @@ export const POLICY_DRAFT_FILE = 'policy-draft.json';
 export const POLICY_DRAFT_BASE_FILE = 'policy-draft.base';
 
 /** Said when a draft was made from a policy that is no longer the one in force (D-53). */
-export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Run NEAR AI: Edit Policy again to start from the policy in force.';
+export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Open NEAR AI: Policy and choose Edit my rules again to start from the policy in force.';
+/** A draft that is not one JSON object. */
+export const POLICY_DRAFT_SHAPE_TEXT = 'Nothing was changed: the draft must be one JSON object, the policy as Edit my rules in NEAR AI: Policy wrote it.';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A file larger than this is not read at all; the verifier's own limit applies to what is signed, this one protects memory. */
@@ -467,7 +469,7 @@ export function parsePolicyDraft(draftText: string, owned: OwnedDraftFields): Po
   } catch (error) {
     throw new BundleStoreError(`Nothing was changed: the draft is not valid JSON (${error instanceof Error ? error.message.slice(0, 160) : 'parse error'}).`);
   }
-  if (typeof draft !== 'object' || draft === null || Array.isArray(draft)) throw new BundleStoreError('Nothing was changed: the draft must be one JSON object, the policy as Edit Policy wrote it.');
+  if (typeof draft !== 'object' || draft === null || Array.isArray(draft)) throw new BundleStoreError(POLICY_DRAFT_SHAPE_TEXT);
   const record = draft as Record<string, unknown>;
   const version = Object.prototype.hasOwnProperty.call(record, 'bundleVersion') ? record['bundleVersion'] : undefined;
   if (version !== 2) {

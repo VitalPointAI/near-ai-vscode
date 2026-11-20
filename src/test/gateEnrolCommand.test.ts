@@ -489,7 +489,7 @@ test('D-44: Apply Policy Draft shows the draft as a proposal, and nothing is sig
   assert.equal(await applyDraft(), false, 'a discarded proposal changes nothing');
   assert.equal(fake.proposed.length, 1);
   assert.equal(fake.proposed[0]?.target, 'personal');
-  assert.equal(fake.proposed[0]?.from, 'Edit Policy');
+  assert.equal(fake.proposed[0]?.from, 'Edit my rules');
   assert.equal(await storedBytes(pc), bytes, 'nothing was signed');
   assert.ok(existsSync(draftFile(pc)), 'a discarded proposal keeps the draft');
   assert.equal(holdsProtectedB(window.host), false);

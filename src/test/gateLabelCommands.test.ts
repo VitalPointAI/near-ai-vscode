@@ -122,7 +122,7 @@ async function readAsAgent(s: Started, file: string): Promise<string> {
 test('tracer: a person adds a Protected B clearance through Edit Policy and Apply Policy Draft, and Set Label then accepts that label', async () => {
   const s = await started();
   assert.equal(await setLabelPB(s), false, 'refused before the clearance exists');
-  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /NEAR AI: Edit Policy first/);
+  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /open NEAR AI: Policy and choose Edit my rules/);
   const before = s.host.bundleState();
   assert.equal(before.state, 'valid');
   const draft = await editPolicy(s);
@@ -293,5 +293,5 @@ test('Show Policy names the command that changes the policy (Edit Policy) beside
   stub.shownDocuments.length = 0;
   await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = stub.shownDocuments[0]?.text ?? '';
-  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults\./);
+  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, open NEAR AI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only\./);
 });

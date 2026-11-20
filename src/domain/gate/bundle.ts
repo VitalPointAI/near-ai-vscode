@@ -603,7 +603,7 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Failing closed (OFFL-02, D-13)
 
-const RESET_FIX = 'Run NEAR AI: Reset Policy to Defaults to sign a fresh one.';
+const RESET_FIX = 'Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.';
 /**
  * The fix for a policy written for a newer version (coherence review S6): update. Never Reset, which would sign a fresh default policy and discard every rule
  * your organization or you set.
@@ -631,7 +631,7 @@ export const BUNDLE_FAILURES = {
   'key-rotated': `The key that signed your policy file was replaced by a newer one, and the file was signed at or after the replacement. ${RESET_FIX}`,
   expired: `Your policy file has expired. ${RESET_FIX}`,
   'vocabulary-unknown': `Your policy file uses a list of actions this version does not know. ${UPDATE_FIX}`,
-  'unknown-field': 'Your policy file has a setting this version does not know, so only reading and planning run. If a newer version of NEAR AI wrote it, update the extension. If you changed your own policy by hand, NEAR AI: Show Policy says how to go back.',
+  'unknown-field': 'Your policy file has a setting this version does not know, so only reading and planning run. If a newer version of NEAR AI wrote it, update the extension. If you changed your own policy by hand, open NEAR AI: Policy and choose Show as stored to see how to go back.',
   'needs-update': `Your policy file needs a feature this version of NEAR AI does not have. ${UPDATE_FIX}`,
   'wrong-type': `Your policy file has a setting that is missing or is not the right kind of value. ${RESET_FIX}`,
   'signer-mismatch': `Your policy file names a different signer than the one that signed it. ${RESET_FIX}`,
