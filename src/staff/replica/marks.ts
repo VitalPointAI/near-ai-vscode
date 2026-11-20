@@ -5,7 +5,7 @@
 // - The signed record, in the editor's secret storage, one value per store under a key made from the hashed absolute path (no path is in the key),
 //   modelled on the staff host's signed ledger head (LEDGER_HEAD_SECRET_PREFIX and headKey in staffHost.ts). It is { v, signed }: this device signs,
 //   with purpose staff-replica-mark, the roster head, the sizes of three lists and the sha256 of the lists file. A few hundred bytes, however many
-//   files a project has.
+//   files a project has. The lists file it names is bounded too (D-14): MAX_MARK_HEADS heads, MAX_MARK_LISTED held and MAX_MARK_WAITING waiting.
 // - The lists file, inside the git-ignored store folder at marks/<this device's writer id>/<sha256 of its bytes>.json. It is trusted only when its
 //   bytes hash to the signed value and it holds lists of the signed sizes in the exact form this version writes. One folder per device, so two
 //   installs that share a project folder never remove each other's lists.
@@ -13,9 +13,10 @@
 // the store refuses to open (mark-unverified) until the person starts this computer's shared history again. A lists file that is missing (the folder
 // was restored from an older copy, or part of it was deleted) is reported as such, and the store refuses it rolled-back. Unreadable is never empty.
 //
-// Crash safety (writeMark): the lists file is written first, under its content hash, by temporary file and rename; then the secret; then older lists
-// files of this device are removed, best effort, only after the secret was written. A crash at any point leaves the secret naming a lists file that
-// is there: the old one before the secret is written, the new one after.
+// Crash safety (writeMark): the lists file is written first, under its content hash, by temporary file and rename, and its folder is synced (and
+// each folder made on the way synced in its parent, 32-CONTEXT D-06); then the secret; then older lists files of this device are removed, best
+// effort, only after the secret was written. A crash or power cut at any point leaves the secret naming a lists file that is there: the old one
+// before the secret is written, the new one after. A sync that fails stops the write before the secret.
 //
 // The three lists:
 // - heads: for one (stream, writer) file, the highest seq seen, one hash held at that seq, how many distinct entries the file held, and a digest of
@@ -37,6 +38,7 @@ import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import { signPayload, verifyPayload } from '../../domain/team/signedPayload';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../../domain/team/validate';
+import { syncFolder } from '../staffFiles';
 
 /** The secret storage key prefix of each store's signed mark; the hashed store path follows it. */
 export const REPLICA_MARK_SECRET_PREFIX = 'nearAi.staff.replicaMarks.';
@@ -309,10 +311,14 @@ export async function readMark(secrets: SecretStorageLike, storeDir: string, sta
   }
 }
 
-/** Makes this device's lists folder, refusing a symbolic link or anything that is not a folder on the way. */
+/**
+ * Makes this device's lists folder, refusing a symbolic link or anything that is not a folder on the way. Each folder it makes is synced in its parent
+ * (the store folder, then marks/), so a power cut cannot lose the folder the lists file goes in (32-CONTEXT D-06).
+ */
 async function ensureListsFolder(storeDir: string, writer: string): Promise<string> {
   let current = storeDir;
   for (const part of [MARK_LISTS_DIR, writer]) {
+    const parent = current;
     current = path.join(current, part);
     try {
       const info = await lstat(current);
@@ -320,6 +326,7 @@ async function ensureListsFolder(storeDir: string, writer: string): Promise<stri
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') throw error;
       await mkdir(current);
+      await syncFolder(parent);
     }
   }
   return current;
@@ -331,7 +338,10 @@ async function holds(file: string, bytes: Buffer): Promise<boolean> {
   return Buffer.isBuffer(read) && read.equals(bytes);
 }
 
-/** Writes the lists file by temporary file (never through a symbolic link), sync and rename, unless it already holds exactly these bytes. */
+/**
+ * Writes the lists file by temporary file (never through a symbolic link), sync and rename, then syncs its folder, unless it already holds exactly
+ * these bytes. The folder sync makes the rename survive a power cut before the signed record names the file (32-CONTEXT D-06).
+ */
 async function writeListsFile(file: string, bytes: Buffer): Promise<void> {
   if (await holds(file, bytes)) return;
   const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
@@ -351,6 +361,7 @@ async function writeListsFile(file: string, bytes: Buffer): Promise<void> {
     await rm(temporary, { force: true });
     throw error;
   }
+  await syncFolder(path.dirname(file));
 }
 
 /** Removes this device's lists files (and temporary files left by a crash) other than `keep`. Best effort: a failure leaves a file, never a problem. */
@@ -369,9 +380,9 @@ async function removeOlderLists(folder: string, keep: string): Promise<void> {
 }
 
 /**
- * Records a mark for the store in `storeDir`: first the lists file (content-addressed, temporary file and rename), then the signed record in secret
- * storage naming it, then, only after that write, this device's older lists files are removed. Throws, recording nothing new, when the mark is not in
- * the shape this version writes or its lists would be over MAX_MARK_LISTS_BYTES. Returns the secret text written.
+ * Records a mark for the store in `storeDir`: first the lists file (content-addressed, temporary file and rename, its folder synced), then the signed
+ * record in secret storage naming it, then, only after that write, this device's older lists files are removed. Throws, recording nothing new, when
+ * the mark is not in the shape this version writes, its lists would be over MAX_MARK_LISTS_BYTES, or a folder sync fails. Returns the secret text.
  */
 export async function writeMark(secrets: SecretStorageLike, storeDir: string, signer: PayloadSigner, mark: ReplicaMark, now: () => Date = () => new Date()): Promise<string> {
   const ordered = parseReplicaMark({ rosterHead: mark.rosterHead, heads: mark.heads, held: mark.held, waiting: mark.waiting });

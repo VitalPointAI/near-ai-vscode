@@ -1,7 +1,7 @@
 // The replica store's signed mark (marks.ts): the parse limits of its lists file (32-CONTEXT D-14), and the folder syncs that keep the lists file the
 // signed record names on disk through a power cut (D-06).
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -11,10 +11,11 @@ import { REPLICA_DIR } from '../domain/staff/multiUser';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import { signPayload } from '../domain/team/signedPayload';
 import type { SecretStorageLike } from '../services/auth';
-import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_LISTS_BYTES, MAX_MARK_WAITING, markKey, markListsFolder, readMark, writeMark } from '../staff/replica/marks';
+import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_LISTS_BYTES, MAX_MARK_WAITING, markContentHash, markKey, markListsBytes, markListsFolder, readMark, writeMark } from '../staff/replica/marks';
 import type { ReplicaMark } from '../staff/replica/marks';
 import { ReplicaStore, STORE_REFUSALS } from '../staff/replica/store';
 import type { ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
 import type { FixedSigner } from './helpers/replicaWorld';
 
@@ -168,4 +169,101 @@ test('D-14: writeMark refuses a mark over either bound and records nothing; at b
   await writeMark(secrets, dir, lead.signer, { rosterHead: null, heads: [], held: held.slice(0, HELD_BOUND), waiting: waiting.slice(0, WAITING_BOUND) }, () => new Date(AT));
   const read = await readMark(secrets, dir, ACTIVE);
   assert.deepEqual(read.kind === 'mark' && [read.mark.held.length, read.mark.waiting.length], [HELD_BOUND, WAITING_BOUND]);
+});
+
+// ---- 32-07 Task 3 (D-06): the lists folder is synced before the signed record names the lists file ------------------------------------------
+
+/** Secret storage whose store() records, at that moment, what the folder sync probe had seen. */
+class WatchedSecrets extends MemorySecrets {
+  public readonly atStore: string[][] = [];
+  public constructor(private readonly log: string[]) { super(); }
+  public override store(key: string, value: string): Promise<void> {
+    this.atStore.push([...this.log]);
+    return super.store(key, value);
+  }
+}
+
+function listsMark(index: number): ReplicaMark {
+  return { rosterHead: null, heads: [], held: [{ hash: sha256Hex(Buffer.from(`held/${index}`)), reason: 'refused' }], waiting: [] };
+}
+
+test('D-06: writeMark makes and syncs marks/ and marks/<writer>/ on a first mark, and syncs the lists folder after the new file is in place, all before the secret is stored', async () => {
+  const dir = path.resolve(project(), REPLICA_DIR);
+  mkdirSync(dir, { recursive: true });
+  const lead = fixedSigner('lead');
+  const marks = path.join(dir, MARK_LISTS_DIR);
+  const folder = markListsFolder(dir, lead.writer);
+  const log: string[] = [];
+  let expected = '';
+  const secrets = new WatchedSecrets(log);
+  setFolderSyncProbe((synced) => {
+    const name = path.resolve(synced) === dir ? 'store' : path.resolve(synced) === marks ? 'marks' : path.resolve(synced) === folder ? 'lists' : `other ${synced}`;
+    const present = existsSync(path.join(folder, `${expected}.json`));
+    log.push(`${name} synced${present ? ' with the lists file' : ''}`);
+  });
+  try {
+    expected = markContentHash(listsMark(1));
+    await writeMark(secrets, dir, lead.signer, listsMark(1), () => new Date(AT));
+    assert.deepEqual(secrets.atStore, [['store synced', 'marks synced', 'lists synced with the lists file']], 'each folder made is synced in its parent, and the lists folder after the rename, before the secret');
+    log.length = 0;
+    expected = markContentHash(listsMark(2));
+    await writeMark(secrets, dir, lead.signer, listsMark(2), () => new Date(AT));
+    assert.deepEqual(secrets.atStore[1], ['lists synced with the lists file'], 'folders already there are not made or synced again');
+    // A lists file that already holds the bytes is not rewritten and needs no sync.
+    log.length = 0;
+    writeFileSync(path.join(folder, `${markContentHash(listsMark(1))}.json`), markListsBytes(listsMark(1)));
+    expected = markContentHash(listsMark(1));
+    await writeMark(secrets, dir, lead.signer, listsMark(1), () => new Date(AT));
+    assert.deepEqual(secrets.atStore[2], []);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  const read = await readMark(secrets, dir, ACTIVE);
+  assert.deepEqual(read.kind === 'mark' && read.mark.held, listsMark(1).held);
+});
+
+test('D-06: a sync error stops writeMark before the secret is stored, so the old record still names a lists file that is there', async () => {
+  const dir = path.resolve(project(), REPLICA_DIR);
+  mkdirSync(dir, { recursive: true });
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const first = await writeMark(secrets, dir, lead.signer, listsMark(1), () => new Date(AT));
+  const folder = markListsFolder(dir, lead.writer);
+  setFolderSyncProbe((synced) => {
+    if (path.resolve(synced) === folder) throw Object.assign(new Error('the disk could not sync'), { code: 'EIO' });
+  });
+  try {
+    await assert.rejects(() => writeMark(secrets, dir, lead.signer, listsMark(2), () => new Date(AT)), /could not sync/);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.equal(secrets.values.get(markKey(dir)), first, 'the secret is unchanged');
+  const read = await readMark(secrets, dir, ACTIVE);
+  assert.deepEqual(read.kind === 'mark' && read.mark.held, listsMark(1).held, 'the old record reads, with its lists file');
+  assert.ok(existsSync(path.join(folder, `${markContentHash(listsMark(1))}.json`)));
+});
+
+test('D-06: a store\'s first mark syncs the store folder and marks/ after making marks/ and marks/<writer>/, before the lists file is written', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const dir = path.resolve(root, REPLICA_DIR);
+  const marks = path.join(dir, MARK_LISTS_DIR);
+  const folder = markListsFolder(dir, lead.writer);
+  const log: string[] = [];
+  const secrets = new WatchedSecrets(log);
+  setFolderSyncProbe((synced) => {
+    const at = path.resolve(synced);
+    const files = existsSync(folder) ? readdirSync(folder).filter((name) => name.endsWith('.json')).length : 0;
+    if (at === dir) log.push(`store synced, marks/ ${existsSync(marks) ? 'there' : 'missing'}, ${files} lists files`);
+    else if (at === marks) log.push(`marks synced, marks/<writer>/ ${existsSync(folder) ? 'there' : 'missing'}, ${files} lists files`);
+    else if (at === folder) log.push(`lists synced, ${files} lists files`);
+  });
+  try {
+    const store = await ReplicaStore.open(root, depsFor(lead, secrets));
+    assert.ok(store instanceof ReplicaStore);
+    assert.deepEqual(await store.appendOwn(chain(lead, 1)), { ok: true, written: 1 });
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.deepEqual(secrets.atStore, [['store synced, marks/ there, 0 lists files', 'marks synced, marks/<writer>/ there, 0 lists files', 'lists synced, 1 lists files']]);
 });

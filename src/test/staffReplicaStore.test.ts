@@ -1199,4 +1199,9 @@ test('SECURITY.md has the replica store subsection once, inside the multi-user s
   assert.ok(section.includes('### The replica store and rollback detection'));
   assert.doesNotMatch(text, /\u2014/);
   for (const phrase of ['.planning/staff/replica/', 'git', 'secret storage', 'private key', 'set aside']) assert.ok(section.toLowerCase().includes(phrase.toLowerCase()), phrase);
+  // 32-07 (D-14, D-03, D-06): the bounds of the lists file, the synced lists folder and the resumable Start Again, in the replica store subsection.
+  const start = text.indexOf('### The replica store and rollback detection');
+  const subsection = text.slice(start, text.indexOf('\n### ', start + 1));
+  for (const phrase of ['1,000', '10,000', '100,000 waiting', 'finishes', 'never starts empty', 'synced to disk before']) assert.ok(subsection.includes(phrase), phrase);
+  assert.doesNotMatch(subsection, /few hundred bytes, however many files/, 'the old promise is replaced by the bound');
 });
