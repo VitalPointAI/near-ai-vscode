@@ -104,7 +104,7 @@ test('a sidebar message streams from NEAR with privacy label, estimate, and actu
     assert.deepEqual(models.models.map((model) => [model.id, model.privacy]), [['z-ai/glm-5.3', 'tee'], ['deepseek/deepseek-v4.1-flash', 'forwarded']]);
     await sidebar.send({ type: 'send', text: 'Say hello', model: 'z-ai/glm-5.3' });
     const start = sidebar.posted.find((message) => message.type === 'assistant-start');
-    assert.equal(start?.privacy, 'Private · runs in NEAR TEE');
+    assert.equal(start?.privacy, 'Private · NEAR AI private hardware, checked each time it is used');
     const done = sidebar.posted.find((message) => message.type === 'assistant-done') as { usage: { estimatedCostUsd: number } };
     assert.deepEqual(billingBodies.at(-1), { requestIds: [INFERENCE_ID] }, 'the run is billed by each turn\'s inference-id');
     assert.equal(Number(done.usage.estimatedCostUsd.toFixed(5)), 0.00755);

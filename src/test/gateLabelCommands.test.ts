@@ -243,7 +243,7 @@ test('a self-added clearance that expires during a chat: the next read of conten
   await stub.commands.get('nearAi.policy.show')?.();
   assert.ok(stub.shownDocuments[0]?.text.includes(`ca-protected/Protected B, until ${ends}`), 'Show Policy shows the expiry');
   await new Promise((resolve) => setTimeout(resolve, 1700));
-  assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(`Not allowed: This file is labelled ca-protected/Protected B, and your clearance for it ended on ${ends.slice(0, 10)}\\.`));
+  assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(`Not allowed: This file is labelled Canada, Protected: Protected B, and your clearance for it ended on ${ends.slice(0, 10)}\\.`));
 });
 
 test('Show Policy says what is live: clearances are checked on reads, each chat\'s label decides where its content is sent, and unlabelled content takes the default label', async () => {

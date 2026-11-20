@@ -5,7 +5,7 @@ How a change gets from an idea to the Visual Studio Marketplace. The short rules
 and slash commands behind them, and what to do when something goes wrong.
 
 ```
-branch + worktree -> commits -> PR -> CI (7 jobs) + agent review -> merge agent -> main
+branch + worktree -> commits -> PR -> CI (8 jobs) + agent review -> merge agent -> main
                                                                         |
                          release/x.y.z PR -> merge -> tag vX.Y.Z -> Release workflow
                                                                         |
@@ -61,6 +61,7 @@ A PR can merge only when all of these hold:
 | `secret-scan` | CI: `scripts/secret-scan.mjs` over all tracked files and every line the PR's commits add |
 | `relay` | CI: the messaging relay in `relay/` on Node 26.13.1: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests and the container hardening tests |
 | `hub` | CI: your organization's sync hub in `hub/` on Node 26.13.1, built like `relay`: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests, the image build and the container and Compose hardening tests |
+| `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor. Runs on every PR; not a required check until the owner adds it to the branch protection (section 8) |
 | `agent-review` | Commit status set by `near-ai-reviewer` from `.github/workflows/agent-review.yml` after CI passes (section 4) |
 | One approval | Branch protection: one approving review, posted by `near-ai-reviewer` when the review passes; for a change to the gates, only after the owner approves (section 7) |
 | Up to date | Branch protection ("require branches to be up to date"): rebase onto `main` and re-run |
@@ -70,6 +71,7 @@ A PR can merge only when all of these hold:
 These nine check names are the required status checks in the branch protection (section 8).
 `hub` becomes required when the owner adds it to `main`'s branch protection after Phase 32 merges
 (section 8); until then the merge and tag scripts already wait for it, because it is in `CI_CHECKS`.
+`docs` runs on every PR too, and becomes required once the owner adds it there.
 Renaming a CI job means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and
 this page in the same PR.
 
@@ -77,7 +79,7 @@ this page in the same PR.
 
 `.github/workflows/ci.yml` runs on every PR into `main`, on every push to `main`, and by hand.
 
-- The eight jobs run **in parallel**; the slowest (e2e, relay or hub) takes a few minutes.
+- The nine jobs run **in parallel**; the slowest (e2e, relay or hub) takes a few minutes.
 - `npm ci` uses the setup-node npm cache; the VS Code download for e2e is cached weekly.
 - A new push to a PR **cancels** the superseded run. Runs on `main` (and runs started by hand)
   each get their own concurrency group, so none is ever cancelled or replaced while queued.
@@ -93,8 +95,19 @@ this page in the same PR.
 - Every action is pinned to a full commit SHA; the workflow token is read-only and checkouts do
   not keep credentials.
 
-Run the same checks locally before pushing: `npm run lint && npm test`, plus `npm run test:e2e`
-or `npm run verify:release` when your change touches what they cover.
+Run the same checks locally before pushing: `npm run lint && npm test`, plus `npm run test:e2e`,
+`npm run verify:release` or `npm run docs:build` when your change touches what they cover. The
+testing rules, including the memory cap for every test run and heavy build, are in
+[testing.md](testing.md).
+
+### The documentation site
+
+`docs-site/` is the documentation site: the user guides and the technical, security and
+architecture pages, built with Docusaurus from the repository's own documents (README, SECURITY.md,
+CHANGELOG, `docs/` and the design documents), which stay where they are and are edited only there.
+`npm run docs` previews it and `npm run docs:build` builds it; on a computer with the local service
+installed it is always at http://127.0.0.1:3210/. How it works, the service, and versions at release
+are in [docs-site/README.md](../docs-site/README.md).
 
 ### The secret scan
 
@@ -233,6 +246,11 @@ the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new 
    `node scripts/prepare-release.mjs bump <x.y.z>` (package.json and package-lock.json).
 2. It writes the `## <x.y.z>` CHANGELOG section for users, in the style of earlier entries, and
    updates README and SECURITY.md if the release changes what they describe.
+   **Docs updated:** it checks that the user guides and technical pages of the documentation site
+   (README, SECURITY.md, `docs/`, `docs-site/content/`) describe what this release does, and that
+   `npm run docs:build` passes. For a minor release (`x.y.0`) it also takes the docs snapshot for
+   the version: `cd docs-site && npm run version:snapshot -- <x.y.z>` (see
+   [docs-site/README.md](../docs-site/README.md), "Versions at release").
 3. `node scripts/prepare-release.mjs check` confirms the branch name, both version fields, a
    version higher than the last tag, and the CHANGELOG section.
 4. It opens the PR `chore(release): <x.y.z>`. CI and `/review-pr` run as for any PR.
@@ -571,7 +589,9 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
   own PRs, so the approval comes from `near-ai-reviewer`, posted by the agent review workflow),
   required checks `lint`, `test`, `e2e`,
   `release-content`, `audit`, `secret-scan`, `relay` and `hub` from GitHub Actions, plus `agent-review`
-  (the owner adds `hub` after Phase 32 merges);
+  (the owner adds `hub` after Phase 32 merges; CI also runs `docs`, which is not in this list yet: to
+  require it, add `{"context": "docs", "app_id": 15368}` to the checks below, and `docs` to `CI_CHECKS` in
+  `scripts/lib/workflow.mjs` in a PR merged at the same time);
   branches must be up to date; admins included; linear history; no force pushes or deletion;
   conversations must be resolved.
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR

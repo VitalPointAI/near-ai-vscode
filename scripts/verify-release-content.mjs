@@ -133,6 +133,7 @@ const forbiddenPatterns = [
   /^extension\/(?:src|test|scripts|node_modules)(?:\/|$)/,
   /^extension\/relay(?:\/|$)/,
   /^extension\/hub(?:\/|$)/,
+  /^extension\/docs-site(?:\/|$)/,
   /^extension\/\.dockerignore$/,
   /^extension\/dist\/test(?:\/|$)/,
   /\.map$/,

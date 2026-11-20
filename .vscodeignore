@@ -34,3 +34,6 @@ relay/**
 # Your organization's sync hub is its own service with its own lockfile and never ships in the extension (D-33).
 hub/**
 .dockerignore
+# The documentation site is its own workspace with its own lockfile and never ships in the extension.
+docs-site/**
+docs/testing.md

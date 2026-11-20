@@ -122,7 +122,8 @@ async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, 
   }
   const status = await localKeyStatus(identityDir(globalStorageDir), secrets);
   const lastValidAt = marker.present ? marker.at : undefined;
-  const state = verifyBundleEnvelope(envelope, { status, now: nowMs, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
+  // The status is this install's own key history, so a policy that verifies but cannot be read is the person's own (Show Policy may offer Reset for it).
+  const state = verifyBundleEnvelope(envelope, { status, now: nowMs, ownKeysOnly: true, ...(lastValidAt === undefined ? {} : { lastValidAt }) });
   // A file that verifies but is not the one this install last accepted (or is writing right now) was put there from outside: refused, never adopted.
   if (state.state === 'valid' && marker.present && marker.hash !== undefined && state.hash !== marker.hash && state.hash !== marker.pending) {
     return { state: failedClosed('replaced'), envelope };
