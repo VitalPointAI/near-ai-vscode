@@ -96,15 +96,22 @@ test('with an exercise box, an unmarked two-decimal pair outside it is for the g
   }
   // Agent review of drop 2: ordinary money, score and measure pairs are not presented as positions, so they are no CHECK on every product.
   for (const text of [
-    '12.50, 3.50', 'Unit prices 12.50, 3.50', 'Scores 45.42, 54.58', 'The team scored at 45.42, 54.58', 'Costs at 12.50, 3.50 per item',
+    'Unit prices 12.50, 3.50', 'Scores 45.42, 54.58', 'The team scored at 45.42, 54.58', 'Costs at 12.50, 3.50 per item',
     'At 12.50, 3.50 points', 'Readings at 12.50, 3.50 km', 'Totals at the end 45.42, 75.69', 'At the depot 12.50, 3.50 kg each'
   ]) {
     assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, text);
   }
-  // The trade-off, stated: a plain pair with no position word is not flagged at all, even when it is a real position outside the box. The rules alone
-  // do not catch it; the release guard's own review and the person who releases the product do (SECURITY.md, guard-scan coordinates).
-  for (const text of ['45.42, 75.69', 'The convoy halts. 45.42, 75.69', 'Then 45.42, 75.69 for the night']) {
-    assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, `${text}: a cue-less pair is a known gap`);
+  // A line that is only the pair (a list of points) reads as a position: a price, score or measure is written with what it measures (#121 review).
+  // A bare "12.50, 3.50" line is a CHECK too (it was not before): the guard clears it by hand if it is money; it is never a HOLD.
+  for (const text of ['45.42, 75.69', '- 45.42, 75.69', '  * 45.42, 75.69.', '3. 45.42, 75.69', '> 45.42, 75.69', '12.50, 3.50']) {
+    assert.deepEqual(scan(text, { config: BOX }), { rules: ['unmarked-pair-outside-box'], hold: false }, `${text}: a pair alone on its line is a position`);
+  }
+  assert.deepEqual(scan('51.10, 11.10', { config: BOX }), { rules: [], hold: false }, 'alone and inside the box: it passes');
+  assert.deepEqual(scan('45.42, 75.69', { config: NONE }), { rules: [], hold: false }, 'with no box an unmarked pair is not a coordinate at all');
+  // The trade-off, stated: a plain pair inside prose with no position word is not flagged at all, even when it is a real position outside the box.
+  // The rules alone do not catch it; the release guard's own review and the person who releases the product do (SECURITY.md, guard-scan coordinates).
+  for (const text of ['The convoy halts. 45.42, 75.69', 'Then 45.42, 75.69 for the night', '45.42, 75.69 km']) {
+    assert.deepEqual(scan(text, { config: BOX }), { rules: [], hold: false }, `${text}: a cue-less pair in prose is a known gap`);
   }
   // The same pair inside one box and outside another: presented as a position, it is held for the guard's check only outside.
   const elsewhere: GuardConfig = { realEntities: [], exerciseBox: [[20, 30], [22, 30], [22, 32], [20, 32]] };
