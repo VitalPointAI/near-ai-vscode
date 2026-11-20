@@ -6,8 +6,9 @@
 // support product without its review mark) or something only a person can judge (`check`: a restricted publication named, a grid reference the scan
 // cannot place). The staff-products tool refuses a CLEARED verdict while a `hold` finding stands on the exact version, so a guard cannot clear past it.
 // What the scan cannot see (implicit decisions, compilation) is the guard model's review, and its HOLD is the answer to a doubt.
-import { SCALE_PRESETS } from '../gate/labels';
-import { activeScales, labelKeyAtLeast } from '../gate/labelAlgebra';
+import { atLeast } from '../gate/dominance';
+import { SCALE_PRESETS, parseLabelKey } from '../gate/labels';
+import { activeScales } from '../gate/labelAlgebra';
 import { findSecrets } from '../team/secrets';
 import { RESTRICTED_PUBLICATION_TITLES } from './doctrine';
 import type { StaffSectionId } from './doctrine';
@@ -246,10 +247,13 @@ export function guardScan(input: GuardInput): GuardScanResult {
   };
 
   if (input.header) {
-    const [scale, level] = input.header.label.split('/');
-    const ceiling = Object.prototype.hasOwnProperty.call(TEMPLATE_CEILING, scale) ? TEMPLATE_CEILING[scale] : undefined;
-    // Ranked on the active policy's scales, the same ranking the gate uses (coherence review S7); an unknown level is never allowed.
-    const allowed = ceiling !== undefined && level !== undefined && labelKeyAtLeast(`${scale}/${ceiling}`, `${scale}/${level}`);
+    // Read and ranked by the label module on the active policy's scales, the same ranking the gate uses (D-35, coherence review S7): the level is
+    // everything after the first slash, so a header that does not parse (an unknown scale or level, or `org/Internal/x`) is never allowed.
+    const scales = activeScales();
+    const label = parseLabelKey(input.header.label, scales);
+    const ceilingLevel = label !== undefined && Object.prototype.hasOwnProperty.call(TEMPLATE_CEILING, label.scale) ? TEMPLATE_CEILING[label.scale] : undefined;
+    const ceiling = label !== undefined && ceilingLevel !== undefined ? parseLabelKey(`${label.scale}/${ceilingLevel}`, scales) : undefined;
+    const allowed = label !== undefined && ceiling !== undefined && atLeast(ceiling, label, scales);
     if (!allowed) add('label-ceiling', 'hold', 0, input.header.label, `The product is labelled ${input.header.label}, above what a staff template may carry (org/Internal, NATO Unclassified or Protected A at most). Staff templates are for exercise and fictional data only.`);
   }
 

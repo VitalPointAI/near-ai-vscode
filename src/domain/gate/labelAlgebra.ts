@@ -4,7 +4,7 @@
 // Every check that ranks a level reads the active signed policy's scales, never the shipped presets on its own: the gate host registers its policy as the
 // source (setActiveScaleSource), and the presets are used only while no policy has been read or the policy failed closed, which is what the gate itself uses
 // then (GateHost.labelPolicy). Labels are still stored by id (`org/Confidential`); only what a person reads changes.
-import { SCALE_PRESETS, levelIndex, scaleOf } from './labels';
+import { SCALE_PRESETS, levelIndex, scaleOf, splitLabelKey } from './labels';
 import type { ScaleTable } from './labels';
 
 let source: (() => ScaleTable) | undefined;
@@ -29,11 +29,8 @@ export function activeScales(): ScaleTable {
   }
 }
 
-/** A `scale/level` text split at its first `/`; undefined when there is none. */
-export function splitLabelKey(text: string): { readonly scale: string; readonly level: string } | undefined {
-  const at = text.indexOf('/');
-  return at <= 0 ? undefined : { scale: text.slice(0, at), level: text.slice(at + 1) };
-}
+// The one splitter lives in the label module (D-35); re-exported so its importers here compile unchanged.
+export { splitLabelKey } from './labels';
 
 /** The rank of a `scale/level` text on its scale in `scales`, or -1 when the scale or the level is unknown. */
 export function labelKeyRank(text: string, scales: ScaleTable = activeScales()): number {

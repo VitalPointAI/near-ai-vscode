@@ -2,6 +2,8 @@
 // from the scale's ordered list, never a number, so a label reads plainly in files and records. Pure: no I/O, no clock, no vscode, no package.
 // Names and tokens compare by exact string equality: no case folding and no Unicode normalisation (a level that differs by case is a different, unknown level).
 // Once a release ships a preset id, a level name or a handling value it never changes in place: a change is label v2 beside v1 (D-22).
+// With dominance.ts this is the one label module (D-35): every label check in the gate, the staff tools and the chat label parses and ranks through it, and
+// it imports only shape.ts (dominance.ts imports only this file), so it stays dependency-free.
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed } from './shape';
 
@@ -87,6 +89,24 @@ export function scaleOf(scales: ScaleTable, scale: string): Scale | undefined {
 export function levelIndex(scales: ScaleTable, scale: string, level: string): number {
   const found = scaleOf(scales, scale);
   return found === undefined ? -1 : found.levels.indexOf(level);
+}
+
+/** A `scale/level` text split at its first `/`; undefined when there is none or it is the first character. */
+export function splitLabelKey(text: string): { readonly scale: string; readonly level: string } | undefined {
+  const at = text.indexOf('/');
+  return at <= 0 ? undefined : { scale: text.slice(0, at), level: text.slice(at + 1) };
+}
+
+/**
+ * A `scale/level` text read as a label on `scales` (D-35): the level is everything after the first slash, so `org/Internal/x` is the unknown level
+ * `Internal/x`, never `org/Internal`. Undefined when the text has no scale, the scale is not an own entry of `scales` or the level is not on it.
+ */
+export function parseLabelKey(text: string, scales: ScaleTable): Label | undefined {
+  const split = splitLabelKey(text);
+  if (split === undefined) return undefined;
+  const scale = scaleOf(scales, split.scale);
+  if (scale === undefined || !scale.levels.includes(split.level)) return undefined;
+  return Object.freeze({ scale: split.scale, level: split.level, compartments: Object.freeze([]), releasability: Object.freeze([]), handling: Object.freeze([]) });
 }
 
 /** `scale/level`: the key routing and the label map use, so `org/Confidential` and `ca-classified/Confidential` are different labels. */

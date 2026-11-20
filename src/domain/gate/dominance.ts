@@ -13,6 +13,20 @@ export interface DominanceContext {
   readonly now: number;
 }
 
+/** The two fields a ranking reads: a label's (or clearance's) scale and level. */
+export type LabelLevel = Pick<Label, 'scale' | 'level'>;
+
+/**
+ * Whether `label` is on the same scale as `floor` and at least as high, both levels known on `scales` (D-35): the one level ranking every label check
+ * uses. Across scales, or with an unknown level on either side, it is false. Pure: the caller passes the scales (the active policy's, see labelAlgebra.ts).
+ */
+export function atLeast(label: LabelLevel, floor: LabelLevel, scales: ScaleTable): boolean {
+  if (label.scale !== floor.scale) return false;
+  const rank = levelIndex(scales, label.scale, label.level);
+  const floorRank = levelIndex(scales, floor.scale, floor.level);
+  return rank >= 0 && floorRank >= 0 && rank >= floorRank;
+}
+
 /** Why a clearance does not dominate a label, in the order they are checked. Later UI words each refusal plainly from this closed list. */
 export const DOMINANCE_REASONS = Object.freeze(['no-clearance', 'scale', 'level', 'compartment', 'releasability', 'expired'] as const);
 export type DominanceReason = (typeof DOMINANCE_REASONS)[number];
