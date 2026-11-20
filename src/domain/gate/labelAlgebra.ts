@@ -4,8 +4,9 @@
 // Every check that ranks a level reads the active signed policy's scales, never the shipped presets on its own: the gate host registers its policy as the
 // source (setActiveScaleSource), and the presets are used only while no policy has been read or the policy failed closed, which is what the gate itself uses
 // then (GateHost.labelPolicy). Labels are still stored by id (`org/Confidential`); only what a person reads changes.
-import { SCALE_PRESETS, levelIndex, scaleOf, splitLabelKey } from './labels';
-import type { ScaleTable } from './labels';
+import { atLeast, joinLabels } from './dominance';
+import { SCALE_PRESETS, labelKey, levelIndex, parseLabelKey, scaleOf, splitLabelKey } from './labels';
+import type { Label, ScaleTable } from './labels';
 
 let source: (() => ScaleTable) | undefined;
 
@@ -40,12 +41,9 @@ export function labelKeyRank(text: string, scales: ScaleTable = activeScales()):
 
 /** Whether `label` is on the same scale as `floor` and at least as high, both known on `scales`. An unknown level is never at least anything. */
 export function labelKeyAtLeast(label: string, floor: string, scales: ScaleTable = activeScales()): boolean {
-  const a = splitLabelKey(label);
-  const b = splitLabelKey(floor);
-  if (a === undefined || b === undefined || a.scale !== b.scale) return false;
-  const rank = labelKeyRank(label, scales);
-  const floorRank = labelKeyRank(floor, scales);
-  return floorRank >= 0 && rank >= floorRank;
+  const read = parseLabelKey(label, scales);
+  const least = parseLabelKey(floor, scales);
+  return read !== undefined && least !== undefined && atLeast(read, least, scales);
 }
 
 /**
@@ -53,10 +51,14 @@ export function labelKeyAtLeast(label: string, floor: string, scales: ScaleTable
  * unknown level or an empty list gives undefined and the caller refuses what it was deriving.
  */
 export function joinLabelKeys(labels: readonly string[], scales: ScaleTable = activeScales()): string | undefined {
-  if (labels.length === 0) return undefined;
-  const scale = splitLabelKey(labels[0] as string)?.scale;
-  if (scale === undefined || labels.some((label) => splitLabelKey(label)?.scale !== scale || labelKeyRank(label, scales) < 0)) return undefined;
-  return labels.reduce((highest, label) => (labelKeyRank(label, scales) > labelKeyRank(highest, scales) ? label : highest));
+  let joined: Label | undefined;
+  for (const text of labels) {
+    const read = parseLabelKey(text, scales);
+    if (read === undefined) return undefined;
+    joined = joined === undefined ? read : joinLabels(joined, read, scales);
+    if (joined === undefined) return undefined;
+  }
+  return joined === undefined ? undefined : labelKey(joined);
 }
 
 /**
