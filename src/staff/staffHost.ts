@@ -24,7 +24,9 @@
 // not shared (Pitfall 8). In a shared project:
 // - replay() reads the products from the fold through the projection (replica/projection.ts), so every reader of replay() (status, list, the
 //   registry, the decision queue, the header tamper check in fileDisagreement) works unchanged on the projected state. One ReplicaProject is kept per
-//   host, so its fold context is reused.
+//   host while its store keeps the same identity (the store folder's device and inode numbers and the roster head this device's mark names), so its
+//   fold context is reused. Before each shared read the identity is compared: Start Again (here or in another window), a folder replaced, or a roster
+//   change another window recorded closes the old project and opens it again; a refused fold drops it too; invalidateShared() forgets it (D-09).
 // - every step that would write today's single-machine ledgers or staff files is refused with SHARED_PROJECT_REFUSAL before any file is touched: a
 //   method with a StaffResult returns it, a method without one throws SharedProjectError. Live multi-user writes arrive in Phase 33.
 // - the reads of the decision log, the wargame ledger, the event log and the logistics files read the files the projection wrote back at their usual
@@ -462,13 +464,23 @@ export class StaffHost {
     return { pending: again, opened: await again };
   }
 
-  /** Forgets the opened shared project when it is still the one `pending` opened (another read may have opened a new one already), and closes it. */
-  private async dropShared(pending: Promise<SharedOpened | { readonly problem: string }>): Promise<void> {
-    if (this.sharedOpen !== pending) return;
+  /**
+   * Forgets the shared project this host opened and its replay cache, so the next read opens the project again, then closes the old project after
+   * the work already asked of it (ReplicaProject.close waits for it). Start Again and Make a Single-Machine Copy call it (D-09); close() goes through
+   * it. A host that opened nothing (a project that is not shared) has nothing to forget and loads nothing.
+   */
+  public async invalidateShared(): Promise<void> {
+    const pending = this.sharedOpen;
     this.sharedOpen = undefined;
     this.sharedCache = undefined;
+    if (!pending) return;
     const opened = await pending;
     if ('project' in opened) await opened.project.close();
+  }
+
+  /** invalidateShared, only when the opened project is still the one `pending` opened (another read may have opened a new one already). */
+  private async dropShared(pending: Promise<SharedOpened | { readonly problem: string }>): Promise<void> {
+    if (this.sharedOpen === pending) await this.invalidateShared();
   }
 
   /**
@@ -477,10 +489,13 @@ export class StaffHost {
    * product and reads as broken with the reason, so nothing reads as fine and nothing is written.
    */
   private async sharedReplay(): Promise<LedgerReplay> {
-    const { opened } = await this.currentShared();
+    const { pending, opened } = await this.currentShared();
     if ('problem' in opened) return unavailableReplay(opened.problem);
     try {
       const { fold } = await opened.project.state();
+      // state() records the roster head in this device's mark: the identity is taken again, so the host's own mark writes never count as a change
+      // from outside. A change another window makes between the two is still met: the next state() reads it, or is refused and reopens below.
+      opened.identity = await this.storeIdentity();
       const context = opened.project.context();
       const key = `${fold.order.length}|${fold.order[fold.order.length - 1] ?? ''}|${fold.checkpoint ?? ''}|${JSON.stringify(fold.digests)}`;
       if (this.sharedCache && this.sharedCache.key === key && this.sharedCache.context === context) return copyReplay(this.sharedCache.replay);
@@ -490,18 +505,16 @@ export class StaffHost {
       this.sharedCache = { key, context, replay };
       return copyReplay(replay);
     } catch (error) {
+      // A refused fold (the store rolled back, say) drops the project, so the next read opens it again instead of keeping a store object on a
+      // folder that may have been set aside.
+      await this.dropShared(pending);
       return unavailableReplay(`${SHARED_PROJECT_UNAVAILABLE} ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /** Closes the shared project this host opened, if any (its decode worker). A host of a project that is not shared has nothing to close. */
+  /** Closes the shared project this host opened, if any (its decode worker), through invalidateShared. A host of a project that is not shared has nothing to close. */
   public async close(): Promise<void> {
-    const pending = this.sharedOpen;
-    this.sharedOpen = undefined;
-    this.sharedCache = undefined;
-    if (!pending) return;
-    const opened = await pending;
-    if ('project' in opened) await opened.project.close();
+    await this.invalidateShared();
   }
 
   /** The refusal every single-machine write gives in a shared project, or undefined. Checked before any file is touched. */

@@ -21,6 +21,8 @@ import type { ProjectedProductState } from '../staff/replica/projection';
 import { isProjectRefused, ReplicaProject } from '../staff/replica/replicaProject';
 import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { STORE_REFUSALS } from '../staff/replica/store';
+import { markKey } from '../staff/replica/marks';
+import { memberAt } from '../domain/replica/rosterMembers';
 import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
 import type { StaffEvent } from '../domain/staff/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
@@ -532,5 +534,155 @@ test('a store folder replaced by a copy of itself (a new folder, the same conten
   } finally {
     opens.restore();
     await host.close();
+  }
+});
+
+/** The roster head this device's mark names for the project's store (read, not verified). */
+function markHead(env: Env): string | null {
+  const text = env.secrets.values.get(markKey(storeDirOf(env.root)));
+  return text === undefined ? null : (JSON.parse(text) as { signed: { payload: { rosterHead: string | null } } }).signed.payload.rosterHead;
+}
+
+test('five replays with nothing changed outside open the shared project once', async () => {
+  const env = await cloneOf(await full(), 'open-once');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    for (let read = 0; read < 4; read += 1) assert.deepEqual((await host.replay()).products, first.products);
+    assert.equal(opens.count(), 1, 'one open for five reads');
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+test('a roster change another window makes: folded by the host\'s own read it moves the mark without a reopen; recorded by the other window it makes the next read open the project again', async () => {
+  const env = await cloneOf(await full(), 'roster-change');
+  await migrate(env);
+  const { writer } = await ReplicaProject.localDevice(env.deps);
+  const lead = `mbr-${writer.slice(0, 16)}`;
+  // Another window of this install: a second project object on the same folder, opened before the count starts.
+  const other = await ReplicaProject.open(env.root, env.deps);
+  assert.ok(other instanceof ReplicaProject, isProjectRefused(other) ? other.message : 'no shared project');
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    const headBefore = markHead(env);
+    // The other window writes a roster change and does not fold it: the mark still names the old head.
+    const renamed = await other.appendOwn('member.update', { member: lead, name: 'Exercise Lead North' });
+    assert.ok('ok' in renamed, 'ok' in renamed ? '' : renamed.message);
+    assert.equal(markHead(env), headBefore, 'the other window has not recorded the change');
+    // The host's own read folds it and records the new head in the mark: that is not an outside change.
+    assert.deepEqual((await host.replay()).products, first.products);
+    assert.equal(markHead(env), renamed.hash, 'the host\'s read moved the mark\'s roster head');
+    assert.deepEqual((await host.replay()).products, first.products);
+    assert.equal(opens.count(), 1, 'the host\'s own mark write never counts as an outside change');
+    // The other window writes again and folds it: the mark's roster head moves under the host, so its next read opens the project again.
+    const again = await other.appendOwn('member.update', { member: lead, name: 'Exercise Lead South' });
+    assert.ok('ok' in again, 'ok' in again ? '' : again.message);
+    await other.state();
+    assert.equal(markHead(env), again.hash);
+    const after = await host.replay();
+    assert.equal(after.broken, undefined, after.broken?.reason);
+    assert.deepEqual(after.products, first.products);
+    assert.equal(opens.count(), 2, 'opened again after the outside change');
+    const { roster } = await opens.opened[1].state();
+    assert.equal(memberAt(roster.members, lead, roster.positions.length - 1)?.name, 'Exercise Lead South', 'the project the host opened again shows the change');
+    assert.equal(opens.count(), 2);
+  } finally {
+    opens.restore();
+    await other.close();
+    await host.close();
+  }
+});
+
+test('invalidateShared closes the opened project once and the next read opens it again; on a host that opened nothing it is harmless', async () => {
+  const unshared = await cloneOf(await full(), 'invalidate-unshared');
+  const plain = worldOf(unshared, true).host;
+  const before = await plain.replay();
+  await plain.invalidateShared();
+  await plain.invalidateShared();
+  assert.deepEqual(await plain.replay(), before, 'a project that is not shared reads as before');
+  assert.equal(existsSync(storeDirOf(unshared.root)), false, 'and no store was made');
+
+  const env = await cloneOf(await full(), 'invalidate');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(opens.count(), 1);
+    const closed = mock.method(opens.opened[0], 'close');
+    await host.invalidateShared();
+    assert.equal(closed.mock.callCount(), 1, 'the old project is closed');
+    await host.invalidateShared();
+    assert.equal(closed.mock.callCount(), 1, 'a second call has nothing to close');
+    const again = await host.replay();
+    assert.equal(opens.count(), 2, 'the next read opens the project again');
+    assert.deepEqual(again.products, first.products);
+    assert.notEqual(opens.opened[1], opens.opened[0]);
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+test('a read whose fold is refused (the store rolled back under the host) drops the opened project, so the next read opens it again and reads it once the folder is put back', async () => {
+  const env = await cloneOf(await full(), 'refused-drop');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    assert.equal(opens.count(), 1);
+    const file = await ownBaseFile(env);
+    const whole = cutLastLine(file);
+    const refused = await host.replay();
+    assert.ok(refused.broken?.reason.includes(STORE_REFUSALS['rolled-back']), refused.broken?.reason);
+    assert.equal(opens.count(), 1, 'the refusal came from the project the host held');
+    const closed = mock.method(opens.opened[0], 'close');
+    const still = await host.replay();
+    assert.ok(still.broken?.reason.includes(STORE_REFUSALS['rolled-back']), still.broken?.reason);
+    assert.equal(opens.count(), 2, 'the next read opened the project again instead of reusing the refused one');
+    assert.ok(closed.mock.callCount() <= 1);
+    // The newer copy of the file is put back: the next read opens the project and shows the products.
+    writeFileSync(file, whole);
+    const back = await host.replay();
+    assert.equal(back.broken, undefined, back.broken?.reason);
+    assert.deepEqual(back.products, first.products);
+    assert.equal(opens.count(), 3);
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+test('close() goes through invalidateShared and ends the decode worker of the project the host opened', async () => {
+  const env = await cloneOf(await full(), 'close-through');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    assert.equal((await host.replay()).broken, undefined);
+    const project = opens.opened[0];
+    // A project makes its decode worker on the first entry from outside; this one holds only its own, so it is given a stand-in worker to end.
+    let ended = 0;
+    const held = project as unknown as { ownDecoder?: { close(): Promise<void> } };
+    held.ownDecoder = { close: async () => { ended += 1; } };
+    const invalidate = mock.method(host, 'invalidateShared');
+    const closed = mock.method(project, 'close');
+    await host.close();
+    assert.equal(invalidate.mock.callCount(), 1, 'close() goes through invalidateShared');
+    assert.equal(closed.mock.callCount(), 1, 'the project is closed once');
+    assert.equal(ended, 1, 'its decode worker ended');
+    assert.equal(held.ownDecoder, undefined);
+  } finally {
+    opens.restore();
   }
 });
