@@ -111,6 +111,11 @@ export interface HubTransportOptions {
   now?: () => Date;
   connectTimeoutMs?: number;
   responseMaxBytes?: number;
+  /**
+   * The blobs the given entries use, as append blobRefs (the local replica's blobsCitedBy). push needs it: entry bodies are sealed, so only the
+   * replica can say which blob an entry uses, and the hub keeps and serves a blob only for the entries that name it (WR-06).
+   */
+  blobsCitedBy?: (entryHashes: readonly string[]) => Promise<Array<{ entry: string; blob: string }>>;
 }
 
 export interface HubHeads extends HeadSet {
@@ -197,6 +202,13 @@ export type EventReport =
   | { kind: 'malformed' };
 export const HUB_EVENT_NAMES = ['heads', 'presence', 'checkpoint', 'roster', 'equivocation', 'join-request', 'resync'] as const;
 export type HubEventName = typeof HUB_EVENT_NAMES[number];
+
+/**
+ * Why a subscription ended without the caller unsubscribing (D-37): the hub asked for a resync, frames were missed (an id gap: the reader is closed
+ * rather than going on without them), the hub stopped the stream (204, 401 or 403), the stream ended or broke, or it could not be opened. After any
+ * of them the caller runs heads-based catch-up, and may subscribe again after retryMs.
+ */
+export type SubscriptionEnd = 'resync' | 'gap' | 'stopped' | 'closed' | 'malformed' | 'failed';
 
 export interface EventReader extends AsyncIterable<EventReport> {
   /** The retry delay the hub asked for, in milliseconds, once read. */
@@ -432,6 +444,7 @@ export class HubTransport implements ReplicaTransport {
   private readonly now: () => Date;
   private readonly connectTimeoutMs: number;
   private readonly cap: number;
+  private readonly blobsCitedBy: HubTransportOptions['blobsCitedBy'];
   private main: HubConnection | undefined;
   private opening: Promise<HubConnection> | undefined;
   private readonly readers = new Set<{ close(): void }>();
@@ -451,6 +464,7 @@ export class HubTransport implements ReplicaTransport {
     this.now = options.now ?? ((): Date => new Date());
     this.connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
     this.cap = options.responseMaxBytes ?? RESPONSE_MAX_BYTES;
+    this.blobsCitedBy = options.blobsCitedBy;
   }
 
   /** How many TLS connections this transport opened, the event reader's included. */
@@ -479,11 +493,20 @@ export class HubTransport implements ReplicaTransport {
     }
   }
 
+  /**
+   * Pushes entries with the blobs given (WR-06, WR-07). Each append names the blobs its entries use (from the blobsCitedBy source), and a 409
+   * blob-missing answer puts them. An entry using a blob not given is not sent, nor is the rest of its writer's log: it is refused blob-not-held, and
+   * the hub never holds an entry whose blob it cannot get. Without a blobsCitedBy source nothing is sent, because the blobs could not be named.
+   */
   public async push(entries: readonly SealedEntry[], blobs: readonly SealedBlob[]): Promise<PushResult> {
+    if (this.blobsCitedBy === undefined) throw new Error('Pushing through the hub needs the blobs each entry uses (the blobsCitedBy source), so nothing was sent.');
     const byHash = new Map(blobs.map((blob) => [blob.hash, blob]));
+    const hashOf = new Map(entries.map((entry) => [entry, entryHash(entry.header)] as const));
+    const refs = await this.blobsCitedBy([...hashOf.values()]);
+    const plan = pushPlan(entries, refs, new Set(byHash.keys()), (entry) => hashOf.get(entry) as string);
     const accepted: string[] = [];
-    const refused: PushResult['refused'] = [];
-    for (const batch of appendBatches(entries, [], [])) {
+    const refused: PushResult['refused'] = plan.heldBack.map((hash) => ({ hash, reason: 'blob-not-held' }));
+    for (const batch of appendBatches(plan.entries, [], plan.blobRefs, (entry) => hashOf.get(entry) as string)) {
       const answer = await this.append(batch, (hash) => byHash.get(hash));
       accepted.push(...answer.accepted);
       for (const item of answer.refused) refused.push({ hash: item.hash ?? '', reason: item.reason });
@@ -491,14 +514,24 @@ export class HubTransport implements ReplicaTransport {
     return { accepted, refused };
   }
 
-  public subscribe(onHeads: (heads: HeadSet) => void, onPresence: (sealed: Uint8Array) => void): Unsubscribe {
+  /**
+   * Hands heads frames to onHeads and each presence device's sealed bytes to onPresence. onEnd is called once when the subscription ends by anything
+   * but the caller's unsubscribe (IN-03), with why and the hub's retry delay; it is never called after unsubscribe.
+   */
+  public subscribe(onHeads: (heads: HeadSet) => void, onPresence: (sealed: Uint8Array) => void, onEnd?: (reason: SubscriptionEnd, retryMs: number | undefined) => void): Unsubscribe {
     let reader: EventReader | undefined;
     let stopped = false;
     void (async () => {
+      let reason: SubscriptionEnd = 'closed';
       try {
         reader = await this.events();
         if (stopped) { reader.close(); return; }
         for await (const report of reader) {
+          if (report.kind === 'gap') {
+            reason = 'gap';
+            break;
+          }
+          if (report.kind === 'resync' || report.kind === 'stopped' || report.kind === 'closed' || report.kind === 'malformed') reason = report.kind;
           if (report.kind !== 'frame') continue;
           if (report.event === 'heads' && isStream(report.data.stream) && Array.isArray(report.data.heads)) {
             onHeads({ streams: [{ stream: report.data.stream, heads: report.data.heads.filter((head): head is { writer: string; seq: number; hash: string } => isRecord(head) && isHash(head.writer) && isSeq(head.seq) && isHash(head.hash)).map((head) => ({ writer: head.writer, seq: head.seq, hash: head.hash })) }] });
@@ -509,8 +542,13 @@ export class HubTransport implements ReplicaTransport {
           }
         }
       } catch {
-        // A stream that cannot open ends the subscription; the caller's next catch-up finds what it missed.
+        // A stream that cannot open ends the subscription; the caller's catch-up finds what it missed.
+        reason = 'failed';
       }
+      reader?.close();
+      if (stopped) return;
+      stopped = true;
+      onEnd?.(reason, reader?.retryMs);
     })();
     return () => {
       stopped = true;
@@ -850,6 +888,36 @@ export async function enrolmentRequest(source: EnrolSource, file: EnrolmentFile,
   const grants = (await source.grants()).map((item) => item.signed);
   const mac = enrolmentMac(file.enrolmentSecret, { enrolment: file.enrolment, hub: file.hub, project, genesisHash: roster.genesisHash, rosterHead: roster.rosterHead });
   return { enrolment: file.enrolment, project, entries: entries.map((entry) => ({ header: entry.header, body: entry.body })), grants, blobs, rosterHead: roster.rosterHead, mac };
+}
+
+/** What a push sends: the entries that go, the blob references they declare, and the hashes of the entries held back. */
+export interface PushPlan { entries: SealedEntry[]; blobRefs: Array<{ entry: string; blob: string }>; heldBack: string[] }
+
+/**
+ * Which entries may go to the hub now (WR-06, WR-07). The hub refuses a whole append when a declared blob is missing (and for a base-stream entry
+ * whose blob it cannot read), and a hub that keeps an entry without its blob leaves every reader waiting for it. So an entry goes only when every
+ * blob it uses is in held (blobs this computer can put), and only those references are declared. An entry that uses a blob not held waits, and so
+ * does every later entry of the same writer's log, which the hub would refuse seq-gap. Entries this computer cannot open name no blob and go as they
+ * are. The order of entries is kept.
+ */
+export function pushPlan(entries: readonly SealedEntry[], refs: ReadonlyArray<{ entry: string; blob: string }>, held: ReadonlySet<string>, entryHashOf: (entry: SealedEntry) => string): PushPlan {
+  const lacking = new Set(refs.filter((ref) => !held.has(ref.blob)).map((ref) => ref.entry));
+  const logKey = (entry: SealedEntry): string => `${entry.header.stream}/${entry.header.writer}`;
+  const stopAt = new Map<string, number>();
+  for (const entry of entries) {
+    if (!lacking.has(entryHashOf(entry))) continue;
+    const key = logKey(entry);
+    stopAt.set(key, Math.min(stopAt.get(key) ?? Number.POSITIVE_INFINITY, entry.header.seq));
+  }
+  const going: SealedEntry[] = [];
+  const heldBack: string[] = [];
+  for (const entry of entries) {
+    const stop = stopAt.get(logKey(entry));
+    if (stop !== undefined && entry.header.seq >= stop) heldBack.push(entryHashOf(entry));
+    else going.push(entry);
+  }
+  const sent = new Set(going.map(entryHashOf));
+  return { entries: going, blobRefs: refs.filter((ref) => sent.has(ref.entry) && held.has(ref.blob)), heldBack };
 }
 
 /** Splits entries and grants into appends the hub takes: at most 200 entries, 64 grants and about 3 MiB each, grants in the first ones. */

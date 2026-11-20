@@ -260,6 +260,11 @@ export interface FakeHubState {
   wrongProjectHeads?: string;
   /** Heads answers show these writer heads instead of the real ones (key stream/writer). */
   headsOverride?: Map<string, { seq: number; hash: string }>;
+  /**
+   * Grants the hub places only once an entry is held, as a cell's grant needs its cell.create (grant hash to that entry's hash), and the entries the
+   * grant opens, refused not-on-access-list until it is placed. A grant offered before then is refused grant-not-placed.
+   */
+  grantRules?: Map<string, { after: string; opens: ReadonlySet<string> }>;
 }
 
 const sha256OfBytes = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
@@ -320,11 +325,24 @@ export function hubRoutes(state: FakeHubState): FakeHandler {
       const body = req.json() as { entries: SealedEntry[]; grants?: unknown[]; blobRefs?: Array<{ entry: string; blob: string }> };
       for (const ref of body.blobRefs ?? []) if (!state.blobs.has(ref.blob)) return { status: 409, json: { error: 'blob-missing', message: 'Missing.' } };
       state.appends.push({ entries: body.entries, grants: body.grants ?? [], blobRefs: body.blobRefs ?? [] });
-      seedGrants(state, body.grants ?? []);
+      const offered = (body.grants ?? []).map((grant, index) => ({ index, grant, hash: sha256OfBytes(canonicalBytes(grant)) }));
+      const holds = (hash: string): boolean => [...state.logs.values()].some((log) => log.some((item) => entryHash(item.header) === hash));
+      const place = (): void => {
+        for (const item of offered) {
+          const rule = state.grantRules?.get(item.hash);
+          if (rule === undefined || holds(rule.after)) seedGrants(state, [item.grant]);
+        }
+      };
+      place();
       const accepted: string[] = [];
       const refused: Array<{ index: number; hash: string; reason: string }> = [];
       body.entries.forEach((entry, index) => {
         const hash = entryHash(entry.header);
+        const gate = [...(state.grantRules ?? [])].find(([, rule]) => rule.opens.has(hash))?.[0];
+        if (gate !== undefined && !state.grants.has(gate)) {
+          place();
+          if (!state.grants.has(gate)) { refused.push({ index, hash, reason: 'not-on-access-list' }); return; }
+        }
         const key = logKey(entry.header.stream, entry.header.writer);
         const log = state.logs.get(key) ?? [];
         const last = log[log.length - 1];
@@ -335,7 +353,9 @@ export function hubRoutes(state: FakeHubState): FakeHandler {
         state.logs.set(key, log);
         accepted.push(hash);
       });
-      return { json: withCheckpoint({ project: state.project, accepted, refused, rosterHead: state.rosterHead }) };
+      place();
+      const grantsRefused = offered.filter((item) => !state.grants.has(item.hash)).map((item) => ({ index: item.index, reason: 'grant-not-placed' }));
+      return { json: withCheckpoint({ project: state.project, accepted, refused, rosterHead: state.rosterHead, ...(grantsRefused.length === 0 ? {} : { grantsRefused }) }) };
     }
     if (req.method === 'PUT' && req.path.startsWith('/v1/blobs/')) {
       const hash = req.path.slice('/v1/blobs/'.length);

@@ -20,7 +20,6 @@ import { fixedSigner } from './helpers/replicaWorld';
 
 const PROJECT = 'project-main';
 const OTHER_PROJECT = 'project-other';
-const HUB_ID = 'hub-exercise-north';
 const hex = (label: string): string => createHash('sha256').update(label).digest('hex');
 const ROSTER = hex('roster/0');
 const STREAM = hex('stream/base').slice(0, 32);
@@ -28,6 +27,10 @@ const STREAM_B = hex('stream/ops').slice(0, 32);
 const A = fixedSigner('A');
 const B = fixedSigner('B');
 const HUB = fixedSigner('H');
+// The witness names the hub it witnesses by the hub's writer id, as the one-shot sync does (transport.hub).
+const HUB_ID = HUB.writer;
+// A second hub your organization admitted for the same project (WR-08).
+const HUB_TWO = fixedSigner('H2');
 
 function roster(): RosterView {
   return staticRosterView({
@@ -65,6 +68,21 @@ function checkpoint(spec: CheckpointSpec): SignedCheckpoint {
     })
   };
   return signCheckpoint(by.signer, value);
+}
+
+// The roster with both hubs admitted as checkpoint signers.
+function twoHubRoster(): RosterView {
+  return staticRosterView({
+    rosters: [{
+      hash: ROSTER,
+      checkpointSigners: [HUB.writer, HUB_TWO.writer],
+      members: [
+        { member: 'mbr-aaaa000000000000', name: 'Analyst A', roles: ['member'], devices: [{ writer: A.writer, publicKey: A.publicKey }] },
+        { member: 'mbr-hhhh000000000000', name: 'Sync hub', roles: ['member'], devices: [{ writer: HUB.writer, publicKey: HUB.publicKey }] },
+        { member: 'mbr-hhhh000000000002', name: 'Second sync hub', roles: ['member'], devices: [{ writer: HUB_TWO.writer, publicKey: HUB_TWO.publicKey }] }
+      ]
+    }]
+  });
 }
 
 const one = (writer: string, seq: number, label?: string): CheckpointSpec => ({ streams: [{ heads: [{ writer, seq, label }] }] });
@@ -174,6 +192,27 @@ test('injected: a checkpoint that does not verify for this roster changes nothin
   assert.deepEqual(kinds(second.findings), ['injected']);
   assert.equal(second.findings[0].detail.reason, 'bad-signature');
   assert.deepEqual(second.state, before);
+});
+
+test('WR-08: a checkpoint another admitted hub signed is refused for this hub (injected, other-signer), never kept, never compared with this hub\'s own', () => {
+  const view = twoHubRoster();
+  const first = witnessCheckpoint(createWitness(HUB_ID, PROJECT), checkpoint(one(A.writer, 5)), view);
+  assert.equal(first.trusted, true);
+  const before = structuredClone(first.state);
+  deepFreeze(first.state);
+  // The second hub's genuine checkpoints: an older one is no rollback of this hub, a newer one is not this hub's newest, another hash is no fork.
+  for (const other of [checkpoint({ ...one(A.writer, 2), by: HUB_TWO }), checkpoint({ ...one(A.writer, 9), by: HUB_TWO }), checkpoint({ ...one(A.writer, 5, 'other'), by: HUB_TWO })]) {
+    const result = witnessCheckpoint(first.state, other, view);
+    assert.deepEqual(kinds(result.findings), ['injected']);
+    assert.equal(result.findings[0].detail.reason, 'other-signer');
+    assert.equal(result.trusted, false);
+    assert.deepEqual(result.state, before);
+  }
+  // A fresh witness does not take another hub's checkpoint as its first newest either.
+  const fresh = witnessCheckpoint(createWitness(HUB_ID, PROJECT), checkpoint({ ...one(A.writer, 9), by: HUB_TWO }), view);
+  assert.equal(fresh.trusted, false);
+  assert.equal(fresh.state.newest, undefined);
+  assert.deepEqual(fresh.state.seen, []);
 });
 
 test('wrong-project: a signed checkpoint for another project is refused and changes nothing', () => {

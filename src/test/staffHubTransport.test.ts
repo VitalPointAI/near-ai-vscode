@@ -376,6 +376,34 @@ test('subscribe hands heads frames to onHeads and each presence device\'s sealed
   });
 });
 
+test('IN-03: subscribe tells the caller when the stream ends (resync, an id gap, the end of the stream, a 204) so it runs heads catch-up, and never after unsubscribe', { timeout: 20_000 }, async () => {
+  const frame = (event: string, id: number): string => `event: ${event}\nid: ${id}\ndata: ${JSON.stringify({ project: PROJECT, stream: PROJECT, heads: [] })}\n\n`;
+  const ended = (transport: HubTransport): Promise<{ reason: string; heads: number }> => new Promise((resolve) => {
+    let heads = 0;
+    transport.subscribe(() => { heads += 1; }, () => undefined, (reason) => resolve({ reason, heads }));
+  });
+  const cases: Array<{ answer: FakeHandler; want: { reason: string; heads: number } }> = [
+    { answer: () => sse([frame('heads', 1), frame('resync', 2)], 5_000), want: { reason: 'resync', heads: 1 } },
+    // A gap: the subscription closes its reader at once rather than going on without the frames it missed.
+    { answer: () => sse([frame('heads', 1), frame('heads', 3)], 5_000), want: { reason: 'gap', heads: 1 } },
+    { answer: () => sse([frame('heads', 1)]), want: { reason: 'closed', heads: 1 } },
+    { answer: () => ({ stream: (res): void => { res.writeHead(204, { 'cache-control': 'no-store' }); res.end(); } }), want: { reason: 'stopped', heads: 0 } }
+  ];
+  for (const item of cases) {
+    await withFake({ handle: routes({ [EVENTS]: item.answer }) }, async (_fake, transport) => {
+      assert.deepEqual(await ended(transport), item.want);
+    });
+  }
+  await withFake({ handle: routes({ [EVENTS]: () => sse([frame('heads', 1)], 5_000) }) }, async (_fake, transport) => {
+    let ends = 0;
+    let stop: () => void = () => undefined;
+    await new Promise<void>((resolve) => { stop = transport.subscribe(() => resolve(), () => undefined, () => { ends += 1; }); });
+    stop();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(ends, 0, 'the caller who unsubscribed is not told');
+  });
+});
+
 // ---- enrol, append, blobs, grants, checkpoints ----
 
 test('enrol posts without a session on a connection of its own and returns the project, roster head and hub id', async () => {
@@ -800,6 +828,121 @@ test('push: own entries, other writers\' entries the hub lacks, the blobs they c
       const again = await syncA(world, fake.address);
       assert.equal(again.pushed, 0);
       assert.equal(state.appends.length, appends);
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
+test('WR-06: HubTransport.push names the blob each entry uses (from its blobsCitedBy source) and puts it when the hub asks, so the blob reaches the hub', async () => {
+  const world = await syncWorld('transport-push');
+  try {
+    const before = await world.held();
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional long report '.repeat(1200) });
+    assert.ok('ok' in own && own.built.blobs.length === 1, 'the own entry carries a blob');
+    const blob = own.built.blobs[0] as SealedBlob;
+    const { fake, state } = await hubFor(world, { entries: before });
+    try {
+      const cited = { servername: 'localhost', blobsCitedBy: (hashes: readonly string[]) => world.a.blobsCitedBy(hashes) };
+      const transport = syncTransport(world, fake.address, cited);
+      try {
+        const result = await transport.push([own.built.entry], own.built.blobs);
+        assert.deepEqual(result, { accepted: [own.hash], refused: [] });
+        assert.deepEqual(state.appends.flatMap((item) => item.blobRefs), [{ entry: own.hash, blob: blob.hash }]);
+        assert.deepEqual(state.blobs.get(blob.hash), Buffer.from(blob.bytes, 'base64url'), 'the blob given to push is on the hub');
+      } finally {
+        transport.close();
+      }
+      // An entry whose blob was not given is not sent, nor the rest of its log: refused blob-not-held, and the hub is not asked.
+      const big = world.memberWrite({ big: true });
+      const next = world.memberWrite();
+      assert.ok('ok' in (await world.a.ingestForeign([big.entry, next.entry], [])));
+      const without = syncTransport(world, fake.address, cited);
+      try {
+        const appends = state.appends.length;
+        assert.deepEqual(await without.push([big.entry, next.entry], []), { accepted: [], refused: [{ hash: big.hash, reason: 'blob-not-held' }, { hash: next.hash, reason: 'blob-not-held' }] });
+        assert.equal(state.appends.length, appends);
+      } finally {
+        without.close();
+      }
+      // Without a source of blob references the transport cannot name the blobs, so it sends nothing rather than lose them.
+      const blind = syncTransport(world, fake.address);
+      try {
+        const appends = state.appends.length;
+        await assert.rejects(blind.push([own.built.entry], own.built.blobs), /blobsCitedBy/);
+        assert.equal(state.appends.length, appends);
+      } finally {
+        blind.close();
+      }
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
+test('WR-07: an entry whose blob neither this computer nor the hub holds waits with the rest of its log; everything else is pushed and the exchange ends synced', async () => {
+  const world = await syncWorld('blob-held-back');
+  try {
+    const before = await world.held();
+    // The member's long note and the entry after it reached this computer without the long note's blob; the hub has neither.
+    const big = world.memberWrite({ text: 'Fictional long observation '.repeat(1200) });
+    const next = world.memberWrite();
+    const blob = big.blobs[0] as SealedBlob;
+    assert.ok('ok' in (await world.a.ingestForeign([big.entry, next.entry], [])));
+    assert.equal(await world.a.blob(blob.hash), undefined, 'this computer does not hold the blob');
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional short report' });
+    assert.ok('ok' in own);
+    const { fake, state } = await hubFor(world, { entries: before });
+    try {
+      const report = await syncA(world, fake.address);
+      assert.equal(report.outcome, 'synced', JSON.stringify(report));
+      assert.equal(report.pushed, 1);
+      assert.equal(report.heldBack, 2, 'the big update and the entry after it wait');
+      assert.deepEqual(state.appends.flatMap((item) => item.entries.map((entry) => entryHash(entry.header))), [own.hash], 'only what can go with its blobs');
+      assert.ok(state.appends.every((item) => item.blobRefs.every((ref) => state.blobs.has(ref.blob))), 'no reference to a blob this computer could not put');
+      assert.deepEqual(report.refusedByHub, []);
+      // Once the blob reaches this computer, the next exchange pushes the waiting log with it: named, put when the hub asks, then accepted.
+      assert.ok('ok' in (await world.a.ingestForeign([], [blob])));
+      const healed = await syncA(world, fake.address);
+      assert.equal(healed.outcome, 'synced', JSON.stringify(healed));
+      assert.equal(healed.pushed, 2);
+      assert.deepEqual(state.blobs.get(blob.hash), Buffer.from(blob.bytes, 'base64url'));
+      assert.equal(healed.heldBack, 0);
+      assert.deepEqual(state.appends.at(-1)?.blobRefs, [{ entry: big.hash, blob: blob.hash }]);
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
+test('IN-05: a grant the hub could not place yet (its cell.create in a later append) is sent again with the retried entries, so they are taken in the same exchange', async () => {
+  const world = await syncWorld('grant-retry');
+  try {
+    const before = await world.held();
+    const grants = (await world.a.signedGrants()).map((grant) => grant.signed);
+    assert.ok(grants.length > 0, 'this computer holds a grant');
+    // 201 entries from the member: the last one always lands in the second append (200 entries each), after the grants went in the first.
+    const memberEntries = Array.from({ length: APPEND_MAX_ENTRIES + 1 }, () => world.memberWrite().entry);
+    assert.ok('ok' in (await world.a.ingestForeign(memberEntries, [])));
+    const gated = await world.a.appendOwn('note.add', { text: 'Fictional cell report' });
+    assert.ok('ok' in gated);
+    const { fake, state } = await hubFor(world, { entries: before, grants: [] });
+    // The hub places the grant only once the member's last entry (standing in for the cell.create) is held, and only then takes the gated entry.
+    const last = memberEntries[memberEntries.length - 1] as SealedEntry;
+    state.grantRules = new Map(grants.map((grant) => [grantHash(grant), { after: entryHash(last.header), opens: new Set([gated.hash]) }] as const));
+    try {
+      const report = await syncA(world, fake.address);
+      assert.equal(report.outcome, 'synced', JSON.stringify(report));
+      assert.deepEqual(report.refusedByHub, [], 'the gated entry was taken once the grant was placed');
+      assert.equal(report.pushed, APPEND_MAX_ENTRIES + 2);
+      for (const grant of grants) assert.ok(state.grants.has(grantHash(grant)), 'the grant is on the hub');
+      assert.equal(state.appends.filter((item) => item.grants.length > 0).length, 2, 'the grant went in the first append and again with the retry');
     } finally {
       await fake.close();
     }
