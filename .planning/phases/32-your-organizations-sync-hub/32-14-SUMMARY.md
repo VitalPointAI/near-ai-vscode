@@ -111,7 +111,7 @@ Hub suite: **110 tests, 110 pass, 0 fail** with `NEAR_AI_HUB_OLD_NODE` set to a 
 **2. [Rule 1 - Bug] Literal em-dash in a test string**
 - **Found during:** final scan
 - **Issue:** the keys test's "no em-dash" check held the character itself.
-- **Fix:** written as the `—` escape.
+- **Fix:** written as a backslash-u 2014 escape.
 - **Commit:** 4066441e
 
 **3. [Rule 2 - Correctness] Extra startup refusals**
