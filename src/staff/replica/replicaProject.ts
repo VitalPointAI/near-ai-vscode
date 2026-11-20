@@ -673,12 +673,17 @@ export class ReplicaProject {
     await this.loadGrants();
     await this.loadBlobs();
     await this.recheckWaiting();
-    const entries = this.store.entries();
-    const rosterKey = (): string => `${entries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}`;
+    // The roster fold reads the entries still waiting for the decode check too: a roster entry waits awaiting-key until the keys the roster settles
+    // arrive, and those come only from the roster fold (CR-01). Once it settled them, the waiting entries are checked again, and only what passed
+    // reaches the main fold (31-REVIEW MJ-07).
+    const rosterEntries = this.store.rosterEntries();
+    const rosterKey = (): string => `${rosterEntries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}`;
     if (this.rosterState === undefined || rosterKey() !== this.rosterKey) {
-      this.rosterState = await this.foldRosterAndKeys(entries);
+      this.rosterState = await this.foldRosterAndKeys(rosterEntries);
       this.rosterKey = rosterKey();
     }
+    await this.recheckWaiting();
+    const entries = this.store.entries();
     const roster = this.rosterState;
     const ctxKey = `${rosterSignature(roster)}|${this.keys.version}|${this.blobCache.size}`;
     if (this.ctx === undefined || ctxKey !== this.ctxKey) {

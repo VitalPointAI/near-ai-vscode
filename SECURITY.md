@@ -1350,7 +1350,9 @@ project folder.
   project, so deleting or editing a file cannot let a refused change in. A change the check cannot
   run on yet, because its key or its attachment has not arrived, waits outside the shared view
   and is checked when they arrive; so does a change found in the folder that no check has passed
-  (copied in by hand, or written by another install of the extension).
+  (copied in by hand, or written by another install of the extension). The project's member list
+  is still read from a change that waits for its key, because that key comes only from the grants
+  the member list places; reading the member list decodes no document update.
 - **Symbolic links are refused.** If any folder or file on the way to the store is a symbolic
   link, nothing is read or written through it.
 

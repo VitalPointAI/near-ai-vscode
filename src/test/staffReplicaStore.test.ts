@@ -728,6 +728,7 @@ test('MJ-07: an entry the check cannot run on yet waits out of the fold, across 
   assert.deepEqual(result.held, []);
   assert.deepEqual(result.waiting, [{ hash: foreign[1].hash, reason: 'awaiting-key' }, { hash: foreign[2].hash, reason: 'awaiting-blob' }]);
   assert.deepEqual(store.entries(), [foreign[0].entry], 'an entry that was not checked does not reach the fold');
+  assert.deepEqual(store.rosterEntries(), foreign.map((item) => item.entry), 'the roster fold reads the waiting entries too, so it can settle the keys they wait for');
   const again = await opened(root, depsFor(lead, secrets));
   assert.deepEqual(again.waitingForCheck(), store.waitingForCheck(), 'the waiting list is in the signed mark');
   assert.deepEqual(again.entries(), [foreign[0].entry]);
@@ -737,6 +738,7 @@ test('MJ-07: an entry the check cannot run on yet waits out of the fold, across 
   assert.deepEqual([...calls].sort(), [foreign[1].hash, foreign[2].hash].sort());
   assert.deepEqual(again.entries(), [foreign[0].entry, foreign[1].entry]);
   assert.deepEqual(again.heldForCheck().map((item) => item.hash), [foreign[2].hash]);
+  assert.deepEqual(again.rosterEntries(), [foreign[0].entry, foreign[1].entry], 'a held entry reaches neither fold');
   const third = await opened(root, depsFor(lead, secrets));
   assert.deepEqual(await third.recheck(() => Promise.resolve({ ok: true })), { ok: true, passed: 0, held: 0, waiting: 0 });
   assert.deepEqual(third.heldForCheck().map((item) => item.hash), [foreign[2].hash], 'a later check never releases a held entry');

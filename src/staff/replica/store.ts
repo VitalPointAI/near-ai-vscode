@@ -439,6 +439,16 @@ export class ReplicaStore {
     return this.order.filter((hash) => !this.held.has(hash) && !this.waiting.has(hash)).map((hash) => this.byHash.get(hash) as SealedEntry);
   }
 
+  /**
+   * What the roster fold reads: every stored entry the decode check has not refused, so the ones still waiting for it too, in the order the store
+   * first saw them. The roster is sealed under the base cell's keys, and this device takes those keys only from the grants the roster fold places
+   * (CR-01), so a roster entry waits awaiting-key until the roster fold has read it. The roster fold applies roster kinds only and never decodes a
+   * document update, so nothing the decode check guards reaches it; entries() stays what the main fold gets (31-REVIEW MJ-07).
+   */
+  public rosterEntries(): SealedEntry[] {
+    return this.order.filter((hash) => !this.held.has(hash)).map((hash) => this.byHash.get(hash) as SealedEntry);
+  }
+
   /** Stored entries the decode check refused, with its reason. They stay in the store and out of the fold. */
   public heldForCheck(): Array<{ hash: string; reason: string }> {
     return [...this.held].filter(([hash]) => this.byHash.has(hash)).map(([hash, reason]) => ({ hash, reason }));
