@@ -12,10 +12,10 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { approvalBody, buildReviewPrompt, defuse } from './ci-review.mjs';
+import { MAX_DIFF_BYTES, MAX_REVIEW_PARTS, approvalBody, buildReviewPrompt, defuse, splitDiff } from './ci-review.mjs';
 import { commitChecks, currentLogin, gh, viewPr } from './gh.mjs';
 import { gatherReview, submitReview } from './review.mjs';
-import { AGENT_REVIEW_CONTEXT, REVIEW_ACCOUNT, gateFileChanges } from './workflow.mjs';
+import { AGENT_REVIEW_CONTEXT, REVIEW_ACCOUNT, gateFileChanges, parseReview, reviewDecision } from './workflow.mjs';
 
 const SCRIPTS = path.resolve(import.meta.dirname, '..');
 
@@ -90,13 +90,29 @@ export async function reviewPr(repo, number, { env = process.env, log = console.
     const read = (name) => readFileSync(path.join(dir, name), 'utf8');
     const pr = JSON.parse(read('pr.json'));
     const files = read('files.txt').split('\n').map((line) => line.trim()).filter(Boolean);
-    const { prompt, omitted } = buildReviewPrompt({ number, pr, checks: read('checks.json'), files: files.join('\n'), diff: read('diff.patch') });
-    const promptFile = path.join(dir, 'prompt.md');
-    writeFileSync(promptFile, prompt, { mode: 0o600 });
-    if (omitted.length) log(`The diff is too large for one review; left out ${omitted.length} file(s).`);
-    log('Asking the review model...');
-    // Model text is posted under the reviewer identity, so mentions are defused first.
-    const review = defuse(await run('ci-review-call.mjs', [promptFile], { env }), Infinity);
+    const diff = read('diff.patch');
+    const { parts, omitted } = splitDiff(diff, MAX_DIFF_BYTES, MAX_REVIEW_PARTS);
+    const base = { number, pr, checks: read('checks.json'), files: files.join('\n') };
+    if (omitted.length) log(`The diff is too large even for ${MAX_REVIEW_PARTS} parts; left out ${omitted.length} file(s).`);
+    let review;
+    if (parts.length <= 1) {
+      const { prompt } = buildReviewPrompt({ ...base, diff: parts[0]?.diff ?? diff, alsoOmitted: omitted });
+      const promptFile = path.join(dir, 'prompt.md');
+      writeFileSync(promptFile, prompt, { mode: 0o600 });
+      log('Asking the review model...');
+      // Model text is posted under the reviewer identity, so mentions are defused first.
+      review = defuse(await run('ci-review-call.mjs', [promptFile], { env }), Infinity);
+    } else {
+      const replies = [];
+      for (const [index, part] of parts.entries()) {
+        const { prompt } = buildReviewPrompt({ ...base, diff: part.diff, part: { index: index + 1, total: parts.length, files: part.files }, alsoOmitted: omitted });
+        const promptFile = path.join(dir, `prompt-${index + 1}.md`);
+        writeFileSync(promptFile, prompt, { mode: 0o600 });
+        log(`Asking the review model about part ${index + 1} of ${parts.length} (${part.files.length} file(s))...`);
+        replies.push(defuse(await run('ci-review-call.mjs', [promptFile], { env }), Infinity));
+      }
+      review = combinePartReviews(replies, pr.headRefOid, { omitted });
+    }
     writeFileSync(path.join(dir, 'review.md'), review, { mode: 0o600 });
 
     // The head this review read: if the PR moved while the model ran, nothing is posted (submitReview), as for the expectedHead check above.
@@ -114,6 +130,40 @@ export async function reviewPr(repo, number, { env = process.env, log = console.
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * One review file from the replies of a review done in parts. Each part is judged on its own by the
+ * same parseReview and reviewDecision as a whole review; the result passes only when every part
+ * passed. Each part's text is kept under its own heading with its Verdict and Head-SHA lines taken
+ * out and its Recommendation heading renamed, so the file has exactly one of each; every severity
+ * tag stays, so an open BLOCKER in any part still fails the gate.
+ */
+export function combinePartReviews(replies, headSha, { omitted = [] } = {}) {
+  const total = replies.length;
+  const reasons = [];
+  const sections = replies.map((reply, index) => {
+    const decision = reviewDecision(parseReview(reply), headSha, { requireRecommendation: true });
+    for (const reason of decision.reasons) reasons.push(`Part ${index + 1}: ${reason}`);
+    const body = String(reply ?? '').split(/\r?\n/)
+      .filter((line) => !/^ {0,3}[*_`]*(?:verdict|head-sha)[*_`]*\s*:/i.test(line))
+      .map((line) => line.replace(/^( {0,3})#{1,6}\s*recommendation\s*:/i, `$1#### Part ${index + 1} recommendation:`))
+      .join('\n').trim();
+    return `### Part ${index + 1} of ${total}\n\n${body}`;
+  });
+  const pass = reasons.length === 0;
+  return [
+    `## Recommendation: ${pass ? 'MERGE' : 'DO NOT MERGE'}`,
+    '',
+    `This pull request's diff is larger than one review can read, so it was reviewed in ${total} parts, each by its own call. It passes only when every part passed.`,
+    ...(reasons.length ? ['', ...reasons.map((reason) => `- ${reason}`)] : []),
+    ...(omitted.length ? ['', `- ${omitted.length} file(s) fit in no part and were not reviewed, so this PR waits for the owner.`] : []),
+    '',
+    ...sections.flatMap((section) => [section, '']),
+    `Verdict: ${pass ? 'PASS' : 'FAIL'}`,
+    `Head-SHA: ${headSha}`,
+    ''
+  ].join('\n');
 }
 
 /**

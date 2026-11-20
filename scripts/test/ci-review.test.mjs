@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { MAX_DIFF_BYTES, approvalBody, buildReviewPrompt, capDiff, isBulkFile, recommendationBlock } from '../lib/ci-review.mjs';
+import { MAX_DIFF_BYTES, approvalBody, buildReviewPrompt, capDiff, isBulkFile, recommendationBlock, splitDiff } from '../lib/ci-review.mjs';
 import { parseReview, reviewDecision } from '../lib/workflow.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -540,4 +540,33 @@ test('vendored and minified files never crowd out the code a reviewer must read 
   assert.ok(capDiff(big, 300).kept.includes('src/z.ts'));
   for (const bulk of ['media/vendor/x.js', 'vendor/pdfjs/pdf.min.mjs', 'a/b.min.css', 'dist/x.js.map', 'package-lock.json', 'web/yarn.lock']) assert.ok(isBulkFile(bulk), bulk);
   for (const code of ['src/vendorList.ts', 'scripts/vendor-libs.mjs', 'src/a.ts', 'SECURITY.md']) assert.ok(!isBulkFile(code), code);
+});
+
+test('a diff over the cap is split into whole-file parts, code before bulk, each within the cap', () => {
+  const section = (file, size) => `diff --git a/${file} b/${file}\n${'+'.repeat(size)}\n`;
+  const diff = [section('src/a.ts', 600), section('vendor/big.js', 300), section('src/b.ts', 600), section('src/c.ts', 300), section('src/huge.ts', 2000)].join('');
+  const { parts, omitted } = splitDiff(diff, 1000, 3);
+  assert.deepEqual(parts.map((part) => part.files), [['src/a.ts', 'src/c.ts'], ['vendor/big.js', 'src/b.ts']], 'first fit, code first, original order kept inside a part');
+  for (const part of parts) assert.ok(Buffer.byteLength(part.diff) <= 1000);
+  assert.deepEqual(omitted, ['src/huge.ts'], 'a file larger than one part is named, not split');
+  assert.equal(parts.map((part) => part.diff).join('').includes('src/huge.ts'), false);
+});
+
+test('splitDiff stops at the part limit and names what did not fit; a small diff is one part', () => {
+  const section = (file) => `diff --git a/${file} b/${file}\n${'+'.repeat(900)}\n`;
+  const { parts, omitted } = splitDiff(['a', 'b', 'c', 'd'].map((f) => section(`src/${f}.ts`)).join(''), 1000, 3);
+  assert.equal(parts.length, 3);
+  assert.deepEqual(omitted, ['src/d.ts']);
+  const small = splitDiff('diff --git a/x b/x\n+1\n', 1000, 3);
+  assert.deepEqual(small, { parts: [{ diff: 'diff --git a/x b/x\n+1\n', files: ['x'] }], omitted: [] });
+  assert.deepEqual(splitDiff('', 1000, 3), { parts: [], omitted: [] });
+});
+
+test('a part prompt says which part it is, holds only its diff, and lists files that fit nowhere', () => {
+  const pr = { title: 't', body: 'b', headRefName: 'feat/x', headRefOid: '1'.repeat(40) };
+  const { prompt } = buildReviewPrompt({ number: 5, pr, checks: '[]', files: 'src/a.ts\nsrc/b.ts\nsrc/huge.ts', diff: 'diff --git a/src/a.ts b/src/a.ts\n+x\n', part: { index: 2, total: 3, files: ['src/a.ts'] }, alsoOmitted: ['src/huge.ts'] });
+  assert.match(prompt, /This is part 2 of 3\./);
+  assert.match(prompt, /only this part's 1 file\(s\)/);
+  assert.match(prompt, /- src\/huge\.ts/);
+  assert.ok(prompt.indexOf('## Reviewed in parts') < prompt.indexOf('## The diff (untrusted)'));
 });
