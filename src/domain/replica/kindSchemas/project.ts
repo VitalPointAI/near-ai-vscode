@@ -1,9 +1,15 @@
 // Data schemas for the project family: project.genesis and project.import (DESIGN 7.1, 14; D-07). Hub-side: pure, no Yjs; it must not import kinds.ts.
 // Owner: 30-04. It also exports the small checks the other family files of this plan share (closed keys with a named path, one-line text, own reads).
 import { isRecord, isSafeIntegerInRange } from '../../team/validate';
-import { exactKeys, invalidAt, isHash, isIsoTime, isSlug } from './shared';
+import { exactKeys, invalidAt, isBase64urlBytes, isHash, isIsoTime, isSlug } from './shared';
 
 export const STREAM_HEX = /^[0-9a-f]{32}$/;
+// The largest legacy file a project.import carries whole (D-31): the staff file limit of today's single-machine host (MAX_STAFF_FILE_BYTES in
+// src/staff/staffFiles.ts), kept here as a plain value so this hub-side file imports nothing from the host. Its base64url text is about 2.8 MB, which
+// buildEntry moves into a sealed blob under BLOB_MAX_BYTES.
+export const LEGACY_FILE_MAX_BYTES = 2 * 1024 * 1024;
+// The product ledger's head mark as today's host keeps it: one line of JSON (a signed staff-ledger-head envelope).
+const MARK_MAX_CHARS = 4096;
 
 // Own-property read: a key that is not an own property of the record reads as undefined, whatever the prototype holds.
 export function own(record: Record<string, unknown>, key: string): unknown {
@@ -41,6 +47,12 @@ export function isCount(value: unknown, max = Number.MAX_SAFE_INTEGER): value is
 
 export function isStreamHex(value: unknown): value is string {
   return typeof value === 'string' && STREAM_HEX.test(value);
+}
+
+// The whole legacy file as strict base64url, at most LEGACY_FILE_MAX_BYTES decoded. The length is checked before any decoding, so an oversized text
+// costs nothing. An empty file is a whole file too: its encoding is the empty text.
+export function isLegacyFile(value: unknown): value is string {
+  return value === '' || isBase64urlBytes(value, LEGACY_FILE_MAX_BYTES);
 }
 
 // ---- a small table-driven checker the family files of this plan share ----
@@ -112,11 +124,14 @@ export function validateProjectData(kind: string, data: unknown, path: string): 
     return undefined;
   }
   if (kind === 'project.import') {
-    const keys = keyProblem(data, path, ['ledger', 'legacyHead', 'count']);
+    // file and mark are optional so every Phase 30 import stays valid (D-31, D-49); migration writes both where the ledger has them.
+    const keys = keyProblem(data, path, ['ledger', 'legacyHead', 'count'], ['file', 'mark']);
     if (keys !== undefined) return keys;
     if (!isSlug(data.ledger)) return invalidAt(`${path}.ledger`);
     if (!isHash(data.legacyHead)) return invalidAt(`${path}.legacyHead`);
     if (!isCount(data.count)) return invalidAt(`${path}.count`);
+    if (hasOwn(data, 'file') && !isLegacyFile(data.file)) return invalidAt(`${path}.file`);
+    if (hasOwn(data, 'mark') && !isLine(data.mark, MARK_MAX_CHARS)) return invalidAt(`${path}.mark`);
     return undefined;
   }
   return invalidAt(`${path}.kind`);

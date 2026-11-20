@@ -1,10 +1,12 @@
 // The closed schemas of the project, roster, registers, watches, runs and obs families, the project reducer, and the kept families (plan 30-04, tasks 2 and 3).
 // Hostile JSON for prototype keys comes from JSON.parse text, because an object literal would not make an own __proto__ key.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { REPLICA_KINDS, validateData } from '../domain/replica/kinds';
+import { LEGACY_FILE_MAX_BYTES } from '../domain/replica/kindSchemas/project';
 import { PROJECT_REFUSALS, projectReducer } from '../domain/replica/projectFold';
 import type { ProjectOutput } from '../domain/replica/projectFold';
 import type { FoldView } from '../domain/replica/reducers';
@@ -12,7 +14,8 @@ import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { textReducer } from '../domain/replica/textFold';
-import { createWorld, fixedSigner, streamId, updateData } from './helpers/replicaWorld';
+import { signPayload } from '../domain/team/signedPayload';
+import { WORLD_AT, createWorld, fixedSigner, streamId, updateData } from './helpers/replicaWorld';
 import type { World } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
@@ -259,6 +262,126 @@ test('project.import is applied and listed with ledger, legacy head and count, o
   assert.deepEqual(projectOf(result)[0].imports.map((item) => [item.ledger, item.legacyHead, item.count]), [['decisions', HASH('d'), 3], ['products', HASH('c'), 12]]);
   assert.deepEqual(result.refused, [{ hash: foreign.hash, reason: 'not-staff-lead', family: 'project' }]);
   assert.equal(result.applied.length, 4);
+});
+
+// ---- D-31, D-49: a project.import carries the whole legacy file and the product ledger's signed head mark ----
+
+const sha256Hex = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
+
+// A fictional products ledger: the same JSON line repeated and cut to the size asked for.
+function legacyLedgerBytes(size: number): Buffer {
+  const line = '{"seq":1,"kind":"propose","product":"intel-estimate","note":"A fictional ledger line for the import tests."}\n';
+  return Buffer.from(line.repeat(Math.ceil(size / line.length)).slice(0, size), 'utf8');
+}
+// The product ledger's head mark as today's host keeps it: one line of JSON, a staff-ledger-head envelope.
+function headMark(count: number, head: string): string {
+  return JSON.stringify(signPayload(fixedSigner('lead-mark').signer, 'staff-ledger-head', { v: 1, count, head }, { now: () => new Date(WORLD_AT) }));
+}
+
+test('D-31 tracer: a project.import carrying a 300 KB legacy file and its signed head mark moves into a sealed blob, folds, and lists the file hash', () => {
+  const world = projectWorld();
+  const genesis = world.write('L1', { kind: 'project.genesis', data: genesisData(world) });
+  const file = legacyLedgerBytes(300 * 1024);
+  const mark = headMark(12, HASH('c'));
+  assert.equal(mark.includes('\n'), false);
+  const data = { ledger: 'products', legacyHead: HASH('c'), count: 12, file: file.toString('base64url'), mark };
+  assert.deepEqual(validateData('project.import', data), { ok: true });
+  const blobsBefore = world.blobs.size;
+  const imported = world.write('L1', { kind: 'project.import', data });
+  // The body is far over the inline limit, so buildEntry moved the data into one sealed blob.
+  assert.equal(world.blobs.size, blobsBefore + 1);
+  const result = foldEntries([genesis.entry, imported.entry], world.ctx(), REDUCERS);
+  assert.deepEqual([...result.applied].sort(), [genesis.hash, imported.hash].sort());
+  assert.deepEqual([result.refused, result.held, result.rejected], [[], [], []]);
+  assert.deepEqual(projectOf(result)[0].imports, [{
+    ledger: 'products', legacyHead: HASH('c'), count: 12, entry: imported.hash, member: 'mbr-lead', writer: world.writerOf('L1'), fileHash: sha256Hex(file), marked: true
+  }]);
+  // Without the blob the import waits for it and lists nothing.
+  const withoutBlob = foldEntries([genesis.entry, imported.entry], world.ctx({ blobs: () => undefined }), REDUCERS);
+  assert.deepEqual(withoutBlob.held.map((held) => [held.hash, held.reason]), [[imported.hash, 'missing-blob']]);
+  assert.deepEqual(projectOf(withoutBlob)[0].imports, []);
+});
+
+test('D-31: an import file over 2 MiB decoded, a file that is not strict base64url and a mark that is not one line are each refused at their path', () => {
+  const base = { ledger: 'products', legacyHead: HASH('c'), count: 12 };
+  const atLimit = Buffer.alloc(LEGACY_FILE_MAX_BYTES, 0x61);
+  const overLimit = Buffer.alloc(LEGACY_FILE_MAX_BYTES + 1, 0x61);
+  assert.equal(LEGACY_FILE_MAX_BYTES, 2 * 1024 * 1024);
+  assert.deepEqual(validateData('project.import', { ...base, file: atLimit.toString('base64url') }), { ok: true });
+  const mark = headMark(12, HASH('c'));
+  const refusals: Array<[Data, string]> = [
+    [{ ...base, file: overLimit.toString('base64url') }, 'data.file'],
+    [{ ...base, file: 'not base64url!' }, 'data.file'],
+    [{ ...base, file: Buffer.from('ledger line').toString('base64') + '=' }, 'data.file'],
+    [{ ...base, file: 'QQ+/' }, 'data.file'],
+    // A tail that is not the canonical encoding of its bytes.
+    [{ ...base, file: 'QR' }, 'data.file'],
+    [{ ...base, file: 7 }, 'data.file'],
+    [{ ...base, file: null }, 'data.file'],
+    [{ ...base, mark: `${mark}\n` }, 'data.mark'],
+    [{ ...base, mark: mark.replace('{', '{\n') }, 'data.mark'],
+    [{ ...base, mark: '' }, 'data.mark'],
+    [{ ...base, mark: 'x'.repeat(4097) }, 'data.mark'],
+    [{ ...base, mark: { signed: true } }, 'data.mark'],
+    [{ ...base, file: 'QQ', mark, extra: 1 }, 'data.extra']
+  ];
+  for (const [data, path] of refusals) {
+    const reason = reasonOf('project.import', data);
+    assert.ok(reason.startsWith('bad-data:') && reason.includes(path), `should name ${path}: ${reason}`);
+  }
+  assert.deepEqual(validateData('project.import', { ...base, mark: 'x'.repeat(4096) }), { ok: true });
+  assert.deepEqual(validateData('project.import', { ...base, file: 'QQ', mark }), { ok: true });
+  // An empty legacy file is still a whole file: its encoding is the empty text.
+  assert.deepEqual(validateData('project.import', { ...base, count: 0, file: '' }), { ok: true });
+});
+
+test('D-31: a Phase 30 import (no file, no mark) folds with no file hash and marked false, and a repeat with a file is still listed once', () => {
+  const world = projectWorld();
+  const genesis = world.write('L1', { kind: 'project.genesis', data: genesisData(world) });
+  const plain = world.write('L1', { kind: 'project.import', data: { ledger: 'products', legacyHead: HASH('c'), count: 12 } });
+  const file = legacyLedgerBytes(1000);
+  const withFile = world.write('L1', { kind: 'project.import', data: { ledger: 'products', legacyHead: HASH('c'), count: 12, file: file.toString('base64url'), mark: headMark(12, HASH('c')) } });
+  const empty = world.write('L1', { kind: 'project.import', data: { ledger: 'wargame', legacyHead: sha256Hex(Buffer.alloc(0)), count: 0, file: '' } });
+  const markOnly = world.write('L1', { kind: 'project.import', data: { ledger: 'decisions', legacyHead: HASH('d'), count: 3, mark: headMark(3, HASH('d')) } });
+  const result = foldEntries([genesis, plain, withFile, empty, markOnly].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.equal(result.applied.length, 5);
+  const imports = projectOf(result)[0].imports;
+  assert.deepEqual(imports.map((item) => [item.ledger, item.entry, item.fileHash, item.marked]), [
+    ['decisions', markOnly.hash, undefined, true],
+    // The first of the two same imports in fold order is the one listed; the repeat with a file adds nothing.
+    ['products', plain.hash, undefined, false],
+    ['wargame', empty.hash, sha256Hex(Buffer.alloc(0)), false]
+  ]);
+  const listed = imports.find((item) => item.ledger === 'products');
+  assert.equal(Object.prototype.hasOwnProperty.call(listed, 'fileHash'), false);
+  // In the other delivery order the fold order is the same, so the output is too.
+  const reversed = foldEntries([genesis, plain, withFile, empty, markOnly].reverse().map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(reversed.families.project, result.families.project);
+  assert.deepEqual(reversed.digests, result.digests);
+  // The same import with its file written alone (on the lead's other device, whose chain does not follow the plain import) is listed with its hash.
+  const withFileAlone = world.write('L2', { kind: 'project.import', data: { ledger: 'products', legacyHead: HASH('c'), count: 12, file: file.toString('base64url'), mark: headMark(12, HASH('c')) } });
+  const alone = foldEntries([genesis, withFileAlone].map((item) => item.entry), world.ctx(), REDUCERS);
+  assert.deepEqual(projectOf(alone)[0].imports.map((item) => [item.entry, item.fileHash, item.marked]), [[withFileAlone.hash, sha256Hex(file), true]]);
+  // The project digest keeps its Phase 30 form: the listed tuple is ledger, legacy head, count and entry, and the entry hash already commits to the file.
+  assert.deepEqual(projectReducer.canonical(projectOf(alone), world.stream), {
+    genesis: genesis.hash, project: streamId('project'), name: 'Operation Example', profile: 'staff-j2', labelMapHash: HASH('a'),
+    lead: { member: 'mbr-lead', writer: world.writerOf('L1') }, hub: null, imports: [['products', HASH('c'), 12, withFileAlone.hash]]
+  });
+});
+
+test('D-31: the import list survives clone, so an incremental fold and a fresh fold list the same file hash and mark', () => {
+  const world = projectWorld();
+  const view = { ctx: { ...world.ctx(), roster: { ...world.ctx().roster, hasRole: () => true } } } as unknown as FoldView;
+  const file = legacyLedgerBytes(500);
+  const written = world.write('L1', { kind: 'project.import', data: { ledger: 'products', legacyHead: HASH('c'), count: 2, file: file.toString('base64url'), mark: headMark(2, HASH('c')) } });
+  const outcome = verifyEntry(written.entry, world.ctx());
+  assert.equal(outcome.status, 'verified');
+  const state = projectReducer.init();
+  assert.deepEqual(projectReducer.apply(state, (outcome as { entry: VerifiedEntry }).entry, view), { status: 'applied' });
+  const copy = projectReducer.clone(state);
+  assert.deepEqual(projectReducer.finish(copy, view), projectReducer.finish(state, view));
+  assert.deepEqual(projectReducer.finish(copy, view)[0].imports[0].fileHash, sha256Hex(file));
+  assert.equal(projectReducer.finish(copy, view)[0].imports[0].marked, true);
 });
 
 // WR-02 project part (D-12): an agent acts under a person's device and is never a roster member, so it cannot set the project's name, lead or hub pin.
