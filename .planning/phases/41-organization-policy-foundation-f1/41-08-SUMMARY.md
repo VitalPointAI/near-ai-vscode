@@ -79,7 +79,7 @@ A pure `proposalOf` that lists every changed key of a policy with one plain sent
 - Found during: final gate run. gateRecordIds' "every rule-shaped id" scan read the literals `'policy.js'` and `'policy.css'` in policyEditor.ts as unknown `policy.*` ids. The names are now built from a `PAGE` constant. Commit 02c66b57.
 
 **3. [Rule 1 - Copy] Literal em-dash in the copy checks**
-- The forbidden-words regex in both test files held a literal em-dash character; it is now written as `—` so no repository file carries the character. Commit 02c66b57.
+- The forbidden-words regex in both test files held a literal em-dash character; it is now written as a unicode escape (backslash u2014) so no repository file carries the character. Commit 02c66b57.
 
 **4. [Test design] Generic effect example**
 - The Task 2 generic-sentence example now changes an existing `limits.spend.dailyNanoUsd` (an added `spend` object is one change of the whole value, also asserted). No assertion was dropped.
