@@ -2,17 +2,19 @@
 // under gate/organization/, the layered load every decision reads, and the host's accept, Apply and Reset. Real files in temp folders and in-memory
 // secret stores; every key is made at test time from a label (policyFixtures). Fictional names only. The host tests live here: there is no gateHost file.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { bundleHash } from '../domain/gate/bundle';
+import { BUNDLE_FAILURES, bundleHash } from '../domain/gate/bundle';
+import { buildOrganizationLayer, contactShown, fileTextOf, organizationEndedText } from '../domain/gate/enrolment';
 import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
 import { ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, setOrganizationWriteProbe } from '../gate/organizationStore';
-import { enrolmentTextFor } from './helpers/enrolmentFixtures';
-import { FIXED_NOW, issuerKey } from './helpers/policyFixtures';
+import { loadDeviceIdentity } from '../team/identity';
+import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rotationTextFor, rulesTextFor } from './helpers/enrolmentFixtures';
+import { DAY_MS, FIXED_NOW, issuerKey } from './helpers/policyFixtures';
 import { MemorySecrets } from './helpers/teamHarness';
 
 interface World {
@@ -150,5 +152,288 @@ test('D-18: without an organization layer the host\'s state and hash are exactly
     if (state.state === 'valid') assert.equal(state.hash, bundleHash(envelope.payload));
     assert.equal(host.policyLayers().failedLayer, undefined);
     assert.deepEqual(host.policyLayers().ignored, []);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Task 2: every organization state
+
+/** Your organization's sections with one routing level set, so a rules update changes something a decision reads. */
+function sectionsWith(level: string, tier: string): Record<string, unknown> {
+  const sections = organizationSections();
+  ((sections['labels'] as { routing: { levels: Record<string, string> } }).routing.levels)[level] = tier;
+  return sections;
+}
+
+async function personalHash(world: World): Promise<string> {
+  const envelope = JSON.parse(await readFile(path.join(gateDir(world.storage), POLICY_BUNDLE_FILE), 'utf8')) as { payload: unknown };
+  return bundleHash(envelope.payload);
+}
+
+async function enrolled(world: World, options: Parameters<typeof enrolmentTextFor>[1] = {}): Promise<GateHost> {
+  const host = hostOf(world);
+  await host.start();
+  const state = await host.acceptOrganizationFile(enrolmentTextFor(issuerKey(), options), { wordsConfirmed: true });
+  assert.equal(state.state, 'valid', state.state === 'failed-closed' ? state.sentence : '');
+  return host;
+}
+
+function failedOf(state: ReturnType<GateHost['bundleState']>): { reason: string; sentence: string; ownPolicy?: true } {
+  assert.equal(state.state, 'failed-closed');
+  return state.state === 'failed-closed' ? state : { reason: '', sentence: '' };
+}
+
+const SECURITY_DESK = contactShown(EXAMPLE_ORGANIZATION.contacts);
+
+test('D-13: a crash after the layer file and before the pin leaves this computer not enrolled', async () => {
+  await withWorld(async (world) => {
+    const host = hostOf(world);
+    await host.start();
+    setOrganizationWriteProbe((step) => { if (step === 'layer-written') throw new Error('the window closed'); });
+    await assert.rejects(host.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true }), /the window closed/);
+    setOrganizationWriteProbe(undefined);
+    assert.equal((pinOf(world)?.['pending'] as { kind?: string } | undefined)?.kind, 'enrol', 'the crash left the pending first enrolment');
+    assert.equal(await exists(layerFile(world)), true, 'and the layer file');
+
+    const after = hostOf(world);
+    const state = await after.start();
+    assert.equal(after.policyLayers().organization.state, 'none');
+    assert.equal(state.state, 'valid');
+    if (state.state === 'valid') assert.equal(state.hash, await personalHash(world), 'the personal policy alone');
+    assert.notEqual(levelOf(after, 'org/Internal'), 'local-only');
+
+    const again = await after.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true });
+    assert.equal(again.state, 'valid');
+    assert.equal(levelOf(after, 'org/Internal'), 'local-only', 'a second confirmed enrolment enrols');
+    assert.equal(pinOf(world)?.['pending'], undefined);
+  });
+});
+
+test('D-13: a pending pin with no layer file is not enrolled; a layer file with no pin is ignored', async () => {
+  await withWorld(async (world) => {
+    const pending = { kind: 'enrol', publicKey: issuerKey().publicKey, serial: 1, issuedAt: new Date(FIXED_NOW).toISOString(), layerHash: 'a'.repeat(64) };
+    await world.secrets.store(ORGANIZATION_ISSUER_SECRET, JSON.stringify({ v: 1, pending }));
+    const host = hostOf(world);
+    assert.equal((await host.start()).state, 'valid');
+    assert.equal(host.policyLayers().organization.state, 'none');
+    assert.notEqual(levelOf(host, 'org/Internal'), 'local-only');
+  });
+  await withWorld(async (world) => {
+    await mkdir(organizationFolder(world), { recursive: true });
+    const text = rulesTextFor(issuerKey(), sectionsWith('org/Public', 'local-only'));
+    await writeFile(layerFile(world), text);
+    const host = hostOf(world);
+    assert.equal((await host.start()).state, 'valid');
+    assert.equal(host.policyLayers().organization.state, 'none', 'a layer with no pin is ignored');
+    assert.equal(levelOf(host, 'org/Public'), 'any-cloud');
+    assert.equal(await readFile(layerFile(world), 'utf8'), text, 'and left on disk as it was');
+  });
+});
+
+test('D-15: a rules file signed by this computer\'s key is refused unknown-key, on disk and through accept', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    const device = await loadDeviceIdentity(world.secrets);
+    assert.ok(device);
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    const own = fileTextOf(buildOrganizationLayer(device, sectionsWith('org/Public', 'any-cloud'), { now: FIXED_NOW + DAY_MS, days: 90 }));
+    await assert.rejects(host.acceptOrganizationFile(own, { wordsConfirmed: true }), (error: unknown) => {
+      assert.ok(error instanceof OrganizationStoreError);
+      assert.equal(error.reason, 'unknown-key');
+      assert.equal(error.refused, true);
+      assert.match(error.message, /^Nothing was changed/);
+      return true;
+    });
+    assert.ok((await installOperations(host, world)).includes('policy.organization-refused'));
+    assert.equal(levelOf(host, 'org/Internal'), 'local-only', 'the rules in force stay');
+
+    await writeFile(layerFile(world), own);
+    const next = hostOf(world);
+    const failed = failedOf(await next.start());
+    assert.equal(failed.reason, 'unknown-key');
+    assert.equal(failed.ownPolicy, undefined, 'never the personal layer\'s reset mark');
+    assert.ok(failed.sentence.includes(`Ask ${SECURITY_DESK} for the rules file`), failed.sentence);
+    assert.equal(next.policyLayers().failedLayer, 'organization');
+    const operations = await installOperations(next, world);
+    assert.equal(operations.filter((operation) => operation === 'policy.organization-refused').length, 2, 'the accept refusal, then the start once');
+  });
+});
+
+test('D-14: an older rules file is refused and recorded, and the rules in force stay', async () => {
+  await withWorld(async (world) => {
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    const host = await enrolled(world, { now: FIXED_NOW + 2 * DAY_MS });
+    const before = host.bundleState();
+    const bytes = await readFile(layerFile(world), 'utf8');
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    const older = rulesTextFor(issuerKey(), sectionsWith('org/Restricted', 'any-cloud'), { now: FIXED_NOW + DAY_MS });
+    await assert.rejects(host.acceptOrganizationFile(older, {}), (error: unknown) => {
+      assert.ok(error instanceof OrganizationStoreError);
+      assert.equal(error.reason, 'older');
+      assert.match(error.message, /^Nothing was changed\. These rules are older/);
+      return true;
+    });
+    assert.ok((await installOperations(host, world)).includes('policy.organization-refused'));
+    assert.deepEqual(host.bundleState(), before);
+    assert.equal(await readFile(layerFile(world), 'utf8'), bytes);
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin);
+  });
+});
+
+test('D-14, D-21: an older rules file put back on disk fails the whole policy closed as replaced, never the personal layer alone', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    const old = await readFile(layerFile(world), 'utf8');
+    world.clock.now = FIXED_NOW + DAY_MS;
+    assert.equal((await host.acceptOrganizationFile(rulesTextFor(issuerKey(), sectionsWith('org/Public', 'attested-cloud'), { now: FIXED_NOW + DAY_MS }), {})).state, 'valid');
+    await writeFile(layerFile(world), old);
+    const next = hostOf(world);
+    const failed = failedOf(await next.start());
+    assert.equal(failed.reason, 'replaced');
+    assert.equal(failed.ownPolicy, undefined);
+    assert.equal(failed.sentence.includes('Reset'), false, failed.sentence);
+    assert.equal(next.policyLayers().failedLayer, 'organization');
+    assert.notEqual(failed.sentence, BUNDLE_FAILURES.replaced, 'your organization\'s sentence, not the personal one');
+  });
+});
+
+test('D-14: a newer rules file signed by the pin is accepted as policy.organization-updated, and a crash between its file and the pin rolls forward at the next start', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const state = await host.acceptOrganizationFile(rulesTextFor(issuerKey(), sectionsWith('org/Public', 'attested-cloud'), { now: FIXED_NOW + DAY_MS }), {});
+    assert.equal(state.state, 'valid');
+    assert.equal(levelOf(host, 'org/Public'), 'attested-cloud');
+    assert.ok((await installOperations(host, world)).includes('policy.organization-updated'));
+
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    setOrganizationWriteProbe((step, kind) => { if (step === 'layer-written' && kind === 'update') throw new Error('the window closed'); });
+    await assert.rejects(host.acceptOrganizationFile(rulesTextFor(issuerKey(), sectionsWith('org/Public', 'local-only'), { now: FIXED_NOW + 2 * DAY_MS }), {}), /the window closed/);
+    setOrganizationWriteProbe(undefined);
+    assert.equal((pinOf(world)?.['pending'] as { kind?: string } | undefined)?.kind, 'update');
+
+    const next = hostOf(world);
+    assert.equal((await next.start()).state, 'valid');
+    assert.equal(levelOf(next, 'org/Public'), 'local-only', 'the newer rules are in force');
+    assert.ok((await installOperations(next, world)).filter((operation) => operation === 'policy.organization-updated').length >= 2);
+    const pin = pinOf(world);
+    assert.equal(pin?.['pending'], undefined, 'the pin was committed at start');
+    assert.equal(pin?.['lastIssuedAt'], new Date(FIXED_NOW + 2 * DAY_MS).toISOString());
+  });
+});
+
+test('D-14: a key handover needs the words again; afterwards only the new key\'s rules are accepted', async () => {
+  await withWorld(async (world) => {
+    const old = issuerKey('handover-old');
+    const fresh = issuerKey('handover-new');
+    const host = hostOf(world);
+    await host.start();
+    assert.equal((await host.acceptOrganizationFile(enrolmentTextFor(old), { wordsConfirmed: true })).state, 'valid');
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const handover = rotationTextFor(old, fresh, { now: FIXED_NOW + DAY_MS });
+    await assert.rejects(host.acceptOrganizationFile(handover, {}), (error: unknown) => error instanceof OrganizationStoreError && /^Nothing was changed:/.test(error.message));
+    assert.equal(pinOf(world)?.['publicKey'], old.publicKey, 'declining keeps the old key');
+
+    assert.equal((await host.acceptOrganizationFile(handover, { wordsConfirmed: true })).state, 'valid');
+    assert.equal(pinOf(world)?.['publicKey'], fresh.publicKey);
+    assert.equal(pinOf(world)?.['serial'], 2);
+    assert.ok((await installOperations(host, world)).includes('policy.organization-updated'));
+
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    await assert.rejects(host.acceptOrganizationFile(rulesTextFor(old, organizationSections(), { now: FIXED_NOW + 2 * DAY_MS }), {}), (error: unknown) => {
+      assert.ok(error instanceof OrganizationStoreError);
+      assert.equal(error.reason, 'unknown-key');
+      return true;
+    });
+    assert.equal((await host.acceptOrganizationFile(rulesTextFor(fresh, sectionsWith('org/Public', 'local-only'), { now: FIXED_NOW + 2 * DAY_MS }), {})).state, 'valid');
+    assert.equal(levelOf(host, 'org/Public'), 'local-only');
+  });
+});
+
+test('D-14: expired organization rules fail the whole policy closed with the date and the contact, and the clock set back does not revive them', async () => {
+  await withWorld(async (world) => {
+    await enrolled(world, { layerDays: 40 });
+    const ended = organizationEndedText(new Date(FIXED_NOW + 40 * DAY_MS).toISOString().slice(0, 10), SECURITY_DESK);
+
+    world.clock.now = FIXED_NOW + 5 * DAY_MS;
+    const early = hostOf(world);
+    assert.equal((await early.start()).state, 'valid');
+    const earlyView = early.policyLayers().organization;
+    assert.equal(earlyView.state === 'valid' && earlyView.endsSoon, false, 'more than 30 days left');
+
+    world.clock.now = FIXED_NOW + 15 * DAY_MS;
+    const soon = hostOf(world);
+    assert.equal((await soon.start()).state, 'valid', 'still valid within its last 30 days');
+    const soonView = soon.policyLayers().organization;
+    assert.equal(soonView.state === 'valid' && soonView.endsSoon, true);
+
+    world.clock.now = FIXED_NOW + 41 * DAY_MS;
+    const late = hostOf(world);
+    const failed = failedOf(await late.start());
+    assert.equal(failed.reason, 'expired');
+    assert.equal(failed.sentence, ended);
+    assert.equal(late.policyLayers().failedLayer, 'organization');
+
+    world.clock.now = FIXED_NOW + 5 * DAY_MS;
+    const setBack = hostOf(world);
+    assert.equal(failedOf(await setBack.start()).sentence, ended, 'the clock marker keeps the later time');
+  });
+});
+
+test('D-14: rules that expire while the window is open read as ended with your organization\'s sentence', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world, { layerDays: 40 });
+    world.clock.now = FIXED_NOW + 41 * DAY_MS;
+    const failed = failedOf(host.bundleState());
+    assert.equal(failed.sentence, organizationEndedText(new Date(FIXED_NOW + 40 * DAY_MS).toISOString().slice(0, 10), SECURITY_DESK));
+    assert.notEqual(failed.sentence, BUNDLE_FAILURES.expired);
+  });
+});
+
+test('D-21: a personal layer that fails under an organization layer fails closed with failedLayer personal', async () => {
+  await withWorld(async (world) => {
+    await enrolled(world);
+    const file = path.join(gateDir(world.storage), POLICY_BUNDLE_FILE);
+    const envelope = JSON.parse(await readFile(file, 'utf8')) as { payload: { expiresAt: string } };
+    envelope.payload.expiresAt = new Date(FIXED_NOW + 3000 * DAY_MS).toISOString();
+    await writeFile(file, JSON.stringify(envelope));
+    const next = hostOf(world);
+    const failed = failedOf(await next.start());
+    assert.equal(failed.reason, 'bad-signature');
+    assert.equal(failed.sentence, BUNDLE_FAILURES['bad-signature'], 'the personal sentence, whose fix is the personal reset');
+    assert.equal(next.policyLayers().failedLayer, 'personal');
+    assert.equal(next.policyLayers().organization.state, 'valid');
+  });
+});
+
+test('D-20: a wider personal value is listed in policyLayers().ignored and the policy stays valid', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    assert.equal(host.bundleState().state, 'valid');
+    const ignored = host.policyLayers().ignored;
+    assert.ok(ignored.some((entry) => entry.key.includes('org/Internal') && entry.layer === 'personal'), JSON.stringify(ignored));
+  });
+});
+
+test('D-57: a crash during a key handover, after its files and before the pin, finishes at the next start under the new key', async () => {
+  await withWorld(async (world) => {
+    const old = issuerKey('crash-old');
+    const fresh = issuerKey('crash-new');
+    const host = hostOf(world);
+    await host.start();
+    assert.equal((await host.acceptOrganizationFile(enrolmentTextFor(old), { wordsConfirmed: true })).state, 'valid');
+    world.clock.now = FIXED_NOW + DAY_MS;
+    setOrganizationWriteProbe((step, kind) => { if (step === 'layer-written' && kind === 'rotate') throw new Error('the window closed'); });
+    await assert.rejects(host.acceptOrganizationFile(rotationTextFor(old, fresh, { now: FIXED_NOW + DAY_MS }), { wordsConfirmed: true }), /the window closed/);
+    setOrganizationWriteProbe(undefined);
+    assert.equal(pinOf(world)?.['publicKey'], old.publicKey, 'the committed pin still names the old key');
+
+    const next = hostOf(world);
+    assert.equal((await next.start()).state, 'valid', 'the handover finished, never a lock-out');
+    assert.equal(pinOf(world)?.['publicKey'], fresh.publicKey);
+    assert.equal(pinOf(world)?.['pending'], undefined);
+    assert.ok((await installOperations(next, world)).includes('policy.organization-updated'));
+    const view = next.policyLayers().organization;
+    assert.equal(view.state === 'valid' ? view.name : undefined, EXAMPLE_ORGANIZATION.name, 'the name is read from the record the new key signed');
   });
 });
