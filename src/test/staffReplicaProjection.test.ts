@@ -247,7 +247,7 @@ test('a header edited by hand gives the same tamper reason against the projectio
     [original.replace('state: awaiting-decision', 'state: approved'), 'header-state'],
     [original.replace('version: 1', 'version: 2'), 'header-version'],
     [original.replace('owner: lead-planner', 'owner: plans-writer'), 'header-identity'],
-    [original.replace(/^guard: .*$/m, ''), 'header-verdict']
+    [original.replace(/^(guard: .*\n)/m, '$1tradecraft: { verdict: SIGN-OFF, at: 2026-11-18T12:00:05.000Z, report: tradecraft/concept-of-operations-v1.md }\n'), 'header-verdict']
   ];
   for (const [edited, reason] of edits) {
     assert.notEqual(edited, original);
@@ -268,9 +268,9 @@ test('a released body changed on disk reads as locked-changed against the projec
 });
 
 /**
- * What both sides' events say: type, product, version and, by type, the step and its states, the gate and verdict, the decision role and the person.
- * The run is excluded (the projection is given one run for every event; today's events carry the run of each step) and so is `at`, the time the
- * step was recorded, which the fold keeps per entry and today's host stamps from its clock.
+ * What both sides' events say: type, product, version and, by type, the step and its states, the gate and verdict, the decision role and the person,
+ * and the run and time of the step. Excluded: the ledger sequence number a product.state event carries (the fold numbers positions, not ledger lines)
+ * and the person's device fingerprint and role, which the record comparison above already covers.
  */
 function eventKey(event: StaffEvent): unknown {
   const value = event as unknown as Record<string, unknown>;
@@ -278,7 +278,7 @@ function eventKey(event: StaffEvent): unknown {
   const person = value.person as { name: string } | undefined;
   const actor = value.actor as { kind: string; member?: string; name?: string } | undefined;
   return {
-    ...pick('type', 'product', 'version', 'from', 'to', 'event', 'hash', 'gate', 'verdict', 'reasons', 'role', 'decision'),
+    ...pick('type', 'run', 'at', 'product', 'version', 'from', 'to', 'event', 'hash', 'gate', 'verdict', 'reasons', 'role', 'decision'),
     ...(actor ? { actor: actor.kind === 'person' ? actor.name : actor.member } : {}),
     ...(person ? { person: person.name } : {})
   };
@@ -290,7 +290,7 @@ for (const scenario of TWIN_SCENARIOS) {
     const events = projectStaffEvents(folded(twin).input, 'run-projected');
     assert.ok(events.length > 0);
     assert.deepEqual(events.map(eventKey), twin.legacyEvents.map(eventKey));
-    assert.ok(events.every((event) => event.run === 'run-projected'));
+    assert.ok(events.every((event) => event.run === TWIN_RUN), 'every step of the twin has a run, so the projected run is never used');
   });
 }
 

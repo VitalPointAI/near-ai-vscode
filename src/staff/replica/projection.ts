@@ -27,9 +27,11 @@ import type { VerifiedEntry } from '../../domain/replica/verify';
 import { actorForTransition, personForTransition } from '../../domain/replica/versions';
 import type { ProductVersions, VersionAct, VersionRecord, VersionView } from '../../domain/replica/versions';
 import { STAFF_LEVELS, STAFF_PROFILE_IDS } from '../../domain/staff/doctrine';
-import { apply, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash } from '../../domain/staff/ledger';
+import { eventsForTransition } from '../../domain/staff/events';
+import type { StaffEvent } from '../../domain/staff/events';
+import { apply, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash, projectHeader } from '../../domain/staff/ledger';
 import type { HistoryItem, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
-import { PRODUCT_KINDS } from '../../domain/staff/products';
+import { PRODUCT_KINDS, renderProductHeader } from '../../domain/staff/products';
 import type { ProductDependency } from '../../domain/staff/products';
 import type { ProductRecord, ReleaseEvent, StaffActor } from '../../domain/staff/release';
 
@@ -331,6 +333,38 @@ export function projectLedgerReplay(input: ProjectionInput): LedgerReplay {
     entries += item.steps.length;
   }
   return { products, entries, head: productsHead(input.fold, [...projected.values()].map((item) => item.stream)) };
+}
+
+/**
+ * A product file as today's host writes it (staffHost.ts writeHeader): the header the state projects, then the body, joined with nothing between. The
+ * body is the product's text from the fold's doc family. Today's header check (ledger.ts headerDisagreement) then compares the file with the same state.
+ */
+export function projectProductFile(state: ProductState, body: string): string {
+  return `${renderProductHeader(projectHeader(state))}${body}`;
+}
+
+/**
+ * The staff product events today's host sends for the same history (staffHost.ts transitionEvents): every projected step in the fold's order, each
+ * history item it added through eventsForTransition, with the gate and verdict of a verdict and the decision role the product waits on after the step.
+ * Each event carries its step's run (an agent's act carries one; a person's step takes the run of the open request or the last step, as today's host
+ * does) and `run` only for a step the fold knows no run for. Each step's time comes from the fold. A product the projection cannot vouch for
+ * (tampered) sends none, so no step the fold does not hold reaches the Staff Room.
+ */
+export function projectStaffEvents(input: ProjectionInput, run: string): StaffEvent[] {
+  const steps = [...projectAll(input).values()].filter((item) => item.state.tampered === undefined).flatMap((item) => item.steps).sort((a, b) => a.order - b.order);
+  const out: StaffEvent[] = [];
+  for (const step of steps) {
+    const event = step.entry.event;
+    const detail = event.type === 'verdict' ? { gate: event.gate, verdict: event.verdict } : {};
+    const decisionFor = step.after.record.decisionFor ?? (event.type === 'submit' ? event.decisionFor : undefined);
+    // The step's own run, as today's host sends it; `run` stands in for a step the fold knows no run for (today's host writes `person` there).
+    const stepRun = step.entry.run === 'person' ? run : step.entry.run;
+    for (const item of step.added) {
+      const stamped: HistoryItem = { ...item, run: stepRun };
+      out.push(...eventsForTransition(stepRun, step.entry.at, stamped, { ...detail, ...(decisionFor ? { decisionFor } : {}) }));
+    }
+  }
+  return out;
 }
 
 /** The digest of the streams that hold products: the fold's own digest when one stream does, a hash over the sorted pairs when several do. */
