@@ -25,7 +25,11 @@ description, and wins wherever the two seem to differ.
   sent. See [The outbound check](./policy.synced.md#the-outbound-check).
 - **Your organization's rules set the ceiling.** A signed policy file, kept in the extension's own
   storage and never in your project, sets the most the agent may do. Your settings can only narrow
-  it. See [Your policy file and decision records](./policy.synced.md#your-policy-file-and-decision-records).
+  it. Your organization can hand every computer its rules as a signed file, added with **NEAR AI:
+  Add Your Organization's Rules** after you compare twelve words with its security contact; your
+  own rules can then only narrow your organization's. **NEAR AI: Policy** shows the rules in force
+  and every proposed change before it is made, and **Reset my rules** there resets your own rules
+  only. See [Your policy file and decision records](./policy.synced.md#your-policy-file-and-decision-records).
 - **Labels decide where content may go.** Files, folders and projects carry labels, agents cannot
   read what your clearances do not cover, and a chat's label rises with what its agents read. See
   [Classification labels and routing](./policy.synced.md#classification-labels-and-routing).
@@ -35,7 +39,8 @@ description, and wins wherever the two seem to differ.
 Models run either on NEAR AI Cloud or on a model runtime you choose, including one on this
 computer. Some cloud models run inside attested private hardware; others are forwarded to another
 provider, and the model picker says which. Each cloud answer from the lead agent carries a trust
-badge that is set only from checks that actually ran. See
+badge that is set only from checks that actually ran, and a line that says where the answer ran,
+what was checked and what allowed it. See
 [Which models are private](./policy.synced.md#which-models-are-private) and
 [The trust badge on each answer](./policy.synced.md#the-trust-badge-on-each-answer).
 
