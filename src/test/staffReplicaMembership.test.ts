@@ -3,21 +3,22 @@
 // refused in plain words; removing a member or a device, or lowering a clearance, moves the affected cells to new keys; and the lead and the deputy
 // keep the roster whole through a split, a deputy and a handover.
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createPrivateKey, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test, { after } from 'node:test';
 import type { ScaleTable } from '../domain/gate/labels';
-import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, sealLabel, wrapEpochKey } from '../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
+import { clientIdOf } from '../domain/replica/clientIds';
 import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
-import { MEMBER_REFUSALS, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
+import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, leadAt, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
-import { epochAt } from '../domain/replica/rosterCells';
+import { committedGrant, epochAt } from '../domain/replica/rosterCells';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import type { SecretStorageLike } from '../services/auth';
-import { JOIN_SECRET_PREFIX } from '../staff/replica/keyring';
+import { ENCRYPTION_KEY_SECRET, JOIN_SECRET_PREFIX } from '../staff/replica/keyring';
 import {
   MEMBERSHIP_REFUSALS, addMyOtherMachine, admitJoinRequest, cellOrderHook, chooseRosterBranch, handOverLead, inviteToProject, joinFromInvite, nameDeputy,
   openWelcome, removeFromProject, reviewJoinRequest, updateMember, voidInvite
@@ -135,7 +136,7 @@ async function createCell(lead: Lead, label: unknown, to: readonly string[]): Pr
   const key = newEpochKey();
   const wraps = to.map((writer) => ({ writer, wrap: wrapEpochKey({ cell, epoch: 1, writer, recipient: x25519At(at.roster.members, writer, at.position) as string, epochKey: key }) }));
   const founding = buildGrant(lead.p.signer, { cell, epoch: 1, roster: at.hash, labelSealed: sealLabel(key, cell, 1, label), wraps });
-  await lead.p.keys.addOwn(cell, 1, key);
+  await lead.p.keys.addOwn(cell, 1, key, grantHash(founding));
   assert.ok(!isProjectRefused(await lead.p.putGrants([founding])));
   const written = await lead.p.appendOwn('cell.create', { cell, epoch: 1, grant: grantHash(founding) }, { roster: at.hash });
   assert.ok('ok' in written);
@@ -164,7 +165,10 @@ function secretsOf(...installs: Install[]): string[] {
   for (const at of installs) {
     for (const [name, value] of at.secrets.values) {
       found.push(value);
-      if (name.startsWith('nearAi.staff.epochKeys.')) for (const item of (JSON.parse(value) as { keys: Array<[string, number, string]> }).keys) found.push(item[2]);
+      if (!name.startsWith('nearAi.staff.epochKeys.')) continue;
+      const ring = JSON.parse(value) as { keys: Array<[string, number, string]>; own: Array<[string, number, string, string]> };
+      for (const item of ring.keys) found.push(item[2]);
+      for (const item of ring.own) found.push(item[3]);
     }
   }
   return found;
@@ -501,9 +505,10 @@ test('removing a member writes member.remove and one cell.rekey for each cell it
   const view = rosterView(roster);
   assert.deepEqual(view.cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter]);
   assert.deepEqual(view.cellGrantees?.(base, hash), [t.lead.p.deviceWriter, t.n.writer].sort());
-  // Every grant reaches M's computer and N's: M opens nothing new, N opens the new base key and nothing of X.
-  assert.ok(!isProjectRefused(await t.m.p.putGrants(grantsOn(t.lead.at))));
-  assert.ok(!isProjectRefused(await t.n.p.putGrants(grantsOn(t.lead.at))));
+  // The roster and every grant reach M's computer and N's: M opens nothing new, N opens the new base key and nothing of X. A grant opens only once
+  // the roster entry that commits to it has arrived too (CR-01), so this carries both, as a transport does.
+  await sync(t.lead, t.m);
+  await sync(t.lead, t.n);
   assert.ok(t.m.p.keys.epochKey(t.x, 1) !== undefined);
   assert.equal(t.m.p.keys.epochKey(t.x, 2), undefined);
   assert.equal(t.m.p.keys.epochKey(base, 2), undefined);
@@ -526,7 +531,7 @@ test('revoking one device rekeys only that device\'s cells; the member\'s other 
   assert.equal(rosterView(roster).isAdmitted(t.m.writer, hash), true);
   assert.equal(epochAt(roster.cells, t.z, position), 1, 'Z not rekeyed');
   assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.m.writer].sort());
-  for (const at of [t.m, second]) assert.ok(!isProjectRefused(await at.p.putGrants(grantsOn(t.lead.at))));
+  for (const at of [t.m, second]) await sync(t.lead, at);
   assert.ok(t.m.p.keys.epochKey(t.x, 2) !== undefined, 'M\'s first device opens the new key');
   assert.equal(second.p.keys.epochKey(t.x, 2), undefined, 'the revoked device does not');
   assert.equal(second.p.keys.epochKey(base, 2), undefined);
@@ -545,7 +550,7 @@ test('lowering N\'s clearance below X\'s label rekeys X without N, and leaves th
   assert.deepEqual(memberAt(roster.members, t.n.member, position)?.clearance, OFFICIAL);
   assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.m.writer].sort());
   assert.equal(epochAt(roster.cells, base, position), 1);
-  assert.ok(!isProjectRefused(await t.n.p.putGrants(grantsOn(t.lead.at))));
+  await sync(t.lead, t.n);
   assert.equal(t.n.p.keys.epochKey(t.x, 2), undefined);
   // A change that is not about clearance rekeys nothing, and a change of nothing is refused.
   const renamed = ok(await updateMember(t.lead.host, { member: t.n.member, name: 'Nell P' }), 'rename');
@@ -564,7 +569,7 @@ test('raising a clearance writes grants for the newly cleared cells with every e
   assert.deepEqual(raised.rekeyed, []);
   const { roster, hash } = await head(t.lead.p);
   assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.n.writer].sort());
-  assert.ok(!isProjectRefused(await t.n.p.putGrants(grantsOn(t.lead.at))));
+  await sync(t.lead, t.n);
   assert.deepEqual(t.n.p.keys.epochKey(t.x, 1), t.lead.p.keys.epochKey(t.x, 1));
   assert.deepEqual(t.n.p.keys.epochKey(t.x, 2), t.lead.p.keys.epochKey(t.x, 2));
   assert.equal(t.n.p.keys.epochKey(t.z, 1), undefined, 'Z stays out of reach');
@@ -720,6 +725,118 @@ test('nameDeputy writes deputy.name; the deputy cannot name a deputy; a planned 
   // The lead can hand over for any reason; naming the lead or an unknown member is refused.
   assert.equal((await handOverLead(t.lead.host, { to: 'mbr-lead', reason: 'planned' })).reason, 'names-the-lead');
   assert.equal((await nameDeputy(t.lead.host, 'mbr-nobody')).reason, 'member-unknown');
+});
+
+// ---- which key a device writes with (CR-01, MJ-04) -------------------------------------------------------------------------------------------------
+
+/** A doc.client of the device's own slot in the base cell: an entry any admitted device may write, sealed under the base cell's current key. */
+async function writeInBase(p: ReplicaProject): Promise<{ hash: string; entry: unknown; blobs: Array<{ hash: string; bytes: string }>; epoch: number }> {
+  const { roster, position } = await head(p);
+  const slot = deviceAt(roster.members, p.deviceWriter, position)?.slot as number;
+  const written = await p.appendOwn('doc.client', { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } });
+  assert.ok('ok' in written, 'the entry is written');
+  return { hash: written.hash, entry: written.built.entry, blobs: written.built.blobs, epoch: written.built.entry.header.epoch };
+}
+
+/** Whether `reader` applies the entry once it has it: it opened the body with its own key for that epoch. */
+async function reads(reader: ReplicaProject, written: { hash: string; entry: unknown; blobs: Array<{ hash: string; bytes: string }> }): Promise<boolean> {
+  assert.ok(!isProjectRefused(await reader.ingestForeign([written.entry], written.blobs)));
+  return (await reader.state()).fold.applied.includes(written.hash);
+}
+
+test('CR-01: a grant planted by a member who may not change the roster, for the next epoch of the base cell, is never opened; after the real rekey this device writes with the committed key and the lead reads it', async () => {
+  const t = await team();
+  const base = t.lead.p.projectId;
+  // M is a member, not a roster writer. Before being removed, M plants a grant of the base cell's next epoch on N's computer, wrapping a key M knows.
+  const at = await head(t.n.p);
+  const planted = newEpochKey();
+  const recipient = x25519At(at.roster.members, t.n.writer, at.position) as string;
+  const forged = buildGrant(t.m.p.signer, { cell: base, epoch: 2, roster: at.hash, labelSealed: '', wraps: [{ writer: t.n.writer, wrap: wrapEpochKey({ cell: base, epoch: 2, writer: t.n.writer, recipient, epochKey: planted }) }] });
+  const stored = await t.n.p.putGrants([forged]);
+  assert.ok(!isProjectRefused(stored));
+  assert.equal(stored.opened, 0, 'the planted grant is stored, never opened');
+  assert.equal(t.n.p.keys.epochKey(base, 2), undefined);
+  // The lead removes M, which moves the base cell to epoch 2, and N receives the roster and the grants.
+  ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove M');
+  await sync(t.lead, t.n);
+  const real = t.lead.p.keys.epochKey(base, 2);
+  assert.ok(real !== undefined);
+  assert.deepEqual(t.n.p.keys.epochKey(base, 2), real, 'N holds the key of the grant the roster committed to');
+  assert.equal(real.equals(planted), false);
+  assert.ok((await t.n.p.state()).roster.refused.some((item) => item.hash === grantHash(forged) && item.kind === 'grant'), 'the roster refuses the planted grant');
+  // N writes in the base cell at the new epoch, with the committed key: the lead reads it, and M (who knows the planted key) never could.
+  const written = await writeInBase(t.n.p);
+  assert.equal(written.epoch, 2);
+  assert.equal(await reads(t.lead.p, written), true, 'the lead reads what N wrote');
+});
+
+test('MJ-04: a rekey whose entry is not written leaves its key unused; the next rekey of the cell commits a new key, the lead writes with it and a remaining member reads it', async () => {
+  const lead = await founded();
+  const a = await bringIn(lead, 'a', 'Ari Analyst', OFFICIAL);
+  const b = await bringIn(lead, 'b', 'Bo Planner', OFFICIAL);
+  const c = await bringIn(lead, 'c', 'Cy Liaison', OFFICIAL);
+  const base = lead.p.projectId;
+  // The first removal writes member.remove, then the cell.rekey write fails (another window, a full disk): its new key and grant are already kept.
+  const appendOwn = lead.p.appendOwn.bind(lead.p);
+  const refusal: ProjectRefused = { refused: 'store-refused', message: 'The test refused this write.' };
+  lead.p.appendOwn = (kind, data, options) => (kind === 'cell.rekey' ? Promise.resolve(refusal) : appendOwn(kind, data, options));
+  let failed: MembershipResult;
+  try {
+    failed = await removeFromProject(lead.host, { member: a.member });
+  } finally {
+    lead.p.appendOwn = appendOwn;
+  }
+  assert.equal(failed.ok, false, 'the removal reports the failed rekey');
+  const between = await head(lead.p);
+  assert.equal(epochAt(between.roster.cells, base, between.position), 1, 'the base cell was not rekeyed');
+  const staleGrants = grantsOn(lead.at).filter((signed) => { const read = readGrant(signed); return read.ok && read.grant.cell === base && read.grant.epoch === 2; });
+  assert.equal(staleGrants.length, 1, 'the failed rekey left its grant on disk');
+  // The next removal rekeys the base cell to the same epoch, with a new key.
+  ok(await removeFromProject(lead.host, { member: b.member }), 'remove B');
+  const { roster, position } = await head(lead.p);
+  assert.equal(epochAt(roster.cells, base, position), 2);
+  const committed = grantsOn(lead.at).find((signed) => grantHash(signed) === committedGrant(roster.cells, base, 2));
+  const read = readGrant(committed);
+  assert.ok(read.ok, 'the committed grant is on disk');
+  assert.notEqual(read.hash, grantHash(staleGrants[0]));
+  const wrap = read.grant.wraps.find((item) => item.writer === c.writer);
+  assert.ok(wrap !== undefined, 'C is on the new epoch');
+  const cPrivate = createPrivateKey({ key: Buffer.from(c.at.secrets.values.get(ENCRYPTION_KEY_SECRET) as string, 'base64'), format: 'der', type: 'pkcs8' });
+  const committedKey = unwrapEpochKey({ cell: base, epoch: 2, writer: c.writer, privateKey: cPrivate, wrap: wrap.wrap });
+  assert.ok(committedKey !== undefined);
+  assert.deepEqual(lead.p.keys.epochKey(base, 2), committedKey, 'the lead holds the committed key, not the key of the failed rekey');
+  await sync(lead, c);
+  assert.deepEqual(c.p.keys.epochKey(base, 2), committedKey);
+  // The lead writes in the base cell at epoch 2 and C reads it.
+  const written = await writeInBase(lead.p);
+  assert.equal(written.epoch, 2);
+  assert.equal(await reads(c.p, written), true, 'C reads what the lead wrote after the rekey');
+});
+
+test('a person admitted after the base cell was rekeyed reads the roster through every epoch from the grants placed at their admission, and a planted grant does not change which key they hold, even with the cache gone', async () => {
+  const t = await team();
+  const base = t.lead.p.projectId;
+  ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove M');
+  const p = await bringIn(t.lead, 'p', 'Pat Late', OFFICIAL);
+  const lead = await head(t.lead.p);
+  const mine = await head(p.p);
+  assert.deepEqual(mine.roster.positions, lead.roster.positions, 'the late joiner reaches the lead\'s roster head');
+  for (const epoch of [1, 2]) assert.deepEqual(p.p.keys.epochKey(base, epoch), t.lead.p.keys.epochKey(base, epoch), `base epoch ${epoch}`);
+  // M, removed, plants grants of both base epochs wrapped to the late joiner, and the joiner's cached keys are lost.
+  const planted = newEpochKey();
+  const recipient = x25519At(mine.roster.members, p.writer, mine.position) as string;
+  const forged = [1, 2].map((epoch) => buildGrant(t.m.p.signer, { cell: base, epoch, roster: mine.hash, labelSealed: '', wraps: [{ writer: p.writer, wrap: wrapEpochKey({ cell: base, epoch, writer: p.writer, recipient, epochKey: planted }) }] }));
+  assert.ok(!isProjectRefused(await p.p.putGrants(forged)));
+  p.at.secrets.values.delete(`nearAi.staff.epochKeys.${base}`);
+  const reopened = project(await ReplicaProject.open(p.at.root, p.at.deps));
+  assert.equal(reopened.keys.size, 0);
+  const again = await head(reopened);
+  assert.deepEqual(again.roster.positions, lead.roster.positions);
+  for (const epoch of [1, 2]) assert.deepEqual(reopened.keys.epochKey(base, epoch), t.lead.p.keys.epochKey(base, epoch), `base epoch ${epoch} after the cache was lost`);
+  // What the late joiner writes, the lead reads.
+  const written = await writeInBase(reopened);
+  assert.equal(written.epoch, 2);
+  assert.equal(await reads(t.lead.p, written), true);
 });
 
 test('SECURITY.md has the invitations subsection inside the multi-user section, with no em-dash', () => {
