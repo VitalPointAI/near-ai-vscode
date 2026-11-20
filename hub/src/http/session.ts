@@ -14,8 +14,8 @@
 // whose body is still arriving when it passes (an enrolment of up to 4 MiB on a slow link) is read to the end under the server's minimum-rate rule
 // and answered, and then the connection is closed unless that request opened a session (WR-03).
 //
-// Bounds: one open challenge per socket (a new challenge replaces the old one), single use, 60 seconds; at most 8 tokens per device and 10,000 in
-// all, the oldest dropped first. Tokens, challenges and keying material are never logged and never echoed.
+// Bounds: one open challenge per socket (a new challenge replaces the old one), single use, 60 seconds; at most 8 tokens per device in each project
+// and 10,000 in all, the oldest dropped first. A device found no longer admitted loses its tokens for that project only (IN-04). Tokens, challenges and keying material are never logged and never echoed.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type http from 'node:http';
 import type { TLSSocket } from 'node:tls';
@@ -173,9 +173,9 @@ export class SessionRegistry {
     return { ok: true, session, body: { project: session.project, token, expiresAt: new Date(session.expiresAt).toISOString() } };
   }
 
-  /** Files a token, dropping the device's oldest past 8 and the hub's oldest past 10,000. */
+  /** Files a token, dropping the device's oldest in this project past 8 and the hub's oldest past 10,000. */
   private keep(id: string, record: TokenRecord): void {
-    const mine = [...this.tokens.entries()].filter(([, held]) => held.writer === record.writer);
+    const mine = [...this.tokens.entries()].filter(([, held]) => held.writer === record.writer && held.project === record.project);
     for (const [old] of mine.slice(0, Math.max(0, mine.length - (TOKENS_PER_DEVICE - 1)))) this.tokens.delete(old);
     while (this.tokens.size >= MAX_TOKENS) {
       const oldest = this.tokens.keys().next();
@@ -205,7 +205,7 @@ export class SessionRegistry {
     const standing = roster.standing(record.writer);
     if (standing === 'quarantined') return refuseAuth('quarantined');
     if (standing !== 'admitted') {
-      this.revokeDevice(record.writer);
+      this.revokeDevice(record.writer, record.project);
       return refuseAuth('revoked');
     }
     return { ok: true, session: { project: record.project, writer: record.writer, expiresAt: record.expiresAt } };
@@ -267,11 +267,11 @@ export class SessionRegistry {
     this.deadlines.delete(socket);
   }
 
-  /** Drops every token of a device. Returns how many were dropped. */
-  revokeDevice(writer: string): number {
+  /** Drops the tokens of a device: those for one project when it is named, every one otherwise. Returns how many were dropped. */
+  revokeDevice(writer: string, project?: string): number {
     let dropped = 0;
     for (const [id, record] of this.tokens) {
-      if (record.writer === writer) {
+      if (record.writer === writer && (project === undefined || record.project === project)) {
         this.tokens.delete(id);
         dropped += 1;
       }

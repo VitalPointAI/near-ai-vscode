@@ -302,6 +302,45 @@ test('a device holds at most 8 tokens: the ninth session drops the oldest token'
     assert.equal((await connection.get(headsOf(world.project), tokens[1])).status, 200);
   }));
 
+/** A second project on the same hub with the same analyst device (device keys follow their label) as a member. */
+async function secondProject(hub: Hub, analyst: WorldDevice): Promise<HubWorld> {
+  const world = createHubWorld({ projectLabel: 'eastwind' });
+  world.admitHub(hub.identity);
+  const same = world.device('ANALYST', 'mbr-analyst');
+  assert.equal(same.writer, analyst.writer, 'the analyst is one device in both projects');
+  world.admitMember(same);
+  await hub.enrolProject(world, { direct: true });
+  return world;
+}
+
+test('revoked in one project: the device\'s token for another project it still belongs to keeps working', () =>
+  withHub({}, async (hub) => {
+    const { world, analyst } = await enrolled(hub);
+    const other = await secondProject(hub, analyst);
+    const inOther = await hub.openSession(analyst, other.project);
+    const inFirst = await hub.openSession(analyst, world.project);
+    const lead = await hub.openSession(world.lead, world.project);
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: analyst.member, writer: analyst.writer });
+    const appended = await lead.connection.post(`/v1/projects/${world.project}/append`, { entries: [revoke.entry] }, lead.token);
+    assert.deepEqual(appended.json().accepted, [revoke.hash]);
+    unauthorised(await inFirst.connection.get(headsOf(world.project), inFirst.token), 'revoked');
+    const stillThere = await inOther.connection.get(headsOf(other.project), inOther.token);
+    assert.equal(stillThere.status, 200, stillThere.text);
+  }));
+
+test('the 8 tokens a device holds are counted per project: a session in one project never drops a token of another', () =>
+  withHub({}, async (hub) => {
+    const { world, analyst } = await enrolled(hub);
+    const other = await secondProject(hub, analyst);
+    const connection = await hub.connect();
+    const tokens: string[] = [];
+    for (let index = 0; index < TOKENS_PER_DEVICE; index += 1) tokens.push((await hub.openSession(analyst, other.project, connection)).token);
+    await hub.openSession(analyst, world.project);
+    assert.equal(hub.sessions.size, TOKENS_PER_DEVICE + 1);
+    const oldest = await connection.get(headsOf(other.project), tokens[0]);
+    assert.equal(oldest.status, 200, oldest.text);
+  }));
+
 // ---- The authentication deadline (D-35) ----
 
 test('deadline: a connection that sends nothing is closed when the deadline passes', () =>
