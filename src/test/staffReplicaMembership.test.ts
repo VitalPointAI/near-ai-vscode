@@ -460,9 +460,9 @@ test('no message, file name or result field contains a join secret, a key or the
   for (const result of results) {
     const text = visible(result);
     for (const value of forbidden) assert.ok(!text.includes(value), `a result field holds a secret: ${result.message}`);
-    assert.ok(!/—/.test(result.message), 'no em-dash');
+    assert.ok(!/\u2014/.test(result.message), 'no em-dash');
   }
-  for (const message of Object.values(MEMBERSHIP_REFUSALS)) assert.ok(!/—/.test(message));
+  for (const message of Object.values(MEMBERSHIP_REFUSALS)) assert.ok(!/\u2014/.test(message));
 });
 
 test('only the lead or the deputy writes the roster: a member\'s invite, void, removal and update are refused not-a-roster-writer and change nothing', async () => {
@@ -730,5 +730,5 @@ test('SECURITY.md has the invitations subsection inside the multi-user section, 
   const next = text.indexOf('\n## ', section + 5);
   assert.ok(next === -1 || heading < next, 'inside the multi-user section');
   assert.equal(text.split('### Invitations, join secrets and the safety code').length - 1, 1);
-  assert.ok(!/—/.test(text));
+  assert.ok(!/\u2014/.test(text));
 });
