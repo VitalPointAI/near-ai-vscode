@@ -15,103 +15,11 @@ import { redactSecrets } from '../domain/redaction';
 import { currentSpendTag, SpendKind, SpendTag, usdToNano } from './spendLedger';
 import type { SpendSink } from './spendAccount';
 import type { BillingCostsAnswer } from './spendReconciler';
-import type { CapabilityMetadataStatus, CapabilityModality, CapabilityPrivacyBoundary, SkillCapability, ProviderOperation } from '../domain/capabilities';
+import type { CapabilityPrivacyBoundary, SkillCapability, ProviderOperation } from '../domain/capabilities';
+import type { AgentMessage, ChatMessage, CompletionEvent, ModelInfo, ToolCall, ToolDefinition, UsageMetadata, VerificationStatus } from '../domain/provider/messages';
+import type { EndpointFacts, ModelEndpoint } from '../domain/provider/endpoint';
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-}
-
-/** A tool call as the OpenAI-compatible API returns it; `arguments` is a JSON string. */
-export interface ToolCall {
-  id: string;
-  type: 'function';
-  function: { name: string; arguments: string };
-}
-
-/** Conversation messages for tool-calling runs. */
-export type AgentMessage =
-  | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }
-  | { role: 'tool'; tool_call_id: string; content: string };
-
-export interface ToolDefinition {
-  type: 'function';
-  function: { name: string; description: string; parameters: Record<string, unknown> };
-}
-
-export type CompletionEvent =
-  | { type: 'text'; text: string }
-  | { type: 'reasoning'; text: string }
-  /** A tool call's name or arguments arrived: the reply is still making progress even though no text streams (PERF-03 stall detection). */
-  | { type: 'progress' }
-  | { type: 'done'; message: Extract<AgentMessage, { role: 'assistant' }>; finishReason: string; usage: UsageMetadata };
-
-export interface ModelInfo {
-  id: string;
-  name?: string;
-  provider?: string;
-  contextLength?: number;
-  maxOutputTokens?: number;
-  inputPricePerMillion?: number;
-  outputPricePerMillion?: number;
-  cachePricePerMillion?: number;
-  imagePricePerUnit?: number;
-  videoPricePerUnit?: number;
-  requestPricePerUnit?: number;
-  supportsReasoning?: boolean;
-  inputModalities?: CapabilityModality[];
-  outputModalities?: CapabilityModality[];
-  architectureInputModalities?: CapabilityModality[];
-  architectureOutputModalities?: CapabilityModality[];
-  supportedFeatures?: SkillCapability[];
-  providerOperations?: ProviderOperation[];
-  readiness?: 'ready' | 'not-ready' | 'unknown';
-  privacyBoundary?: CapabilityPrivacyBoundary;
-  locality?: 'cloud' | 'local' | 'hybrid' | 'unknown';
-  verificationStatus?: VerificationStatus;
-  attestationStatus?: string;
-  /** NEAR's model list says this model runs in a TEE whose attestation can be checked (`attestationSupported` in /model/list metadata). */
-  attestationSupported?: boolean;
-  /** Where NEAR sends the request when it does not run the model in its own TEE (e.g. "anthropic", "openrouter.ai"). */
-  forwardedTo?: string;
-  cancellationSupported?: boolean;
-  publicationSupported?: boolean;
-  capabilityMetadataStatus?: CapabilityMetadataStatus;
-  fetchedAt?: string;
-  capabilitySource?: string;
-}
-
-export type VerificationStatus = 'verified' | 'unverified' | 'unknown';
-
-export interface UsageMetadata {
-  requestId?: string;
-  provider?: string;
-  inputTokens?: number;
-  /** Of inputTokens, how many NEAR served from its prompt cache (billed at the cache-read price). */
-  cachedInputTokens?: number;
-  outputTokens?: number;
-  estimatedCostUsd?: number;
-  actualCostUsd?: number;
-  verificationStatus: VerificationStatus;
-  latencyMs: number;
-  /** Time from sending the request to the first streamed token (queueing and prompt processing). */
-  firstTokenMs?: number;
-  /** Of outputTokens, reasoning, when NEAR reports it (completion_tokens_details.reasoning_tokens). */
-  reasoningTokens?: number;
-  /** Characters of reasoning and of answer (text plus tool-call arguments) streamed, to estimate the reasoning share when it is not reported. */
-  reasoningChars?: number;
-  answerChars?: number;
-  /** Hashes for checking NEAR's signature on this completion later. */
-  evidence?: ResponseEvidence;
-  /** The connection binding fact the route check read for this request, when the client has a binding source (plan 25 gives NEAR clients one). */
-  connection?: ConnectionBindingFact;
-  /**
-   * True only when the request went over a connection pinned to that fact's key, which the route check allows only while the fact is fresh and bound
-   * (D-50). A bound fact alone does not prove the connection: a request sent without the pin may have reached another server (CLAS-08).
-   */
-  connectionPinned?: true;
-}
+export type { AgentMessage, ChatMessage, CompletionEvent, ModelInfo, ToolCall, ToolDefinition, UsageMetadata, VerificationStatus } from '../domain/provider/messages';
 
 export interface ImageGenerationOptions {
   count?: number;
@@ -432,7 +340,7 @@ export class SpendLimitError extends Error {
   }
 }
 
-export class NearAiClient {
+export class NearAiClient implements ModelEndpoint {
   private readonly fetchFn: typeof fetch;
   private readonly models = new Map<string, ModelInfo>();
   private pricingEndpointAbsent = false;
@@ -478,6 +386,9 @@ export class NearAiClient {
 
   /** This client's endpoint is NEAR AI Cloud's own, where a TEE model's answers can be checked (the trust badge reads it, CLAS-08). */
   public get nearEndpoint(): boolean { return isNearCloudEndpoint(this.options.baseUrl); }
+
+  /** What the policy layer may know about this endpoint (D-43): its route, base URL and whether it is NEAR AI Cloud's own. Never the key or headers. */
+  public get facts(): EndpointFacts { return Object.freeze({ ...(this.options.route === undefined ? {} : { route: this.options.route }), baseUrl: this.options.baseUrl, nearEndpoint: isNearCloudEndpoint(this.options.baseUrl) }); }
 
   /** The cached catalog entry of a model, or undefined when the catalog has not listed it. Never fetches. */
   public catalogEntry(id: string): ModelInfo | undefined { return this.models.get(id); }

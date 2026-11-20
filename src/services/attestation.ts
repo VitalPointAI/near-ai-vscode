@@ -16,8 +16,9 @@ import { createHash, createPublicKey, randomBytes, verify, X509Certificate, type
 // code the enclave runs (its measurements against NEAR's published build), and NVIDIA's verdict.
 // Results say so explicitly.
 
-/** What a completion keeps so it can be verified later. Hashes only; no prompt or answer text. */
-export interface ResponseEvidence { chatId: string; requestHash: string; responseHash: string }
+/** What a completion keeps so it can be verified later (moved to src/domain/provider/messages.ts, D-43). */
+export type { ResponseEvidence } from '../domain/provider/messages';
+import type { ResponseEvidence } from '../domain/provider/messages';
 
 export interface VerificationResult {
   outcome: 'signed' | 'failed' | 'unavailable';
