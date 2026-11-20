@@ -60,6 +60,12 @@ export const NOT_SHARED_TEXT = 'This folder holds no shared staff project, so no
 export const WORDS_DIFFER_TEXT = 'Nobody was admitted, and nothing was changed. Do not admit a request whose words differ, because someone else may have made it. Ask the person to make a new join request from your invitation, or cancel the invitation with Staff: Remove from Staff Project.';
 export const WORDS_NOT_CONFIRMED_TEXT = 'Nobody was admitted, because the six words were not confirmed. Nothing was changed. Compare the words with the person out loud or in person, then run Staff: Admit to Staff Project again. If they do not match, ask the person for a new join request, or cancel the invitation with Staff: Remove from Staff Project.';
 /** What to do when an invitation file could not be saved after the roster recorded the invitation: save it again, or cancel it and invite again. */
+/**
+ * When a join request could not be saved. Running Join again is safe after this partial run: the request never left this computer, the invitation
+ * it kept is stored once by its content (a second run finds the same record), and this computer's keys stay the same. The new run makes a new
+ * request with new six words, and only the new one is sent.
+ */
+export const JOIN_NOT_SAVED_TEXT = 'Nothing was sent and the project was not changed, so it is safe to run Staff: Join Staff Project again with the same invitation and choose another place. It makes a new join request with new six words; send only the new one.';
 export const INVITE_NOT_SAVED_TEXT = 'To save it again, run Staff: Remove from Staff Project on this computer and pick Save the invitation again; nothing in the project changes. Or cancel it there and invite them again.';
 export const INVITE_SAVE_AGAIN_PREFIX = 'Save the invitation for ';
 export const INVITE_INSIDE_PROJECT_TEXT = 'The invitation holds a one-time secret, so it is not saved inside the project folder, where git could commit it. Nothing was changed. Choose a folder outside the project.';
@@ -427,7 +433,7 @@ async function joinCommand(context: StaffCommandContext): Promise<void> {
   try {
     await saveFile(target, result.file?.text ?? '');
   } catch (error) {
-    warn(`The join request could not be saved at ${target} (${error instanceof Error ? error.message : String(error)}). Run Staff: Join Staff Project again and choose another place.`);
+    warn(`The join request could not be saved at ${target} (${error instanceof Error ? error.message : String(error)}). ${JOIN_NOT_SAVED_TEXT}`);
     return;
   }
   // The six words stay on screen in a modal dialog while the person reads them to the lead.

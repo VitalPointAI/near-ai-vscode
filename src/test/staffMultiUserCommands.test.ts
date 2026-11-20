@@ -916,3 +916,32 @@ test('a secret file is created 0600 from the start, replaces a file chosen in th
   await assert.rejects(() => multi.saveSecretFile(path.join(dir, 'missing', 'invitation'), secret));
   assert.deepEqual(readdirSync(dir).sort(), before);
 });
+
+test('a join request that could not be saved says running Join again is safe, and it is: the rerun keeps one invitation record, makes a new request with new words, and that request is admitted', async () => {
+  const first = await lead('join-unsaved-lead');
+  const invitation = await inviteBy(first, 'J. Example');
+  const joiner = install('join-unsaved');
+  use(joiner);
+  // The first save fails: the place chosen does not exist.
+  stub.openDialogAnswers.push([invitation]);
+  stub.inputAnswers.push('J. Example');
+  stub.saveDialogAnswers.push(path.join(joiner.out, 'missing', 'join'));
+  await run(C.join);
+  const unsaved = lastNotification();
+  assert.equal(unsaved.level, 'warn');
+  assert.ok(unsaved.message.includes(multi.JOIN_NOT_SAVED_TEXT), unsaved.message);
+  assert.deepEqual(readdirSync(joiner.out), [], 'no join request was saved anywhere');
+  const project = (JSON.parse(readFileSync(invitation, 'utf8')) as { payload: { project: string } }).payload.project;
+  const { pendingInvitationsDir } = await import('../staff/replica/membership');
+  const pendingDir = (): string[] => readdirSync(pendingInvitationsDir(joiner.storage, project)).sort();
+  const keptBefore = pendingDir();
+  assert.equal(keptBefore.length, 1, 'the invitation is kept once');
+  assert.equal(existsSync(path.join(joiner.root, REPLICA_PROJECT_FILE)), false, 'the project folder was not changed');
+  // The rerun is safe: the same invitation record, a new request, and the lead admits it.
+  const { request, words } = await joinBy(joiner, invitation, 'J. Example');
+  assert.deepEqual(pendingDir(), keptBefore, 'still one invitation record');
+  assert.equal(words.length, 6);
+  await admitBy(first, request, multi.SIX_WORDS_MATCH, path.join(first.out, 'welcome-j'));
+  assert.match(lastNotification().message, /J\. Example/);
+  assert.equal(multi.JOIN_NOT_SAVED_TEXT.includes('—'), false);
+});

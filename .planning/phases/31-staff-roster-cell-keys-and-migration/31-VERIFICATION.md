@@ -174,12 +174,12 @@ human_verification:
     expected: "Both exit 0 (31-23 truth: the full suite and release check pass once at the end of the phase)."
     result: "Done (see Test runs at the end): full suite 5218 tests, 5210 pass, 0 fail, 8 skipped; verify:release passed; e2e passed in CI on the PR head; local e2e could not start because /tmp was out of inodes."
     why_human: "The verifier was told not to run them; the orchestrator is running them now."
-  - test: "Owner decision: labelled products are migrated into the base cell (see Gaps Summary, item W-1)."
-    expected: "Decide whether Make Multi-User must place each labelled product (and its share of the legacy ledger) in its label cell, or refuse/warn when a product's label is above the lowest admitted clearance, before Phase 32/33 deliver base-cell entries to members."
-    why_human: "Design decision with confidentiality impact; not testable as a pass/fail today because no transport exists in Phase 31."
-  - test: "Owner decision: invitations only from the founding device (31-20)."
-    expected: "Accept, or schedule a fix, knowing that after a lead handover or loss of the founding computer nobody (new lead, deputy, lead's second machine) can invite anyone or add a machine; re-founding would be the only way."
-    why_human: "Product decision on the lead-loss recovery path."
+  - test: "Owner decision: Make Multi-User refuses a project with any product labelled above org/Public (W-1, closed by refusal in review fix 1f486240)."
+    expected: "Decide whether labelled products should instead be sealed under a cell for their label, so default-labelled (org/Internal) projects can be made multi-user."
+    why_human: "Design decision with confidentiality impact; what shipped refuses before writing anything, so nothing leaks either way."
+  - test: "Invitations from a lead or deputy computer other than the founding one (W-3, resolved by review fix MJ-05)."
+    expected: "On a second lead computer, on the deputy's computer and on a new lead's computer after a handover, Staff: Invite to Staff Project makes an invitation the new person can join with; the person is admitted on the computer that made the invitation."
+    why_human: "Two or more real installs; the automated tests cover the same flows in staffReplicaMembership."
 ---
 
 # Phase 31: Staff roster, cell keys and migration Verification Report
@@ -328,8 +328,8 @@ The post-31-23 fix (`72f5370e`) narrows the secret scanner only at named generat
 4. **Preview setting.** Expected: commands hidden and nothing created while off; shown when on without a reload. Why human: palette when-clauses in the real host.
 5. **Single-Machine Copy in use.** Expected: copy verifies, carried wording correct, shared project unchanged, result lists what is not copied. Why human: end-to-end use.
 6. **Orchestrator's full suite and verify:release.** Expected: both pass once. Done: see Test runs.
-7. **Owner decision on W-1** (labelled products in the base cell).
-8. **Owner decision on W-3** (invitations only from the founding device).
+7. **Owner decision on W-1** (Make Multi-User refuses labelled products; whether to seal them under label cells instead).
+8. **W-3 is resolved** (any lead or deputy computer can invite; see the Gaps Summary row). Only a two-install check remains.
 
 ### Gaps Summary
 
@@ -337,9 +337,9 @@ No must-have truth failed and no blocker was found. The phase goal is met in cod
 
 | ID | Finding | Severity | Classification |
 |----|---------|----------|----------------|
-| W-1 | **Labelled products go into the base cell (new finding).** `migrate.ts` writes every product, its live text, its version blob and the whole legacy `products.jsonl` (in the `project.import` blob) under the base cell key; the product's Phase 70 label (`state.meta.label`, for example `org/Internal` or higher) is only recorded in the sealed version header. No host flow creates a label cell in Phase 31 (31-20 SUMMARY: "No host command makes a cell in Phase 31"), and every admitted member receives the base cell. So declared clearances currently decide nothing about product visibility. Nothing leaks in Phase 31: the welcome file carries only roster kinds (`ROSTER_KIND_OWNER` has no `project.import`), and no transport exists yet. It must be settled before Phase 32 or 33 deliver base-cell entries, otherwise a member declared below a product's label would receive it. | WARNING | Owner decision (human_verification item 7). Not deferred: no later phase names it specifically; Phase 33's two-compartment leak test would not catch migrated data placed in the base cell. |
+| W-1 | **Labelled products and the base cell.** Found here: `migrate.ts` wrote every product under the base cell key whatever its label. What shipped (review fix 1f486240): Make Multi-User refuses, before writing anything, a project with any product labelled above `org/Public`, naming the products (`label-above-base`), so no labelled product reaches the base cell. Most real projects (default label `org/Internal`) are refused until products can be sealed under a cell for their label. | RESOLVED (by refusal) | Owner decision on the longer-term fix (human_verification item). |
 | W-2 | 31-11: open decision request has no options, dissent or deadline for natively shared products. | WARNING | Known, accepted; deferred to Phase 33 (unobservable in Phase 31; migrated products unaffected). |
-| W-3 | 31-20: invitations (and Add My Other Machine) only from the founding device (`not-founding-device`), and admission only where the join secret is. Consequence: after a lead handover, or once the founding computer is lost or revoked, nobody can invite or add a machine. | WARNING | Known, accepted; owner should confirm the recovery consequence (human_verification item 8). |
+| W-3 | What shipped (review fix MJ-05, commit 4d30e460): any device of the staff lead or the deputy lead can make an invitation, including the lead's second computer, the deputy's computer and a new lead after a handover. The invitation names the founding lead as the anchor and the inviting device separately, and the joining computer checks the inviter against the roster folded from the anchor. Admission happens on the computer that made the invitation, because only it holds the join secret. This matches the CHANGELOG. The original 31-20 behaviour (founding device only, `not-founding-device`) no longer exists. | RESOLVED | Covered by the MJ-05 tests in staffReplicaMembership (second lead computer, deputy after handover, re-signed invitation refused). |
 | W-4 | 31-17: a roster split while the lead is lost but still has an active device cannot be resolved except by re-founding (deputy may choose only when the lead has no active device; `writerProblem` refuses handover and revocation while a split is pending). | WARNING | Known, accepted (owner decision 5, T-31-54 in 31-17 SUMMARY). |
 | W-5 | 31-22: Single-Machine Copy omits registers, calculator record files, gate reports, proposals, settings, observations and `events.jsonl`. The command says so plainly (`NOT_COPIED_TEXT`) and tells the person what to copy by hand. D-35 and the plan truths name only the four ledgers and product files, which are copied. | WARNING | Known, accepted. |
 | W-6 | 31-23: watch commands ask their questions before refusing in a shared project. `WatchHost.change` refuses before touching the register, so nothing is written; only the order of dialogs is off (unlike decide, Decide a PIR and Set Aside, which refuse at once). | INFO | Known, accepted; UX polish. |

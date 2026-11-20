@@ -47,7 +47,13 @@ test('SAFETY_WORDS is the BIP-39 English list: 2048 distinct lower-case words wi
   assert.equal(SAFETY_WORDS.length, 2048);
   assert.equal(new Set(SAFETY_WORDS).size, 2048);
   for (const word of SAFETY_WORDS) assert.match(word, /^[a-z]{3,8}$/, word);
-  assert.equal(new Set(SAFETY_WORDS.map((word) => word.slice(0, 4))).size, 2048);
+  // The header's claim: the first four letters (the whole word for a three-letter word) tell every word apart, so a word reads back from them.
+  const prefixes = SAFETY_WORDS.map((word) => word.slice(0, 4));
+  assert.equal(new Set(prefixes).size, 2048);
+  const byPrefix = new Map(prefixes.map((prefix, index) => [prefix, SAFETY_WORDS[index]]));
+  for (const word of SAFETY_WORDS) assert.equal(byPrefix.get(word.slice(0, 4)), word, word);
+  assert.ok(SAFETY_WORDS.some((word) => word.length === 3), 'three-letter words are covered');
+  assert.equal(prefixes.length, SAFETY_WORDS.length);
   assert.equal(SAFETY_WORDS_SHA256, BIP39_ENGLISH_SHA256);
   assert.equal(createHash('sha256').update(`${SAFETY_WORDS.join('\n')}\n`, 'utf8').digest('hex'), SAFETY_WORDS_SHA256);
   assert.equal(SAFETY_WORDS[0], 'abandon');

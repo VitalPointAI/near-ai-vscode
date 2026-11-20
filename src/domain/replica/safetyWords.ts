@@ -1,7 +1,8 @@
 // The safety code word list (D-16, D-49): the BIP-39 English word list, 2048 words, one per array element in the original order.
 // Source: https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt (BIP-39, License: MIT, as stated in the BIP header).
 // The list is data only. SAFETY_WORDS_SHA256 is the sha256 of the source file (the words joined by newlines, with a final newline), and a test
-// checks the array against it, so a changed, missing or reordered word fails the build. All 2048 first-four-letter prefixes are distinct.
+// checks the array against it, so a changed, missing or reordered word fails the build. The first four letters of each word (the whole word for a
+// three-letter word) are distinct across all 2048, so a word can be read back from its first four letters; replicaSafetyCode.test.ts pins this.
 export const SAFETY_WORDS_SHA256 = '2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda';
 
 export const SAFETY_WORDS: readonly string[] = Object.freeze([
