@@ -50,6 +50,7 @@ export const VERSION_REFUSALS = {
   'no-approval': 'There is no approval of this exact version in the past of this step.',
   'no-release': 'There is no release of this version in the past of this step.',
   'decline-not-pending': 'A decline can only settle decisions that were waiting for confirmation.',
+  'not-gate-member': 'Only a member the roster lets run the release guard, or for the tradecraft gate the tradecraft reviewer, can give that verdict.',
   'unsupported-kind': 'This kind of entry is not applied by this version.'
 } as const;
 export type VersionRefusalReason = keyof typeof VERSION_REFUSALS | ReleaseRefusalReason;
@@ -407,11 +408,16 @@ function deriveVersion(product: ProductEntry, version: VersionProposal, view: Fo
   };
 
   // Valid verdicts of one gate: each is tried alone against the version's own record, so a refused act never hides a valid one before it.
+  // WR-01 (D-12): the writing device's member must be allowed to run the gate's seat at the roster the verdict cites, or the verdict is dropped
+  // not-gate-member before release.ts sees it. A roster view without canRunAgent allows nobody (default deny). A product without a tradecraft gate
+  // has no seat to ask about, and release.ts refuses that verdict no-tradecraft-gate.
   const validVerdicts = (gate: 'guard' | 'tradecraft', signedBefore: (act: VersionAct) => boolean): Verdict[] => {
     const valid: Verdict[] = [];
+    const seat = gate === 'guard' ? roles.releaseGuard : roles.tradecraftReviewer;
     for (const act of named(product.acts, 'version.verdict', version.hash)) {
       const data = act.data as { gate: 'guard' | 'tradecraft'; verdict: string; reasons: string[]; hash: string };
       if (data.gate !== gate) continue;
+      if (seat !== undefined && roster.canRunAgent?.(act.member, seat, act.roster) !== true) { refuse(act, 'not-gate-member'); continue; }
       const context: ProductRecord = signedBefore(act) ? { ...base, tradecraftSignOff: version.hash } : base;
       const result = run(context, act, { type: 'verdict', gate, verdict: data.verdict as GuardVerdict | TradecraftVerdict, hash: data.hash, reasons: data.reasons }, false);
       if (result.ok) valid.push({ act, verdict: data.verdict, reasons: data.reasons, entry: act.entry });
