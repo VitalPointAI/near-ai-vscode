@@ -791,9 +791,9 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 **Core value:** Your organization can hand its rules to every computer, and every feature reads them the same way; an older extension asks to be updated instead of reset.
 
 - [ ] **FND-01**: Organization layer: enrolment file, pinned issuer fingerprint read aloud, personal and project layers that narrow only, declared narrowing direction per key, Reset touching only the personal layer.
-- [ ] **FND-02**: Bundle v2 sections, `requires`, `needs-update`, v1 read as v2.
+- [ ] **FND-02**: Bundle v2 sections, `requires`, `needs-update`, v1 read as v2; also the `exportControl` section parsed in report mode and starting rules that keep the reserved compartments `CGP`, `ITAR` and `EAR` on this computer (`local-only`) (amended 2026-11-20, CGP-ITAR.md section 12).
 - [ ] **FND-03**: `endpoints[]` replacing `routing.localHosts` (migration at today's effect, one-time notice).
-- [ ] **FND-04**: One `authorizations[]` record with kinds and inner signatures; "self-signed on this computer" until an issuer exists.
+- [ ] **FND-04**: One `authorizations[]` record with kinds and inner signatures; "self-signed on this computer" until an issuer exists; also the kinds `export-person` and `export-endpoint` and the reserved rule id `route.export-control` (shapes only; enforcement in Phase 45).
 - [ ] **FND-05**: Residency section and `route.residency`; accredited-device rule in report mode.
 - [ ] **FND-06**: One dependency-free label module; `decideRoute` as the one decision function; `privacyMode` and `teeOnly` folded in as floors; `TrustFacts`.
 - [ ] **FND-07**: The mode table (`src/domain/org/modes.ts`) and `term()`, moved from 32.1; the copy lint with its baseline.

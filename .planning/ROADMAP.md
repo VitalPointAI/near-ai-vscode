@@ -347,10 +347,10 @@ Order: (1) the **coherence safety patch**, one small PR in the patch line for ei
 **Research flags**: (1) Owner questions Q1, Q2, Q6, Q7 in the review. (2) Enrolment file format and fingerprint reading, checked against the safety code flow (`src/domain/replica/safetyCode.ts`).
 **Amended 2026-11-20 (Controlled Goods Program and ITAR, `.planning/research/compliance-dashboard/CGP-ITAR.md`, section 12)**: FND-02 also parses an `exportControl` section in report mode and ships `routing.compartments` defaults of `local-only` for the reserved compartments `CGP`, `ITAR` and `EAR`; FND-04 also accepts the authorization kinds `export-person` and `export-endpoint`, and `decideRoute` reserves the rule id `route.export-control`. Shapes only, so signed policies never need a schema change; the behaviour is Phase 45.
 **Undo cost**: Medium to high: bundle v2 and the authorization record are signed into policies, so settle their schemas in the first plan.
-**Plans:** 15 plans in 5 waves (planned 2026-11-20; starts after the coherence safety patch merges; decisions D-01 to D-59 in `41-CONTEXT.md`, owner confirmations listed there)
+**Plans:** 15 plans in 5 waves (planned 2026-11-20; starts after the coherence safety patch merges; decisions D-01 to D-64 in `41-CONTEXT.md`, owner confirmations listed there)
 
 Plans:
-- [ ] 41-01-PLAN.md: Wave 1. Contract: bundle v2 document, feature ids, endpoints and the localHosts migration, authorizations, sections, every new id and signing purpose
+- [ ] 41-01-PLAN.md: Wave 1. Contract: bundle v2 document, feature ids, endpoints and the localHosts migration, authorizations (with the export-control kinds), sections (with exportControl in report mode), every new id and signing purpose, CGP, ITAR and EAR local-only in the starting rules
 - [ ] 41-02-PLAN.md: Wave 2. Layers that only narrow: the narrowing table, composition, wider personal values clamped and listed
 - [ ] 41-03-PLAN.md: Wave 2. Enrolment file, twelve words read aloud, the issuer script
 - [ ] 41-04-PLAN.md: Wave 2. One label module: staff observations, guard scan and the chat label rank through it
