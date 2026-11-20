@@ -619,7 +619,7 @@ test('WR-05: a handed-back checkpoint is placed by its coverage with no other bo
   });
 });
 
-test('WR-05: a version 1 store with kept checkpoints is brought to the current schema with each checkpoint\'s coverage filled from its body', async () => {
+test('WR-05, WR-02: a version 1 store with kept checkpoints is brought to the current schema with each checkpoint\'s coverage and covered heads filled from its body', async () => {
   await withStoreDir(async (dir) => {
     const db = new Database(path.join(dir, 'hub.db'));
     migrate(db, MIGRATIONS.slice(0, 1));
@@ -636,6 +636,14 @@ test('WR-05: a version 1 store with kept checkpoints is brought to the current s
       const four = coveringCheckpoint(4, 'four');
       assert.equal(store.putHandedBackCheckpoint(PROJECT, four, T0 + 60_000), 'stored');
       assert.deepEqual(store.checkpoints(PROJECT).map((item) => item.hash), [old.hash, four.hash, nine.hash]);
+      // WR-02: the furthest head a kept checkpoint names, read from the body kept before the upgrade too, and never moved back by a smaller one.
+      assert.deepEqual(store.coveredHead(PROJECT, PROJECT, WRITER), { seq: 8, hash: sha256Hex(Buffer.from('head nine')) });
+      assert.equal(store.coveredHead(PROJECT, PROJECT, sha256Hex(Buffer.from('another writer'))), undefined);
+      const twenty = coveringCheckpoint(20, 'twenty');
+      assert.equal(store.putCheckpoint(PROJECT, { ...twenty, signedAt: T0 + 120_000, receivedAt: T0 + 120_000 }), 'stored');
+      assert.deepEqual(store.coveredHead(PROJECT, PROJECT, WRITER), { seq: 19, hash: sha256Hex(Buffer.from('head twenty')) });
+      assert.equal(store.putHandedBackCheckpoint(PROJECT, coveringCheckpoint(2, 'two'), T0 + 180_000), 'stored');
+      assert.deepEqual(store.coveredHead(PROJECT, PROJECT, WRITER), { seq: 19, hash: sha256Hex(Buffer.from('head twenty')) });
     } finally {
       store.close();
     }

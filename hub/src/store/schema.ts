@@ -201,6 +201,31 @@ FROM checkpoints AS c;
 
 UPDATE hub_meta SET value = '2' WHERE key = 'schema_version';
 `,
+  // v3 (WR-02): per writer log, the furthest place a kept checkpoint of this hub names as a head. A place at or below it is one the hub accepted
+  // before, so after a restore the entry there is taken back even from a device revoked since. Derived from the kept checkpoints and only ever
+  // moved forward by the store, so it is not append-only; rows for checkpoints kept before this migration are filled from their bodies.
+  `
+CREATE TABLE checkpoint_cover (
+  project TEXT NOT NULL REFERENCES projects (project),
+  stream TEXT NOT NULL CHECK (length(stream) = 32),
+  writer TEXT NOT NULL CHECK (length(writer) = 64),
+  seq INTEGER NOT NULL CHECK (seq >= 0),
+  hash TEXT NOT NULL CHECK (length(hash) = 64),
+  PRIMARY KEY (project, stream, writer)
+) STRICT;
+
+INSERT INTO checkpoint_cover (project, stream, writer, seq, hash)
+SELECT project, stream, writer, max(seq), hash FROM (
+  SELECT c.project AS project, json_extract(s.value, '$.stream') AS stream, json_extract(h.value, '$.writer') AS writer,
+    json_extract(h.value, '$.seq') AS seq, json_extract(h.value, '$.hash') AS hash
+  FROM checkpoints AS c, json_each(c.body, '$.payload.streams') AS s, json_each(s.value, '$.heads') AS h
+)
+WHERE typeof(stream) = 'text' AND length(stream) = 32 AND typeof(writer) = 'text' AND length(writer) = 64
+  AND typeof(seq) = 'integer' AND seq >= 0 AND typeof(hash) = 'text' AND length(hash) = 64
+GROUP BY project, stream, writer;
+
+UPDATE hub_meta SET value = '3' WHERE key = 'schema_version';
+`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

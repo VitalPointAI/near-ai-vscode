@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { checkpointHash, signCheckpoint } from '@ext/domain/replica/checkpoint';
 import { verifyProof } from '@ext/domain/replica/equivocation';
 import { readHubFile } from '@ext/domain/replica/hubFile';
 import { APPEND_REFUSALS, appendBatch, checkBatch, commitBatch } from '../src/append/checks';
@@ -606,4 +607,50 @@ test('appendBatch runs one batch at a time per project, so two roster changes ci
     const roster = await hub.cache.get(hub.world.project);
     assert.deepEqual(roster.state.pending.map((item) => item.branches), [[a.hash, b.hash].sort()]);
     assert.equal(second.result.rosterHead, roster.head);
+  }));
+
+// ---- WR-02 (D-42, D-54): after a restore, a device revoked since re-pushes places a checkpoint this hub kept already covers ----
+
+/** Keeps a checkpoint signed by this hub whose heads name these places (counts and order hashes are not read by the append checks). */
+function keepCheckpoint(hub: Hub, heads: ReadonlyArray<{ stream: string; written: Written }>): void {
+  const streams = [...new Set(heads.map((item) => item.stream))].sort().map((stream) => ({
+    stream,
+    heads: heads.filter((item) => item.stream === stream).map((item) => ({ writer: item.written.writer, seq: item.written.seq, hash: item.written.hash, lamport: item.written.seq + 1, roster: hub.world.head })),
+    count: heads.filter((item) => item.stream === stream).length,
+    orderTip: DIGITS(`tip ${stream}`)
+  }));
+  const signed = signCheckpoint(hub.identity.signer, { type: 'checkpoint', v: 2, project: hub.world.project, signer: hub.identity.writer, rosterHead: hub.world.head, streams });
+  assert.equal(hub.store.putCheckpoint(hub.world.project, { hash: checkpointHash(signed), body: JSON.stringify(signed), signedAt: NOW_MS, receivedAt: NOW_MS }), 'stored');
+}
+
+test('WR-02 restore: entries of a device revoked since, at places a checkpoint this hub kept covers, are accepted again; a place beyond it or another entry at it is refused revoked', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const first = note(world, analyst);
+    const second = note(world, analyst);
+    // Before the restore the hub had both entries and signed a checkpoint naming the second as the analyst's head.
+    keepCheckpoint(hub, [{ stream: world.project, written: second }]);
+    // The restored hub gets the lead's revocation back first (hubSync pushes the base stream first).
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: analyst.member, writer: analyst.writer });
+    assert.deepEqual((await push(hub, [revoke.entry])).accepted, [revoke.hash]);
+    assert.equal((await hub.cache.get(world.project)).standing(analyst.writer), 'revoked');
+
+    // Another entry at the covered head's place is not the one the checkpoint names.
+    const other = note(world, analyst, { seq: 1, prev: first.hash, data: { text: 'Fictional other note' } });
+    const third = note(world, analyst);
+    const result = await push(hub, [first.entry, other.entry, second.entry, third.entry], { device: world.lead.writer });
+    assert.deepEqual(result.accepted, [first.hash, second.hash]);
+    assert.deepEqual(result.refused.map((item) => [item.index, item.reason]), [[1, 'revoked'], [3, 'revoked']]);
+    assert.equal(hub.store.headOf(world.project, world.project, analyst.writer)?.hash, second.hash);
+  }));
+
+test('WR-02 restore: without a kept checkpoint covering the place, an entry of a revoked device is still refused revoked', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const written = note(world, analyst);
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: analyst.member, writer: analyst.writer });
+    await push(hub, [revoke.entry]);
+    await expectRefused(hub, written.entry, 'revoked', world.lead.writer);
   }));

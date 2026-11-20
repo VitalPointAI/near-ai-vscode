@@ -5,8 +5,9 @@
 // Order. Per batch, before anything costly: its shape and size, then the pushing device's token bucket (before any signature, Pitfall 7), then the
 // project and the blobs the batch says its entries use (a missing blob refuses the whole batch, blob-missing). Per entry, in order: header shape and
 // size; the body's size and ciphertext hash; the stream is the project's; the writer's signature with its roster key; the writer admitted and neither
-// revoked nor quarantined at the head; the writer on the stream's access list; the place (same hash again: held; another hash at a used seq: an
-// equivocation proof, D-43; beyond the next seq: seq-gap; wrong prev: prev-mismatch); and for base-stream entries, a body the hub can open and, for
+// revoked nor quarantined at the head (a device revoked since may still fill a place a kept checkpoint of this hub covers, WR-02); the writer on the
+// stream's access list; the place (same hash again: held; another hash at a used seq: an equivocation proof, D-43; beyond the next seq: seq-gap;
+// wrong prev: prev-mismatch); and for base-stream entries, a body the hub can open and, for
 // roster kinds, a lead or deputy device at the roster the entry cites (D-11). A roster kind citing an older roster than the hub's head is stored:
 // it is a concurrent branch the fold turns into a split (D-09), and refusing it would cut the writer's log at a seq gap for good (CR-01).
 //
@@ -185,6 +186,12 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   }
 }
 
+/** True when a kept checkpoint of this hub names this writer log's head at or beyond the entry's place, and at that place names this very entry. */
+function coveredBefore(store: HubStore, project: string, header: EntryHeader, hash: string): boolean {
+  const covered = store.coveredHead(project, header.stream, header.writer);
+  return covered !== undefined && (header.seq < covered.seq || (header.seq === covered.seq && hash === covered.hash));
+}
+
 /** Checks one batch. Nothing is stored here; commitBatch writes what this accepted. */
 export async function checkBatch(input: AppendInput, ctx: AppendContext): Promise<CheckOutcome> {
   if (!isRecord(input) || typeof input.project !== 'string' || typeof input.device !== 'string' || !Array.isArray(input.entries)) return refuseBatch('malformed-batch');
@@ -304,11 +311,16 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       continue;
     }
     const standing = roster.standing(header.writer);
-    if (standing !== 'admitted') {
+    // WR-02 (D-54): standing is judged at the entry's place, not only at the head. A place at or below the furthest head a kept checkpoint of this
+    // hub names for that log is one the hub accepted before, so after a restore the entry there is taken back even from a device revoked since
+    // (at the covered head itself only the very entry the checkpoint names). Without it the hub could never cover that checkpoint's heads again
+    // and would stop signing for the project. Anything beyond the covered place stays refused revoked.
+    const vouched = standing === 'revoked' && coveredBefore(store, project, header, hash);
+    if (standing !== 'admitted' && !vouched) {
       refuse(standing, hash);
       continue;
     }
-    if (!(roster.accessList(header.stream) ?? []).includes(header.writer)) {
+    if (!vouched && !(roster.accessList(header.stream) ?? []).includes(header.writer)) {
       refuse('not-on-access-list', hash);
       continue;
     }

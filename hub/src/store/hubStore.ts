@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Database } from 'node:sqlite';
 import { GRANT_MAX_BYTES } from '@ext/domain/replica/cellKeys';
 import { CHECKPOINT_MAX_BYTES, readCheckpoint } from '@ext/domain/replica/checkpoint';
+import type { Checkpoint } from '@ext/domain/replica/checkpoint';
 import {
   BLOB_MAX_BYTES,
   HASH_PATTERN,
@@ -415,14 +416,19 @@ function toCheckpoint(row: Row): CheckpointRecord {
   return { hash: row.hash as string, body: row.body as string, signedAt: Number(row.signed_at), receivedAt: Number(row.received_at) };
 }
 
+/** The checkpoint a signed-checkpoint body carries, or undefined for a body that is not one. */
+function checkpointOfBody(body: string): Checkpoint | undefined {
+  try {
+    return readCheckpoint((JSON.parse(body) as { payload?: unknown }).payload);
+  } catch {
+    return undefined;
+  }
+}
+
 /** How many entries a signed checkpoint covers (the sum of its stream counts); 0 for a body that is not a checkpoint. */
 function coverageOfBody(body: string): number {
-  try {
-    const checkpoint = readCheckpoint((JSON.parse(body) as { payload?: unknown }).payload);
-    return checkpoint === undefined ? 0 : checkpoint.streams.reduce((total, stream) => total + stream.count, 0);
-  } catch {
-    return 0;
-  }
+  const checkpoint = checkpointOfBody(body);
+  return checkpoint === undefined ? 0 : checkpoint.streams.reduce((total, stream) => total + stream.count, 0);
 }
 
 /** Refuses a symbolic link or anything that is not a real folder where a hub folder should be, and creates a missing one 0700. */
@@ -918,6 +924,23 @@ export class HubStore {
   private insertCheckpoint(project: string, hash: string, body: string, signedAt: number, receivedAt: number): void {
     this.sql('INSERT INTO checkpoints (project, hash, body, signed_at, received_at) VALUES (?, ?, ?, ?, ?)').run(project, hash, body, signedAt, receivedAt);
     this.sql('INSERT INTO checkpoint_coverage (project, hash, coverage) VALUES (?, ?, ?)').run(project, hash, coverageOfBody(body));
+    const checkpoint = checkpointOfBody(body);
+    for (const stream of checkpoint?.streams ?? []) {
+      if (!STREAM_ID_PATTERN.test(stream.stream)) continue;
+      for (const head of stream.heads) {
+        if (!HASH_PATTERN.test(head.writer) || !HASH_PATTERN.test(head.hash) || !Number.isSafeInteger(head.seq) || head.seq < 0) continue;
+        this.sql(
+          'INSERT INTO checkpoint_cover (project, stream, writer, seq, hash) VALUES (?, ?, ?, ?, ?) ON CONFLICT (project, stream, writer) DO UPDATE SET seq = excluded.seq, hash = excluded.hash WHERE excluded.seq > checkpoint_cover.seq',
+        ).run(project, stream.stream, head.writer, head.seq, head.hash);
+      }
+    }
+  }
+
+  /** The furthest place in one writer log that a kept checkpoint names as a head (WR-02), or undefined when none names that log. */
+  coveredHead(project: string, stream: string, writer: string): { seq: number; hash: string } | undefined {
+    checkProject(project);
+    const row = this.sql('SELECT seq, hash FROM checkpoint_cover WHERE project = ? AND stream = ? AND writer = ?').get(project, stream, writer) as Row | undefined;
+    return row === undefined ? undefined : { seq: Number(row.seq), hash: row.hash as string };
   }
 
   /** The checkpoints kept after a read cursor, in the order they were kept, each with its own cursor (WR-05: a reader reads only what is new). */
