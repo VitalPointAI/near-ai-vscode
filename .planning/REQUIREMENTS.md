@@ -785,6 +785,25 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 
+## Phase 41 requirements: One foundation (organization policy foundation, 0.4.x)
+
+**Defined:** 2026-11-20 from `.planning/research/coherence/REVIEW.md` (section 9.2), added when Phase 41 was planned.
+**Core value:** Your organization can hand its rules to every computer, and every feature reads them the same way; an older extension asks to be updated instead of reset.
+
+- [ ] **FND-01**: Organization layer: enrolment file, pinned issuer fingerprint read aloud, personal and project layers that narrow only, declared narrowing direction per key, Reset touching only the personal layer.
+- [ ] **FND-02**: Bundle v2 sections, `requires`, `needs-update`, v1 read as v2.
+- [ ] **FND-03**: `endpoints[]` replacing `routing.localHosts` (migration at today's effect, one-time notice).
+- [ ] **FND-04**: One `authorizations[]` record with kinds and inner signatures; "self-signed on this computer" until an issuer exists.
+- [ ] **FND-05**: Residency section and `route.residency`; accredited-device rule in report mode.
+- [ ] **FND-06**: One dependency-free label module; `decideRoute` as the one decision function; `privacyMode` and `teeOnly` folded in as floors; `TrustFacts`.
+- [ ] **FND-07**: The mode table (`src/domain/org/modes.ts`) and `term()`, moved from 32.1; the copy lint with its baseline.
+- [ ] **FND-08**: Passport schema only (WP-0 of 74.1): the `models` section shape, parsed in report mode; 74.1 keeps enforcement, the T0 lane and the defaults.
+- [ ] **FND-09**: `ModelEndpoint` and `LocalServerAdmin` interfaces with `NearAiClient` as the first adapter; the architecture test with its baseline; the policy editor shell that receives proposals.
+
+| Requirement | Phase |
+|-------------|-------|
+| FND-01 … FND-09 | Phase 41 |
+
 ## Later milestones: draft requirements (not mapped to phases yet)
 
 Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are reserved so the outlines can be cited; each set is reviewed and mapped to phases when its milestone starts. Not counted in any coverage figure above.
