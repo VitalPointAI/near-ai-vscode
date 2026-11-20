@@ -21,6 +21,10 @@ export const STAFF_REGISTER_READ_TOOL = 'mcp__staff-products__register_read';
 /** Both register tools, granted together to every member that works with the registers. */
 export const STAFF_REGISTER_TOOLS: readonly string[] = [STAFF_REGISTER_TOOL, STAFF_REGISTER_READ_TOOL];
 export const STAFF_WARGAME_TOOL = 'mcp__staff-products__wargame';
+/** Reading the wargame ledger is its own tool, a read, offered to the run's lead too; recording and deriving stay with STAFF_WARGAME_TOOL, a member's. */
+export const STAFF_WARGAME_READ_TOOL = 'mcp__staff-products__wargame_read';
+/** Both wargame tools, granted together to every member that runs the wargame ledger. */
+export const STAFF_WARGAME_TOOLS: readonly string[] = [STAFF_WARGAME_TOOL, STAFF_WARGAME_READ_TOOL];
 export const STAFF_STEP_TOOL = 'mcp__staff-products__step';
 /** The one tradecraft rule set (ICD 203), for the tradecraft gate: src/domain/staff/tradecraftLint.ts. */
 export const STAFF_LINT_TOOL = 'mcp__staff-products__lint';

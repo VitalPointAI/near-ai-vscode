@@ -69,7 +69,7 @@ test('staff-products: the lead is offered only the tools the host lets it call; 
   const world = await staffWorld();
   const tools = staffTools({ host: () => world.host, team: J2_TEAM, run: 'run-1' });
   const lead = offeredTools(tools, undefined).map((tool) => tool.name.replace(/^mcp__[a-z-]+__/, ''));
-  assert.deepEqual(lead.sort(), ['lint', 'list', 'register_read', 'scan', 'status', 'step', 'wargame']);
+  assert.deepEqual(lead.sort(), ['lint', 'list', 'register_read', 'scan', 'status', 'step', 'wargame_read']);
   assert.equal(offeredTools(tools, 'threat-analyst').length, tools.length, 'a member is offered every staff tool (its tools line narrows it in the run)');
   assert.equal(offeredTools(tools, 'not-a-member').length, lead.length, 'someone off the team gets no more than the lead');
   const memberOnly: Record<string, Record<string, unknown>> = {
@@ -77,7 +77,9 @@ test('staff-products: the lead is offered only the tools the host lets it call; 
     verdict: { product: 'threat-assessment', gate: 'guard', verdict: 'CLEARED', hash: 'a'.repeat(64) },
     submit: { product: 'threat-assessment', decisionFor: 'commander', options: [{ label: 'A', risk: 'Low' }] },
     withdraw: { product: 'threat-assessment', reason: 'superseded' },
-    register: { action: 'write', register: 'pir-register', rows: [] }
+    register: { action: 'write', register: 'pir-register', rows: [] },
+    // Recording and deriving the wargame are a member's; the lead reads the record with wargame_read (0.4.35 follow-up).
+    wargame: { action: 'derive' }
   };
   for (const [verb, args] of Object.entries(memberOnly)) {
     assert.ok(!lead.includes(verb), `${verb} is not offered to the lead`);
@@ -85,7 +87,7 @@ test('staff-products: the lead is offered only the tools the host lets it call; 
     assert.equal(refused.ok, false, verb);
     assert.match(refused.text, /Only a member of this staff team can do that/, verb);
   }
-  const leadCalls: Record<string, Record<string, unknown>> = { list: {}, step: { step: 2 }, wargame: { action: 'read' }, status: { product: 'threat-assessment' } };
+  const leadCalls: Record<string, Record<string, unknown>> = { list: {}, step: { step: 2 }, wargame_read: {}, status: { product: 'threat-assessment' } };
   for (const [verb, args] of Object.entries(leadCalls)) {
     const result = await callTool(world, J2_TEAM, `mcp__staff-products__${verb}`, args);
     assert.doesNotMatch(result.text, /Only a member/, `${verb} works for the lead`);

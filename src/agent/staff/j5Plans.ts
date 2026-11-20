@@ -19,7 +19,7 @@ import type { ResolvedProfile, StaffSettings } from '../../domain/staff/profiles
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
 import { RED_TEAM_PRODUCT, STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/staff/writeLimits';
 import { renderTeam } from '../teams';
-import { GATE_VERBS, GUARD_SCAN, LEAD_VERBS, ORDERS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL, staffProductTools } from './grants';
+import { GATE_VERBS, GUARD_SCAN, LEAD_VERBS, ORDERS, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOLS, staffProductTools } from './grants';
 
 export type J5Variant = 'standard' | 'mdo';
 export const J5_VARIANTS: readonly J5Variant[] = ['standard', 'mdo'];
@@ -97,8 +97,8 @@ const DOCS = ['CreateDocument', 'CreatePdf', 'CreatePresentation', 'RenderSvg'];
 // the lead-planner, the section's integrator, also submits and withdraws, marks the step and runs the wargame ledger with the plans-writer, who records
 // it; the release guard runs guard-scan and records verdicts. The red team may register only its critique (the host refuses any other product for it).
 const OWNER = [...staffProductTools(OWNER_VERBS), ...STAFF_REGISTER_TOOLS];
-const LEAD = [...staffProductTools(LEAD_VERBS), ...STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, STAFF_WARGAME_TOOL];
-const RECORDER = [...OWNER, STAFF_WARGAME_TOOL];
+const LEAD = [...staffProductTools(LEAD_VERBS), ...STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL, ...STAFF_WARGAME_TOOLS];
+const RECORDER = [...OWNER, ...STAFF_WARGAME_TOOLS];
 const RED_TEAM_TOOLS = staffProductTools(OWNER_VERBS);
 const GATE = [...staffProductTools(GATE_VERBS), GUARD_SCAN];
 

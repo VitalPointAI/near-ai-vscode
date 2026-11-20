@@ -32,7 +32,7 @@ import { STAFF_FOLDER, staffGuardFolder, staffProductPath } from '../../domain/s
 import { renderTeam } from '../teams';
 import {
   BATTLE_RHYTHM, BATTLE_RHYTHM_READ, COP_MAP, GATE_VERBS, GUARD_SCAN, LEAD_VERBS, OBSERVATIONS, OBSERVATIONS_GRANTEES, ORDERS, ORDERS_FRAGO, OWNER_VERBS, STAFF_REGISTER_TOOLS, STAFF_STEP_TOOL,
-  STAFF_WARGAME_TOOL, staffProductTools
+  STAFF_WARGAME_TOOLS, staffProductTools
 } from './grants';
 
 export const J3_TEMPLATE_ID = 'j3-operations';
@@ -260,7 +260,7 @@ function futureOpsPlanner(ctx: Context): J3Member {
     'Boundary: "Your output is branches; sequels are the J5\'s."',
     `Hands back: the branch plans with their triggers and decision makers, the ${ctx.frago} drafts with their state, the current DST and DSM and sync matrix, the transition brief, and any sequel you found for the ${ctx.plans}.`
   ].join('\n\n');
-  return { name: 'future-ops-planner', role: 'Future operations: branches, FRAGO drafts, DST and DSM in execution', model: 'deep', tools: [...READ, ...WRITE, ...OWNER, STAFF_WARGAME_TOOL, ORDERS], reportsTo: ctx.director, instructions: text };
+  return { name: 'future-ops-planner', role: 'Future operations: branches, FRAGO drafts, DST and DSM in execution', model: 'deep', tools: [...READ, ...WRITE, ...OWNER, ...STAFF_WARGAME_TOOLS, ORDERS], reportsTo: ctx.director, instructions: text };
 }
 
 function firesCoordinator(ctx: Context): J3Member {

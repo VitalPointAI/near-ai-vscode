@@ -272,6 +272,16 @@ test('the card redraws in place keeping the focused button, ignores what does no
   // A section the card does not know, or a team name not in the library's form, is not drawn.
   const odd = kit.renderStaffTeams(doc, welcome, { sections: [{ section: 'j9', code: 'J9', role: 'x', state: 'ready', team: 'x' }, { section: 'j2', code: 'J-2', role: 'Intelligence', state: 'ready', team: 'rm -rf' }] }, () => undefined, () => undefined)!;
   assert.equal(odd.all((node) => node.tagName === 'button').length, 0);
+  // Link candidates are only an array of team names (#124 review): anything else in that field leaves the section plain "not set up", never a
+  // "Found:" line with nothing to link.
+  for (const candidates of ['j2-us-joint-operational', { 0: 'j2-us-joint-operational', length: 1 }, [42], [null, 'rm -rf'], 7]) {
+    const card = kit.renderStaffTeams(doc, welcome, { sections: [{ section: 'j2', code: 'J-2', role: 'Intelligence', state: 'none', candidates }] }, () => undefined, () => undefined)!;
+    assert.equal(card.all((node) => /^link-/.test(node.getAttribute('data-key') ?? '')).length, 0, JSON.stringify(candidates));
+    assert.equal(card.all((node) => node.className === 'staff-team-missing').length, 0, `no "Found:" line for ${JSON.stringify(candidates)}`);
+    assert.equal(card.all((node) => node.getAttribute('data-key') === 'setup-j2').length, 1, JSON.stringify(candidates));
+  }
+  const mixed = kit.renderStaffTeams(doc, welcome, { sections: [{ section: 'j2', code: 'J-2', role: 'Intelligence', state: 'none', candidates: [42, 'j2-us-joint-operational'] }] }, () => undefined, () => undefined)!;
+  assert.deepEqual(mixed.all((node) => /^link-/.test(node.getAttribute('data-key') ?? '')).map((node) => node.getAttribute('data-key')), ['link-j2-j2-us-joint-operational']);
   // A first section to set up says so.
   const none = kit.renderStaffTeams(doc, welcome, { sections: CARD_MODEL.sections.map((entry) => ({ section: entry.section, code: entry.code, role: entry.role, state: 'none' })) }, () => undefined, () => undefined)!;
   assert.ok(none.all((node) => node.textContent === 'Set up a section:').length === 1);
