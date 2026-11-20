@@ -111,7 +111,7 @@ M1 and M2 passed at first. Their subcases were caught by `apply()` or by `parseL
 1. **[Rule 1, test accuracy] Two subcases of my own new scoped-import test were strengthened** before the final commit, after the mutation run showed other checks caught them (see above). No assertion was removed.
 2. **[Plan wording] Branch name:** the plan names `feat/phase-32-10-convert-labelled`. The orchestrator made `feat/phase-32-10-migrate-label-cells`, and that branch was used.
 3. **[Fixture] The full template's annex is now org/Internal** (it was org/Public). One template therefore covers the Task 1 tracer (an org/Public and an org/Internal product plus a calculator ledger) and the Task 2 pin across cells (annex org/Internal pins conops@1 org/Public). Tests that pinned Phase 31 placement were rewritten to assert exact cells, counts and refusal ids. For example, `importEntries` went from 4 to 6, and new checks assert one `cell.create` per label and the exact kind list including `cell.create`.
-4. **Commits:** four, not one per task: tests first (RED), the projection, the conversion, and a follow-up that writes the em-dash checks as `'—'` instead of the character. The three tasks share migrate.ts and the migration test.
+4. **Commits:** four, not one per task: tests first (RED), the projection, the conversion, and a follow-up that writes the em-dash checks as a unicode escape (backslash u2014) instead of the character. The three tasks share migrate.ts and the migration test.
 
 Files touched: only the six in the plan's files_modified, plus this summary.
 
