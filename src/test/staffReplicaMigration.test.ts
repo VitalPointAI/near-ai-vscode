@@ -869,7 +869,7 @@ test('not-cleared-for-label: a product labelled nato/NATO Unclassified, with the
   assert.deepEqual(refused.labels, ['nato/NATO Unclassified']);
   assert.match(MIGRATION_REFUSALS['not-cleared-for-label'], /not made multi-user/);
   assert.match(MIGRATION_REFUSALS['not-cleared-for-label'], /Nothing was written\./);
-  assert.ok(!refused.message.includes('—'), 'no em-dash');
+  assert.ok(!refused.message.includes('\u2014'), 'no em-dash');
   // The base cell label check is gone (D-21): the base cell keeps its label for the roster only.
   assert.equal(Object.hasOwn(MIGRATION_REFUSALS, 'label-above-base'), false);
   assert.equal(BASE_CELL_LABEL, PUBLIC);

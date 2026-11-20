@@ -418,7 +418,7 @@ test('label-mismatch: a product whose version label is not its cell\'s is marked
   assert.equal(shown.meta.label, label, 'the version\'s own label is shown, with the mark');
   assert.deepEqual(projectStaffEvents(mismatched, 'run-projected'), [], 'a product the view cannot vouch for sends no events');
   assert.match(PROJECTION_PROBLEMS['label-mismatch'], /not the label of the part of the project it is kept in/);
-  assert.ok(!PROJECTION_PROBLEMS['label-mismatch'].includes('—'));
+  assert.ok(!PROJECTION_PROBLEMS['label-mismatch'].includes('\u2014'));
 });
 
 test('label-mismatch: a product the projection cannot read a version header for shows its cell\'s label, not a guessed one', async () => {
