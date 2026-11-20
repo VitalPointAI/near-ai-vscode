@@ -2,10 +2,12 @@
 // text never in the document"), numbering and "changes since" are fold outputs, and the gate chain up to awaiting-decision runs per version through
 // release.ts (15.4 rows 1 to 5). Tests pass the reducer list explicitly; plan 30-12 registers versionsReducer.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { canonicalBytes } from '../domain/team/canonical';
 import { docText, snapshotOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
+import { MAX_STATE_BYTES } from '../domain/replica/kindSchemas/doc';
+import * as stateKeys from '../domain/state/keys';
 import type { Actor } from '../domain/replica/entry';
 import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
@@ -600,4 +602,34 @@ test('WR-06: the 33rd act by one writer on one version is refused too-many-acts;
   assert.ok(third.applied.includes(elsewhere.hash));
   assert.ok(gateRefusals(third).some(([entry, reason]) => entry === elsewhere.hash && reason === 'stale-version'));
   assert.equal(holds.length, MAX_ACTS_PER_WRITER_VERSION);
+});
+
+// ---- plan 31-07: the proposal text blob is size-gated before it is opened (31-RESEARCH new defect 1) ---------------------------------------------
+
+test('new defect 1: a proposal whose text blob is over MAX_STATE_BYTES is refused too-large without being decrypted; an honest one is opened', () => {
+  const f = fixture();
+  const honest = f.propose('P', OWNER, [f.typed]);
+  const more = f.editor.insert(11, '!', { deps: [honest] });
+  // The blob holds a correct { text, header } whose text is over the limit; the hash in the entry even matches it.
+  const text = 'y'.repeat(MAX_STATE_BYTES + 1);
+  const oversized = f.propose('P', OWNER, [more], { text });
+  const blobs = [...f.world.blobs.values()];
+  const ivs = new Map(blobs.map((blob) => [Buffer.from(blob.bytes, 'base64url').subarray(0, 12).toString('hex'), blob]));
+  const opens = mock.method(stateKeys, 'openRaw');
+  let result: FoldResult;
+  let opened: string[];
+  try {
+    result = f.fold();
+    opened = opens.mock.calls.map((call) => (call.arguments[1] as { iv: Buffer }).iv.toString('hex'));
+  } finally {
+    opens.mock.restore();
+  }
+  assert.deepEqual(result.refused, [{ hash: oversized.hash, reason: 'too-large', family: 'versions' }]);
+  assert.deepEqual(versionsOf(result).map((version) => version.entry), [honest.hash]);
+  const openedBlobs = opened.map((iv) => ivs.get(iv)).filter((blob) => blob !== undefined);
+  const big = blobs.filter((blob) => blob.bytes.length > MAX_STATE_BYTES);
+  assert.equal(big.length, 1);
+  assert.equal(openedBlobs.includes(big[0]), false);
+  // The honest proposal's text blob is opened, so the spy sees opens.
+  assert.ok(openedBlobs.some((blob) => blob !== big[0] && blob.bytes.length < 1000));
 });

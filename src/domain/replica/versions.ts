@@ -17,6 +17,8 @@ import type { Actor } from './entry';
 import { blobBytesHash, openBlob } from './entry';
 import { snapshotReport } from './doc';
 import type { AttributionRun } from './doc';
+import { MAX_STATE_BYTES } from './kindSchemas/doc';
+import { sealedBlobWithin } from './updateGuard';
 import { attributeText, summariseAuthors } from './attribution';
 import type { AuthorSummary } from './attribution';
 import type { CausalGraph } from './causal';
@@ -49,6 +51,7 @@ export const VERSION_REFUSALS = {
   'product-exists': 'This product already exists.',
   'bad-roles': 'The owner seat must differ from the release-guard and the tradecraft reviewer.',
   'bad-blob': 'The text of the proposal cannot be read.',
+  'too-large': 'The text of the proposal is larger than the allowed size.',
   'hash-mismatch': 'The version hash does not match the text and pins in the proposal.',
   'text-not-in-document': 'The proposed text was never in the shared document at the snapshot the proposal names.',
   'no-change': 'The proposal has the same hash as a version the product already has.',
@@ -232,9 +235,13 @@ function refused(reason: VersionRefusalReason): ReduceOutcome {
   return { status: 'refused', reason };
 }
 
-function readBlobText(view: FoldView, entry: VerifiedEntry, blobHash: string): { ok: true; text: string; header: Record<string, unknown> } | { ok: false; hold: boolean } {
+// tooLarge: the blob is the named one and its sealed length is over the state limit, so it is refused without being opened.
+function readBlobText(view: FoldView, entry: VerifiedEntry, blobHash: string): { ok: true; text: string; header: Record<string, unknown> } | { ok: false; hold: boolean; tooLarge?: true } {
   const blob = view.ctx.blobs(blobHash);
   if (blob === undefined || blobBytesHash(blob) !== blobHash) return { ok: false, hold: true };
+  // The size gate (31-RESEARCH new defect 1, D-43), from the base64url length and before the key is fetched or the blob decrypted. The blob matched
+  // its name, so the answer does not depend on which copy this machine holds.
+  if (!sealedBlobWithin(blob, MAX_STATE_BYTES)) return { ok: false, hold: false, tooLarge: true };
   const key = view.ctx.keys(entry.header.stream, entry.header.epoch);
   if (key === undefined) return { ok: false, hold: true };
   const opened = openBlob(key, entry.header.stream, entry.header.epoch, blob);
@@ -278,7 +285,7 @@ function applyPropose(state: VersionsState, entry: VerifiedEntry, view: FoldView
 
 function checkProposal(product: ProductEntry, entry: VerifiedEntry, data: { product: string; hash: string; textBlob: string; snapshot: string; pins: Pin[] }, view: FoldView): ReduceOutcome {
   const read = readBlobText(view, entry, data.textBlob);
-  if (!read.ok) return read.hold ? held('missing-blob') : refused('bad-blob');
+  if (!read.ok) return read.hold ? held('missing-blob') : refused(read.tooLarge === true ? 'too-large' : 'bad-blob');
   const pins = data.pins.map((pin) => ({ product: pin.product, hash: pin.hash }));
   if (replicaVersionHash(read.text, pins) !== data.hash) return refused('hash-mismatch');
   if (product.versions.some((version) => version.hash === data.hash)) return refused('no-change');

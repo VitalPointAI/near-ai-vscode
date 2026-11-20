@@ -1,13 +1,14 @@
 // The ownership and compaction rules of co-edited text (plan 30-06, D-18, D-19, D-21, D-35, D-37): a hostile update cannot forge attribution, crash
 // the fold, or make the text depend on the order updates were applied in, and a compaction is a cache that is checked against the log.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { UNATTRIBUTED_WRITER, summariseAuthors } from '../domain/replica/attribution';
 import { applyRemote, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
-import type { Actor, Dep } from '../domain/replica/entry';
+import type { Actor, Dep, SealedBlob } from '../domain/replica/entry';
+import * as stateKeys from '../domain/state/keys';
 import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
-import { MAX_UPDATE_BYTES, validateDocData } from '../domain/replica/kindSchemas/doc';
+import { MAX_STATE_BYTES, MAX_UPDATE_BYTES, validateDocData } from '../domain/replica/kindSchemas/doc';
 import { DEFAULT_REDUCERS } from '../domain/replica/reducers';
 import type { AnyReducer } from '../domain/replica/reducers';
 import type { ReplicaContext } from '../domain/replica/rosterView';
@@ -711,4 +712,73 @@ test('compactions that cover only some of the accepted updates are checked again
   assert.equal(productOf(result).accepted.length, 2);
   assert.equal(capture.state().products.get(`${world.stream}/${PRODUCT}`)?.scratchBuilds, 1);
   incrementalEqualsFresh([...regs, updA, updB, ...both], world.ctx(), 2);
+});
+
+// ---- plan 31-07: size gates before a compaction state is opened (31-RESEARCH new defect 1) and the state limit for its inspection (31-03 handoff) ----
+
+// The AES-GCM IV a sealed blob carries: its first 12 bytes on the wire.
+const ivOf = (blob: SealedBlob): string => Buffer.from(blob.bytes, 'base64url').subarray(0, 12).toString('hex');
+
+// One writer types three pieces of 120 000 characters (each update under the update limit), and C compacts them with blob plaintext `state`
+// (the honest full state when absent). Returns the entries, the blob and the honest state.
+function bigScene(state?: Uint8Array): { world: World; items: Written[]; entry: Written; blob: SealedBlob; honest: Uint8Array } {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-cccc', devices: ['C'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const reg = a.register();
+  const pieces = ['n', 'o', 'p'].map((letter, index) => a.insert(index * 120_000, `${letter}${'x'.repeat(119_999)}`));
+  const fold = createFoldDoc();
+  // A whole state goes in under the state limit; applyUpdate holds one update to the update limit.
+  assert.equal(applyRemote(fold, encodeFullState(a.doc)), true);
+  const honest = encodeFullState(fold);
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(state ?? honest));
+  world.blobs.set(blob.hash, blob);
+  const entry = world.write('C', { kind: 'doc.compact', deps: pieces, data: { product: PRODUCT, covers: pieces.map(dep), stateVector: stateVectorOf(fold), textHash: textHashOf(docText(fold)), stateBlob: blob.hash } });
+  return { world, items: [reg, ...pieces, entry], entry, blob, honest };
+}
+
+// Folds with a blob lookup that records every hash asked for, and records the IV of every AES-GCM open.
+function spiedFold(world: World, items: readonly Written[]): { result: ReturnType<typeof foldEntries>; looked: string[]; opened: string[] } {
+  const looked: string[] = [];
+  const opens = mock.method(stateKeys, 'openRaw');
+  try {
+    const result = foldEntries(sealed(items), world.ctx({ blobs: (hash) => { looked.push(hash); return world.blobs.get(hash); } }));
+    const opened = opens.mock.calls.map((call) => (call.arguments[1] as { iv: Buffer }).iv.toString('hex'));
+    return { result, looked, opened };
+  } finally {
+    opens.mock.restore();
+  }
+}
+
+test('31-03 handoff: an honest compaction state over the 256 KiB update limit and under the 2 MiB state limit is accepted as verified', () => {
+  const scene = bigScene();
+  assert.ok(scene.honest.length > MAX_UPDATE_BYTES && scene.honest.length < MAX_STATE_BYTES, `state of ${scene.honest.length} bytes`);
+  const { result, looked, opened } = spiedFold(scene.world, scene.items);
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).compactions, [{ entry: scene.entry.hash, verified: true }]);
+  assert.equal(productOf(result).text.length, 360_000);
+  // The spy sees this blob looked up and opened, so the refusals below that show no open are meaningful.
+  assert.ok(looked.includes(scene.blob.hash));
+  assert.ok(opened.includes(ivOf(scene.blob)));
+});
+
+test('new defect 1: a compaction state blob over MAX_STATE_BYTES is refused too-large from its length, looked up but never decrypted', () => {
+  // A plaintext one byte over the limit; its content does not matter, because nothing reads it.
+  const over = bigScene(Buffer.alloc(MAX_STATE_BYTES + 1, 7));
+  const refusedRun = spiedFold(over.world, over.items);
+  assert.deepEqual(reasons(refusedRun.result), [[over.entry.hash, 'too-large']]);
+  assert.ok(refusedRun.looked.includes(over.blob.hash));
+  assert.equal(refusedRun.opened.includes(ivOf(over.blob)), false);
+  assert.deepEqual(productOf(refusedRun.result).compactions, []);
+  // Exactly at the limit the blob passes the gate and is opened; the bytes are not a plain-text state, so the inspection refuses them after decrypting.
+  const at = bigScene(Buffer.alloc(MAX_STATE_BYTES, 7));
+  const atRun = spiedFold(at.world, at.items);
+  assert.ok(atRun.opened.includes(ivOf(at.blob)));
+  assert.deepEqual(reasons(atRun.result), [[at.entry.hash, 'forbidden-content']]);
+  // A state that decodes but is over the limit by Yjs bytes alone is refused too-large by the gate as well, before any decode.
+  const padded = new Uint8Array(MAX_STATE_BYTES + 64);
+  padded.set(over.honest);
+  const big = bigScene(padded);
+  const bigRun = spiedFold(big.world, big.items);
+  assert.deepEqual(reasons(bigRun.result), [[big.entry.hash, 'too-large']]);
+  assert.equal(bigRun.opened.includes(ivOf(big.blob)), false);
 });
