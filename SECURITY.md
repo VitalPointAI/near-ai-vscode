@@ -1415,11 +1415,19 @@ People join a multi-user staff project by exchanging three small files and compa
 Nothing is posted anywhere: the files go from person to person any way they like (email, chat, a
 USB stick), and there is no server to trust.
 
-- **Invitations are signed files.** The staff lead's computer writes a `.near-staff-invite` file
-  signed with its device key. It names the project (the hash of its first signed entry and the
-  lead's public keys), the invitation id, when it expires (7 days unless the lead chooses
-  otherwise), and a one-time join secret of 32 random bytes. The joining computer checks the
-  signature and the expiry before it uses anything in the file.
+- **Invitations are signed files.** A computer of the staff lead or the deputy lead writes a
+  `.near-staff-invite` file signed with its device key. It names the project (the hash of its first
+  signed entry and the founding lead's public keys), the inviting computer's public keys, the
+  invitation id, when it expires (7 days unless the lead chooses otherwise), and a one-time join
+  secret of 32 random bytes. The joining computer checks the signature and the expiry before it
+  uses anything in the file.
+- **Opening an invitation ties this computer to nothing yet.** The joining computer keeps the
+  project and the inviting computer named in the invitation in the editor's storage, outside the
+  project folder. It pins the project only when the welcome file arrives and the roster in it,
+  read from the project's first signed entry, shows that this computer was admitted through that
+  invitation, and that the invitation was written by the inviting computer while it belonged to
+  the staff lead or the deputy lead. Anything else is refused and nothing is kept, so a fake
+  invitation cannot block the real one.
 - **Each invitation works once, expires, and can be cancelled.** The roster records the
   invitation when it is made, and records when it is used or cancelled. A join request for an
   invitation that has expired, was already used or was cancelled is refused with a plain message,
@@ -1428,15 +1436,21 @@ USB stick), and there is no server to trust.
 - **The join secret stays on the lead's computer.** The secret is kept in the editor's secret
   storage until the roster records what happened to the invitation (used or cancelled), and is
   then deleted. It is the only secret the extension ever deletes. The shared record holds only its
-  SHA-256 hash.
+  SHA-256 hash. If a welcome file is lost, the lead makes it again from the same join request
+  without the secret: the person is already in the roster, and the welcome file works only on
+  their computer. Expired invitations stay listed until the lead cancels them, which deletes their
+  secrets too.
 - **The joining computer proves it holds the secret without sending it.** The `.near-staff-join`
   file carries the joining device's public keys, signed by that device, and an HMAC-SHA256 of
   them under the join secret. The secret itself is never in the join request.
 - **The six words catch a swapped key.** Anyone who gets hold of an invitation file can make a
   join request that passes the secret check, so both screens show six words worked out from the
-  invitation, the lead's keys and the joining device's keys. The lead admits the person only after
-  confirming that the words match, out loud or in person. Admit is refused unless the lead
-  confirms; nothing confirms it for them.
+  invitation, the founding lead's keys, the inviting computer's keys, the joining device's keys and
+  a random value the joining computer draws after it has read the invitation. Because that value
+  comes after the invitation is fixed, someone who controls the files in both directions cannot
+  prepare two matching sets of words in advance: they have to match one fixed set, about 2^66
+  tries. The lead admits the person only after confirming that the words match, out loud or in
+  person. Admit is refused unless the lead confirms; nothing confirms it for them.
 - **What the person receives is limited to what they are cleared for.** On admission the lead's
   computer gives the new device the keys, with their earlier epochs, of only the cells the
   person's declared clearance dominates, and returns a `.near-staff-welcome` file for that device
@@ -1445,9 +1459,11 @@ USB stick), and there is no server to trust.
 - **Only the lead or the deputy changes who is in the project.** Inviting, admitting, removing a
   person or a device, changing a clearance, naming the deputy and handing over the lead are roster
   changes, and the roster accepts them only from a device of the staff lead or the deputy lead.
-  Invitations are made, and their join requests admitted, only on the computer that created the
-  shared project, because the joining computer trusts that computer's keys and the join secret is
-  kept there. Removing someone or lowering their clearance moves the affected cells to new keys.
+  A join request is admitted on the computer that made its invitation, where its join secret is
+  kept. Removing someone or lowering their clearance moves the affected cells to new keys. Which
+  cells still need a new key is worked out from the roster, so if that is interrupted, the next
+  removal, change or admission finishes it first, and Remove from Staff Project offers to finish
+  it.
 - **People and clearances are declared, not verified.** Until verified credentials arrive, every
   multi-user result says: "People and clearances in this project are declared by the staff lead,
   not verified." The six words check that the right device joined; they do not check who the

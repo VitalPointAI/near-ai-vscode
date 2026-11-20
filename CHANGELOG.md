@@ -23,6 +23,17 @@
   second computer, the deputy, the handover and a roster changed in two places at once. Removing
   someone or lowering their clearance tells you plainly: "They keep what they already received.
   They will not receive anything new."
+- **Invitations from more computers, and a join that recovers.** The lead's other computers, the
+  deputy and a new lead after a handover can now invite people and add computers, not only the
+  computer that created the project. The six words now also cover the inviting computer and a
+  random value from the joining computer, so someone who controls the files both ways cannot make
+  the words match. Opening an invitation no longer ties a computer to the project until the
+  welcome file is opened, so a fake invitation cannot block the real one. A lost welcome file is
+  made again with **Staff: Admit to Staff Project** and the same join request. An interrupted
+  removal or clearance change is finished by the next removal, change or admission, and **Staff:
+  Remove from Staff Project** offers to finish it. Expired invitations are listed so you can cancel
+  them, and **Staff: Choose Roster Branch** describes each change. Join requests made by an earlier
+  preview build are refused: ask the person to make a new one.
 - **Make a Single-Machine Copy.** **Staff: Make a Single-Machine Copy** writes a copy you can work
   in alone into an empty folder, and says what it does not copy.
 - **Declared, not verified.** Every multi-user screen says that people and clearances are declared
