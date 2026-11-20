@@ -17,6 +17,7 @@ import { dominates, whyNotDominated } from '../domain/gate/dominance';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { DEFAULT_ROUTING, ROUTING_HANDLING_FLAGS, ROUTING_TIERS, TIER_ORDER, parseRouting } from '../domain/gate/routing';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
+import { FEATURE_IDS } from '../domain/gate/features';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 
@@ -678,7 +679,8 @@ test('a default bundle signed by a different key than the one it names is not ac
 
 test('S6: an optional requires list naming no unknown feature is accepted, and the default bundle carries none', () => {
   const signer = makeSigner();
-  assert.deepEqual([...KNOWN_BUNDLE_FEATURES], []);
+  // Phase 41 (D-06): the known features are exactly the registry's, so a v1 bundle may name any of them.
+  assert.deepEqual([...KNOWN_BUNDLE_FEATURES], [...FEATURE_IDS]);
   assert.equal(Object.prototype.hasOwnProperty.call(defaultFor(signer), 'requires'), false);
   const plain = check(signedDefault(signer), signer);
   assert.equal(plain.state, 'valid');
@@ -735,14 +737,24 @@ test('S6 (PR #143 review): a policy whose content cannot be read is marked as th
 
 test('S6 (Phase 41 schema): a feature id may carry an @N version; an unknown one such as x@1 is needs-update and says update, never Reset; a malformed version is wrong-type', () => {
   const signer = makeSigner();
-  for (const feature of ['x@1', 'labels@1', 'endpoints@12', 'models']) {
+  // labels@1 became known in Phase 41 (D-06), so labels@2 is the newer version here.
+  for (const feature of ['x@1', 'labels@2', 'endpoints@12', 'models', 'org-layer']) {
     const state = check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer);
     assert.equal(failedWith(state), 'needs-update', feature);
     const sentence = state.state === 'failed-closed' ? state.sentence : '';
     assert.match(sentence, /Update the NEAR AI extension/);
     assert.ok(!/Reset/.test(sentence), feature);
   }
-  for (const feature of ['x@0', 'x@', 'x@01', 'x@12345', 'X@1', 'x@1@2', '@1']) {
+  for (const feature of ['x@0', 'x@', 'x@01', 'x@12345', 'X@1', 'x@1@2', '@1', 'labels@01', 'Labels@1', 'Has Capitals']) {
     assert.equal(failedWith(check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer)), 'wrong-type', feature);
+  }
+});
+
+test('Phase 41 (D-06, D-50): a v1 bundle may require labels@1 or export-control@1, which this version knows, and still reads with its requires', () => {
+  const signer = makeSigner();
+  for (const features of [['labels@1'], ['export-control@1'], ['export-control@1', 'labels@1'], [...FEATURE_IDS]]) {
+    const state = check(signBundle(signer, edited(signer, (p) => { p.requires = features; })), signer);
+    assert.equal(state.state, 'valid', features.join(','));
+    if (state.state === 'valid') assert.deepEqual(state.bundle.requires, features);
   }
 });

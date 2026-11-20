@@ -23,9 +23,13 @@ import { SecretLeakError, assertNoSecrets } from './secrets';
 
 export const PAYLOAD_DOMAIN = 'near-ai-vscode/signed-payload/v1';
 export const PAYLOAD_VERSION = 1;
-// Phase 31 (D-49) adds the last four, in order: the lead's invite file, a joining device's answer to it, a cell grant (the wraps of one cell epoch,
-// committed by hash from cell.create and cell.rekey) and the replica store's high-water mark kept in SecretStorage.
-export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark'] as const;
+// Phase 31 (D-49) adds the four from staff-invite, in order: the lead's invite file, a joining device's answer to it, a cell grant (the wraps of one cell
+// epoch, committed by hash from cell.create and cell.rekey) and the replica store's high-water mark kept in SecretStorage.
+// Phase 41 (D-10) appends the last four, in order: your organization's enrolment file (signed by the issuer key itself), your organization's policy layer,
+// one authorization record signed by a named person, and a proposed policy change exported for your organization's contacts. Their key material sits only
+// under `publicKey` and `sig`, the names the secret scanner exempts, so they need no GENERATED_PATHS entry. The name `org-release` is reserved for an
+// issuer-signed release from your organization (D-16) and is deliberately not a purpose yet: no code path may sign or accept one.
+export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark', 'org-enrolment', 'org-policy-layer', 'policy-authorization', 'policy-proposal'] as const;
 export type PayloadPurpose = typeof PAYLOAD_PURPOSES[number];
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
 

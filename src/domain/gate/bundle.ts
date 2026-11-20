@@ -16,6 +16,7 @@ import type { RoutingTable } from './routing';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Parsed, Refusal } from './shape';
 import { CAPABILITY_VERBS, GATE_VOCABULARY_VERSION, isCapabilityVerb } from './vocabulary';
+import { FEATURE_IDS } from './features';
 import type { CapabilityVerb } from './vocabulary';
 
 export const BUNDLE_VERSION = 1;
@@ -103,19 +104,19 @@ const BUNDLE_FIELDS = [
 ] as const;
 
 /**
- * The policy features this version knows (coherence review S6). A bundle's `requires` may name only these; none exists yet, so any named feature means the
- * policy was written for a newer version. A feature is added here, with its meaning, in the release that implements it.
+ * The policy features this version knows (coherence review S6): a frozen copy of FEATURE_IDS (features.ts, Phase 41 D-06). A bundle's `requires` may name
+ * only these; any other named feature means the policy was written for a newer version. A feature is added there, with its meaning, never here.
  */
-export const KNOWN_BUNDLE_FEATURES: readonly string[] = Object.freeze([]);
-/** A feature id: a lowercase name with an optional `@N` version (`endpoints@1`), as the policy schema names them. */
-const FEATURE_ID_PATTERN = /^[a-z][a-z0-9.-]{0,63}(@[1-9][0-9]{0,3})?$/;
-const MAX_REQUIRES = 32;
+export const KNOWN_BUNDLE_FEATURES: readonly string[] = Object.freeze([...FEATURE_IDS]);
+/** A feature id: a lowercase name with an optional `@N` version (`endpoints@1`), as the policy schema names them (the base already took `@N`, D-50). */
+export const FEATURE_ID_PATTERN = /^[a-z][a-z0-9.-]{0,63}(@[1-9][0-9]{0,3})?$/;
+export const MAX_REQUIRES = 32;
 
 /**
  * Reads `requires`: a list of feature ids. A list that is not one is `wrong-type`; a feature this version does not know is refused as `unknown-version` at
  * `requires[i]`, which shapeReason turns into `needs-update`. Undefined when the bundle has no `requires`.
  */
-function checkRequires(value: Record<string, unknown>, path: string): Refusal | undefined {
+export function checkRequires(value: Record<string, unknown>, path: string): Refusal | undefined {
   if (!Object.prototype.hasOwnProperty.call(value, 'requires')) return undefined;
   const list = ownValue(value, 'requires');
   const where = childPath(path, 'requires');
@@ -134,7 +135,7 @@ export const SELF_SIGNED_LIFETIME_DAYS = 365;
 /** A bundle that still verifies is renewed in its last this many days (D-14). */
 export const RENEW_WINDOW_DAYS = 30;
 /** An issuedAt later than the effective time by more than this is refused as clock-behind. */
-const CLOCK_SKEW_MS = 5 * 60 * 1000;
+export const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /** Epoch milliseconds in, so the folder holds no clock. */
 export interface DefaultBundleInput {
@@ -195,39 +196,40 @@ export function bundleHash(payload: unknown): string {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Parsing
 
-const SCALE_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
-const FINGERPRINT_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+// Exported with their limits for the v2 sections (Phase 41), which reuse these readers unchanged.
+export const SCALE_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+export const FINGERPRINT_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const DID_PATTERN = /^did:[a-z0-9]+:[A-Za-z0-9._:%-]+$/;
-const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
-const MAX_TEXT = 64;
-const MAX_SERVER_ID = 128;
-const MAX_SCALES = 16;
-const MAX_LEVELS = 16;
+export const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
+export const MAX_TEXT = 64;
+export const MAX_SERVER_ID = 128;
+export const MAX_SCALES = 16;
+export const MAX_LEVELS = 16;
 const PUBLIC_KEY_BYTES = 32;
-const MAX_CLEARANCES = 64;
-const MAX_MAPPINGS = 256;
-const MAX_ANCHOR_ROOTS = 64;
+export const MAX_CLEARANCES = 64;
+export const MAX_MAPPINGS = 256;
+export const MAX_ANCHOR_ROOTS = 64;
 const MAX_PROOF_STEPS = 64;
-const MAX_STATUS_LISTS = 16;
+export const MAX_STATUS_LISTS = 16;
 const MAX_URI = 2048;
 const MAX_DEPTH = 16;
-const HEX_64 = /^[0-9a-f]{64}$/;
+export const HEX_64 = /^[0-9a-f]{64}$/;
 const PURPOSE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 /** An MCP server id as the MCP page stores it (1 to 31 lowercase letters, digits or dashes); a key like `__proto__` can never match. */
 export const MCP_SERVER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,30}$/;
-const MAX_MCP_CEILINGS = 256;
+export const MAX_MCP_CEILINGS = 256;
 
-function parseTimestamp(value: unknown, path: string): Parsed<string> {
+export function parseTimestamp(value: unknown, path: string): Parsed<string> {
   if (typeof value !== 'string' || Number.isNaN(parseIsoMillis(value))) return refused('wrong-type', path);
   return { ok: true, value };
 }
 
-function parseText(value: unknown, path: string, max: number): Parsed<string> {
+export function parseText(value: unknown, path: string, max: number): Parsed<string> {
   if (typeof value !== 'string' || value === '' || value.length > max || CONTROL_CHARACTERS.test(value)) return refused('wrong-type', path);
   return { ok: true, value };
 }
 
-function parseIssuer(value: unknown, path: string): Parsed<BundleIssuer> {
+export function parseIssuer(value: unknown, path: string): Parsed<BundleIssuer> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const keys = checkKeys(value, path, ['fingerprint', 'publicKey'], ['did']);
   if (keys !== undefined) return keys;
@@ -256,7 +258,7 @@ function parseContextList(value: unknown, path: string): Parsed<readonly GateCon
   return { ok: true, value: Object.freeze(out) };
 }
 
-function parseMaxMode(value: unknown, path: string): Parsed<Record<GateContextName, ActionPolicyMode>> {
+export function parseMaxMode(value: unknown, path: string): Parsed<Record<GateContextName, ActionPolicyMode>> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const keys = checkKeys(value, path, GATE_CONTEXTS);
   if (keys !== undefined) return keys;
@@ -271,7 +273,7 @@ function parseMaxMode(value: unknown, path: string): Parsed<Record<GateContextNa
   return { ok: true, value: Object.freeze(out) };
 }
 
-function parseContexts(value: unknown, path: string): Parsed<Partial<Record<CapabilityVerb, readonly GateContextName[]>>> {
+export function parseContexts(value: unknown, path: string): Parsed<Partial<Record<CapabilityVerb, readonly GateContextName[]>>> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const out: Partial<Record<CapabilityVerb, readonly GateContextName[]>> = {};
   for (const key of Object.keys(value)) {
@@ -283,7 +285,7 @@ function parseContexts(value: unknown, path: string): Parsed<Partial<Record<Capa
   return { ok: true, value: Object.freeze(out) };
 }
 
-function parseServerIds(value: unknown, path: string): Parsed<readonly string[]> {
+export function parseServerIds(value: unknown, path: string): Parsed<readonly string[]> {
   if (!Array.isArray(value)) return refused('wrong-type', path);
   const out: string[] = [];
   for (let index = 0; index < value.length; index += 1) {
@@ -302,7 +304,7 @@ function parseServerIds(value: unknown, path: string): Parsed<readonly string[]>
  * The MCP label ceilings: each key a server id the MCP page could store, each value a clearance on the bundle's own scales. An unknown scale or level, a
  * malformed token, the reserved "releasable to no one" token and a server id that is not one are each refused, so a ceiling never means something it does not say.
  */
-function parseMcpLabelCeilings(value: unknown, scales: ScaleTable, path: string): Parsed<Readonly<Record<string, Clearance>>> {
+export function parseMcpLabelCeilings(value: unknown, scales: ScaleTable, path: string): Parsed<Readonly<Record<string, Clearance>>> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const ids = Object.keys(value);
   if (ids.length > MAX_MCP_CEILINGS) return refused('not-allowed-here', path);
@@ -352,7 +354,7 @@ function parseScale(value: unknown, path: string): Parsed<Scale> {
   return { ok: true, value: Object.freeze({ name: name.value, levels: Object.freeze(out) }) };
 }
 
-function parseScales(value: unknown, path: string): Parsed<ScaleTable> {
+export function parseScales(value: unknown, path: string): Parsed<ScaleTable> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const ids = Object.keys(value);
   if (ids.length === 0) return refused('empty-list', path);
@@ -367,7 +369,7 @@ function parseScales(value: unknown, path: string): Parsed<ScaleTable> {
   return { ok: true, value: Object.freeze(out) };
 }
 
-function parseList<T>(value: unknown, path: string, max: number, one: (item: unknown, where: string) => Parsed<T>): Parsed<readonly T[]> {
+export function parseList<T>(value: unknown, path: string, max: number, one: (item: unknown, where: string) => Parsed<T>): Parsed<readonly T[]> {
   if (!Array.isArray(value)) return refused('wrong-type', path);
   if (value.length > max) return refused('not-allowed-here', path);
   const out: T[] = [];
@@ -384,7 +386,7 @@ function parseList<T>(value: unknown, path: string, max: number, one: (item: unk
  * ascending by each entry's text key. An entry that repeats an earlier one is `duplicate` (wherever it sits), and any other out of order entry is `not-sorted`,
  * so two bundles that mean the same thing cannot be written two ways and cannot have two hashes.
  */
-function parseSetList<T>(
+export function parseSetList<T>(
   value: unknown, path: string, max: number, one: (item: unknown, where: string) => Parsed<T>, keyOf: (item: T) => string
 ): Parsed<readonly T[]> {
   const list = parseList(value, path, max, one);
@@ -425,15 +427,15 @@ export function inBundleOrder(draft: unknown): unknown {
 }
 
 /** A clearance's identity is all of its content: scale, level, both lists and the expiry (absent sorts first). */
-function clearanceKey(clearance: Clearance): string {
+export function clearanceKey(clearance: Clearance): string {
   return JSON.stringify([clearance.scale, clearance.level, clearance.compartments, clearance.releasability, clearance.expiresAt ?? '']);
 }
 
-function mappingKey(mapping: ScaleMapping): string {
+export function mappingKey(mapping: ScaleMapping): string {
   return JSON.stringify([mapping.from.scale, mapping.from.level, mapping.covers.scale, mapping.covers.level]);
 }
 
-function parseAnchorRoot(value: unknown, path: string): Parsed<AnchorRoot> {
+export function parseAnchorRoot(value: unknown, path: string): Parsed<AnchorRoot> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const keys = checkKeys(value, path, ['root', 'proof']);
   if (keys !== undefined) return keys;
@@ -461,7 +463,7 @@ function isHttpsAddress(text: string): boolean {
   }
 }
 
-function parseStatusList(value: unknown, path: string): Parsed<StatusListRef> {
+export function parseStatusList(value: unknown, path: string): Parsed<StatusListRef> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const keys = checkKeys(value, path, ['uri', 'purpose']);
   if (keys !== undefined) return keys;
@@ -473,7 +475,7 @@ function parseStatusList(value: unknown, path: string): Parsed<StatusListRef> {
 }
 
 /** `scale/level` keys of the declared scales to whole seconds. Whole seconds only: a fraction was already refused by the number check. */
-function parseMaxOfflineAge(value: unknown, scales: ScaleTable, path: string): Parsed<Readonly<Record<string, number>>> {
+export function parseMaxOfflineAge(value: unknown, scales: ScaleTable, path: string): Parsed<Readonly<Record<string, number>>> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const known: string[] = [];
   for (const id of Object.keys(scales)) {
@@ -495,7 +497,7 @@ function parseMaxOfflineAge(value: unknown, scales: ScaleTable, path: string): P
  * Number.MAX_SAFE_INTEGER are refused wherever they sit, before the field checks, so a number in a place that takes none is also refused. Money and shares
  * use nano-USD and basis points elsewhere; this bundle holds only versions and seconds.
  */
-function checkNumbers(value: unknown, path: string, depth: number): Refusal | undefined {
+export function checkNumbers(value: unknown, path: string, depth: number): Refusal | undefined {
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0) ? undefined : refused('wrong-type', path);
   }
@@ -635,6 +637,12 @@ export const BUNDLE_FAILURES = {
 } as const;
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 
+/** The update sentence, naming the version a policy's `minClient` asks for when it gives one (Phase 41 D-07); never Reset. */
+export function needsUpdateSentence(minClient?: string): string {
+  if (minClient === undefined) return BUNDLE_FAILURES['needs-update'];
+  return `Your policy file needs version ${minClient} or later of NEAR AI. ${UPDATE_FIX}`;
+}
+
 /** The reasons whose fix is updating the extension (coherence review S6): no surface offers Reset Policy to Defaults as their fix. */
 export const UPDATE_REASONS: ReadonlySet<BundleFailureReason> = new Set<BundleFailureReason>(['unsupported-version', 'vocabulary-unknown', 'needs-update']);
 
@@ -652,7 +660,7 @@ export function failedClosed(reason: BundleFailureReason, detail?: string): Extr
     : { state: 'failed-closed', reason, sentence: BUNDLE_FAILURES[reason], detail };
 }
 
-function payloadReason(reason: PayloadFailureReason): BundleFailureReason {
+export function payloadReason(reason: PayloadFailureReason): BundleFailureReason {
   // The verifier's reasons are a subset of ours with the same names. This keeps a new verifier reason from compiling until it has a sentence here.
   const own: Record<PayloadFailureReason, BundleFailureReason> = {
     malformed: 'malformed', 'unsupported-version': 'unsupported-version', 'unknown-purpose': 'unknown-purpose', 'wrong-purpose': 'wrong-purpose',
@@ -662,11 +670,16 @@ function payloadReason(reason: PayloadFailureReason): BundleFailureReason {
   return own[reason];
 }
 
-function shapeReason(refusal: Refusal): BundleFailureReason {
+/**
+ * A shape refusal as a bundle failure. An unknown version is `unsupported-version` at bundleVersion, `vocabulary-unknown` at vocabulary and `needs-update`
+ * anywhere else (a feature in `requires`, a section's `v`); a missing `requires`, or one that does not name a section the policy uses, is `malformed`.
+ */
+export function shapeReason(refusal: Refusal): BundleFailureReason {
   if (refusal.reason === 'unknown-version') {
-    if (refusal.path.startsWith('requires')) return 'needs-update';
-    return refusal.path.startsWith('bundleVersion') ? 'unsupported-version' : 'vocabulary-unknown';
+    if (refusal.path.startsWith('bundleVersion')) return 'unsupported-version';
+    return refusal.path.startsWith('vocabulary') ? 'vocabulary-unknown' : 'needs-update';
   }
+  if (refusal.reason === 'missing-field' && refusal.path === 'requires') return 'malformed';
   if (refusal.reason === 'unknown-field' || refusal.reason === 'unknown-verb') return 'unknown-field';
   return 'wrong-type';
 }
