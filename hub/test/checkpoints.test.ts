@@ -608,3 +608,111 @@ test('trimmed: granted streams past the size limit are dropped from the end of s
     assert.ok(verifyCheckpoint(signed, mine.view).ok, 'the trimmed checkpoint does not verify within the size limit');
     assert.deepEqual(recomputeCheckpoint(payloadOf(signed), mine.open()), { ok: true, mismatches: [] });
   }));
+
+// ---- Task 3: clean shutdown ----
+
+test('shutdown: stopping clears a pending debounce timer, so nothing is signed once shutdown starts, not even on an ask', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    assert.equal(hub.checkpoints?.pending(world.project), true, 'no debounce timer was set');
+    hub.checkpoints?.stop();
+    assert.equal(hub.checkpoints?.pending(world.project), false, 'the debounce timer was left set');
+    await advance(hub, scheduler, MIN_GAP_MS * 2);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    assert.equal(hub.store.checkpoints(world.project).length, 0);
+  }));
+
+/** Reads the open stream until it ends or ms pass. */
+async function ended(stream: EventStream, ms: number): Promise<boolean> {
+  try {
+    await stream.end(ms);
+    return true;
+  } catch {
+    return stream.ended;
+  }
+}
+
+test('shutdown: SIGTERM with an event stream open exits 0 within 6 seconds, ends the stream, logs no project text, and keeps the signed checkpoint', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-hub-checkpoints-'));
+  const tlsFixture = makeTlsFixture();
+  const signingLine = generateKeyFile('signing');
+  const encryptionLine = generateKeyFile('encryption');
+  const secrets = { HUB_TLS_CERT: tlsFixture.certPem, HUB_TLS_KEY: tlsFixture.keyPem, HUB_SIGNING_KEY: `${signingLine}\n`, HUB_ENCRYPTION_KEY: `${encryptionLine}\n` };
+  const stateDir = path.join(root, 'state');
+  const signing = readSigningKey(signingLine);
+  const identity = hubIdentityOf(signing, readEncryptionKey(encryptionLine, signing), tlsFixture.certPem, HUB_ADDRESS);
+  const runs: Array<{ cleanup(): void }> = [];
+  const connections: HubConnection[] = [];
+  try {
+    const issue = launchHub({ args: ['--hub-file', '7'], secrets, stateDir, env: { HUB_PUBLIC_ADDRESS: HUB_ADDRESS } });
+    runs.push(issue);
+    assert.equal((await within(issue.exited, 20_000, 'the hub file')).code, 0, issue.stdout());
+    const file = readHubFile(issue.stdout().trim(), new Date());
+    assert.ok(file.ok);
+    const run = await startHubProcess({ secrets, stateDir });
+    runs.push(run);
+    const world = createHubWorld({ causalLamport: true });
+    world.admitHub(identity);
+    const analyst = world.device('ANALYST', 'mbr-analyst');
+    world.admitMember(analyst);
+    const enrol = await HubConnection.open(run.port, identity.certPin);
+    assert.equal((await enrol.post('/v1/enrol', world.enrolRequest(file.hubFile))).status, 201);
+    enrol.close();
+    const endpoint = {
+      port: run.port,
+      now: () => Date.now(),
+      connect: async () => {
+        const connection = await HubConnection.open(run.port, identity.certPin);
+        connections.push(connection);
+        return connection;
+      },
+    };
+    const lead = await (await EventClient.open(endpoint, world.lead, world.project)).events();
+    const pusher = await EventClient.open(endpoint, analyst, world.project);
+    const pushed = async (written: Written): Promise<void> => {
+      const answer = await pusher.call('POST', `/v1/projects/${world.project}/append`, { json: { entries: [written.entry] } });
+      assert.equal(answer.status, 200, answer.text);
+    };
+    await pushed(note(world, analyst));
+    await lead.until((item) => item.frames.some((frame) => frame.event === 'checkpoint'), 'the checkpoint event', 10_000);
+    const signed = (lead.frames.find((frame) => frame.event === 'checkpoint')?.data as { checkpoint: SignedCheckpoint }).checkpoint;
+    // A second arrival leaves a debounce timer pending (60 seconds from the first checkpoint) when the stop comes.
+    await pushed(note(world, analyst));
+    pusher.close();
+
+    const started = Date.now();
+    const stopped = await within(run.kill('SIGTERM'), 15_000, 'the stop');
+    assert.equal(stopped.code, 0, run.stdout());
+    assert.ok(Date.now() - started < 6000, `the stop took ${Date.now() - started} ms`);
+    assert.equal(await ended(lead, 2000), true, 'the event stream did not end');
+    assert.equal(lead.frames.some((frame) => frame.event === 'resync'), false, 'shutdown sent resync');
+    const lines = run.logs();
+    const stopIndex = lines.findIndex((line) => line.event === 'hub.stopping');
+    assert.ok(stopIndex >= 0 && lines.some((line) => line.event === 'hub.stopped'), run.stdout());
+    for (const line of lines.filter((item) => item.event === 'hub.stopping' || item.event === 'hub.stopped')) {
+      assert.equal(JSON.stringify(line).includes(world.project), false, 'a shutdown line names the project');
+    }
+    assert.equal(lines.slice(stopIndex).filter((line) => line.event === 'checkpoint.signed').length, 0, 'a checkpoint was signed after the stop began');
+    // The pending debounce timer of the second arrival was cleared when the stop began, and the line holds a count only.
+    const cleared = lines.slice(stopIndex).find((line) => line.event === 'checkpoints.stopped');
+    assert.ok(cleared, 'the checkpoint timers were not stopped');
+    assert.deepEqual(Object.keys(cleared).filter((key) => !['time', 'level', 'event'].includes(key)), ['timersCleared']);
+    assert.equal(cleared.timersCleared, 1);
+    assert.equal(JSON.stringify(cleared).includes(world.project), false);
+    assert.equal(lines.filter((line) => line.event === 'checkpoint.signed').length, 1);
+
+    const reopened = await openHubStore(stateDir, { recoverBlobs: false });
+    try {
+      assert.deepEqual(reopened.checkpoints(world.project).map((record) => record.hash), [checkpointHash(signed)]);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    for (const connection of connections) connection.close();
+    for (const item of runs) item.cleanup();
+    tlsFixture.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

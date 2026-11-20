@@ -200,9 +200,12 @@ class ProjectCheckpointer {
     return this.enqueue('ask');
   }
 
-  cancel(): void {
-    if (this.timer !== undefined) this.deps.scheduler.clearTimeout(this.timer);
+  /** Clears the debounce timer; true when one was set. */
+  cancel(): boolean {
+    if (this.timer === undefined) return false;
+    this.deps.scheduler.clearTimeout(this.timer);
     this.timer = undefined;
+    return true;
   }
 
   get pendingTimer(): boolean {
@@ -553,11 +556,14 @@ export class Checkpointer {
     }
   }
 
-  /** For shutdown: no timer stays set, no new job starts, and a running job signs and stores nothing from here on. */
-  stop(): void {
+  /** For shutdown: no timer stays set, no new job starts, and a running job signs and stores nothing from here on. Returns how many pending
+   *  debounce timers were cleared. */
+  stop(): number {
     this.stopped = true;
     for (const remove of this.unlisten.splice(0)) remove();
-    for (const project of this.projects.values()) project.cancel();
+    let cleared = 0;
+    for (const project of this.projects.values()) if (project.cancel()) cleared += 1;
+    return cleared;
   }
 
   get isStopped(): boolean {

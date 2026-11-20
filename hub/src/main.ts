@@ -29,7 +29,7 @@ declare const __HUB_VERSION__: string;
 // Composition root, built to dist/app.mjs. Startup order: settings, plain-secret refusal, state directory, secrets, keys, TLS pair, store, the
 // hub's identity (keys and certificate pin), roster cache, sessions, routes, the checkpoint signer (32-22, listening on the event channel), server.
 // composeHub is the one place the parts are wired, and the tests' in-process hub (test/helpers/hubHarness.ts) calls it too, so what the tests run
-// is what the binary runs.
+// is what the binary runs. A stop clears the signer's timers first, then ends event streams, then closes the server and the store.
 //
 // --hub-file <days> (D-41, default 7) prints one signed hub file for the operator to give the staff lead, and nothing else on stdout: no info line
 // before or after it, only a hub.start_refused line when it cannot.
@@ -406,6 +406,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   const sessions = composed.sessions;
   const liveEvents = composed.events;
   const livePresence = composed.presence;
+  const checkpointer = composed.checkpoints;
   let port: number;
   try {
     port = await listen(openServer, config.host, config.port);
@@ -445,6 +446,10 @@ export async function main(argv: readonly string[]): Promise<void> {
     }, SHUTDOWN_GRACE_MS).unref();
     // The relay's order: no new sessions, then the server, then the store once the last request has finished.
     clearInterval(sweep);
+    // No checkpoint is signed once stopping starts: pending debounce timers are cleared and a running job stores nothing. A line (a count only)
+    // only when a timer was pending, so an idle stop logs exactly what it did before.
+    const timersCleared = checkpointer?.stop() ?? 0;
+    if (timersCleared > 0) logger.info('checkpoints.stopped', { timersCleared });
     // Open event streams would hold the server open: they end first, then the server stops taking requests.
     liveEvents.closeAll();
     livePresence.close();
