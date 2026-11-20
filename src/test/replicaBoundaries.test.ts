@@ -37,7 +37,9 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/rosterMembers',
   'domain/replica/rosterCells',
   'domain/replica/cellKeys',
-  'domain/replica/invite'
+  'domain/replica/invite',
+  // The hub file, the session answer and the enrolment MAC (32-15): the hub signs and checks them, so they compile without Yjs.
+  'domain/replica/hubFile'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }
@@ -184,6 +186,15 @@ test('the hub-side closure, following type-only imports too, contains no replica
   // The closure follows imports across folders, so it also holds the pure domain files a hub copies along with the replica modules.
   assert.ok(closure.some((file) => file === 'domain/team/canonical.ts'));
   assert.ok(!closure.includes(DOC_FILE));
+});
+
+test('32-15: the hub file and session module is hub-side, and its closure reaches no Yjs, no doc.ts and nothing outside src/domain (D-27)', () => {
+  const closure = hubSideClosure();
+  assert.ok(closure.includes('domain/replica/hubFile.ts'), 'hubFile.ts is in the hub-side closure');
+  assert.ok(isHubSide('domain/replica/hubFile'), 'hubFile is listed as hub-side');
+  assert.ok(!closure.includes(DOC_FILE));
+  assert.deepEqual(replicaBoundaryViolations('domain/replica/hubFile.ts', read('domain/replica/hubFile.ts')), []);
+  assert.deepEqual(closure.filter((file) => importsOf(read(file)).some((ref) => ref.specifier === 'yjs')), []);
 });
 
 test('the scanner has teeth: an editor import, a package import, a second or value yjs import, the vendor path outside doc.ts and a hub-side import of fold.ts are all reported', () => {

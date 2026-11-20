@@ -7,9 +7,14 @@
 //   operator prints it with --hub-file and gives it to the lead by any channel; the hub keeps only the secret's hash. It is read as hostile input: text
 //   is size-capped before it is parsed, fields are read as own properties only, and parsed input is never spread into a result.
 // - Certificate pin: sha256 hex of the certificate's SubjectPublicKeyInfo DER, so a certificate renewed with the same key keeps its pin (D-29).
+// - Session answer (purpose staff-hub-session), signed by a device: the hub's writer id, the project, the hub's fresh challenge and 32 bytes of TLS
+//   keying material from exportKeyingMaterial(SESSION_KEYING_BYTES, SESSION_KEYING_LABEL), so the answer works only for that hub and project on that
+//   one TLS connection (D-35). This module checks the answer against what the hub expects; the device's standing in the roster is the hub's question.
+// - Enrolment MAC: HMAC-SHA256 under the hub file's enrolment secret over the enrolment id, hub id, project, genesis hash and roster head. The lead's
+//   device makes it and the hub checks it with the one function here (D-41).
 //
 // Refusal reasons are a closed record of plain sentences that carry no secret, MAC or key.
-import { X509Certificate, createHash, createPublicKey } from 'node:crypto';
+import { X509Certificate, createHash, createHmac, createPublicKey, timingSafeEqual } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { isIPv6 } from 'node:net';
 import { canonicalBytes, isStrictBase64url, verifySignature } from '../team/canonical';
@@ -17,7 +22,7 @@ import type { KeyStatusLookup } from '../team/keyStatus';
 import { signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 import { isRecord } from '../team/validate';
-import { HASH_PATTERN, writerIdOf } from './entry';
+import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from './entry';
 import { X25519_KEY_BYTES, x25519BindingBytes } from './cellKeys';
 
 export const HUB_FILE_EXTENSION = '.near-staff-hub';
@@ -205,5 +210,129 @@ export function readHubFile(file: unknown, now: Date): HubFileRead {
   } catch {
     // Hostile input never throws out of the reader.
     return refuseFile('malformed');
+  }
+}
+
+// ---- The session answer (D-35). ----
+
+/** The label both ends pass to TLSSocket.exportKeyingMaterial; it must be identical on the hub and the device. */
+export const SESSION_KEYING_LABEL = 'near-ai-hub-session/v1';
+export const SESSION_KEYING_BYTES = 32;
+export const CHALLENGE_BYTES = 32;
+export const SESSION_VERSION = 1;
+/** A session answer is well under 1 KiB; anything over this is refused before it is parsed. */
+export const SESSION_ANSWER_MAX_BYTES = 8 * 1024;
+const SESSION_KEYS = ['v', 'hub', 'project', 'challenge', 'keying'] as const;
+const BASE64URL_TEXT = /^[A-Za-z0-9_-]+$/;
+
+/** hub is the hub's writer id (64 hex), project the project's stream id (32 hex), challenge and keying base64url of 32 bytes each. */
+export interface SessionAnswerPayload { v: 1; hub: string; project: string; challenge: string; keying: string }
+/** Bytes or their base64url text. */
+export type SessionBytes = Uint8Array | string;
+/** What the hub expects: its own writer id, the project asked for, the challenge it gave on this connection and this connection's keying material. */
+export interface SessionExpectation { hub: string; project: string; challenge: SessionBytes; keying: SessionBytes }
+export interface BuildSessionAnswerInput extends SessionExpectation { now: Date }
+
+export const SESSION_REFUSALS = {
+  malformed: 'This is not a session answer this version can read. Open a new session and answer its challenge.',
+  'bad-signature': 'The signature on this session answer does not match its content or its device, so it was not accepted. Open a new session and answer its challenge.',
+  'wrong-hub': 'This session answer was made for a different hub. Open a new session with this hub and answer its challenge.',
+  'wrong-project': 'This session answer was made for a different project. Open a new session for this project and answer its challenge.',
+  'wrong-challenge': 'This session answer does not answer the challenge this hub gave. Open a new session and answer its challenge.',
+  'wrong-connection': 'This session answer was made on a different connection to the hub. Open a new session on this connection and answer its challenge.'
+} as const;
+export type SessionRefusal = keyof typeof SESSION_REFUSALS;
+export type SessionFailure = { ok: false; reason: SessionRefusal; message: string };
+export type SessionRead = { ok: true; publicKey: string; writer: string } | SessionFailure;
+
+const refuseSession = (reason: SessionRefusal): SessionFailure => ({ ok: false, reason, message: SESSION_REFUSALS[reason] });
+
+// Bytes as base64url text, or undefined when the value is neither bytes nor strict base64url text of that length.
+function sessionText(value: unknown, bytes: number): string | undefined {
+  if (value instanceof Uint8Array) return value.length === bytes ? Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64url') : undefined;
+  return isKey(value, bytes) ? value : undefined;
+}
+
+// Bytes from bytes or base64url text, for a comparison; an empty buffer for anything else, so the length check refuses it.
+function sessionBytes(value: unknown): Buffer {
+  if (value instanceof Uint8Array) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  return typeof value === 'string' && BASE64URL_TEXT.test(value) ? Buffer.from(value, 'base64url') : Buffer.alloc(0);
+}
+
+// Constant time for equal lengths; a length that differs is refused without comparing.
+function sameBytes(a: Buffer, b: Buffer): boolean {
+  return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
+}
+
+function sessionPayloadOf(value: unknown): SessionAnswerPayload | undefined {
+  if (!isRecord(value) || !hasKeys(value, SESSION_KEYS)) return undefined;
+  const [v, hub, project, challenge, keying] = SESSION_KEYS.map((key) => own(value, key));
+  if (v !== SESSION_VERSION || !isHash(hub) || typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
+  if (!isKey(challenge, CHALLENGE_BYTES) || !isKey(keying, SESSION_KEYING_BYTES)) return undefined;
+  return { v: SESSION_VERSION, hub, project, challenge, keying };
+}
+
+// Signs a device's answer to the hub's challenge. Throws a plain error when a field is not valid.
+export function buildSessionAnswer(signer: PayloadSigner, input: BuildSessionAnswerInput): SignedPayload<SessionAnswerPayload> {
+  const challenge = sessionText(input.challenge, CHALLENGE_BYTES);
+  const keying = sessionText(input.keying, SESSION_KEYING_BYTES);
+  const payload = { v: SESSION_VERSION, hub: input.hub, project: input.project, challenge, keying };
+  const checked = sessionPayloadOf(payload);
+  if (checked === undefined) throw new Error('The session answer was not made: the hub must be a writer id, the project a project id, and the challenge and keying material 32 bytes each.');
+  return signPayload(signer, 'staff-hub-session', checked, { now: () => input.now });
+}
+
+// The hub's check of a session answer (its JSON text or its parsed content) against what it expects on this connection. Checks, in order: size and
+// shape, the signature by the key the envelope names, then the hub, the project, the challenge and the keying material, with the last two compared in
+// constant time. Returns the device's key and writer id; whether that device may open a session is the roster's answer. Never throws.
+export function readSessionAnswer(answer: unknown, expected: SessionExpectation): SessionRead {
+  try {
+    const input = inputValue(answer, SESSION_ANSWER_MAX_BYTES);
+    if (!input.ok) return refuseSession('malformed');
+    const value = input.value;
+    if (!isRecord(value)) return refuseSession('malformed');
+    const payload = sessionPayloadOf(own(value, 'payload'));
+    const signer = own(value, 'signer');
+    const publicKey = isRecord(signer) ? own(signer, 'publicKey') : undefined;
+    if (payload === undefined || !isKey(publicKey, ED25519_PUBLIC_BYTES)) return refuseSession('malformed');
+    const verdict = verifyPayload<unknown>(value, { purpose: 'staff-hub-session', status: onlyKey(publicKey), maxBytes: SESSION_ANSWER_MAX_BYTES });
+    if (!verdict.ok) return refuseSession(verdict.reason === 'bad-signature' || verdict.reason === 'unknown-key' || verdict.reason === 'key-mismatch' ? 'bad-signature' : 'malformed');
+    if (payload.hub !== expected.hub) return refuseSession('wrong-hub');
+    if (payload.project !== expected.project) return refuseSession('wrong-project');
+    if (!sameBytes(Buffer.from(payload.challenge, 'base64url'), sessionBytes(expected.challenge))) return refuseSession('wrong-challenge');
+    if (!sameBytes(Buffer.from(payload.keying, 'base64url'), sessionBytes(expected.keying))) return refuseSession('wrong-connection');
+    return { ok: true, publicKey, writer: writerIdOf(publicKey) };
+  } catch {
+    // Hostile input never throws out of the check.
+    return refuseSession('malformed');
+  }
+}
+
+// ---- The enrolment MAC (D-41). ----
+
+/** hub is the hub id from the hub file (hubIdOf of its writer id), as hub.admit names it. */
+export interface EnrolmentMacFields { enrolment: string; hub: string; project: string; genesisHash: string; rosterHead: string }
+
+const MAC_BYTES = 32;
+
+function enrolmentMessage(fields: EnrolmentMacFields): Buffer {
+  // Only these five fields, copied by name, so an extra property on the input is never covered.
+  return canonicalBytes({ enrolment: fields.enrolment, hub: fields.hub, project: fields.project, genesisHash: fields.genesisHash, rosterHead: fields.rosterHead });
+}
+
+// HMAC-SHA256 under the enrolment secret over the canonical bytes of the five fields, as base64url. Throws a plain error, naming no secret, when the
+// secret is not 32 bytes of base64url.
+export function enrolmentMac(secret: string, fields: EnrolmentMacFields): string {
+  if (!isKey(secret, ENROLMENT_SECRET_BYTES)) throw new Error('The enrolment check was not made: the enrolment secret must be 32 bytes written as base64url.');
+  return createHmac('sha256', Buffer.from(secret, 'base64url')).update(enrolmentMessage(fields)).digest('base64url');
+}
+
+// True only for the MAC of exactly these fields under this secret, compared in constant time. False, never a throw, for anything else.
+export function checkEnrolmentMac(secret: string, fields: EnrolmentMacFields, mac: string): boolean {
+  try {
+    if (!isKey(mac, MAC_BYTES)) return false;
+    return sameBytes(Buffer.from(enrolmentMac(secret, fields), 'base64url'), Buffer.from(mac, 'base64url'));
+  } catch {
+    return false;
   }
 }

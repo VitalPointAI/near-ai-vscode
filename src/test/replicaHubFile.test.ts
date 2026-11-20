@@ -2,14 +2,16 @@
 // certificate pin it carries. One named test per refusal. Keys are generated at run time or derived from labels; no key material is written here.
 // The certificates are built here from DER parts and signed with a generated key, so no certificate file and no openssl run is needed.
 import assert from 'node:assert/strict';
-import { createHash, createPublicKey, generateKeyPairSync, randomBytes, sign as dsaSign } from 'node:crypto';
+import { createHash, createHmac, createPublicKey, generateKeyPairSync, randomBytes, sign as dsaSign } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import test from 'node:test';
 import { x25519BindingBytes } from '../domain/replica/cellKeys';
 import {
-  HUB_FILE_EXTENSION, HUB_FILE_MAX_BYTES, HUB_FILE_REFUSALS, buildHubFile, certPinOf, hubIdOf, isHubAddress, readHubFile, spkiPin
+  CHALLENGE_BYTES, HUB_FILE_EXTENSION, HUB_FILE_MAX_BYTES, HUB_FILE_REFUSALS, SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, SESSION_REFUSALS, buildHubFile, buildSessionAnswer, certPinOf,
+  checkEnrolmentMac, enrolmentMac, hubIdOf, isHubAddress, readHubFile, readSessionAnswer, spkiPin
 } from '../domain/replica/hubFile';
-import type { BuildHubFileInput, HubFilePayload } from '../domain/replica/hubFile';
+import type { BuildHubFileInput, EnrolmentMacFields, HubFilePayload, SessionAnswerPayload, SessionExpectation } from '../domain/replica/hubFile';
+import { canonicalBytes } from '../domain/team/canonical';
 import { writerIdOf } from '../domain/replica/entry';
 import { signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
@@ -282,4 +284,148 @@ test('certPinOf refuses text or bytes that are not a certificate with a plain er
       return true;
     });
   }
+});
+
+// ---- The session answer (D-35): a device's signed answer to the hub's challenge, bound to the hub, the project and the TLS connection. ----
+interface SessionWorld { hub: RosterDevice; device: RosterDevice; project: string; challenge: Buffer; keying: Buffer; expected: SessionExpectation }
+
+function sessionWorld(): SessionWorld {
+  const hub = rosterDevice('HUB', 'hub');
+  const device = rosterDevice('LEAD', 'mbr-lead');
+  const project = createHash('sha256').update('project/session').digest('hex').slice(0, 32);
+  // What the hub draws and what both ends of one TLS connection export (exportKeyingMaterial(SESSION_KEYING_BYTES, SESSION_KEYING_LABEL)).
+  const challenge = randomBytes(CHALLENGE_BYTES);
+  const keying = randomBytes(SESSION_KEYING_BYTES);
+  return { hub, device, project, challenge, keying, expected: { hub: hub.writer, project, challenge, keying } };
+}
+
+const answerOf = (world: SessionWorld, overrides: Partial<{ hub: string; project: string; challenge: Buffer | string; keying: Buffer | string }> = {}): SignedPayload<SessionAnswerPayload> =>
+  buildSessionAnswer(world.device.signer, { hub: world.hub.writer, project: world.project, challenge: world.challenge, keying: world.keying, now: NOW, ...overrides });
+
+test('tracer: a device answers the hub\'s challenge for one project on one TLS connection, and the hub reads the answer with the device\'s key and writer id', () => {
+  assert.equal(SESSION_KEYING_LABEL, 'near-ai-hub-session/v1');
+  assert.equal(SESSION_KEYING_BYTES, 32);
+  assert.equal(CHALLENGE_BYTES, 32);
+  const world = sessionWorld();
+  const signed = answerOf(world);
+  assert.equal(signed.purpose, 'staff-hub-session');
+  assert.deepEqual(signed.payload, { v: 1, hub: world.hub.writer, project: world.project, challenge: world.challenge.toString('base64url'), keying: world.keying.toString('base64url') });
+  const read = readSessionAnswer(asFile(signed), world.expected);
+  assert.deepEqual(read, { ok: true, publicKey: world.device.publicKey, writer: world.device.writer });
+  // The expected values may be given as bytes or as base64url text, and the answer as text or as a parsed value.
+  const asText: SessionExpectation = { ...world.expected, challenge: world.challenge.toString('base64url'), keying: world.keying.toString('base64url') };
+  assert.equal(reasonOf(readSessionAnswer(signed, asText)), 'ok');
+  assert.equal(reasonOf(readSessionAnswer(answerOf(world, { challenge: world.challenge.toString('base64url') }), world.expected)), 'ok');
+});
+
+test('wrong-hub, wrong-project and wrong-challenge: an answer made for another hub, project or challenge is refused, each with its own reason', () => {
+  const world = sessionWorld();
+  const text = asFile(answerOf(world));
+  const other = sessionWorld();
+  assert.equal(reasonOf(readSessionAnswer(text, { ...world.expected, hub: rosterDevice('OTHER-HUB', 'hub').writer })), 'wrong-hub');
+  assert.equal(reasonOf(readSessionAnswer(text, { ...world.expected, project: '0'.repeat(32) })), 'wrong-project');
+  assert.equal(reasonOf(readSessionAnswer(text, { ...world.expected, challenge: other.challenge })), 'wrong-challenge');
+});
+
+test('wrong-connection: an answer replayed on another TLS connection, whose keying material differs, is refused even with the same hub, project and challenge', () => {
+  const world = sessionWorld();
+  const signed = answerOf(world);
+  const otherConnection = randomBytes(SESSION_KEYING_BYTES);
+  assert.equal(reasonOf(readSessionAnswer(asFile(signed), { ...world.expected, keying: otherConnection })), 'wrong-connection');
+  // One bit different is enough.
+  const flipped = Buffer.from(world.keying);
+  flipped[31] ^= 1;
+  assert.equal(reasonOf(readSessionAnswer(asFile(signed), { ...world.expected, keying: flipped })), 'wrong-connection');
+  // An expected value of another length is refused the same way, never thrown.
+  assert.equal(reasonOf(readSessionAnswer(asFile(signed), { ...world.expected, keying: world.keying.subarray(0, 16) })), 'wrong-connection');
+  assert.equal(reasonOf(readSessionAnswer(asFile(signed), { ...world.expected, challenge: world.challenge.subarray(0, 16) })), 'wrong-challenge');
+});
+
+test('bad-signature: an answer with any changed field, or re-labelled with another device\'s key, is refused', () => {
+  const world = sessionWorld();
+  const signed = answerOf(world);
+  for (const field of ['hub', 'project', 'challenge', 'keying'] as const) {
+    const copy = JSON.parse(asFile(signed)) as SignedPayload<SessionAnswerPayload>;
+    // Edited to the value the hub expects from someone else's answer, so only the signature can catch it.
+    copy.payload[field] = field === 'hub' ? rosterDevice('OTHER-HUB', 'hub').writer : field === 'project' ? '0'.repeat(32) : randomBytes(32).toString('base64url');
+    assert.equal(reasonOf(readSessionAnswer(asFile(copy), { ...world.expected, [field]: field === 'hub' || field === 'project' ? copy.payload[field] : Buffer.from(copy.payload[field], 'base64url') })), 'bad-signature', field);
+  }
+  const relabelled = JSON.parse(asFile(signed)) as SignedPayload<SessionAnswerPayload>;
+  relabelled.signer = { ...answerOf({ ...world, device: rosterDevice('MALLORY', 'mbr-mallory') }).signer };
+  assert.equal(reasonOf(readSessionAnswer(asFile(relabelled), world.expected)), 'bad-signature');
+});
+
+test('malformed: an answer of the wrong shape, another purpose, text that is not JSON, or an oversized answer is refused malformed', () => {
+  const world = sessionWorld();
+  const base = answerOf(world).payload as unknown as Record<string, unknown>;
+  const sign = (payload: unknown): string => asFile(signPayload(world.device.signer, 'staff-hub-session', payload, { now: () => NOW }));
+  const cases: Array<[string, unknown]> = [
+    ['an extra key', { ...base, note: 'x' }],
+    ['a short challenge', { ...base, challenge: randomBytes(16).toString('base64url') }],
+    ['a long keying value', { ...base, keying: randomBytes(48).toString('base64url') }],
+    ['a hub that is not a writer id', { ...base, hub: hubIdOf(world.hub.writer) }],
+    ['a project that is not a stream id', { ...base, project: 'project-1' }],
+    ['another version', { ...base, v: 2 }]
+  ];
+  for (const [what, payload] of cases) assert.equal(reasonOf(readSessionAnswer(sign(payload), world.expected)), 'malformed', what);
+  const hubFileSigned = asFile(signPayload(world.device.signer, 'staff-hub-file', base, { now: () => NOW }));
+  assert.equal(reasonOf(readSessionAnswer(hubFileSigned, world.expected)), 'malformed');
+  for (const input of ['not json', 'null', '[]', '{}', 'x'.repeat(64 * 1024)]) assert.equal(reasonOf(readSessionAnswer(input, world.expected)), 'malformed', input.slice(0, 10));
+  // buildSessionAnswer refuses what readSessionAnswer would refuse, in plain words.
+  for (const overrides of [{ challenge: randomBytes(16) }, { keying: 'short' }, { hub: 'hub-1' }, { project: 'x' }]) {
+    assert.throws(() => answerOf(world, overrides), /^Error: The session answer was not made: /);
+  }
+});
+
+test('every session refusal is one plain sentence that says what to do, with no em-dash, and no refusal carries the challenge or the keying material', () => {
+  assert.deepEqual(Object.keys(SESSION_REFUSALS).sort(), ['bad-signature', 'malformed', 'wrong-challenge', 'wrong-connection', 'wrong-hub', 'wrong-project']);
+  for (const [reason, message] of Object.entries(SESSION_REFUSALS)) {
+    assert.match(message, /^[A-Z][^—]*\.$/, reason);
+    assert.match(message, /new session/, reason);
+  }
+  const world = sessionWorld();
+  const text = asFile(answerOf(world));
+  for (const result of [readSessionAnswer(text, { ...world.expected, keying: randomBytes(32) }), readSessionAnswer(text, { ...world.expected, challenge: randomBytes(32) })]) {
+    assert.equal(result.ok, false);
+    const shown = JSON.stringify(result);
+    assert.equal(shown.includes(world.challenge.toString('base64url')), false);
+    assert.equal(shown.includes(world.keying.toString('base64url')), false);
+  }
+});
+
+// ---- The enrolment MAC (D-41): both sides use the one function. ----
+const ENROLMENT_FIELDS: EnrolmentMacFields = {
+  enrolment: 'enr-0123456789abcdef',
+  hub: 'hub-0123456789abcdef',
+  project: createHash('sha256').update('project/enrol').digest('hex').slice(0, 32),
+  genesisHash: createHash('sha256').update('genesis/enrol').digest('hex'),
+  rosterHead: createHash('sha256').update('roster-head/enrol').digest('hex')
+};
+
+test('enrolmentMac is base64url HMAC-SHA256 under the enrolment secret over the canonical bytes of the enrolment id, hub, project, genesis hash and roster head', () => {
+  const secret = randomBytes(32).toString('base64url');
+  const mac = enrolmentMac(secret, ENROLMENT_FIELDS);
+  const expected = createHmac('sha256', Buffer.from(secret, 'base64url')).update(canonicalBytes({ ...ENROLMENT_FIELDS })).digest('base64url');
+  assert.equal(mac, expected);
+  assert.equal(Buffer.from(mac, 'base64url').length, 32);
+  assert.equal(checkEnrolmentMac(secret, ENROLMENT_FIELDS, mac), true);
+  // The same fields give the same MAC; an extra property on the input is not covered and changes nothing.
+  assert.equal(enrolmentMac(secret, { ...ENROLMENT_FIELDS, extra: 'ignored' } as EnrolmentMacFields), mac);
+  assert.throws(() => enrolmentMac('short', ENROLMENT_FIELDS), /^Error: The enrolment check was not made: /);
+});
+
+test('checkEnrolmentMac is false for any one field changed, another secret, a MAC of the wrong length or text that is not a MAC, and never throws', () => {
+  const secret = randomBytes(32).toString('base64url');
+  const mac = enrolmentMac(secret, ENROLMENT_FIELDS);
+  const changed: Array<[keyof EnrolmentMacFields, string]> = [
+    ['enrolment', 'enr-fedcba9876543210'], ['hub', 'hub-fedcba9876543210'], ['project', '0'.repeat(32)], ['genesisHash', '0'.repeat(64)], ['rosterHead', '1'.repeat(64)]
+  ];
+  for (const [field, value] of changed) assert.equal(checkEnrolmentMac(secret, { ...ENROLMENT_FIELDS, [field]: value }, mac), false, field);
+  assert.equal(checkEnrolmentMac(randomBytes(32).toString('base64url'), ENROLMENT_FIELDS, mac), false);
+  const bytes = Buffer.from(mac, 'base64url');
+  assert.equal(checkEnrolmentMac(secret, ENROLMENT_FIELDS, bytes.subarray(0, 31).toString('base64url')), false);
+  assert.equal(checkEnrolmentMac(secret, ENROLMENT_FIELDS, Buffer.concat([bytes, Buffer.from([0])]).toString('base64url')), false);
+  for (const junk of ['', 'not a mac!', 42, null, undefined, { mac }]) assert.equal(checkEnrolmentMac(secret, ENROLMENT_FIELDS, junk as string), false);
+  assert.equal(checkEnrolmentMac('short', ENROLMENT_FIELDS, mac), false);
+  assert.equal(checkEnrolmentMac(secret, null as unknown as EnrolmentMacFields, mac), false);
 });

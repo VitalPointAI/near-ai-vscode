@@ -537,7 +537,7 @@ test('a key record made of keys and hashes in the shapes the history writes is n
   }
 });
 
-// Every exempt path of the Phase 31 purposes (GENERATED_PATHS in signedPayload.ts): the purpose, a payload with the value at that path, and the path.
+// Every exempt path of the Phase 31 and Phase 32 purposes (GENERATED_PATHS in signedPayload.ts): the purpose, a payload with the value at that path, and the path.
 const GENERATED_FIELD_CASES: ReadonlyArray<[PayloadPurpose, (value: string) => unknown, string]> = [
   ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: value, wraps: [] }), '$.labelSealed'],
   ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: '', wraps: [{ writer: 'w', wrap: 'x' }, { writer: 'v', wrap: value }] }), '$.wraps[1].wrap'],
@@ -545,12 +545,19 @@ const GENERATED_FIELD_CASES: ReadonlyArray<[PayloadPurpose, (value: string) => u
   ['staff-invite', (value) => ({ invite: 'i', lead: { member: 'm', x25519: value } }), '$.lead.x25519'],
   ['staff-join-request', (value) => ({ invite: 'i', x25519: value }), '$.x25519'],
   ['staff-join-request', (value) => ({ invite: 'i', x25519Sig: value }), '$.x25519Sig'],
-  ['staff-join-request', (value) => ({ invite: 'i', mac: value }), '$.mac']
+  ['staff-join-request', (value) => ({ invite: 'i', mac: value }), '$.mac'],
+  // Phase 32 (D-60): the hub session answer, the hub file and the hub join envelope.
+  ['staff-hub-session', (value) => ({ hub: 'h', project: 'p', challenge: value }), '$.challenge'],
+  ['staff-hub-session', (value) => ({ hub: 'h', project: 'p', keying: value }), '$.keying'],
+  ['staff-hub-file', (value) => ({ hub: 'h', address: 'hub.example.org:8443', x25519: value }), '$.x25519'],
+  ['staff-hub-file', (value) => ({ hub: 'h', address: 'hub.example.org:8443', x25519Sig: value }), '$.x25519Sig'],
+  ['staff-hub-file', (value) => ({ hub: 'h', address: 'hub.example.org:8443', enrolmentSecret: value }), '$.enrolmentSecret'],
+  ['staff-hub-join', (value) => ({ hub: 'h', project: 'p', hubMac: value }), '$.hubMac']
 ];
 /** A path as a regular expression that matches it literally. */
 const pathPattern = (where: string): RegExp => new RegExp(`secret-like value at ${where.replace(/[$.[\]]/g, '\\$&')}`);
 
-test('generated random fields of the Phase 31 purposes are not mistaken for tokens, and nothing else is let through', () => {
+test('generated random fields of the Phase 31 and Phase 32 purposes are not mistaken for tokens, and nothing else is let through', () => {
   const agent = agentSigner();
   // Random base64url that happens to contain a token shape: the chance match that made grants, admissions and rekeys fail at random.
   const lookalike = `${randomBytes(9).toString('base64url')}-rt_${randomBytes(12).toString('base64url')}`;
@@ -568,6 +575,14 @@ test('generated random fields of the Phase 31 purposes are not mistaken for toke
   throwsPlain(() => signPayload(agent, 'staff-cell-grant', { cell: 'c', labelSealed: '', wraps: [], note: lookalike }), /secret-like value at \$\.note/);
   throwsPlain(() => signPayload(agent, 'staff-invite', { invite: 'i', name: lookalike }), /secret-like value at \$\.name/);
   throwsPlain(() => signPayload(agent, 'staff-join-request', { invite: 'i', wraps: [{ wrap: lookalike }] }), /secret-like value/);
+  // Phase 32: the same lookalike in the address or the project of a hub purpose is not a random field, so it is refused with that path named.
+  for (const purpose of ['staff-hub-session', 'staff-hub-file', 'staff-hub-join'] as const) {
+    throwsPlain(() => signPayload(agent, purpose, { hub: 'h', address: lookalike }), pathPattern('$.address'));
+    throwsPlain(() => signPayload(agent, purpose, { hub: 'h', project: lookalike }), pathPattern('$.project'));
+  }
+  // An exempt name one level down is not the exempt path.
+  throwsPlain(() => signPayload(agent, 'staff-hub-file', { hub: 'h', inner: { enrolmentSecret: lookalike } }), pathPattern('$.inner.enrolmentSecret'));
+  throwsPlain(() => signPayload(agent, 'staff-hub-join', { hub: 'h', mac: lookalike }), pathPattern('$.mac'));
 });
 
 // D-11 (PR #130 review): the test above uses a lookalike. Here the random field holds a real token shape, built from parts at run time so no
