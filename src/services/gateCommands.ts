@@ -364,7 +364,9 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   const port = options.policyEditor ?? defaultPolicyEditorPort(context);
   attempt('the policy editor', () => {
     if (port !== undefined) {
-      const wiring = policyEditorDeps(host, { secrets: context.secrets, reset: () => resetPolicy(host), showStored: () => showStored() });
+      const dir = context.globalStorageUri.fsPath;
+      const ownRules = { globalStorageDir: dir, edit: () => editPolicy(host, dir, port), applyDraft: () => applyPolicyDraftCommand(host, dir, port) };
+      const wiring = policyEditorDeps(host, { secrets: context.secrets, reset: () => resetPolicy(host), showStored: () => showStored(), ownRules });
       keep({ dispose: wiring.dispose });
       keep(port.register(wiring.deps));
     }
