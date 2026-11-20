@@ -29,6 +29,7 @@ import { productPath } from '../staff/staffHost';
 import { setCasProbe } from '../staff/staffFiles';
 import { attend, isAttended, resetAttendance } from '../staff/watchAttendance';
 import { STANDING_WATCHES_FILE, WATCH_CHANGED_TEXT, WatchHost } from '../staff/watchHost';
+import { REPLICA_DIR, REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
 import type { WatchNotice } from '../staff/watchHost';
 import { J2_TEAM, staffWorld } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
@@ -658,4 +659,25 @@ test('the contract names every watch event the runtime records', () => {
   for (const rule of WATCH_TRANSITIONS) { assert.ok(states.has(rule.to)); for (const from of rule.from) assert.ok(states.has(from)); }
   const events = new Set<WatchEvent>(WATCH_EVENTS);
   for (const rule of WATCH_TRANSITIONS) assert.ok(events.has(rule.event));
+});
+
+test('in a shared project every watch change is refused before the standing watches file is touched, so no step is left without its events', async () => {
+  const p = await project();
+  await created(p);
+  const file = path.join(p.world.root, STANDING_WATCHES_FILE);
+  const before = readFileSync(file, 'utf8');
+  const events = (await watchEvents(p)).length;
+  // The project becomes shared (31-21): the staff host then refuses every single-machine write, the watch events included.
+  mkdirSync(path.join(p.world.root, ...REPLICA_DIR.split('/')), { recursive: true });
+  writeFileSync(path.join(p.world.root, ...REPLICA_PROJECT_FILE.split('/')), '{}');
+  assert.deepEqual(await p.host.pause(K_SAMPLE(p), 'WATCH-1'), { ok: false, message: SHARED_PROJECT_REFUSAL });
+  assert.deepEqual(await p.host.retire(K_SAMPLE(p), 'WATCH-1', ['No longer needed.']), { ok: false, message: SHARED_PROJECT_REFUSAL });
+  const another = await p.host.create(K_SAMPLE(p), { title: 'Another watch', pir: 'PIR-1', indicator: 'IND-1', condition: { area: { kind: 'control-measure', id: 'obj-falcon' } }, ltiov: LTIOV });
+  assert.deepEqual(another, { ok: false, message: SHARED_PROJECT_REFUSAL });
+  await advance(p, 1);
+  await p.store.append({ rows: [row(p.world.clock.now)] });
+  await p.host.evaluate();
+  assert.equal(readFileSync(file, 'utf8'), before, 'the register is untouched');
+  assert.equal((await watchEvents(p)).length, events);
+  assert.equal((await one(p)).state, 'armed');
 });
