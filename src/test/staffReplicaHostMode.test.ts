@@ -5,20 +5,22 @@
 // secret, while the reads of the decision log, the wargame ledger, the event log and the logistics files still answer.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import type { StaffSectionId } from '../domain/staff/doctrine';
 import type { PlanningFactor } from '../domain/staff/logistics';
-import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
+import { REPLICA_DIR, REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
 import type { PersonActor } from '../domain/staff/release';
 import type { DeviceIdentity } from '../team/identity';
 import { isMigrationRefused, ledgerHeadKey, makeMultiUser } from '../staff/replica/migrate';
 import type { MigrationDeps } from '../staff/replica/migrate';
 import type { ProjectedProductState } from '../staff/replica/projection';
-import { ReplicaProject } from '../staff/replica/replicaProject';
+import { isProjectRefused, ReplicaProject } from '../staff/replica/replicaProject';
+import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
+import { STORE_REFUSALS } from '../staff/replica/store';
 import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
 import type { StaffEvent } from '../domain/staff/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
@@ -446,4 +448,89 @@ test('a replica project file that cannot be checked (a stat error other than its
   // An error code that is not a plain errno name is not echoed.
   assert.match(sharedCheckFailedText('bad code; rm -rf'), /failed with an unknown error\./);
   assert.match(sharedCheckFailedText(undefined), /failed with an unknown error\./);
+});
+
+// ---- 32-05: the host follows its shared project's store (D-09) ----------------------------------------------------------------------------------
+// A window keeps its staff host across Start Again, run there or in another window. The host keeps the project it opened together with the store's
+// identity (the store folder's device and inode numbers and the roster head this device's mark names) and opens the project again when it changed.
+
+/** The project's replica store folder. */
+const storeDirOf = (root: string): string => path.join(root, ...REPLICA_DIR.split('/'));
+
+/** This device's file in the project's base stream: the file a rollback of this device's own history cuts. */
+async function ownBaseFile(env: Env): Promise<string> {
+  const project = (JSON.parse(readFileSync(path.join(env.root, ...REPLICA_PROJECT_FILE.split('/')), 'utf8')) as { anchor: { project: string } }).anchor.project;
+  const { writer } = await ReplicaProject.localDevice(env.deps);
+  return path.join(storeDirOf(env.root), 'streams', project, `${writer}.jsonl`);
+}
+
+/** Cuts the last whole line of a stream file and gives back the text it had, so a test can put it back. */
+function cutLastLine(file: string): string {
+  const text = readFileSync(file, 'utf8');
+  const lines = text.split('\n');
+  assert.ok(lines.length >= 3 && lines[lines.length - 1] === '', 'at least two whole lines');
+  writeFileSync(file, `${lines.slice(0, -2).join('\n')}\n`);
+  return text;
+}
+
+/** Counts ReplicaProject.open and keeps every project it opened, until restore(). */
+function countOpens(): { readonly opened: ReplicaProject[]; count(): number; restore(): void } {
+  const original = ReplicaProject.open.bind(ReplicaProject);
+  const opened: ReplicaProject[] = [];
+  const spy = mock.method(ReplicaProject, 'open', async (root: string, deps: ReplicaProjectDeps) => {
+    const result = await original(root, deps);
+    if (result instanceof ReplicaProject) opened.push(result);
+    return result;
+  });
+  return { opened, count: () => spy.mock.callCount(), restore: () => spy.mock.restore() };
+}
+
+test('Start Again while the host holds a cached project: after another window sets the rolled-back store aside and starts it again, the host shows the products again without a reload', async () => {
+  const env = await cloneOf(await full(), 'start-again-held');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    assert.deepEqual([...first.products.keys()].sort(), [...PRODUCTS].sort());
+    // This device's base stream file loses its last line: the store is refused rolled-back, and the host says so.
+    cutLastLine(await ownBaseFile(env));
+    const refused = await host.replay();
+    assert.ok(refused.broken, 'a rolled-back store reads as broken');
+    assert.ok(refused.broken.reason.includes(STORE_REFUSALS['rolled-back']), refused.broken.reason);
+    assert.equal(refused.products.size, 0);
+    // Another window starts this computer's shared history again, without telling the host.
+    const started = await ReplicaProject.startHistoryAgain(env.root, env.deps);
+    assert.ok(started !== undefined && !isProjectRefused(started), started === undefined ? 'no shared project' : isProjectRefused(started) ? started.message : '');
+    const again = await host.replay();
+    assert.equal(again.broken, undefined, again.broken?.reason);
+    assert.deepEqual(again.products, first.products, 'the products read again, as before the rollback');
+  } finally {
+    await host.close();
+  }
+});
+
+test('a store folder replaced by a copy of itself (a new folder, the same content) is opened again by a host that was told nothing, and the replay is unchanged', async () => {
+  const env = await cloneOf(await full(), 'store-copied');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    assert.equal(opens.count(), 1);
+    const dir = storeDirOf(env.root);
+    const before = lstatSync(dir).ino;
+    cpSync(dir, `${dir}.copy`, { recursive: true });
+    renameSync(dir, `${dir}.old`);
+    renameSync(`${dir}.copy`, dir);
+    assert.notEqual(lstatSync(dir).ino, before, 'a new folder');
+    const again = await host.replay();
+    assert.equal(opens.count(), 2, 'the host opened the project again on the new folder');
+    assert.equal(again.broken, undefined, again.broken?.reason);
+    assert.deepEqual(again.products, first.products);
+  } finally {
+    opens.restore();
+    await host.close();
+  }
 });
