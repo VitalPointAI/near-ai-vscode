@@ -13,6 +13,7 @@ import { HealthRegistry } from './health';
 import { createRoutes, type RouteDeps } from './http/routes';
 import { createHubServer, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
 import { SessionRegistry } from './http/session';
+import { JoinDesk, type JoinChecks, type JoinLog } from './join';
 import { EventHub, realScheduler, type Scheduler } from './live/events';
 import { PresenceHub } from './live/presence';
 import { RateLimits, type RateLimitOptions } from './limits';
@@ -154,6 +155,10 @@ export interface HubParts {
   signCheckpoints?: boolean;
   /** The checkpointer's log lines (project id, counts and a reason word). */
   onCheckpointLog?: CheckpointLog;
+  /** The signature and MAC checks of a join post (32-25); the real ones unless a test counts them. */
+  joinChecks?: JoinChecks;
+  /** The join desk's log lines (project id, invite id and a reason word). */
+  onJoinLog?: JoinLog;
 }
 
 export interface ComposedHub {
@@ -165,6 +170,8 @@ export interface ComposedHub {
   presence: PresenceHub;
   /** The checkpoint signer, listening on the events channel; undefined when turned off. */
   checkpoints: Checkpointer | undefined;
+  /** Invitations and join requests (32-25); its 7 day removal runs at start and every hour. */
+  join: JoinDesk;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -184,6 +191,16 @@ export function composeHub(parts: HubParts): ComposedHub {
   const scheduler = parts.scheduler === undefined ? {} : { scheduler: parts.scheduler };
   const events = new EventHub({ now, ...scheduler });
   const presence = new PresenceHub(events, { now, ...scheduler, accessList: async (project, cell) => (await cache.get(project)).accessList(cell) });
+  const join = new JoinDesk({
+    store,
+    cache,
+    identity,
+    events,
+    now,
+    ...(parts.joinChecks === undefined ? {} : { checks: parts.joinChecks }),
+    ...(parts.onJoinLog === undefined ? {} : { log: parts.onJoinLog }),
+  });
+  join.start(parts.scheduler ?? realScheduler);
   const routes = createRoutes({
     store,
     cache,
@@ -193,6 +210,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     now,
     events,
     presence,
+    join,
     ...(parts.onAccepted === undefined ? {} : { onAccepted: parts.onAccepted }),
     ...(parts.onEquivocation === undefined ? {} : { onEquivocation: parts.onEquivocation }),
     ...(parts.onFailure === undefined ? {} : { onFailure: parts.onFailure }),
@@ -221,7 +239,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits, events, presence, checkpoints };
+  return { server, sessions, cache, limits, events, presence, checkpoints, join };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
@@ -390,6 +408,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       health,
       onFailure: (route, error) => logger.error('http.failed', { route, name: error instanceof Error ? error.name : 'NonError' }),
       onCheckpointLog: (level, event, fields) => logger[level](event, fields),
+      onJoinLog: (level, event, fields) => logger[level](event, fields),
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);
@@ -407,6 +426,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   const liveEvents = composed.events;
   const livePresence = composed.presence;
   const checkpointer = composed.checkpoints;
+  const joinDesk = composed.join;
   let port: number;
   try {
     port = await listen(openServer, config.host, config.port);
@@ -446,6 +466,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     }, SHUTDOWN_GRACE_MS).unref();
     // The relay's order: no new sessions, then the server, then the store once the last request has finished.
     clearInterval(sweep);
+    joinDesk.stop();
     // No checkpoint is signed once stopping starts: pending debounce timers are cleared and a running job stores nothing. A line (a count only)
     // only when a timer was pending, so an idle stop logs exactly what it did before.
     const timersCleared = checkpointer?.stop() ?? 0;
