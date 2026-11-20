@@ -15,7 +15,8 @@ import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore'
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
 import {
-  ENROLMENT_RECORD_FILE, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, migrationNoticeText, setOrganizationWriteProbe
+  ENROLMENT_RECORD_FILE, NOT_ENROLLED_TEXT, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, migrationNoticeText,
+  previewOrganizationFile, setOrganizationWriteProbe
 } from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
 import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rotationTextFor, rulesTextFor } from './helpers/enrolmentFixtures';
@@ -574,5 +575,28 @@ test('D-27: a v1 personal layer with local hosts reports its migration changes; 
     const applied = await host.applyPolicyDraft(JSON.stringify(payload), composedHash(host));
     assert.equal(applied.state.state, 'valid');
     assert.deepEqual(host.policyLayers().migration, [], 'a v2 layer reports none');
+  });
+});
+
+test('a preview reads a file the way accept does, with the words for an enrolment, and writes nothing', async () => {
+  await withWorld(async (world) => {
+    const host = hostOf(world);
+    await host.start();
+    const rules = rulesTextFor(issuerKey(), sectionsWith('org/Public', 'local-only'));
+    const refused = await previewOrganizationFile(world.storage, world.secrets, rules, world.clock.now);
+    assert.deepEqual(refused, { kind: 'refused', reason: 'not-enrolled', sentence: NOT_ENROLLED_TEXT });
+    const enrolment = enrolmentTextFor(issuerKey());
+    const preview = await previewOrganizationFile(world.storage, world.secrets, enrolment, world.clock.now);
+    assert.equal(preview.kind, 'enrol');
+    if (preview.kind === 'enrol') {
+      assert.equal(preview.name, EXAMPLE_ORGANIZATION.name);
+      assert.equal(preview.words?.length, 12);
+      assert.deepEqual(preview.contacts, EXAMPLE_ORGANIZATION.contacts);
+    }
+    assert.deepEqual(await previewOrganizationFile(world.storage, world.secrets, 'not json', world.clock.now).then((value) => value.kind), 'refused');
+    assert.equal(world.secrets.values.has(ORGANIZATION_ISSUER_SECRET), false, 'nothing was pinned');
+    assert.equal(await exists(organizationFolder(world)), false, 'nothing was written');
+    await host.acceptOrganizationFile(enrolment, { wordsConfirmed: true });
+    assert.equal((await previewOrganizationFile(world.storage, world.secrets, enrolment, world.clock.now)).kind, 'same');
   });
 });
