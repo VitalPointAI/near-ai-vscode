@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { currentLogin, gh, prFiles, viewPr } from './gh.mjs';
+import { currentLogin, gh, prFilePatches, prFiles, viewPr } from './gh.mjs';
 import { AGENT_REVIEW_CONTEXT, REVIEW_ACCOUNT, CI_CHECKS, evaluateChecks, fitComment, normalizeChecks, parseReview, reviewDecision } from './workflow.mjs';
 
 function checkSummary(checks) {
@@ -13,6 +13,37 @@ function checkSummary(checks) {
     .map((check) => `| ${check.name} | ${check.state} |`);
   const ci = evaluateChecks(checks, CI_CHECKS);
   return { table: ['| Check | State |', '| --- | --- |', ...lines].join('\n'), ci };
+}
+
+/** True for gh's refusal to return the diff of a PR that changes more files or lines than GitHub serves as one diff. */
+export function isDiffTooLarge(error) {
+  return /too_large|HTTP 406|exceeded the maximum/i.test(String(error?.message ?? error));
+}
+
+/**
+ * The PR's unified diff. GitHub refuses `gh pr diff` above 300 files or 20,000 lines (HTTP 406
+ * too_large); the review then builds the same diff from the paginated per-file API, which serves
+ * up to 3,000 files. A file GitHub sends no patch for (binary, or itself too large) gets a
+ * section saying so, so the reviewer sees it changed and that its content was not shown.
+ */
+export function prDiff(repo, number, log = console.log) {
+  try {
+    return gh(['pr', 'diff', String(number), '--repo', repo]);
+  } catch (error) {
+    if (!isDiffTooLarge(error)) throw error;
+  }
+  const entries = prFilePatches(repo, number);
+  const withoutPatch = entries.filter((entry) => typeof entry.patch !== 'string').length;
+  log(`GitHub refused the whole diff as too large; built it from the per-file API (${entries.length} files, ${withoutPatch} without a text patch).`);
+  return entries.map((entry) => {
+    const to = entry.filename;
+    const from = entry.previous_filename ?? to;
+    const header = `diff --git a/${from} b/${to}\n`;
+    if (typeof entry.patch !== 'string') return `${header}(${entry.status}: no text diff from GitHub, binary or too large to show)\n`;
+    const oldName = entry.status === 'added' ? '/dev/null' : `a/${from}`;
+    const newName = entry.status === 'removed' ? '/dev/null' : `b/${to}`;
+    return `${header}--- ${oldName}\n+++ ${newName}\n${entry.patch.endsWith('\n') ? entry.patch : `${entry.patch}\n`}`;
+  }).join('');
 }
 
 /** Writes pr.json, checks.json, files.txt and diff.patch for the reviewers into `out` (or a new temp dir). */
@@ -27,7 +58,7 @@ export function gatherReview(repo, number, out, { log = console.log } = {}) {
   writeFileSync(path.join(dir, 'pr.json'), `${JSON.stringify({ ...rest, files: files.map((file) => ({ path: file })) }, null, 2)}\n`);
   writeFileSync(path.join(dir, 'checks.json'), `${JSON.stringify(checks, null, 2)}\n`);
   writeFileSync(path.join(dir, 'files.txt'), `${files.join('\n')}\n`);
-  writeFileSync(path.join(dir, 'diff.patch'), gh(['pr', 'diff', String(number), '--repo', repo]));
+  writeFileSync(path.join(dir, 'diff.patch'), prDiff(repo, number, log));
   const { table, ci } = checkSummary(checks);
   log(`PR #${pr.number}: ${pr.title}`);
   log(`${pr.headRefName} -> ${pr.baseRefName} @ ${pr.headRefOid}`);
