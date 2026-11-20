@@ -48,7 +48,7 @@ import type { DecodeVerdict } from './decodeHost';
 import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore } from './store';
-import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefusal, StoreRefused } from './store';
+import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
 
 /** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
 export const GENESIS_PIN_FOLDER = 'staff-replica';
@@ -225,6 +225,8 @@ function welcomeProject(file: unknown): string | undefined {
 }
 
 const PASS = { ok: true as const };
+const AWAITING_KEY: CheckVerdict = { ok: false, awaiting: 'key' };
+const AWAITING_BLOB: CheckVerdict = { ok: false, awaiting: 'blob' };
 const MAX_BLOB_CHARS = Math.ceil((BLOB_MAX_BYTES * 4) / 3);
 
 /** The input of a new shared project. The lead is this device's person; level is the project's level as a slug (D-49). */
@@ -264,6 +266,7 @@ export class ReplicaProject {
   private rosterState: RosterState | undefined;
   private rosterKey: string | undefined;
   private recordedHead: string | undefined;
+  private recheckKey: string | undefined;
   private ownDecoder: DecodeHost | undefined;
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -378,6 +381,20 @@ export class ReplicaProject {
     if (before.kind === 'damaged') return refuse('pin-damaged');
     if (before.kind === 'anchor') return sameAnchor(before.anchor, checked) ? { ok: true, first: false } : refuse('pin-mismatch');
     return (await writeAnchorFile(file, checked)) ? { ok: true, first: true } : refuse('pin-mismatch');
+  }
+
+  /**
+   * Starts this computer's shared history of the project in `root` again, after the person confirmed it (31-REVIEW MJ-08): only when its store is
+   * refused rolled-back, damaged or mark-unverified (ReplicaStore.startAgain). The store folder is moved aside, never deleted; this device's own
+   * signed entries, the grants, the blobs and project.json are carried into a new one; its mark starts again. Undefined when the folder holds no
+   * shared project. The rest of the history comes back with a new welcome file, opened with Staff: Join Staff Project.
+   */
+  public static async startHistoryAgain(root: string, deps: ReplicaProjectDeps): Promise<StartedAgain | ProjectRefused | undefined> {
+    const local = await readAnchorFile(projectFile(root));
+    if (local.kind === 'missing') return undefined;
+    const device = await deviceKeys(deps);
+    const result = await ReplicaStore.startAgain(root, storeDeps(deps, device.identity));
+    return 'ok' in result ? result : storeRefused(result);
   }
 
   /**
@@ -508,7 +525,8 @@ export class ReplicaProject {
   /**
    * Takes entries and blobs from outside this machine (a transport, later). Each new entry passes the decode check first (D-05): the body of a
    * doc.update or doc.compact this device can open is handed to the memory-capped decode worker, and one it refuses is kept, held and listed by
-   * heldForCheck(), never folded. An entry this device cannot open yet passes; the fold holds it for its key or blob.
+   * heldForCheck(), never folded. An entry this device cannot check yet (its epoch key or its blob is not here) waits out of the fold, and the next
+   * state() after the key or the blob arrives runs the check again (31-REVIEW MJ-07).
    */
   public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[]): Promise<IngestResult | ProjectRefused> {
     return this.exclusive(async () => {
@@ -585,8 +603,10 @@ export class ReplicaProject {
 
   /**
    * The store's ForeignCheck (D-05). Opens the body of a doc.update or doc.compact with this device's keys (and its blob, from this delivery or the
-   * store) and asks the decode worker about the update bytes or the compacted state; a refusal holds the entry with the worker's reason. Anything
-   * this device cannot open yet, and every other kind, passes: the fold checks it, holds it, or refuses it.
+   * store) and asks the decode worker about the update bytes or the compacted state; a refusal holds the entry with the worker's reason. An entry
+   * whose epoch key or blob is not here yet cannot be checked, so it waits (awaiting-key, awaiting-blob) and never reaches the fold unchecked
+   * (31-REVIEW MJ-07). Every other kind, and a body that does not open under the key this device holds, passes: the fold checks it, holds it, or
+   * refuses it.
    */
   private foreignCheck(blobs: readonly SealedBlob[]): ForeignCheck {
     const given = new Map<string, SealedBlob>();
@@ -601,14 +621,15 @@ export class ReplicaProject {
     return async (entry) => {
       const { stream, epoch } = entry.header;
       const key = this.keys.epochKey(stream, epoch);
-      if (key === undefined) return PASS;
+      if (key === undefined) return AWAITING_KEY;
       const plain = openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
       const body = plain === undefined ? undefined : parseJson(plain);
       if (!isRecord(body) || (body.kind !== 'doc.update' && body.kind !== 'doc.compact')) return PASS;
       let data: unknown = body.data;
       if (body.blob !== undefined) {
         const blob = await blobOf(body.blob);
-        const opened = blob === undefined ? undefined : openBlob(key, stream, epoch, blob);
+        if (blob === undefined) return AWAITING_BLOB;
+        const opened = openBlob(key, stream, epoch, blob);
         if (opened === undefined) return PASS;
         data = parseJson(opened);
       }
@@ -619,7 +640,8 @@ export class ReplicaProject {
         verdict = await this.decoder().inspect('update', Buffer.from(data.update, 'base64url'));
       } else {
         const state = await blobOf(data.stateBlob);
-        const opened = state === undefined ? undefined : openBlob(key, stream, epoch, state);
+        if (state === undefined) return AWAITING_BLOB;
+        const opened = openBlob(key, stream, epoch, state);
         if (opened === undefined) return PASS;
         verdict = await this.decoder().inspect('state', opened);
       }
@@ -637,6 +659,7 @@ export class ReplicaProject {
     if (!('ok' in refreshed)) throw new ReplicaProjectError(storeRefused(refreshed));
     await this.loadGrants();
     await this.loadBlobs();
+    await this.recheckWaiting();
     const entries = this.store.entries();
     const rosterKey = `${entries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}`;
     if (this.rosterState === undefined || rosterKey !== this.rosterKey) {
@@ -662,6 +685,20 @@ export class ReplicaProject {
       this.recordedHead = head;
     }
     return { roster, fold: this.foldState.result };
+  }
+
+  /**
+   * Runs the decode check again on the entries still waiting for it (31-REVIEW MJ-07) when something that could change its answer changed: a key
+   * arrived in the ring, a blob arrived, or an entry nobody had checked was found on disk.
+   */
+  private async recheckWaiting(): Promise<void> {
+    const key = `${this.keys.version}|${this.blobCache.size}|${this.store.waitingVersion}`;
+    if (key === this.recheckKey) return;
+    if (this.store.waitingForCheck().length > 0) {
+      const rechecked = await this.store.recheck(this.foreignCheck([]));
+      if (!('ok' in rechecked)) throw new ReplicaProjectError(storeRefused(rechecked));
+    }
+    this.recheckKey = key;
   }
 
   private buildContext(roster: RosterState): ReplicaContext {

@@ -8,7 +8,7 @@
 //   blobs/<hash>                        sealed blob wire bytes, named by their sha256.
 //   grants/<cell>/<epoch>-<hash>.json   signed cell grants, named by the sha256 of their canonical bytes.
 //   checkpoints/<hash>.json             signed checkpoints, named by checkpointHash.
-//   held.json                           the store's own index of entries from outside that the decode check refused: kept, never folded.
+//   project.json                        the convenience copy of the genesis pin (replicaProject.ts); the store copies it when it starts again.
 //   replica.lock                        the cross-window lock file (withFileLock).
 //
 // Rules:
@@ -16,12 +16,21 @@
 // - Blobs are written to a temporary file, synced, then renamed into place.
 // - Every append runs under withRegisterLock(storeDir) for order inside one process and, inside it, withFileLock(storeDir, 'replica.lock') for
 //   order across windows and processes, so appends never interleave; inside the locks the store first catches up with lines another window wrote.
-// - How far this device has seen is kept in a signed mark in secret storage (marks.ts). Opening a store whose files are behind the mark is refused.
+// - How far this device has seen is kept in a signed mark in secret storage (marks.ts). Opening a store whose files are behind the mark is refused
+//   rolled-back, or damaged when lines it had read can no longer be read. The mark is a floor: lines are written and synced before it, so a mark
+//   that could not be recorded leaves the files ahead of it, and the next write records it from every file (31-REVIEW MJ-06).
+// - A line in this device's own file counts only when it carries this device's valid signature; any other line there is damaged and never moves
+//   this device's head (31-REVIEW CR-02). Signatures of other writers are the fold's job.
 // - A symbolic link anywhere from the project root to a store file is refused: nothing is read or written through it.
-// - Entries from outside the machine pass an injected check (the decode worker, wired by the project host) before they reach the fold. An entry the
-//   check refuses is still written, listed in held.json with its reason, and left out of entries(); it is never silently dropped (D-05).
+// - Entries from outside the machine pass an injected check (the decode worker, wired by the project host) before they reach the fold (D-05). An
+//   entry the check refuses is still written, held with its reason in the signed mark, and left out of entries(); it is never silently dropped. An
+//   entry the check could not run on yet (its key or its blob is not here), and an entry found on disk that no check has passed (copied in by hand,
+//   or written by another install), waits out of the fold until recheck() passes it (31-REVIEW MJ-07).
 // - The store never deletes an entry or a blob and never rewrites a line (P-31-17). No private key or secret is ever written here (P-31-18).
-import { randomBytes } from 'node:crypto';
+// - Starting again (startAgain, person-confirmed, 31-REVIEW MJ-08) moves the whole folder aside, never deletes it, and starts a new one with this
+//   device's own signed entries, the grants, the blobs and project.json carried over, under a new mark.
+import { createHash, randomBytes } from 'node:crypto';
+import type { Hash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
@@ -29,8 +38,8 @@ import * as path from 'node:path';
 import type { SecretStorageLike } from '../../services/auth';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { withRegisterLock } from '../registerLock';
-import { REPLICA_DIR } from '../../domain/staff/multiUser';
-import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, sha256Hex, writerIdOf } from '../../domain/replica/entry';
+import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, sha256Hex, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { BuiltEntry, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
@@ -40,8 +49,8 @@ import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import { MAX_PAYLOAD_BYTES } from '../../domain/team/signedPayload';
 import { isRecord } from '../../domain/team/validate';
 import { readWhole } from '../staffFiles';
-import { compareWithMark, markKey, readMark, writeMark } from './marks';
-import type { MarkFileState, MarkHead, ReplicaMark } from './marks';
+import { compareWithMark, digestOf, heldReason, markKey, readMark, writeMark } from './marks';
+import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 
 /** The cross-window lock file inside the store folder. */
 export const REPLICA_LOCK_FILE = 'replica.lock';
@@ -56,10 +65,16 @@ const READ_CHUNK = 64 * 1024;
 const BASE64URL = /^[A-Za-z0-9_-]*$/;
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 
+/** The command that starts this computer's shared history again, as the refusals name it. */
+export const START_AGAIN_COMMAND_TITLE = 'Staff: Start This Computer\'s Shared History Again';
+const START_AGAIN_STEP = `run ${START_AGAIN_COMMAND_TITLE}. It sets this copy aside without deleting anything, and your staff lead can then send you a new welcome file to bring the shared history back.`;
+
 // Closed list of refusals, in plain words. No message names a key, a secret or a full hash, and none uses an em-dash.
 export const STORE_REFUSALS = {
-  'rolled-back': 'The shared history in this project folder is older than what this device has already seen, so it was not opened. Nothing was changed. This happens when the folder was restored from an older backup or copy, or when part of it was deleted. Put the newer copy of the folder back if you have one, or ask your staff lead for help.',
-  'mark-unverified': 'This device\'s signed record of how far it has seen the shared history does not verify, so the shared history in this project folder cannot be checked against it and was not opened. Nothing was changed. Ask your staff lead for help.',
+  'rolled-back': `The shared history in this project folder is older than what this device has already seen, so it was not opened. Nothing was changed. This happens when the folder was restored from an older backup or copy, or when part of it was deleted. Put the newer copy of the folder back if you have one. If you do not, ${START_AGAIN_STEP}`,
+  damaged: `Part of the shared history in this project folder is damaged: lines this device had already read can no longer be read, so it was not opened. Nothing was changed. This happens after a disk error, or when a program or a person edited a file in the folder. Put back a good copy of the folder if you have one. If you do not, ${START_AGAIN_STEP}`,
+  'mark-unverified': `This device's signed record of how far it has seen the shared history does not verify, so the shared history in this project folder cannot be checked against it and was not opened. Nothing was changed. To start a new record, ${START_AGAIN_STEP}`,
+  'not-needed': 'The shared history in this project folder opens and matches what this device has already seen, so it was not set aside. Nothing was changed.',
   'blob-too-large': 'A sealed attachment is larger than the 8 MB the shared history accepts, so it was not written. Nothing was changed.',
   symlink: 'A folder or file on the way to the shared history in this project is a symbolic link, so nothing was read or written through it. Nothing was changed. Replace it with a real folder or file.',
   unreadable: 'Part of the shared history in this project folder could not be read, so it was not opened. Nothing was changed. Check that the folder and its files can be read by your user account.',
@@ -68,6 +83,9 @@ export const STORE_REFUSALS = {
 } as const;
 export type StoreRefusal = keyof typeof STORE_REFUSALS;
 export interface StoreRefused { refused: StoreRefusal; message: string }
+
+/** The refusals that starting this computer's shared history again resolves. Every other refusal has its own fix and is never reset. */
+export const START_AGAIN_REFUSALS: readonly StoreRefusal[] = ['rolled-back', 'damaged', 'mark-unverified'];
 
 /** What the store needs from the host: secret storage for marks, this device's signer and the key status that verifies its marks. */
 export interface ReplicaStoreDeps {
@@ -79,53 +97,64 @@ export interface ReplicaStoreDeps {
 
 export type AppendResult = { ok: true; written: number } | StoreRefused;
 
-/** The injected check an entry from outside passes before it reaches the fold. A refusal keeps the entry in the store, held back with the reason. */
-export type ForeignCheck = (entry: SealedEntry) => Promise<{ ok: true } | { ok: false; reason: string }>;
+/**
+ * What the injected check says of one entry from outside: it passes; it is refused (held with the reason); or it cannot be checked yet because its
+ * epoch key or its blob is not on this machine (it waits out of the fold, and recheck() runs the check again when they arrive).
+ */
+export type CheckVerdict = { ok: true } | { ok: false; reason: string } | { ok: false; awaiting: 'key' | 'blob' };
+
+/** The injected check an entry from outside passes before it reaches the fold. */
+export type ForeignCheck = (entry: SealedEntry) => Promise<CheckVerdict>;
 
 export interface IngestResult {
   ok: true;
-  /** New entries written (held ones included). */
+  /** New entries written (held and waiting ones included). */
   added: number;
   /** Entries the store already had, or given twice in this call: not written again and not checked again. */
   duplicates: number;
   /** New entries the check refused: written, and left out of entries(). */
   held: Array<{ hash: string; reason: string }>;
-  /** Inputs that are not a sealed entry, or whose body does not match its header. */
+  /** New entries the check could not run on yet: written, and left out of entries() until recheck() passes them. */
+  waiting: Array<{ hash: string; reason: WaitReason }>;
+  /** Inputs that are not a sealed entry, whose body does not match its header, or that name this device as writer without its signature. */
   dropped: number;
   blobsAdded: number;
   /** Blobs not written: over BLOB_MAX_BYTES, or bytes that do not match their name. */
   blobsRefused: number;
 }
 
+export interface RecheckResult { ok: true; passed: number; held: number; waiting: number }
+
+/** What starting again did: where the old folder was set aside (relative to the project, with forward slashes) and how many entries were carried. */
+export interface StartedAgain { ok: true; setAside: string; carried: number }
+
 /** A signed grant or checkpoint file read back, or the file named with why it could not be. Unreadable files are listed, never dropped silently. */
 export interface StoredGrant { cell: string; epoch: number; hash: string; signed: unknown }
 export interface StoredCheckpoint { hash: string; signed: unknown }
 export interface UnreadableFile { file: string; reason: string }
 
-/** The most held.json may hold, and the longest reason kept for one held entry. */
-const HELD_MAX_BYTES = 16 * 1024 * 1024;
-const MAX_HELD_REASON = 200;
 const SIGNED_FILE_MAX_BYTES = 2 * MAX_PAYLOAD_BYTES;
+const PROJECT_FILE_MAX_BYTES = 64 * 1024;
+const PROJECT_FILE_NAME = path.posix.basename(REPLICA_PROJECT_FILE);
 
-/** A check's reason as one plain line of at most MAX_HELD_REASON characters. */
-function heldReason(reason: unknown): string {
-  const text = typeof reason === 'string' ? reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : '';
-  return (text || 'The decode check refused this update.').slice(0, MAX_HELD_REASON);
+/** This device as the store knows it: its writer id and the public key its own lines must verify against. */
+interface OwnDevice { writer: string; publicKey: string }
+
+function ownOf(signer: PayloadSigner): OwnDevice {
+  return { writer: writerIdOf(signer.publicKey), publicKey: signer.publicKey };
 }
 
-function parseHeld(text: string): Map<string, string> | undefined {
+/** A check's verdict made safe: anything but a clear pass or a clear wait is a refusal with a plain one-line reason. */
+async function runCheck(check: ForeignCheck, entry: SealedEntry): Promise<{ kind: 'pass' } | { kind: 'held'; reason: string } | { kind: 'wait'; reason: WaitReason }> {
+  let verdict: unknown;
   try {
-    const value = JSON.parse(text) as unknown;
-    if (!isRecord(value) || value.v !== 1 || !Array.isArray(value.held)) return undefined;
-    const held = new Map<string, string>();
-    for (const item of value.held) {
-      if (!isRecord(item) || typeof item.hash !== 'string' || !HASH_PATTERN.test(item.hash) || typeof item.reason !== 'string') return undefined;
-      held.set(item.hash, heldReason(item.reason));
-    }
-    return held;
+    verdict = await check(entry);
   } catch {
-    return undefined;
+    return { kind: 'held', reason: 'The decode check could not run on this update.' };
   }
+  if (isRecord(verdict) && verdict.ok === true) return { kind: 'pass' };
+  if (isRecord(verdict) && verdict.ok === false && (verdict.awaiting === 'key' || verdict.awaiting === 'blob')) return { kind: 'wait', reason: verdict.awaiting === 'key' ? 'awaiting-key' : 'awaiting-blob' };
+  return { kind: 'held', reason: heldReason(isRecord(verdict) ? verdict.reason : undefined) };
 }
 
 function refusal(reason: StoreRefusal): StoreRefused {
@@ -151,9 +180,18 @@ interface StreamFile {
   offset: number;
   /** The file's size when last read; above offset means a torn tail. */
   size: number;
+  /** The distinct entries read, in file order. */
   readonly hashes: Set<string>;
   readonly bySeq: Map<number, string[]>;
   maxSeq: number;
+  /** sha256 running over the entry hashes in file order (digestOf), so the mark's digest of the whole file costs one copy. */
+  readonly running: Hash;
+  /** Whole lines that are not an entry of this file. */
+  damaged: number;
+}
+
+function newStreamFile(stream: string, writer: string, file: string): StreamFile {
+  return { stream, writer, file, offset: 0, size: 0, hashes: new Set(), bySeq: new Map(), maxSeq: -1, running: createHash('sha256'), damaged: 0 };
 }
 
 /** A sealed entry read from a line or received from outside, or undefined when its shape or body is wrong. Checks shape and body hash, no signature. */
@@ -277,30 +315,49 @@ function fileId(stream: string, writer: string): string {
   return `${stream}/${writer}`;
 }
 
+/** A time as YYYYMMDD-HHMMSS in UTC, for the name of a folder set aside. */
+function stampOf(at: Date): string {
+  return at.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+}
+
+/** Writes whole lines to a new file and syncs it. */
+async function writeNewFile(file: string, bytes: Buffer | string): Promise<void> {
+  const handle = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o644);
+  try {
+    await handle.writeFile(bytes);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 export class ReplicaStore {
   private readonly files = new Map<string, StreamFile>();
   private readonly byHash = new Map<string, SealedEntry>();
   private readonly order: string[] = [];
-  private held = new Map<string, string>();
+  /** Entries from outside the decode check refused, with its reason. Never released once held. */
+  private readonly held = new Map<string, string>();
+  /** Entries from outside no check has passed yet, with why. */
+  private readonly waiting = new Map<string, WaitReason>();
   private damaged = 0;
+  private waitingAdded = 0;
+  /** The mark last read or written, and its exact text, so a mark nobody changed is not compared again. */
+  private mark: ReplicaMark | undefined;
+  private markText: string | undefined;
 
-  private constructor(public readonly root: string, public readonly dir: string, private readonly deps: ReplicaStoreDeps) {}
+  private constructor(public readonly root: string, public readonly dir: string, private readonly deps: ReplicaStoreDeps, private readonly own: OwnDevice) {}
 
   /**
    * Opens (and on first use makes) the store of the project at `root`. Refused when a symbolic link is on the way, when part of the store cannot be
-   * read, when this device's mark does not verify, or when the files are behind the mark.
+   * read, when this device's mark does not verify, or when the files are behind the mark (rolled-back) or lines it counted are damaged.
    */
   public static async open(root: string, deps: ReplicaStoreDeps): Promise<ReplicaStore | StoreRefused> {
     const absolute = path.resolve(root);
-    const store = new ReplicaStore(absolute, path.join(absolute, REPLICA_DIR), deps);
+    const store = new ReplicaStore(absolute, path.join(absolute, REPLICA_DIR), deps, ownOf(await deps.signer()));
     try {
       return await store.locked(async () => {
         await store.catchUp();
-        await store.loadHeld();
-        const mark = await store.readOwnMark();
-        const compared = compareWithMark(mark ?? { v: 1, rosterHead: null, heads: [] }, store.fileStates());
-        if (!compared.ok) throw new Refusal('rolled-back');
-        if (mark?.rosterHead && !store.byHash.has(mark.rosterHead)) throw new Refusal('rolled-back');
+        await store.syncMark();
         return store;
       });
     } catch (error) {
@@ -309,9 +366,75 @@ export class ReplicaStore {
     }
   }
 
-  /** What the fold gets: every stored entry except those the decode check held back, in the order the store first saw them. */
+  /**
+   * Starts this computer's shared history again (31-REVIEW MJ-08), after the person confirmed it. Only for a store refused rolled-back, damaged or
+   * mark-unverified: a store that opens is refused not-needed, and any other refusal is returned as it is, with nothing changed.
+   *
+   * The whole store folder is moved aside to `<store>.set-aside-<time>` beside it (never deleted; it keeps its own .gitignore, so git still ignores
+   * it), and a new store is made from what can be carried safely: this device's own entries that carry its valid signature (so its next entry follows
+   * the last one it wrote instead of forking its chain), the grants and blobs that match their names, and project.json. The new store is built in a
+   * temporary folder first and renamed into place, then this device's mark is replaced by one for the new store. Entries of other writers are not
+   * carried: they come back with a new welcome file (and, in a later version, from the sharing service). An interruption at any step leaves either
+   * the old store or the new one in place with a mark that refuses the other, so running this again finishes the job.
+   */
+  public static async startAgain(root: string, deps: ReplicaStoreDeps): Promise<StartedAgain | StoreRefused> {
+    const probe = await ReplicaStore.open(root, deps);
+    if (probe instanceof ReplicaStore) return refusal('not-needed');
+    if (!START_AGAIN_REFUSALS.includes(probe.refused)) return probe;
+    const absolute = path.resolve(root);
+    const dir = path.join(absolute, REPLICA_DIR);
+    const own = ownOf(await deps.signer());
+    const parts = REPLICA_DIR.split('/');
+    try {
+      return await withRegisterLock(dir, () => withFileLock(dir, REPLICA_LOCK_FILE, async () => {
+        const problem = await checkPath(absolute, parts);
+        if (problem) throw new Refusal(problem);
+        const old = new ReplicaStore(absolute, dir, deps, own);
+        await old.catchUp();
+        const temporary = `${dir}.new-${randomBytes(6).toString('hex')}`;
+        await mkdir(temporary);
+        await writeNewFile(path.join(temporary, '.gitignore'), STORE_GITIGNORE);
+        let carried = 0;
+        for (const file of old.files.values()) {
+          if (file.writer !== own.writer || file.hashes.size === 0) continue;
+          await mkdir(path.join(temporary, 'streams', file.stream), { recursive: true });
+          const lines = [...file.hashes].map((hash) => old.byHash.get(hash) as SealedEntry).map((entry) => `${JSON.stringify({ header: entry.header, body: entry.body })}\n`);
+          await writeNewFile(path.join(temporary, 'streams', file.stream, `${file.writer}.jsonl`), lines.join(''));
+          carried += lines.length;
+        }
+        for (const grant of (await old.grants()).grants) {
+          await mkdir(path.join(temporary, 'grants', grant.cell), { recursive: true });
+          await writeNewFile(path.join(temporary, 'grants', grant.cell, `${grant.epoch}-${grant.hash}.json`), canonicalBytes(grant.signed));
+        }
+        for (const name of await old.listDir(['blobs'], [])) {
+          const blob = HASH_PATTERN.test(name) ? await old.blob(name) : undefined;
+          if (blob === undefined) continue;
+          await mkdir(path.join(temporary, 'blobs'), { recursive: true });
+          await writeNewFile(path.join(temporary, 'blobs', name), Buffer.from(blob.bytes, 'base64url'));
+        }
+        const projectFile = path.join(dir, PROJECT_FILE_NAME);
+        const project = (await lstat(projectFile).then((info) => info.isFile(), () => false)) ? await readWhole(projectFile, PROJECT_FILE_MAX_BYTES) : undefined;
+        if (project?.kind === 'text') await writeNewFile(path.join(temporary, PROJECT_FILE_NAME), project.bytes);
+        // The old folder goes aside under a name of its own, then the new one takes its place.
+        const stamp = stampOf((deps.now ?? (() => new Date()))());
+        let aside = `${dir}.set-aside-${stamp}`;
+        for (let attempt = 2; await lstat(aside).then(() => true, () => false); attempt += 1) aside = `${dir}.set-aside-${stamp}-${attempt}`;
+        await rename(dir, aside);
+        await rename(temporary, dir);
+        const fresh = new ReplicaStore(absolute, dir, deps, own);
+        await fresh.catchUp();
+        await fresh.writeOwnMark(null);
+        return { ok: true as const, setAside: path.relative(absolute, aside).split(path.sep).join('/'), carried };
+      }));
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      throw error;
+    }
+  }
+
+  /** What the fold gets: every stored entry except those held back or still waiting for the decode check, in the order the store first saw them. */
   public entries(): SealedEntry[] {
-    return this.order.filter((hash) => !this.held.has(hash)).map((hash) => this.byHash.get(hash) as SealedEntry);
+    return this.order.filter((hash) => !this.held.has(hash) && !this.waiting.has(hash)).map((hash) => this.byHash.get(hash) as SealedEntry);
   }
 
   /** Stored entries the decode check refused, with its reason. They stay in the store and out of the fold. */
@@ -319,12 +442,25 @@ export class ReplicaStore {
     return [...this.held].filter(([hash]) => this.byHash.has(hash)).map(([hash, reason]) => ({ hash, reason }));
   }
 
+  /** Stored entries no decode check has passed yet, with why. They stay out of the fold until recheck() passes them. */
+  public waitingForCheck(): Array<{ hash: string; reason: WaitReason }> {
+    return [...this.waiting].filter(([hash]) => this.byHash.has(hash)).map(([hash, reason]) => ({ hash, reason }));
+  }
+
+  /** Rises each time an entry nobody has checked is found on disk, so the host knows to run recheck() again. */
+  public get waitingVersion(): number {
+    return this.waitingAdded;
+  }
+
   /** Is an entry with this hash in the store? */
   public has(hash: string): boolean {
     return this.byHash.has(hash);
   }
 
-  /** The highest seq stored for one writer in one stream and one hash at it, or undefined when the store holds none. */
+  /**
+   * The highest seq stored for one writer in one stream and one hash at it, or undefined when the store holds none. For this device's own writer only
+   * lines that carry its valid signature count (CR-02).
+   */
   public head(stream: string, writer: string): { seq: number; hash: string } | undefined {
     const file = this.files.get(fileId(stream, writer));
     if (!file || file.maxSeq < 0) return undefined;
@@ -336,7 +472,7 @@ export class ReplicaStore {
     try {
       return await this.locked(async () => {
         await this.catchUp();
-        await this.loadHeld();
+        await this.syncMark();
         return { ok: true as const };
       });
     } catch (error) {
@@ -345,7 +481,7 @@ export class ReplicaStore {
     }
   }
 
-  /** How many whole lines could not be read as an entry (damaged or edited lines). They are skipped, never counted. */
+  /** How many whole lines could not be read as an entry (damaged, edited, or a line in this device's file it did not sign). Skipped, never counted. */
   public damagedLines(): number {
     return this.damaged;
   }
@@ -367,13 +503,13 @@ export class ReplicaStore {
 
   /**
    * Appends this device's own built entries, in order, with their blobs. An entry already stored is skipped (a retry after a crash). Each new entry
-   * must follow the last one in its file (seq one higher, prev naming it), or nothing is written. Blobs go first, then the lines, then the mark.
+   * must carry this device's valid signature and follow the last one in its file (seq one higher, prev naming it), or nothing is written. Blobs go
+   * first, then the lines, then the mark.
    */
   public async appendOwn(built: readonly BuiltEntry[]): Promise<AppendResult> {
-    const own = writerIdOf((await this.deps.signer()).publicKey);
     const entries = built.map((item) => {
       const entry = parseSealed(item.entry);
-      if (!entry || entry.header.writer !== own) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
+      if (!entry || entry.header.writer !== this.own.writer || !verifyHeader(entry.header, this.own.publicKey)) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
       return entry;
     });
     const blobs = new Map<string, Buffer>();
@@ -388,7 +524,7 @@ export class ReplicaStore {
     try {
       return await this.locked(async () => {
         await this.catchUp();
-        const mark = await this.readOwnMark();
+        await this.syncMark();
         // Plan the batch against the files as they are now, before anything is written.
         const heads = new Map<string, { seq: number; hashes: readonly string[] }>();
         const fresh: SealedEntry[] = [];
@@ -407,8 +543,8 @@ export class ReplicaStore {
         }
         if (fresh.length === 0) return { ok: true, written: 0 };
         for (const [hash, wire] of blobs) await this.putBlobBytes(hash, wire);
-        const touched = await this.appendLines(fresh);
-        await this.writeOwnMark(mark, touched);
+        await this.appendLines(fresh);
+        await this.writeOwnMark();
         return { ok: true, written: fresh.length };
       });
     } catch (error) {
@@ -418,9 +554,11 @@ export class ReplicaStore {
   }
 
   /**
-   * Takes entries and blobs from outside the machine. Each input is checked for shape and body hash only (signatures are the fold's job); each new
-   * entry then passes `check`. Every new entry is written, refused or not; a refused one is recorded in held.json first, so it can never reach the
-   * fold, and is listed by heldForCheck(). An entry already stored is neither written nor checked again. A check that throws counts as a refusal.
+   * Takes entries and blobs from outside the machine. Each input is checked for shape and body hash (signatures are the fold's job), except that an
+   * entry naming this device as its writer must carry this device's valid signature or it is dropped (CR-02); such an entry is this device's own and
+   * needs no decode check. Each other new entry then passes `check`. Every new entry is written; one the check refuses is held, and one the check
+   * cannot run on yet waits, both recorded in the signed mark with the lines, so neither reaches the fold. An entry already stored is neither written
+   * nor checked again. A check that throws counts as a refusal.
    */
   public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
@@ -429,22 +567,14 @@ export class ReplicaStore {
     const fresh: Array<{ entry: SealedEntry; hash: string }> = [];
     for (const value of entries) {
       const entry = parseSealed(value);
-      if (!entry) { dropped += 1; continue; }
+      if (!entry || (entry.header.writer === this.own.writer && !verifyHeader(entry.header, this.own.publicKey))) { dropped += 1; continue; }
       const hash = entryHash(entry.header);
       if (seen.has(hash) || this.byHash.has(hash)) { duplicates += 1; continue; }
       seen.add(hash);
       fresh.push({ entry, hash });
     }
-    const refusedBy = new Map<string, string>();
-    for (const { entry, hash } of fresh) {
-      let verdict: { ok: true } | { ok: false; reason: string } | undefined;
-      try {
-        verdict = await check(entry);
-      } catch {
-        verdict = { ok: false, reason: 'The decode check could not run on this update.' };
-      }
-      if (verdict?.ok !== true) refusedBy.set(hash, heldReason((verdict as { reason?: unknown } | undefined)?.reason));
-    }
+    const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
+    for (const { entry, hash } of fresh) verdicts.set(hash, entry.header.writer === this.own.writer ? { kind: 'pass' } : await runCheck(check, entry));
     let blobsRefused = 0;
     const goodBlobs = new Map<string, Buffer>();
     for (const blob of blobs) {
@@ -456,23 +586,56 @@ export class ReplicaStore {
     try {
       return await this.locked(async () => {
         await this.catchUp();
-        await this.loadHeld();
-        const mark = await this.readOwnMark();
+        await this.syncMark();
         // Another window may have stored some of these since the check ran: those are duplicates now.
         const toWrite = fresh.filter(({ hash }) => !this.byHash.has(hash));
         duplicates += fresh.length - toWrite.length;
-        const held = toWrite.filter(({ hash }) => refusedBy.has(hash)).map(({ hash }) => ({ hash, reason: refusedBy.get(hash) as string }));
-        if (held.length > 0) {
-          for (const item of held) this.held.set(item.hash, item.reason);
-          await this.writeHeld();
+        const held: IngestResult['held'] = [];
+        const waiting: IngestResult['waiting'] = [];
+        for (const { hash } of toWrite) {
+          const verdict = verdicts.get(hash);
+          if (verdict?.kind === 'held') { this.held.set(hash, verdict.reason); held.push({ hash, reason: verdict.reason }); }
+          if (verdict?.kind === 'wait') { this.waiting.set(hash, verdict.reason); waiting.push({ hash, reason: verdict.reason }); }
         }
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
         if (toWrite.length > 0) {
-          const touched = await this.appendLines(toWrite.map(({ entry }) => entry));
-          await this.writeOwnMark(mark, touched);
+          await this.appendLines(toWrite.map(({ entry }) => entry));
+          await this.writeOwnMark();
         }
-        return { ok: true as const, added: toWrite.length, duplicates, held, dropped, blobsAdded, blobsRefused };
+        return { ok: true as const, added: toWrite.length, duplicates, held, waiting, dropped, blobsAdded, blobsRefused };
+      });
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      throw error;
+    }
+  }
+
+  /**
+   * Runs `check` again on every entry still waiting (never checked, or waiting for its key or blob). One that passes reaches entries(); one that is
+   * refused is held; one that still cannot be checked keeps waiting. The outcome is recorded in the signed mark. An entry another window decided in
+   * the meantime keeps that window's verdict.
+   */
+  public async recheck(check: ForeignCheck): Promise<RecheckResult | StoreRefused> {
+    const targets = [...this.waiting.keys()].filter((hash) => this.byHash.has(hash));
+    const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
+    for (const hash of targets) verdicts.set(hash, await runCheck(check, this.byHash.get(hash) as SealedEntry));
+    try {
+      return await this.locked(async () => {
+        await this.catchUp();
+        await this.syncMark();
+        let passed = 0;
+        let held = 0;
+        let changed = false;
+        for (const [hash, verdict] of verdicts) {
+          const before = this.waiting.get(hash);
+          if (before === undefined) continue;
+          if (verdict.kind === 'pass') { this.waiting.delete(hash); passed += 1; changed = true; }
+          if (verdict.kind === 'held') { this.waiting.delete(hash); this.held.set(hash, verdict.reason); held += 1; changed = true; }
+          if (verdict.kind === 'wait' && verdict.reason !== before) { this.waiting.set(hash, verdict.reason); changed = true; }
+        }
+        if (changed) await this.writeOwnMark();
+        return { ok: true as const, passed, held, waiting: this.waitingForCheck().length };
       });
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
@@ -486,8 +649,8 @@ export class ReplicaStore {
     try {
       return await this.locked(async () => {
         await this.catchUp();
-        const mark = await this.readOwnMark();
-        await this.writeOwnMark(mark, new Set(), hash);
+        await this.syncMark();
+        await this.writeOwnMark(hash);
         return { ok: true as const };
       });
     } catch (error) {
@@ -670,7 +833,7 @@ export class ReplicaStore {
         const id = fileId(stream, writer);
         let file = this.files.get(id);
         if (!file) {
-          file = { stream, writer, file: path.join(dir, name), offset: 0, size: 0, hashes: new Set(), bySeq: new Map(), maxSeq: -1 };
+          file = newStreamFile(stream, writer, path.join(dir, name));
           this.files.set(id, file);
         }
         await this.readFile(file);
@@ -709,7 +872,11 @@ export class ReplicaStore {
     }
   }
 
-  /** Indexes one whole line of a file. A line that is not an entry of this file is damaged and skipped. */
+  /**
+   * Indexes one whole line of a file. A line that is not an entry of this file is damaged and skipped, and so is a line in this device's own file
+   * that does not carry this device's valid signature (CR-02): it never becomes this device's head. An entry of another writer found here and
+   * not decided yet waits for the decode check (unchecked) until the mark or recheck() says otherwise.
+   */
   private take(file: StreamFile, line: string | undefined): void {
     let entry: SealedEntry | undefined;
     try {
@@ -717,16 +884,24 @@ export class ReplicaStore {
     } catch {
       entry = undefined;
     }
-    if (!entry || entry.header.stream !== file.stream || entry.header.writer !== file.writer) {
+    if (!entry || entry.header.stream !== file.stream || entry.header.writer !== file.writer || (file.writer === this.own.writer && !verifyHeader(entry.header, this.own.publicKey))) {
+      file.damaged += 1;
       this.damaged += 1;
       return;
     }
-    this.index(file, entry, entryHash(entry.header));
+    const hash = entryHash(entry.header);
+    const known = this.byHash.has(hash);
+    this.index(file, entry, hash);
+    if (!known && file.writer !== this.own.writer && !this.held.has(hash) && !this.waiting.has(hash)) {
+      this.waiting.set(hash, 'unchecked');
+      this.waitingAdded += 1;
+    }
   }
 
   private index(file: StreamFile, entry: SealedEntry, hash: string): void {
     if (file.hashes.has(hash)) return;
     file.hashes.add(hash);
+    file.running.update(`${hash}\n`);
     const atSeq = file.bySeq.get(entry.header.seq);
     if (atSeq) atSeq.push(hash); else file.bySeq.set(entry.header.seq, [hash]);
     if (entry.header.seq > file.maxSeq) file.maxSeq = entry.header.seq;
@@ -749,7 +924,7 @@ export class ReplicaStore {
       const dir = await ensureDir(this.dir, ['streams', stream]);
       let file = this.files.get(id);
       if (!file) {
-        file = { stream, writer, file: path.join(dir, `${writer}.jsonl`), offset: 0, size: 0, hashes: new Set(), bySeq: new Map(), maxSeq: -1 };
+        file = newStreamFile(stream, writer, path.join(dir, `${writer}.jsonl`));
         this.files.set(id, file);
       }
       const text = list.map((entry) => `${JSON.stringify({ header: entry.header, body: entry.body })}\n`).join('');
@@ -793,50 +968,75 @@ export class ReplicaStore {
     return true;
   }
 
-  /** Reads held.json. Unreadable is refused, never read as empty: an empty list would let refused entries into the fold. */
-  private async loadHeld(): Promise<void> {
-    const file = path.join(this.dir, 'held.json');
-    try {
-      if ((await lstat(file)).isSymbolicLink()) throw new Refusal('symlink');
-    } catch (error) {
-      if (error instanceof Refusal) throw error;
-      if (errorCode(error) === 'ENOENT') { this.held = new Map(); return; }
-      throw new Refusal('unreadable');
-    }
-    const read = await readWhole(file, HELD_MAX_BYTES);
-    if (read.kind === 'missing') { this.held = new Map(); return; }
-    const held = read.kind === 'text' ? parseHeld(read.text) : undefined;
-    if (!held) throw new Refusal('unreadable');
-    this.held = held;
-  }
-
-  /** Rewrites held.json whole, by temporary file and rename. It is the store's own index, not history, so a whole rewrite is allowed. */
-  private async writeHeld(): Promise<void> {
-    const held = [...this.held].map(([hash, reason]) => ({ hash, reason }));
-    await writeAtomic(path.join(this.dir, 'held.json'), `${JSON.stringify({ v: 1, held })}\n`);
-  }
-
   private fileStates(): MarkFileState[] {
-    return [...this.files.values()].map((file) => ({ stream: file.stream, writer: file.writer, count: file.hashes.size, hashesAt: (seq: number) => file.bySeq.get(seq) ?? [] }));
+    return [...this.files.values()].map((file) => ({
+      stream: file.stream,
+      writer: file.writer,
+      count: file.hashes.size,
+      damaged: file.damaged,
+      digestAt: (count: number) => {
+        if (count > file.hashes.size) return undefined;
+        if (count === file.hashes.size) return file.running.copy().digest('hex');
+        return digestOf([...file.hashes].slice(0, count));
+      },
+      hashesAt: (seq: number) => file.bySeq.get(seq) ?? []
+    }));
   }
 
-  /** This device's mark for this store: undefined when none; refused when one is there and does not verify. */
-  private async readOwnMark(): Promise<ReplicaMark | undefined> {
+  /**
+   * Reads this device's mark and, when it changed since this store last read or wrote it, checks the files against it (refused rolled-back or damaged
+   * when they are behind it) and takes its verdicts: an entry it holds stays held; an entry it covers is waiting when it lists it, and passed when it
+   * does not. Refused mark-unverified when a mark is there and does not verify.
+   */
+  private async syncMark(): Promise<void> {
     const read = await readMark(this.deps.secrets, markKey(this.dir), await this.deps.keyStatus());
     if (read.kind === 'unverified') throw new Refusal('mark-unverified');
-    return read.kind === 'mark' ? read.mark : undefined;
+    if (read.kind === 'none') { this.mark = undefined; this.markText = undefined; return; }
+    if (read.text === this.markText) return;
+    const compared = compareWithMark(read.mark, this.fileStates());
+    if (!compared.ok) throw new Refusal(compared.reason);
+    if (read.mark.rosterHead && !this.byHash.has(read.mark.rosterHead)) throw new Refusal('rolled-back');
+    for (const item of read.mark.held) {
+      if (this.held.has(item.hash)) continue;
+      this.held.set(item.hash, item.reason);
+      this.waiting.delete(item.hash);
+    }
+    const listed = new Map(read.mark.waiting.map((item) => [item.hash, item.reason]));
+    for (const head of read.mark.heads) {
+      const file = this.files.get(fileId(head.stream, head.writer));
+      if (!file || file.writer === this.own.writer) continue;
+      let index = 0;
+      for (const hash of file.hashes) {
+        if (index >= head.count) break;
+        index += 1;
+        if (this.held.has(hash)) continue;
+        const reason = listed.get(hash);
+        if (reason === undefined) this.waiting.delete(hash); else this.waiting.set(hash, reason);
+      }
+    }
+    this.mark = read.mark;
+    this.markText = read.text;
   }
 
-  /** The mark moved forward for the files written: their heads now, every other head as it was. */
-  private async writeOwnMark(before: ReplicaMark | undefined, touched: ReadonlySet<string>, rosterHead?: string): Promise<void> {
-    const heads = new Map<string, MarkHead>((before?.heads ?? []).map((head) => [fileId(head.stream, head.writer), head]));
-    for (const id of touched) {
-      const file = this.files.get(id);
-      if (!file || file.maxSeq < 0) continue;
-      heads.set(id, { stream: file.stream, writer: file.writer, seq: file.maxSeq, hash: (file.bySeq.get(file.maxSeq) ?? [])[0], count: file.hashes.size });
+  /**
+   * Records the mark for every file as it is now: each file's head, count and digest, the held and the waiting entries, and the roster head (the one
+   * given; otherwise the one recorded before, or none when `rosterHead` is null). Runs after the files were written and synced.
+   */
+  private async writeOwnMark(rosterHead?: string | null): Promise<void> {
+    const heads: MarkHead[] = [];
+    for (const file of this.files.values()) {
+      if (file.hashes.size === 0 || file.maxSeq < 0) continue;
+      heads.push({ stream: file.stream, writer: file.writer, seq: file.maxSeq, hash: (file.bySeq.get(file.maxSeq) ?? [])[0], count: file.hashes.size, digest: file.running.copy().digest('hex') });
     }
-    const mark: ReplicaMark = { v: 1, rosterHead: rosterHead ?? before?.rosterHead ?? null, heads: [...heads.values()] };
-    await writeMark(this.deps.secrets, markKey(this.dir), await this.deps.signer(), mark, this.deps.now ?? (() => new Date()));
+    const mark: ReplicaMark = {
+      rosterHead: rosterHead === undefined ? this.mark?.rosterHead ?? null : rosterHead,
+      heads,
+      held: this.heldForCheck(),
+      waiting: this.waitingForCheck()
+    };
+    const text = await writeMark(this.deps.secrets, markKey(this.dir), await this.deps.signer(), mark, this.deps.now ?? (() => new Date()));
+    this.mark = mark;
+    this.markText = text;
   }
 }
 
