@@ -1,5 +1,6 @@
 // Who is in a multi-user staff project, and how they get in and out (D-09, D-10, D-13 to D-18, D-22, D-23, D-37, D-45). The host flows behind the
-// roster commands; the commands (31-23) only show dialogs and call these. Node I/O through ReplicaProject and keyring.ts only; never imports vscode.
+// roster commands; the commands (31-23) only show dialogs and call these. Node I/O through ReplicaProject and keyring.ts, apart from branchEntries, which
+// reads the store's roster line files read-only to describe a split (D-08); never imports vscode.
 //
 // The flows, as the person sees them:
 //   lead:    inviteToProject -> (sends the .near-staff-invite file any way they like)
@@ -34,7 +35,9 @@
 // No result, message, file name or error holds a join secret, a MAC or a key (P-31-23). The invitation file holds the secret by design, inside its
 // signed payload, and the join request file holds the MAC by design; nothing else does.
 import { createHash, randomBytes } from 'node:crypto';
-import { lstat, mkdir, readdir, rename } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readdir, rename } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import { dominates } from '../../domain/gate/dominance';
 import type { DominanceContext } from '../../domain/gate/dominance';
@@ -42,7 +45,7 @@ import { SCALE_PRESETS, parseClearance, parseLabel } from '../../domain/gate/lab
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../../domain/gate/labels';
 import { REKEY_KEEP_TEXT, buildGrant, earlierEpochGrants, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import type { RekeyPlan, RekeyReason } from '../../domain/replica/cellKeys';
-import { entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
+import { HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
 import type { SealedEntry } from '../../domain/replica/entry';
 import {
   INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest,
@@ -59,12 +62,13 @@ import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
-import { MULTI_USER_DECLARED_TEXT, multiUserNoticeLines } from '../../domain/staff/multiUser';
+import { MULTI_USER_DECLARED_TEXT, REPLICA_DIR, multiUserNoticeLines } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
 import { forgetJoinSecret, joinSecret, storeJoinSecret } from './keyring';
 import type { DeviceKeyRing } from './keyring';
 import { PROJECT_REFUSALS_HOST, ReplicaProject, ReplicaProjectError, anchorOf, genesisPinFile, isProjectRefused, projectFile, sameAnchor } from './replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from './replicaProject';
+import { parseSealed } from './store';
 
 /** How long an invitation is open when the lead does not say (D-14). */
 export const INVITE_DEFAULT_DAYS = 7;
@@ -1309,9 +1313,107 @@ function branchSummary(kind: string, data: unknown, nameOf: (member: string) => 
   }
 }
 
+// The longest line the store writes (store.ts): a header, the longest inline body as base64url, and room for the JSON around them. A longer line is
+// not an entry, and it is skipped without being held whole.
+const ROSTER_LINE_MAX_BYTES = HEADER_MAX_BYTES + Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD + 3) * 4) / 3) + 1024;
+const ROSTER_READ_CHUNK = 64 * 1024;
+const WRITER_LINE_FILE = /^[0-9a-f]{64}\.jsonl$/;
+
+/**
+ * Calls `take` with each whole line of one line file, read in chunks, until it returns true. A line longer than ROSTER_LINE_MAX_BYTES is skipped and
+ * bytes after the last newline are left, as the store does. A file that is a link or not a plain file, or cannot be read, gives no lines.
+ */
+async function eachLine(file: string, take: (line: string) => boolean): Promise<void> {
+  let handle: FileHandle;
+  try {
+    if (!(await lstat(file)).isFile()) return;
+    handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch {
+    return;
+  }
+  try {
+    if (!(await handle.stat()).isFile()) return;
+    const chunk = Buffer.allocUnsafe(ROSTER_READ_CHUNK);
+    let pending: Buffer[] = [];
+    let pendingLength = 0;
+    let overlong = false;
+    let position = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, ROSTER_READ_CHUNK, position);
+      if (bytesRead === 0) return;
+      position += bytesRead;
+      let start = 0;
+      for (;;) {
+        const newline = chunk.indexOf(10, start);
+        if (newline === -1 || newline >= bytesRead) break;
+        const whole = !overlong && pendingLength + (newline - start) <= ROSTER_LINE_MAX_BYTES;
+        const line = whole ? Buffer.concat([...pending, chunk.subarray(start, newline)]).toString('utf8') : undefined;
+        pending = [];
+        pendingLength = 0;
+        overlong = false;
+        start = newline + 1;
+        if (line !== undefined && take(line)) return;
+      }
+      if (start < bytesRead && !overlong) {
+        pendingLength += bytesRead - start;
+        if (pendingLength > ROSTER_LINE_MAX_BYTES) { overlong = true; pending = []; } else pending.push(Buffer.from(chunk.subarray(start, bytesRead)));
+      }
+    }
+  } catch {
+    return;
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * The roster entries with the given hashes, read straight from the store's line files of the base stream, streams/<project id>/<writer>.jsonl
+ * (D-08). Read only: nothing is written, no lock is taken and no welcome file is built. A symbolic link or a non-folder on the way gives nothing;
+ * a damaged line is skipped; reading stops once every hash is found. The hashes come from the roster fold, so a line whose header hashes to one of
+ * them is that entry.
+ */
+async function branchEntries(project: ReplicaProject, hashes: readonly string[]): Promise<Map<string, SealedEntry>> {
+  const found = new Map<string, SealedEntry>();
+  const wanted = new Set(hashes);
+  if (wanted.size === 0) return found;
+  let folder = project.root;
+  for (const part of [...REPLICA_DIR.split('/'), 'streams', project.projectId]) {
+    folder = path.join(folder, part);
+    try {
+      const info = await lstat(folder);
+      if (info.isSymbolicLink() || !info.isDirectory()) return found;
+    } catch {
+      return found;
+    }
+  }
+  let names: string[];
+  try {
+    names = (await readdir(folder)).filter((name) => WRITER_LINE_FILE.test(name)).sort();
+  } catch {
+    return found;
+  }
+  for (const name of names) {
+    await eachLine(path.join(folder, name), (line) => {
+      let entry: SealedEntry | undefined;
+      try {
+        entry = parseSealed(JSON.parse(line) as unknown);
+      } catch {
+        entry = undefined;
+      }
+      if (entry === undefined || entry.header.stream !== project.projectId) return false;
+      const hash = entryHash(entry.header);
+      if (wanted.has(hash) && !found.has(hash)) found.set(hash, entry);
+      return found.size === wanted.size;
+    });
+    if (found.size === wanted.size) break;
+  }
+  return found;
+}
+
 /**
  * The branches of the first roster split, each opened with this device's key and described (MN-03): the kind of change and whom it names, the member
- * whose device wrote it and when it was signed. A branch this device cannot open is described as such. Writes nothing.
+ * whose device wrote it and when it was signed. A branch this device cannot open is described as such. Writes nothing. The two entries are read
+ * from the roster's line files (branchEntries), never from a welcome file, so describing a split costs reading those lines (D-08).
  */
 export async function describeRosterBranches(shared: SharedProjectHost): Promise<RosterBranchView[]> {
   const { project } = shared;
@@ -1319,15 +1421,10 @@ export async function describeRosterBranches(shared: SharedProjectHost): Promise
   const split = roster.pending[0];
   if (split === undefined) return [];
   const position = roster.positionOf.get(split.at) ?? headOf(roster).position;
-  let entries: SealedEntry[] = [];
-  try {
-    entries = (await project.welcomeFor(project.deviceWriter, [])).roster;
-  } catch {
-    entries = [];
-  }
+  const entries = await branchEntries(project, split.branches);
   const nameOf = (member: string): string => memberAt(roster.members, member, position)?.name ?? member;
   return split.branches.map((branch) => {
-    const entry = entries.find((item) => entryHash(item.header) === branch);
+    const entry = entries.get(branch);
     const key = entry === undefined ? undefined : project.keys.epochKey(entry.header.stream, entry.header.epoch);
     const plain = entry === undefined || key === undefined ? undefined : openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
     let body: unknown;
