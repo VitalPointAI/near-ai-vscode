@@ -313,8 +313,21 @@ async function harness(): Promise<Harness> {
     watch: (listener) => { watcher = listener; return { dispose() {} }; }
   };
   attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: (listener) => { disposed = listener; return { dispose() {} }; } }, deps);
-  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!(), setRoot: (next, notify = true) => { openRoot = next; if (notify) folderChanged?.(); } };
+  // A folder change makes the studio list the library again on its own (no message to await): settle then waits for the listing it posts, not for a
+  // fixed time, which failed under a loaded full run. The deadline only turns a hang into a failure.
+  let listingAfter: number | undefined;
+  const states = () => posted.filter((message) => message.type === 'state').length;
+  const settle = async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    if (listingAfter === undefined) return;
+    const deadline = Date.now() + 10_000;
+    while (states() <= listingAfter) {
+      assert.ok(Date.now() < deadline, 'the studio lists the library again after the folder change');
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    listingAfter = undefined;
+  };
+  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!(), setRoot: (next, notify = true) => { openRoot = next; if (notify && folderChanged) { listingAfter ??= states(); folderChanged(); } } };
 }
 const last = (h: Harness, type: string) => [...h.posted].reverse().find((message) => message.type === type)!;
 
