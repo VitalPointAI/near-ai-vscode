@@ -15,7 +15,8 @@ import type { InvitePayload } from '../domain/replica/invite';
 import { ORIGIN_ROSTER, rosterView } from '../domain/replica/roster';
 import type { ProjectOutput } from '../domain/replica/projectFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
-import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../domain/staff/multiUser';
+import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
+import { MULTI_USER_DECLARED_TEXT, MULTI_USER_PREVIEW_SETTING, REPLICA_DIR, REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, multiUserNoticeLines } from '../domain/staff/multiUser';
 import type { SecretStorageLike } from '../services/auth';
 import { DEVICE_KEY_SECRET } from '../team/identity';
 import { DecodeHost } from '../staff/replica/decodeHost';
@@ -364,4 +365,17 @@ test('a welcome whose genesis differs from the pin is refused pin-mismatch and c
   assert.ok(!isProjectRefused(again));
   assert.equal(again.added, 0);
   await joined.b.close();
+});
+
+// ---- Task 4: the notices every multi-user result shows ------------------------------------------------------------------------------------------
+
+test('multiUserNoticeLines gives the two label notices and the declared-people sentence in that order, with no em-dash; the refusal and setting texts are plain', () => {
+  assert.deepEqual(multiUserNoticeLines(), [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, 'People and clearances in this project are declared by the staff lead, not verified.']);
+  assert.equal(multiUserNoticeLines()[2], MULTI_USER_DECLARED_TEXT);
+  // A fresh array each time, so a caller cannot change what the next result shows.
+  multiUserNoticeLines().push('changed');
+  assert.equal(multiUserNoticeLines().length, 3);
+  for (const text of [...multiUserNoticeLines(), SHARED_PROJECT_REFUSAL, ...Object.values(PROJECT_REFUSALS_HOST)]) assert.doesNotMatch(text, /\u2014/);
+  assert.match(SHARED_PROJECT_REFUSAL, /Make a Single-Machine Copy/);
+  assert.equal(MULTI_USER_PREVIEW_SETTING, 'nearAi.staff.multiUserPreview');
 });
