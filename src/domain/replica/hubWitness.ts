@@ -13,8 +13,10 @@
 import { fingerprintOf } from '../team/canonical';
 import { CHECKPOINT_CONFLICTS, checkpointConflict, checkpointHash, readCheckpoint, verifyCheckpoint } from './checkpoint';
 import type { Checkpoint, CheckpointEntry, CheckpointStream, SignedCheckpoint } from './checkpoint';
-import { REPLICA_SIGNED_AT } from './entry';
+import { isSafeIntegerInRange } from '../team/validate';
+import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, sha256Hex } from './entry';
 import type { RosterView } from './rosterView';
+import type { HeadSet } from './transport';
 
 // Closed finding ids, each with one plain sentence (DESIGN 10.8 and 19). N stands for the count findingSentence fills in. No em-dashes.
 export const HUB_FINDINGS = {
@@ -77,7 +79,14 @@ export interface WitnessResult { state: WitnessState; findings: HubFinding[] }
 export interface CheckpointWitness extends WitnessResult { trusted: boolean }
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const REASON_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const SHORT = 12;
+// Caps that keep a saved state under WITNESS_MAX_BYTES even holding a proof of two full-size checkpoints. 400 heads is what a full checkpoint holds.
+export const MAX_SEEN_HEADS = 400;
+
+const isHash = (value: unknown): value is string => typeof value === 'string' && HASH_PATTERN.test(value);
+const isStream = (value: unknown): value is string => typeof value === 'string' && STREAM_ID_PATTERN.test(value);
+const isSeq = (value: unknown): value is number => isSafeIntegerInRange(value, 0, Number.MAX_SAFE_INTEGER);
 
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const short = (value: string): string => value.slice(0, SHORT);
@@ -111,12 +120,14 @@ export function createWitness(hub: string, project: string): WitnessState {
   return { v: 1, hub, project, seen: [], waiting: [], own: [], replayed: 0, distrusted: false };
 }
 
-// Raises the seen high-water marks with the heads given; a head below or level with a known mark changes nothing.
+// Raises the seen high-water marks with the heads given; a head below or level with a known mark changes nothing. Past MAX_SEEN_HEADS a new writer
+// log is not tracked, and the marks already held keep rising.
 function raiseSeen(seen: readonly SeenHead[], heads: ReadonlyArray<SeenHead>): SeenHead[] {
   const next = new Map(seen.map((row) => [`${row.stream}/${row.writer}`, row]));
   for (const head of heads) {
     const key = `${head.stream}/${head.writer}`;
     const known = next.get(key);
+    if (known === undefined && next.size >= MAX_SEEN_HEADS) continue;
     if (known === undefined || head.seq > known.seq) next.set(key, { stream: head.stream, writer: head.writer, seq: head.seq, hash: head.hash });
   }
   return [...next.values()].sort((a, b) => compareText(a.stream, b.stream) || compareText(a.writer, b.writer));
@@ -188,3 +199,75 @@ export function witnessCheckpoint(state: WitnessState, signed: unknown, roster: 
   return accept();
 }
 
+
+// The heads the hub reports (D-50). Each head below the mark this hub already showed for that writer log is rolled-back (one finding, the first
+// named, the count of all); higher heads raise the mark. Only writers the roster knows are tracked, and only heads in a valid shape, so a hub cannot
+// fill the marks with made-up writers. A same-seq head with another hash is a writer fork, which the chain stage handles, and changes no mark.
+// heads.checkpoint is not read here: pass it to witnessCheckpoint.
+export function witnessHeads(state: WitnessState, heads: HeadSet, roster: Pick<RosterView, 'deviceKey'>): WitnessResult {
+  const rows: SeenHead[] = [];
+  for (const stream of Array.isArray(heads?.streams) ? heads.streams : []) {
+    if (!isStream(stream?.stream) || !Array.isArray(stream.heads)) continue;
+    for (const head of stream.heads) {
+      if (!isHash(head?.writer) || !isSeq(head.seq) || !isHash(head.hash) || roster.deviceKey(head.writer) === undefined) continue;
+      rows.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
+    }
+  }
+  const marks = new Map(state.seen.map((row) => [`${row.stream}/${row.writer}`, row]));
+  const below = rows
+    .filter((row) => { const mark = marks.get(`${row.stream}/${row.writer}`); return mark !== undefined && row.seq < mark.seq; })
+    .sort((a, b) => compareText(a.stream, b.stream) || compareText(a.writer, b.writer));
+  const next = make(state, { seen: raiseSeen(state.seen, rows) });
+  if (below.length === 0) return { state: next, findings: [] };
+  const first = below[0];
+  const had = (marks.get(`${first.stream}/${first.writer}`) as SeenHead).seq;
+  return { state: next, findings: [finding('rolled-back', { stream: short(first.stream), writer: short(first.writer), seq: first.seq, seen: had }, below.length)] };
+}
+
+// What a hub response says it carries. project is required in every response; stream when the answer is about one stream.
+export interface ResponseLabel { project: string; stream?: string }
+
+// A response must name this project and, when it names a stream, one of the streams asked for (D-50). asked is the stream or streams in the request.
+export function witnessResponse(state: WitnessState, response: ResponseLabel, asked: string | readonly string[]): WitnessResult {
+  const streams: readonly string[] = typeof asked === 'string' ? [asked] : asked;
+  const project = typeof response?.project === 'string' ? response.project : '';
+  if (project !== state.project) return { state: make(state), findings: [finding('wrong-project', { project: short(project) })] };
+  if (response.stream !== undefined && !streams.includes(response.stream)) {
+    return { state: make(state), findings: [finding('wrong-project', { stream: short(String(response.stream)) })] };
+  }
+  return { state: make(state), findings: [] };
+}
+
+// One entry the hub sent, after this computer checked it: already held (replayed, counted and harmless), failed verification with the verifier's
+// reason id (injected), or verified and new (nothing, and it stops waiting if it was cited).
+export type EntryWitness =
+  | { hash: string; held: true }
+  | { hash: string; held?: false; verified: true }
+  | { hash: string; held?: false; verified: false; reason: string };
+
+export function witnessEntry(state: WitnessState, entry: EntryWitness): WitnessResult {
+  const id = short(String(entry.hash));
+  if (entry.held === true) {
+    const replayed = state.replayed + 1;
+    return { state: make(state, { replayed }), findings: [finding('replayed', { entry: id }, replayed)] };
+  }
+  if (entry.verified === false) {
+    const reason = typeof entry.reason === 'string' && REASON_PATTERN.test(entry.reason) ? entry.reason : 'unknown';
+    return { state: make(state), findings: [finding('injected', { entry: id, reason })] };
+  }
+  const waiting = state.waiting.filter((row) => row.hash !== entry.hash);
+  return { state: make(state, { waiting }), findings: [] };
+}
+
+// The raw bytes of a blob, or its base64url text as SealedBlob carries it, must hash to its name (D-50). Bytes that cannot be read are corrupt too.
+export function witnessBlob(state: WitnessState, name: string, bytes: Uint8Array | string): WitnessResult {
+  let raw: Buffer | undefined;
+  if (typeof bytes === 'string') {
+    const decoded = Buffer.from(bytes, 'base64url');
+    raw = decoded.toString('base64url') === bytes ? decoded : undefined;
+  } else if (bytes instanceof Uint8Array) {
+    raw = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+  if (isHash(name) && raw !== undefined && sha256Hex(raw) === name) return { state: make(state), findings: [] };
+  return { state: make(state), findings: [finding('corrupt-blob', { blob: short(String(name)) })] };
+}

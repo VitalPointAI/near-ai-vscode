@@ -7,7 +7,8 @@ import { signCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint, SignedCheckpoint } from '../domain/replica/checkpoint';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { RosterView } from '../domain/replica/rosterView';
-import { HUB_FINDINGS, createWitness, findingSentence, witnessCheckpoint } from '../domain/replica/hubWitness';
+import type { HeadSet } from '../domain/replica/transport';
+import { HUB_FINDINGS, createWitness, findingSentence, witnessBlob, witnessCheckpoint, witnessEntry, witnessHeads, witnessResponse } from '../domain/replica/hubWitness';
 import type { HubFinding, WitnessState } from '../domain/replica/hubWitness';
 import { fixedSigner } from './helpers/replicaWorld';
 
@@ -179,4 +180,123 @@ test('wrong-project: a signed checkpoint for another project is refused and chan
 test('the sentence table names every finding the design lists', () => {
   assert.equal(findingSentence('rolled-back'), HUB_FINDINGS['rolled-back']);
   assert.equal(findingSentence('forked-view'), HUB_FINDINGS['forked-view']);
+});
+
+// Task 2: heads, responses, entries and blobs (D-50).
+
+const headSet = (...rows: Array<[string, string, number, string?]>): HeadSet => {
+  const streams = new Map<string, Array<{ writer: string; seq: number; hash: string }>>();
+  for (const [stream, writer, seq, label] of rows) {
+    const list = streams.get(stream) ?? [];
+    list.push({ writer, seq, hash: headHash(writer, seq, label) });
+    streams.set(stream, list);
+  }
+  return { streams: [...streams].map(([stream, heads]) => ({ stream, heads })) };
+};
+
+test('rolled-back: heads below what this hub already showed name the stream and writer, and higher heads raise the mark', () => {
+  const first = witnessHeads(createWitness(HUB_ID, PROJECT), headSet([STREAM, A.writer, 4], [STREAM, B.writer, 2]), roster());
+  assert.deepEqual(first.findings, []);
+  assert.deepEqual(first.state.seen.map((row) => [row.writer, row.seq]).sort(), [[A.writer, 4], [B.writer, 2]].sort());
+  const lower = witnessHeads(deepFreeze(first.state), headSet([STREAM, A.writer, 1], [STREAM, B.writer, 3]), roster());
+  assert.deepEqual(kinds(lower.findings), ['rolled-back']);
+  assert.equal(lower.findings[0].detail.stream, STREAM.slice(0, 12));
+  assert.equal(lower.findings[0].detail.writer, A.writer.slice(0, 12));
+  assert.equal(lower.findings[0].detail.seq, 1);
+  assert.equal(lower.findings[0].detail.seen, 4);
+  // B's higher head still raises its mark; A's mark stays where it was.
+  assert.equal(lower.state.seen.find((row) => row.writer === B.writer)?.seq, 3);
+  assert.equal(lower.state.seen.find((row) => row.writer === A.writer)?.seq, 4);
+  const higher = witnessHeads(lower.state, headSet([STREAM, A.writer, 6]), roster());
+  assert.deepEqual(higher.findings, []);
+  assert.equal(higher.state.seen.find((row) => row.writer === A.writer)?.seq, 6);
+});
+
+test('rolled-back: heads below an accepted checkpoint are below what this hub showed', () => {
+  const state = feed(createWitness(HUB_ID, PROJECT), checkpoint(one(A.writer, 5)));
+  const result = witnessHeads(state, headSet([STREAM, A.writer, 3]), roster());
+  assert.deepEqual(kinds(result.findings), ['rolled-back']);
+});
+
+test('heads for a device the roster does not know, or in a shape that is not a head, raise no mark', () => {
+  const stranger = fixedSigner('stranger');
+  const result = witnessHeads(createWitness(HUB_ID, PROJECT), {
+    streams: [{ stream: STREAM, heads: [{ writer: stranger.writer, seq: 9, hash: headHash(stranger.writer, 9) }, { writer: A.writer, seq: -1, hash: 'nope' }] }, { stream: 'not-a-stream', heads: [{ writer: A.writer, seq: 1, hash: headHash(A.writer, 1) }] }]
+  }, roster());
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.state.seen, []);
+});
+
+test('wrong-project: a response naming another project or a stream not asked for is refused', () => {
+  const state = createWitness(HUB_ID, PROJECT);
+  assert.deepEqual(witnessResponse(state, { project: PROJECT, stream: STREAM }, [STREAM, STREAM_B]).findings, []);
+  assert.deepEqual(witnessResponse(state, { project: PROJECT, stream: STREAM }, STREAM).findings, []);
+  assert.deepEqual(witnessResponse(state, { project: PROJECT }, STREAM).findings, []);
+  const otherProject = witnessResponse(state, { project: OTHER_PROJECT, stream: STREAM }, STREAM);
+  assert.deepEqual(kinds(otherProject.findings), ['wrong-project']);
+  assert.equal(otherProject.findings[0].sentence, 'The hub answered with data from another project, and it was refused.');
+  const otherStream = witnessResponse(state, { project: PROJECT, stream: STREAM_B }, [STREAM]);
+  assert.deepEqual(kinds(otherStream.findings), ['wrong-project']);
+  assert.deepEqual(otherStream.state, state);
+});
+
+test('replayed: an entry already held is harmless and counted each time', () => {
+  const hash = headHash(A.writer, 2);
+  const first = witnessEntry(deepFreeze(createWitness(HUB_ID, PROJECT)), { hash, held: true });
+  assert.deepEqual(kinds(first.findings), ['replayed']);
+  assert.equal(first.findings[0].sentence, 'The hub sent changes this computer already had, so nothing changed.');
+  assert.equal(first.state.replayed, 1);
+  const second = witnessEntry(first.state, { hash, held: true });
+  assert.deepEqual(kinds(second.findings), ['replayed']);
+  assert.equal(second.state.replayed, 2);
+  assert.equal(first.state.replayed, 1);
+});
+
+test('injected: an entry that fails verification carries the reason id, and a verified new entry gives nothing', () => {
+  const state = createWitness(HUB_ID, PROJECT);
+  const bad = witnessEntry(state, { hash: headHash(A.writer, 3, 'forged'), verified: false, reason: 'bad-signature' });
+  assert.deepEqual(kinds(bad.findings), ['injected']);
+  assert.equal(bad.findings[0].detail.reason, 'bad-signature');
+  assert.equal(bad.findings[0].sentence, 'The hub sent a change that is not validly signed by anyone in this project, and it was refused.');
+  assert.deepEqual(bad.state, state);
+  const good = witnessEntry(state, { hash: headHash(A.writer, 3), verified: true });
+  assert.deepEqual(good.findings, []);
+  assert.deepEqual(good.state, state);
+});
+
+test('corrupt-blob: bytes that do not hash to the blob name are refused, and matching bytes give nothing', () => {
+  const state = createWitness(HUB_ID, PROJECT);
+  const bytes = Buffer.from('sealed attachment bytes of a fictional overlay');
+  const name = createHash('sha256').update(bytes).digest('hex');
+  assert.deepEqual(witnessBlob(state, name, bytes).findings, []);
+  assert.deepEqual(witnessBlob(state, name, bytes.toString('base64url')).findings, []);
+  const wrong = witnessBlob(state, name, Buffer.from('other bytes'));
+  assert.deepEqual(kinds(wrong.findings), ['corrupt-blob']);
+  assert.equal(wrong.findings[0].sentence, 'The hub sent an attachment that does not match its fingerprint, and it was refused.');
+  assert.equal(wrong.findings[0].detail.blob, name.slice(0, 12));
+  assert.deepEqual(kinds(witnessBlob(state, name, 'not base64url!').findings), ['corrupt-blob']);
+  assert.deepEqual(kinds(witnessBlob(state, 'not-a-hash', bytes).findings), ['corrupt-blob']);
+});
+
+test('every finding carries kind, sentence and detail, with ids cut to 12 characters and no em-dash', () => {
+  const findings: HubFinding[] = [];
+  const base = feed(createWitness(HUB_ID, PROJECT), checkpoint(one(A.writer, 5)));
+  findings.push(...witnessCheckpoint(base, checkpoint(one(A.writer, 2)), roster()).findings);
+  findings.push(...witnessCheckpoint(base, checkpoint(one(A.writer, 5, 'other')), roster()).findings);
+  findings.push(...witnessCheckpoint(base, checkpoint({ ...one(A.writer, 9), by: A }), roster()).findings);
+  findings.push(...witnessCheckpoint(base, checkpoint({ ...one(A.writer, 9), project: OTHER_PROJECT }), roster()).findings);
+  findings.push(...witnessHeads(base, headSet([STREAM, A.writer, 1]), roster()).findings);
+  findings.push(...witnessResponse(base, { project: OTHER_PROJECT, stream: STREAM }, STREAM).findings);
+  findings.push(...witnessEntry(base, { hash: headHash(A.writer, 1), held: true }).findings);
+  findings.push(...witnessEntry(base, { hash: headHash(A.writer, 1), verified: false, reason: 'bad-signature' }).findings);
+  findings.push(...witnessBlob(base, headHash(A.writer, 1), Buffer.from('x')).findings);
+  assert.equal(findings.length, 9);
+  for (const item of findings) {
+    assert.deepEqual(Object.keys(item).filter((key) => key !== 'count').sort(), ['detail', 'kind', 'sentence']);
+    assert.equal(typeof item.sentence, 'string');
+    const text = JSON.stringify(item);
+    assert.doesNotMatch(text, /—/);
+    assert.doesNotMatch(text, /[0-9a-f]{64}/);
+    assert.doesNotMatch(text, /[0-9a-f]{13,}/);
+  }
 });
