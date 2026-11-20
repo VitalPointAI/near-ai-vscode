@@ -36,7 +36,10 @@ export interface RoutingTable {
   readonly localHosts: readonly HostPattern[];
 }
 
-/** The CLAS-05 defaults. Protected B stays local-only because no CCCS Medium assessment of NEAR AI Cloud was found (D-30). */
+/**
+ * The CLAS-05 defaults. Protected B stays local-only because no CCCS Medium assessment of NEAR AI Cloud was found (D-30). The reserved export compartments
+ * CGP, EAR and ITAR are local-only (Phase 41 D-62).
+ */
 export const DEFAULT_ROUTING: RoutingTable = Object.freeze({
   levels: Object.freeze({
     'org/Public': 'any-cloud',
@@ -56,7 +59,9 @@ export const DEFAULT_ROUTING: RoutingTable = Object.freeze({
     'nato/Cosmic Top Secret': 'local-only'
   } as const),
   handling: Object.freeze({ 'local-only': 'local-only' } as const),
-  compartments: Object.freeze({}),
+  // The starting rules keep content marked Controlled goods (Canada), ITAR or US export-controlled (EAR) on this computer (Phase 41 D-62). A fresh install
+  // and the renewal of unedited starting rules get these; a policy someone edited is never changed in place.
+  compartments: Object.freeze({ CGP: 'local-only', EAR: 'local-only', ITAR: 'local-only' } as const),
   localHosts: Object.freeze([])
 });
 
@@ -426,7 +431,8 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
  * Route rules Phase 41 names before anything can return them (D-10, D-49, D-51). A rule enters ROUTE_RULES only when decideRoute can reach it, because
  * gateRouting checks that every ROUTE_RULES id is reached; so the new ids wait here, with their sentences, and every record id list already knows them.
  * Plan 41-10 moves each into ROUTE_RULES and ROUTE_REFUSALS, sentence unchanged, as decideRoute starts to return it. `route.passport` stays here until
- * Phase 74.1 (report only, recorded as wouldRefuse). No id is on this list and another route list at once.
+ * Phase 74.1 (report only, recorded as wouldRefuse), and `route.export-control` until Phase 45, which gives the export-control step its behaviour (D-63).
+ * No id is on this list and another route list at once.
  */
 export const ROUTE_RULES_NAMED_AHEAD = Object.freeze([
   'route.endpoint-unknown',
@@ -437,7 +443,8 @@ export const ROUTE_RULES_NAMED_AHEAD = Object.freeze([
   'route.passport',
   'route.accredited-device',
   'route.clearance',
-  'route.model-not-allowed'
+  'route.model-not-allowed',
+  'route.export-control'
 ] as const);
 export type NamedAheadRouteRule = (typeof ROUTE_RULES_NAMED_AHEAD)[number];
 
@@ -451,7 +458,8 @@ export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, st
   'route.passport': 'Nothing was sent. Your organization has not approved this model for this use. Choose a model your organization approved for this work, or ask your organization\'s security contact to review this one.',
   'route.accredited-device': 'Nothing was sent. Your organization\'s rules allow content at this level only on a computer recorded as accredited, and this computer is not. Use an accredited computer, ask your organization\'s security contact about this one, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.model-not-allowed': 'Nothing was sent. This model is not allowed for this work. Choose one of the models allowed for this work, or ask whoever manages those settings to allow this one.'
+  'route.model-not-allowed': 'Nothing was sent. This model is not allowed for this work. Choose one of the models allowed for this work, or ask whoever manages those settings to allow this one.',
+  'route.export-control': 'Nothing was sent. This content is marked Controlled goods (Canada), ITAR or US export-controlled (EAR), and your organization has not approved this AI service, or you sending it there, for that marking. Use a model on this computer, or ask your organization\'s export-control contact.'
 });
 
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */

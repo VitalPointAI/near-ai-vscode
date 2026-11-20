@@ -10,8 +10,8 @@
 import { BUNDLE_VERSION, CLOCK_SKEW_MS, UPDATE_REASONS, bundleHash, checkNumbers, checkRequires, effectiveNow, failedClosed, needsRenewal, needsUpdateSentence,
   parseBundle, parseIssuer, parseTimestamp, payloadReason, shapeReason, FINGERPRINT_PATTERN, HEX_64 } from './bundle';
 import type { BundleIssuer, BundleState, PolicyBundle } from './bundle';
-import { parseAuthorizations } from './authorizations';
-import type { AuthorizationBody } from './authorizations';
+import { LEGAL_BASIS_EXEMPT_CLASSES, parseAuthorizations } from './authorizations';
+import type { AuthorizationBody, ExportEndpointConditions } from './authorizations';
 import { migrateLocalHosts, parseEndpoints } from './endpoints';
 import type { PolicyEndpoint } from './endpoints';
 import { ALWAYS_REQUIRED_FEATURES, POLICY_SECTIONS, featureForSection } from './features';
@@ -20,8 +20,10 @@ import { parseModelsSection } from './models';
 import type { ModelsSection } from './models';
 import { parsePeopleSection } from '../org/peopleSection';
 import type { PeopleSection } from '../org/peopleSection';
-import { parseAgentsSection, parseLabelsSection, parseLimitsSection, parseOnboardingSection, parseReservedSection, parseResidencySection } from './sections';
-import type { AgentsSection, LabelsSection, LimitsSection, OnboardingSection, ReservedSection, ResidencySection } from './sections';
+import {
+  parseAgentsSection, parseExportControlSection, parseLabelsSection, parseLimitsSection, parseOnboardingSection, parseReservedSection, parseResidencySection
+} from './sections';
+import type { AgentsSection, ExportControlSection, LabelsSection, LimitsSection, OnboardingSection, ReservedSection, ResidencySection } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 import { MAX_PAYLOAD_BYTES, verifyPayload } from '../team/signedPayload';
@@ -71,6 +73,8 @@ export interface PolicyDocument {
   readonly onboarding?: OnboardingSection;
   readonly limits?: LimitsSection;
   readonly reserved?: ReservedSection;
+  /** Export-controlled technical data (D-60), report mode: parsed and signed, read by nothing that decides in this phase. */
+  readonly exportControl?: ExportControlSection;
 }
 
 const ENVELOPE_REQUIRED = ['bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'requires', 'labels', 'agents'] as const;
@@ -198,7 +202,6 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     if (!authorizations.ok) return authorizations;
     out['authorizations'] = authorizations.value;
   }
-  if (has(value, 'exportControl')) return refused('not-available-yet', childPath(path, 'exportControl'));
   if (has(value, 'models')) {
     const models = parseModelsSection(ownValue(value, 'models'), scales, childPath(path, 'models'));
     if (!models.ok) return models;
@@ -228,6 +231,31 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     const reserved = parseReservedSection(ownValue(value, 'reserved'), scales, childPath(path, 'reserved'));
     if (!reserved.ok) return reserved;
     out['reserved'] = reserved.value;
+  }
+  if (has(value, 'exportControl')) {
+    const exportControl = parseExportControlSection(ownValue(value, 'exportControl'), scales, childPath(path, 'exportControl'));
+    if (!exportControl.ok) return exportControl;
+    out['exportControl'] = exportControl.value;
+  }
+  return checkLegalBasis(out, path);
+}
+
+/**
+ * D-61: an export-endpoint record for a place this document lists, of a class your organization does not run (anything but local, org-plain and org-tee),
+ * must cite its legal basis. A record for a place another layer lists is checked where both are known (composition, 41-02).
+ */
+function checkLegalBasis(out: Readonly<Record<string, unknown>>, path: string): Refusal | undefined {
+  const endpoints = (out['endpoints'] ?? []) as readonly PolicyEndpoint[];
+  const authorizations = (out['authorizations'] ?? []) as readonly SignedPayload<AuthorizationBody>[];
+  for (let index = 0; index < authorizations.length; index += 1) {
+    const body = (authorizations[index] as SignedPayload<AuthorizationBody>).payload;
+    if (body.kind !== 'export-endpoint' || !('endpoint' in body.subject)) continue;
+    const id = body.subject.endpoint;
+    const endpoint = endpoints.find((entry) => entry.id === id);
+    if (endpoint === undefined || LEGAL_BASIS_EXEMPT_CLASSES.includes(endpoint.class)) continue;
+    if ((body.conditions as ExportEndpointConditions).legalBasis === undefined) {
+      return refused('missing-field', `${childPath(path, 'authorizations')}[${String(index)}].payload.conditions.legalBasis`);
+    }
   }
   return undefined;
 }

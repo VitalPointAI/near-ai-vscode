@@ -13,11 +13,12 @@ import type { PolicyDocument, PolicyLayerState } from '../domain/gate/policyDocu
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { parsePeopleSection } from '../domain/org/peopleSection';
 import {
-  CONTACT_TOPICS, KINDS_OF_WORK, LOCKABLE_ANSWERS, RESIDENCY_REGIONS, parseContacts, parseLimitsSection, parseOnboardingSection, parseResidencySection
+  CONTACT_TOPICS, EXPORT_REGIMES, KINDS_OF_WORK, LOCKABLE_ANSWERS, RESIDENCY_REGIONS, parseContacts, parseExportControlSection, parseLimitsSection,
+  parseOnboardingSection, parseRegimes, parseResidencySection
 } from '../domain/gate/sections';
 import { signPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
-import { FIXED_NOW, activeKeys, deviceKey, fullDocumentFor, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
+import { FIXED_NOW, activeKeys, deviceKey, exportControlExample, fullDocumentFor, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
 
 type Loose = any; // a document under edit: each test breaks one value on purpose
 
@@ -361,12 +362,11 @@ test('every section: the full document round-trips, and each section without its
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
   if (!parsed.ok) return;
   for (const section of POLICY_SECTIONS) {
-    if (section === 'exportControl') continue; // TASK5
     assert.ok(Object.prototype.hasOwnProperty.call(parsed.value, section), `the full document has ${section}`);
   }
   for (const section of POLICY_SECTIONS) {
     const feature = featureForSection(section);
-    if (feature === undefined || feature === 'labels@1' || feature === 'agents@1' || feature === 'export-control@1') continue; // TASK5
+    if (feature === undefined) continue;
     const without = plain(full);
     without.requires = without.requires.filter((id: string) => id !== feature);
     assert.equal(failureOf(without), 'malformed', section);
@@ -392,4 +392,70 @@ test('residency, onboarding and limits are read in the document at their own pat
   assert.equal(at((d) => { d.onboarding.contacts = Array.from({ length: 9 }, (_, i) => ({ topic: 'it', name: `Desk ${String(i)}`, how: 'it@example.org' })); }), 'not-allowed-here onboarding.contacts');
   assert.equal(at((d) => { d.limits.spend = { vaultHoursPerDay: 25 }; }), 'not-allowed-here limits.spend.vaultHoursPerDay');
   assert.equal(at((d) => { d.onboarding.v = 2; }), 'unknown-version onboarding.v');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// exportControl (export-control@1), shapes only (D-60, D-63)
+
+function exportReason(edit: (section: Loose) => void): string {
+  const section = plain(exportControlExample());
+  edit(section);
+  return sectionReason(parseExportControlSection(section, SCALE_PRESETS));
+}
+
+test('D-60: the exportControl example of CGP-ITAR 6.4 parses, and a minimal section has its defaults filled', () => {
+  const parsed = parseExportControlSection(exportControlExample(), SCALE_PRESETS);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  if (parsed.ok) assert.deepEqual(parsed.value, exportControlExample());
+  assert.deepEqual([...EXPORT_REGIMES], ['CGP', 'EAR', 'ITAR']);
+  const minimal = parseExportControlSection({ v: 1, regimes: ['ITAR'], officials: [{ regime: 'ITAR', position: 'empowered-official' }] }, SCALE_PRESETS);
+  assert.ok(minimal.ok);
+  if (minimal.ok) {
+    assert.deepEqual(minimal.value, {
+      v: 1, regimes: ['ITAR'], officials: [{ regime: 'ITAR', position: 'empowered-official' }], suggestRules: 'standard', agentNetwork: 'refuse',
+      retention: { neverAutoPrune: true }, incidents: { contacts: ['export-control'] }
+    });
+    assert.ok(Object.isFrozen(minimal.value) && Object.isFrozen(minimal.value.officials) && Object.isFrozen(minimal.value.incidents.contacts));
+  }
+  assert.equal(exportReason((s) => { s.suggestRules = 'automatic'; }), 'ok');
+  assert.equal(exportReason((s) => { s.suggestRules = 'off'; }), 'ok');
+  assert.equal(exportReason((s) => { s.registration = { CGP: { registered: false, reference: 'CGP-REG-0001', endsOn: '2026-10-01T00:00:00.000Z' } }; }), 'ok');
+});
+
+test('D-60: exportControl refuses an unknown regime, unsorted or repeated regimes, and anything but one official per listed regime', () => {
+  assert.equal(exportReason((s) => { s.regimes = ['CGP', 'EAR', 'OTHER']; }), 'not-allowed-here exportControl.regimes[2]');
+  assert.equal(exportReason((s) => { s.regimes = ['ITAR', 'CGP', 'EAR']; }), 'not-sorted exportControl.regimes[1]');
+  assert.equal(exportReason((s) => { s.regimes = ['CGP', 'CGP', 'EAR', 'ITAR']; }), 'duplicate exportControl.regimes[1]');
+  assert.equal(exportReason((s) => { s.regimes = []; }), 'empty-list exportControl.regimes');
+  assert.equal(exportReason((s) => { s.officials = s.officials.slice(0, 2); }), 'missing-field exportControl.officials', 'no official for ITAR');
+  assert.equal(exportReason((s) => { s.officials.splice(1, 0, { regime: 'CGP', position: 'deputy' }); }), 'duplicate exportControl.officials[1]', 'two for CGP');
+  assert.equal(exportReason((s) => { s.regimes = ['CGP']; }), 'not-allowed-here exportControl.officials[1].regime', 'an official for an unlisted regime');
+  assert.equal(exportReason((s) => { s.officials[0].position = 'Designated Official'; }), 'wrong-type exportControl.officials[0].position');
+  assert.equal(exportReason((s) => { s.officials.reverse(); }), 'not-sorted exportControl.officials[1]');
+  assert.equal(exportReason((s) => { delete s.officials; }), 'missing-field exportControl.officials');
+});
+
+test('D-60: registration only for listed regimes; agentNetwork only refuse; retention only never pruned; incidents only contact topics; keys exact', () => {
+  assert.equal(exportReason((s) => { s.regimes = ['CGP']; s.officials = [s.officials[0]]; s.registration.ITAR = { registered: true, reference: 'M-0001', endsOn: null }; }), 'not-allowed-here exportControl.registration.ITAR');
+  assert.equal(exportReason((s) => { s.registration.OTHER = { registered: true, reference: 'x', endsOn: null }; }), 'unknown-field exportControl.registration.OTHER');
+  assert.equal(exportReason((s) => { s.registration.CGP.endsOn = 'soon'; }), 'wrong-type exportControl.registration.CGP.endsOn');
+  assert.equal(exportReason((s) => { delete s.registration.CGP.endsOn; }), 'missing-field exportControl.registration.CGP.endsOn');
+  assert.equal(exportReason((s) => { s.agentNetwork = 'allow'; }), 'not-allowed-here exportControl.agentNetwork');
+  assert.equal(exportReason((s) => { s.retention.neverAutoPrune = false; }), 'not-allowed-here exportControl.retention.neverAutoPrune');
+  assert.equal(exportReason((s) => { s.retention.days = 30; }), 'unknown-field exportControl.retention.days');
+  assert.equal(exportReason((s) => { s.incidents.contacts = ['legal']; }), 'not-allowed-here exportControl.incidents.contacts[0]');
+  assert.equal(exportReason((s) => { s.incidents.contacts = ['security', 'export-control']; }), 'not-sorted exportControl.incidents.contacts[1]');
+  assert.equal(exportReason((s) => { s.incidents.contacts = ['export-control', 'security']; }), 'ok');
+  assert.equal(exportReason((s) => { s.suggestRules = 'always'; }), 'not-allowed-here exportControl.suggestRules');
+  assert.equal(exportReason((s) => { s.exportEligible = true; }), 'unknown-field exportControl.exportEligible');
+  assert.equal(exportReason((s) => { s.v = 2; }), 'unknown-version exportControl.v');
+  assert.equal(sectionReason(parseRegimes(['CGP', 'ITAR'], 'regimes')), 'ok');
+});
+
+test('D-60, D-63: the section needs export-control@1 in requires, and export-control is a contact topic', () => {
+  const withSection = (requires: string[]): Loose => v2((d) => { d.exportControl = exportControlExample(); d.requires = requires; });
+  assert.equal(failureOf(withSection(['agents@1', 'labels@1', 'layers@1', 'people@1'])), 'malformed');
+  assert.equal(reasonOf(withSection(['agents@1', 'export-control@1', 'labels@1', 'layers@1', 'people@1'])), 'ok');
+  assert.ok((CONTACT_TOPICS as readonly string[]).includes('export-control'));
+  assert.equal(sectionReason(parseContacts([{ topic: 'export-control', name: 'Export control desk', how: 'exports@example.org' }])), 'ok');
 });

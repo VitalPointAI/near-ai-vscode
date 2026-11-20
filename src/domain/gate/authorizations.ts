@@ -5,8 +5,15 @@
 // Key sources are never mixed (D-15, D-31): an authorization verifies only against the signers your organization's layer lists (`people.signers`), or, when
 // there is no organization layer, only against this device's own key, which every screen then calls "self-signed on this computer". This file never
 // combines two key sources.
+// Two kinds record export-control decisions (D-61): `export-person` (who may see controlled technical data, per regime) and `export-endpoint` (which AI
+// service may receive it). Their conditions hold only a basis, an extent, an authority and dates, never citizenship, a birth date or assessment content,
+// which stay in your organization's security files; strict keys refuse every such field. Nothing grants access with them in this phase (Phase 45).
 // Imported values are used only inside functions, never at module load.
 import { CLOCK_SKEW_MS, parseTimestamp } from './bundle';
+import { ENDPOINT_REGIONS } from './endpoints';
+import type { EndpointClass, EndpointRegion } from './endpoints';
+import { parseRegimes } from './sections';
+import type { ExportRegime } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Parsed } from './shape';
 import { fingerprintOf, isStrictBase64url } from '../team/canonical';
@@ -14,12 +21,17 @@ import type { KeyStatusLookup } from '../team/keyStatus';
 import { verifyPayload } from '../team/signedPayload';
 import type { PayloadFailureReason, SignedPayload } from '../team/signedPayload';
 
-/** The kinds of exception (D-29): Protected B on a named place, a T1 model risk, an accredited device, a residency exception, a declassification. */
-export const AUTHORIZATION_KINDS = Object.freeze(['protected-b', 't1-risk', 'accredited-device', 'residency-exception', 'declassify'] as const);
+/**
+ * The kinds of exception (D-29): Protected B on a named place, a T1 model risk, an accredited device, a residency exception, a declassification; then the
+ * two export-control decisions about a person and an AI service (D-61). Append-only.
+ */
+export const AUTHORIZATION_KINDS = Object.freeze([
+  'protected-b', 't1-risk', 'accredited-device', 'residency-exception', 'declassify', 'export-person', 'export-endpoint'
+] as const);
 export type AuthorizationKind = (typeof AUTHORIZATION_KINDS)[number];
 
 /** What each kind is about. */
-export const SUBJECT_KINDS = Object.freeze(['endpoint', 'model', 'device', 'item'] as const);
+export const SUBJECT_KINDS = Object.freeze(['endpoint', 'model', 'device', 'item', 'person'] as const);
 export type SubjectKind = (typeof SUBJECT_KINDS)[number];
 
 export const SUBJECT_FOR_KIND: Readonly<Record<AuthorizationKind, SubjectKind>> = Object.freeze({
@@ -27,20 +39,87 @@ export const SUBJECT_FOR_KIND: Readonly<Record<AuthorizationKind, SubjectKind>> 
   't1-risk': 'model',
   'accredited-device': 'device',
   'residency-exception': 'endpoint',
-  declassify: 'item'
+  declassify: 'item',
+  'export-person': 'person',
+  'export-endpoint': 'endpoint'
 });
 
 /**
  * The longest each kind may run, in days (D-30): t1-risk 90 (provenance O3), protected-b 365 (Cohere 6.3), accredited-device 365, residency-exception 90.
- * declassify has none, like today's label-declassify records, which keep working unchanged (D-32).
+ * declassify has none, like today's label-declassify records, which keep working unchanged (D-32). export-endpoint 365 (D-61); export-person is measured in
+ * calendar years per regime by latestExpiryFor.
  */
 export const MAX_DAYS_BY_KIND: Readonly<Record<AuthorizationKind, number | undefined>> = Object.freeze({
   'protected-b': 365,
   't1-risk': 90,
   'accredited-device': 365,
   'residency-exception': 90,
-  declassify: undefined
+  declassify: undefined,
+  'export-person': undefined,
+  'export-endpoint': 365
 });
+
+/** The CGP bases of an export-person decision: assessed (CGR s. 13, five years) or one of the exemptions (three years). */
+export const CGP_BASES = Object.freeze([
+  'assessed', 'exempt-us-itar-registered', 'exempt-us-official', 'exempt-temporary-worker', 'exempt-student', 'exempt-visitor'
+] as const);
+export type CgpBasis = (typeof CGP_BASES)[number];
+
+/** What the designated official allows under CGR s. 13(a). */
+export const CGP_EXTENTS = Object.freeze(['examine', 'possess', 'transfer'] as const);
+export type CgpExtent = (typeof CGP_EXTENTS)[number];
+
+/** The ITAR and EAR bases of an export-person decision. */
+export const US_EXPORT_BASES = Object.freeze([
+  'us-person', 'canadian-registered-person', 'licence', 'agreement', 'dual-third-country-126.18', 'exempt-other'
+] as const);
+export type UsExportBasis = (typeof US_EXPORT_BASES)[number];
+
+/** Whether an AI service holds only ciphertext or decrypts to compute. */
+export const EXPORT_PLAINTEXT = Object.freeze(['none', 'processes'] as const);
+
+/** Classes your organization runs or that run on this computer: an export-endpoint record for any other class must cite its legal basis (D-61). */
+export const LEGAL_BASIS_EXEMPT_CLASSES: readonly EndpointClass[] = Object.freeze(['local', 'org-plain', 'org-tee'] as const);
+
+export interface CgpPersonCondition {
+  readonly basis: CgpBasis;
+  readonly extent: readonly CgpExtent[];
+  readonly authority?: string;
+  readonly excludes?: readonly string[];
+}
+
+export interface UsExportPersonCondition {
+  readonly basis: UsExportBasis;
+  /** The licence, agreement or exemption cited; required for licence, agreement and exempt-other. */
+  readonly authority?: string;
+  /** The cited licence or agreement's own end; required for licence and agreement, and the decision never runs past it. */
+  readonly authorityExpiresAt?: string;
+  readonly excludes?: readonly string[];
+}
+
+/** One entry per regime of `scope.regimes`, and nothing about the person beyond the basis (D-61). */
+export interface ExportPersonConditions {
+  readonly CGP?: CgpPersonCondition;
+  readonly EAR?: UsExportPersonCondition;
+  readonly ITAR?: UsExportPersonCondition;
+}
+
+export interface ExportEndpointConditions {
+  readonly regimes: readonly ExportRegime[];
+  readonly region: EndpointRegion;
+  /** Who runs it: your organization, or the provider with its registration references. */
+  readonly operator: string;
+  /** Who can reach the data in the clear. */
+  readonly access: string;
+  readonly crypto?: string;
+  readonly plaintext: (typeof EXPORT_PLAINTEXT)[number];
+  /** The written opinion or authorization relied on; required for a class outside LEGAL_BASIS_EXEMPT_CLASSES. */
+  readonly legalBasis?: string;
+}
+
+export type AuthorizationConditions = readonly string[] | ExportPersonConditions | ExportEndpointConditions;
+
+const EXPORT_KINDS: readonly AuthorizationKind[] = Object.freeze(['export-person', 'export-endpoint'] as const);
 
 /** Said wherever an authorization, an acceptance or a trust line cites a record this device signed itself (D-23). */
 export const SELF_SIGNED_TEXT = 'self-signed on this computer';
@@ -49,13 +128,16 @@ export type AuthorizationSubject =
   | { readonly endpoint: string }
   | { readonly model: string }
   | { readonly device: string }
-  | { readonly item: string };
+  | { readonly item: string }
+  | { readonly person: string };
 
 /** Which projects, labels (`scale/level`) and uses (lowercase tokens such as `t1`) a record covers. An absent list covers any; a present one is never empty. */
 export interface AuthorizationScope {
   readonly projects?: readonly string[];
   readonly labels?: readonly string[];
   readonly uses?: readonly string[];
+  /** The export regimes an export-person or export-endpoint record covers; required for those kinds, refused for the others. */
+  readonly regimes?: readonly ExportRegime[];
 }
 
 export interface NamedPerson {
@@ -69,8 +151,8 @@ export interface AuthorizationBody {
   readonly kind: AuthorizationKind;
   readonly subject: AuthorizationSubject;
   readonly scope: AuthorizationScope;
-  /** Plain conditions the person attached, 0 to 8 texts. */
-  readonly conditions: readonly string[];
+  /** Plain conditions the person attached, 0 to 8 texts; for the export kinds, their structured conditions (D-61). */
+  readonly conditions: AuthorizationConditions;
   /** A reference to the assessment in your organization's own files. */
   readonly evidence: string;
   readonly namedPerson: NamedPerson;
@@ -163,11 +245,20 @@ function parseSubject(value: unknown, kind: AuthorizationKind, path: string): Pa
   return { ok: true, value: Object.freeze({ [expected]: id }) as AuthorizationSubject };
 }
 
-function parseScope(value: unknown, path: string): Parsed<AuthorizationScope> {
+function parseScope(value: unknown, kind: AuthorizationKind, path: string): Parsed<AuthorizationScope> {
   if (!isRecord(value)) return refused('wrong-type', path);
-  const keys = checkKeys(value, path, [], ['projects', 'labels', 'uses']);
+  const keys = checkKeys(value, path, [], ['projects', 'labels', 'uses', 'regimes']);
   if (keys !== undefined) return keys;
   const out: Record<string, readonly string[]> = {};
+  const exportKind = EXPORT_KINDS.includes(kind);
+  if (Object.prototype.hasOwnProperty.call(value, 'regimes')) {
+    if (!exportKind) return refused('not-allowed-here', childPath(path, 'regimes'));
+    const regimes = parseRegimes(ownValue(value, 'regimes'), childPath(path, 'regimes'));
+    if (!regimes.ok) return regimes;
+    out['regimes'] = regimes.value;
+  } else if (exportKind) {
+    return refused('missing-field', childPath(path, 'regimes'));
+  }
   const lists: ReadonlyArray<readonly [string, RegExp]> = [['projects', SUBJECT_VALUE_PATTERN], ['labels', LABEL_KEY_PATTERN], ['uses', USE_PATTERN]];
   for (const [key, pattern] of lists) {
     if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
@@ -175,7 +266,7 @@ function parseScope(value: unknown, path: string): Parsed<AuthorizationScope> {
     if (!list.ok) return list;
     out[key] = list.value;
   }
-  return { ok: true, value: Object.freeze(out) };
+  return { ok: true, value: Object.freeze(out) as AuthorizationScope };
 }
 
 function parseConditionTexts(value: unknown, path: string): Parsed<readonly string[]> {
@@ -188,6 +279,113 @@ function parseConditionTexts(value: unknown, path: string): Parsed<readonly stri
     out.push(text.value);
   }
   return { ok: true, value: Object.freeze(out) };
+}
+
+const AUTHORITY_MAX = 64;
+const MAX_EXCLUDES = 16;
+const EXCLUDE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+function parseOptionalText(value: Record<string, unknown>, key: string, path: string, max: number, out: Record<string, unknown>): Parsed<true> {
+  if (!Object.prototype.hasOwnProperty.call(value, key)) return { ok: true, value: true };
+  const text = parseText(ownValue(value, key), childPath(path, key), max);
+  if (!text.ok) return text;
+  out[key] = text.value;
+  return { ok: true, value: true };
+}
+
+function parseExcludes(value: Record<string, unknown>, path: string, out: Record<string, unknown>): Parsed<true> {
+  if (!Object.prototype.hasOwnProperty.call(value, 'excludes')) return { ok: true, value: true };
+  const list = parseTokenSet(ownValue(value, 'excludes'), childPath(path, 'excludes'), MAX_EXCLUDES, EXCLUDE_PATTERN);
+  if (!list.ok) return list;
+  out['excludes'] = list.value;
+  return { ok: true, value: true };
+}
+
+function parseCgpCondition(value: unknown, path: string): Parsed<CgpPersonCondition> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['basis', 'extent'], ['authority', 'excludes']);
+  if (keys !== undefined) return keys;
+  const basis = parseChoice(ownValue(value, 'basis'), childPath(path, 'basis'), CGP_BASES);
+  if (!basis.ok) return basis;
+  const extentPath = childPath(path, 'extent');
+  const extent = parseTokenSet(ownValue(value, 'extent'), extentPath, CGP_EXTENTS.length, /^[a-z]+$/);
+  if (!extent.ok) return extent;
+  for (let index = 0; index < extent.value.length; index += 1) {
+    if (!(CGP_EXTENTS as readonly string[]).includes(extent.value[index] as string)) return refused('not-allowed-here', `${extentPath}[${String(index)}]`);
+  }
+  const out: Record<string, unknown> = { basis: basis.value, extent: extent.value };
+  const authority = parseOptionalText(value, 'authority', path, AUTHORITY_MAX, out);
+  if (!authority.ok) return authority;
+  const excludes = parseExcludes(value, path, out);
+  if (!excludes.ok) return excludes;
+  return { ok: true, value: Object.freeze(out) as unknown as CgpPersonCondition };
+}
+
+function parseUsCondition(value: unknown, path: string): Parsed<UsExportPersonCondition> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['basis'], ['authority', 'authorityExpiresAt', 'excludes']);
+  if (keys !== undefined) return keys;
+  const basis = parseChoice(ownValue(value, 'basis'), childPath(path, 'basis'), US_EXPORT_BASES);
+  if (!basis.ok) return basis;
+  const out: Record<string, unknown> = { basis: basis.value };
+  const authority = parseOptionalText(value, 'authority', path, AUTHORITY_MAX, out);
+  if (!authority.ok) return authority;
+  const cited = basis.value === 'licence' || basis.value === 'agreement';
+  if ((cited || basis.value === 'exempt-other') && out['authority'] === undefined) return refused('missing-field', childPath(path, 'authority'));
+  if (Object.prototype.hasOwnProperty.call(value, 'authorityExpiresAt')) {
+    const at = parseTimestamp(ownValue(value, 'authorityExpiresAt'), childPath(path, 'authorityExpiresAt'));
+    if (!at.ok) return at;
+    out['authorityExpiresAt'] = at.value;
+  } else if (cited) {
+    return refused('missing-field', childPath(path, 'authorityExpiresAt'));
+  }
+  const excludes = parseExcludes(value, path, out);
+  if (!excludes.ok) return excludes;
+  return { ok: true, value: Object.freeze(out) as unknown as UsExportPersonCondition };
+}
+
+/** export-person conditions: exactly one entry per regime of the scope, CGP with its basis and extent, ITAR and EAR with theirs (D-61). */
+function parseExportPersonConditions(value: unknown, regimes: readonly ExportRegime[], path: string): Parsed<ExportPersonConditions> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, regimes);
+  if (keys !== undefined) return keys;
+  const out: Record<string, unknown> = {};
+  for (const regime of regimes) {
+    const where = childPath(path, regime);
+    const parsed = regime === 'CGP' ? parseCgpCondition(ownValue(value, regime), where) : parseUsCondition(ownValue(value, regime), where);
+    if (!parsed.ok) return parsed;
+    out[regime] = parsed.value;
+  }
+  return { ok: true, value: Object.freeze(out) as ExportPersonConditions };
+}
+
+function parseExportEndpointConditions(value: unknown, regimes: readonly ExportRegime[], path: string): Parsed<ExportEndpointConditions> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['regimes', 'region', 'operator', 'access', 'plaintext'], ['crypto', 'legalBasis']);
+  if (keys !== undefined) return keys;
+  const listed = parseRegimes(ownValue(value, 'regimes'), childPath(path, 'regimes'));
+  if (!listed.ok) return listed;
+  if (listed.value.join(',') !== regimes.join(',')) return refused('not-allowed-here', childPath(path, 'regimes'));
+  const region = parseChoice(ownValue(value, 'region'), childPath(path, 'region'), ENDPOINT_REGIONS);
+  if (!region.ok) return region;
+  const operator = parseText(ownValue(value, 'operator'), childPath(path, 'operator'), 128);
+  if (!operator.ok) return operator;
+  const access = parseText(ownValue(value, 'access'), childPath(path, 'access'), MAX_CONDITION_TEXT);
+  if (!access.ok) return access;
+  const plaintext = parseChoice(ownValue(value, 'plaintext'), childPath(path, 'plaintext'), EXPORT_PLAINTEXT);
+  if (!plaintext.ok) return plaintext;
+  const out: Record<string, unknown> = { regimes: listed.value, region: region.value, operator: operator.value, access: access.value, plaintext: plaintext.value };
+  const crypto = parseOptionalText(value, 'crypto', path, MAX_CONDITION_TEXT, out);
+  if (!crypto.ok) return crypto;
+  const legalBasis = parseOptionalText(value, 'legalBasis', path, MAX_EVIDENCE, out);
+  if (!legalBasis.ok) return legalBasis;
+  return { ok: true, value: Object.freeze(out) as unknown as ExportEndpointConditions };
+}
+
+function parseConditions(value: unknown, kind: AuthorizationKind, scope: AuthorizationScope, path: string): Parsed<AuthorizationConditions> {
+  if (kind === 'export-person') return parseExportPersonConditions(value, scope.regimes ?? [], path);
+  if (kind === 'export-endpoint') return parseExportEndpointConditions(value, scope.regimes ?? [], path);
+  return parseConditionTexts(value, path);
 }
 
 const BODY_REQUIRED = ['v', 'id', 'kind', 'subject', 'scope', 'conditions', 'evidence', 'namedPerson', 'issuedAt', 'expiresAt'] as const;
@@ -206,9 +404,9 @@ export function parseAuthorizationBody(value: unknown, path = ''): Parsed<Author
   if (!kind.ok) return kind;
   const subject = parseSubject(ownValue(value, 'subject'), kind.value, childPath(path, 'subject'));
   if (!subject.ok) return subject;
-  const scope = parseScope(ownValue(value, 'scope'), childPath(path, 'scope'));
+  const scope = parseScope(ownValue(value, 'scope'), kind.value, childPath(path, 'scope'));
   if (!scope.ok) return scope;
-  const conditions = parseConditionTexts(ownValue(value, 'conditions'), childPath(path, 'conditions'));
+  const conditions = parseConditions(ownValue(value, 'conditions'), kind.value, scope.value, childPath(path, 'conditions'));
   if (!conditions.ok) return conditions;
   const evidence = parseText(ownValue(value, 'evidence'), childPath(path, 'evidence'), MAX_EVIDENCE);
   if (!evidence.ok) return evidence;
@@ -367,10 +565,38 @@ function sameKey(a: { readonly fingerprint: string; readonly publicKey: string }
   return a.fingerprint === b.fingerprint && a.publicKey === b.publicKey;
 }
 
-/** The latest expiry the kind allows for this body, in epoch milliseconds; undefined when the kind has no maximum (declassify). */
-export function latestExpiryFor(body: Pick<AuthorizationBody, 'kind' | 'issuedAt'>): number | undefined {
-  const days = MAX_DAYS_BY_KIND[body.kind];
-  return days === undefined ? undefined : parseIsoMillis(body.issuedAt) + days * DAY_MS;
+function plusYears(ms: number, years: number): number {
+  const date = new Date(ms);
+  date.setUTCFullYear(date.getUTCFullYear() + years);
+  return date.getTime();
+}
+
+/**
+ * The latest expiry the kind allows for this body, in epoch milliseconds; undefined when the kind has no maximum (declassify). An export-person decision is
+ * measured in UTC calendar years per regime: CGP assessed five, a CGP exemption three, ITAR or EAR five and never past the cited authority's own end; the
+ * earliest regime wins (D-61).
+ */
+export function latestExpiryFor(body: Pick<AuthorizationBody, 'kind' | 'issuedAt' | 'scope' | 'conditions'>): number | undefined {
+  const issued = parseIsoMillis(body.issuedAt);
+  if (body.kind !== 'export-person') {
+    const days = MAX_DAYS_BY_KIND[body.kind];
+    return days === undefined ? undefined : issued + days * DAY_MS;
+  }
+  const conditions = body.conditions as ExportPersonConditions;
+  let latest = Number.NaN;
+  for (const regime of body.scope.regimes ?? []) {
+    let limit: number;
+    if (regime === 'CGP') {
+      limit = plusYears(issued, conditions.CGP?.basis === 'assessed' ? 5 : 3);
+    } else {
+      limit = plusYears(issued, 5);
+      const cited = conditions[regime]?.authorityExpiresAt;
+      if (cited !== undefined) limit = Math.min(limit, parseIsoMillis(cited));
+    }
+    latest = Number.isNaN(latest) ? limit : Math.min(latest, limit);
+  }
+  // An export-person record with no regime has no length that could be allowed (the parser already refuses one).
+  return Number.isNaN(latest) ? issued : latest;
 }
 
 /**
@@ -419,6 +645,8 @@ export interface AuthorizationQuestion {
   readonly label?: string;
   /** A lowercase use token such as `t1`. */
   readonly use?: string;
+  /** An export regime (export-person and export-endpoint records). */
+  readonly regime?: ExportRegime;
 }
 
 function coversOne(list: readonly string[] | undefined, asked: string | undefined): boolean {
@@ -441,6 +669,7 @@ function subjectEquals(a: AuthorizationSubject, b: AuthorizationSubject): boolea
 export function authorizationCovers(body: AuthorizationBody, question: AuthorizationQuestion, now: number): boolean {
   if (body.kind !== question.kind || !subjectEquals(body.subject, question.subject)) return false;
   if (!coversOne(body.scope.projects, question.project) || !coversOne(body.scope.labels, question.label) || !coversOne(body.scope.uses, question.use)) return false;
+  if (!coversOne(body.scope.regimes, question.regime)) return false;
   if (body.revokedBy !== undefined || !Number.isFinite(now)) return false;
   return parseIsoMillis(body.issuedAt) <= now + CLOCK_SKEW_MS && now < parseIsoMillis(body.expiresAt);
 }

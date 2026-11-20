@@ -60,6 +60,11 @@ test('D-10, D-51: every route rule Phase 41 writes is named ahead, on no other l
   const named = [...ROUTE_RULES_NAMED_AHEAD];
   for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency', 'route.passport',
     'route.accredited-device', 'route.clearance', 'route.model-not-allowed']) assert.ok(named.includes(id as never), id);
+  // D-63: route.export-control is named ahead last, until Phase 45, and its sentence uses the shown words, never the officials' words.
+  assert.equal(named[named.length - 1], 'route.export-control');
+  const exportSentence = ROUTE_REFUSALS_NAMED_AHEAD['route.export-control'];
+  for (const word of [/regime/i, /designated official/i, /empowered official/i]) assert.ok(!word.test(exportSentence), String(word));
+  assert.match(exportSentence, /Controlled goods \(Canada\), ITAR or US export-controlled \(EAR\)/);
   assert.deepEqual(Object.keys(ROUTE_REFUSALS_NAMED_AHEAD).sort(), [...named].sort());
   const emDash = String.fromCharCode(0x2014);
   for (const id of named) {

@@ -7,7 +7,7 @@
 import type { ActionPolicyMode } from '../policy';
 import {
   MAX_ANCHOR_ROOTS, MAX_MAPPINGS, MAX_STATUS_LISTS, mappingKey, parseAnchorRoot, parseContexts, parseList, parseMaxMode, parseMaxOfflineAge,
-  parseMcpLabelCeilings, parseScales, parseServerIds, parseSetList, parseStatusList
+  parseMcpLabelCeilings, parseScales, parseServerIds, parseSetList, parseStatusList, parseTimestamp
 } from './bundle';
 import type { AnchorRoot, GateContextName, StatusListRef } from './bundle';
 import { parseLabel, parseMapping } from './labels';
@@ -514,4 +514,187 @@ export function parseLimitsSection(value: unknown, path = 'limits'): Parsed<Limi
     out[key] = parsed.value;
   }
   return { ok: true, value: Object.freeze({ v: 1, spend: Object.freeze(out) }) };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// exportControl (export-control@1): export-controlled technical data, shapes only (D-60 to D-63, CGP-ITAR 6.4). Nothing decides with it in this phase.
+
+/** The reserved compartment tokens with a fixed meaning: Controlled goods (Canada), ITAR and US export-controlled (EAR). Sorted. */
+export const EXPORT_REGIMES = Object.freeze(['CGP', 'EAR', 'ITAR'] as const);
+export type ExportRegime = (typeof EXPORT_REGIMES)[number];
+
+/** How marking suggestions run: the shipped legend rules as suggestions, made automatic, or off. */
+export const SUGGEST_RULES = Object.freeze(['standard', 'automatic', 'off'] as const);
+export type SuggestRules = (typeof SUGGEST_RULES)[number];
+
+export interface ExportOfficial {
+  readonly regime: ExportRegime;
+  /** The position whose holder signs this regime's decisions (designated or empowered official), as a token. */
+  readonly position: string;
+}
+
+export interface ExportRegistration {
+  readonly registered: boolean;
+  readonly reference: string;
+  /** When the registration ended, or null while it stands. */
+  readonly endsOn: string | null;
+}
+
+export interface ExportControlSection {
+  readonly v: 1;
+  readonly regimes: readonly ExportRegime[];
+  /** Exactly one per listed regime, sorted by regime. */
+  readonly officials: readonly ExportOfficial[];
+  readonly registration?: Readonly<Partial<Record<ExportRegime, ExportRegistration>>>;
+  readonly suggestRules: SuggestRules;
+  /** Always `refuse`: no value lets network tools near controlled content. */
+  readonly agentNetwork: 'refuse';
+  /** Always true in v1, present so a later version cannot silently change it. */
+  readonly retention: { readonly neverAutoPrune: true };
+  /** The onboarding contact topics told about a possible release. */
+  readonly incidents: { readonly contacts: readonly ContactTopic[] };
+}
+
+const POSITION_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+const MAX_REGISTRATION_REFERENCE = 64;
+
+/** A non-empty, sorted, unique list of export regimes: an exportControl section's, an authorization scope's, and a project layer's (41-02). */
+export function parseRegimes(value: unknown, path: string): Parsed<readonly ExportRegime[]> {
+  if (!Array.isArray(value)) return refused('wrong-type', path);
+  if (value.length === 0) return refused('empty-list', path);
+  const out: ExportRegime[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const where = `${path}[${String(index)}]`;
+    const regime = parseChoice(value[index], where, EXPORT_REGIMES);
+    if (!regime.ok) return regime;
+    const before = out[out.length - 1];
+    if (before !== undefined && regime.value === before) return refused('duplicate', where);
+    if (before !== undefined && regime.value < before) return refused('not-sorted', where);
+    out.push(regime.value);
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+function parseOfficials(value: unknown, regimes: readonly ExportRegime[], path: string): Parsed<readonly ExportOfficial[]> {
+  if (!Array.isArray(value)) return refused('wrong-type', path);
+  const out: ExportOfficial[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const where = `${path}[${String(index)}]`;
+    const item: unknown = value[index];
+    if (!isRecord(item)) return refused('wrong-type', where);
+    const keys = checkKeys(item, where, ['regime', 'position']);
+    if (keys !== undefined) return keys;
+    const regime = parseChoice(ownValue(item, 'regime'), childPath(where, 'regime'), EXPORT_REGIMES);
+    if (!regime.ok) return regime;
+    if (!regimes.includes(regime.value)) return refused('not-allowed-here', childPath(where, 'regime'));
+    const position = ownValue(item, 'position');
+    if (typeof position !== 'string' || !POSITION_PATTERN.test(position)) return refused('wrong-type', childPath(where, 'position'));
+    const before = out[out.length - 1];
+    if (before !== undefined && regime.value === before.regime) return refused('duplicate', where);
+    if (before !== undefined && regime.value < before.regime) return refused('not-sorted', where);
+    out.push(Object.freeze({ regime: regime.value, position }));
+  }
+  // Every listed regime names the position that signs its decisions.
+  if (out.length !== regimes.length) return refused('missing-field', path);
+  return { ok: true, value: Object.freeze(out) };
+}
+
+function parseRegistration(value: unknown, regimes: readonly ExportRegime[], path: string): Parsed<Readonly<Partial<Record<ExportRegime, ExportRegistration>>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const out: Partial<Record<ExportRegime, ExportRegistration>> = {};
+  for (const key of Object.keys(value).sort()) {
+    const where = childPath(path, key.slice(0, 40));
+    const regime = EXPORT_REGIMES.find((candidate) => candidate === key);
+    if (regime === undefined) return refused('unknown-field', where);
+    if (!regimes.includes(regime)) return refused('not-allowed-here', where);
+    const entry = ownValue(value, key);
+    if (!isRecord(entry)) return refused('wrong-type', where);
+    const keys = checkKeys(entry, where, ['registered', 'reference', 'endsOn']);
+    if (keys !== undefined) return keys;
+    const registered = parseBoolean(ownValue(entry, 'registered'), childPath(where, 'registered'));
+    if (!registered.ok) return registered;
+    const reference = parseBoundedText(ownValue(entry, 'reference'), childPath(where, 'reference'), MAX_REGISTRATION_REFERENCE);
+    if (!reference.ok) return reference;
+    const endsOnValue = ownValue(entry, 'endsOn');
+    let endsOn: string | null = null;
+    if (endsOnValue !== null) {
+      const parsed = parseTimestamp(endsOnValue, childPath(where, 'endsOn'));
+      if (!parsed.ok) return parsed;
+      endsOn = parsed.value;
+    }
+    out[regime] = Object.freeze({ registered: registered.value, reference: reference.value, endsOn });
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+function parseIncidents(value: unknown, path: string): Parsed<{ readonly contacts: readonly ContactTopic[] }> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['contacts']);
+  if (keys !== undefined) return keys;
+  const listPath = childPath(path, 'contacts');
+  const list = ownValue(value, 'contacts');
+  if (!Array.isArray(list)) return refused('wrong-type', listPath);
+  const out: ContactTopic[] = [];
+  for (let index = 0; index < list.length; index += 1) {
+    const where = `${listPath}[${String(index)}]`;
+    const topic = parseChoice(list[index], where, CONTACT_TOPICS);
+    if (!topic.ok) return topic;
+    const before = out[out.length - 1];
+    if (before !== undefined && topic.value === before) return refused('duplicate', where);
+    if (before !== undefined && topic.value < before) return refused('not-sorted', where);
+    out.push(topic.value);
+  }
+  return { ok: true, value: Object.freeze({ contacts: Object.freeze(out) }) };
+}
+
+/**
+ * exportControl, in report mode: strict keys, defaults filled (suggestRules standard, agentNetwork refuse, retention never pruned automatically, incidents
+ * to the export-control contact). Only `refuse` and `true` are accepted where the section has no wider value (D-60).
+ */
+export function parseExportControlSection(value: unknown, scales: ScaleTable, path = 'exportControl'): Parsed<ExportControlSection> {
+  void scales;
+  const section = openSection(value, path, ['regimes', 'officials'], ['registration', 'suggestRules', 'agentNetwork', 'retention', 'incidents']);
+  if (!section.ok) return section;
+  const opened = section.value;
+  const regimes = parseRegimes(ownValue(opened, 'regimes'), childPath(path, 'regimes'));
+  if (!regimes.ok) return regimes;
+  const officials = parseOfficials(ownValue(opened, 'officials'), regimes.value, childPath(path, 'officials'));
+  if (!officials.ok) return officials;
+  const out: Record<string, unknown> = { v: 1, regimes: regimes.value, officials: officials.value };
+  if (has(opened, 'registration')) {
+    const registration = parseRegistration(ownValue(opened, 'registration'), regimes.value, childPath(path, 'registration'));
+    if (!registration.ok) return registration;
+    out['registration'] = registration.value;
+  }
+  let suggestRules: SuggestRules = 'standard';
+  if (has(opened, 'suggestRules')) {
+    const parsed = parseChoice(ownValue(opened, 'suggestRules'), childPath(path, 'suggestRules'), SUGGEST_RULES);
+    if (!parsed.ok) return parsed;
+    suggestRules = parsed.value;
+  }
+  out['suggestRules'] = suggestRules;
+  if (has(opened, 'agentNetwork')) {
+    const parsed = parseChoice(ownValue(opened, 'agentNetwork'), childPath(path, 'agentNetwork'), ['refuse'] as const);
+    if (!parsed.ok) return parsed;
+  }
+  out['agentNetwork'] = 'refuse';
+  if (has(opened, 'retention')) {
+    const retentionPath = childPath(path, 'retention');
+    const retention = ownValue(opened, 'retention');
+    if (!isRecord(retention)) return refused('wrong-type', retentionPath);
+    const keys = checkKeys(retention, retentionPath, ['neverAutoPrune']);
+    if (keys !== undefined) return keys;
+    const flag = ownValue(retention, 'neverAutoPrune');
+    if (typeof flag !== 'boolean') return refused('wrong-type', childPath(retentionPath, 'neverAutoPrune'));
+    if (!flag) return refused('not-allowed-here', childPath(retentionPath, 'neverAutoPrune'));
+  }
+  out['retention'] = Object.freeze({ neverAutoPrune: true });
+  let incidents: { readonly contacts: readonly ContactTopic[] } = Object.freeze({ contacts: Object.freeze(['export-control'] as ContactTopic[]) });
+  if (has(opened, 'incidents')) {
+    const parsed = parseIncidents(ownValue(opened, 'incidents'), childPath(path, 'incidents'));
+    if (!parsed.ok) return parsed;
+    incidents = parsed.value;
+  }
+  out['incidents'] = incidents;
+  return { ok: true, value: Object.freeze(out) as unknown as ExportControlSection };
 }

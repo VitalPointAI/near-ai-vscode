@@ -10,12 +10,12 @@ import { signPayload } from '../domain/team/signedPayload';
 import type { PayloadPurpose, PayloadSigner, SignedPayload } from '../domain/team/signedPayload';
 import {
   BUNDLE_FAILURES, FAILED_CLOSED_VERBS, RENEW_WINDOW_DAYS, SELF_SIGNED_LIFETIME_DAYS, bundleHash, defaultBundlePayload, effectiveNow, failedClosed,
-  KNOWN_BUNDLE_FEATURES, UPDATE_REASONS, isDefaultBundle, needsRenewal, parseBundle, verifyBundleEnvelope
+  KNOWN_BUNDLE_FEATURES, UPDATE_REASONS, isDefaultBundle, needsRenewal, parseBundle, renewalPayload, verifyBundleEnvelope
 } from '../domain/gate/bundle';
 import type { BundleFailureReason, BundleState, PolicyBundle } from '../domain/gate/bundle';
 import { dominates, whyNotDominated } from '../domain/gate/dominance';
 import { SCALE_PRESETS } from '../domain/gate/labels';
-import { DEFAULT_ROUTING, ROUTING_HANDLING_FLAGS, ROUTING_TIERS, TIER_ORDER, parseRouting } from '../domain/gate/routing';
+import { DEFAULT_ROUTING, ROUTING_HANDLING_FLAGS, ROUTING_TIERS, TIER_ORDER, decideRoute, parseRouting, routingWhileFailedClosed, tierForLabel } from '../domain/gate/routing';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import { FEATURE_IDS } from '../domain/gate/features';
 
@@ -129,7 +129,7 @@ test('the default bundle allows what today allows, ships the four presets, no ma
   assert.equal(did.issuer.did, 'did:key:z6Mkexample');
 });
 
-test('the default routing table is exactly the CLAS-05 list, with no compartment entries and no local hosts', () => {
+test('the default routing table is exactly the CLAS-05 list, with the three reserved export compartments local-only and no local hosts', () => {
   assert.deepEqual({ ...DEFAULT_ROUTING.levels }, {
     'org/Public': 'any-cloud',
     'org/Internal': 'attested-cloud',
@@ -148,7 +148,8 @@ test('the default routing table is exactly the CLAS-05 list, with no compartment
     'nato/Cosmic Top Secret': 'local-only'
   });
   assert.deepEqual({ ...DEFAULT_ROUTING.handling }, { 'local-only': 'local-only' });
-  assert.deepEqual({ ...DEFAULT_ROUTING.compartments }, {});
+  // Phase 41 (D-62): the starting rules keep CGP, EAR and ITAR content on this computer.
+  assert.deepEqual({ ...DEFAULT_ROUTING.compartments }, { CGP: 'local-only', EAR: 'local-only', ITAR: 'local-only' });
   assert.deepEqual([...DEFAULT_ROUTING.localHosts], []);
   assert.deepEqual([...ROUTING_TIERS], ['any-cloud', 'attested-cloud', 'local-only', 'deny']);
   assert.deepEqual([...ROUTING_HANDLING_FLAGS], ['local-only']);
@@ -194,7 +195,7 @@ test('parseRouting refuses unknown tiers, unknown keys, a missing level and any 
   assert.equal(({} as Loose).polluted, undefined);
 });
 
-test('with no mapping a clearance never covers another scale, and an empty compartment map changes no tier (CLAS-02, CLAS-05 empty)', () => {
+test('with no mapping a clearance never covers another scale, and the compartment map routes only the reserved export compartments (CLAS-02, D-62)', () => {
   const signer = makeSigner();
   const state = check(signedDefault(signer), signer);
   assert.equal(state.state, 'valid');
@@ -206,7 +207,9 @@ test('with no mapping a clearance never covers another scale, and an empty compa
   const restricted = { scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] };
   assert.equal(dominates(clearance, restricted, context), true);
   assert.equal(whyNotDominated(clearance, protectedA, context), 'scale');
-  assert.deepEqual({ ...bundle.routing.compartments }, {});
+  assert.deepEqual({ ...bundle.routing.compartments }, { CGP: 'local-only', EAR: 'local-only', ITAR: 'local-only' });
+  // A label without a compartment keeps its level's tier.
+  assert.equal(tierForLabel({ scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] }, bundle.routing), 'any-cloud');
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -757,4 +760,74 @@ test('Phase 41 (D-06, D-50): a v1 bundle may require labels@1 or export-control@
     assert.equal(state.state, 'valid', features.join(','));
     if (state.state === 'valid') assert.deepEqual(state.bundle.requires, features);
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Phase 41 D-62: the starting rules keep export-controlled content on this computer, and an edited policy is never changed in place
+
+const itarPublic = { scale: 'org', level: 'Public', compartments: ['ITAR'], releasability: [], handling: [] };
+
+/** The default as shipped before Phase 41: the same rules with no compartment entries. */
+function shippedBefore(signer: PayloadSigner, now = NOW): Loose {
+  return edited(signer, (p) => { p.routing.compartments = {}; }, now);
+}
+
+test('D-62: org Public marked ITAR is local-only under the starting rules, decideRoute to NEAR AI Cloud refuses it, and the failed-closed routing keeps it here', () => {
+  const signer = makeSigner();
+  const state = check(signedDefault(signer), signer);
+  assert.equal(state.state, 'valid');
+  if (state.state !== 'valid') return;
+  for (const token of ['CGP', 'EAR', 'ITAR']) {
+    assert.equal(tierForLabel({ ...itarPublic, compartments: [token] }, state.bundle.routing), 'local-only', token);
+    assert.equal(tierForLabel({ ...itarPublic, compartments: [token] }, routingWhileFailedClosed()), 'local-only', `${token} while failed closed`);
+  }
+  const facts = { clientRoute: 'near' as const, host: 'https://cloud-api.near.ai/v1', nearEndpoint: true, model: { id: 'example/model', privacyBoundary: 'tee' }, attestationFailed: false, now: NOW };
+  const refused = decideRoute([itarPublic], state.bundle.routing, facts, state.bundle.defaultLabel);
+  assert.equal(refused.allowed, false);
+  assert.equal(refused.tier, 'local-only');
+  const plainPublic = decideRoute([{ ...itarPublic, compartments: [] }], state.bundle.routing, facts, state.bundle.defaultLabel);
+  assert.equal(plainPublic.allowed, true, 'the same label without the marking still goes where it does today');
+  // A local model on this computer still serves it.
+  const local = decideRoute([itarPublic], state.bundle.routing, { ...facts, clientRoute: 'local', host: 'http://localhost:11434', nearEndpoint: false, model: { id: 'llama', privacyBoundary: 'local' } }, state.bundle.defaultLabel);
+  assert.equal(local.allowed, true);
+});
+
+test('D-62: a default signed before this change (no compartment entries) still verifies, and both it and the current default are unedited starting rules', () => {
+  const signer = makeSigner();
+  const old = shippedBefore(signer);
+  const state = check(signBundle(signer, old), signer);
+  assert.equal(state.state, 'valid');
+  if (state.state === 'valid') assert.deepEqual({ ...state.bundle.routing.compartments }, {}, 'a stored policy is read as it was signed');
+  assert.equal(isDefaultBundle(old), true);
+  assert.equal(isDefaultBundle(defaultFor(signer)), true);
+  // Only those two forms: one compartment more or less is an edit.
+  assert.equal(isDefaultBundle(edited(signer, (p) => { p.routing.compartments = { CGP: 'local-only', ITAR: 'local-only' }; })), false);
+  assert.equal(isDefaultBundle(edited(signer, (p) => { p.routing.compartments = { CGP: 'local-only', EAR: 'local-only', ITAR: 'deny' }; })), false);
+  assert.equal(isDefaultBundle(edited(signer, (p) => { p.routing.compartments = {}; p.routing.levels['org/Internal'] = 'local-only'; })), false);
+});
+
+test('D-62: renewalPayload gives unedited starting rules the current ones and keeps an edited policy\'s rules exactly, with fresh dates, never in place', () => {
+  const signer = makeSigner();
+  const later = NOW + 340 * DAY;
+  const parsedOld = parseBundle(shippedBefore(signer));
+  assert.ok(parsedOld.ok);
+  if (!parsedOld.ok) return;
+  const renewed = renewalPayload(parsedOld.value, later);
+  assert.deepEqual({ ...renewed.routing.compartments }, { CGP: 'local-only', EAR: 'local-only', ITAR: 'local-only' });
+  assert.equal(renewed.issuedAt, new Date(later).toISOString());
+  assert.equal(renewed.expiresAt, new Date(later + 365 * DAY).toISOString());
+  assert.deepEqual(renewed.issuer, parsedOld.value.issuer);
+  assert.equal(bundleHash(renewed), bundleHash(defaultFor(signer, later)));
+  assert.deepEqual({ ...parsedOld.value.routing.compartments }, {}, 'the old policy object is unchanged');
+  assert.equal(check(signBundle(signer, renewed, later), signer, later).state, 'valid');
+  const custom = parseBundle(edited(signer, (p) => { p.routing.compartments = {}; p.routing.levels['org/Internal'] = 'local-only'; p.clearances = []; }));
+  assert.ok(custom.ok);
+  if (!custom.ok) return;
+  const kept = renewalPayload(custom.value, later);
+  assert.deepEqual(kept.routing, custom.value.routing);
+  assert.deepEqual({ ...kept.routing.compartments }, {}, 'an edited policy does not gain the export entries');
+  assert.deepEqual(kept.clearances, []);
+  assert.equal(kept.issuedAt, new Date(later).toISOString());
+  assert.equal(bundleHash({ ...kept, issuedAt: custom.value.issuedAt, expiresAt: custom.value.expiresAt }), bundleHash(custom.value), 'only the dates differ');
+  assert.notEqual(kept, custom.value);
 });

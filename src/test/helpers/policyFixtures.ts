@@ -75,7 +75,7 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     ...base,
     layer,
     minClient: '0.4.40',
-    requires: ['agents@1', 'authorizations@1', 'endpoints@1', 'labels@1', 'layers@1', 'limits@1', 'models@1', 'onboarding@1', 'people@1', 'residency@1'],
+    requires: ['agents@1', 'authorizations@1', 'endpoints@1', 'export-control@1', 'labels@1', 'layers@1', 'limits@1', 'models@1', 'onboarding@1', 'people@1', 'residency@1'],
     labels: { ...base['labels'], routing: { ...base['labels'].routing, compartments: { ...base['labels'].routing.compartments, PROJECT_X: 'attested-cloud' } } },
     agents: {
       ...base['agents'],
@@ -104,6 +104,7 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     },
     limits: { v: 1, spend: { dailyNanoUsd: 5_000_000_000, vaultHoursPerDay: 8, hubDailyNanoUsd: 50_000_000_000 } },
     people: { v: 1, clearances: base['people'].clearances, signers: [signerEntry(key)] },
+    exportControl: exportControlExample(),
     reserved: { v: 1, anchorRoots: [{ root: 'a'.repeat(64), proof: ['b'.repeat(64)] }], statusLists: [{ uri: 'https://status.example.org/list', purpose: 'revocation' }], maxOfflineAge: { 'org/Restricted': 86400 } }
   };
   if (layer !== 'organization') document['parent'] = { hash: 'c'.repeat(64), issuer: issuerKey().fingerprint };
@@ -137,6 +138,49 @@ const DEFAULT_SUBJECT_VALUE: Readonly<Record<string, string>> = Object.freeze({
   endpoint: 'models-example-org', model: 'example/model-7b', device: 'dev-0123456789abcdef0123456789abcdef', item: 'docs/plan.md', person: 'person-0142'
 });
 
+/** The scope and conditions an export kind needs when a test gives none: one CGP decision, assessed to examine; or a CGP service your organization runs. */
+const EXPORT_DEFAULTS: Readonly<Partial<Record<AuthorizationKind, { scope: AuthorizationScope; conditions: unknown }>>> = Object.freeze({
+  'export-person': { scope: { regimes: ['CGP'] }, conditions: { CGP: { basis: 'assessed', extent: ['examine'] } } },
+  'export-endpoint': {
+    scope: { regimes: ['CGP'] },
+    conditions: { regimes: ['CGP'], region: 'CA', operator: 'your-organization', access: 'Only people assessed or exempt under the CGR.', plaintext: 'processes' }
+  }
+});
+
+/** The exportControl example of CGP-ITAR 6.4, with fictional references. */
+export function exportControlExample(): Record<string, unknown> {
+  return {
+    v: 1,
+    regimes: ['CGP', 'EAR', 'ITAR'],
+    officials: [
+      { regime: 'CGP', position: 'designated-official' },
+      { regime: 'EAR', position: 'empowered-official' },
+      { regime: 'ITAR', position: 'empowered-official' }
+    ],
+    registration: { CGP: { registered: true, reference: 'CGP-REG-0001', endsOn: null } },
+    suggestRules: 'standard',
+    agentNetwork: 'refuse',
+    retention: { neverAutoPrune: true },
+    incidents: { contacts: ['export-control'] }
+  };
+}
+
+/** The export-person example of CGP-ITAR 7.1 (fictional ids): CGP assessed to examine, possess and transfer, and ITAR as a Canadian registered person. */
+export function exportPersonExample(): AuthorizationBody {
+  return authorizationFor({
+    kind: 'export-person',
+    id: 'xp-2026-0142',
+    subject: { person: 'person-0142' },
+    scope: { regimes: ['CGP', 'ITAR'], projects: ['project-alpha'], labels: ['ca-protected/Protected B'] },
+    conditions: {
+      CGP: { basis: 'assessed', extent: ['examine', 'possess', 'transfer'] },
+      ITAR: { basis: 'canadian-registered-person', authority: '126.5', excludes: ['supplement-1-note-12'] }
+    },
+    evidence: 'SEC-FILE-2026-0142',
+    days: 365
+  });
+}
+
 export interface AuthorizationOptions {
   readonly kind: AuthorizationKind;
   readonly subject?: AuthorizationSubject;
@@ -157,13 +201,14 @@ export function authorizationFor(options: AuthorizationOptions): AuthorizationBo
   const issuedAt = options.issuedAt ?? new Date(FIXED_NOW).toISOString();
   const days = options.days ?? MAX_DAYS_BY_KIND[options.kind] ?? 30;
   const subjectKind = SUBJECT_FOR_KIND[options.kind];
+  const exportDefaults = EXPORT_DEFAULTS[options.kind];
   const body: Record<string, unknown> = {
     v: 1,
     id: options.id ?? `${options.kind}-1`,
     kind: options.kind,
     subject: options.subject ?? { [subjectKind]: DEFAULT_SUBJECT_VALUE[subjectKind] },
-    scope: options.scope ?? {},
-    conditions: options.conditions ?? [],
+    scope: options.scope ?? exportDefaults?.scope ?? {},
+    conditions: options.conditions ?? exportDefaults?.conditions ?? [],
     evidence: options.evidence ?? 'TRA-2026-11-0042',
     namedPerson: options.namedPerson ?? NAMED_PERSON,
     issuedAt,
@@ -187,9 +232,18 @@ export function fixtureAuthorizations(key: PayloadSigner): unknown[] {
       kind: 'protected-b', id: 'protected-b-1', subject: { endpoint: 'models-example-org' },
       scope: { projects: ['project-alpha'], labels: ['ca-protected/Protected B'], uses: ['chat', 't1'] }, conditions: ['Pinned connection only.']
     }),
+    authorizationFor({
+      kind: 'export-endpoint', id: 'export-endpoint-1', subject: { endpoint: 'nearai-private' }, scope: { regimes: ['ITAR'] },
+      conditions: {
+        regimes: ['ITAR'], region: 'US', operator: 'Example Provider (DDTC M-00000)', access: 'Only US persons.', crypto: 'FIPS 140-3 certificate 0000; keys held by members.',
+        plaintext: 'processes', legalBasis: 'Opinion EX-2026-07 on file.'
+      }
+    }),
+    { ...exportPersonExample(), id: 'export-person-1' },
     authorizationFor({ kind: 'residency-exception', id: 'residency-exception-1', subject: { endpoint: 'vendor-enclave' } }),
     authorizationFor({ kind: 't1-risk', id: 't1-risk-1' })
   ];
+  bodies.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return bodies.map((body) => plain(signAuthorization(body, key)));
 }
 

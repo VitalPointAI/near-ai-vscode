@@ -16,9 +16,10 @@ import { fingerprintOf } from '../domain/team/canonical';
 import { MAX_PAYLOAD_BYTES, PayloadError, signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../domain/team/signedPayload';
 import {
-  DAY_MS, FIXED_NOW, NAMED_PERSON, activeKeys, authorizationFor, deviceKey, enrolmentFileFor, fullDocumentFor, issuerKey, policyDocumentFor, signAuthorization,
-  signOrganizationLayer, signPersonalLayer, signerEntry
+  DAY_MS, FIXED_NOW, NAMED_PERSON, activeKeys, authorizationFor, deviceKey, enrolmentFileFor, exportPersonExample, fixtureEndpoints, fullDocumentFor, issuerKey,
+  policyDocumentFor, signAuthorization, signOrganizationLayer, signPersonalLayer, signerEntry
 } from './helpers/policyFixtures';
+import { CGP_BASES, LEGAL_BASIS_EXEMPT_CLASSES, US_EXPORT_BASES, latestExpiryFor } from '../domain/gate/authorizations';
 
 type Loose = any; // an envelope or body under edit
 
@@ -87,9 +88,9 @@ test('D-15, D-31: with your organization\'s signers only they count; this device
 test('D-30: each kind passes at its maximum length and is too-long one day over; declassify has no maximum', () => {
   const device = deviceKey();
   assert.deepEqual({ ...MAX_DAYS_BY_KIND }, {
-    'protected-b': 365, 't1-risk': 90, 'accredited-device': 365, 'residency-exception': 90, declassify: undefined
+    'protected-b': 365, 't1-risk': 90, 'accredited-device': 365, 'residency-exception': 90, declassify: undefined, 'export-person': undefined, 'export-endpoint': 365
   });
-  for (const kind of ['protected-b', 't1-risk', 'accredited-device', 'residency-exception'] as const) {
+  for (const kind of ['protected-b', 't1-risk', 'accredited-device', 'residency-exception', 'export-endpoint'] as const) {
     const max = MAX_DAYS_BY_KIND[kind] as number;
     const extra = {};
     const at = signAuthorization(authorizationFor({ kind, days: max, ...extra }), device);
@@ -219,7 +220,7 @@ test('parseAuthorizationBody: exact keys, the subject the kind is about and noth
   };
   for (const kind of AUTHORIZATION_KINDS) assert.equal(reason(() => undefined, kind), 'ok', kind);
   assert.deepEqual({ ...SUBJECT_FOR_KIND }, {
-    'protected-b': 'endpoint', 't1-risk': 'model', 'accredited-device': 'device', 'residency-exception': 'endpoint', declassify: 'item'
+    'protected-b': 'endpoint', 't1-risk': 'model', 'accredited-device': 'device', 'residency-exception': 'endpoint', declassify: 'item', 'export-person': 'person', 'export-endpoint': 'endpoint'
   });
   assert.equal(reason((b) => { b.kind = 'everything'; }), 'not-allowed-here kind');
   assert.equal(reason((b) => { b.subject = { endpoint: 'a', model: 'b' }; }), 'not-allowed-here subject.model');
@@ -375,4 +376,154 @@ test('an authorization is checked against a key source built only from the calle
   assert.equal(reasonOf(verifyAuthorization(envelope, { thisDevice: self(deviceKey()), now: FIXED_NOW })), 'unknown-signer');
   assert.equal(reasonOf(verifyAuthorization(envelope, { signers: [signerOf(issuerKey('other'))], now: FIXED_NOW })), 'unknown-signer');
   assert.equal(reasonOf(verifyAuthorization(envelope, { signers: [signerOf(officer)], now: FIXED_NOW })), 'ok');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Export-control decisions, shapes only (D-61)
+
+function bodyReason(body: unknown): string {
+  const parsed = parseAuthorizationBody(body);
+  return parsed.ok ? 'ok' : `${parsed.reason} ${parsed.path}`;
+}
+
+function personWith(edit: (body: Loose) => void): Loose {
+  const body = plain(exportPersonExample());
+  edit(body);
+  return body;
+}
+
+test('D-61: the export-person example (CGP-ITAR 7.1, fictional ids) signs, parses and verifies, and is shape only', () => {
+  const officer = issuerKey('designated-official');
+  const body = exportPersonExample();
+  assert.equal(bodyReason(body), 'ok');
+  const envelope = signAuthorization(body, officer);
+  const verdict = verifyAuthorization(envelope, { signers: [signerOf(officer)], now: FIXED_NOW });
+  assert.equal(reasonOf(verdict), 'ok');
+  if (!verdict.ok) return;
+  assert.deepEqual(verdict.body.subject, { person: 'person-0142' });
+  assert.deepEqual(verdict.body.scope.regimes, ['CGP', 'ITAR']);
+  assert.deepEqual(verdict.body.conditions, body.conditions);
+  assert.deepEqual([...CGP_BASES], ['assessed', 'exempt-us-itar-registered', 'exempt-us-official', 'exempt-temporary-worker', 'exempt-student', 'exempt-visitor']);
+  assert.deepEqual([...US_EXPORT_BASES], ['us-person', 'canadian-registered-person', 'licence', 'agreement', 'dual-third-country-126.18', 'exempt-other']);
+  assert.deepEqual([...AUTHORIZATION_KINDS].slice(-2), ['export-person', 'export-endpoint']);
+});
+
+test('D-61, T-41-06: a citizenship, nationality or birth date field is unknown-field wherever it is put', () => {
+  for (const field of ['citizenship', 'nationality', 'dateOfBirth', 'birthDate']) {
+    assert.equal(bodyReason(personWith((b) => { b[field] = 'x'; })), `unknown-field ${field}`);
+    assert.equal(bodyReason(personWith((b) => { b.namedPerson[field] = 'x'; })), `unknown-field namedPerson.${field}`);
+    assert.equal(bodyReason(personWith((b) => { b.subject[field] = 'x'; })), `unknown-field subject.${field}`);
+    assert.equal(bodyReason(personWith((b) => { b.conditions.CGP[field] = 'x'; })), `unknown-field conditions.CGP.${field}`);
+    assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR[field] = 'x'; })), `unknown-field conditions.ITAR.${field}`);
+    assert.equal(bodyReason(personWith((b) => { b.scope[field] = ['x']; })), `unknown-field scope.${field}`);
+  }
+  assert.equal(bodyReason(personWith((b) => { b.conditions.CGP.assessment = 'interview notes'; })), 'unknown-field conditions.CGP.assessment');
+});
+
+test('D-61: export-person conditions name exactly the scope\'s regimes, each with its own bases, and the cited authority where one is needed', () => {
+  assert.equal(bodyReason(personWith((b) => { delete b.conditions.ITAR; })), 'missing-field conditions.ITAR');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.EAR = { basis: 'us-person' }; })), 'unknown-field conditions.EAR');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR.basis = 'assessed'; })), 'not-allowed-here conditions.ITAR.basis', 'a CGP basis under ITAR');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.CGP.basis = 'us-person'; })), 'not-allowed-here conditions.CGP.basis');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR.extent = ['examine']; })), 'unknown-field conditions.ITAR.extent');
+  assert.equal(bodyReason(personWith((b) => { delete b.conditions.CGP.extent; })), 'missing-field conditions.CGP.extent');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.CGP.extent = ['transfer', 'examine']; })), 'not-sorted conditions.CGP.extent[1]');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.CGP.extent = ['share']; })), 'not-allowed-here conditions.CGP.extent[0]');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.CGP.extent = []; })), 'empty-list conditions.CGP.extent');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR = { basis: 'licence' }; })), 'missing-field conditions.ITAR.authority');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR = { basis: 'licence', authority: 'DSP-5 050000' }; })), 'missing-field conditions.ITAR.authorityExpiresAt');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR = { basis: 'agreement', authority: 'TAA 0000-00', authorityExpiresAt: '2028-01-01T00:00:00.000Z' }; })), 'ok');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR = { basis: 'exempt-other' }; })), 'missing-field conditions.ITAR.authority');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR = { basis: 'us-person' }; })), 'ok');
+  assert.equal(bodyReason(personWith((b) => { b.conditions.ITAR.excludes = ['b-note', 'a-note']; })), 'not-sorted conditions.ITAR.excludes[1]');
+  assert.equal(bodyReason(personWith((b) => { b.conditions = []; })), 'wrong-type conditions');
+  // Regimes are required for the export kinds and refused on every other.
+  assert.equal(bodyReason(personWith((b) => { delete b.scope.regimes; })), 'missing-field scope.regimes');
+  assert.equal(bodyReason(personWith((b) => { b.scope.regimes = ['ITAR', 'CGP']; })), 'not-sorted scope.regimes[1]');
+  assert.equal(bodyReason(personWith((b) => { b.scope.regimes = ['OTHER']; })), 'not-allowed-here scope.regimes[0]');
+  assert.equal(bodyReason({ ...plain(authorizationFor({ kind: 'protected-b' })), scope: { regimes: ['CGP'] } }), 'not-allowed-here scope.regimes');
+  assert.equal(bodyReason({ ...plain(authorizationFor({ kind: 'export-person' })), subject: { endpoint: 'x' } }), 'not-allowed-here subject.endpoint');
+});
+
+test('D-61: lengths are calendar years per regime: CGP assessed five, a CGP exemption three, ITAR five and never past its licence; the earliest wins', () => {
+  const officer = issuerKey('designated-official');
+  const verify = (body: AuthorizationBody): string => reasonOf(verifyAuthorization(signAuthorization(body, officer), { signers: [signerOf(officer)], now: FIXED_NOW }));
+  const years = (n: number, extraDays = 0): string => { const d = new Date(FIXED_NOW); d.setUTCFullYear(d.getUTCFullYear() + n); return new Date(d.getTime() + extraDays * DAY_MS).toISOString(); };
+  const cgp = (basis: string, expiresAt: string): AuthorizationBody => authorizationFor({
+    kind: 'export-person', scope: { regimes: ['CGP'] }, conditions: { CGP: { basis, extent: ['examine'] } }, expiresAt
+  });
+  assert.equal(verify(cgp('assessed', years(5))), 'ok');
+  assert.equal(verify(cgp('assessed', years(5, 1))), 'too-long');
+  assert.equal(verify(cgp('exempt-visitor', years(3))), 'ok');
+  assert.equal(verify(cgp('exempt-student', years(3, 1))), 'too-long');
+  const itar = (condition: Record<string, unknown>, expiresAt: string): AuthorizationBody => authorizationFor({
+    kind: 'export-person', scope: { regimes: ['ITAR'] }, conditions: { ITAR: condition }, expiresAt
+  });
+  assert.equal(verify(itar({ basis: 'us-person' }, years(5))), 'ok');
+  assert.equal(verify(itar({ basis: 'us-person' }, years(5, 1))), 'too-long');
+  const licenceEnds = years(2);
+  assert.equal(verify(itar({ basis: 'licence', authority: 'DSP-5 050000', authorityExpiresAt: licenceEnds }, licenceEnds)), 'ok');
+  assert.equal(verify(itar({ basis: 'licence', authority: 'DSP-5 050000', authorityExpiresAt: licenceEnds }, years(2, 1))), 'too-long', 'never past the licence');
+  // CGP exempt (three years) and ITAR (five): the earlier, three years, wins.
+  const both = (expiresAt: string): AuthorizationBody => authorizationFor({
+    kind: 'export-person', scope: { regimes: ['CGP', 'ITAR'] }, conditions: { CGP: { basis: 'exempt-us-official', extent: ['examine'] }, ITAR: { basis: 'us-person' } }, expiresAt
+  });
+  assert.equal(verify(both(years(3))), 'ok');
+  assert.equal(verify(both(years(4))), 'too-long');
+  assert.equal(latestExpiryFor(both(years(3))), Date.parse(years(3)));
+  // export-endpoint: 365 days.
+  assert.equal(latestExpiryFor(authorizationFor({ kind: 'export-endpoint' })), FIXED_NOW + 365 * DAY_MS);
+});
+
+test('D-61: export-endpoint conditions repeat the scope\'s regimes and hold region, operator, access and plaintext, with no person data', () => {
+  const endpoint = (edit: (c: Loose) => void = () => undefined): Loose => {
+    const body = plain(authorizationFor({ kind: 'export-endpoint' }));
+    edit(body.conditions);
+    return body;
+  };
+  assert.equal(bodyReason(endpoint()), 'ok');
+  assert.equal(bodyReason(endpoint((c) => { c.crypto = 'FIPS 140-3 certificate 0000'; c.legalBasis = 'Opinion EX-2026-07.'; })), 'ok');
+  assert.equal(bodyReason(endpoint((c) => { c.regimes = ['ITAR']; })), 'not-allowed-here conditions.regimes');
+  assert.equal(bodyReason(endpoint((c) => { c.region = 'unknown'; })), 'not-allowed-here conditions.region');
+  assert.equal(bodyReason(endpoint((c) => { c.plaintext = 'sometimes'; })), 'not-allowed-here conditions.plaintext');
+  assert.equal(bodyReason(endpoint((c) => { delete c.access; })), 'missing-field conditions.access');
+  assert.equal(bodyReason(endpoint((c) => { c.citizenship = 'x'; })), 'unknown-field conditions.citizenship');
+  assert.equal(bodyReason(endpoint((c) => { c.legalBasis = ''; })), 'wrong-type conditions.legalBasis');
+});
+
+test('D-61: in one document, an export-endpoint record for a NEAR AI, vendor or forwarding service needs a legal basis; your own or this computer does not', () => {
+  const issuer = issuerKey();
+  const classOf = new Map(fixtureEndpoints().map((entry) => [entry['id'] as string, entry['class'] as string]));
+  assert.deepEqual([...LEGAL_BASIS_EXEMPT_CLASSES], ['local', 'org-plain', 'org-tee']);
+  for (const [id, endpointClass] of classOf) {
+    const doc = plain(fullDocumentFor(issuer));
+    const body = authorizationFor({ kind: 'export-endpoint', id: 'export-endpoint-1', subject: { endpoint: id } });
+    const index = doc.authorizations.findIndex((envelope: Loose) => envelope.payload.id === 'export-endpoint-1');
+    doc.authorizations[index] = plain(signAuthorization(body, issuer));
+    const parsed = parsePolicyDocument(doc);
+    const exempt = (LEGAL_BASIS_EXEMPT_CLASSES as readonly string[]).includes(endpointClass);
+    assert.equal(parsed.ok ? 'ok' : `${parsed.reason} ${parsed.path}`, exempt ? 'ok' : `missing-field authorizations[${String(index)}].payload.conditions.legalBasis`, `${id} (${endpointClass})`);
+    const withBasis = plain(signAuthorization(authorizationFor({
+      kind: 'export-endpoint', id: 'export-endpoint-1', subject: { endpoint: id },
+      conditions: { ...(authorizationFor({ kind: 'export-endpoint' }).conditions as object), legalBasis: 'Opinion EX-2026-07 on file.' }
+    }), issuer));
+    doc.authorizations[index] = withBasis;
+    assert.equal(parsePolicyDocument(doc).ok, true, `${id} with a legal basis`);
+  }
+  // A record for a place no layer here lists is checked where both are known.
+  const doc = plain(fullDocumentFor(issuer));
+  const index = doc.authorizations.findIndex((envelope: Loose) => envelope.payload.id === 'export-endpoint-1');
+  doc.authorizations[index] = plain(signAuthorization(authorizationFor({ kind: 'export-endpoint', id: 'export-endpoint-1', subject: { endpoint: 'elsewhere' } }), issuer));
+  assert.equal(parsePolicyDocument(doc).ok, true);
+});
+
+test('D-61: authorizationCovers asks about the regime of an export record, and an older kind never covers an export question', () => {
+  const body = exportPersonExample();
+  const ask = { kind: 'export-person' as const, subject: { person: 'person-0142' }, project: 'project-alpha', label: 'ca-protected/Protected B' };
+  assert.equal(authorizationCovers(body, { ...ask, regime: 'CGP' }, FIXED_NOW), true);
+  assert.equal(authorizationCovers(body, { ...ask, regime: 'ITAR' }, FIXED_NOW), true);
+  assert.equal(authorizationCovers(body, { ...ask, regime: 'EAR' }, FIXED_NOW), false);
+  assert.equal(authorizationCovers(body, ask, FIXED_NOW), false, 'a regime-scoped record covers nothing when no regime is asked');
+  assert.equal(authorizationCovers(body, { ...ask, regime: 'CGP', subject: { person: 'person-0143' } }, FIXED_NOW), false);
+  assert.equal(authorizationCovers(authorizationFor({ kind: 'protected-b' }), { kind: 'export-endpoint', subject: { endpoint: 'models-example-org' }, regime: 'CGP' }, FIXED_NOW), false);
 });

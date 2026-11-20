@@ -734,11 +734,22 @@ export function isDefaultBundle(payload: unknown): boolean {
     const parsed = parseBundle(payload);
     if (!parsed.ok) return false;
     const bundle = parsed.value;
-    const fresh = defaultBundlePayload({ issuer: bundle.issuer, now: 0 });
-    return bundleHash({ ...fresh, issuedAt: bundle.issuedAt, expiresAt: bundle.expiresAt }) === bundleHash(bundle);
+    const fresh = { ...defaultBundlePayload({ issuer: bundle.issuer, now: 0 }), issuedAt: bundle.issuedAt, expiresAt: bundle.expiresAt };
+    // The starting rules as shipped before Phase 41 had no compartment entries (D-62); a stored copy of them is unedited too.
+    const shippedBefore = { ...fresh, routing: { ...fresh.routing, compartments: {} } };
+    return bundleHash(fresh) === bundleHash(bundle) || bundleHash(shippedBefore) === bundleHash(bundle);
   } catch {
     return false;
   }
+}
+
+/**
+ * What a renewal signs (D-62): unedited starting rules become the current starting rules under the same issuer, so a fresh install and a renewal agree;
+ * any edited policy keeps every rule exactly and gets fresh dates. A new object either way: a policy is never changed in place. `now` in epoch ms.
+ */
+export function renewalPayload(bundle: PolicyBundle, now: number): PolicyBundle {
+  if (isDefaultBundle(bundle)) return defaultBundlePayload({ issuer: bundle.issuer, now });
+  return plainCopy({ ...bundle, issuedAt: new Date(now).toISOString(), expiresAt: new Date(now + SELF_SIGNED_LIFETIME_DAYS * DAY_MS).toISOString() });
 }
 
 /**
