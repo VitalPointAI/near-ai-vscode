@@ -448,7 +448,11 @@ export interface OpenReport {
   damaged: string | undefined;
 }
 
-export async function openHubStore(dir: string): Promise<HubStore> {
+/**
+ * Opens the store. recoverBlobs false skips the blob folder sweep at open: only for a short second process (the operator's --hub-file) that writes
+ * no blob, so it never removes a file a running hub has written but not yet given its row.
+ */
+export async function openHubStore(dir: string, options: { recoverBlobs?: boolean } = {}): Promise<HubStore> {
   const info = lstatSync(dir);
   if (info.isSymbolicLink() || !info.isDirectory()) throw new StoreError('damaged-store', 'The hub state directory is not a real folder.');
   const file = path.join(dir, DATABASE_FILE);
@@ -464,7 +468,7 @@ export async function openHubStore(dir: string): Promise<HubStore> {
     ensurePrivateFolder(blobRoot);
     const report: OpenReport = { orphanBlobsRemoved: 0, temporaryFilesRemoved: 0, missingBlobFiles: 0, damaged: undefined };
     const store = new HubStore(db, blobRoot, report);
-    await store.recoverBlobFolder();
+    if (options.recoverBlobs !== false) await store.recoverBlobFolder();
     return store;
   } catch (error) {
     if (db.isOpen) db.close();
@@ -725,6 +729,13 @@ export class HubStore {
       this.requireProject(project);
       this.insertBlobRefs(project, checked, at);
     });
+  }
+
+  /** The streams whose entries reference this blob (D-69), for the blob route's access check. */
+  blobStreams(project: string, hash: string): string[] {
+    checkProject(project);
+    checkHash('a blob hash', hash);
+    return (this.sql('SELECT DISTINCT stream FROM blob_refs WHERE project = ? AND blob = ? ORDER BY stream').all(project, hash) as Row[]).map((row) => row.stream as string);
   }
 
   /** Bytes of the project's blobs this uploader put that no entry references yet: what 32-19's per-uploader quota counts. */

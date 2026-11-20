@@ -57,7 +57,8 @@ test('tracer: the built hub starts from secret files, answers GET /healthz over 
     const manifest = JSON.parse(readFileSync(path.join(hubRoot(), 'package.json'), 'utf8')) as { version: string };
     assert.equal(body.version, manifest.version);
     assert.equal(typeof body.uptimeSeconds, 'number');
-    assert.equal(body.store, 'not-configured');
+    // 32-20 opens the store and gives the health check its probe, so a started hub reports its store ok.
+    assert.equal(body.store, 'ok');
 
     const listening = hub.logs().find((line) => line.event === 'hub.listening');
     assert.ok(listening, 'no hub.listening line');

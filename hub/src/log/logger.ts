@@ -10,15 +10,18 @@ import { type Redactor, uniqueFieldName } from './redact';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
+/** Writes one log line to stdout: the default sink, and the one main.ts filters for --hub-file (32-20). */
+export function stdoutLine(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
+
 const EVENT_NAME = /^[a-z0-9._-]+$/;
 const RESERVED_KEYS = new Set(['time', 'level', 'event']);
 
 export class Logger {
   constructor(
     private readonly redactor: Redactor,
-    private readonly sink: (line: string) => void = (line) => {
-      process.stdout.write(`${line}\n`);
-    },
+    private readonly sink: (line: string) => void = stdoutLine,
     private readonly now: () => number = Date.now,
   ) {}
 

@@ -3,11 +3,19 @@ import { createPrivateKey, X509Certificate } from 'node:crypto';
 import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { TLSSocket } from 'node:tls';
+import type { SessionExpectation, SessionRead } from '@ext/domain/replica/hubFile';
+import { RosterCache } from './append/rosterCache';
 import { loadConfig, type HubConfig } from './config';
+import { HUB_FILE_DAYS, hubIdentityOf, issueHubFile, type HubIdentity } from './enrol';
 import { HealthRegistry } from './health';
-import { createHubServer, listen, TLS_VERSION, type HubTls } from './http/server';
+import { createRoutes, type RouteDeps } from './http/routes';
+import { createHubServer, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
+import { SessionRegistry } from './http/session';
+import { RateLimits, type RateLimitOptions } from './limits';
+import { openHubStore, StoreError, type HubStore } from './store/hubStore';
 import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
-import { Logger, printKeyFile } from './log/logger';
+import { Logger, printKeyFile, stdoutLine } from './log/logger';
 import { Redactor } from './log/redact';
 import { HUB_SECRETS, loadSecrets, refusePlainSecretEnv, SecretError } from './secrets';
 import { finishStartup } from './startup';
@@ -15,7 +23,12 @@ import { prepareStateDir, StateDirError } from './stateDir';
 
 declare const __HUB_VERSION__: string;
 
-// Composition root, built to dist/app.mjs. Startup order: settings, plain-secret refusal, state directory, secrets, keys, TLS pair, server.
+// Composition root, built to dist/app.mjs. Startup order: settings, plain-secret refusal, state directory, secrets, keys, TLS pair, store, the
+// hub's identity (keys and certificate pin), roster cache, sessions, routes, server. composeHub is the one place the parts are wired, and the tests'
+// in-process hub (test/helpers/hubHarness.ts) calls it too, so what the tests run is what the binary runs.
+//
+// --hub-file <days> (D-41, default 7) prints one signed hub file for the operator to give the staff lead, and nothing else on stdout: no info line
+// before or after it, only a hub.start_refused line when it cannot.
 // The Redactor and the Logger are created first (D-26): every line the hub prints goes through them, and a failed start prints one
 // hub.start_refused line that names the setting and never its value.
 //
@@ -23,6 +36,8 @@ declare const __HUB_VERSION__: string;
 // the hub itself on its own host and port.
 
 const SHUTDOWN_GRACE_MS = 5000;
+/** How often blobs no entry referenced within 24 hours of upload are removed (D-44). */
+export const BLOB_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 const HEALTHCHECK_TIMEOUT_MS = 2000;
 
 class TlsPairError extends Error {
@@ -114,11 +129,93 @@ export function crashFields(reason: unknown): Record<string, unknown> {
   return { name: 'NonError', code: null, detail: typeof reason === 'string' ? reason : typeof reason };
 }
 
+export interface HubParts {
+  store: HubStore;
+  identity: HubIdentity;
+  tls: HubTls;
+  health: HealthRegistry;
+  /** Milliseconds; Date.now unless a test drives the clock. */
+  now?: () => number;
+  /** The authentication deadline (10 seconds unless a test shortens it). */
+  deadlineMs?: number;
+  rateLimits?: RateLimitOptions;
+  readAnswer?: (answer: unknown, expected: SessionExpectation) => SessionRead;
+  onAccepted?: RouteDeps['onAccepted'];
+  onEquivocation?: RouteDeps['onEquivocation'];
+  onFailure?: RouteDeps['onFailure'];
+  onRejected?: (route: RejectedRoute, method: string, status: number) => void;
+}
+
+export interface ComposedHub {
+  server: https.Server;
+  sessions: SessionRegistry;
+  cache: RosterCache;
+  limits: RateLimits;
+}
+
+/** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
+export function composeHub(parts: HubParts): ComposedHub {
+  const now = parts.now ?? Date.now;
+  const { store, identity } = parts;
+  const cache = new RosterCache(store, identity, { now: () => new Date(now()) });
+  const limits = new RateLimits(parts.rateLimits);
+  const sessions = new SessionRegistry({
+    hub: identity.writer,
+    store,
+    cache,
+    now,
+    ...(parts.deadlineMs === undefined ? {} : { deadlineMs: parts.deadlineMs }),
+    ...(parts.readAnswer === undefined ? {} : { readAnswer: parts.readAnswer }),
+  });
+  const routes = createRoutes({
+    store,
+    cache,
+    sessions,
+    limits,
+    identity,
+    now,
+    ...(parts.onAccepted === undefined ? {} : { onAccepted: parts.onAccepted }),
+    ...(parts.onEquivocation === undefined ? {} : { onEquivocation: parts.onEquivocation }),
+    ...(parts.onFailure === undefined ? {} : { onFailure: parts.onFailure }),
+  });
+  parts.health.setStoreProbe(async () => {
+    if (store.damaged() !== undefined) return 'down';
+    store.schemaVersion();
+    return 'ok';
+  });
+  const server = createHubServer({
+    tls: parts.tls,
+    health: parts.health,
+    handler: routes,
+    onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
+    ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
+  });
+  return { server, sessions, cache, limits };
+}
+
+/** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
+export function sweepBlobsOnce(store: HubStore, now: number): Promise<number> {
+  return store.sweepBlobs(now);
+}
+
+/** The days of --hub-file: the default 7 when none is given, a whole number otherwise (issueHubFile checks the range). */
+export function hubFileDays(argv: readonly string[]): number | undefined {
+  if (argv.length === 1) return HUB_FILE_DAYS.default;
+  if (argv.length !== 2 || !/^\d{1,3}$/.test(argv[1] as string)) return undefined;
+  return Number(argv[1]);
+}
+
 export async function main(argv: readonly string[]): Promise<void> {
   process.umask(0o077);
 
   const redactor = new Redactor();
-  const logger = new Logger(redactor);
+  // --hub-file prints the hub file alone: its logger passes warnings and errors only, so stdout holds one hub file or one refusal.
+  const hubFileMode = argv[0] === '--hub-file';
+  const logger = hubFileMode
+    ? new Logger(redactor, (line) => {
+        if (!line.includes('"level":"info"')) stdoutLine(line);
+      })
+    : new Logger(redactor);
 
   process.on('uncaughtException', (error) => {
     logger.error('hub.crashed', crashFields(error));
@@ -143,8 +240,14 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
 
   const healthcheck = argv.length === 1 && argv[0] === '--healthcheck';
-  if (argv.length > 0 && !healthcheck) {
-    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck or --generate-key' });
+  const days = hubFileMode ? hubFileDays(argv) : undefined;
+  if (hubFileMode && days === undefined) {
+    logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --hub-file, or --hub-file followed by a whole number of days from 1 to 30' });
+    process.exitCode = 1;
+    return;
+  }
+  if (argv.length > 0 && !healthcheck && !hubFileMode) {
+    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck, --hub-file or --generate-key' });
     process.exitCode = 1;
     return;
   }
@@ -203,7 +306,6 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  void encryption; // held for the base cell grants (32-20); never logged
 
   const tls: HubTls = { cert: secrets.get('HUB_TLS_CERT') ?? '', key: secrets.get('HUB_TLS_KEY') ?? '' };
   try {
@@ -213,13 +315,49 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  // The identity a hub file and hub.admit name: both keys, and the pin of the certificate's key, so a renewal with the same key keeps it.
+  const identity = hubIdentityOf(signing, encryption, tls.cert, config.publicAddress);
+
+  // --hub-file opens the store without the blob folder sweep: a running hub may share the folder, and this process writes one enrolment row only.
+  let store: HubStore;
+  try {
+    store = await openHubStore(config.stateDir, { recoverBlobs: !hubFileMode });
+  } catch (error) {
+    logger.error('hub.start_refused', { reason: 'store', detail: error instanceof StoreError ? error.message : 'the hub store could not be opened' });
+    process.exitCode = 1;
+    return;
+  }
+
+  if (hubFileMode) {
+    try {
+      const issued = issueHubFile(store, identity, { days: days as number, now: new Date() });
+      if (!issued.ok) {
+        logger.error('hub.start_refused', { reason: 'config', detail: issued.message });
+        process.exitCode = 1;
+        return;
+      }
+      await printKeyFile(JSON.stringify(issued.file));
+    } finally {
+      store.close();
+    }
+    return;
+  }
+  // Counts only, and only when the open found something: a clean start logs no line for the store.
+  if (store.openReport.damaged !== undefined) logger.error('store.damaged', { missingBlobFiles: store.openReport.missingBlobFiles });
+  if (store.openReport.orphanBlobsRemoved + store.openReport.temporaryFilesRemoved > 0) {
+    logger.warn('store.recovered', { orphanBlobsRemoved: store.openReport.orphanBlobsRemoved, temporaryFilesRemoved: store.openReport.temporaryFilesRemoved });
+  }
+  const openStore = store;
 
   const health = new HealthRegistry({ version: __HUB_VERSION__, startedAt: Date.now() });
-  let server;
+  let composed: ComposedHub;
   try {
-    server = createHubServer({
+    composed = composeHub({
+      store: openStore,
+      identity,
       tls,
       health,
+      onFailure: (route, error) => logger.error('http.failed', { route, name: error instanceof Error ? error.name : 'NonError' }),
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);
@@ -227,19 +365,39 @@ export async function main(argv: readonly string[]): Promise<void> {
       },
     });
   } catch {
+    openStore.close();
     logger.error('hub.start_refused', { reason: 'tls', detail: 'the TLS certificate and key could not be used' });
     process.exitCode = 1;
     return;
   }
-  const openServer = server;
+  const openServer = composed.server;
+  const sessions = composed.sessions;
   let port: number;
   try {
     port = await listen(openServer, config.host, config.port);
   } catch (error) {
+    openStore.close();
     logger.error('hub.start_refused', { reason: 'listen', detail: error instanceof Error ? error.message : 'listen failed' });
     process.exitCode = 1;
     return;
   }
+  // The hourly sweep of abandoned uploads (D-44). unref: it never keeps the process alive on its own.
+  let sweeping = false;
+  const sweep = setInterval(() => {
+    if (sweeping) return;
+    sweeping = true;
+    sweepBlobsOnce(openStore, Date.now()).then(
+      (removed) => {
+        sweeping = false;
+        if (removed > 0) logger.info('blobs.swept', { removed });
+      },
+      (error: unknown) => {
+        sweeping = false;
+        logger.error('blobs.sweep_failed', { name: error instanceof Error ? error.name : 'NonError' });
+      },
+    );
+  }, BLOB_SWEEP_INTERVAL_MS);
+  sweep.unref();
   // Everything hub.listening needs is read before the signal handlers go in, and the handlers go in before hub.listening is logged: a
   // supervisor or test that reacts to that line by sending SIGTERM must always get a clean stop. finishStartup keeps that order.
   let stopping = false;
@@ -251,7 +409,11 @@ export async function main(argv: readonly string[]): Promise<void> {
       logger.error('hub.stop_timeout', { graceMs: SHUTDOWN_GRACE_MS });
       process.exit(1);
     }, SHUTDOWN_GRACE_MS).unref();
+    // The relay's order: no new sessions, then the server, then the store once the last request has finished.
+    clearInterval(sweep);
+    sessions.close();
     openServer.close(() => {
+      openStore.close();
       logger.info('hub.stopped');
       process.exit(0);
     });
