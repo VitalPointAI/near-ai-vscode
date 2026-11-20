@@ -10,9 +10,11 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { MODES, ModeId, ModeRow } from '../domain/org/modes';
 import {
-  ALLOWED_CONTEXTS, BASELINE_PATH, CopyCounts, GLOSSARY_WORDS, MODEL_INSTRUCTIONS, REPO_ROOT, baselineText, compareWithBaseline, copySourceFiles, countHits,
-  extractCopy, extractPackage, increaseMessage, readBaseline, scanRepository, writeBaselineAndFail
+  ALLOWED_CLAIM_CONTEXTS, ALLOWED_CONTEXTS, BASELINE_PATH, COMPLIANCE_CLAIMS, COPY_RULES, CopyCounts, DISTINCTIVE_MODE_WORDS, GLOSSARY_WORDS, MODEL_INSTRUCTIONS,
+  REPO_ROOT, baselineText, checkTightness, compareWithBaseline, copySourceFiles, countHits, extractCopy, extractPackage, increaseMessage, modeWordsFromTable,
+  readBaseline, scanRepository, writeBaselineAndFail
 } from './helpers/copyLintScan';
 
 const EM_DASH = String.fromCharCode(0x2014);
@@ -139,7 +141,9 @@ test('D-41 source: a page script gives strings that hold words, and not identifi
     `status.textContent = 'Saved the example';`,
     'label.textContent = `Ready`;',
     `row.innerHTML = '<span class="muted">No tools yet</span>';`,
-    `const box = make('div', 'room-process room-squads');`
+    `const box = make('div', 'room-process room-squads');`,
+    'dot.className = `team-dot dot-${state}`;',
+    'badge.title = `team-dot dot-${state}`;'
   ].join('\n');
   assert.deepEqual(texts(source, file), ['Saved the example', 'Ready', 'No tools yet']);
 });
@@ -215,9 +219,105 @@ test('D-41 rule 5: the provider\'s name before organization is counted in its th
   assert.deepEqual(one('NEAR AI is only the provider; your organization decides.'), {});
 });
 
+// ---- Rule 2: mode words (Task 3) ----
+
+test('D-41 rule 2: a mode word spelled in copy is counted', () => {
+  for (const word of ['Report for duty', 'Work team admin', 'Tasking authority', 'Billet', 'Dual-hatted', 'Relief in place', 'Commander\'s decision']) {
+    assert.deepEqual(one(`Choose ${word} below.`), { 'mode-word': 1 }, word);
+  }
+  // The table is where the words live: modes.ts and terms.ts are never scanned.
+  for (const file of ['src/domain/org/modes.ts', 'src/domain/org/terms.ts']) assert.deepEqual(one('Report for duty', file), {}, file);
+  // A single ordinary word that is a mode word is not counted.
+  for (const word of ['Position', 'Member', 'Accept', 'Decline', 'Approved', 'Handover']) assert.deepEqual(one(`Choose ${word} below.`), {}, word);
+});
+
+test('D-41 rule 2 reads MODES: the mode word list is the multi-word words of MODES plus the distinctive single words', () => {
+  const expected = new Set<string>(DISTINCTIVE_MODE_WORDS);
+  for (const row of Object.values(MODES)) {
+    for (const entry of Object.values(row.words)) for (const word of [entry.word, ...(entry.also ?? [])]) if (/\s/.test(word)) expected.add(word);
+  }
+  assert.deepEqual([...modeWordsFromTable()].sort(), [...expected].sort());
+  assert.ok(expected.size > 30);
+  // A word added to the table is linted without editing the lint.
+  const added = { ...MODES, corporate: { ...MODES.corporate, words: { ...MODES.corporate.words, lead: { word: 'Crew chief of work' } } } } as Readonly<Record<ModeId, ModeRow>>;
+  const words = modeWordsFromTable(added);
+  assert.ok(words.includes('Crew chief of work'));
+  assert.deepEqual(countHits([{ text: 'Ask the Crew chief of work.' }], SERVICE, { modeWords: words })[SERVICE]?.['mode-word'], 1);
+  assert.equal(countHits([{ text: 'Ask the Crew chief of work.' }], SERVICE)[SERVICE]?.['mode-word'], undefined);
+});
+
+// ---- Rule 6: a bare team (Task 3) ----
+
+test('owner 2026-11-20 rule 6: a bare team is counted', () => {
+  for (const word of ['team', 'Teams', 'team\'s', 'Team Mode', 'Team Studio', 'team-lead']) assert.equal(one(`Open the ${word} page.`)['bare-team'], 1, word);
+  for (const word of ['agent team', 'work team', 'Agent teams', 'Microsoft Teams', 'agent-team', 'steam', 'teammate']) {
+    assert.equal(one(`Open the ${word} page.`)['bare-team'], undefined, word);
+  }
+  assert.equal(one('A team and two agent teams and Teams.')['bare-team'], 2);
+});
+
+// ---- Rule 7: compliance claims about the product (Task 3) ----
+
+test('D-64 rule 7: a compliance claim about the product is counted, the longest phrase once', () => {
+  const claim = (text: string, file = SERVICE): number | undefined => one(text, file)['compliance-claim'];
+  assert.equal(claim('NEAR AI is ITAR compliant'), 1);
+  for (const phrase of ['ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'certified', 'accredited', 'compliant']) {
+    assert.equal(claim(`This extension is ${phrase} for your work.`), 1, phrase);
+  }
+  assert.ok(COMPLIANCE_CLAIMS.length >= 9);
+  // Honest uses: the claim's own sentence negates it before the phrase.
+  for (const honest of ['This product is not certified for ITAR work', 'NEAR AI does not make a device accredited', 'It never claims to be compliant',
+    'This extension isn\'t certified.', 'No part of it is accredited.', 'It cannot be export compliant on its own.', 'Use it without certified hardware.']) {
+    assert.equal(claim(honest), undefined, honest);
+  }
+  // A negation in an earlier sentence does not cover a later claim.
+  assert.equal(claim('This is not new. The extension is certified.'), 1);
+});
+
+test('D-64 rule 7: a phrase in a file listed in the claim contexts is not counted, and the table starts empty', () => {
+  assert.deepEqual(ALLOWED_CLAIM_CONTEXTS, []);
+  const contexts = [{ file: 'src/services/compliancePage.ts', phrases: ['certified'], why: 'a compliance page shows a status with its evidence' }];
+  const counted = (file: string, text: string): number | undefined => countHits([{ text }], file, { claimContexts: contexts })[file]?.['compliance-claim'];
+  assert.equal(counted('src/services/compliancePage.ts', 'Supplier certified on the date shown.'), undefined);
+  assert.equal(counted('src/services/compliancePage.ts', 'The extension is compliant.'), 1, 'only the listed phrases');
+  assert.equal(counted('src/services/other.ts', 'Supplier certified on the date shown.'), 1, 'only the listed file');
+});
+
+// ---- The baseline (Task 1, final in Task 3) ----
+
 test('D-41: the repository passes against its baseline', () => {
   const counts = scanRepository();
   if (process.env.NEAR_AI_WRITE_BASELINE === '1') writeBaselineAndFail(BASELINE_PATH, counts);
   const { increased } = compareWithBaseline(counts, readBaseline());
   assert.deepEqual(increased, [], increaseMessage(increased));
+});
+
+test('D-41: the baseline file is sorted, uses only the seven rules and holds no zero count', () => {
+  const text = readFileSync(BASELINE_PATH, 'utf8');
+  const baseline = readBaseline();
+  assert.equal(text, baselineText(baseline), 'the file is exactly its sorted text');
+  for (const [file, rules] of Object.entries(baseline)) {
+    for (const [rule, count] of Object.entries(rules)) {
+      assert.ok((COPY_RULES as readonly string[]).includes(rule), `${file}: ${rule} is a rule`);
+      assert.ok(Number.isInteger(count) && (count ?? 0) > 0, `${file} ${rule}: ${String(count)}`);
+    }
+  }
+  for (const rule of ['glossary', 'brand', 'em-dash', 'bare-team', 'mode-word', 'compliance-claim']) {
+    assert.ok(Object.values(baseline).some((rules) => (rules as Record<string, number>)[rule] !== undefined), `today's copy has ${rule} hits`);
+  }
+});
+
+test('D-45 pattern: the tightness check fails on a stale count only when the baseline must be tight', () => {
+  const stale = compareWithBaseline({ 'a.ts': { glossary: 1 } }, { 'a.ts': { glossary: 3 }, 'b.ts': { brand: 1 } }).stale;
+  assert.deepEqual(stale, ['a.ts  glossary  3 -> 1', 'b.ts  brand  1 -> 0']);
+  const notes: string[] = [];
+  assert.throws(() => { checkTightness(stale, true, (note) => notes.push(note)); }, /a\.ts {2}glossary {2}3 -> 1[\s\S]*b\.ts {2}brand {2}1 -> 0/);
+  checkTightness(stale, false, (note) => notes.push(note));
+  assert.ok(notes.some((note) => note.includes('a.ts  glossary  3 -> 1')) && notes.some((note) => note.includes('b.ts  brand  1 -> 0')));
+  checkTightness([], true, (note) => notes.push(note));
+});
+
+test('D-45 pattern: the baseline is tight (enforced at the close of a phase with NEAR_AI_BASELINE_TIGHT=1)', (t) => {
+  const { stale } = compareWithBaseline(scanRepository(), readBaseline());
+  checkTightness(stale, process.env.NEAR_AI_BASELINE_TIGHT === '1', (note) => { t.diagnostic(note); });
 });

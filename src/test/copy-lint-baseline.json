@@ -3,10 +3,12 @@
     "glossary": 2
   },
   "media/chat/chat.js": {
+    "bare-team": 2,
     "em-dash": 5,
     "glossary": 6
   },
   "media/chat/setup.js": {
+    "bare-team": 9,
     "glossary": 2
   },
   "media/chat/syncControl.js": {
@@ -25,59 +27,98 @@
   "media/cyber/cyber.js": {
     "em-dash": 1
   },
+  "media/staffRoom/staffRoom.js": {
+    "bare-team": 16
+  },
   "media/staffRoom/staffWorkspaces.js": {
+    "bare-team": 1,
     "glossary": 2
   },
   "media/teamLive/teamLive.js": {
+    "bare-team": 1,
     "glossary": 1
   },
   "media/teams/teams.js": {
+    "bare-team": 184,
     "em-dash": 2,
     "glossary": 19
   },
   "media/tools/tools.js": {
+    "bare-team": 8,
     "glossary": 2
   },
   "package.json": {
-    "glossary": 42
+    "bare-team": 21,
+    "glossary": 42,
+    "mode-word": 3
   },
   "src/domain/cyberModel.ts": {
     "glossary": 1
   },
   "src/domain/gate/routing.ts": {
+    "bare-team": 1,
+    "compliance-claim": 2,
     "glossary": 9
   },
   "src/domain/gate/trustBadge.ts": {
     "glossary": 12
   },
+  "src/domain/replica/chain.ts": {
+    "mode-word": 1
+  },
+  "src/domain/replica/checkpoint.ts": {
+    "mode-word": 1
+  },
   "src/domain/replica/projectFold.ts": {
-    "glossary": 2
+    "glossary": 2,
+    "mode-word": 3
   },
   "src/domain/replica/roster.ts": {
-    "glossary": 3
+    "glossary": 3,
+    "mode-word": 18
   },
   "src/domain/replica/rosterCells.ts": {
-    "glossary": 4
+    "glossary": 4,
+    "mode-word": 9
   },
   "src/domain/replica/rosterMembers.ts": {
-    "glossary": 4
+    "glossary": 4,
+    "mode-word": 19
   },
   "src/domain/replica/textFold.ts": {
-    "glossary": 1
+    "glossary": 1,
+    "mode-word": 2
   },
   "src/domain/replica/versions.ts": {
-    "glossary": 1
+    "glossary": 1,
+    "mode-word": 2
+  },
+  "src/domain/staff/multiUser.ts": {
+    "mode-word": 1
+  },
+  "src/domain/staff/obs/read.ts": {
+    "compliance-claim": 1
   },
   "src/domain/staff/parse.ts": {
     "glossary": 1
   },
+  "src/domain/staff/products.ts": {
+    "bare-team": 1
+  },
+  "src/domain/team/permissions.ts": {
+    "bare-team": 3
+  },
   "src/extension.ts": {
     "glossary": 9
+  },
+  "src/services/activityView.ts": {
+    "bare-team": 2
   },
   "src/services/agentSession.ts": {
     "glossary": 1
   },
   "src/services/chat.ts": {
+    "bare-team": 7,
     "glossary": 1
   },
   "src/services/cyberPanel.ts": {
@@ -93,6 +134,7 @@
     "glossary": 1
   },
   "src/services/onboarding.ts": {
+    "bare-team": 3,
     "brand": 5,
     "glossary": 7
   },
@@ -102,19 +144,61 @@
   "src/services/panelView.ts": {
     "glossary": 9
   },
+  "src/services/projectInitialization.ts": {
+    "bare-team": 1
+  },
   "src/services/researchProfileCommand.ts": {
     "glossary": 2
   },
   "src/services/spendTracking.ts": {
     "glossary": 1
   },
+  "src/services/staffCommands.ts": {
+    "bare-team": 1
+  },
+  "src/services/staffImportCommand.ts": {
+    "bare-team": 1
+  },
   "src/services/staffMultiUserCommands.ts": {
-    "glossary": 9
+    "glossary": 9,
+    "mode-word": 3
+  },
+  "src/services/staffScenario.ts": {
+    "bare-team": 1
+  },
+  "src/services/staffSetupCommand.ts": {
+    "bare-team": 9,
+    "mode-word": 1
+  },
+  "src/services/staffWatchCommands.ts": {
+    "bare-team": 1
   },
   "src/services/syncCommands.ts": {
     "glossary": 4
   },
+  "src/services/team/teamCommands.ts": {
+    "bare-team": 12
+  },
+  "src/services/team/teamSession.ts": {
+    "bare-team": 2
+  },
+  "src/services/team/teamStatusBar.ts": {
+    "bare-team": 5
+  },
+  "src/services/teamLiveView.ts": {
+    "bare-team": 8
+  },
+  "src/services/teamStudioPage.ts": {
+    "bare-team": 8
+  },
+  "src/services/teamStudioPanel.ts": {
+    "bare-team": 3
+  },
+  "src/services/teamUpdateCommands.ts": {
+    "bare-team": 14
+  },
   "src/services/toolsDirectory.ts": {
+    "bare-team": 3,
     "glossary": 2
   },
   "src/services/usageExport.ts": {
@@ -123,10 +207,24 @@
   "src/services/webSearchSetup.ts": {
     "glossary": 4
   },
+  "src/services/workspaceCommands.ts": {
+    "bare-team": 1
+  },
+  "src/staff/replica/membership.ts": {
+    "mode-word": 13
+  },
   "src/staff/replica/migrate.ts": {
-    "glossary": 7
+    "glossary": 7,
+    "mode-word": 2
   },
   "src/staff/replica/projection.ts": {
-    "glossary": 1
+    "glossary": 1,
+    "mode-word": 1
+  },
+  "src/staff/replica/replicaProject.ts": {
+    "mode-word": 5
+  },
+  "src/team/gitTransport.ts": {
+    "bare-team": 1
   }
 }

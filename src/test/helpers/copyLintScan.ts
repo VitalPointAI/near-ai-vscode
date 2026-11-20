@@ -4,6 +4,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import * as ts from 'typescript';
+import { MODES, ModeId, ModeRow } from '../../domain/org/modes';
 
 /** The copy rules, in the order GLOSSARY section 5 and D-41 number them (the compliance claim is rule 7, after the bare team rule). */
 export const COPY_RULES = ['glossary', 'mode-word', 'brand', 'em-dash', 'provider-organization', 'bare-team', 'compliance-claim'] as const;
@@ -146,8 +147,11 @@ function decodeEntities(text: string): string {
 
 const tidy = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
-/** A name, not words: an id with a separator (nearAi.newChat, hub-revoked, room-squads) or a lower-case word beside such ids (a class list). */
-const ID_LIKE = /^[a-z0-9_][A-Za-z0-9_]*(?:[-.:/@#][A-Za-z0-9_]+)+$/;
+/**
+ * A name, not words: an id with a separator (nearAi.newChat, hub-revoked, room-squads, or dot- before a removed ${...}) or a lower-case word beside such
+ * ids (a class list).
+ */
+const ID_LIKE = /^[a-z0-9_][A-Za-z0-9_]*(?:[-.:/@#][A-Za-z0-9_]*)+$/;
 export function isNameList(text: string): boolean {
   const tokens = text.trim().split(/\s+/);
   return tokens.some((token) => ID_LIKE.test(token)) && tokens.every((token) => ID_LIKE.test(token) || /^[a-z0-9_]+$/.test(token));
@@ -458,22 +462,100 @@ function countOf(text: string, needle: string): number {
   return count;
 }
 
+/**
+ * Single words that are mode words and not ordinary English, so a count is a real hit. Left out because each is also plain English or a word every mode
+ * uses in another sense: Position, Member, Invitation, Accept, Decline, Guest, Removed, Handover, Acting, Role, Employee, People and Approved.
+ */
+export const DISTINCTIVE_MODE_WORDS: readonly string[] = Object.freeze(['Billet', 'Directorate', 'Dual-hatted', 'Roster']);
+
+/** The mode words rule 2 counts: every `word` and `also` value of the mode table with two or more words, plus DISTINCTIVE_MODE_WORDS. Never spelled here. */
+export function modeWordsFromTable(modes: Readonly<Record<ModeId, ModeRow>> = MODES): string[] {
+  const words = new Set<string>(DISTINCTIVE_MODE_WORDS);
+  for (const row of Object.values(modes)) {
+    for (const entry of Object.values(row.words)) for (const word of [entry.word, ...(entry.also ?? [])]) if (/\s/.test(word.trim())) words.add(word.trim());
+  }
+  return [...words].sort();
+}
+
+const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const phraseRegex = (phrase: string): RegExp => new RegExp(`${TOKEN_BEFORE}${phrase.split(/\s+/).map(escapeRegex).join('\\s+')}${TOKEN_AFTER}`, 'gi');
+const modeMatchers = (words: readonly string[]): Array<{ word: string; regex: RegExp }> => words.map((word) => ({ word, regex: phraseRegex(word) }));
+const DEFAULT_MODE_MATCHERS = modeMatchers(modeWordsFromTable());
+
+/** Rule 6 (owner, 2026-11-20): team, teams or team's, unless "agent" or "work" comes before it, or it is Microsoft Teams. "Team Mode" counts here. */
+const TEAM_WORD = /(?<![A-Za-z0-9_])teams?(?:['\u2019]s)?(?![A-Za-z0-9_])/gi;
+const TEAM_QUALIFIER = /(?:agent|work)[\s-]+$/i;
+const MICROSOFT = /Microsoft\s+$/;
+
+function bareTeamHits(text: string): number {
+  let count = 0;
+  for (const match of text.matchAll(TEAM_WORD)) {
+    const before = text.slice(0, match.index);
+    if (TEAM_QUALIFIER.test(before) || (match[0] === 'Teams' && MICROSOFT.test(before))) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product. The longest phrase wins, so "ITAR compliant" counts once and not
+ * also as "compliant".
+ */
+export const COMPLIANCE_CLAIMS: readonly string[] = Object.freeze([
+  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'compliant', 'accredited', 'certified'
+]);
+const CLAIM_MATCHERS = COMPLIANCE_CLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
+/** A claim is honest when its own sentence negates it before the phrase ("is not certified", "does not make ... accredited"). */
+const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
+const SENTENCE_BREAK = /[.!?]\s+|\n/;
+
+/** Where a compliance phrase may appear, and why. */
+export interface ClaimContext {
+  readonly file: string;
+  readonly phrases: readonly string[];
+  readonly why: string;
+}
+
+/**
+ * Files whose compliance phrases are statuses with evidence, never a claim. It starts empty: Phase 44 adds its compliance pages when they land, each row
+ * with its reason.
+ */
+export const ALLOWED_CLAIM_CONTEXTS: readonly ClaimContext[] = Object.freeze([]);
+
+function claimHits(text: string, allowed: ReadonlySet<string>): number {
+  const hits = longestFirst(CLAIM_MATCHERS.flatMap(({ phrase, regex }) => hitsOf(text, regex, phrase)));
+  return hits.filter((hit) => {
+    if (allowed.has(hit.key.toLowerCase())) return false;
+    const sentence = text.slice(0, hit.start).split(SENTENCE_BREAK).pop() ?? '';
+    return !NEGATION.test(sentence);
+  }).length;
+}
+
 export interface CountOptions {
   /** The allowed-context table; tests pass their own. Defaults to ALLOWED_CONTEXTS. */
   readonly allowedContexts?: readonly AllowedContext[];
+  /** The mode words; tests pass their own. Defaults to modeWordsFromTable(). */
+  readonly modeWords?: readonly string[];
+  /** The claim contexts; tests pass their own. Defaults to ALLOWED_CLAIM_CONTEXTS. */
+  readonly claimContexts?: readonly ClaimContext[];
 }
 
 /** The hits of every rule in `texts`, all counted under `file`. Returns `{}` when nothing is hit, never a zero count. */
 export function countHits(texts: readonly CopyText[], file: string, options: CountOptions = {}): CopyCounts {
   if (NEVER_SCANNED.includes(file)) return {};
   const allowed = new Set((options.allowedContexts ?? ALLOWED_CONTEXTS).filter((row) => row.file === file).flatMap((row) => row.words));
+  const claimsAllowed = new Set((options.claimContexts ?? ALLOWED_CLAIM_CONTEXTS).filter((row) => row.file === file).flatMap((row) => row.phrases.map((phrase) => phrase.toLowerCase())));
+  const modes = options.modeWords === undefined ? DEFAULT_MODE_MATCHERS : modeMatchers(options.modeWords);
   const rules: Partial<Record<CopyRule, number>> = {};
   const add = (rule: CopyRule, count: number): void => { if (count > 0) rules[rule] = (rules[rule] ?? 0) + count; };
   for (const { text, title } of texts) {
     add('em-dash', countOf(text, EM_DASH));
     add('glossary', longestFirst(GLOSSARY_MATCHERS.flatMap(({ word, regex }) => hitsOf(text, regex, word))).filter((hit) => !allowed.has(hit.key)).length);
     add('brand', brandHits(text, title === true));
+    add('mode-word', longestFirst(modes.flatMap(({ word, regex }) => hitsOf(text, regex, word))).length);
     add('provider-organization', hitsOf(text, PROVIDER_ORGANIZATION, 'provider').length);
+    add('bare-team', bareTeamHits(text));
+    add('compliance-claim', claimHits(text, claimsAllowed));
   }
   return Object.keys(rules).length > 0 ? { [file]: rules } : {};
 }
@@ -523,6 +605,20 @@ export function increaseMessage(increased: readonly string[]): string {
     ...rules.map((rule) => `  ${rule}: ${RULE_ADVICE[rule]}`),
     'A count that moved with code from another file moves in the baseline with it: the rule\'s total must not grow. Fix new copy, never raise the baseline.'
   ].join('\n');
+}
+
+/**
+ * The tightness check (the D-45 pattern applied to the copy lint): a baseline count above today's count is stale. With `tight` (NEAR_AI_BASELINE_TIGHT=1,
+ * set by the closing plan of a phase) it fails, naming each; otherwise the same list goes to `diagnostic` and the run passes.
+ */
+export function checkTightness(stale: readonly string[], tight: boolean, diagnostic: (note: string) => void): void {
+  if (stale.length === 0) return;
+  const message = [
+    'Stale copy lint baseline counts (file  rule  baseline -> now). Lower them: run the copy lint once with NEAR_AI_WRITE_BASELINE=1 and review the diff.',
+    ...stale.map((entry) => `  ${entry}`)
+  ].join('\n');
+  if (tight) throw new Error(message);
+  diagnostic(message);
 }
 
 /** The baseline file's text: files sorted, rules sorted, zero counts left out, two-space indent, a trailing newline. */
