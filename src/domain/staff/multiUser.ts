@@ -30,3 +30,12 @@ export function multiUserNoticeLines(): string[] {
 
 /** What a step that only works on a single-machine project says in a shared project (D-29), pointing to the way to work alone. */
 export const SHARED_PROJECT_REFUSAL = 'This project is shared, so its history lives in the shared record and this step is not available here. To work alone, use Make a Single-Machine Copy.';
+
+/**
+ * The refusal when the replica project file cannot be checked at all (any stat error but its absence): the step is refused, as in a shared project,
+ * but the sentence names the failure instead of claiming the project is shared. The error code is shown only when it is a plain errno name.
+ */
+export function sharedCheckFailedText(code: unknown): string {
+  const name = typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,19}$/.test(code) ? code : 'an unknown error';
+  return `NEAR AI could not check whether this project is shared: reading ${REPLICA_PROJECT_FILE} failed with ${name}. This step was not done and nothing was written. Check that the folder can be read, then try again.`;
+}

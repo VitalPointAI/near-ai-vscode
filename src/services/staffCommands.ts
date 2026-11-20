@@ -16,7 +16,6 @@ import { configureObservationStores } from '../staff/observationStore';
 import type { StaffHost } from '../staff/staffHost';
 
 import { STAFF_COMMANDS } from '../domain/staff/commands';
-import { SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
 import { registerWatchCommands } from './staffWatchCommands';
 import { registerStaffMultiUserCommands } from './staffMultiUserCommands';
 
@@ -87,7 +86,8 @@ function hostOrSay(): StaffHost | undefined {
 async function writableHostOrSay(): Promise<StaffHost | undefined> {
   const host = hostOrSay();
   if (!host) return undefined;
-  if (await host.isSharedProject()) { void vscode.window.showWarningMessage(SHARED_PROJECT_REFUSAL); return undefined; }
+  const shared = await host.sharedProjectRefusal();
+  if (shared !== undefined) { void vscode.window.showWarningMessage(shared); return undefined; }
   return host;
 }
 

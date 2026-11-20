@@ -5,14 +5,14 @@
 // secret, while the reads of the decision log, the wargame ledger, the event log and the logistics files still answer.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import type { StaffSectionId } from '../domain/staff/doctrine';
 import type { PlanningFactor } from '../domain/staff/logistics';
-import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
+import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
 import type { PersonActor } from '../domain/staff/release';
 import type { DeviceIdentity } from '../team/identity';
 import { isMigrationRefused, ledgerHeadKey, makeMultiUser } from '../staff/replica/migrate';
@@ -243,12 +243,13 @@ test('a product header edited by hand after the conversion is reported with the 
 const sha256 = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
 
 /** Every file under .planning/staff, the replica store included, by path, with the sha256 of its bytes. */
-function staffTree(root: string): Map<string, string> {
+function staffTree(root: string, skip?: string): Map<string, string> {
   const out = new Map<string, string>();
   const walk = (dir: string): void => {
     if (!existsSync(dir)) return;
     for (const name of readdirSync(dir)) {
       const file = path.join(dir, name);
+      if (skip !== undefined && file === path.join(root, '.planning', 'staff', skip)) continue;
       if (statSync(file).isDirectory()) walk(file);
       else out.set(path.relative(root, file).split(path.sep).join('/'), sha256(readFileSync(file)));
     }
@@ -411,4 +412,38 @@ test('a shared project this window cannot open shows no product and says so plai
   assert.equal(refused.registry.length, 0);
   assert.match(refused.ledgerProblem ?? '', /^This project is shared, and its shared history cannot be opened here, so its staff products are not shown\. This project folder holds a shared staff project that this computer has not joined/);
   assert.deepEqual(staffTree(env.root), files, 'a refused open writes nothing');
+});
+
+test('a replica project file that cannot be checked (a stat error other than its absence) refuses every write with a sentence naming the error, never the shared-project sentence', async () => {
+  const env = await cloneOf(await full(), 'stat-fails');
+  // A symbolic link to itself: stat fails with ELOOP, which is neither "absent" nor "present".
+  const file = path.join(env.root, ...REPLICA_PROJECT_FILE.split('/'));
+  await mkdir(path.dirname(file), { recursive: true });
+  symlinkSync(path.basename(file), file);
+  const expected = sharedCheckFailedText('ELOOP');
+  assert.match(expected, /ELOOP/);
+  assert.notEqual(expected, SHARED_PROJECT_REFUSAL);
+  assert.doesNotMatch(expected, /This project is shared/);
+  assert.equal(expected.includes('—'), false);
+  const host = worldOf(env).host;
+  // Fails closed: the writes are refused, but with the stat failure, not the claim that the project is shared.
+  assert.equal(await host.isSharedProject(), true);
+  assert.equal(await host.sharedProjectRefusal(), expected);
+  // The tree outside the replica folder: walking into it would meet the looping link itself.
+  const outside = (): Array<[string, string]> => [...staffTree(env.root, 'replica')].sort();
+  const files = outside();
+  const proposed = await host.propose(caller(env.root), { product: ANNEX, kind: 'annex' });
+  assert.deepEqual([proposed.ok, proposed.message], [false, expected]);
+  assert.deepEqual(await host.branchLedgerCheck(), { kind: 'broken', message: expected });
+  await assert.rejects(() => host.setAsideLedger(), (error: unknown) => error instanceof SharedProjectError && error.message === expected && error.refusal === expected);
+  const logistics = host.logistics();
+  const report = await logistics.submitReport('jloc-chief', LOGSTAT);
+  assert.deepEqual([report.ok, report.ok ? '' : report.message], [false, expected]);
+  await assert.rejects(() => logistics.appendValidation([{ report: LOGSTAT.id, passed: true, findings: [], hash: 'b'.repeat(64), at: AT, by: 'logstat-analyst' } as unknown as ValidationLogEntry]),
+    (error: unknown) => error instanceof SharedProjectError && error.message === expected);
+  assert.deepEqual(outside(), files, 'nothing was written');
+  assert.deepEqual(readdirSync(path.dirname(file)), [path.basename(file)], 'nothing was added beside the link');
+  // An error code that is not a plain errno name is not echoed.
+  assert.match(sharedCheckFailedText('bad code; rm -rf'), /failed with an unknown error\./);
+  assert.match(sharedCheckFailedText(undefined), /failed with an unknown error\./);
 });

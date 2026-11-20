@@ -192,8 +192,15 @@ export class DecodeHost {
   }
 
   private answer(worker: Worker, reply: unknown): void {
+    // A message from a worker already dropped changes nothing.
+    if (this.worker !== worker) return;
     const job = this.pending;
-    if (job === undefined || job.worker !== worker || typeof reply !== 'object' || reply === null || (reply as { id?: unknown }).id !== job.id) return;
+    // The current worker answering a job it was not asked (another id, no job pending, or not an object) is not trusted with the next job: it is
+    // dropped as crashed at once, and the job in flight is answered malformed instead of waiting for the time limit.
+    if (job === undefined || job.worker !== worker || typeof reply !== 'object' || reply === null || (reply as { id?: unknown }).id !== job.id) {
+      this.drop(worker, MALFORMED, 'crashed');
+      return;
+    }
     const verdict = verdictOf(reply as Record<string, unknown>);
     // A worker that answers in a shape it never writes is not trusted with the next job.
     if (verdict === undefined) this.drop(worker, MALFORMED, 'crashed');

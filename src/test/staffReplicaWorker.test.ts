@@ -203,6 +203,8 @@ const HOG_THROW = Uint8Array.of(3);
 const HOG_EXIT = Uint8Array.of(4);
 const HOG_BAD_REPLY = Uint8Array.of(5);
 const HOG_HEAP_LIMIT = Uint8Array.of(6);
+const HOG_WRONG_ID = Uint8Array.of(7);
+const HOG_NOT_OBJECT = Uint8Array.of(8);
 const HOG_OK = Uint8Array.of(0);
 const HOG_OK_VERDICT: DecodeVerdict = { ok: true, structs: 0, deletes: 0, clients: 0 };
 // Small limits keep the hog cheap: it reaches 16 MB of old generation in well under a second.
@@ -380,4 +382,21 @@ test('no file under src/staff/replica imports the editor API', () => {
   assert.ok(files.some((file) => file.endsWith('decodeWorker.ts')) && files.some((file) => file.endsWith('decodeHost.ts')), 'the scan sees the worker files');
   const problems = files.flatMap((file) => editorApiImports(readFileSync(file, 'utf8')).map((line) => `${path.relative(REPO_ROOT, file)}:${line}`));
   assert.deepEqual(problems, []);
+});
+
+test('a reply from the current worker that does not match the job in flight drops the worker as crashed at once, not after the time limit', async () => {
+  // The time limit is long, so a host that ignored the reply would answer only after 5 seconds.
+  await withHost(new DecodeHost({ workerFile: HOG, limits: { ...SMALL, timeoutMs: 5000 } }), async (host) => {
+    for (const [bytes, restarts] of [[HOG_WRONG_ID, 1], [HOG_NOT_OBJECT, 2]] as const) {
+      const started = Date.now();
+      assert.deepEqual(await host.inspect('update', bytes), { ok: false, error: 'malformed' });
+      assert.ok(Date.now() - started < 2000, `answered at once, not at the time limit (${Date.now() - started} ms)`);
+      assert.equal(host.restarts, restarts);
+      assert.equal(host.lastFailure, 'crashed');
+    }
+    // A fresh worker answers the next job normally.
+    assert.deepEqual(await host.inspect('update', HOG_OK), HOG_OK_VERDICT);
+    assert.equal(host.restarts, 2);
+    assert.equal(host.starts, 3);
+  });
 });

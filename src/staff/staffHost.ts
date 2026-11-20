@@ -75,7 +75,7 @@ import type { TradecraftFinding } from '../domain/staff/tradecraftLint';
 import { checkOrder, deriveFromWargame, parseWargamePhase, wargameTurnEvent } from '../domain/staff/wargame';
 import type { WargameEntry } from '../domain/staff/wargame';
 import { withFileLock } from '../services/stateMirrorLock';
-import { LogisticsHost, readCalculatorCheck, SharedProjectError } from './logisticsHost';
+import { LogisticsHost, readCalculatorCheck, SharedProjectError, sharedProjectRefusal } from './logisticsHost';
 import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
 
 export { SharedProjectError } from './logisticsHost';
@@ -373,13 +373,15 @@ export class StaffHost {
    * be checked for another reason than its absence counts as shared, so a write never goes to a project that might be (fail closed).
    */
   public async isSharedProject(): Promise<boolean> {
-    try {
-      await stat(path.join(this.options.root, ...REPLICA_PROJECT_FILE.split('/')));
-      return true;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      return code !== 'ENOENT' && code !== 'ENOTDIR';
-    }
+    return (await this.sharedProjectRefusal()) !== undefined;
+  }
+
+  /**
+   * Why a single-machine write must not run here, or undefined when it may. In a shared project it is SHARED_PROJECT_REFUSAL; when the replica
+   * project file cannot even be checked (any stat error but its absence) the write is refused too, with a sentence naming that error.
+   */
+  public async sharedProjectRefusal(): Promise<string | undefined> {
+    return sharedProjectRefusal(this.options.root);
   }
 
   private sharedOpen: Promise<{ readonly project: SharedProject; readonly deps: SharedProjectDeps } | { readonly problem: string }> | undefined;
@@ -444,12 +446,14 @@ export class StaffHost {
 
   /** The refusal every single-machine write gives in a shared project, or undefined. Checked before any file is touched. */
   private async sharedRefusal(): Promise<StaffResult | undefined> {
-    return (await this.isSharedProject()) ? refuse(SHARED_PROJECT_REFUSAL) : undefined;
+    const shared = await this.sharedProjectRefusal();
+    return shared === undefined ? undefined : refuse(shared);
   }
 
   /** For a write with no result to carry a refusal: throws SharedProjectError in a shared project, before any file is touched. */
   private async refuseIfShared(): Promise<void> {
-    if (await this.isSharedProject()) throw new SharedProjectError();
+    const shared = await this.sharedProjectRefusal();
+    if (shared !== undefined) throw new SharedProjectError(shared);
   }
 
   /**
@@ -518,7 +522,8 @@ export class StaffHost {
   /** How the ledger stands against the head this computer recorded (BranchLedgerCheck). Reads only. */
   public async branchLedgerCheck(): Promise<BranchLedgerCheck> {
     // A shared project has no single-machine ledger to use, so Use This Branch's Ledger is never offered there: it says why instead (D-29).
-    if (await this.isSharedProject()) return { kind: 'broken', message: SHARED_PROJECT_REFUSAL };
+    const shared = await this.sharedProjectRefusal();
+    if (shared !== undefined) return { kind: 'broken', message: shared };
     const status = await this.options.keyStatus();
     const read = await this.ledgerLines();
     if ('unreadable' in read) return { kind: 'unreadable', message: unreadableText(`${LEDGER_DIR}/${LEDGER_FILE}`, read.unreadable, SET_ASIDE_WAY_OUT) };

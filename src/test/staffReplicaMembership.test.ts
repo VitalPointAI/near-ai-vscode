@@ -633,11 +633,16 @@ test('no-grant-key: changing the clearance of a member who holds a cell whose la
   assert.equal(blocked.reason, 'no-grant-key');
   assert.equal(blocked.message, MEMBERSHIP_REFUSALS['no-grant-key']);
   assert.equal((await head(t.lead.p)).hash, before.hash);
-  // Removing N is still possible: Y keeps the devices that were granted it, without N.
-  const removed = ok(await removeFromProject(t.lead.host, { member: t.n.member }), 'remove N');
-  assert.ok((removed.rekeyed ?? []).includes(y));
-  const { roster, hash } = await head(t.lead.p);
-  assert.deepEqual(rosterView(roster).cellGrantees?.(y, hash), [t.lead.p.deviceWriter]);
+  // MN-05: removing N would move Y to a new epoch this computer cannot label (the lead is still on it), so it is refused the same way, before
+  // anything is written; before MN-05 the new epoch was written with no label and nobody admitted later could be cleared for Y.
+  const removal = await removeFromProject(t.lead.host, { member: t.n.member });
+  assert.equal(removal.reason, 'no-grant-key');
+  assert.equal(removal.message, MEMBERSHIP_REFUSALS['no-grant-key']);
+  const after = await head(t.lead.p);
+  assert.equal(after.hash, before.hash, 'nothing written');
+  assert.equal(epochAt(after.roster.cells, y, after.position), 1);
+  assert.ok(memberAt(after.roster.members, t.n.member, after.position) !== undefined, 'N is still a member');
+  assert.equal(await unfinishedRekeys(t.lead.host), 0);
 });
 
 // ---- Task 4: split and choose, deputy, handover --------------------------------------------------------------------------------------------------
@@ -1077,4 +1082,19 @@ test('SECURITY.md has the invitations subsection inside the multi-user section, 
   assert.ok(next === -1 || heading < next, 'inside the multi-user section');
   assert.equal(text.split('### Invitations, join secrets and the safety code').length - 1, 1);
   assert.ok(!/\u2014/.test(text));
+});
+
+test('MN-05: finishing an interrupted removal never writes a new epoch without its label: a cell this computer cannot label is refused no-grant-key and stays on its epoch', async () => {
+  const t = await team();
+  const y = await unlabelledCell(t.lead, [t.lead.p.deviceWriter, t.n.writer]);
+  // The removal is written, then the window dies before any cell moves to a new key.
+  assert.ok('ok' in (await t.lead.p.appendOwn('member.remove', { member: t.n.member })));
+  const cut = await head(t.lead.p);
+  const finished = await finishRekeys(t.lead.host);
+  assert.equal(finished.reason, 'no-grant-key');
+  assert.equal(finished.message, MEMBERSHIP_REFUSALS['no-grant-key']);
+  const after = await head(t.lead.p);
+  assert.equal(epochAt(after.roster.cells, y, after.position), 1, 'no label-less epoch was written for Y');
+  assert.ok(after.roster.cells.cells.get(y)?.epochs.every((epoch) => epoch.epoch === 1));
+  assert.ok(after.position >= cut.position);
 });

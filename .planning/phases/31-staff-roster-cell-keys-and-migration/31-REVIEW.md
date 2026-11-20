@@ -240,6 +240,9 @@ Every CRITICAL and MAJOR finding is fixed, each with a regression test that fail
 | MJ-08 | Fixed. Damaged lines are reported as damage; Staff: Start This Computer's Shared History Again sets the store aside (never deletes) and starts over. | store.ts, command (ec582812, 94c60c24) |
 | MJ-09 | Fixed. A re-run after a product file was edited stops with product-changed; an edited body is never written over. | migrate.ts, projection.ts (1f486240) |
 | MN-01, MN-02, MN-03, MN-04 | Fixed. | 4d30e460, e5c23094, e52ac25e |
-| MN-05, IN-01, IN-02 | Open (minor), left for a later phase. | |
+| MN-05 | Fixed. A removal or revocation that would write a new epoch for a cell whose label this computer cannot read is refused no-grant-key before anything is written, as a clearance change already was; writeRekeys never writes a label-less epoch (the finish path included). A cell nobody else is left on still gets no rekey. Trade-off: the deputy cannot cut a lost lead's device off a cell the deputy cannot read while others remain on it. | membership.ts |
+| IN-01, IN-02 | Open (info), left for a later phase. | |
+
+Follow-ups from the agent review of PR #130 (5 minor, all fixed): a stat error on the replica project file other than its absence now refuses writes with a sentence naming the error (sharedProjectRefusal); a decode worker reply that does not match the job in flight drops the worker as crashed at once; an invitation whose file could not be saved can be saved again from Staff: Remove from Staff Project on the computer that made it (remakeInvite, nothing written); the e2e statement in 31-VERIFICATION.md now records the green CI e2e job; and MN-05 above.
 
 Verifier W-1 (labelled products sealed under the base cell) is closed by refusal: Make Multi-User refuses a project with a product labelled above org/Public until products can be sealed under a cell for their label (1f486240). That is an owner decision to revisit.

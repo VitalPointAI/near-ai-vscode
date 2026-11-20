@@ -90,6 +90,7 @@ export const MEMBERSHIP_REFUSALS = {
   'not-a-roster-writer': 'Only the staff lead or the deputy lead can change who is in this project, and this computer is not one of their devices. Nothing was changed.',
   'member-unknown': 'That person is not a member of this project, so nothing was changed. Check the name and try again.',
   'no-grant-key': 'This computer does not hold every key this change needs, so nothing was changed. Make the change on the staff lead\'s computer that holds the project\'s keys.',
+  'invite-not-remade': 'This computer did not make that invitation, or no longer holds its secret, so it cannot be saved again here. Cancel it with Staff: Remove from Staff Project and invite the person again.',
   'no-join-secret': 'This computer does not hold the secret of that invitation, so the join request cannot be checked here and nobody was admitted. Admit the person on the computer that made the invitation.',
   'not-admitted-yet': 'Nobody was admitted with this join request yet, so there is no welcome file to make again. Nothing was changed. Admit the person with Staff: Admit to Staff Project.',
   'no-invitation-opened': 'This computer has not opened an invitation for this project, so the welcome file was not used and nothing was changed. Open the staff lead\'s invitation with Staff: Join Staff Project first, then open the welcome file.',
@@ -380,6 +381,64 @@ async function writeInvite(shared: SharedProjectHost, input: InviteInput & { for
   const what = input.forMember === undefined ? `The invitation for ${input.name} is ready.` : `The invitation for ${input.name}'s other computer is ready.`;
   return done(`${what} Send the file to them any way you like. It works once and expires on ${when}. When their join request comes back, compare the six words with them out loud or in person before you admit them.`, {
     file: { name: `${invite}${INVITE_FILE_EXTENSION}`, text: JSON.stringify(signed) }, invite
+  });
+}
+
+/** An invitation this computer made that is still open: its file can be saved again from the roster entry and the stored secret. */
+export interface ReissuableInvite { invite: string; name: string; expiresAt: string; forMember?: string }
+
+/**
+ * The open, unexpired invitations whose join secret this computer holds (it stores a secret only for an invitation it wrote). Their files can be
+ * saved again with remakeInvite when the first save failed. Reads only.
+ */
+export async function reissuableInvites(shared: SharedProjectHost): Promise<ReissuableInvite[]> {
+  const { roster } = await shared.project.state();
+  const position = headOf(roster).position;
+  const at = now(shared.deps).toISOString();
+  const found: ReissuableInvite[] = [];
+  for (const record of roster.members.invites.values()) {
+    if (inviteAt(roster.members, record.invite, position, at)?.state !== 'open') continue;
+    const secret = await joinSecret(shared.deps.secrets, record.invite);
+    if (secret === undefined || joinSecretHash(secret) !== record.secretHash) continue;
+    found.push(record.forMember === undefined ? { invite: record.invite, name: record.name, expiresAt: record.expiresAt } : { invite: record.invite, name: record.name, expiresAt: record.expiresAt, forMember: record.forMember });
+  }
+  return found.sort((a, b) => a.invite.localeCompare(b.invite));
+}
+
+/**
+ * Saves an invitation again when its file was lost (the first save failed after the roster recorded it). Writes nothing: the file is rebuilt from
+ * the roster's member.invite entry and the join secret this computer kept, signed by this device as the inviter, as at first. Only an open,
+ * unexpired invitation whose secret this computer holds can be remade; the copy is the same capability the first file was, never a new one.
+ */
+export function remakeInvite(shared: SharedProjectHost, invite: string): Promise<MembershipResult> {
+  return guarded(async () => {
+    const { project, deps } = shared;
+    const { roster, fold } = await project.state();
+    const problem = writerProblem(shared, roster);
+    if (problem !== undefined) return problem;
+    const record = roster.members.invites.get(invite);
+    const position = headOf(roster).position;
+    const at = now(deps);
+    const standing = inviteAt(roster.members, invite, position, at.toISOString());
+    if (record === undefined || standing === undefined) return refuse('unknown-invite');
+    if (standing.state === 'used') return refuse('invite-used');
+    if (standing.state === 'voided') return refuse('invite-voided');
+    if (standing.state === 'expired') return refuse('invite-expired');
+    const secret = await joinSecret(deps.secrets, invite);
+    if (secret === undefined || joinSecretHash(secret) !== record.secretHash) return refuse('invite-not-remade');
+    // The inviter's keys as they stood when the invitation was written, which the joining device checks against the roster.
+    const inviter = selfAt(shared, roster, record.from);
+    if (inviter === undefined) return refuse('invite-not-remade');
+    const signed = buildInvite(project.signer, {
+      genesisHash: project.anchor.genesisHash, project: project.projectId, name: projectName(fold, project.projectId),
+      lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519, publicKey: project.anchor.lead.publicKey },
+      inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt: record.expiresAt, now: at,
+      ...(record.forMember === undefined ? {} : { forMember: record.forMember })
+    });
+    const who = record.forMember === undefined ? record.name : `${record.name}'s other computer`;
+    return done(`The invitation for ${who} is ready again. Nothing was changed in the project. It still works once and expires on ${record.expiresAt.slice(0, 10)}.`, {
+      file: { name: `${invite}${INVITE_FILE_EXTENSION}`, text: JSON.stringify(signed) }, invite
+    });
   });
 }
 
@@ -933,9 +992,8 @@ interface RekeyOutcome { rekeyed: string[]; skipped: string[] }
 
 /**
  * The rekey plans for a change, computed before the change is written: the grantees of each cell at the current head, and who is cleared once the
- * change applies. A labelled cell whose label this device cannot read keeps its current grantees, minus the devices the change removes: they were
- * cleared when they were granted, and the signed grant is the authority for who is on a cell. A clearance change for a member who holds such a cell
- * cannot be judged here, so it is refused no-grant-key before anything is written.
+ * change applies. A labelled cell whose label this device cannot read cannot be rekeyed here (MN-05): a change touching a device on such a cell is
+ * refused no-grant-key before anything is written, and a cell the change does not touch keeps its grantees and needs no new key.
  */
 function rekeyPlans(shared: SharedProjectHost, roster: RosterState, change: { kind: RekeyReason; writers: readonly string[] }, after: Change, gate: Gate): { plans: RekeyPlan[]; cells: Map<string, CellInfo> } | MembershipResult {
   const head = headOf(roster);
@@ -944,8 +1002,15 @@ function rekeyPlans(shared: SharedProjectHost, roster: RosterState, change: { ki
   for (const info of infos) {
     const grantees = granteesAt(roster.cells, info.cell, head.position, (writer) => deviceAt(roster.members, writer, head.position) !== undefined) ?? [];
     if (!info.known) {
-      if (after.clearance !== undefined && change.writers.some((writer) => grantees.includes(writer))) return refuse('no-grant-key');
-      cells.push({ cell: info.cell, grantees, clearedNow: grantees.filter((writer) => after.without?.has(writer) !== true) });
+      // A cell whose label this computer cannot read cannot be moved to a new key here: its new epoch would carry no label, so nobody admitted later
+      // could be judged cleared for it (MN-05). A clearance change for a device on it cannot be judged, and a removal or revocation that would write
+      // a new epoch for it is refused, both before anything is written; the computer that can read the cell's label makes the change.
+      const touched = change.writers.some((writer) => grantees.includes(writer));
+      if (touched && after.clearance !== undefined) return refuse('no-grant-key');
+      const clearedNow = grantees.filter((writer) => after.without?.has(writer) !== true);
+      // A cell nobody else is left on gets no new epoch at all, so no label is lost: only a rekey that would be written is refused.
+      if (touched && clearedNow.length > 0) return refuse('no-grant-key');
+      cells.push({ cell: info.cell, grantees, clearedNow });
       continue;
     }
     cells.push({ cell: info.cell, grantees, clearedNow: clearedDevices(roster, info, head.position, gate, after) });
@@ -968,8 +1033,10 @@ async function writeRekeys(shared: SharedProjectHost, plans: readonly RekeyPlan[
     const current = epochAt(roster.cells, plan.cell, head.position);
     if (current === undefined) return refused('cell-unknown', CELL_REFUSALS['cell-unknown']);
     const epoch = current + 1;
-    const key = newEpochKey();
     const info = cells.get(plan.cell) as CellInfo;
+    // Never a new epoch without its label (MN-05): a labelled cell whose label this computer cannot read is not rekeyed here.
+    if (!info.base && info.raw === undefined) return refuse('no-grant-key');
+    const key = newEpochKey();
     const wraps = plan.recipients.map((writer) => {
       const recipient = x25519At(roster.members, writer, head.position);
       if (recipient === undefined) throw new Error('The cell key was not moved: a device to receive it has no encryption key in the roster.');

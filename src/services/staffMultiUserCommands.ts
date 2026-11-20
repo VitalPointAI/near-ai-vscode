@@ -59,6 +59,9 @@ export const NO_FOLDER_TEXT = 'Open the folder of a staff project first. Nothing
 export const NOT_SHARED_TEXT = 'This folder holds no shared staff project, so nothing was changed. To share this staff project, run Staff: Make This Staff Project Multi-User first.';
 export const WORDS_DIFFER_TEXT = 'Nobody was admitted, and nothing was changed. Do not admit a request whose words differ, because someone else may have made it. Ask the person to make a new join request from your invitation, or cancel the invitation with Staff: Remove from Staff Project.';
 export const WORDS_NOT_CONFIRMED_TEXT = 'Nobody was admitted, because the six words were not confirmed. Nothing was changed. Compare the words with the person out loud or in person, then run Staff: Admit to Staff Project again. If they do not match, ask the person for a new join request, or cancel the invitation with Staff: Remove from Staff Project.';
+/** What to do when an invitation file could not be saved after the roster recorded the invitation: save it again, or cancel it and invite again. */
+export const INVITE_NOT_SAVED_TEXT = 'To save it again, run Staff: Remove from Staff Project on this computer and pick Save the invitation again; nothing in the project changes. Or cancel it there and invite them again.';
+export const INVITE_SAVE_AGAIN_PREFIX = 'Save the invitation for ';
 export const INVITE_INSIDE_PROJECT_TEXT = 'The invitation holds a one-time secret, so it is not saved inside the project folder, where git could commit it. Nothing was changed. Choose a folder outside the project.';
 export const SEAT_TEXT = 'A seat is lowercase letters, digits and dashes, for example j2-analyst, so nothing was changed. Run the command again with a seat like that.';
 export const AGENT_SEATS_TEXT = 'Agent seats are lowercase letters, digits and dashes, separated by commas, so nothing was changed. Run the command again with seats like that.';
@@ -356,7 +359,7 @@ async function inviteCommand(context: StaffCommandContext): Promise<void> {
     if (!target) return;
     if (await inside(root, target)) { warn(INVITE_INSIDE_PROJECT_TEXT); return; }
     const result = await membership.inviteToProject(shared, { name, seat, roles, clearance });
-    await deliver(result, target, 'Cancel the invitation with Staff: Remove from Staff Project, then invite them again.');
+    await deliver(result, target, INVITE_NOT_SAVED_TEXT);
   });
 }
 
@@ -451,14 +454,14 @@ async function admitCommand(context: StaffCommandContext): Promise<void> {
   });
 }
 
-type RemoveChoice = { kind: 'member'; member: MemberView } | { kind: 'device'; member: MemberView; writer: string; slot?: number } | { kind: 'invite'; invite: string; name: string } | { kind: 'finish'; count: number };
+type RemoveChoice = { kind: 'member'; member: MemberView } | { kind: 'device'; member: MemberView; writer: string; slot?: number } | { kind: 'invite'; invite: string; name: string } | { kind: 'reinvite'; invite: string; name: string } | { kind: 'finish'; count: number };
 
 /**
  * Remove from Staff Project (D-17, D-23): a member, one of a member's devices, or an open or expired invitation; the rekey sentence before and after.
  * When a removal or clearance change was left unfinished, finishing it is offered first (MJ-03).
  */
 async function removeCommand(context: StaffCommandContext): Promise<void> {
-  await withShared(context, async (shared, membership) => {
+  await withShared(context, async (shared, membership, root) => {
     const view = await readRoster(shared);
     const choices: Array<{ label: string; description: string; choice: RemoveChoice }> = [];
     const unfinished = await membership.unfinishedRekeys(shared);
@@ -475,6 +478,11 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
         ? { label: `Invitation for ${invite.name} (expired)`, description: `Cancel the expired invitation ${invite.invite} to clean it up`, choice: { kind: 'invite', invite: invite.invite, name: invite.name } }
         : { label: `Invitation for ${invite.name}`, description: `Cancel the open invitation ${invite.invite}`, choice: { kind: 'invite', invite: invite.invite, name: invite.name } });
     }
+    // An open invitation whose file was never saved (the save failed after the roster recorded it) can be saved again on the computer that made it.
+    for (const open of await membership.reissuableInvites(shared)) {
+      const who = open.forMember === undefined ? open.name : `${open.name}'s other computer`;
+      choices.push({ label: `${INVITE_SAVE_AGAIN_PREFIX}${who} again`, description: `Save invitation ${open.invite} again; nothing in the project changes`, choice: { kind: 'reinvite', invite: open.invite, name: who } });
+    }
     const picked = await vscode.window.showQuickPick(choices.map(({ label, description }) => ({ label, description })), { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' });
     const choice = picked === undefined ? undefined : choices.find((item) => item.label === picked.label && item.description === picked.description)?.choice;
     if (!choice) return;
@@ -483,6 +491,14 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       const parts = choice.count === 1 ? 'One part of the project still uses' : `${choice.count} parts of the project still use`;
       if (!(await confirm('Finish the removal or clearance change left unfinished?', [`${parts} a key that a removed device, or a member no longer cleared for it, holds. Finishing moves them to a new key for the people still on them.`, REKEY_KEEP_TEXT], 'Finish'))) return;
       show(await membership.finishRekeys(shared));
+      return;
+    }
+    if (choice.kind === 'reinvite') {
+      const { INVITE_FILE_EXTENSION } = await import('../domain/replica/invite');
+      const target = await saveTarget(`invitation-${fileSlug(choice.name)}${INVITE_FILE_EXTENSION}`, INVITE_FILE_EXTENSION, `Save the invitation for ${choice.name} again`, 'Staff invitation');
+      if (!target) return;
+      if (await inside(root, target)) { warn(INVITE_INSIDE_PROJECT_TEXT); return; }
+      await deliver(await membership.remakeInvite(shared, choice.invite), target, INVITE_NOT_SAVED_TEXT);
       return;
     }
     if (choice.kind === 'invite') {
@@ -513,7 +529,7 @@ async function addMachineCommand(context: StaffCommandContext): Promise<void> {
     if (!target) return;
     if (await inside(root, target)) { warn(INVITE_INSIDE_PROJECT_TEXT); return; }
     const result = await membership.addMyOtherMachine(shared, { member: member.member });
-    await deliver(result, target, 'Cancel the invitation with Staff: Remove from Staff Project, then make a new one.');
+    await deliver(result, target, INVITE_NOT_SAVED_TEXT);
   });
 }
 

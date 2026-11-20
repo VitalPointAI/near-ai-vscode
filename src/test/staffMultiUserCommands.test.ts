@@ -816,3 +816,72 @@ test('start this computer\'s shared history again in a folder with no shared pro
     assert.equal(/organi[sz]ation/i.test(text), false, text);
   }
 });
+
+test('an invitation whose file could not be saved is saved again from Remove on the computer that made it, writing nothing, and the joiner joins with it', async () => {
+  const first = await lead('reinvite-lead');
+  // The save place does not exist: the roster records the invitation, but its file is not saved, and the lead is told how to save it again.
+  use(first);
+  stub.inputAnswers.push('B. Example', 'j2-analyst');
+  stub.quickPickAnswers.push(['member', 'answers_for:j2'], 'Internal');
+  stub.saveDialogAnswers.push(path.join(first.out, 'missing', 'invitation'));
+  await run(C.invite);
+  const unsaved = lastNotification();
+  assert.equal(unsaved.level, 'warn');
+  assert.ok(unsaved.message.includes(multi.INVITE_NOT_SAVED_TEXT), unsaved.message);
+  const before = state(first);
+  // Remove lists the invitation to save again; picking it saves the file and changes nothing in the project.
+  const again = path.join(first.out, 'invitation-again');
+  stub.quickPickAnswers.push(`${multi.INVITE_SAVE_AGAIN_PREFIX}B. Example again`);
+  stub.saveDialogAnswers.push(again);
+  await run(C.remove);
+  assert.match(lastNotification().message, /The invitation for B\. Example is ready again\. Nothing was changed in the project\./);
+  const file = `${again}${INVITE_FILE_EXTENSION}`;
+  assert.ok(existsSync(file));
+  const after = state(first);
+  const projectFiles = (files: Record<string, string>): Array<[string, string]> => Object.entries(files).filter(([name]) => name.startsWith(`project${path.sep}`)).sort();
+  assert.deepEqual(projectFiles(after.files), projectFiles(before.files), 'nothing in the project changed');
+  assert.deepEqual(after.secrets, before.secrets, 'no secret changed');
+  // The saved invitation works: the joiner answers it and both screens show the same six words.
+  const joiner = install('reinvite-joiner');
+  const { request, words } = await joinBy(joiner, file, 'B. Example');
+  assert.equal(words.length, 6);
+  await admitBy(first, request, multi.SIX_WORDS_MATCH, path.join(first.out, 'welcome'));
+  assert.match(lastNotification().message, /B\. Example/);
+  // Once used, the invitation is no longer offered to save again.
+  use(first);
+  stub.quickPickAnswers.push(undefined);
+  await run(C.remove);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items;
+  assert.equal(listed.some((item) => item.label.startsWith(multi.INVITE_SAVE_AGAIN_PREFIX)), false, listed.map((item) => item.label).join(' | '));
+});
+
+test('remakeInvite refuses a used, cancelled, expired or unknown invitation, and one whose secret this computer does not hold, writing nothing', async () => {
+  const first = await lead('reinvite-refusals');
+  const { inviteToProject, remakeInvite, voidInvite, reissuableInvites } = await import('../staff/replica/membership');
+  const opened1 = await ReplicaProject.open(first.root, first.deps);
+  assert.ok(opened1 instanceof ReplicaProject);
+  opened.push(opened1);
+  const shared = { project: opened1, deps: first.deps };
+  const clearance = { scale: 'org', level: 'Internal', compartments: [], releasability: [] };
+  const a = await inviteToProject(shared, { name: 'A. Example', seat: 'j2-analyst', clearance });
+  const b = await inviteToProject(shared, { name: 'C. Example', seat: 'j2-analyst', clearance });
+  assert.ok(a.ok && b.ok);
+  assert.deepEqual((await reissuableInvites(shared)).map((item) => item.name).sort(), ['A. Example', 'C. Example']);
+  const remade = await remakeInvite(shared, a.invite as string);
+  assert.ok(remade.ok, remade.message);
+  assert.equal(remade.file?.name, a.file?.name, 'the same invitation id');
+  assert.equal((await remakeInvite(shared, 'inv-000000000000')).reason, 'unknown-invite');
+  assert.ok((await voidInvite(shared, b.invite as string)).ok);
+  assert.equal((await remakeInvite(shared, b.invite as string)).reason, 'invite-voided');
+  // Without the stored secret (another computer, or the secret was forgotten), it cannot be remade.
+  for (const key of [...first.secrets.values.keys()].filter((name) => name.endsWith(a.invite as string))) first.secrets.values.delete(key);
+  const lost = await remakeInvite(shared, a.invite as string);
+  assert.equal(lost.reason, 'invite-not-remade');
+  assert.equal(lost.message.includes('—'), false);
+  assert.deepEqual(await reissuableInvites(shared), []);
+  // Expired: a clock past the expiry.
+  const c = await inviteToProject(shared, { name: 'D. Example', seat: 'j2-analyst', clearance, days: 1 });
+  assert.ok(c.ok);
+  const later = { project: opened1, deps: { ...first.deps, now: () => new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) } };
+  assert.equal((await remakeInvite(later, c.invite as string)).reason, 'invite-expired');
+});

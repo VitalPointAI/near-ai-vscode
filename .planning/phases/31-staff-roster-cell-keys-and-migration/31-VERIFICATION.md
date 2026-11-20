@@ -2,7 +2,7 @@
 phase: 31-staff-roster-cell-keys-and-migration
 verified: 2026-11-20T07:06:00Z
 status: human_needed
-score: 142/144 must-haves verified (4/4 roadmap success criteria; 138/140 plan truths, 1 deferred to Phase 33, 1 pending the orchestrator's full-suite run)
+score: 143/144 must-haves verified (4/4 roadmap success criteria; 139/140 plan truths, 1 deferred to Phase 33)
 covered_files:
   - ".planning/phases/31-staff-roster-cell-keys-and-migration/31-01-PLAN.md"
   - ".planning/phases/31-staff-roster-cell-keys-and-migration/31-01-SUMMARY.md"
@@ -172,6 +172,7 @@ human_verification:
     why_human: "End-to-end use of the copy in a real window."
   - test: "Confirm the orchestrator's one full `npm test` run and one `npm run verify:release` run on this branch both passed."
     expected: "Both exit 0 (31-23 truth: the full suite and release check pass once at the end of the phase)."
+    result: "Done (see Test runs at the end): full suite 5218 tests, 5210 pass, 0 fail, 8 skipped; verify:release passed; e2e passed in CI on the PR head; local e2e could not start because /tmp was out of inodes."
     why_human: "The verifier was told not to run them; the orchestrator is running them now."
   - test: "Owner decision: labelled products are migrated into the base cell (see Gaps Summary, item W-1)."
     expected: "Decide whether Make Multi-User must place each labelled product (and its share of the legacy ledger) in its label cell, or refuse/warn when a product's label is above the lowest admitted clearance, before Phase 32/33 deliver base-cell entries to members."
@@ -227,7 +228,7 @@ Branch `feat/phase-31-staff-roster` at `72f5370e` (23 plans merged plus one inte
 | 31-20 host roster flows | 8 | VERIFIED | staffReplicaMembership 26/26 |
 | 31-21 staff host reads from the fold; parity | 4 | VERIFIED | staffReplicaHostMode 8/8, staffReplicaParity 5/5, staffWatches 27/27 |
 | 31-22 single-machine copy | 5 | VERIFIED | staffReplicaCopy 11/11 |
-| 31-23 commands behind the preview setting | 7 | 6 VERIFIED, 1 PENDING | staffMultiUserCommands 19/19, staffMultiUserManifest 6/6; "full suite and verify:release pass once" is being run by the orchestrator (human_verification item) |
+| 31-23 commands behind the preview setting | 7 | 7 VERIFIED | staffMultiUserCommands 19/19, staffMultiUserManifest 6/6; full suite and verify:release passed once at the end of the phase (see Test runs) |
 
 **Score:** 142/144 truths verified (0 present, behavior-unverified). Every behavior-dependent truth (state transitions, rekey, split/choose, rollback refusal, idempotent rerun) has a named test that was run and passed.
 
@@ -326,7 +327,7 @@ The post-31-23 fix (`72f5370e`) narrows the secret scanner only at named generat
 3. **Make Multi-User on a real project.** Expected: Staff Room, registry and queues read as before; originals in `.planning/staff/legacy/`; rerun refused already-shared; Set Aside and decisions refused with the Single-Machine Copy sentence. Why human: visual parity.
 4. **Preview setting.** Expected: commands hidden and nothing created while off; shown when on without a reload. Why human: palette when-clauses in the real host.
 5. **Single-Machine Copy in use.** Expected: copy verifies, carried wording correct, shared project unchanged, result lists what is not copied. Why human: end-to-end use.
-6. **Orchestrator's full suite and verify:release.** Expected: both pass once. Why human: not run by the verifier by instruction.
+6. **Orchestrator's full suite and verify:release.** Expected: both pass once. Done: see Test runs.
 7. **Owner decision on W-1** (labelled products in the base cell).
 8. **Owner decision on W-3** (invitations only from the founding device).
 
@@ -347,3 +348,16 @@ No must-have truth failed and no blocker was found. The phase goal is met in cod
 
 _Verified: 2026-11-20T07:06:00Z_
 _Verifier: Claude (gsd-verifier)_
+
+
+## Test runs (after this report was written)
+
+| Run | Where | Result |
+|---|---|---|
+| Full unit suite (`npm test`), memory-capped | local, on the integration branch after the review fixes | 5218 tests: 5210 pass, 0 fail, 8 skipped |
+| `npm run verify:release` | local | passed: 615 entries, 64 required release assets |
+| `npm run smoke:staff` | local | 37 of 37 checks passed |
+| e2e | CI on the PR head 994a236e (PR #130, run 44700211427) | passed |
+| e2e | local | not run: Xvfb could not create its lock and socket because /tmp was out of inodes (leftover test temp folders); the CI job above is the e2e result for this branch |
+
+The 31-23 truth that waited on the full suite is therefore verified, and the score above counts it. Status stays human_needed for the manual UAT items.

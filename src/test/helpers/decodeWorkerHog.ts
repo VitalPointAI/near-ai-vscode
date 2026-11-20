@@ -7,6 +7,8 @@
 //   3 throw an uncaught error
 //   4 exit with code 3
 //   5 answer with a reply the host cannot read
+//   7 answer ok under another job's id
+//   8 answer with a bare string instead of a reply object
 //   6 answer ok with this worker's heap limit in megabytes as its struct count, so a test can see whether resourceLimits took effect
 //   anything else: answer ok with zero counts
 import * as v8 from 'node:v8';
@@ -27,6 +29,14 @@ if (port !== null) {
     if (mode === 4) process.exit(3);
     if (mode === 5) {
       port.postMessage({ id: job.id, ok: true, structs: -1 });
+      return;
+    }
+    if (mode === 7) {
+      port.postMessage({ id: job.id + 1000, ok: true, structs: 0, deletes: 0, clients: 0 });
+      return;
+    }
+    if (mode === 8) {
+      port.postMessage('done');
       return;
     }
     if (mode === 6) {
