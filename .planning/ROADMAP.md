@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36; Phase 33.1, assigned positions and handover, inserted 2026-11-20 after Phase 33; Phases 38 to 40, the portfolio view, added 2026-11-20 after drop B)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
@@ -25,7 +25,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (integer numbering: Phases 26 to 37 so far) when 0.4.x work is planned with GSD.
+Next phases are added here (Phases 26 to 40 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -274,6 +274,28 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 33 to break down)
 
+**Note (2026-11-20)**: plan POST-01 into this phase: a generic `roster.require` feature check, so a client that lacks a feature a project needs refuses to fold it instead of ignoring entries it does not know. It must be in the field before Phase 33.1 ships positions, because an older client that ignored a relief would keep accepting the relieved holder's writes (`.planning/research/portfolio-and-assignment/DESIGN.md`, 3.9).
+
+### Phase 33.1: Assigned positions and handover (INSERTED)
+**Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
+**Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
+**Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 32.1 (mode table and `term()`).
+**Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
+**Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (defined in `.planning/research/portfolio-and-assignment/DESIGN.md`; added to REQUIREMENTS.md when Phase 33.1 is planned)
+**Success Criteria** (what must be TRUE):
+  1. A J1 delegate posts a person to "Watch Officer, night" from 1 December; the person proves their computer by safety code, sees no Decline, and reports for duty on 1 December; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
+  2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
+  3. In a handover, a decision the outgoing holder signs after the incoming's report is refused, the incoming reads new entries and the outgoing cannot, and a membership change between order and report forces a restage, in random fold orders and through an offline split. (POST-06)
+  4. Acting postings move decision roles and back on return; a dual-hatted person cannot approve a product they own; a client without the positions feature refuses the project with the update sentence. (POST-01, POST-07)
+  5. An existing multi-user project switched to Military mode gives the same decisions and grants after migration from seats; invitation-mode projects are unchanged. (POST-08)
+**Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
+**Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 33.1 to break down)
+
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
 **Depends on**: Phase 33
@@ -311,7 +333,7 @@ Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agre
 **Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
 **Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records). Phase 74.1 not required: the guide reads the shipped passport rows as data until it lands.
 **Inserted**: 2026-11-20 at the owner's request.
-**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08
+**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, ORG-01, ORG-02, ORG-03, ORG-04 (organization modes added 2026-11-20, `.planning/research/portfolio-and-assignment/DESIGN.md` section 5; the ids are defined in that design's requirements table and added to REQUIREMENTS.md when Phase 32.1 is planned)
 **Success Criteria** (what must be TRUE):
   1. On a laptop with no local AI and a NEAR AI key, a developer answering "internal work, Canada No" is recommended NEAR AI private hardware with its reason, and local appears only under "Not available here" with the hardware reason. (GUIDE-01, GUIDE-03, GUIDE-04)
   2. With a local server serving a passported model, an analyst answering "sensitive personal information" gets the project labelled Protected B and is recommended this computer; NEAR AI is greyed with the routing sentence; a hosted option appears for Protected B only when the policy records an authorization for it. (GUIDE-02, GUIDE-04, GUIDE-05)
@@ -319,6 +341,7 @@ Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agre
   4. A policy that locks Canada greys NEAR AI and non-Canadian vaults with the residency reason; nothing outside the verified policy is ever offered, and no policy edit or label lowering is suggested. (GUIDE-06)
   5. Check answers lists what will change before Apply; a re-run shows only differences and never lowers a label; a signed record holds the answers, viability snapshot, policy hash, options, recommendation and choice. (GUIDE-07)
   6. Staff officers land in the Staff Room with their section's team and developers in chat with the project team; the path works by keyboard and screen reader, and nothing animates with reduced motion; existing profiles and discovery answers work unchanged. (GUIDE-08)
+  7. One mode table sets words and joining behaviour together: a staff officer's setup suggests Military mode and the Staff Room then says "Post a person"; a policy fixing Public service shows the mode as set by your organization; a software project keeps "Invite", unchanged. (ORG-01, ORG-02, ORG-03, ORG-04)
 **Research flags**: (1) Open owner decisions D1 to D4, D6, D7 and D9. (2) Exact probe ports and signature endpoints per local server, checked against current releases. (3) Mapping of personal information to Protected A or B to be confirmed by your organization's security officer before rollout.
 **Undo cost**: Low to medium: an optional `onboarding` bundle key and a `setupGuide` entry in `project.json`.
 **Plans:** 0 plans
@@ -382,6 +405,54 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 37 to break down)
+
+### Portfolio view: mixed organizations rolled up for prioritization and resource allocation (Phases 38 to 40, added 2026-11-20)
+
+Design: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part C (section 6) and 10.4. Owner request of 2026-11-20: a whole defence portfolio mixes units of different modes (commands, public service branches, capital project offices, software cells); each keeps its own mode, words and joining rules, and everything rolls up into one strategic portfolio view for prioritization and resource allocation, as decision support where people decide and agents draft. Units release signed, labelled publications into the portfolio's write-only intake cells; the portfolio never receives units' cells; each view is labelled at the join of its inputs, raised by signed aggregation rules, and a viewer below it sees only views within their clearance and learns nothing about the rest. These phases ship in the 0.4.x line after drop B, on fictional data and one hub. Later stages are lines in Phase 97 (views), Phase 100 (feeds), Phase 71 (verified publishers) and L5 (cross-hub relay); real data waits for Phase 71, the Stage 1 gate and an accredited host. Requirement ids PORT-01 to PORT-12 are defined in the design and added to REQUIREMENTS.md when Phase 38 is planned.
+
+### Phase 38: Organization tree, publications and label-safe roll-up
+**Goal**: Units of different modes agree to report to a portfolio and release signed, labelled publications into write-only intake cells, and the portfolio folds them into views whose label covers the whole under signed aggregation rules.
+**Depends on**: Phases 34 and 35 (drop B: hub changes and bundle transport); Phase 33.1 (supply from positions); Phase 32.1 (modes); Phase 70 (labels).
+**Requirements**: PORT-01, PORT-02, PORT-03, PORT-04, PORT-05, PORT-06
+**Success Criteria** (what must be TRUE):
+  1. A Military-mode unit and a Public service unit each publish status, risks and supply counts, and neither can read the other's publications or the portfolio's (byte capture on the hub). (PORT-01, PORT-02, PORT-03)
+  2. Many Protected B items across three units raise the combined view under the default aggregation rule; a Protected B viewer is offered only narrowed, suppressed or coarsened views, each labelled, and "Why this label" names the rule. (PORT-05, PORT-06)
+  3. A viewer below a unit's label sees identical screens whether or not that unit exists; a missing publication shows as withheld to cleared viewers only. (PORT-03, PORT-06)
+  4. Publications move between two hubs by sealed bundle file and fold to the same digest. (PORT-03)
+**Research flags**: (1) Treasury Board clause-level detail (gating, approval limits, independent review) confirmed by a person, since automated reading was refused. (2) Default aggregation rules set with your organization's security officer. (3) Open owner decisions D6 to D8 in the design.
+**Undo cost**: Medium to high: publication and agreement formats travel between organizations, so settle them in the first plan.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 38 to break down)
+
+### Phase 39: Portfolio Room, prioritization and scenarios
+**Goal**: The portfolio office sets weighted criteria, people score with agent-drafted evidence, and scenarios with the efficient frontier are compared and decided by named people.
+**Depends on**: Phase 38.
+**Requirements**: PORT-07, PORT-08, PORT-09
+**Success Criteria** (what must be TRUE):
+  1. A criteria set whose weights do not sum to 100 or with a criterion without anchors is held; an agent score without a publication citation is refused; scorers differing by more than one anchor level need a reconciliation note. (PORT-08)
+  2. The constrained frontier for a fictional 120-project portfolio matches a brute-force reference on small cases and otherwise completes or says "best found, not proven optimal". (PORT-09)
+  3. Two board members deciding one scenario version differently at once make it contested; the approved scenario produces downward priority publications released by a person; no agent can reach these acts. (PORT-07, PORT-09)
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 39 to break down)
+
+### Phase 40: Capacity, allocation, dependencies and gates
+**Goal**: Demand and supply across units are matched by skill, clearance and period, reallocations become taskings each unit fills in its own mode, and cross-unit dependencies and gate calendars show what will slip.
+**Depends on**: Phase 38 (and Phase 39 for decisions).
+**Requirements**: PORT-10, PORT-11, PORT-12
+**Success Criteria** (what must be TRUE):
+  1. A Secret demand is never matched by Protected B supply; an approved reallocation reaches a unit as a tasking, its tasker posts two people, and the next supply publication shows the change. (PORT-10)
+  2. A viewer who cannot see an upstream milestone sees their own item at risk only through its own published forecast, with no hint of the hidden edge. (PORT-11)
+  3. A fictional project rated above its unit's capacity class is flagged for higher approval from profile thresholds, with no threshold in code. (PORT-12)
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 40 to break down)
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -678,6 +749,7 @@ Plans:
 **Goal**: An agent can never hold more than it was delegated: every person, agent and machine acts under its own standard DID, authority, clearance, roles and compartments are signed credentials that can be revoked, a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.
 **Depends on**: Phase 70 (and Phase 69's signer and key status)
 **Requirements**: DLGT-01, DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07
+**From the portfolio design (2026-11-20)**: positions and portfolio publishers become verified credentials here, so a posting and a publication can be checked against a person's credential, not only the device key (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
 **Builds on Phase 69 (unchanged, executing)**: the payload signer accepts any Ed25519 signer object (69 D-20) and every check honours one key-status lookup (69 D-09, D-21). The `eddsa-jcs-2022` proof is a second proof format beside Phase 69's signed-payload envelope, using the same signer object, the same raw key and the same canonical JSON, so there is still one signer (69 D-10); the envelope keeps signing policy bundles and approval answers, its `grant` purpose stays reserved, and grants become delegation credentials. Phase 69's device key becomes the device's `did:key` with no key change; 69 D-06's wording about a `did:near` identity is superseded by decision 10; 69-CONTEXT.md D-06 carries a note saying so. Phase 69's build is unaffected: it creates the Ed25519 device key that becomes a `did:key`.
 **Research step (first, before the other plans are written)**: (a) JCS conformance: run the existing canonical JSON and our `eddsa-jcs-2022` signing input against the W3C test vectors and Digital Bazaar's cryptosuite, confirm the integer-only subset equals RFC 8785 for every input the profile allows (research risk 12), and confirm a Data Integrity signing input (two SHA-256 digests) can never equal a Phase 69 signed-payload or team-event input. (b) `did:webvh` hosting and caching: until HQ hosts logs (L4), where people's and your organization's logs live and how they travel (candidates: beside the policy bundle, or over Phase 69's coordination transport); how a log verifies from a cached copy and resumes from cached verified state; the SCID and domain in the identifier; pre-rotation with an offline root key; witnesses. (c) Status list sizing: the 131,072-entry minimum, compressed size, random index allocation, lists per issuer, `validUntil` and cache lifetime, and how a solo install publishes and refreshes its own list.
 **Success Criteria** (what must be TRUE):
@@ -1074,6 +1146,7 @@ Plans:
 ### Phase 97: Analytics, reports, insights and views
 **Goal**: Dashboards, reports and suggested insights appear without setup, with every number computed under the viewer's clearance.
 **Depends on**: Phase 96.
+**From the portfolio design (2026-11-20)**: the knowledge base views become the rendering and ad-hoc analysis layer over the portfolio's publication fold (Phases 38 to 40), with the same viewer-clearance rule; the aggregation rule evaluator built in Phase 38 is the one Phase 93 extends.
 **Requirements**: KB-09, KB-10, KB-11, KB-12, KB-13, KB-14
 **Success Criteria** (what must be TRUE):
   1. Dashboard totals for two clearances each match the totals of the corresponding single-clearance base. (KB-09)
@@ -1129,6 +1202,7 @@ Plans:
 **Goal**: Adding a new source takes a few clicks, and agents can write new connectors safely.
 **Depends on**: Phase 88; Phases 72 and 73. May start any time after Phase 92 if capacity allows.
 **Requirements**: DATA-27, DATA-28, DATA-29, DATA-30, DATA-31, DATA-32
+**From the portfolio design (2026-11-20)**: financial, procurement and schedule sources feed the portfolio's publications (Phases 38 to 40) as released, labelled items, never as raw cross-unit access (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
 **Success Criteria** (what must be TRUE):
   1. An agent writes a connector for a REST source that passes conformance and runs after one approval. (DATA-28, DATA-29, DATA-30)
   2. A connector that tries an undeclared host is blocked and recorded. (DATA-29)
@@ -1481,6 +1555,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 **Scope**: Node identities as `did:key` bound to your organization by a credential (issued by a person with authority, revocable through the status list); local grouping by discovery on the local network with mutual authentication by node identity and binding credentials, each node's gate still deciding alone; offline verification (revised 2026-11-15, Platform direction decision 13): before going offline a device syncs your organization's DID log, the DID logs of the people it works with, all status lists, the policy bundle and the latest anchor roots with inclusion proofs, verifies locally and checks the cached copies against the roots; each level has a maximum offline age after which new access at that level fails closed; two offline devices exchange stapled status lists signed by your organization; on reconnect, sessions that ran on stale data are re-evaluated and flagged; a second site may hold its own issuer DID under a narrower delegation; compute pooling for local inference across linked machines, NVIDIA and AMD; routing extended to local, then linked machines, then the HQ cluster, then a NEAR AI Cloud burst, each hop only where policy, privacy tier and contract allow; federation sync of identities, policy (down, as signed bundles that never widen an edge's anchored authority), audit (up, hash-chained, gaps detected) and results; inference federation to an HQ cluster as one more provider.
 **Builds on**: Phase 27's encrypted sync (bundles over git with a recovery code, records merged without loss); Team Mode's signed coordination log and git transport; the ciphertext relay design of the paused former v0.5.0 knowledge-base plan (a relay that stores only ciphertext, checks signed append capabilities, and can withhold but not forge; RELAY-01/02 in `.planning/milestones/v0.5.0-paused/`); the planned `relayTransport.ts`, which this transport replaces.
 **From the data platform (2026-11-18):** catalog federation between edge and HQ, per-label-cell keys for edge devices that store data, and pooled compute for extraction and training (data platform design, section 8.2).
+**From the portfolio design (2026-11-20):** hub-to-hub relay of sealed portfolio publications with checkpoints naming their signer, verified publishers and positions across organizations, and cross-organization portfolios; the publication format does not change (`.planning/research/portfolio-and-assignment/DESIGN.md`, 6.11).
 **Depends on**: L1a and L1b, L2, L4.
 **Research flags**: Pooling across heterogeneous NVIDIA and AMD nodes is hard and must be flagged honestly: one model split across vendors may not be practical, so expect per-vendor pools with request-level balancing; options to evaluate include llama.cpp RPC, vLLM and SGLang multi-node, and Ollama per node behind a router; OpenShell has nothing for pooling (the spike: a model server on each box behind an allowed endpoint, or a Kubernetes cluster); clock trust without network time (offline age uses monotonic counters and last-sync time, not the wall clock alone: `identity-research.md`, risk 8); offline revocation lag: a revoked person keeps working on a device until its cached list or the level's maximum offline age runs out, so each level's limit is set deliberately (risk 5; the research's values are examples only); conflict rules when an edge and HQ both changed policy; the federation transport can reuse Team Mode's git transport with event payloads encrypted to member device keys and signatures and hashes left in clear (works over any git remote or a LAN bare repository; Calimero evaluation, 2026-11-15, recommended instead of Calimero, which has no LAN or offline groups), and anchor roots are written at fixed intervals so timing reveals nothing.
 **Undo cost**: High for the federation record formats.
@@ -1504,12 +1579,16 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 0/28 | Planned (drop A; Parts A and B first, then the hub) | - |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
+| 33.1. Assigned positions and handover | 0/TBD | Not started (after Phase 33, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/TBD | Not started (after Phase 32, before Phase 36) | - |
 | 32.2. Local model manager | 0/TBD | Not started (after 32.1's shared contract) | - |
 | 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phase 32; may run beside 33 to 35) | - |
 | 37. Cohere Encrypted Vault as an attested endpoint | 0/TBD | Not started (after Phase 36) | - |
+| 38. Organization tree, publications and label-safe roll-up | 0/TBD | Not started (portfolio view; after drop B) | - |
+| 39. Portfolio Room, prioritization and scenarios | 0/TBD | Not started (after Phase 38) | - |
+| 40. Capacity, allocation, dependencies and gates | 0/TBD | Not started (after Phase 38; may run beside 39) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
