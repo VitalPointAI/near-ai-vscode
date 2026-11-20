@@ -83,6 +83,24 @@
   time each write their own findings file, which the lead combines, instead of writing parts of one
   shared file. Update Team offers the new research team wording.
 
+### Military staff teams
+
+- **Labelled products in shared staff projects.** A shared staff project now keeps each product
+  in a part of its own for its label, and gives that part only to the computers of people whose
+  declared clearance covers the label. The part every member holds carries only the list of
+  people, so it never holds product text. Products made without a label are `org/Internal`.
+- **Make This Staff Project Multi-User converts labelled projects.** Projects with products above
+  `org/Public` are no longer refused. You are asked to declare your own clearance first, and the
+  conversion is refused only for labels your declared clearance does not cover, naming the
+  products that carry them. The old product ledger and decision log are kept whole in a part only
+  you, and a deputy cleared for every label in them, can open.
+- **Projects made multi-user with 0.4.35 keep working.** Their products stay where they are. To
+  give those products parts of their own, make a single-machine copy and make that copy
+  multi-user again.
+- **The single-machine copy says what it left out.** A copy made on a computer that is not cleared
+  for every part of the project says "Parts of this project you are not cleared for were not
+  copied."
+
 
 ## 0.4.35
 

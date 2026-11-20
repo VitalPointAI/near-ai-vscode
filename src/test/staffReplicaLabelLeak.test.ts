@@ -15,11 +15,11 @@ import { createLocalDoc, docText, localInsert, snapshotOf } from '../domain/repl
 import { entryHash, openBlob, openBody } from '../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
 import type { Label } from '../domain/gate/labels';
-import { baseCellAllows } from '../domain/replica/productCells';
+import { PREVIEW_WAY_FORWARD_TEXT, baseCellAllows } from '../domain/replica/productCells';
 import { rosterView } from '../domain/replica/roster';
 import { epochsAt } from '../domain/replica/rosterCells';
 import { REPLICA_DIR } from '../domain/staff/multiUser';
-import { appendProductEntry, ensureLabelCell, proposeVersion } from '../staff/replica/labelCells';
+import { NOT_CLEARED_TEXT, appendProductEntry, ensureLabelCell, proposeVersion } from '../staff/replica/labelCells';
 import { isProjectRefused } from '../staff/replica/replicaProject';
 import { makeSingleMachineCopy } from '../staff/replica/singleCopy';
 import { StaffHost } from '../staff/staffHost';
@@ -419,4 +419,40 @@ test('base cell: opened with the base key on the lead, every base entry is the g
     const inCell = streamEntries(s.lead.at, written.cell).map((entry) => openBody(s.lead.p.keys.epochKey(written.cell, entry.header.epoch) as Buffer, entry.header, Buffer.from(entry.body, 'base64url')) as Buffer);
     assert.ok(found(Buffer.concat(inCell), canariesOf(written.plan, ['name', 'title', 'reason'])).length === 3, `the search finds ${written.plan.token}'s canaries in its own cell`);
   }
+});
+
+// ---- Task 3: what SECURITY.md says ---------------------------------------------------------------------------------------------------------------
+
+/** A subsection of SECURITY.md, from its heading to the next heading of its level or above, with the line breaks folded. */
+function subsectionOf(text: string, heading: string): string {
+  const start = text.indexOf(`\n${heading}\n`);
+  assert.ok(start >= 0, heading);
+  const rest = text.slice(start + heading.length + 2);
+  const next = rest.search(/\n#{2,3} /);
+  return (next === -1 ? rest : rest.slice(0, next)).replace(/\s+/g, ' ');
+}
+
+test('SECURITY.md has "Labelled products in shared projects" once inside the multi-user section, says the base cell carries only the roster, and has no em-dash', () => {
+  const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
+  const heading = '### Labelled products in shared projects';
+  assert.equal(text.split('\n').filter((line) => line === heading).length, 1, 'the heading appears once');
+  const start = text.indexOf('## Multi-user staff projects (preview)');
+  const end = text.indexOf('\n## ', start + 1);
+  const at = text.indexOf(`\n${heading}\n`);
+  assert.ok(start >= 0 && at > start && (end === -1 || at < end), 'inside the multi-user section');
+  assert.ok(at > text.indexOf('\n### Cell keys, wraps and rekey\n'), 'after the cell keys subsection');
+  const section = subsectionOf(text, heading);
+  for (const phrase of [
+    'org/Internal', 'write up, never down', 'only the staff lead', 'deputy', 'Make a single-machine copy and make that copy multi-user again',
+    'Parts of this project you are not cleared for were not copied.', 'hub', 'repository'
+  ]) assert.ok(section.toLowerCase().includes(phrase.toLowerCase()), phrase);
+  assert.ok(section.includes(PREVIEW_WAY_FORWARD_TEXT), 'the way forward is quoted word for word');
+  assert.ok(section.includes(NOT_CLEARED_TEXT('that label')), 'the D-19 sentence is quoted word for word');
+  // The cell keys subsection now opens with the base cell carrying only the roster, every member (and so the hub) holding it.
+  const cellKeys = subsectionOf(text, '### Cell keys, wraps and rekey');
+  assert.ok(cellKeys.includes('carries only the roster'), 'the cell keys introduction says the base cell carries only the roster');
+  // The bullet saying labelled products are refused at conversion is gone, and the clearances subsection points to the new one.
+  assert.ok(!text.includes('Labelled products are not made multi-user yet'), 'the old refusal bullet is replaced');
+  assert.ok(subsectionOf(text, '### People and clearances are declared by the staff lead').includes('Labelled products in shared projects'), 'the clearances subsection points to the new one');
+  assert.doesNotMatch(text, /—/);
 });
