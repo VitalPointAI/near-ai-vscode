@@ -303,3 +303,182 @@ test('cellOrderHook: a cell may cite the base cell and a cell its label dominate
   assert.equal(fromN(base, t.x), false);
   assert.equal(fromN(t.z, t.x), false);
 });
+
+// ---- Task 2: refusals, Add My Other Machine, voiding ----------------------------------------------------------------------------------------------
+
+async function invitedAndJoined(lead: Lead, label = 'b', options: { days?: number } = {}): Promise<{ at: Install; invited: MembershipResult; joined: MembershipResult }> {
+  const at = install(label);
+  const invited = ok(await inviteToProject(lead.host, { name: 'Jo Analyst', seat: 'j2-chief', clearance: OFFICIAL, ...options }), 'invite');
+  const joined = ok(await joinFromInvite(at.root, at.deps, file(invited).text, { name: 'Jo Analyst' }), 'join');
+  return { at, invited, joined };
+}
+
+test('code-not-confirmed: admitting without the lead\'s confirmation that the words matched is refused and writes nothing', async () => {
+  const lead = await founded();
+  const { invited, joined } = await invitedAndJoined(lead);
+  const before = await head(lead.p);
+  for (const codeMatched of [false, undefined, 'yes', 1] as unknown[]) {
+    const result = await admitJoinRequest(lead.host, file(joined).text, { codeMatched: codeMatched as boolean });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'code-not-confirmed');
+    assert.equal(result.message, MEMBERSHIP_REFUSALS['code-not-confirmed']);
+    assert.equal(result.file, undefined);
+  }
+  const after = await head(lead.p);
+  assert.equal(after.hash, before.hash, 'the roster did not move');
+  assert.ok(lead.at.secrets.values.has(JOIN_SECRET_PREFIX + (invited.invite as string)), 'the secret is kept');
+});
+
+test('invite-expired: an invitation read after its expiry is refused on the joining side and nothing is pinned; a request admitted after the expiry is refused too', async () => {
+  const lead = await founded();
+  const late = install('late');
+  const invited = ok(await inviteToProject(lead.host, { name: 'Jo Analyst', seat: 'j2-chief', clearance: OFFICIAL, days: 2 }), 'invite');
+  late.clock.now = new Date(NOW.getTime() + 3 * DAY_MS);
+  const refused = await joinFromInvite(late.root, late.deps, file(invited).text, { name: 'Jo Analyst' });
+  assert.equal(refused.reason, 'invite-expired');
+  assert.equal(refused.message, MEMBERSHIP_REFUSALS['invite-expired']);
+  assert.equal(existsSync(genesisPinFile(late.global, lead.p.projectId)), false, 'nothing pinned');
+  // Answered in time, admitted too late.
+  const { joined } = await invitedAndJoined(lead, 'b', { days: 2 });
+  lead.at.clock.now = new Date(NOW.getTime() + 3 * DAY_MS);
+  const before = await head(lead.p);
+  const admitted = await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true });
+  assert.equal(admitted.reason, 'invite-expired');
+  assert.equal(admitted.message, MEMBERSHIP_REFUSALS['invite-expired']);
+  assert.equal((await head(lead.p)).hash, before.hash);
+});
+
+test('invite-used: a second join request for an invitation already used is refused, and nothing is written', async () => {
+  const lead = await founded();
+  const { invited, joined } = await invitedAndJoined(lead);
+  ok(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true }), 'first admit');
+  const other = install('other');
+  const again = ok(await joinFromInvite(other.root, other.deps, file(invited).text, { name: 'Someone Else' }), 'a second answer');
+  const before = await head(lead.p);
+  for (const text of [file(again).text, file(joined).text]) {
+    const result = await admitJoinRequest(lead.host, text, { codeMatched: true });
+    assert.equal(result.reason, 'invite-used');
+    assert.equal(result.message, MEMBERSHIP_REFUSALS['invite-used']);
+  }
+  assert.equal((await head(lead.p)).hash, before.hash);
+});
+
+test('invite-voided: voidInvite writes invite.void and forgets the join secret; a request for it is then refused, and voiding it twice is refused', async () => {
+  const lead = await founded();
+  const { invited, joined } = await invitedAndJoined(lead);
+  const id = invited.invite as string;
+  const others = new Map([...lead.at.secrets.values].filter(([name]) => name !== JOIN_SECRET_PREFIX + id));
+  const voided = ok(await voidInvite(lead.host, id), 'void');
+  assert.deepEqual(voided.notices, multiUserNoticeLines());
+  const { roster, position } = await head(lead.p);
+  assert.equal(inviteAt(roster.members, id, position)?.state, 'voided');
+  assert.equal(lead.at.secrets.values.has(JOIN_SECRET_PREFIX + id), false);
+  for (const name of others.keys()) assert.ok(lead.at.secrets.values.has(name), name);
+  const result = await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true });
+  assert.equal(result.reason, 'invite-voided');
+  assert.equal(result.message, MEMBERSHIP_REFUSALS['invite-voided']);
+  assert.equal((await voidInvite(lead.host, id)).reason, 'invite-voided');
+  assert.equal((await voidInvite(lead.host, 'inv-nothing')).reason, 'unknown-invite');
+});
+
+test('wrong-secret: a request made with another secret is refused, the secret is kept and the invitation still admits the right request', async () => {
+  const lead = await founded();
+  const { invited, joined } = await invitedAndJoined(lead);
+  const id = invited.invite as string;
+  const read = readInvite(file(invited).text, NOW);
+  assert.ok(read.ok);
+  const forger = install('forger');
+  const device = await ReplicaProject.localDevice(forger.deps);
+  const forged = JSON.stringify(buildJoinRequest(device.signer, { ...read.invite, secret: newJoinSecret() }, { name: 'Jo Analyst', x25519: device.x25519, now: NOW }));
+  const result = await admitJoinRequest(lead.host, forged, { codeMatched: true });
+  assert.equal(result.reason, 'wrong-secret');
+  assert.equal(result.message, MEMBERSHIP_REFUSALS['wrong-secret']);
+  assert.ok(lead.at.secrets.values.has(JOIN_SECRET_PREFIX + id));
+  ok(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true }), 'the right request');
+  // unknown-invite: a request for an invitation the project does not have.
+  const unknown = JSON.stringify(buildJoinRequest(device.signer, { ...read.invite, invite: 'inv-unknown' }, { name: 'Jo Analyst', x25519: device.x25519, now: NOW }));
+  assert.equal((await admitJoinRequest(lead.host, unknown, { codeMatched: true })).reason, 'unknown-invite');
+});
+
+test('folder-has-staff-project: joining into a folder that holds today\'s staff ledgers, or another shared project, is refused and changes nothing', async () => {
+  const lead = await founded();
+  const invited = ok(await inviteToProject(lead.host, { name: 'Jo Analyst', seat: 'j2-chief', clearance: OFFICIAL }), 'invite');
+  const ledgers = install('ledgers');
+  mkdirSync(path.join(ledgers.root, '.planning', 'staff', 'ledger'), { recursive: true });
+  writeFileSync(path.join(ledgers.root, '.planning', 'staff', 'ledger', 'products.jsonl'), '');
+  const refused = await joinFromInvite(ledgers.root, ledgers.deps, file(invited).text, { name: 'Jo Analyst' });
+  assert.equal(refused.reason, 'folder-has-staff-project');
+  assert.equal(refused.message, MEMBERSHIP_REFUSALS['folder-has-staff-project']);
+  assert.equal(existsSync(genesisPinFile(ledgers.global, lead.p.projectId)), false);
+  assert.deepEqual(readdirSync(path.join(ledgers.root, '.planning', 'staff')), ['ledger']);
+  // A folder holding another shared project: the other lead's own folder.
+  const other = await founded('other');
+  const into = await joinFromInvite(other.at.root, other.at.deps, file(invited).text, { name: 'Jo Analyst' });
+  assert.equal(into.reason, 'folder-has-staff-project');
+  assert.equal(existsSync(genesisPinFile(other.at.global, lead.p.projectId)), false);
+});
+
+test('Add My Other Machine: a short invitation for an existing member, answered by that member\'s second install, is admitted as device.add with a new slot and the invitation is used', async () => {
+  const t = await team();
+  const before = await head(t.lead.p);
+  const second = await addMachine(t.lead, t.m.member, 'm2', 'Mo Analyst');
+  const { roster, position, hash } = await head(t.lead.p);
+  assert.equal(position, before.position + 2, 'member.invite then device.add');
+  const added = roster.members.devices.get(second.writer)?.[0];
+  assert.equal(added?.member, t.m.member);
+  assert.equal(added?.slot, 4, 'the next slot after the lead (1), M (2) and N (3)');
+  const id = second.results[0].invite as string;
+  assert.equal(inviteAt(roster.members, id, position)?.state, 'used');
+  assert.equal(roster.members.invites.get(id)?.forMember, t.m.member);
+  assert.equal(roster.members.members.get(t.m.member)?.length, 1, 'no second member record');
+  // The other machine gets the cells its member is cleared for.
+  assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.m.writer, second.writer].sort());
+  assert.ok(second.p.keys.epochKey(t.x, 1) !== undefined);
+  // The lead's own other machine: the lead declares no clearance, so it gets the cells the lead's device holds.
+  const leadTwo = await addMachine(t.lead, 'mbr-lead', 'a2', 'Lee Lead');
+  for (const cell of [t.lead.p.projectId, t.x, t.z]) assert.ok(leadTwo.p.keys.epochKey(cell, 1) !== undefined, cell);
+  // An unknown member cannot be given another machine.
+  assert.equal((await addMyOtherMachine(t.lead.host, { member: 'mbr-nobody' })).reason, 'member-unknown');
+});
+
+test('no message, file name or result field contains a join secret, a key or the MAC', async () => {
+  const lead = await founded();
+  const results: MembershipResult[] = [];
+  const b = await bringIn(lead, 'b', 'Jo Analyst', OFFICIAL);
+  results.push(...b.results);
+  const { invited, joined } = await invitedAndJoined(lead, 'c');
+  results.push(invited, joined);
+  const mac = (JSON.parse(file(joined).text) as { payload: { mac: string } }).payload.mac;
+  const secret = (readInvite(file(invited).text, NOW) as { invite: { secret: string } }).invite.secret;
+  results.push(await reviewJoinRequest(lead.host, file(joined).text));
+  results.push(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: false }));
+  results.push(await voidInvite(lead.host, invited.invite as string));
+  results.push(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true }));
+  results.push(await removeFromProject(lead.host, { member: b.member }));
+  const forbidden = [mac, secret, ...secretsOf(lead.at, b.at)].filter((value) => value.length >= 32);
+  assert.ok(forbidden.length > 6);
+  for (const result of results) {
+    const text = visible(result);
+    for (const value of forbidden) assert.ok(!text.includes(value), `a result field holds a secret: ${result.message}`);
+    assert.ok(!/—/.test(result.message), 'no em-dash');
+  }
+  for (const message of Object.values(MEMBERSHIP_REFUSALS)) assert.ok(!/—/.test(message));
+});
+
+test('only the lead or the deputy writes the roster: a member\'s invite, void, removal and update are refused not-a-roster-writer and change nothing', async () => {
+  const t = await team();
+  const before = await head(t.m.p);
+  const attempts = [
+    await inviteToProject(t.m.host, { name: 'Pat', seat: 'j2-chief', clearance: OFFICIAL }),
+    await voidInvite(t.m.host, 'inv-anything'),
+    await removeFromProject(t.m.host, { member: t.n.member }),
+    await updateMember(t.m.host, { member: t.n.member, name: 'Nell P' }),
+    await nameDeputy(t.m.host, t.n.member),
+    await handOverLead(t.m.host, { to: t.m.member, reason: 'lead-lost' })
+  ];
+  for (const result of attempts) {
+    assert.equal(result.reason, 'not-a-roster-writer');
+    assert.equal(result.message, MEMBERSHIP_REFUSALS['not-a-roster-writer']);
+  }
+  assert.equal((await head(t.m.p)).hash, before.hash);
+});
