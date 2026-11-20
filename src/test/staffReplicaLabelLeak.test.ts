@@ -3,9 +3,10 @@
 // and member Y for B only (admitted after). Cells and products are made through ensureLabelCell, appendProductEntry and proposeVersion, the paths
 // the real flows use. Canaries (a product name, its title, a phrase of its text, its label token and a decision reason) are searched byte for byte,
 // as UTF-8 and as base64 and base64url at each of the three byte offsets, everywhere a member below a cell can look; positive controls show the same
-// search finds them where they belong. Fictional exercise data only.
+// search finds them where they belong. A converted project adds the dependsOn canary (CR-02): an org/Public annex that depended on an org/Internal
+// product must not carry that product's name to a member cleared only for org/Public. Fictional exercise data only.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -20,13 +21,15 @@ import { rosterView } from '../domain/replica/roster';
 import { epochsAt } from '../domain/replica/rosterCells';
 import { REPLICA_DIR } from '../domain/staff/multiUser';
 import { NOT_CLEARED_TEXT, appendProductEntry, ensureLabelCell, proposeVersion } from '../staff/replica/labelCells';
-import { isProjectRefused } from '../staff/replica/replicaProject';
+import { isMigrationRefused, makeMultiUser, projectionInputOf } from '../staff/replica/migrate';
+import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import { makeSingleMachineCopy } from '../staff/replica/singleCopy';
 import { StaffHost } from '../staff/staffHost';
 import type { StaffCaller } from '../staff/staffHost';
-import { bringIn, grantsOn, leadWith, streamEntries, syncTo } from './helpers/labelCellWorld';
+import { bringIn, grantsOn, hostOf, install, leadWith, orgClearance, project as keptProject, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Seat } from './helpers/labelCellWorld';
-import { J4_TEAM, trusting } from './helpers/staffFixtures';
+import { J4_TEAM, J5_TEAM, callTool, trusting, writeBody } from './helpers/staffFixtures';
+import type { StaffWorld } from './helpers/staffFixtures';
 
 // ---- the scene -------------------------------------------------------------------------------------------------------------------------------------
 
@@ -420,6 +423,94 @@ test('base cell: opened with the base key on the lead, every base entry is the g
     assert.ok(found(Buffer.concat(inCell), canariesOf(written.plan, ['name', 'title', 'reason'])).length === 3, `the search finds ${written.plan.token}'s canaries in its own cell`);
   }
 });
+
+// ---- CR-02: a dependency named in a converted ledger -----------------------------------------------------------------------------------------------
+
+// A single-machine project made multi-user: the concept is org/Internal; the annex, org/Public, depends on it (a write-down today's host allowed). Each
+// ledger line of the annex names the concept in meta.dependsOn, and every line is a signed envelope that cannot be edited (D-20). A notice, org/Public
+// with no dependency, gives the member's cell something to show and copy.
+const HIGHER: CellPlan = { token: 'Internal', product: 'heron-crossing-concept', title: 'heron-crossing-concept', text: 'Heron columns cross the river at first light', reason: '' };
+const LOWER = { product: 'heron-road-annex', text: 'Roads close at dawn for the convoy.' };
+const NOTICE = { product: 'heron-public-notice', text: 'The ferry runs as usual.' };
+
+interface ConvertedScene { lead: Seat; member: Seat; publicCell: string }
+
+let convertedOnce: Promise<ConvertedScene> | undefined;
+function converted(): Promise<ConvertedScene> {
+  convertedOnce ??= (async () => {
+    const at = install('dependency-lead');
+    mkdirSync(at.root, { recursive: true });
+    const { signer } = await ReplicaProject.localDevice(at.deps);
+    const clock = { now: Date.parse('2026-11-19T12:00:00.000Z') };
+    const make = (): StaffHost => new StaffHost({ root: at.root, signer: async () => signer, keyStatus: async () => trusting(signer), headStore: at.secrets, now: () => { clock.now += 1000; return clock.now; } });
+    const world: StaffWorld = {
+      root: at.root, signer, clock, host: make(), headStore: at.secrets,
+      reload: () => { world.host = make(); return world.host; },
+      person: (name = 'A. Demo', role = 'commander') => ({ kind: 'person', name, role, deviceFingerprint: signer.fingerprint })
+    };
+    await writeBody(at.root, 'j5', HIGHER.product, `# Concept\n\n${HIGHER.text}.\n`);
+    const higher = await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: HIGHER.product, kind: 'plan' }, 'lead-planner');
+    assert.ok(higher.ok, higher.text);
+    await writeBody(at.root, 'j5', LOWER.product, `# Annex\n\n${LOWER.text}\n`);
+    const lower = await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: LOWER.product, kind: 'annex', label: 'org/Public', dependsOn: [`${HIGHER.product}@1`] }, 'lead-planner');
+    assert.ok(lower.ok, lower.text);
+    await writeBody(at.root, 'j5', NOTICE.product, `# Notice\n\n${NOTICE.text}\n`);
+    const notice = await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: NOTICE.product, kind: 'annex', label: 'org/Public' }, 'lead-planner');
+    assert.ok(notice.ok, notice.text);
+    await world.host.close();
+    const result = await makeMultiUser(at.root, { ...at.deps, staffKeyStatus: async () => trusting(signer) }, { name: 'Exercise Northwind', leadClearance: orgClearance('Internal') });
+    assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
+    assert.equal(result.completed, 'complete');
+    const publicCell = result.cells.find((item) => item.label === 'org/Public')?.cell as string;
+    const p = keptProject(await ReplicaProject.open(at.root, at.deps));
+    const lead: Seat = { at, p, host: hostOf(p, at), member: p.anchor.lead.member, writer: p.deviceWriter, results: [] };
+    const member = await bringIn(lead, 'dependency-public', 'Pat Public', orgClearance('Public'));
+    await syncTo(lead, member, [publicCell]);
+    // Then the mistaken relay: everything on the lead's disk, the legacy and org/Internal cells included, handed to the member.
+    await relayEverything(lead, member);
+    return { lead, member, publicCell };
+  })();
+  return convertedOnce;
+}
+
+test('dependsOn canary (CR-02): a member cleared for org/Public only, given a converted project whose org/Public annex depends on an org/Internal concept, holds the concept\'s name and text nowhere: fold output, staff host texts, project folder, store, global storage, secrets or its single-machine copy', async () => {
+  const s = await converted();
+  const canaries = canariesOf(HIGHER, ['name', 'text']);
+  assert.deepEqual(found(await foldFamilies(s.member), canaries), [], 'fold families');
+  assert.deepEqual(found(Buffer.from(await hostTexts(s.member), 'utf8'), canaries), [], 'staff host texts');
+  assert.deepEqual(foundInTree(s.member.at.root, canaries), [], 'the project folder, the store included');
+  assert.deepEqual(foundInTree(s.member.at.global, canaries), [], 'global storage');
+  assert.deepEqual(found(secretsText(s.member), canaries), [], 'secret names and values');
+  // The cell import the member holds, opened: none of its lines names the concept.
+  assert.deepEqual(found(await openedEntries(s.member), canaries), [], 'the opened entries of the member\'s cells, import files decoded');
+  const copy = await copyOf(s.member, 'Pat Public');
+  assert.deepEqual(foundInTree(copy.folder, canaries), [], 'the member\'s copy folder');
+  assert.deepEqual(found(Buffer.from(copy.result, 'utf8'), canaries), [], 'the member\'s copy result');
+});
+
+test('dependsOn canary, positive control: the same searches find the annex and the notice in the member\'s fold, the notice in its host texts and copy, and the concept\'s name in the lead\'s staff host texts and opened entries', async () => {
+  const s = await converted();
+  const own = [{ what: 'annex name', value: LOWER.product }, { what: 'notice name', value: NOTICE.product }];
+  assert.deepEqual(found(await foldFamilies(s.member), own), ['annex name', 'notice name'], 'the member holds its own cell\'s products');
+  assert.deepEqual(found(Buffer.from(await hostTexts(s.member), 'utf8'), own), ['notice name'], 'the notice is shown from the cell import; the annex is its live text only');
+  const copy = await copyOf(s.member, 'Pat Public again');
+  assert.ok(foundInTree(copy.folder, own).some((item) => item.startsWith('notice name in ')), 'the member\'s copy carries the notice');
+  const name = canariesOf(HIGHER, ['name']);
+  assert.deepEqual(found(Buffer.from(await hostTexts(s.lead), 'utf8'), name), name.map((item) => item.what), 'the lead\'s host texts name the concept');
+  assert.deepEqual(found(await openedEntries(s.lead), name), name.map((item) => item.what), 'the lead\'s opened entries name it (the legacy cell holds the whole ledger)');
+});
+
+/** Every entry a seat's fold admits, opened, as text, with each import's file decoded from base64url so its ledger lines are searched as written. */
+async function openedEntries(seat: Seat): Promise<Buffer> {
+  const input = await projectionInputOf(seat.p, seat.at.deps);
+  const texts: string[] = [];
+  for (const entry of input.entries.values()) {
+    const data = entry.data as { file?: unknown } | undefined;
+    texts.push(asText(entry.data));
+    if (typeof data?.file === 'string') texts.push(Buffer.from(data.file, 'base64url').toString('utf8'));
+  }
+  return Buffer.from(texts.join('\n'), 'utf8');
+}
 
 // ---- Task 3: what SECURITY.md says ---------------------------------------------------------------------------------------------------------------
 

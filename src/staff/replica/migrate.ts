@@ -16,6 +16,9 @@
 //                cell holding products gets a products import of scope cell carrying only its products' lines, byte for byte, with the whole
 //                ledger's head and count; the calculator and wargame ledgers go whole into the org/Internal cell. Nothing goes into the base cell. Each
 //                import is looked up by ledger, scope and stream first and never sealed twice: a second seal is a second signed header at one seq.
+//                A product any of whose lines names a product the cell's label does not cover (in meta.dependsOn) has none of its lines in the cell
+//                import: a signed line cannot be edited, and the name must not reach a device cleared only for the cell (D-18, D-23; CR-02). It is
+//                listed withheld, and the cell carries it as its live text (and a version when one can be made); the legacy cell keeps every line.
 //   reconstruct  each product becomes a live text in the cell for its label (appendProductEntry) and, when its current text is known and its pins
 //                can be named, one version whose text is the original's (proposeVersion; D-32). Every one of these entries cites its cell's products
 //                import, which is how the projection tells an imported product. A pin to a product whose label its own does not cover leaves the
@@ -395,6 +398,12 @@ export interface ScopedLedger { readonly ledger: LegacyLedgerId; readonly cell: 
 export interface MigrationCell { readonly cell: string; readonly label?: string; readonly legacy?: string[]; readonly products: string[] }
 /** A product given a live text but no version, and why. pin-above-cell: it pins a product whose label its own does not cover (D-18). */
 export interface UnversionedProduct { readonly product: string; readonly reason: 'pin-above-cell' }
+/**
+ * A product whose ledger lines were left out of its cell's products import, and why. names-above-cell: a line names (in meta.dependsOn) a product whose
+ * label the cell's does not cover, so sealing it there would put that name on every device cleared only for the cell (D-23; CR-02). The lines stay in
+ * the lead-only legacy cell; the cell carries the product as its live text.
+ */
+export interface WithheldProduct { readonly product: string; readonly cell: string; readonly lines: number; readonly reason: 'names-above-cell' }
 
 export interface MigrationResult {
   readonly ok: true;
@@ -407,6 +416,8 @@ export interface MigrationResult {
   readonly imported: ImportedLedger[];
   /** The products import of each label cell holding products. */
   readonly scoped: ScopedLedger[];
+  /** Products whose lines were left out of their cell's products import (CR-02), in the order of the cells, then by product. */
+  readonly withheld: WithheldProduct[];
   /** Products reconstructed with a live text only for a reason the conversion names. */
   readonly unversioned: UnversionedProduct[];
   /** Every product of the imported ledger, and the ones reconstructed with a version (the others have a live text only; see the summary). */
@@ -571,10 +582,39 @@ function productOfLine(line: string): string | undefined {
   }
 }
 
-/** The lines of a product ledger naming one of the products, each byte for byte as in the file, joined with a newline and ending with one (D-20). */
-function cellFileOf(bytes: Buffer, products: ReadonlySet<string>): { file: Buffer; lines: number } {
-  const kept = bytes.toString('utf8').split('\n').filter((line) => line.trim() !== '' && products.has(productOfLine(line) ?? ''));
-  return { file: Buffer.from(kept.length === 0 ? '' : `${kept.join('\n')}\n`, 'utf8'), lines: kept.length };
+/** Every product a ledger line names: its own, and each product of meta.dependsOn. Empty for a line that is not a ledger entry. */
+function productsNamedBy(line: string): string[] {
+  try {
+    const value = JSON.parse(line) as unknown;
+    const payload = isRecord(value) ? value.payload : undefined;
+    if (!isRecord(payload)) return [];
+    const named = typeof payload.product === 'string' ? [payload.product] : [];
+    const dependsOn = isRecord(payload.meta) && Array.isArray(payload.meta.dependsOn) ? payload.meta.dependsOn : [];
+    // Anything in dependsOn that is not a plain product name counts as naming something unknown, which no cell covers.
+    for (const item of dependsOn) named.push(isRecord(item) && typeof item.product === 'string' ? item.product : '');
+    return named;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The lines of a product ledger naming one of the products, each byte for byte as in the file, joined with a newline and ending with one (D-20), except
+ * every line of a product any of whose lines names a product `covered` refuses (CR-02): signed lines cannot be edited, so such a product's lines are
+ * all left out (a part of a product's lines would not replay), and counted in `withheld` by product.
+ */
+function cellFileOf(bytes: Buffer, products: ReadonlySet<string>, covered: (product: string) => boolean): { file: Buffer; lines: number; withheld: Map<string, number> } {
+  const ofCell = bytes.toString('utf8').split('\n').filter((line) => line.trim() !== '' && products.has(productOfLine(line) ?? ''));
+  const above = new Set<string>();
+  for (const line of ofCell) if (!productsNamedBy(line).every(covered)) above.add(productOfLine(line) as string);
+  const withheld = new Map<string, number>();
+  const kept = ofCell.filter((line) => {
+    const product = productOfLine(line) as string;
+    if (!above.has(product)) return true;
+    withheld.set(product, (withheld.get(product) ?? 0) + 1);
+    return false;
+  });
+  return { file: Buffer.from(kept.length === 0 ? '' : `${kept.join('\n')}\n`, 'utf8'), lines: kept.length, withheld };
 }
 
 /**
@@ -601,12 +641,13 @@ async function sealImport(project: ReplicaProject, read: LegacyRead, stream: str
 
 /**
  * The import step (D-20): the product ledger and the decision log whole into the legacy cell, the calculator and wargame ledgers whole into the
- * org/Internal cell, and into each label cell holding products a products import of scope cell with only its products' lines. Nothing goes into
- * the base cell.
+ * org/Internal cell, and into each label cell holding products a products import of scope cell with only its products' lines, less the lines of a
+ * product that names a product the cell's label does not cover (cellFileOf; CR-02), which are listed withheld. Nothing goes into the base cell.
  */
-async function importLedgers(project: ReplicaProject, ledgers: readonly LegacyRead[], placement: Placement): Promise<{ imported: ImportedLedger[]; scoped: ScopedLedger[] }> {
+async function importLedgers(project: ReplicaProject, ledgers: readonly LegacyRead[], placement: Placement, gate: Gate): Promise<{ imported: ImportedLedger[]; scoped: ScopedLedger[]; withheld: WithheldProduct[] }> {
   const imported: ImportedLedger[] = [];
   const scoped: ScopedLedger[] = [];
+  const withheld: WithheldProduct[] = [];
   for (const read of ledgers) {
     const stream = LEDGERS_AT_LEDGERS_LABEL.includes(read.ledger) ? placement.byLabel.get(LEDGERS_LABEL) : placement.legacy;
     if (stream === undefined) throw new Error(`The ${read.ledger} ledger has no part of the project to go into.`);
@@ -615,11 +656,14 @@ async function importLedgers(project: ReplicaProject, ledgers: readonly LegacyRe
     if (read.ledger !== IMPORTED_PRODUCTS_LEDGER) continue;
     for (const cell of placement.cells) {
       if (cell.label === undefined || cell.products.length === 0) continue;
-      const { file, lines } = cellFileOf(read.bytes, new Set(cell.products));
+      // The same rule a pin across cells is decided with (D-18): a product the conversion holds whose label the cell's label covers.
+      const covered = (product: string): boolean => labelCovers(cell.label, placement.labelOf.get(product), gate);
+      const { file, lines, withheld: left } = cellFileOf(read.bytes, new Set(cell.products), covered);
+      for (const [product, count] of [...left].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) withheld.push({ product, cell: cell.cell, lines: count, reason: 'names-above-cell' });
       scoped.push({ ledger: read.ledger, cell: cell.cell, entry: await sealImport(project, read, cell.cell, 'cell', file, lines), lines });
     }
   }
-  return { imported, scoped };
+  return { imported, scoped, withheld };
 }
 
 /** One product as the reconstruct step reads it, before it writes anything: the body read from its file, the updates and the version that body gives. */
@@ -827,7 +871,7 @@ export async function makeMultiUser(root: string, deps: MigrationDeps, options: 
   const absolute = path.resolve(root);
   const notices = multiUserNoticeLines();
   const result = (completed: MigrationStep, rest: Partial<Omit<MigrationResult, 'ok' | 'completed' | 'notices'>> = {}): MigrationResult =>
-    ({ ok: true, completed, cells: [], imported: [], scoped: [], unversioned: [], products: [], versions: [], moved: [], notices, ...rest });
+    ({ ok: true, completed, cells: [], imported: [], scoped: [], withheld: [], unversioned: [], products: [], versions: [], moved: [], notices, ...rest });
 
   if (!(await exists(path.join(absolute, '.planning', 'staff')))) return refuse('no-staff-project');
   if (await migrationComplete(absolute)) return refuse('already-shared');
@@ -858,27 +902,28 @@ export async function makeMultiUser(root: string, deps: MigrationDeps, options: 
     const { cells } = placement;
     if (options.stopAfter === 'cells') return result('cells', { project: project.projectId, cells });
 
-    const { imported, scoped } = await importLedgers(project, verified.ledgers, placement);
-    if (options.stopAfter === 'import') return result('import', { project: project.projectId, cells, imported, scoped });
+    const gate = gateFor(options.scales, deps.now);
+    const { imported, scoped, withheld } = await importLedgers(project, verified.ledgers, placement, gate);
+    if (options.stopAfter === 'import') return result('import', { project: project.projectId, cells, imported, scoped, withheld });
 
     const products = verified.ledgers.find((item) => item.ledger === IMPORTED_PRODUCTS_LEDGER);
     const cellImports = new Map(scoped.map((item) => [item.cell, item.entry] as const));
     const rebuilt = products?.replay !== undefined
-      ? await reconstruct(shared, absolute, products.replay, placement, cellImports, lead, gateFor(options.scales, deps.now))
+      ? await reconstruct(shared, absolute, products.replay, placement, cellImports, lead, gate)
       : { products: [], versions: [], unversioned: [] };
-    if (options.stopAfter === 'reconstruct') return result('reconstruct', { project: project.projectId, cells, imported, scoped, ...rebuilt });
+    if (options.stopAfter === 'reconstruct') return result('reconstruct', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt });
 
     const moved = await moveLegacy(absolute, imported);
-    if (options.stopAfter === 'move-legacy') return result('move-legacy', { project: project.projectId, cells, imported, scoped, ...rebuilt, moved });
+    if (options.stopAfter === 'move-legacy') return result('move-legacy', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt, moved });
 
     const projections = await writeProjections(absolute, await projectionInputOf(project, deps), PASSTHROUGH_LEDGERS);
     // A product file edited after reconstruct read it is left with the edit (MJ-09); the conversion does not finish over it, and a rerun names it.
     const edited = projections.left.find((item) => item.reason === PROJECTION_LEFT_REASONS['text-changed']);
     if (edited !== undefined) return productChanged(edited.path);
-    if (options.stopAfter === 'projections') return result('projections', { project: project.projectId, cells, imported, scoped, ...rebuilt, moved, projections });
+    if (options.stopAfter === 'projections') return result('projections', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt, moved, projections });
 
     await writeMarker(absolute, imported.length, (deps.now?.() ?? new Date()).toISOString());
-    return result('complete', { project: project.projectId, cells, imported, scoped, ...rebuilt, moved, projections });
+    return result('complete', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt, moved, projections });
   } catch (error) {
     if (error instanceof Stop) return error.refusal;
     throw error;
