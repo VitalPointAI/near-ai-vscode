@@ -10,7 +10,7 @@ import * as path from 'node:path';
 import * as docModule from '../domain/replica/doc';
 import {
   MAX_STRUCTS as DOC_MAX_STRUCTS, applyRemote, applyUpdate, attributionAtSnapshot, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, decodeSnapshot,
-  docText, encodeFullState, inspectUpdate, localDelete, localInsert, rangesCovered, snapshotMissing, snapshotOf, snapshotReport, snapshotStateVector, stateVectorOf,
+  docText, encodeFullState, inspectState, inspectUpdate, localDelete, localInsert, rangesCovered, snapshotMissing, snapshotOf, snapshotReport, snapshotStateVector, stateVectorOf,
   textAtSnapshot
 } from '../domain/replica/doc';
 import type { AttributionRun, CrdtDoc } from '../domain/replica/doc';
@@ -426,4 +426,63 @@ test('the unused update-clients export is gone from doc.ts and nothing under src
   };
   walk(src);
   assert.deepEqual(found, []);
+});
+
+// ---- Task 4: a 30-page state against the limits (research assumption A10) -------------------------------------------------------------------------
+
+test('a 30-page state built like the Phase 30 spike (about 92 000 characters by 20 authors in typing batches, pastes, deletions and rewrites) fits MAX_STRUCTS and MAX_STATE_BYTES', (t) => {
+  const random = rng(30);
+  // Client ids near the top of the 32-bit range, as derived ids are (D-03), so every id a struct names costs its full five varuint bytes.
+  const authors = Array.from({ length: 20 }, (_, index) => 4_000_000_000 + index * 7919);
+  const words = ['staff', 'estimate', 'the', 'route', 'supply', 'north', 'bridge', 'report', 'and', 'of', 'to', 'within', 'phase', 'lines', 'support'];
+  const textOf = (length: number): string => {
+    let out = '';
+    while (out.length < length) out += `${random.pick(words)}${random.chance(0.1) ? '. ' : ' '}`;
+    return out.slice(0, length);
+  };
+  // One editor document whose client id changes per batch, so every author's text is its own structs; each batch is one update, as a 500 ms batch
+  // would be. Every batch lands at a random place, which splits more structs than typing at a steady cursor does, so the count is an upper bound.
+  const editor = createLocalDoc(authors[0]);
+  const fold = createFoldDoc();
+  let length = 0;
+  let updates = 0;
+  let largest = 0;
+  const apply = (update: Uint8Array): void => {
+    assert.equal(applyUpdate(fold, update), true);
+    updates += 1;
+    largest = Math.max(largest, update.length);
+  };
+  const insert = (text: string): void => {
+    apply(localInsert(editor, random.int(length + 1), text));
+    length += text.length;
+  };
+  const remove = (span: number): void => {
+    apply(localDelete(editor, random.int(length - span + 1), span));
+    length -= span;
+  };
+  while (length < 92_000) {
+    editor.clientID = random.pick(authors);
+    const roll = random.next();
+    if (roll < 0.06 && length > 100) remove(1 + random.int(30));
+    else if (roll < 0.075) insert(textOf(500 + random.int(2501)));
+    else if (roll < 0.145 && length > 1000) {
+      const span = 200 + random.int(601);
+      remove(span);
+      insert(textOf(Math.round(span * (0.8 + random.next() * 0.4))));
+    } else insert(textOf(1 + random.int(40)));
+  }
+  assert.equal(docText(fold).length, length);
+  const state = encodeFullState(fold);
+  const skim = skimUpdate(state);
+  assert.equal(skim.ok, true);
+  const structs = skim.ok ? skim.structs : -1;
+  t.diagnostic(`30-page state: ${length} characters, ${updates} updates (largest ${largest} bytes), ${state.length} bytes, ${structs} structs, ${skim.ok ? skim.ranges : -1} delete ranges`);
+  t.diagnostic(`headroom: ${(MAX_STATE_BYTES / state.length).toFixed(1)}x bytes, ${(MAX_STRUCTS / structs).toFixed(1)}x structs`);
+  assert.ok(structs > 0 && structs < MAX_STRUCTS, `${structs} structs`);
+  assert.ok(state.length < MAX_STATE_BYTES, `${state.length} bytes`);
+  assert.ok(largest < MAX_UPDATE_BYTES, `largest update ${largest} bytes`);
+  // A doc.compact state is checked with the state limit; the same bytes as one doc.update would be over the update limit.
+  assert.equal('error' in inspectState(state), false);
+  const loaded = buildFromCompaction(state, []);
+  assert.equal(loaded === undefined ? undefined : docText(loaded), docText(fold));
 });
