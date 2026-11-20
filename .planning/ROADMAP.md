@@ -347,10 +347,24 @@ Order: (1) the **coherence safety patch**, one small PR in the patch line for ei
 **Research flags**: (1) Owner questions Q1, Q2, Q6, Q7 in the review. (2) Enrolment file format and fingerprint reading, checked against the safety code flow (`src/domain/replica/safetyCode.ts`).
 **Amended 2026-11-20 (Controlled Goods Program and ITAR, `.planning/research/compliance-dashboard/CGP-ITAR.md`, section 12)**: FND-02 also parses an `exportControl` section in report mode and ships `routing.compartments` defaults of `local-only` for the reserved compartments `CGP`, `ITAR` and `EAR`; FND-04 also accepts the authorization kinds `export-person` and `export-endpoint`, and `decideRoute` reserves the rule id `route.export-control`. Shapes only, so signed policies never need a schema change; the behaviour is Phase 45.
 **Undo cost**: Medium to high: bundle v2 and the authorization record are signed into policies, so settle their schemas in the first plan.
-**Plans:** 0 plans
+**Plans:** 15 plans in 5 waves (planned 2026-11-20; starts after the coherence safety patch merges; decisions D-01 to D-64 in `41-CONTEXT.md`, owner confirmations listed there)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 41 to break down)
+- [ ] 41-01-PLAN.md: Wave 1. Contract: bundle v2 document, feature ids, endpoints and the localHosts migration, authorizations (with the export-control kinds), sections (with exportControl in report mode), every new id and signing purpose, CGP, ITAR and EAR local-only in the starting rules
+- [ ] 41-02-PLAN.md: Wave 2. Layers that only narrow: the narrowing table, composition, wider personal values clamped and listed
+- [ ] 41-03-PLAN.md: Wave 2. Enrolment file, twelve words read aloud, the issuer script
+- [ ] 41-04-PLAN.md: Wave 2. One label module: staff observations, guard scan and the chat label rank through it
+- [ ] 41-05-PLAN.md: Wave 2. Model passport schema in report mode, shipped passports, use tier
+- [ ] 41-06-PLAN.md: Wave 2. Organization modes, term() and the people section
+- [ ] 41-07-PLAN.md: Wave 2. ModelEndpoint and LocalServerAdmin, NearAiClient as the first adapter
+- [ ] 41-08-PLAN.md: Wave 2. Proposals and the policy editor shell
+- [ ] 41-09-PLAN.md: Wave 3. Organization store and host: the pin, updates, rollback, Reset of the personal layer only, v2 writes
+- [ ] 41-10-PLAN.md: Wave 3. decideRoute over endpoints, authorizations, residency, accredited devices and passports; TrustFacts
+- [ ] 41-11-PLAN.md: Wave 3. Copy lint with a baseline that only shrinks
+- [ ] 41-12-PLAN.md: Wave 3. Architecture test with a baseline that only shrinks
+- [ ] 41-13-PLAN.md: Wave 4. Private, TEE only and Team Mode inputs through decideRoute; the trust line on every answer
+- [ ] 41-14-PLAN.md: Wave 4. Add your organization's rules, NEAR AI: Policy, notices and palette
+- [ ] 41-15-PLAN.md: Wave 5. Copy sweep, SECURITY.md, README, CHANGELOG, baselines tight, requirements, full suite
 
 ### Guided setup: viable options, a plain recommendation and local models (Phases 32.1 and 32.2, added 2026-11-20)
 
@@ -1685,7 +1699,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 38. Organization tree, publications and label-safe roll-up | 0/TBD | Not started (portfolio view; after drop B) | - |
 | 39. Portfolio Room, prioritization and scenarios | 0/TBD | Not started (after Phase 38) | - |
 | 40. Capacity, allocation, dependencies and gates | 0/TBD | Not started (after Phase 38; may run beside 39) | - |
-| 41. Organization policy foundation (F1) | 0/TBD | Not started (after the coherence safety patch; before 32.1, 32.2, 33.1, 36 and 37) | - |
+| 41. Organization policy foundation (F1) | 0/15 | Planned (after the coherence safety patch; before 32.1, 32.2, 33.1, 36 and 37) | - |
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 0/TBD | Not started (no dependency in flight; may run beside any phase) | - |
