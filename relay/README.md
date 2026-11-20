@@ -98,6 +98,7 @@ What the container gives you:
 - A read-only root filesystem, every Linux capability dropped, no-new-privileges, a 16 MB private `/tmp`, and limits of 128 processes and 512 MB of memory.
 - The state volume `relay-state` as the only writable path, created empty with mode 0700 for user 65532.
 - The port published on `127.0.0.1` only. TLS for the public Teams webhook ends at your reverse proxy on the host, which the Phase 84 runbook covers. Never publish the relay's port on all interfaces.
+- If your reverse proxy is NGINX: two critical NGINX flaws disclosed on 18 November 2026 (CVE-2026-123633 and CVE-2026-123007, CVSS 9.2) let an unauthenticated attacker run code on the proxy when HTTP/2 is enabled, even when it serves only static files. Use NGINX 1.30.7 (stable) or 1.31.9 (mainline) or newer, or the fixed NGINX Plus builds, and check the running binary with `nginx -v` (for a distribution package, its own advisory decides, not the version number alone; for a container, the running image digest). Until you have upgraded, turn HTTP/2 off: `http2 off;` in each server block and no `http2` on any `listen` line, then reload and confirm the old workers have exited. The relay itself does not use NGINX.
 
 Podman rootless: run the same image with `--userns=keep-id:uid=65532,gid=65532` so a secret file you own is read as user 65532. The container suite does not cover Podman.
 

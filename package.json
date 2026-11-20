@@ -1217,7 +1217,13 @@
     "check": "npm run lint && npm test",
     "test:e2e": "npm run compile && env -u ELECTRON_RUN_AS_NODE xvfb-run -a -s \"-screen 0 1920x1080x24\" node dist/test/e2e/run.js",
     "generate:screenshots": "npm run compile && node scripts/generate-marketplace-screenshots.mjs",
-    "sbom": "node scripts/extension-sbom.mjs"
+    "sbom": "node scripts/extension-sbom.mjs",
+    "docs:install": "npm --prefix docs-site ci --ignore-scripts",
+    "docs": "npm --prefix docs-site run start",
+    "docs:build": "npm --prefix docs-site run build",
+    "docs:serve": "npm --prefix docs-site run serve",
+    "docs:service:install": "npm --prefix docs-site run service:install",
+    "docs:service:uninstall": "npm --prefix docs-site run service:uninstall"
   },
   "devDependencies": {
     "@jsquash/jpeg": "1.6.0",
