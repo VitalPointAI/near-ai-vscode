@@ -44,12 +44,12 @@ interface Fixture {
 function fixture(options: { tradecraft?: boolean } = {}): Fixture {
   const world = createWorld({
     members: [
-      { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] },
+      { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'], agentSeats: ['j2-chief'] },
       { member: 'mbr-dep', roles: ['member', 'deputy_lead'], devices: ['DEP'] },
-      { member: 'mbr-p', roles: ['member', 'answers_for:j2'], devices: ['P'] },
-      { member: 'mbr-sl', roles: ['member', 'section_lead:j2'], devices: ['SL'] },
-      { member: 'mbr-q', roles: ['member', 'answers_for:j3'], devices: ['Q'] },
-      { member: 'mbr-x', roles: ['member'], devices: ['X'] }
+      { member: 'mbr-p', roles: ['member', 'answers_for:j2'], devices: ['P'], agentSeats: ['j2-chief', 'j2-chief-2', 'j2-lead', 'some-other-agent', 'release-guard'] },
+      { member: 'mbr-sl', roles: ['member', 'section_lead:j2'], devices: ['SL'], agentSeats: ['j2-chief', 'j2-lead', 'release-guard', 'tradecraft'] },
+      { member: 'mbr-q', roles: ['member', 'answers_for:j3'], devices: ['Q'], agentSeats: ['j2-chief'] },
+      { member: 'mbr-x', roles: ['member'], devices: ['X'], agentSeats: ['j2-chief'] }
     ]
   });
   const roles = options.tradecraft === false
