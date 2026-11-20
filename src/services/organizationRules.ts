@@ -8,14 +8,14 @@ import { readFile, stat } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { bundleHash } from '../domain/gate/bundle';
 import {
-  ENROLMENT_FILE_EXTENSION, ISSUER_WORDS_MATCH, ORGANIZATION_LAYER_REFUSALS, ORGANIZATION_RULES_FILE_EXTENSION, ROTATION_WORDS_LEAD, issuerDetailsLine,
-  issuerWordsPrompt, issuerWordsQuestion
+  ENROLMENT_FILE_EXTENSION, ISSUER_WORDS_MATCH, ORGANIZATION_LAYER_REFUSALS, ORGANIZATION_RULES_FILE_EXTENSION, ROTATION_WORDS_LEAD, contactShown, issuerDetailsLine,
+  issuerWordsPrompt, issuerWordsQuestion, organizationEndingText
 } from '../domain/gate/enrolment';
 import { ignoredSettingsNotice } from '../domain/gate/layers';
 import type { IgnoredSetting } from '../domain/gate/layers';
 import { MAX_ORGANIZATION_LAYER_BYTES } from '../domain/gate/policyDocument';
 import type { GateHost } from '../gate/host';
-import { OrganizationStoreError, previewOrganizationFile } from '../gate/organizationStore';
+import { OrganizationStoreError, migrationNoticeText, previewOrganizationFile } from '../gate/organizationStore';
 import type { SecretStorageLike } from './auth';
 
 export const ADD_ORGANIZATION_RULES_COMMAND = 'nearAi.organization.addRules';
@@ -139,4 +139,27 @@ export async function addOrganizationRules(host: GateHost, deps: AddRulesDeps): 
   inform(outcome === 'enrolled' ? enrolledText(name) : outcome === 'rotated' ? rotatedText(name) : updatedText(preview.issuedAt.slice(0, 10)));
   await tellIgnored(host, deps.tell, deps.memento, true);
   return outcome;
+}
+
+/**
+ * The notices at start (D-20, D-27, D-14): the migration of a v1 personal layer's local servers once per personal layer (recorded as policy.migrated),
+ * the personal settings your organization ignores once per distinct list, and your organization's rules ending soon once per window.
+ */
+export async function startNotices(host: GateHost, context: { readonly globalState?: NoticeMemento }, tell: (message: string) => void): Promise<{ migrationShown: boolean }> {
+  await host.state();
+  const layers = host.policyLayers();
+  const memento = context.globalState;
+  let migrationShown = false;
+  const migration = migrationNoticeText(layers.migration);
+  const personalHash = layers.personal?.hash;
+  if (migration !== undefined && personalHash !== undefined && memento?.get(MIGRATION_NOTICE_KEY) !== personalHash) {
+    tell(migration);
+    migrationShown = true;
+    await Promise.resolve(memento?.update(MIGRATION_NOTICE_KEY, personalHash)).catch(() => undefined);
+    host.recordPolicyEvent('policy.migrated', `${String(layers.migration.length)} local servers`);
+  }
+  await tellIgnored(host, tell, memento, false);
+  const organization = layers.organization;
+  if (organization.state === 'valid' && organization.endsSoon) tell(organizationEndingText(organization.expiresAt.slice(0, 10), contactShown(organization.contacts)));
+  return { migrationShown };
 }

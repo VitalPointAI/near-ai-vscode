@@ -32,7 +32,11 @@ import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routin
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
 import type { GateStatusTimers } from './gateStatusBar';
-import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules } from './organizationRules';
+import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules, startNotices } from './organizationRules';
+import type { NoticeMemento } from './organizationRules';
+import { SELF_SIGNED_TEXT } from '../domain/gate/authorizations';
+import { contactShown } from '../domain/gate/enrolment';
+import type { PolicyLayersView } from '../gate/organizationStore';
 import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
@@ -78,6 +82,10 @@ export interface GateActivationContext {
   readonly extension?: { readonly packageJSON?: { readonly version?: string } };
   /** Where the commands, the status bar and the setup step are kept so the editor disposes them. Optional so a test context can leave it out. */
   readonly subscriptions?: { push(...items: Array<{ dispose(): unknown }>): unknown };
+  /** Where the one-time policy notices remember what they told (D-20, D-27); without it each is told at every start. */
+  readonly globalState?: NoticeMemento;
+  /** The extension's folder, for the policy editor page (D-44); without it the policy commands open the stored view. */
+  readonly extensionUri?: vscode.Uri;
 }
 
 export interface RegisterGateOptions {
@@ -120,13 +128,21 @@ function mcpCeilingLines(ceilings: Readonly<Record<string, Clearance>> | undefin
   })];
 }
 
-export function policyDocumentText(state: BundleState | undefined, now: number): string {
+export function policyDocumentText(state: BundleState | undefined, now: number, layers?: PolicyLayersView): string {
   const lines: string[] = ['Your NEAR AI policy', ''];
+  // D-23: who set the rules, only when the layers are known and the policy is usable; D-21: your organization's failure is fixed by its contact, never Reset.
+  const organization = layers?.organization;
+  if (organization !== undefined && state?.state === 'valid' && policyProblem(state, now, layers) === undefined) {
+    lines.push(organization.state === 'valid'
+      ? `Rules from: your organization${organization.name === undefined ? '' : ` (${organization.name})`}. Your settings on this computer can only narrow them.`
+      : `Rules from: this computer (${SELF_SIGNED_TEXT}).`, '');
+  }
+  const organizationFailed = layers?.failedLayer === 'organization' && state?.state === 'failed-closed';
   if (state === undefined) {
     lines.push('NEAR AI is checking your policy file. Open this view again in a moment.');
     return lines.join('\n');
   }
-  const problem = policyProblem(state, now);
+  const problem = policyProblem(state, now, layers);
   const usable = problem === undefined && state.state === 'valid';
   // Edit Policy works only on a policy that can be trusted, so a failed one names only the reset (D-41).
   // A policy written for a newer version is fixed by updating, never by a reset that would discard its rules (coherence review S6).
@@ -134,7 +150,9 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   // for that own policy, saying what it discards. A policy any other key signed is never offered Reset.
   const needsUpdate = state.state === 'failed-closed' && (UPDATE_REASONS.has(state.reason) || (state.reason === 'unknown-field' && state.ownPolicy !== true));
   const ownUnknownField = state.state === 'failed-closed' && state.reason === 'unknown-field' && state.ownPolicy === true;
-  lines.push(usable
+  lines.push(organizationFailed
+    ? `This view only shows your policy. Editing it changes nothing. Your organization's rules need attention: ask ${contactShown(organization?.state === 'failed' ? organization.contacts : undefined)}.`
+    : usable
     ? 'This view only shows your policy. Editing it changes nothing. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults.'
     : ownUnknownField
       ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded.'
@@ -265,9 +283,11 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const clearPrivateOnly = setPrivateOnlySetting(() => vscode.workspace.getConfiguration('nearAi').get<string>('privacyMode') === 'tee-only');
   try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }); } catch { /* replaced at the next activation */ }
   // Coherence review S1: a policy whose local hosts hold a *. pattern is told once in this window what changed and how to fix the entry.
-  void host.state().then((state) => {
+  // D-20, D-27: the one-time notices first; the migration notice names the same hosts, so the pattern notice waits for the next window after it.
+  void host.state().then(async (state) => {
+    const shown = await startNotices(host, context, tell).catch(() => ({ migrationShown: false }));
     const patterns = state.state === 'valid' ? patternLocalHosts(state.bundle.routing) : [];
-    if (patterns.length > 0) tell(localHostPatternNotice(patterns));
+    if (patterns.length > 0 && !shown.migrationShown) tell(localHostPatternNotice(patterns));
   }).catch(() => undefined);
   // D-58: every thread merge in this window judges signed lowerings with this host's key sources, and each is recorded once.
   try { context.subscriptions?.push({ dispose: host.registerLabelLowerings() }); } catch { /* with no judge every lowering from another copy is rejected */ }
@@ -299,11 +319,12 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       const mark = chat?.mark()?.current();
       return chat === undefined || mark === undefined ? undefined : { mark, defaultLabel: chat.defaultLabel() };
     };
-    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock(), layers: host.policyLayers() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const refresh = (): void => { bar.update(host.bundleState(), clock(), host.policyLayers()); };
     keep({ dispose: () => { bar.dispose(); } });
-    keep({ dispose: host.onDidChange(() => { bar.update(host.bundleState(), clock()); }) });
+    keep({ dispose: host.onDidChange(refresh) });
     // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
-    keep({ dispose: onChatInViewChange(() => { bar.update(host.bundleState(), clock()); }) });
+    keep({ dispose: onChatInViewChange(refresh) });
   });
   attempt('the policy view', () => {
     const changed = new vscode.EventEmitter<vscode.Uri>();
@@ -311,7 +332,7 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       onDidChange: changed.event,
       provideTextDocumentContent: async () => {
         await host.state();
-        return policyDocumentText(host.bundleState(), clock());
+        return policyDocumentText(host.bundleState(), clock(), host.policyLayers());
       }
     };
     keep(vscode.workspace.registerTextDocumentContentProvider(POLICY_SCHEME, provider));
@@ -328,7 +349,7 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     }));
   });
   attempt("Add Your Organization's Rules", () => {
-    keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell })));
+    keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell, ...(context.globalState === undefined ? {} : { memento: context.globalState }) })));
   });
   attempt('Reset Policy to Defaults', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
