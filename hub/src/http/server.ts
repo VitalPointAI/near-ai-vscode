@@ -79,6 +79,24 @@ export function uploadUnderWay(socket: Socket): { req: http.IncomingMessage; res
   return upload !== undefined && !upload.req.complete ? upload : undefined;
 }
 
+/** Each server's requests whose body is still arriving, so stopping can end them (endUploads). */
+const serverUploads = new WeakMap<https.Server, Set<http.IncomingMessage>>();
+
+/**
+ * At stop: ends every request whose body is still arriving, so a slow upload cannot hold the hub past its stopping grace. Such a request has
+ * touched nothing yet (its route is still reading the body), and the device sends it again on its next exchange. Requests already read are
+ * answered as usual. Returns how many were ended.
+ */
+export function endUploads(server: https.Server): number {
+  let ended = 0;
+  for (const req of serverUploads.get(server) ?? []) {
+    if (req.complete) continue;
+    req.socket.destroy();
+    ended += 1;
+  }
+  return ended;
+}
+
 /** True when the request carries a body: a content-length above zero, or a chunked body. */
 function carriesBody(req: http.IncomingMessage): boolean {
   const length = req.headers['content-length'];
@@ -121,6 +139,7 @@ const TOO_SLOW = JSON.stringify({ error: 'too-slow', message: 'The request arriv
 
 export function createHubServer(options: HubServerOptions): https.Server {
   const timing: RequestTiming = { ...REQUEST_TIMING, ...(options.timing ?? {}) };
+  const active = new Set<http.IncomingMessage>();
   const checkEveryMs = Math.max(50, Math.min(CONNECTIONS_CHECKING_INTERVAL_MS, timing.graceMs));
   const reject = (route: RejectedRoute, method: string, status: number): void => {
     try {
@@ -172,8 +191,10 @@ export function createHubServer(options: HubServerOptions): https.Server {
     const started = Date.now();
     const before = socket.bytesRead;
     uploads.set(socket, { req, res });
+    active.add(req);
     const stop = (): void => {
       clearInterval(timer);
+      active.delete(req);
       if (uploads.get(socket)?.req === req) uploads.delete(socket);
     };
     const timer = setInterval(() => {
@@ -242,6 +263,7 @@ export function createHubServer(options: HubServerOptions): https.Server {
   server.requestTimeout = requestBackstopMs(timing);
   server.keepAliveTimeout = timing.keepAliveMs;
   server.maxHeadersCount = 50;
+  serverUploads.set(server, active);
   return server;
 }
 

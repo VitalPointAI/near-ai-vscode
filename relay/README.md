@@ -246,7 +246,7 @@ What the container gives you is what the relay's gives (see [Running with Compos
 
 A reverse proxy in front of the hub must pass TCP through and never end TLS: members' computers bind their session to the hub's own TLS connection, and a proxy that ends TLS breaks that binding, so nothing works through it. Behind a pass-through proxy every member appears to come from the proxy's address, so the hub's per-address limits (120 session openings, 10 join requests and 10 enrolments a minute, 300 event streams) apply to all of them together. A member's computer keeps its connection, and so its session, for 2 minutes between requests, so a site does not spend a session opening on every exchange.
 
-Slow links are expected. The hub wants a request's headers within 5 seconds; a body then gets 10 seconds, after which it must keep arriving at 16 KiB a second (128 kbit/s) or faster, so an 8 MiB attachment can take about eight and a half minutes. A client that trickles or stops is cut off with `408` within about a second of falling behind, and the hub logs `http.rejected` with route `slow-upload`.
+Slow links are expected. The hub wants a request's headers within 5 seconds; a body then gets 10 seconds, after which it must keep arriving at 16 KiB a second (128 kbit/s) or faster, so an 8 MiB attachment can take about eight and a half minutes. A client that trickles or stops is cut off with `408` within about a second of falling behind, and the hub logs `http.rejected` with route `slow-upload`. Stopping the hub ends any upload still arriving, so it stops within its grace; the member's computer sends it again on its next exchange.
 
 ### The hub file and enrolment
 

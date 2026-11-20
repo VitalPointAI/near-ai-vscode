@@ -223,3 +223,24 @@ test('slowloris: a body that trickles below the minimum rate, or stops, is cut o
     assert.deepEqual(JSON.parse(fast.text), { bytes: 256 * 1024 });
   });
 });
+
+test('stopping: SIGTERM while a slow upload is under way ends that upload and stops the hub with exit 0, not at its 5 s grace with exit 1', { timeout: 40_000 }, async () => {
+  const hub = await startHubProcess();
+  try {
+    // About 25 s of upload at 40 KiB a second: well inside the minimum rate, far past the hub's 5 s stopping grace.
+    const uploading = slowUpload(hub.port, { method: 'POST', path: '/v1/enrol', body: Buffer.alloc(1024 * 1024, 32), chunkBytes: 4 * 1024, everyMs: 100, headers: { 'content-type': 'application/json' } });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const started = Date.now();
+    const exit = await within(hub.kill('SIGTERM'), 15_000, 'the hub stopping');
+    assert.deepEqual(exit, { code: 0, signal: null }, `stdout was: ${hub.stdout()}`);
+    assert.ok(Date.now() - started < 5000, `stopping took ${Date.now() - started} ms`);
+    const events = hub.events();
+    assert.ok(events.includes('hub.stopped'), 'no hub.stopped line');
+    assert.ok(!events.includes('hub.stop_timeout'), 'the hub stopped on its grace timeout');
+    const upload = await uploading;
+    assert.notEqual(upload.status, 201, 'the upload was taken although the hub was stopping');
+  } finally {
+    await within(hub.kill('SIGKILL'), 10_000, 'the hub ending');
+    hub.cleanup();
+  }
+});

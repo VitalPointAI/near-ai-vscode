@@ -11,7 +11,7 @@ import { loadConfig, type HubConfig } from './config';
 import { HUB_FILE_DAYS, hubIdentityOf, issueHubFile, type HubIdentity } from './enrol';
 import { HealthRegistry } from './health';
 import { createRoutes, type RouteDeps } from './http/routes';
-import { createHubServer, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
+import { createHubServer, endUploads, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
 import { SessionRegistry } from './http/session';
 import { JoinDesk, type JoinChecks, type JoinLog } from './join';
 import { EventHub, realScheduler, type Scheduler } from './live/events';
@@ -483,6 +483,8 @@ export async function main(argv: readonly string[]): Promise<void> {
       process.exit(0);
     });
     openServer.closeIdleConnections();
+    // A body still arriving (a slow upload may take minutes under the minimum-rate rule) would hold the server past the grace: it is ended.
+    endUploads(openServer);
   };
   await finishStartup({
     read: async () => signing.writer,
