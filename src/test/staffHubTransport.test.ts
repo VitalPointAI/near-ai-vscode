@@ -5,14 +5,30 @@ import assert from 'node:assert/strict';
 import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
 import * as net from 'node:net';
 import test from 'node:test';
-import { buildGrant, grantHash, wrapEpochKey, x25519PrivateFromSeed, x25519PublicRaw } from '../domain/replica/cellKeys';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import { buildGrant, grantHash, wrapEpochKey, x25519BindingBytes, x25519PrivateFromSeed, x25519PublicRaw } from '../domain/replica/cellKeys';
+import { checkpointHash, signCheckpoint } from '../domain/replica/checkpoint';
+import type { SignedCheckpoint } from '../domain/replica/checkpoint';
+import { GENESIS_PREV, buildEntry, entryHash } from '../domain/replica/entry';
+import type { BuiltEntry, SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { certPinOf } from '../domain/replica/hubFile';
+import { WITHHELD_GRACE_MS, createWitness, readWitness, serializeWitness } from '../domain/replica/hubWitness';
+import type { WitnessState } from '../domain/replica/hubWitness';
+import { joinSecretHash, newJoinSecret } from '../domain/replica/invite';
+import type { SecretStorageLike } from '../services/auth';
+import { HUB_WITNESS_SECRET_PREFIX, hubMemoryOf, hubWitnessKey, syncOnce } from '../staff/replica/hubSync';
+import type { SyncReport } from '../staff/replica/hubSync';
+import { ReplicaProject, syncLocalOf } from '../staff/replica/replicaProject';
+import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
+import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { canonicalBytes, fingerprintOf } from '../domain/team/canonical';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { APPEND_MAX_ENTRIES, CONNECT_TIMEOUT_MS, HubTransport, HubTransportError, RESPONSE_MAX_BYTES, appendBatches } from '../staff/replica/hubTransport';
 import type { EventReport, HubTransportOptions } from '../staff/replica/hubTransport';
-import { FIXTURE_CA, FIXTURE_CERT, FakeHubServer } from './helpers/fakeHubServer';
-import type { FakeAnswer, FakeHandler, FakeHubOptions } from './helpers/fakeHubServer';
+import { FIXTURE_CA, FIXTURE_CERT, FakeHubServer, fakeHubState, hubRoutes, seedGrants, seedHub } from './helpers/fakeHubServer';
+import type { FakeAnswer, FakeHandler, FakeHubOptions, FakeHubState } from './helpers/fakeHubServer';
 
 const sha256 = (text: string): Buffer => createHash('sha256').update(text, 'utf8').digest();
 const sha256Hex = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
@@ -494,4 +510,532 @@ test('pull pages one writer until more is false, from the seq after each page\'s
     assert.deepEqual(seen, [0, 1, 2, 3, 4]);
     assert.deepEqual(froms, [0, 2, 4]);
   });
+});
+
+// ---- Task 3: the one-shot sync against the scripted hub, with a real ReplicaProject ----------------------------------------------------------------
+
+class MemorySecrets implements SecretStorageLike {
+  public readonly values = new Map<string, string>();
+  public get(key: string): Promise<string | undefined> { return Promise.resolve(this.values.get(key)); }
+  public store(key: string, value: string): Promise<void> { this.values.set(key, value); return Promise.resolve(); }
+  public delete(key: string): Promise<void> { this.values.delete(key); return Promise.resolve(); }
+}
+
+const NOW_TEXT = '2026-11-20T10:00:00.000Z';
+const SYNC_NOW = new Date(NOW_TEXT);
+const LABEL_MAP_HASH = 'c'.repeat(64);
+
+interface SyncWorld {
+  a: ReplicaProject;
+  project: string;
+  secrets: MemorySecrets;
+  hubSigner: PayloadSigner & { writer: string };
+  member: PayloadSigner & { writer: string };
+  /** The roster head after the hub and the member were admitted. */
+  head: string;
+  baseKey: Buffer;
+  memberEntries: BuiltEntry[];
+  /** The member's next entry in the base cell (a doc.update with a blob when big is set). */
+  memberWrite(options?: { big?: boolean; text?: string }): BuiltEntry;
+  checkpoint(heads: ReadonlyArray<{ writer: string; seq: number; hash: string }>, count: number, orderTip?: string): SignedCheckpoint;
+  /** Every entry this computer holds, in seq order per writer. */
+  held(): Promise<SealedEntry[]>;
+}
+
+/** A lead's shared project on disk with the hub admitted (hub.admit at slot 3) and one member admitted (slot 2) whose device is only keys here. */
+async function syncWorld(label: string): Promise<SyncWorld> {
+  const base = mkdtempSync(path.join(tmpdir(), `near-ai-hub-sync-${label}-`));
+  const secrets = new MemorySecrets();
+  const deps: ReplicaProjectDeps = { secrets, globalStorageDir: path.join(base, 'global'), now: () => SYNC_NOW };
+  const created = await ReplicaProject.createSharedProject(path.join(base, 'project'), deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: LABEL_MAP_HASH, lead: { member: 'mbr-lead', name: 'Lee Lead' }
+  });
+  assert.ok(created instanceof ReplicaProject, 'the project is created');
+  const a = created;
+  const project = a.projectId;
+  const descriptor = (signer: PayloadSigner & { writer: string }, seed: string, slot: number): Record<string, unknown> => {
+    const x25519 = x25519PublicRaw(x25519PrivateFromSeed(sha256(`hub-transport/x25519/${seed}`))).toString('base64url');
+    return { writer: signer.writer, publicKey: signer.publicKey, x25519, x25519Sig: signer.sign(x25519BindingBytes(x25519, signer.writer)), slot };
+  };
+  const hubSigner = labelSigner(`HUB-${label}`);
+  const admitHub = await a.appendOwn('hub.admit', { hub: 'hub-test', device: descriptor(hubSigner, `hub-${label}`, 3), certPin: PIN, ceiling: DEMO_CLEARANCE });
+  assert.ok('ok' in admitHub, 'hub.admit is written');
+  const member = labelSigner(`MEMBER-${label}`);
+  const invited = await a.appendOwn('member.invite', { invite: 'inv-1', name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(newJoinSecret()) });
+  assert.ok('ok' in invited);
+  const admitted = await a.appendOwn('member.admit', { member: 'mbr-jo', invite: 'inv-1', name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, agentSeats: [], device: descriptor(member, `member-${label}`, 2) });
+  assert.ok('ok' in admitted);
+  const head = admitted.hash;
+  const baseKey = a.keys.epochKey(project, 1) as Buffer;
+  const memberEntries: BuiltEntry[] = [];
+  const world: SyncWorld = {
+    a, project, secrets, hubSigner, member, head, baseKey, memberEntries,
+    memberWrite(options = {}) {
+      const last = memberEntries[memberEntries.length - 1];
+      const seq = memberEntries.length;
+      const data = options.big === true ? { product: 'intel-estimate', update: Buffer.alloc(20_000, seq + 1).toString('base64url') } : { text: options.text ?? `Fictional observation ${seq}` };
+      const built = buildEntry({
+        signer: member, key: baseKey, stream: project, seq, prev: last === undefined ? GENESIS_PREV : last.hash, epoch: 1,
+        body: { deps: [], roster: head, lamport: 100 + seq, at: NOW_TEXT, actor: { kind: 'person' }, kind: options.big === true ? 'doc.update' : 'note.add', data }
+      });
+      memberEntries.push(built);
+      return built;
+    },
+    checkpoint(heads, count, orderTip = 'a'.repeat(64)) {
+      return signCheckpoint(hubSigner, {
+        type: 'checkpoint', v: 2, project, signer: hubSigner.writer, rosterHead: head,
+        streams: [{ stream: project, heads: heads.map((item) => ({ writer: item.writer, seq: item.seq, hash: item.hash, lamport: 1, roster: head })), count, orderTip }]
+      });
+    },
+    async held() {
+      const out: SealedEntry[] = [];
+      for (const stream of await a.heads()) for (const item of stream.heads) out.push(...(await a.entriesAfter(stream.stream, item.writer, -1)));
+      return out;
+    }
+  };
+  return world;
+}
+
+/** A scripted hub for the world's project, holding what is given (the lead's entries and grants by default). */
+async function hubFor(world: SyncWorld, seed?: { entries?: readonly SealedEntry[]; grants?: readonly unknown[] }): Promise<{ fake: FakeHubServer; state: FakeHubState }> {
+  const state = fakeHubState(world.project, world.head);
+  seedHub(state, seed?.entries ?? await world.held());
+  seedGrants(state, seed?.grants ?? (await world.a.signedGrants()).map((grant) => grant.signed));
+  const fake = await FakeHubServer.start({ project: world.project, hub: world.hubSigner.writer, handle: hubRoutes(state) });
+  return { fake, state };
+}
+
+function syncTransport(world: SyncWorld, address: string, more: Partial<HubTransportOptions> = {}): HubTransport {
+  return new HubTransport({ address, project: world.project, hub: world.hubSigner.writer, trust: { pin: PIN }, signer: world.a.signer, servername: 'localhost', now: () => SYNC_NOW, ...more });
+}
+
+async function syncA(world: SyncWorld, address: string, options: { now?: Date; more?: Partial<HubTransportOptions> } = {}): Promise<SyncReport> {
+  const transport = syncTransport(world, address, options.more);
+  try {
+    return await syncOnce(transport, syncLocalOf(world.a), hubMemoryOf(world.secrets), { now: () => options.now ?? SYNC_NOW });
+  } finally {
+    transport.close();
+  }
+}
+
+/** Runs body with a fresh world and scripted hub; closes the hub and the project's decode worker. */
+async function withSync(label: string, body: (world: SyncWorld, fake: FakeHubServer, state: FakeHubState) => Promise<void>): Promise<void> {
+  const world = await syncWorld(label);
+  const { fake, state } = await hubFor(world);
+  try {
+    await body(world, fake, state);
+  } finally {
+    await fake.close();
+    await world.a.close();
+  }
+}
+
+const kinds = (report: SyncReport): string[] => report.findings.map((item) => item.kind);
+const witnessOf = (world: SyncWorld): WitnessState => {
+  const text = world.secrets.values.get(hubWitnessKey(world.hubSigner.writer, world.project));
+  assert.ok(text !== undefined, 'the witness state was saved');
+  const read = readWitness(text, { hub: world.hubSigner.writer, project: world.project });
+  assert.ok(read.ok, 'the witness state reads back');
+  return read.state;
+};
+
+test('synced: entries the hub holds are pulled through ingestForeign into the store, and a second exchange pulls nothing', async () => {
+  await withSync('pull', async (world, fake, state) => {
+    seedHub(state, [world.memberWrite().entry, world.memberWrite().entry, world.memberWrite().entry]);
+    const report = await syncA(world, fake.address);
+    assert.equal(report.outcome, 'synced', JSON.stringify(report));
+    assert.equal(report.pulled, 3);
+    assert.equal(report.pushed, 0);
+    assert.deepEqual(report.findings, []);
+    assert.deepEqual([...(await world.a.holds(world.memberEntries.map((item) => item.hash)))].sort(), world.memberEntries.map((item) => item.hash).sort());
+    assert.deepEqual(await world.a.head(world.project, world.member.writer), { seq: 2, hash: world.memberEntries[2]?.hash });
+    const again = await syncA(world, fake.address);
+    assert.equal(again.outcome, 'synced');
+    assert.equal(again.pulled, 0);
+    assert.equal(state.appends.length, 0, 'nothing was pushed: the hub held everything');
+  });
+});
+
+test('pages served in reverse seq order are put in order per writer before the prev check', async () => {
+  await withSync('reverse', async (world, fake, state) => {
+    seedHub(state, Array.from({ length: 5 }, () => world.memberWrite().entry));
+    state.reversePages = true;
+    state.pageSize = 2;
+    const report = await syncA(world, fake.address);
+    assert.equal(report.outcome, 'synced', JSON.stringify(report));
+    assert.equal(report.pulled, 5);
+    assert.deepEqual(report.findings, []);
+    assert.equal((await world.a.head(world.project, world.member.writer))?.seq, 4);
+  });
+});
+
+test('a gap stops that writer: nothing after it is stored, the hub\'s head stays cited, and past the grace period the next exchange names withheld', async () => {
+  await withSync('gap', async (world, fake, state) => {
+    seedHub(state, Array.from({ length: 4 }, () => world.memberWrite().entry));
+    state.skipSeq = new Map([[`${world.project}/${world.member.writer}`, 2]]);
+    const first = await syncA(world, fake.address);
+    assert.equal(first.outcome, 'synced', JSON.stringify(first));
+    assert.equal(first.pulled, 2);
+    assert.deepEqual(kinds(first), []);
+    assert.equal((await world.a.head(world.project, world.member.writer))?.seq, 1);
+    assert.equal(witnessOf(world).waiting.length, 1, 'the hub\'s head is cited and waiting');
+    const later = await syncA(world, fake.address, { now: new Date(SYNC_NOW.getTime() + WITHHELD_GRACE_MS) });
+    assert.deepEqual(kinds(later), ['withheld']);
+    assert.equal(later.findings[0]?.count, 1);
+    assert.equal((await world.a.head(world.project, world.member.writer))?.seq, 1, 'still nothing past the gap');
+  });
+});
+
+test('injected: an entry whose signature does not verify against the roster is named and not stored, and nothing after it is taken', async () => {
+  await withSync('injected', async (world, fake, state) => {
+    const real = world.memberWrite();
+    const forger = labelSigner('FORGER');
+    const forged = buildEntry({ signer: forger, key: world.baseKey, stream: world.project, seq: 0, prev: GENESIS_PREV, epoch: 1, body: { deps: [], roster: world.head, lamport: 5, at: NOW_TEXT, actor: { kind: 'person' }, kind: 'note.add', data: { text: 'Forged' } } });
+    const injected = { header: { ...forged.entry.header, writer: world.member.writer }, body: forged.entry.body } as SealedEntry;
+    state.logs.set(`${world.project}/${world.member.writer}`, [injected]);
+    const report = await syncA(world, fake.address);
+    assert.deepEqual(kinds(report), ['injected']);
+    assert.equal(report.findings[0]?.detail.reason, 'bad-signature');
+    assert.equal(report.outcome, 'synced', 'an injected entry is refused, not a reason to stop');
+    assert.equal(report.pulled, 0);
+    assert.equal((await world.a.holds([entryHash(injected.header), real.hash])).size, 0);
+  });
+});
+
+test('a validly signed entry whose prev does not name the stored head is not stored, so the chain is never extended out of order', async () => {
+  await withSync('prev', async (world, fake, state) => {
+    const first = world.memberWrite();
+    const stray = buildEntry({ signer: world.member, key: world.baseKey, stream: world.project, seq: 1, prev: HASH_A, epoch: 1, body: { deps: [], roster: world.head, lamport: 9, at: NOW_TEXT, actor: { kind: 'person' }, kind: 'note.add', data: { text: 'Out of order' } } });
+    state.logs.set(`${world.project}/${world.member.writer}`, [first.entry, stray.entry]);
+    const report = await syncA(world, fake.address);
+    assert.equal(report.pulled, 1);
+    assert.deepEqual(await world.a.head(world.project, world.member.writer), { seq: 0, hash: first.hash });
+    assert.equal((await world.a.holds([stray.hash])).size, 0);
+  });
+});
+
+test('replayed: an entry this computer already holds is counted and harmless', async () => {
+  await withSync('replayed', async (world, fake, state) => {
+    const first = world.memberWrite();
+    const second = world.memberWrite();
+    const ingested = await world.a.ingestForeign([first.entry], []);
+    assert.ok('ok' in ingested && ingested.added === 1);
+    seedHub(state, [first.entry, second.entry]);
+    state.extra = new Map([[`${world.project}/${world.member.writer}`, [first.entry]]]);
+    const report = await syncA(world, fake.address);
+    assert.equal(report.outcome, 'synced');
+    assert.equal(report.pulled, 1);
+    assert.deepEqual(kinds(report), ['replayed']);
+    assert.equal(report.findings[0]?.count, 1);
+    assert.equal(witnessOf(world).replayed, 1);
+  });
+});
+
+test('corrupt-blob: a blob whose bytes do not hash to its name is named and not stored; once the hub serves the right bytes the waiting entry gets it', async () => {
+  await withSync('blob', async (world, fake, state) => {
+    const built = world.memberWrite({ big: true });
+    const blob = built.blobs[0];
+    assert.ok(blob !== undefined, 'the big update moved into a blob');
+    seedHub(state, [built.entry]);
+    state.blobs.set(blob.hash, Buffer.from(blob.bytes, 'base64url'));
+    state.corruptBlobs = new Set([blob.hash]);
+    const first = await syncA(world, fake.address);
+    assert.equal(first.pulled, 1);
+    assert.deepEqual(kinds(first), ['corrupt-blob']);
+    assert.deepEqual(await world.a.wantedBlobs(), [blob.hash]);
+    assert.equal(await world.a.blob(blob.hash), undefined, 'the corrupt bytes were not stored');
+    state.corruptBlobs = new Set();
+    const second = await syncA(world, fake.address);
+    assert.deepEqual(kinds(second), []);
+    assert.equal(second.blobs, 1);
+    assert.deepEqual(await world.a.blob(blob.hash), blob);
+    assert.ok(fake.calls().some((call) => call.method === 'GET' && call.path === `/v1/blobs/${blob.hash}`));
+  });
+});
+
+test('push: own entries, other writers\' entries the hub lacks, the blobs they cite and the grants the hub lacks are pushed; nothing the hub already has is sent', async () => {
+  const world = await syncWorld('push');
+  try {
+    const before = await world.held();
+    const grants = (await world.a.signedGrants()).map((grant) => grant.signed);
+    // The member's entries reached this computer another way; the hub never saw them.
+    const memberEntries = [world.memberWrite().entry, world.memberWrite().entry];
+    assert.ok('ok' in (await world.a.ingestForeign(memberEntries, [])));
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional long report '.repeat(1200) });
+    assert.ok('ok' in own && own.built.blobs.length === 1, 'the own entry carries a blob');
+    const extraGrant = buildGrant(world.a.signer, { cell: world.project, epoch: 1, roster: world.head, labelSealed: '', wraps: [{ writer: world.member.writer, wrap: wrapEpochKey({ cell: world.project, epoch: 1, writer: world.member.writer, recipient: x25519PublicRaw(x25519PrivateFromSeed(sha256('hub-transport/x25519/member-push'))).toString('base64url'), epochKey: world.baseKey }) }] });
+    assert.ok('ok' in (await world.a.putGrants([extraGrant])));
+    const { fake, state } = await hubFor(world, { entries: before, grants });
+    try {
+      const report = await syncA(world, fake.address);
+      assert.equal(report.outcome, 'synced', JSON.stringify(report));
+      const expected = [...memberEntries.map((entry) => entryHash(entry.header)), own.hash].sort();
+      assert.equal(report.pushed, 3);
+      const sent = state.appends.flatMap((item) => item.entries.map((entry) => entryHash(entry.header)));
+      assert.deepEqual([...sent].sort(), expected, 'exactly what the hub lacked');
+      assert.deepEqual(state.appends.flatMap((item) => item.grants).map(grantHash), [grantHash(extraGrant)]);
+      assert.deepEqual(state.appends.flatMap((item) => item.blobRefs), [{ entry: own.hash, blob: own.built.blobs[0]?.hash }]);
+      assert.ok(state.blobs.has(own.built.blobs[0]?.hash as string), 'the blob was put after the hub said it was missing');
+      // A second exchange sends nothing.
+      const appends = state.appends.length;
+      const again = await syncA(world, fake.address);
+      assert.equal(again.pushed, 0);
+      assert.equal(state.appends.length, appends);
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
+test('checkpoints: a valid newer checkpoint replaces the kept newest and each is stored as evidence', async () => {
+  await withSync('checkpoint', async (world, fake, state) => {
+    const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };
+    const cp1 = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }], 4);
+    state.checkpoint = cp1;
+    const first = await syncA(world, fake.address);
+    assert.equal(first.outcome, 'synced', JSON.stringify(first));
+    assert.equal(checkpointHash(witnessOf(world).newest as SignedCheckpoint), checkpointHash(cp1));
+    const added = world.memberWrite();
+    seedHub(state, [added.entry]);
+    const cp2 = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }, { writer: world.member.writer, seq: 0, hash: added.hash }], 5);
+    state.checkpoint = cp2;
+    const second = await syncA(world, fake.address);
+    assert.equal(second.outcome, 'synced', JSON.stringify(second));
+    assert.equal(checkpointHash(witnessOf(world).newest as SignedCheckpoint), checkpointHash(cp2));
+    assert.deepEqual((await world.a.checkpoints()).map(checkpointHash).sort(), [checkpointHash(cp1), checkpointHash(cp2)].sort());
+  });
+});
+
+test('rolled-back: a checkpoint with a head below the kept newest is named, the newer one is handed back, and the client re-pushes what the hub lost', async () => {
+  await withSync('rollback-cp', async (world, fake, state) => {
+    const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };
+    const cpOld = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }], 4);
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional situation report' });
+    assert.ok('ok' in own);
+    seedHub(state, [own.built.entry]);
+    const cpNew = world.checkpoint([{ writer: world.a.deviceWriter, seq: leadHead.seq + 1, hash: own.hash }], 5);
+    state.checkpoint = cpNew;
+    assert.equal((await syncA(world, fake.address)).outcome, 'synced');
+    // The hub is restored from an older copy: the new entry and the newer checkpoint are gone.
+    state.logs.set(`${world.project}/${world.a.deviceWriter}`, (state.logs.get(`${world.project}/${world.a.deviceWriter}`) ?? []).filter((entry) => entryHash(entry.header) !== own.hash));
+    state.checkpoint = cpOld;
+    state.askAnswer = cpNew;
+    const report = await syncA(world, fake.address);
+    assert.ok(kinds(report).includes('rolled-back'), JSON.stringify(report.findings));
+    assert.equal(report.outcome, 'attention');
+    assert.equal(report.repushed, true);
+    assert.equal(report.pushed, 1);
+    assert.ok(state.logs.get(`${world.project}/${world.a.deviceWriter}`)?.some((entry) => entryHash(entry.header) === own.hash), 'the hub holds it again');
+    assert.equal(report.handedBack, 1);
+    assert.deepEqual(state.handedBack.map((item) => checkpointHash(item as SignedCheckpoint)), [checkpointHash(cpNew)]);
+    assert.equal(checkpointHash(witnessOf(world).newest as SignedCheckpoint), checkpointHash(cpNew), 'the kept newest is unchanged');
+  });
+});
+
+test('rolled-back heads: with no checkpoint at all, hub heads below what this computer saw the hub accept are named rolled-back and re-pushed', async () => {
+  await withSync('rollback-heads', async (world, fake, state) => {
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional patrol report' });
+    assert.ok('ok' in own);
+    const first = await syncA(world, fake.address);
+    assert.equal(first.pushed, 1);
+    assert.equal(first.outcome, 'synced');
+    const key = `${world.project}/${world.a.deviceWriter}`;
+    state.logs.set(key, (state.logs.get(key) ?? []).filter((entry) => entryHash(entry.header) !== own.hash));
+    const report = await syncA(world, fake.address);
+    assert.deepEqual(kinds(report), ['rolled-back']);
+    assert.equal(report.outcome, 'attention');
+    assert.equal(report.repushed, true);
+    assert.equal(report.pushed, 1);
+    assert.ok(report.message?.includes('older copy'));
+  });
+});
+
+test('forked-view: a checkpoint that conflicts with the kept newest (same count, other order tip) is named, both are stored, the kept newest is the proof\'s first, and nothing more is exchanged', async () => {
+  await withSync('fork', async (world, fake, state) => {
+    const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };
+    const kept = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }], 4, 'a'.repeat(64));
+    state.checkpoint = kept;
+    assert.equal((await syncA(world, fake.address)).outcome, 'synced');
+    const other = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }], 4, 'b'.repeat(64));
+    state.checkpoint = other;
+    const own = await world.a.appendOwn('note.add', { text: 'Not sent to a forked hub' });
+    assert.ok('ok' in own);
+    const appends = state.appends.length;
+    const report = await syncA(world, fake.address);
+    assert.deepEqual(kinds(report), ['forked-view']);
+    assert.equal(report.outcome, 'attention');
+    assert.equal(state.appends.length, appends, 'nothing was pushed');
+    const witness = witnessOf(world);
+    assert.equal(witness.distrusted, true);
+    assert.equal(checkpointHash(witness.proof?.a as SignedCheckpoint), checkpointHash(kept));
+    assert.equal(checkpointHash(witness.proof?.b as SignedCheckpoint), checkpointHash(other));
+    assert.deepEqual((await world.a.checkpoints()).map(checkpointHash).sort(), [checkpointHash(kept), checkpointHash(other)].sort());
+    // A distrusted hub stays distrusted on the next exchange.
+    assert.deepEqual(kinds(await syncA(world, fake.address)), ['forked-view']);
+  });
+});
+
+test('hand-back: when the hub\'s latest checkpoint is older than the kept newest, the newer held hub checkpoints go back through the checkpoint ask before anything is pushed', async () => {
+  await withSync('handback', async (world, fake, state) => {
+    const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };
+    const added = world.memberWrite();
+    seedHub(state, [added.entry]);
+    const newer = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }, { writer: world.member.writer, seq: 0, hash: added.hash }], 5);
+    state.checkpoint = newer;
+    assert.equal((await syncA(world, fake.address)).outcome, 'synced');
+    // The hub lost its latest checkpoint (an honest restore with every entry kept) and this computer has an own entry to push.
+    delete state.checkpoint;
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional assessment' });
+    assert.ok('ok' in own);
+    const mark = fake.requests.length;
+    const report = await syncA(world, fake.address);
+    assert.equal(report.outcome, 'synced', JSON.stringify(report));
+    assert.equal(report.handedBack, 1);
+    const later = fake.requests.slice(mark);
+    const ask = later.findIndex((req) => req.path.endsWith('/checkpoint') && ((req.json() as { known: unknown[] }).known.length > 0));
+    const append = later.findIndex((req) => req.path.endsWith('/append'));
+    assert.ok(ask >= 0 && append > ask, 'the hand-back came before the push');
+    assert.deepEqual(state.handedBack.map((item) => checkpointHash(item as SignedCheckpoint)), [checkpointHash(newer)]);
+  });
+});
+
+test('the witness state lives in SecretStorage under nearAi.staff.hubWitness., holds no secret or token, reads back with readWitness and survives a new syncOnce', async () => {
+  await withSync('memory', async (world, fake, state) => {
+    const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };
+    state.checkpoint = world.checkpoint([{ writer: world.a.deviceWriter, ...leadHead }], 4);
+    seedHub(state, [world.memberWrite().entry]);
+    assert.equal((await syncA(world, fake.address)).outcome, 'synced');
+    const keys = [...world.secrets.values.keys()].filter((key) => key.startsWith(HUB_WITNESS_SECRET_PREFIX));
+    assert.deepEqual(keys, [hubWitnessKey(world.hubSigner.writer, world.project)]);
+    const saved = world.secrets.values.get(keys[0] as string) as string;
+    for (const [key, value] of world.secrets.values) if (!key.startsWith(HUB_WITNESS_SECRET_PREFIX)) assert.ok(!saved.includes(value), `the witness state holds the secret ${key}`);
+    for (const token of fake.issuedTokens()) assert.ok(!saved.includes(token), 'the witness state holds a session token');
+    const state1 = witnessOf(world);
+    assert.equal(state1.hub, world.hubSigner.writer);
+    assert.ok(state1.newest !== undefined);
+    assert.ok(state1.seen.length > 0);
+    // A new exchange starts from the saved state: same newest checkpoint, no finding.
+    const again = await syncA(world, fake.address);
+    assert.deepEqual(kinds(again), []);
+    assert.deepEqual(witnessOf(world).newest, state1.newest);
+  });
+});
+
+test('a stored state for another hub or another project is not used: the exchange starts from a fresh witness', async () => {
+  const secrets = new MemorySecrets();
+  const memory = hubMemoryOf(secrets);
+  const otherHub = { ...createWitness(HASH_A, PROJECT), replayed: 7 };
+  await secrets.store(hubWitnessKey(HUB, PROJECT), serializeWitness(otherHub));
+  assert.deepEqual(await memory.load(HUB, PROJECT), createWitness(HUB, PROJECT));
+  const otherProject = { ...createWitness(HUB, OTHER_PROJECT), replayed: 7 };
+  await secrets.store(hubWitnessKey(HUB, PROJECT), serializeWitness(otherProject));
+  assert.deepEqual(await memory.load(HUB, PROJECT), createWitness(HUB, PROJECT));
+  await secrets.store(hubWitnessKey(HUB, PROJECT), 'not json');
+  assert.deepEqual(await memory.load(HUB, PROJECT), createWitness(HUB, PROJECT));
+  // Its own state reads back.
+  const own = { ...createWitness(HUB, PROJECT), replayed: 3 };
+  await memory.save(own);
+  assert.deepEqual(await memory.load(HUB, PROJECT), own);
+  assert.notEqual(hubWitnessKey(HUB, PROJECT), hubWitnessKey(HASH_A, PROJECT));
+  assert.ok(hubWitnessKey(HUB, PROJECT).startsWith('nearAi.staff.hubWitness.'));
+});
+
+test('outcome offline: a hub that cannot be reached ends offline with the plain sentence, and nothing is stored', async () => {
+  const world = await syncWorld('offline');
+  try {
+    const silent = net.createServer();
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
+    const port = (silent.address() as net.AddressInfo).port;
+    await new Promise<void>((resolve) => silent.close(() => resolve()));
+    const report = await syncA(world, `127.0.0.1:${port}`, { more: { connectTimeoutMs: 2_000 } });
+    assert.equal(report.outcome, 'offline');
+    assert.equal(report.reason, 'unreachable');
+    assert.ok(report.message?.includes('could not be reached'));
+    assert.equal(report.pulled + report.pushed, 0);
+  } finally {
+    await world.a.close();
+  }
+});
+
+test('outcome refused: a hub that refuses this device\'s session ends refused with the hub\'s reason id', async () => {
+  const world = await syncWorld('refused');
+  const fake = await FakeHubServer.start({ project: world.project, hub: world.hubSigner.writer, session: (step) => (step === 'answer' ? { status: 403, json: { error: 'session-refused', reason: 'not-admitted', message: 'Refused.' } } : undefined) });
+  try {
+    const report = await syncA(world, fake.address);
+    assert.equal(report.outcome, 'refused');
+    assert.equal(report.reason, 'not-admitted');
+    assert.equal(fake.calls().length, 0);
+  } finally {
+    await fake.close();
+    await world.a.close();
+  }
+});
+
+test('outcome attention: a pin mismatch ends attention before any request, and a heads answer for another project ends attention with wrong-project', async () => {
+  await withSync('attention', async (world, fake, state) => {
+    const pinned = await syncA(world, fake.address, { more: { trust: { pin: '1'.repeat(64) } } });
+    assert.equal(pinned.outcome, 'attention');
+    assert.equal(pinned.reason, 'pin-mismatch');
+    assert.equal(fake.requests.length, 0);
+    state.wrongProjectHeads = OTHER_PROJECT;
+    seedHub(state, [world.memberWrite().entry]);
+    const wrong = await syncA(world, fake.address);
+    assert.equal(wrong.outcome, 'attention');
+    assert.deepEqual(kinds(wrong), ['wrong-project']);
+    assert.equal(wrong.pulled, 0);
+  });
+});
+
+test('no finding sentence or detail carries a key, a token or a full hash', async () => {
+  await withSync('sentences', async (world, fake, state) => {
+    const blobEntry = world.memberWrite({ big: true });
+    const blob = blobEntry.blobs[0] as SealedBlob;
+    seedHub(state, [blobEntry.entry]);
+    state.blobs.set(blob.hash, Buffer.from(blob.bytes, 'base64url'));
+    state.corruptBlobs = new Set([blob.hash]);
+    state.extra = new Map([[`${world.project}/${world.member.writer}`, [blobEntry.entry, { header: { ...world.memberWrite().entry.header, sig: 'A'.repeat(86) }, body: 'AA' }]]]);
+    const report = await syncA(world, fake.address);
+    assert.ok(report.findings.length >= 2, JSON.stringify(report.findings));
+    const text = JSON.stringify(report.findings) + (report.message ?? '');
+    assert.doesNotMatch(text, /[0-9a-f]{64}/, 'no full hash');
+    assert.doesNotMatch(text, /[A-Za-z0-9_-]{43}/, 'no key or token');
+    for (const token of fake.issuedTokens()) assert.ok(!text.includes(token));
+    assert.ok(!text.includes(world.member.publicKey) && !text.includes(world.a.signer.publicKey));
+    assert.doesNotMatch(text, /\u2014/);
+  });
+});
+
+test('replicaProject read accessors: heads, entries after a seq, wanted and cited blobs, signed grants and checkpoints', async () => {
+  const world = await syncWorld('accessors');
+  try {
+    const { a, project } = world;
+    const own = await a.appendOwn('note.add', { text: 'Fictional annex '.repeat(1400) });
+    assert.ok('ok' in own);
+    const blobEntry = world.memberWrite({ big: true });
+    assert.ok('ok' in (await a.ingestForeign([blobEntry.entry], [])));
+    const heads = await a.heads();
+    const base = heads.find((item) => item.stream === project);
+    assert.deepEqual(base?.heads.find((head) => head.writer === a.deviceWriter), { writer: a.deviceWriter, seq: (await a.head(project, a.deviceWriter))?.seq, hash: own.hash });
+    assert.deepEqual(base?.heads.find((head) => head.writer === world.member.writer), { writer: world.member.writer, seq: 0, hash: blobEntry.hash });
+    const after = await a.entriesAfter(project, a.deviceWriter, 0);
+    assert.ok(after.length >= 1 && after.every((entry, index) => entry.header.seq === index + 1));
+    assert.equal(entryHash((after[after.length - 1] as SealedEntry).header), own.hash);
+    assert.deepEqual(await a.holds([own.hash, HASH_A]), new Set([own.hash]));
+    assert.deepEqual(await a.wantedBlobs(), [blobEntry.blobs[0]?.hash]);
+    assert.deepEqual(await a.blobsCitedBy([own.hash, blobEntry.hash]), [{ entry: own.hash, blob: own.built.blobs[0]?.hash }, { entry: blobEntry.hash, blob: blobEntry.blobs[0]?.hash }].sort((x, y) => (x.entry === own.hash ? -1 : 1) - (y.entry === own.hash ? -1 : 1)));
+    assert.deepEqual(await a.blob(own.built.blobs[0]?.hash as string), own.built.blobs[0]);
+    const grants = await a.signedGrants();
+    assert.ok(grants.length >= 1 && grants.every((grant) => grant.hash === grantHash(grant.signed)));
+    const cp = world.checkpoint([{ writer: a.deviceWriter, seq: 0, hash: a.anchor.genesisHash }], 1);
+    assert.ok('ok' in (await a.putCheckpoint(cp)));
+    assert.deepEqual((await a.checkpoints()).map(checkpointHash), [checkpointHash(cp)]);
+    const local = syncLocalOf(a);
+    assert.equal(local.project, project);
+    assert.equal(local.writer, a.deviceWriter);
+    assert.ok((await local.roster()).checkpointSigner(world.hubSigner.writer, world.head));
+  } finally {
+    await world.a.close();
+  }
 });

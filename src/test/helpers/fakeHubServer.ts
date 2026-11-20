@@ -75,6 +75,7 @@ export class FakeHubServer {
   private readonly sockets = new Map<TLSSocket, number>();
   private readonly challenges = new Map<number, Buffer>();
   private readonly tokens = new Map<string, number>();
+  private readonly forgotten: string[] = [];
   private connectionCount = 0;
 
   private constructor(private readonly options: FakeHubOptions) {
@@ -117,8 +118,14 @@ export class FakeHubServer {
     for (const socket of this.sockets.keys()) socket.destroy();
   }
 
+  /** The token texts this server issued, only so a test can search what the client saved for them. */
+  public issuedTokens(): string[] {
+    return [...this.forgotten, ...this.tokens.keys()];
+  }
+
   /** Forgets every token, so the next call is refused unknown-token. */
   public forgetTokens(): void {
+    for (const token of this.tokens.keys()) this.forgotten.push(token);
     this.tokens.clear();
   }
 

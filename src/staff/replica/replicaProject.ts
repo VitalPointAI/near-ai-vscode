@@ -40,8 +40,10 @@ import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
-import { deviceKeyOf } from '../../domain/replica/rosterMembers';
+import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
+import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
+import type { HeadSet } from '../../domain/replica/transport';
 import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
 import { DecodeHost } from './decodeHost';
@@ -50,6 +52,7 @@ import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
+import type { SyncLocal } from './hubSync';
 
 /** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
 export const GENESIS_PIN_FOLDER = 'staff-replica';
@@ -651,6 +654,113 @@ export class ReplicaProject {
     });
   }
 
+  // ---- read access for the one-shot hub sync (32-23) -------------------------------------------------------------------------------------------
+
+  /** Per stream, the head of every writer's log in the store (entries the decode check refused left out of the list of writers). */
+  public heads(): Promise<HeadSet['streams']> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      const streams = new Map<string, HeadSet['streams'][number]>();
+      const seen = new Set<string>();
+      for (const entry of this.store.rosterEntries()) {
+        const { stream, writer } = entry.header;
+        if (seen.has(`${stream}/${writer}`)) continue;
+        seen.add(`${stream}/${writer}`);
+        const head = this.store.head(stream, writer);
+        if (head === undefined) continue;
+        const row = streams.get(stream) ?? { stream, heads: [] };
+        row.heads.push({ writer, seq: head.seq, hash: head.hash });
+        streams.set(stream, row);
+      }
+      return [...streams.values()];
+    });
+  }
+
+  /** The head of one writer's log in one stream, or undefined when the store holds none. */
+  public head(stream: string, writer: string): Promise<{ seq: number; hash: string } | undefined> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      return this.store.head(stream, writer);
+    });
+  }
+
+  /** Which of these entry hashes the store holds. */
+  public holds(hashes: readonly string[]): Promise<Set<string>> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      return new Set(hashes.filter((hash) => this.store.has(hash)));
+    });
+  }
+
+  /** The stored entries of one writer in one stream above a seq, in seq order (entries the decode check refused left out). */
+  public entriesAfter(stream: string, writer: string, seq: number): Promise<SealedEntry[]> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      return this.store.rosterEntries().filter((entry) => entry.header.stream === stream && entry.header.writer === writer && entry.header.seq > seq).sort((a, b) => a.header.seq - b.header.seq);
+    });
+  }
+
+  /** A blob this computer holds, or undefined. */
+  public blob(hash: string): Promise<SealedBlob | undefined> {
+    return this.exclusive(async () => this.blobCache.get(hash) ?? await this.store.blob(hash));
+  }
+
+  /** The blobs that entries waiting for a blob cite and this computer does not hold. */
+  public wantedBlobs(): Promise<string[]> {
+    return this.exclusive(async () => {
+      await this.foldNow();
+      const waiting = new Set(this.store.waitingForCheck().filter((item) => item.reason === 'awaiting-blob').map((item) => item.hash));
+      const wanted = new Set<string>();
+      for (const entry of this.store.rosterEntries()) {
+        if (!waiting.has(entryHash(entry.header))) continue;
+        for (const hash of this.citedBlobs(entry)) if (!this.blobCache.has(hash) && (await this.store.blob(hash)) === undefined) wanted.add(hash);
+      }
+      return [...wanted].sort();
+    });
+  }
+
+  /** The blobs the given stored entries use, as append blobRefs: a body's blob and a compaction's state blob. Entries this device cannot open name none. */
+  public blobsCitedBy(hashes: readonly string[]): Promise<Array<{ entry: string; blob: string }>> {
+    return this.exclusive(async () => {
+      await this.foldNow();
+      const wanted = new Set(hashes);
+      const refs: Array<{ entry: string; blob: string }> = [];
+      for (const entry of this.store.rosterEntries()) {
+        const hash = entryHash(entry.header);
+        if (!wanted.has(hash)) continue;
+        for (const blob of this.citedBlobs(entry)) refs.push({ entry: hash, blob });
+      }
+      return refs;
+    });
+  }
+
+  /** Every signed cell grant stored, with its hash. */
+  public signedGrants(): Promise<Array<{ hash: string; signed: unknown }>> {
+    return this.exclusive(async () => (await this.store.grants()).grants.map((grant) => ({ hash: grant.hash, signed: grant.signed })));
+  }
+
+  /** Stores a signed checkpoint as evidence (the store names it by its checkpoint hash). */
+  public putCheckpoint(signed: SignedCheckpoint): Promise<{ ok: true; hash: string } | ProjectRefused> {
+    return this.exclusive(async () => {
+      const stored = await this.store.putCheckpoint(signed);
+      return 'ok' in stored ? stored : storeRefused(stored);
+    });
+  }
+
+  /** Every stored checkpoint that reads back. */
+  public checkpoints(): Promise<SignedCheckpoint[]> {
+    return this.exclusive(async () => (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint));
+  }
+
+  /** The cells the hub with this writer id holds at the roster head (the base cell and those granted with hub.grant), or undefined. */
+  public hubCells(hubWriter: string): Promise<readonly string[] | undefined> {
+    return this.exclusive(async () => {
+      const { roster } = await this.foldNow();
+      const device = deviceKeyOf(roster.members, hubWriter);
+      return device === undefined ? undefined : hubCellsAt(roster.members, device.member, roster.positions.length - 1);
+    });
+  }
+
   /** Ends the decode worker this project made for itself (one passed in deps is the caller's to close). */
   public async close(): Promise<void> {
     await this.tail;
@@ -743,6 +853,25 @@ export class ReplicaProject {
 
   private now(): Date {
     return this.deps.now?.() ?? new Date();
+  }
+
+  /** Reads what other windows wrote since the store last looked; refused like open when a file went backwards. */
+  private async refreshed(): Promise<void> {
+    const refreshed = await this.store.refresh();
+    if (!('ok' in refreshed)) throw new ReplicaProjectError(storeRefused(refreshed));
+  }
+
+  /** The blobs an entry's body names, when this device can open it: the body's own blob and a compaction's state blob. */
+  private citedBlobs(entry: SealedEntry): string[] {
+    const key = this.keys.epochKey(entry.header.stream, entry.header.epoch);
+    if (key === undefined) return [];
+    const plain = openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+    const body = plain === undefined ? undefined : parseJson(plain);
+    if (!isRecord(body)) return [];
+    const found: string[] = [];
+    if (typeof body.blob === 'string' && HASH_PATTERN.test(body.blob)) found.push(body.blob);
+    if (body.kind === 'doc.compact' && isRecord(body.data) && typeof body.data.stateBlob === 'string' && HASH_PATTERN.test(body.data.stateBlob)) found.push(body.data.stateBlob);
+    return found;
   }
 
   private async foldNow(): Promise<ProjectState> {
@@ -977,4 +1106,41 @@ function rosterSignature(roster: RosterState): string {
   let grants = 0;
   for (const cell of roster.cells.cells.values()) grants += cell.grants.length;
   return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants)].join('|');
+}
+
+/**
+ * The replica a one-shot hub sync reads and writes (32-23): this project's store through its read accessors, entries from the hub through
+ * ingestForeign (the decode check), grants through putGrants, and the roster as this device folds it. hubSync.ts imports nothing from this file, so
+ * the hub's tests bundle the sync without the fold or Yjs (D-27).
+ */
+export function syncLocalOf(project: ReplicaProject): SyncLocal {
+  const settle = <T>(value: T | ProjectRefused): T => {
+    if (isProjectRefused(value)) throw new ReplicaProjectError(value);
+    return value;
+  };
+  return {
+    project: project.projectId,
+    writer: project.deviceWriter,
+    roster: async () => rosterView((await project.state()).roster),
+    heads: () => project.heads(),
+    head: (stream, writer) => project.head(stream, writer),
+    holds: (hashes) => project.holds(hashes),
+    entriesAfter: (stream, writer, seq) => project.entriesAfter(stream, writer, seq),
+    blob: (hash) => project.blob(hash),
+    wantedBlobs: () => project.wantedBlobs(),
+    blobsCitedBy: (hashes) => project.blobsCitedBy(hashes),
+    grants: () => project.signedGrants(),
+    async ingest(entries, blobs) {
+      const result = settle(await project.ingestForeign(entries, blobs));
+      return { added: result.added, notStored: result.deferred + result.flooded + result.dropped };
+    },
+    async putGrants(grants) {
+      settle(await project.putGrants(grants));
+    },
+    checkpoints: () => project.checkpoints(),
+    async putCheckpoint(signed) {
+      settle(await project.putCheckpoint(signed));
+    },
+    covered: (hub) => project.hubCells(hub)
+  };
 }
