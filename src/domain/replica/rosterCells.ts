@@ -5,13 +5,19 @@
 // (A3). Each epoch is founded by a roster entry (the genesis cells, cell.create or cell.rekey) that commits to its founding grant by hash (D-44).
 // Records carry the position they start at, so every query answers at a position.
 //
-// Owner of the apply rules: 31-12 (this file's first version) applies the genesis cells and checks grants; cell.create and cell.rekey are refused
-// roster-kind-pending until 31-15 adds their rules. A pending kind is refused, never applied.
+// cell.create founds epoch 1 of a new cell and cell.rekey the next epoch of an existing one; each must name its epoch and commit to its founding grant
+// by hash (the wire allows both to be absent so Phase 30 data stays valid, the fold does not). Who may write them is the driver's check (a roster
+// writer at the roster the entry cites). The grants themselves arrive outside the streams and are placed by addGrant after the line is folded.
+//
+// The signed grant is the authority for who is on a cell (31-RESEARCH.md): clearance dominance needs a clock and a scale table, so the fold never
+// recomputes it. The host decides who is cleared when it writes a grant (cellKeys.planRekey).
 import type { CellGrant } from './cellKeys';
 import type { VerifiedEntry } from './verify';
 
 export const CELL_REFUSALS = {
   'cell-exists': 'This cell is already in the roster.',
+  'cell-unknown': 'This cell is not in the roster, so it cannot be given a new key.',
+  'grant-missing': 'This roster entry starts a new cell key without naming its epoch and the grant that carries the key, so it is refused.',
   'epoch-not-next': 'The epoch is not the next one for this cell, so it is refused.',
   'grant-mismatch': 'This grant is not the one the roster committed to for this cell and epoch.',
   'grant-signer': 'This grant was not signed by a device of the staff lead at the roster it names.',
@@ -30,7 +36,8 @@ export interface EpochRecord {
   // The position of the founding entry: the epoch is the cell's current one from here.
   from: number;
 }
-export interface GrantRecord { hash: string; epoch: number; writers: readonly string[]; grant: CellGrant; from: number }
+// founding: the grant the epoch's founding entry committed to. Without it this machine does not know who holds the epoch.
+export interface GrantRecord { hash: string; epoch: number; writers: readonly string[]; grant: CellGrant; from: number; founding: boolean }
 export interface CellRecord { cell: string; from: number; epochs: EpochRecord[]; grants: GrantRecord[] }
 export interface CellsState { project: string; cells: Map<string, CellRecord> }
 
@@ -54,18 +61,27 @@ export function epochAt(state: CellsState, cell: string, position: number): numb
   return current;
 }
 
-// The devices holding a wrap for the cell's current epoch at the position, sorted. admitted, when given, drops a device that is not admitted there.
-// Undefined when the cell does not exist at the position.
-export function granteesAt(state: CellsState, cell: string, position: number, admitted?: (writer: string) => boolean): readonly string[] | undefined {
+// The devices holding a wrap for the cell's current epoch at the position, sorted. admitted (the members module's answer at the same position) drops
+// a device that is not admitted there, so a device removed or revoked after its grant is never listed. Undefined when this machine does not know
+// the cell at the position: the cell does not exist there, or the founding grant of its current epoch is not on this machine (a member below the
+// cell never receives it, D-22), so a device that holds only the roster learns that a cell id exists and nothing about who holds it.
+export function granteesAt(state: CellsState, cell: string, position: number, admitted: (writer: string) => boolean): readonly string[] | undefined {
   const epoch = epochAt(state, cell, position);
   const record = state.cells.get(cell);
   if (epoch === undefined || record === undefined) return undefined;
+  const current = record.grants.filter((grant) => grant.epoch === epoch && grant.from <= position);
+  if (!current.some((grant) => grant.founding)) return undefined;
   const writers = new Set<string>();
-  for (const grant of record.grants) {
-    if (grant.epoch !== epoch || grant.from > position) continue;
-    for (const writer of grant.writers) if (admitted === undefined || admitted(writer)) writers.add(writer);
-  }
+  for (const grant of current) for (const writer of grant.writers) if (admitted(writer)) writers.add(writer);
   return [...writers].sort();
+}
+
+// Every epoch of the cell founded at or before the position, oldest first, with the founding grant hash. Empty when the cell does not exist there.
+// The host reads it to give a device admitted later the earlier epochs it is cleared for (D-45).
+export function epochsAt(state: CellsState, cell: string, position: number): ReadonlyArray<{ epoch: number; grant: string; from: number }> {
+  const record = state.cells.get(cell);
+  if (record === undefined || record.from > position) return [];
+  return record.epochs.filter((epoch) => epoch.from <= position).map((epoch) => ({ epoch: epoch.epoch, grant: epoch.grant, from: epoch.from }));
 }
 
 // The cell a stream belongs to: a cell's stream id is its cell id.
@@ -92,8 +108,30 @@ export function applyGenesisCells(state: CellsState, cells: ReadonlyArray<{ cell
   return { status: 'applied' };
 }
 
-// cell.create and cell.rekey: 31-15 adds their rules.
-export function applyCellEntry(_state: CellsState, _entry: VerifiedEntry, _ctx: CellApplyContext): CellApplyOutcome {
+interface CellEntryData { cell: string; epoch?: number; grant?: string; reason?: string }
+
+// cell.create founds epoch 1 of a cell the roster does not have; cell.rekey founds the epoch after the cell's current one (D-21, D-23, D-44). Both
+// must name the epoch and commit to the founding grant by hash. The entry is validated before anything changes, so a refusal changes nothing.
+export function applyCellEntry(state: CellsState, entry: VerifiedEntry, ctx: CellApplyContext): CellApplyOutcome {
+  const kind = entry.body.kind;
+  const data = entry.data as CellEntryData;
+  if (kind === 'cell.create') {
+    if (state.cells.has(data.cell)) return refused('cell-exists');
+    if (data.epoch !== 1) return refused('epoch-not-next');
+    if (data.grant === undefined) return refused('grant-missing');
+    state.cells.set(data.cell, { cell: data.cell, from: ctx.position, epochs: [{ epoch: 1, grant: data.grant, roster: ctx.roster, from: ctx.position }], grants: [] });
+    return { status: 'applied' };
+  }
+  if (kind === 'cell.rekey') {
+    const record = state.cells.get(data.cell);
+    const current = epochAt(state, data.cell, ctx.position - 1);
+    if (record === undefined || current === undefined) return refused('cell-unknown');
+    if (data.epoch !== current + 1) return refused('epoch-not-next');
+    if (data.grant === undefined) return refused('grant-missing');
+    record.epochs.push({ epoch: data.epoch, grant: data.grant, roster: ctx.roster, from: ctx.position });
+    return { status: 'applied' };
+  }
+  // The driver routes only the cell kinds here.
   return refused('roster-kind-pending');
 }
 
@@ -123,6 +161,6 @@ export function addGrant(state: CellsState, placement: GrantPlacement): CellAppl
   if (!founding && position < epoch.from) return refused('grant-epoch-unknown');
   if (!placement.signerIsRosterWriter) return refused('grant-signer');
   if (!grant.wraps.every((wrap) => placement.admitted(wrap.writer))) return refused('grant-recipient');
-  record.grants.push({ hash, epoch: grant.epoch, writers: grant.wraps.map((wrap) => wrap.writer), grant, from: founding ? epoch.from : position });
+  record.grants.push({ hash, epoch: grant.epoch, writers: grant.wraps.map((wrap) => wrap.writer), grant, from: founding ? epoch.from : position, founding });
   return { status: 'applied' };
 }

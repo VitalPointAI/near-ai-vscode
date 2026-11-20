@@ -1335,6 +1335,46 @@ project folder.
 - **Symbolic links are refused.** If any folder or file on the way to the store is a symbolic
   link, nothing is read or written through it.
 
+### Cell keys, wraps and rekey
+
+A multi-user project is split into label cells: the base cell everyone in the project is on, and
+a cell for each higher label. Everything in a cell (its products, their text, versions and
+decisions) is sealed under that cell's key, so only the devices cleared for the cell can read it.
+
+- **One key per cell per epoch.** Each cell has its own key, 32 random bytes, and a cell gets a
+  new key (a new epoch) whenever someone must stop receiving it. Old keys are kept so old entries
+  stay readable.
+- **A key is wrapped to each cleared device.** Every device has an encryption key pair besides
+  its signing key; the device signs its encryption key so it cannot be swapped. To give a device a
+  cell key, the lead's machine makes a fresh key pair, agrees a shared secret with the device's
+  public key (X25519), derives a wrapping key from it with HKDF-SHA256 bound to the cell, the
+  epoch and the receiving device, and seals the cell key with AES-256-GCM. A wrap copied to
+  another device, cell or epoch does not open.
+- **Grants are signed and sent only to that cell's devices.** The wraps for one cell and epoch
+  travel together in a grant signed by the staff lead (or the deputy, once named). The roster
+  entry that creates the cell or gives it a new key records the hash of the grant, so a changed
+  or substituted grant is refused. A grant is accepted only when its signer could change the
+  roster at the roster it names and every device it wraps to was admitted there. Grants are files
+  outside the shared history and are given only to the devices on that cell: a member never
+  receives the grant of a cell they are not cleared for, and so cannot even see who is on it.
+- **The cell's label is sealed inside the grant.** The level and compartments of a cell are
+  sealed under a key derived from the cell key, so a device below the cell learns only that an
+  unnamed cell exists, not what it is or what is in it.
+- **Removal gives the cell a new key.** Removing a member, revoking a device or lowering a
+  clearance writes a new epoch for every cell the change affects, wrapped only to the devices
+  still cleared. The person or device removed keeps what it already had and cannot open anything
+  written after. The lead is told: "They keep what they already received. They will not receive
+  anything new."
+- **New devices can read the history of their cells.** A device admitted later receives wraps
+  for the earlier epochs of the cells it is cleared for, so the history of those cells stays
+  readable on it.
+- **Write up, never down.** An entry in a higher cell may cite entries in a lower cell. An entry
+  in a lower cell that cites a higher cell is refused when the project's cell order is known, and
+  listed with the reason, so nothing from a higher cell leaks into a lower one through a citation.
+- **Who is cleared is decided when a grant is written.** Clearance checks need the current date
+  and the label scales, so they run on the lead's machine when a grant or a new key is written.
+  The shared history then relies on the signed grant: it never decides clearance itself.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR
@@ -1406,6 +1446,15 @@ and enter the SBOM from that file:
 | --- | --- | --- | --- |
 | MapLibre GL JS (`maplibre-gl`) | 6.16.0 | BSD-3-Clause | The COP map, 2D and globe (WebGL) |
 | milsymbol | 3.0.5 | MIT | MIL-STD-2525 and APP-6 military symbols |
+
+One piece of third-party data is committed into the source, not vendored: the word list for the
+safety code two people compare when one joins a multi-user staff project. It is data only, never
+run, and `src/test/replicaSafetyCode.test.ts` checks it against the SHA-256 of the published file,
+so a changed, missing or reordered word fails the build:
+
+| Data | Source | License | Used for |
+| --- | --- | --- | --- |
+| BIP-39 English word list (2048 words, in `src/domain/replica/safetyWords.ts`) | `bitcoin/bips`, `bip-0039/english.txt` | MIT | The six safety code words shown when a person joins a multi-user staff project |
 
 Every release carries `sbom.cdx.json` (CycloneDX 1.6) for those components.
 `npm run sbom` builds it and checks each one on OSV.dev; the release fails on a
