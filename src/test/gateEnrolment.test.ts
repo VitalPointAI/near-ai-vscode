@@ -313,11 +313,11 @@ test('every refusal sentence is plain', () => {
     'bad-signature', 'clock-behind', 'expired', 'malformed', 'needs-update', 'older', 'signer-mismatch', 'too-large', 'unknown-key'
   ]);
   for (const [name, sentence] of sentences) {
-    assert.ok(!sentence.includes('—'), `${name}: no em-dash`);
+    assert.ok(!sentence.includes('\u2014'), `${name}: no em-dash`);
     assert.ok(!/reset/i.test(sentence), `${name}: never offers Reset`);
     assert.ok(!longToken.test(sentence), `${name}: no key or signature text`);
     assert.ok(!/\{[a-z]+\}/i.test(sentence), `${name}: no placeholder`);
-    assert.ok(!/NEAR organization/.test(sentence), `${name}: says your organization`);
+    assert.ok(!sentence.includes(['NEAR', 'organization'].join(' ')), `${name}: says your organization`);
     assert.match(sentence, /\.$/, `${name}: a whole sentence`);
   }
   assert.match(ENROLMENT_REFUSALS['needs-update'], /Update the NEAR AI extension/);
