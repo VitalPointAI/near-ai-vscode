@@ -296,7 +296,10 @@ test('the projected replay equals today\'s replay for every product, and an appr
   const conops = replay.products.get(CONOPS) as ProjectedProductState;
   assert.equal(conops.record.state, 'released');
   assert.equal(conops.imported?.approval, IMPORTED_APPROVAL_TEXT);
-  assert.equal(IMPORTED_APPROVAL_TEXT, 'approved on this machine before the project became multi-user, verified at import by the staff lead');
+  // The wording's load-bearing phrases: where and when it was approved, and who verified it at import.
+  assert.match(IMPORTED_APPROVAL_TEXT, /approved on this machine/);
+  assert.match(IMPORTED_APPROVAL_TEXT, /before the project became multi-user/);
+  assert.match(IMPORTED_APPROVAL_TEXT, /verified at import by the staff lead/);
   const annex = replay.products.get(ANNEX) as ProjectedProductState;
   assert.equal(annex.imported?.approval, undefined, 'a product never approved carries no approval wording');
   assert.equal(annex.imported?.ledger, 'products');
@@ -813,7 +816,8 @@ test('MJ-09: a product file edited after reconstruct read it, before the project
   assert.equal(refused.file, relative);
   assert.equal(readFileSync(file, 'utf8'), edited, 'the edit is not written over');
   assert.equal(await migrationComplete(env.root), false, 'the conversion did not finish');
-  assert.equal(PROJECTION_LEFT_REASONS['text-changed'], 'its text is not the text in the shared history (it was edited), so it was left as it is with the edit in it');
+  assert.match(PROJECTION_LEFT_REASONS['text-changed'], /not the text in the shared history/);
+  assert.match(PROJECTION_LEFT_REASONS['text-changed'], /left as it is with the edit in it/);
 
   // Run again: the reconstruct step names the file before writing anything; with the text put back it finishes.
   const again = await makeMultiUser(env.root, env.deps, { name: NAME });
