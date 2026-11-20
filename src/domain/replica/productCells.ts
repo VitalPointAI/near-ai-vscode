@@ -78,6 +78,30 @@ export function labelFromText(text: unknown, scales: ScaleTable): Label | undefi
   return parsed.ok ? parsed.value : undefined;
 }
 
+// A whole label read back from its text as labelText writes it (scale/level, then //COMPARTMENTS joined by '/', then //REL and the releasability
+// joined by ', '), or undefined when the text is not that form or names a scale, level or token the given scales do not know. A version header's
+// label is this text, so a cell can check every part of it, not scale and level only (WR-01). Handling flags have no text, so the label has none.
+export function labelFromHeaderText(text: unknown, scales: ScaleTable): Label | undefined {
+  if (typeof text !== 'string') return undefined;
+  const [head, ...rest] = text.split('//');
+  const base = labelFromText(head, scales);
+  if (base === undefined || rest.length > 2) return undefined;
+  let compartments: string[] = [];
+  let releasability: string[] = [];
+  for (const [index, part] of rest.entries()) {
+    if (part.startsWith('REL ')) {
+      if (releasability.length > 0) return undefined;
+      releasability = part.slice(4).split(', ');
+    } else {
+      // Compartments come before releasability, once.
+      if (index > 0 || compartments.length > 0) return undefined;
+      compartments = part.split('/');
+    }
+  }
+  const parsed = parseLabel({ scale: base.scale, level: base.level, compartments, releasability, handling: [] }, scales);
+  return parsed.ok ? parsed.value : undefined;
+}
+
 // The structural form sameLabel and the legacy label read; a parsed Label fits it.
 export interface LabelLike {
   readonly scale: string;

@@ -17,15 +17,16 @@
 // The legacy cell (D-20) holds the whole single-machine product ledger and decision log. Its sealed label is the legacy form (a set of labels), its
 // key goes only to a lead or deputy whose declared clearance dominates every label in it (membership.ts clearedFor), and the hub never gets it (D-64).
 import { randomBytes } from 'node:crypto';
+import { dominates } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseLabel } from '../../domain/gate/labels';
-import type { Label, ScaleTable } from '../../domain/gate/labels';
+import type { Clearance, Label, ScaleTable } from '../../domain/gate/labels';
 import { buildGrant, earlierEpochGrants, grantHash, newEpochKey, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { SEALED_OVERHEAD, sealBlob } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import { kindFamily } from '../../domain/replica/kinds';
 import { MAX_STATE_BYTES } from '../../domain/replica/kindSchemas/doc';
 import {
-  DEFAULT_PRODUCT_LABEL, PRODUCT_CELL_REFUSALS, labelFromText, labelText, legacyCellLabel, pinProblem, readLegacyCellLabel, sameLabel
+  DEFAULT_PRODUCT_LABEL, PRODUCT_CELL_REFUSALS, labelFromHeaderText, labelFromText, labelText, legacyCellLabel, pinProblem, readLegacyCellLabel, sameLabel
 } from '../../domain/replica/productCells';
 import type { CellOrder, LegacyCellLabel, PinCandidate } from '../../domain/replica/productCells';
 import type { RosterState } from '../../domain/replica/roster';
@@ -264,8 +265,17 @@ async function labelOfCell(shared: SharedProjectHost, cell: string): Promise<Lab
   return parsed.ok ? parsed.value : undefined;
 }
 
-/** scale/level of a label text ("org/Confidential//REL CAN" gives "org/Confidential"). */
-const scaleLevel = (text: string): string => text.split('//')[0];
+/**
+ * Does a version header's label text name its cell's label (D-17, WR-01)? Read whole (scale, level, compartments and releasability), it must be on the
+ * cell's scale and level, and each must dominate the other by the Phase 70 rule (gate/dominance.ts): a compartment or releasability the cell does not
+ * carry, or one the header drops, is another label. A header that does not read as a label names none. Handling flags have no text and are not compared.
+ */
+function headerNamesCell(headerLabel: string, cellLabel: Label, gate: Gate): boolean {
+  const header = labelFromHeaderText(headerLabel, gate.scales);
+  if (header === undefined || header.scale !== cellLabel.scale || header.level !== cellLabel.level) return false;
+  const asClearance = (label: Label): Clearance => ({ scale: label.scale, level: label.level, compartments: label.compartments, releasability: label.releasability });
+  return dominates(asClearance(cellLabel), header, gate.context) && dominates(asClearance(header), cellLabel, gate.context);
+}
 
 /** The pin check the fold makes (D-18, D-67), with the cell order the project folds with, or the host's own when it folds with none. */
 function pinCheck(shared: SharedProjectHost, roster: RosterState, fold: { families: Record<string, unknown> }, own: string, pins: readonly Pin[]): LabelCellRefused | undefined {
@@ -358,9 +368,10 @@ export interface ProposeInput {
 }
 
 /**
- * Proposes a version of a product in its cell (D-17, D-18): refused label-change when the header's label (scale and level; org/Internal when none)
- * is not the cell's, pin-above-cell when the fold would refuse a pin, and as appendProductEntry. The text and header are sealed under the cell's
- * current epoch key into a blob, stored, and version.propose cites the deps given and each pinned version entry.
+ * Proposes a version of a product in its cell (D-17, D-18): refused label-change when the header's label (read whole: scale, level, compartments and
+ * releasability; org/Internal when none) is not the cell's (headerNamesCell), pin-above-cell when the fold would refuse a pin, and as
+ * appendProductEntry. The text and header are sealed under the cell's current epoch key into a blob, stored, and version.propose cites the deps given
+ * and each pinned version entry.
  */
 export async function proposeVersion(shared: SharedProjectHost, input: ProposeInput): Promise<ProposeResult> {
   const target = await targetOf(shared, 'version.propose', input.product, undefined);
@@ -368,7 +379,7 @@ export async function proposeVersion(shared: SharedProjectHost, input: ProposeIn
   const { project } = shared;
   const cellLabel = await labelOfCell(shared, target.stream);
   const headerLabel = typeof input.header.label === 'string' ? input.header.label : DEFAULT_PRODUCT_LABEL;
-  if (cellLabel === undefined || scaleLevel(headerLabel) !== `${cellLabel.scale}/${cellLabel.level}`) return refuse('label-change');
+  if (cellLabel === undefined || !headerNamesCell(headerLabel, cellLabel, gateOf(shared))) return refuse('label-change');
   const pins = input.pins.map((pin) => ({ product: pin.product, hash: pin.hash }));
   const problem = pinCheck(shared, target.roster, target.fold, target.stream, pins);
   if (problem !== undefined) return problem;
