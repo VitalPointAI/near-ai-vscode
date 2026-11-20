@@ -21,7 +21,7 @@
 // Grants travel in append and are listed in heads because they live outside the streams and the hub needs them for access lists; append names the
 // blobs its entries use because the hub cannot read which blob a sealed body names (D-69).
 import { createHash } from 'node:crypto';
-import { CHECKPOINT_MAX_BYTES, readCheckpoint, verifyCheckpoint } from '@ext/domain/replica/checkpoint';
+import { CHECKPOINT_MAX_BYTES, verifyCheckpoint } from '@ext/domain/replica/checkpoint';
 import type { Checkpoint } from '@ext/domain/replica/checkpoint';
 import { canonicalize } from '@ext/domain/team/canonical';
 import type http from 'node:http';
@@ -481,15 +481,8 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     const now = deps.now();
     let kept = 0;
     for (const item of verified.sort((a, b) => a.coverage - b.coverage)) {
-      const held = store.checkpoints(project).map((record) => {
-        const payload = readCheckpoint((JSON.parse(record.body) as { payload?: unknown }).payload);
-        return { hash: record.hash, signedAt: record.signedAt, coverage: payload === undefined ? 0 : coverageOf(payload) };
-      });
-      if (held.some((record) => record.hash === item.hash)) continue;
-      // Below every held checkpoint that covers at least as much; otherwise after all of them.
-      const above = held.filter((record) => record.coverage >= item.coverage).map((record) => record.signedAt);
-      const signedAt = above.length > 0 ? Math.max(0, Math.min(...above) - 1) : Math.max(now, ...held.map((record) => record.signedAt + 1));
-      if (store.putCheckpoint(project, { hash: item.hash, body: item.text, signedAt, receivedAt: now }) === 'stored') kept += 1;
+      // Below every held checkpoint that covers at least as much; otherwise after all of them. The store places it with one query (WR-05).
+      if (store.putHandedBackCheckpoint(project, { hash: item.hash, body: item.text }, now) === 'stored') kept += 1;
     }
     sendJson(res, 200, JSON.stringify({ project, kept, ...checkpointOf(project) }));
     events.channel.emit('checkpoint', project);

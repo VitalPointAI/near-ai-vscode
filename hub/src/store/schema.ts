@@ -181,6 +181,51 @@ CREATE INDEX join_requests_accepted ON join_requests (accepted_at) WHERE accepte
 
 INSERT INTO hub_meta (key, value) VALUES ('schema_version', '1');
 `,
+  // v2 (WR-05): each kept checkpoint's coverage (how many entries it covers), so a handed-back checkpoint is placed among the kept ones with one
+  // query instead of reading and parsing every kept checkpoint. Append-only like the checkpoints it describes; rows of checkpoints kept before
+  // this migration are filled from their bodies.
+  `
+CREATE TABLE checkpoint_coverage (
+  project TEXT NOT NULL,
+  hash TEXT NOT NULL CHECK (length(hash) = 64),
+  coverage INTEGER NOT NULL CHECK (coverage >= 0),
+  PRIMARY KEY (project, hash),
+  FOREIGN KEY (project, hash) REFERENCES checkpoints (project, hash)
+) STRICT;
+
+CREATE INDEX checkpoint_coverage_by_size ON checkpoint_coverage (project, coverage);
+${APPEND_ONLY('checkpoint_coverage')}
+INSERT INTO checkpoint_coverage (project, hash, coverage)
+SELECT c.project, c.hash, max(0, coalesce((SELECT sum(CAST(json_extract(s.value, '$.count') AS INTEGER)) FROM json_each(c.body, '$.payload.streams') AS s), 0))
+FROM checkpoints AS c;
+
+UPDATE hub_meta SET value = '2' WHERE key = 'schema_version';
+`,
+  // v3 (WR-02): per writer log, the furthest place a kept checkpoint of this hub names as a head. A place at or below it is one the hub accepted
+  // before, so after a restore the entry there is taken back even from a device revoked since. Derived from the kept checkpoints and only ever
+  // moved forward by the store, so it is not append-only; rows for checkpoints kept before this migration are filled from their bodies.
+  `
+CREATE TABLE checkpoint_cover (
+  project TEXT NOT NULL REFERENCES projects (project),
+  stream TEXT NOT NULL CHECK (length(stream) = 32),
+  writer TEXT NOT NULL CHECK (length(writer) = 64),
+  seq INTEGER NOT NULL CHECK (seq >= 0),
+  hash TEXT NOT NULL CHECK (length(hash) = 64),
+  PRIMARY KEY (project, stream, writer)
+) STRICT;
+
+INSERT INTO checkpoint_cover (project, stream, writer, seq, hash)
+SELECT project, stream, writer, max(seq), hash FROM (
+  SELECT c.project AS project, json_extract(s.value, '$.stream') AS stream, json_extract(h.value, '$.writer') AS writer,
+    json_extract(h.value, '$.seq') AS seq, json_extract(h.value, '$.hash') AS hash
+  FROM checkpoints AS c, json_each(c.body, '$.payload.streams') AS s, json_each(s.value, '$.heads') AS h
+)
+WHERE typeof(stream) = 'text' AND length(stream) = 32 AND typeof(writer) = 'text' AND length(writer) = 64
+  AND typeof(seq) = 'integer' AND seq >= 0 AND typeof(hash) = 'text' AND length(hash) = 64
+GROUP BY project, stream, writer;
+
+UPDATE hub_meta SET value = '3' WHERE key = 'schema_version';
+`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -13,6 +13,9 @@
 // extends it with the sorted new entries, which is that order without holding every earlier covered set in memory.
 //
 // Kept checkpoints (D-46, D-54, D-70). Every checkpoint of this hub in the store counts, the ones clients handed back after a restore included.
+// Memory (WR-05): once the kept checkpoints are checked as one chain, only the latest is held, with the order state after it; earlier ones are
+// nested in it, so they add nothing to what must be covered. The store is read from a cursor, so an ask reads only checkpoints kept since the last
+// read. A checkpoint handed back below the latest one (after a restore) makes the whole chain be read and checked again, once.
 // While one of them names a head the hub does not cover, the hub signs nothing for that project and logs checkpoint.waiting; once clients re-push,
 // the next checkpoint nests after it. Kept checkpoints that do not form one chain of nested sets stop signing for that project with
 // checkpoint.conflict: never a silent guess. Kept checkpoints whose order the hub cannot reproduce (order-mismatch) also stop signing with
@@ -24,8 +27,11 @@
 // checkpoint of that project. An ask signs at once when the covered set grew and the last ask-signed checkpoint of that project is at least
 // 10 seconds old. A covered set that did not grow is never signed again. One job runs at a time per project.
 //
-// Size. A checkpoint that would pass CHECKPOINT_MAX_BYTES drops granted streams from the end of stream id order (never the base cell stream),
-// recomputes the closed set, and logs checkpoint.trimmed with counts.
+// Size (WR-09). A checkpoint that would pass CHECKPOINT_MAX_BYTES leaves out granted streams no kept checkpoint covered yet, from the end of stream
+// id order, recomputes the closed set, and logs checkpoint.trimmed with counts. A stream a kept checkpoint covered is never left out (nor the base
+// cell stream): clients would read its absence as a rollback (D-46). When even that does not fit, the hub cannot sign for the project: it logs
+// checkpoint.too_large once with a reason word (base-over-limit, covered-over-limit) and reports the project through stuck() until it signs again;
+// members' computers report the hub as delayed meanwhile. The format holds about 250 writer heads (D-45 keeps it unchanged).
 //
 // Privacy (T-32-89). Opened bodies stay in memory, reduced to what ordering needs (deps, roster, lamport and the plain fields of the body); their
 // data is dropped at once and never written or logged. Log lines carry the project id, counts and a reason word only.
@@ -84,6 +90,19 @@ export interface CheckpointerDeps {
 
 /** What one signing attempt came to, for tests and logs. */
 export type AttemptOutcome = 'signed' | 'unchanged' | 'waiting' | 'conflict' | 'too-soon' | 'stopped' | 'too-large' | 'failed';
+
+/** Why the hub signs nothing for a project for size (WR-09): even the base cell stream alone, or the streams kept checkpoints already cover, pass
+ *  CHECKPOINT_MAX_BYTES. */
+export type SizeStop = 'base-over-limit' | 'covered-over-limit';
+
+/** A project whose signing has stopped until something changes: a size stop or a conflict among its kept checkpoints. No project text. */
+export interface StuckProject {
+  project: string;
+  state: 'too-large' | 'conflict';
+  reason: string;
+  /** Milliseconds, when the state began. */
+  since: number;
+}
 
 /** An opened entry reduced to what checkpoints need: no data and no blob. */
 type Opened = CheckpointEntry;
@@ -166,17 +185,28 @@ class ProjectCheckpointer {
   private readonly logs = new Map<string, WriterLog>();
   private readonly located = new Map<string, { log: WriterLog; seq: number }>();
   private readonly blobs = new Map<string, SealedBlob>();
+  /**
+   * The kept checkpoints in memory, in coverage order. When anchored, the first is the latest checked one and tip is the order state after it,
+   * and the rest are kept checkpoints read since and not checked yet; otherwise the chain is every kept checkpoint and tip is empty.
+   */
   private chain: ChainItem[] = [];
+  private anchored = false;
   private tip: ChainTip = EMPTY_TIP();
-  private readonly seen = new Set<string>();
+  /** The store's cursor after the last kept checkpoint read. */
+  private cursor = 0;
+  /** Checkpoints this signer stored since the last read: already in the chain, so the next read skips them. */
+  private readonly signedSinceRead = new Set<string>();
   private chainLoaded = false;
   /** An ask may have handed checkpoints back: read the store again at the next attempt. */
   private reloadWanted = true;
   /** The kept chain was checked and tip is its order state. */
   private validated = true;
   private conflict: string | undefined;
-  /** The number of kept checkpoints when their order could not be reproduced: only a longer chain (more handed back) is checked again. */
-  private gapAt: number | undefined;
+  private conflictSince = 0;
+  /** Signing stopped for size, and since when; logged once per reason. */
+  private sizeStop: { reason: SizeStop; since: number } | undefined;
+  /** The conflict is an order gap that more handed-back checkpoints can heal: only a read that finds new ones checks the chain again. */
+  private healable = false;
   private queue: Promise<unknown> = Promise.resolve();
   private timer: Timer | undefined;
   private lastSigned = Number.NEGATIVE_INFINITY;
@@ -232,7 +262,7 @@ class ProjectCheckpointer {
 
   private async attempt(trigger: 'timer' | 'ask'): Promise<AttemptOutcome> {
     if (this.isStopped()) return 'stopped';
-    if (this.conflict !== undefined && (this.gapAt === undefined || !this.reloadWanted)) return 'conflict';
+    if (this.conflict !== undefined && (!this.healable || !this.reloadWanted)) return 'conflict';
     if (trigger === 'ask' && this.deps.now() - this.lastAskSigned < CHECKPOINT_TIMING.askGapMs) return 'too-soon';
     // Arrivals from here on schedule a new timer; the store is read after this point, so none is lost.
     if (trigger === 'ask') this.cancel();
@@ -241,12 +271,12 @@ class ProjectCheckpointer {
     await this.refresh(roster);
     if (this.isStopped()) return 'stopped';
 
-    this.loadChain();
+    const fresh = this.loadChain();
     if (this.conflict !== undefined) {
       // An order gap: nothing new was handed back, so the chain still cannot be reproduced.
-      if (this.chain.length === this.gapAt) return 'conflict';
+      if (fresh === 0) return 'conflict';
       this.conflict = undefined;
-      this.gapAt = undefined;
+      this.healable = false;
     }
     const all = this.cover(roster, undefined);
     const waiting = this.missingHeads(all.frontier);
@@ -258,7 +288,8 @@ class ProjectCheckpointer {
       const reason = this.validateChain();
       if (reason !== undefined) {
         this.conflict = reason;
-        this.gapAt = reason === 'order-mismatch' ? this.chain.length : undefined;
+        this.conflictSince = this.deps.now();
+        this.healable = reason === 'order-mismatch';
         this.deps.log?.('error', 'checkpoint.conflict', { project: this.project, reason, kept: this.chain.length });
         return 'conflict';
       }
@@ -266,11 +297,19 @@ class ProjectCheckpointer {
     if (all.total <= this.tip.total) return 'unchanged';
 
     const built = this.fit(roster, all);
-    if (built === undefined) return 'too-large';
+    if ('stop' in built) {
+      if (this.sizeStop?.reason !== built.stop) {
+        this.sizeStop = { reason: built.stop, since: this.deps.now() };
+        this.deps.log?.('error', 'checkpoint.too_large', { project: this.project, reason: built.stop, streams: built.streams });
+      }
+      return 'too-large';
+    }
     const { checkpoint, cover, dropped } = built;
     if (dropped > 0) {
       this.deps.log?.('warn', 'checkpoint.trimmed', { project: this.project, dropped, streams: checkpoint.streams.length });
-      if (!within(this.tip.frontier, cover.frontier) || cover.total <= this.tip.total) return 'too-large';
+      // Only streams no kept checkpoint covered were left out, so the trimmed set nests; what grew may lie only in the streams left out.
+      if (!within(this.tip.frontier, cover.frontier)) return 'too-large';
+      if (cover.total <= this.tip.total) return 'unchanged';
     }
     if (this.isStopped()) return 'stopped';
     const signed = signCheckpoint(this.deps.identity.signer, checkpoint);
@@ -281,11 +320,17 @@ class ProjectCheckpointer {
     const signedAt = latest === undefined ? now : Math.max(now, latest.signedAt + 1);
     this.deps.store.putCheckpoint(this.project, { hash, body: canonicalize(signed), signedAt, receivedAt: now });
     const payload = readCheckpoint(signed.payload) as Checkpoint;
-    this.chain.push({ hash, signed, checkpoint: payload, frontier: cover.frontier, total: cover.total });
-    this.seen.add(hash);
+    // The new checkpoint nests after the checked chain, so it alone stands for it from here on.
+    this.chain = [{ hash, signed, checkpoint: payload, frontier: cover.frontier, total: cover.total }];
+    this.anchored = true;
+    this.signedSinceRead.add(hash);
     this.tip = this.advance(this.tip, cover.frontier);
     this.lastSigned = now;
     if (trigger === 'ask') this.lastAskSigned = now;
+    if (this.sizeStop !== undefined) {
+      this.sizeStop = undefined;
+      this.deps.log?.('info', 'checkpoint.resumed', { project: this.project });
+    }
     this.deps.events.publish(
       this.project,
       (writer) => (this.deps.cache.peek(this.project) ?? roster).standing(writer) === 'admitted',
@@ -401,28 +446,64 @@ class ProjectCheckpointer {
     return { frontier: covered, total: entries.length, entries };
   }
 
-  /** Reads this hub's kept checkpoints from the store when they may have changed (first use, or an ask that may have handed some back). */
-  private loadChain(): void {
-    if (this.chainLoaded && !this.reloadWanted) return;
+  /** Why signing has stopped for this project, or undefined while it can sign. */
+  get stuck(): Omit<StuckProject, 'project'> | undefined {
+    if (this.conflict !== undefined) return { state: 'conflict', reason: this.conflict, since: this.conflictSince };
+    if (this.sizeStop !== undefined) return { state: 'too-large', reason: this.sizeStop.reason, since: this.sizeStop.since };
+    return undefined;
+  }
+
+  /** How many kept checkpoints this signer holds in memory (WR-05: one once the chain is checked). */
+  get keptInMemory(): number {
+    return this.chain.length;
+  }
+
+  /**
+   * Reads the kept checkpoints stored since the last read, when they may have changed (first use, or an ask that may have handed some back).
+   * Returns how many new ones of this hub it found. One that covers no more than the checked tip was handed back below it, so the whole chain is
+   * read again and checked from the start.
+   */
+  private loadChain(): number {
+    if (this.chainLoaded && !this.reloadWanted) return 0;
     this.chainLoaded = true;
     this.reloadWanted = false;
     const fresh: ChainItem[] = [];
-    for (const record of this.deps.store.checkpoints(this.project)) {
-      if (this.seen.has(record.hash)) continue;
-      this.seen.add(record.hash);
-      let signed: SignedCheckpoint;
-      try {
-        signed = JSON.parse(record.body) as SignedCheckpoint;
-      } catch {
-        continue;
-      }
-      const checkpoint = readCheckpoint(signed?.payload);
-      if (checkpoint === undefined || checkpoint.signer !== this.deps.identity.writer || checkpoint.project !== this.project) continue;
-      fresh.push({ hash: record.hash, signed, checkpoint, frontier: frontierOf(checkpoint), total: totalOf(checkpoint) });
+    for (const record of this.deps.store.checkpointsAfter(this.project, this.cursor)) {
+      this.cursor = Math.max(this.cursor, record.cursor);
+      if (this.signedSinceRead.has(record.hash)) continue;
+      const item = this.itemOf(record);
+      if (item !== undefined) fresh.push(item);
     }
-    if (fresh.length === 0) return;
-    this.chain = [...this.chain, ...fresh].sort((a, b) => a.total - b.total || compareText(a.hash, b.hash));
+    this.signedSinceRead.clear();
+    if (fresh.length === 0) return 0;
+    if (this.anchored && fresh.some((item) => item.total <= this.tip.total)) {
+      const all: ChainItem[] = [];
+      for (const record of this.deps.store.checkpointsAfter(this.project, 0)) {
+        this.cursor = Math.max(this.cursor, record.cursor);
+        const item = this.itemOf(record);
+        if (item !== undefined) all.push(item);
+      }
+      this.chain = all;
+      this.anchored = false;
+      this.tip = EMPTY_TIP();
+    } else {
+      this.chain = [...this.chain, ...fresh];
+    }
+    this.chain.sort((a, b) => a.total - b.total || compareText(a.hash, b.hash));
     this.validated = false;
+    return fresh.length;
+  }
+
+  private itemOf(record: { hash: string; body: string }): ChainItem | undefined {
+    let signed: SignedCheckpoint;
+    try {
+      signed = JSON.parse(record.body) as SignedCheckpoint;
+    } catch {
+      return undefined;
+    }
+    const checkpoint = readCheckpoint(signed?.payload);
+    if (checkpoint === undefined || checkpoint.signer !== this.deps.identity.writer || checkpoint.project !== this.project) return undefined;
+    return { hash: record.hash, signed, checkpoint, frontier: frontierOf(checkpoint), total: totalOf(checkpoint) };
   }
 
   /** How many heads of kept checkpoints the hub does not cover (a head the hub holds as another entry counts too). */
@@ -454,8 +535,9 @@ class ProjectCheckpointer {
       const conflict = checkpointConflict(previous.signed, item.signed);
       if (conflict !== undefined) return conflict.reason;
     }
-    let tip = EMPTY_TIP();
-    for (const item of this.chain) {
+    // When anchored, the first item is the checked tip: the order is extended from there.
+    let tip = this.anchored ? this.tip : EMPTY_TIP();
+    for (const item of this.anchored ? this.chain.slice(1) : this.chain) {
       tip = this.advance(tip, item.frontier);
       for (const [stream, state] of tip.streams) {
         const listed = item.checkpoint.streams.find((candidate: CheckpointStream) => candidate.stream === stream);
@@ -465,6 +547,12 @@ class ProjectCheckpointer {
     }
     this.tip = tip;
     this.validated = true;
+    // Every kept checkpoint is nested in the latest one: it alone stands for the chain from here on.
+    const latest = this.chain[this.chain.length - 1];
+    if (latest !== undefined) {
+      this.chain = [latest];
+      this.anchored = true;
+    }
     return undefined;
   }
 
@@ -497,21 +585,25 @@ class ProjectCheckpointer {
   }
 
   /**
-   * The checkpoint of everything covered, or, past CHECKPOINT_MAX_BYTES, of the closed set left when granted streams are dropped from the end of
-   * stream id order (the base cell stream never is). The fewest streams are dropped: dropping more never makes a checkpoint larger.
+   * The checkpoint of everything covered, or, past CHECKPOINT_MAX_BYTES, of the closed set left when granted streams no kept checkpoint covered
+   * are left out from the end of stream id order (the base cell stream and every stream a kept checkpoint covered always stay, WR-09). The fewest
+   * streams are left out: leaving out more never makes a checkpoint larger. A size stop when even all of them left out does not fit.
    */
-  private fit(roster: ProjectRoster, all: Cover): { checkpoint: Checkpoint; cover: Cover; dropped: number } | undefined {
+  private fit(roster: ProjectRoster, all: Cover): { checkpoint: Checkpoint; cover: Cover; dropped: number } | { stop: SizeStop; streams: number } {
     const signer = this.deps.identity.signer;
     const first = this.checkpointOf(roster, all);
     if (signedSize(signer, first) <= CHECKPOINT_MAX_BYTES) return { checkpoint: first, cover: all, dropped: 0 };
+    const coveredBefore = new Set([...this.tip.frontier.keys()].map((key) => key.slice(0, key.indexOf('/'))));
     const granted = [...new Set(all.entries.map((entry) => entry.header.stream))].filter((stream) => stream !== this.project).sort(compareText);
+    const kept = granted.filter((stream) => coveredBefore.has(stream));
+    const droppable = granted.filter((stream) => !coveredBefore.has(stream));
     const attempt = (dropped: number): { checkpoint: Checkpoint; cover: Cover } | undefined => {
-      const cover = this.cover(roster, new Set([this.project, ...granted.slice(0, granted.length - dropped)]));
+      const cover = this.cover(roster, new Set([this.project, ...kept, ...droppable.slice(0, droppable.length - dropped)]));
       const checkpoint = this.checkpointOf(roster, cover);
       return signedSize(signer, checkpoint) <= CHECKPOINT_MAX_BYTES ? { checkpoint, cover } : undefined;
     };
     let low = 1;
-    let high = granted.length;
+    let high = droppable.length;
     let best: { checkpoint: Checkpoint; cover: Cover; dropped: number } | undefined;
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
@@ -523,8 +615,7 @@ class ProjectCheckpointer {
         high = middle - 1;
       }
     }
-    if (best === undefined) this.deps.log?.('error', 'checkpoint.too_large', { project: this.project, streams: granted.length + 1 });
-    return best;
+    return best ?? { stop: kept.length > 0 ? 'covered-over-limit' : 'base-over-limit', streams: granted.length + 1 };
   }
 }
 
@@ -551,6 +642,21 @@ export class Checkpointer {
   asked(project: string): Promise<AttemptOutcome> {
     if (this.stopped) return Promise.resolve('stopped');
     return this.of(project).asked();
+  }
+
+  /** The projects whose signing has stopped (a size stop or a conflict among kept checkpoints), with a reason word and since when (WR-09). */
+  stuck(): StuckProject[] {
+    const found: StuckProject[] = [];
+    for (const [project, signer] of this.projects) {
+      const state = signer.stuck;
+      if (state !== undefined) found.push({ project, ...state });
+    }
+    return found;
+  }
+
+  /** How many kept checkpoints the project's signer holds in memory (0 for a project it never signed or read). */
+  keptInMemory(project: string): number {
+    return this.projects.get(project)?.keptInMemory ?? 0;
   }
 
   /** Whether a debounce timer is set for the project. */

@@ -44,6 +44,9 @@ export interface RosterInput {
   entries: readonly SealedEntry[];
   /** Signed grant objects: first those the hub keeps, then new ones offered with a batch. */
   grants: readonly unknown[];
+  /** Hashes of the grants the store keeps. Each was placed by the hub's fold when it was stored (enrolment and append keep placed grants only),
+   *  so its key stays in the hub's ring even while a roster split leaves the roster it names off the line (CR-01). */
+  kept?: ReadonlySet<string>;
   blobs: ReadonlyMap<string, SealedBlob>;
   equivocations: readonly Place[];
   identity: RosterIdentity;
@@ -112,17 +115,20 @@ export class ProjectRoster {
     this.quarantinePlaces = input.equivocations;
   }
 
-  /** Folds the roster. The ring is opened from the grants wrapped to the hub; if a key came from a grant the fold did not place, it folds again
-   *  with keys from placed grants only, so a grant from someone who may not give keys never decides what the hub can read. */
+  /** Folds the roster. The ring is opened from the grants wrapped to the hub; if a key came from a grant the fold did not place and the store does
+   *  not keep, it folds again with keys from placed or kept grants only, so a grant from someone who may not give keys never decides what the hub
+   *  can read. A kept grant stays usable through a roster split below the roster it names: without it a split at a roster older than the hub's
+   *  admission would leave the hub unable to open the roster, including the roster.choose that resolves the split. */
   static build(input: RosterInput): ProjectRoster {
     const fold = (keys: KeyRing): RosterState =>
       foldRoster({ entries: input.entries, anchor: input.anchor, keys, blobs: (hash) => input.blobs.get(hash), grants: input.grants, now: input.now });
+    const kept = input.kept ?? new Set<string>();
     const first = ringKeys(input.grants, input.identity);
     let state = fold(ringOf(first));
     let keys = first;
     const placed = placedGrantsOf(state);
-    if ([...first.values()].some((item) => !placed.has(item.grant))) {
-      keys = ringKeys(input.grants, input.identity, placed);
+    if ([...first.values()].some((item) => !placed.has(item.grant) && !kept.has(item.grant))) {
+      keys = ringKeys(input.grants, input.identity, new Set([...placed, ...kept]));
       state = fold(ringOf(keys));
     }
     return new ProjectRoster(input, state, ringOf(keys));
@@ -146,7 +152,9 @@ export class ProjectRoster {
         }
       }
     }
-    const grants = store.grants(project).map((grant) => JSON.parse(grant.body) as unknown);
+    const records = store.grants(project);
+    const grants = records.map((grant) => JSON.parse(grant.body) as unknown);
+    const kept = new Set(records.map((grant) => grant.hash));
     const ring = ringOf(ringKeys(grants, identity));
     const blobs = new Map<string, SealedBlob>();
     for (const hash of blobsNamed(entries, ring)) {
@@ -154,7 +162,7 @@ export class ProjectRoster {
       if (bytes !== undefined) blobs.set(hash, { hash, bytes: bytes.toString('base64url') });
     }
     const equivocations = store.equivocations(project).map((proof) => ({ writer: proof.writer, stream: proof.stream, seq: proof.seq }));
-    return ProjectRoster.build({ project, anchor, entries, grants, blobs, equivocations, identity, now });
+    return ProjectRoster.build({ project, anchor, entries, grants, kept, blobs, equivocations, identity, now });
   }
 
   /** The roster folded again with more base-stream entries, grants and blobs (an overlay for a batch). */
@@ -162,6 +170,13 @@ export class ProjectRoster {
     const merged = new Map(this.input.blobs);
     for (const [hash, blob] of blobs) merged.set(hash, blob);
     return ProjectRoster.build({ ...this.input, entries: [...this.input.entries, ...entries], grants: [...this.input.grants, ...grants], blobs: merged });
+  }
+
+  /** The same roster once the store keeps these grants too (after COMMIT); they were placed by this fold, so the ring and state do not change. */
+  withKept(hashes: readonly string[]): ProjectRoster {
+    if (hashes.length === 0) return this;
+    const input = { ...this.input, kept: new Set([...(this.input.kept ?? []), ...hashes]) };
+    return new ProjectRoster(input, this.state, this.ring);
   }
 
   /** The same roster with more equivocation places; no fold is needed. */
@@ -219,6 +234,14 @@ export class ProjectRoster {
   /** May this device write the roster at the head: a device of the staff lead or the deputy lead there. */
   isRosterWriter(writer: string): boolean {
     return isRosterWriterAt(this.state, writer, this.headPosition);
+  }
+
+  /** May this device write the roster at the roster with this hash (D-11: authority at the cited roster). True or false for a roster on the hub's
+   *  line, at or below the head; undefined for a roster the line does not hold (not received yet, or on a branch nobody chose), which only the
+   *  fold can judge once that roster is applied. */
+  isRosterWriterAtRoster(writer: string, hash: string): boolean | undefined {
+    const position = this.state.positionOf.get(hash);
+    return position === undefined ? undefined : isRosterWriterAt(this.state, writer, position);
   }
 }
 

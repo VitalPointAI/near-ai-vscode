@@ -5,9 +5,11 @@
 // Order. Per batch, before anything costly: its shape and size, then the pushing device's token bucket (before any signature, Pitfall 7), then the
 // project and the blobs the batch says its entries use (a missing blob refuses the whole batch, blob-missing). Per entry, in order: header shape and
 // size; the body's size and ciphertext hash; the stream is the project's; the writer's signature with its roster key; the writer admitted and neither
-// revoked nor quarantined at the head; the writer on the stream's access list; the place (same hash again: held; another hash at a used seq: an
-// equivocation proof, D-43; beyond the next seq: seq-gap; wrong prev: prev-mismatch); and for base-stream entries, a body the hub can open and, for
-// roster kinds, a lead or deputy device citing the roster head.
+// revoked nor quarantined at the head (a device revoked since may still fill a place a kept checkpoint of this hub covers, WR-02); the writer on the
+// stream's access list; the place (same hash again: held; another hash at a used seq: an equivocation proof, D-43; beyond the next seq: seq-gap;
+// wrong prev: prev-mismatch); and for base-stream entries, a body the hub can open and, for
+// roster kinds, a lead or deputy device at the roster the entry cites (D-11). A roster kind citing an older roster than the hub's head is stored:
+// it is a concurrent branch the fold turns into a split (D-09), and refusing it would cut the writer's log at a seq gap for good (CR-01).
 //
 // A batch is checked in order against an in-memory overlay (heads, places and a roster folded again after each roster entry), then written by
 // commitBatch in one store transaction. Only after COMMIT does the overlay replace the cached roster, so a failed write accepts nothing (D-26).
@@ -18,7 +20,7 @@ import type { EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/e
 import { canonicalProof, proofHash } from '@ext/domain/replica/equivocation';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
 import { validateBody } from '@ext/domain/replica/kinds';
-import { ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
@@ -45,8 +47,7 @@ export const APPEND_REFUSALS = {
   'seq-gap': 'The entry skips a place in its writer\'s log. Send the entries before it first.',
   'prev-mismatch': 'The entry does not follow the entry before it in its writer\'s log.',
   equivocation: 'The writer already signed a different entry at this place. The hub keeps the first one and has recorded both as proof.',
-  'not-a-roster-writer': 'Only a device of the staff lead or the deputy lead may change the roster.',
-  'roster-not-at-head': 'This roster change follows another roster than the hub\'s current one. Fetch the roster and make the change again.',
+  'not-a-roster-writer': 'Only a device of the staff lead or the deputy lead may change the roster, and the device that wrote this was not one at the roster it follows.',
   'roster-unreadable': 'The hub cannot open this entry of the roster part of the project, so it cannot check it.',
   'grant-not-placed': 'This cell grant does not fit the roster, so the hub does not keep it.'
 } as const;
@@ -185,6 +186,12 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   }
 }
 
+/** True when a kept checkpoint of this hub names this writer log's head at or beyond the entry's place, and at that place names this very entry. */
+function coveredBefore(store: HubStore, project: string, header: EntryHeader, hash: string): boolean {
+  const covered = store.coveredHead(project, header.stream, header.writer);
+  return covered !== undefined && (header.seq < covered.seq || (header.seq === covered.seq && hash === covered.hash));
+}
+
 /** Checks one batch. Nothing is stored here; commitBatch writes what this accepted. */
 export async function checkBatch(input: AppendInput, ctx: AppendContext): Promise<CheckOutcome> {
   if (!isRecord(input) || typeof input.project !== 'string' || typeof input.device !== 'string' || !Array.isArray(input.entries)) return refuseBatch('malformed-batch');
@@ -304,11 +311,16 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       continue;
     }
     const standing = roster.standing(header.writer);
-    if (standing !== 'admitted') {
+    // WR-02 (D-54): standing is judged at the entry's place, not only at the head. A place at or below the furthest head a kept checkpoint of this
+    // hub names for that log is one the hub accepted before, so after a restore the entry there is taken back even from a device revoked since
+    // (at the covered head itself only the very entry the checkpoint names). Without it the hub could never cover that checkpoint's heads again
+    // and would stop signing for the project. Anything beyond the covered place stays refused revoked.
+    const vouched = standing === 'revoked' && coveredBefore(store, project, header, hash);
+    if (standing !== 'admitted' && !vouched) {
       refuse(standing, hash);
       continue;
     }
-    if (!(roster.accessList(header.stream) ?? []).includes(header.writer)) {
+    if (!vouched && !(roster.accessList(header.stream) ?? []).includes(header.writer)) {
       refuse('not-on-access-list', hash);
       continue;
     }
@@ -349,13 +361,14 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       }
       const { kind, data } = read.opened;
       if (Object.prototype.hasOwnProperty.call(ROSTER_KIND_OWNER, kind)) {
-        if (!roster.isRosterWriter(header.writer)) {
+        // Authority at the roster the entry cites, never at the hub's head (D-11, CR-01). A roster entry citing an older head is an honest
+        // concurrent branch (a lead and a deputy racing, a lead handover race): it is the writer's log, so it is stored and the fold makes it a
+        // split for the lead to choose. Refusing it would leave a seq gap that cuts off every later entry of that device in the base stream.
+        // A cited roster the hub's line does not hold is stored too: the fold applies nothing from it unless that roster is applied, and then
+        // judges the writer there.
+        const rosterPrev = kind === 'project.genesis' ? ORIGIN_ROSTER : isRecord(data) && typeof data.rosterPrev === 'string' ? data.rosterPrev : read.opened.roster;
+        if (roster.isRosterWriterAtRoster(header.writer, rosterPrev) === false) {
           refuse('not-a-roster-writer', hash);
-          continue;
-        }
-        const rosterPrev = isRecord(data) ? data.rosterPrev : undefined;
-        if (rosterPrev !== roster.head || read.opened.roster !== roster.head) {
-          refuse('roster-not-at-head', hash);
           continue;
         }
         baseEntries.push({ header, body: raw.body as string });
@@ -380,13 +393,18 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   }
   grantsRefused.sort((a, b) => a.index - b.index);
 
-  // Blob references for entries the hub has after this batch; a reference for a refused entry is dropped with it.
+  // Blob references for entries this batch stores; a reference for a refused entry is dropped with it. For an entry the hub already held, only its
+  // own writer's device may add a reference (IN-01): otherwise any device could mark its uploads referenced by naming someone else's entry,
+  // escaping the pending quota and the 24 hour sweep (D-44), and widen who may read that blob to the entry's stream.
   const streamOf = new Map<string, string>();
   for (const entry of entries) streamOf.set(entry.hash, entry.stream);
   const blobRefs: BlobRef[] = [];
   for (const ref of refsIn) {
     let stream = streamOf.get(ref.entry);
-    if (stream === undefined && held.includes(ref.entry)) stream = store.entryByHash(project, ref.entry)?.stream;
+    if (stream === undefined && held.includes(ref.entry)) {
+      const stored = store.entryByHash(project, ref.entry);
+      if (stored !== undefined && stored.writer === input.device) stream = stored.stream;
+    }
     if (stream !== undefined) blobRefs.push({ entry: ref.entry, blob: ref.blob, stream });
   }
 
@@ -409,7 +427,7 @@ export function commitBatch(store: HubStore, cache: RosterCache, checked: Checke
     blobRefs: checked.blobRefs,
     at: now
   });
-  if (cache.peek(checked.project) === checked.base) cache.replace(checked.project, checked.roster);
+  if (cache.peek(checked.project) === checked.base) cache.replace(checked.project, checked.roster.withKept(checked.grants.map((grant) => grant.hash)));
   else cache.invalidate(checked.project);
   return {
     project: checked.project,

@@ -2098,6 +2098,14 @@ are the hub's own suite, files under `src/test/` the extension's.
   against the ones they hold by its heads and by checkpoints over the same number of changes; they
   do not yet recompute its order from the changes themselves, so a hub that reorders earlier
   changes while also changing the count is not caught by that check.
+- **Limit: the size of a checkpoint.** A checkpoint is at most 64 KiB, which holds about 250
+  writer heads over the parts it covers. Past that, the hub leaves out parts granted to it that no
+  earlier checkpoint covered (from the end of their id order); a part an earlier checkpoint covered is
+  never left out, because members' computers would read that as a rollback. When the parts already
+  covered pass the limit on their own (for example many devices writing in the part every member
+  holds), the hub signs nothing more for that project: it logs `checkpoint.too_large` once with the
+  reason, lists the project as stuck, and members' computers in time report the hub as delayed.
+  Changes still sync (`hub/test/checkpoints.test.ts`, the trimmed and stuck rows).
 
 ### Checkpoints cover only what the hub can read
 

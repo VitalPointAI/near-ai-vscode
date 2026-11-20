@@ -335,6 +335,59 @@ test('restore drill, ungranted cell: no checkpoint lists it, so both clients nam
     assert.deepEqual(hashesOf(a.replica), hashesOf(b.replica), 'A and B do not hold the same entries');
   }));
 
+test('restore drill, revoked since (WR-02): a member device revoked after it wrote has its entries taken back on re-push at the places a handed-back checkpoint covers, and the hub signs again', () =>
+  withKept(async (kept, track) => {
+    const dir = kept.folder('state');
+    let live = track(await kept.instance(dir));
+    const { world, member, granted } = await enrolledTeam(live.hub);
+    const a = clientOf(world, world.lead);
+    const b = clientOf(world, member);
+    // The backup is taken right after enrolment, before B writes anything.
+    await live.hub.close();
+    const backup = kept.copy(dir, 'backup');
+
+    // B writes in the base cell and the granted cell; the hub signs a checkpoint naming B's heads, and A holds it.
+    live = track(await kept.instance(dir));
+    const byB = writeIn(world, b, [world.project, granted], 'member report');
+    await sync(live.hub, world, b);
+    await sync(live.hub, world, a);
+    await live.advance(MIN_GAP_MS);
+    await sync(live.hub, world, a);
+    const covering = latestOf(live.hub, world.project);
+    assert.ok(covering, 'no checkpoint covered B\'s entries');
+    const names = (signed: SignedCheckpoint, written: Written): boolean =>
+      payloadOf(signed).streams.some((stream) => stream.stream === written.stream && stream.heads.some((head) => head.writer === written.writer && head.seq >= written.seq));
+    assert.ok(byB.every((written) => names(covering, written)), 'the checkpoint does not name B\'s heads');
+    // Then the lead revokes B's device and A pushes the revocation.
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: member.member, writer: member.writer });
+    assert.ok(a.replica.add(revoke.entry));
+    await sync(live.hub, world, a);
+    await live.hub.close();
+
+    // The old backup is restored. A pushes the base stream first, so the revocation is back before B's entries arrive; A hands back what it holds.
+    kept.restore(backup, dir);
+    live = track(await kept.instance(dir));
+    const first = await sync(live.hub, world, a);
+    assert.ok(kinds(first).includes('rolled-back'), JSON.stringify(first.findings));
+    assert.ok(first.handedBack >= 1, 'A did not hand back the checkpoint naming B\'s heads');
+    // The next exchange re-pushes what is still missing: B's entries sit at places a kept checkpoint of this hub covers, so they are taken back.
+    await sync(live.hub, world, a);
+    for (const written of byB) assert.ok(live.hub.store.entryByHash(world.project, written.hash) !== undefined, `B's entry in ${written.stream.slice(0, 8)} was not taken back`);
+    await live.advance(MIN_GAP_MS);
+    const last = await sync(live.hub, world, a);
+    assert.deepEqual(last.refusedByHub, []);
+    const latest = latestOf(live.hub, world.project);
+    assert.ok(latest !== undefined && byB.every((written) => names(latest, written)));
+    assert.ok(heldHashes(live.hub, world.project).length >= 2);
+    // The hub signed after the restore: it no longer waits for B's heads.
+    const signedAfter = live.hub.checkpointLogs.filter((line) => line.event === 'checkpoint.signed');
+    assert.ok(signedAfter.length >= 1, 'the hub never signed again after the restore');
+    // B itself stays refused: its next entry is beyond every covered place.
+    const after = writeIn(world, b, [granted], 'member report after the revocation');
+    await sync(live.hub, world, b);
+    assert.ok(live.hub.store.entryByHash(world.project, (after[0] as Written).hash) === undefined, 'a revoked device wrote past its covered place');
+  }));
+
 test('restore drill: the cold backup and the live state folder hold no byte of the hub\'s signing or encryption key (D-30)', () =>
   withKept(async (kept, track) => {
     const dir = kept.folder('state');

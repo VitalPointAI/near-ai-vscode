@@ -7,6 +7,7 @@ import test from 'node:test';
 import { entryHash, sha256Hex, type EntryHeader } from '@ext/domain/replica/entry';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { BLOB_SWEEP_AFTER_MS, INVITE_LOCK_AFTER, openHubStore, StoreError, STORE_REFUSALS, type EntryRow, type HubStore } from '../src/store/hubStore';
+import { MIGRATIONS, SCHEMA_VERSION, migrate } from '../src/store/schema';
 
 // Phase 32, plan 18 (D-26, D-44): the hub's store. One node:sqlite database in WAL mode with synchronous FULL plus a content-addressed blob folder,
 // both in the hub's state directory. These tests run on real files in temporary directories; reopening a store is what a restart does.
@@ -93,7 +94,7 @@ test('openHubStore on an empty state directory creates hub.db 0600 and the blob 
       assert.ok(blobs.isDirectory());
       assert.equal(blobs.mode & 0o777, 0o700);
       assert.deepEqual(store.durability(), { journalMode: 'wal', synchronous: 2, foreignKeys: 1 });
-      assert.equal(store.schemaVersion(), 1);
+      assert.equal(store.schemaVersion(), SCHEMA_VERSION);
       assert.match(store.instanceId(), /^[0-9a-f-]{36}$/);
     } finally {
       store.close();
@@ -101,7 +102,7 @@ test('openHubStore on an empty state directory creates hub.db 0600 and the blob 
   });
 });
 
-test('hub_meta holds schema version 1 and an instance id that survives reopening', async () => {
+test('hub_meta holds the current schema version and an instance id that survives reopening', async () => {
   await withStoreDir(async (dir) => {
     const first = await openHubStore(dir);
     const id = first.instanceId();
@@ -109,7 +110,7 @@ test('hub_meta holds schema version 1 and an instance id that survives reopening
     const second = await openHubStore(dir);
     try {
       assert.equal(second.instanceId(), id);
-      assert.equal(second.schemaVersion(), 1);
+      assert.equal(second.schemaVersion(), SCHEMA_VERSION);
     } finally {
       second.close();
     }
@@ -117,7 +118,7 @@ test('hub_meta holds schema version 1 and an instance id that survives reopening
     try {
       const rows = reader.prepare('SELECT key, value FROM hub_meta ORDER BY key').all() as Array<{ key: string; value: string }>;
       assert.deepEqual(rows.map((row) => row.key), ['instance_id', 'schema_version']);
-      assert.equal(rows.find((row) => row.key === 'schema_version')?.value, '1');
+      assert.equal(rows.find((row) => row.key === 'schema_version')?.value, String(SCHEMA_VERSION));
       const strict = reader.prepare(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE '%STRICT%'`).all();
       assert.deepEqual(strict, [], 'every table is STRICT');
     } finally {
@@ -570,6 +571,79 @@ test('every checkpoint is kept as evidence, idempotent by hash, listed in signin
       assert.deepEqual(store.checkpoints(PROJECT).map((item) => item.hash), [first.hash, second.hash]);
       assert.deepEqual(store.latestCheckpoint(PROJECT), { hash: second.hash, body: second.body, signedAt: second.signedAt, receivedAt: second.receivedAt });
       assert.throws(() => store.putCheckpoint(PROJECT, { ...first, hash: sha256Hex(Buffer.from('another')), body: 'not json' }), refusal('invalid-record'));
+    } finally {
+      store.close();
+    }
+  });
+});
+
+/** A signed-checkpoint body whose payload reads as a version 2 checkpoint covering count entries of one stream (the signature is not checked here). */
+function coveringCheckpoint(count: number, note: string): { hash: string; body: string } {
+  const head = { writer: WRITER, seq: count - 1, hash: sha256Hex(Buffer.from(`head ${note}`)), lamport: count, roster: GENESIS };
+  const payload = { type: 'checkpoint', v: 2, project: PROJECT, signer: WRITER, rosterHead: GENESIS, streams: [{ stream: PROJECT, heads: [head], count, orderTip: sha256Hex(Buffer.from(`tip ${note}`)) }] };
+  return { hash: sha256Hex(Buffer.from(`covering ${note}`)), body: canonicalize({ payload, sig: SIG }) };
+}
+
+test('WR-05: a handed-back checkpoint is placed by its coverage with no other body read, and checkpointsAfter reads only what was kept since a cursor', async () => {
+  await withStoreDir(async (dir) => {
+    const store = await openHubStore(dir);
+    try {
+      newProject(store);
+      const five = coveringCheckpoint(5, 'five');
+      const ten = coveringCheckpoint(10, 'ten');
+      assert.equal(store.putCheckpoint(PROJECT, { ...five, signedAt: T0, receivedAt: T0 }), 'stored');
+      assert.equal(store.putCheckpoint(PROJECT, { ...ten, signedAt: T0 + 60_000, receivedAt: T0 + 60_000 }), 'stored');
+      const first = store.checkpointsAfter(PROJECT, 0);
+      assert.deepEqual(first.map((item) => item.hash), [five.hash, ten.hash]);
+      const cursor = (first[1] as { cursor: number }).cursor;
+      assert.deepEqual(store.checkpointsAfter(PROJECT, cursor), []);
+
+      // Covering 7: just below the earliest kept checkpoint covering at least as much (ten).
+      const seven = coveringCheckpoint(7, 'seven');
+      assert.equal(store.putHandedBackCheckpoint(PROJECT, seven, T0 + 120_000), 'stored');
+      assert.equal(store.putHandedBackCheckpoint(PROJECT, seven, T0 + 120_000), 'held');
+      // Covering 12: after every kept one, and not before now.
+      const twelve = coveringCheckpoint(12, 'twelve');
+      assert.equal(store.putHandedBackCheckpoint(PROJECT, twelve, T0 + 30_000), 'stored');
+      const listed = store.checkpoints(PROJECT);
+      assert.deepEqual(listed.map((item) => item.hash), [five.hash, seven.hash, ten.hash, twelve.hash]);
+      assert.equal(listed[1]?.signedAt, T0 + 60_000 - 1);
+      assert.equal(listed[3]?.signedAt, T0 + 60_000 + 1);
+      assert.equal(store.latestCheckpoint(PROJECT)?.hash, twelve.hash);
+      // Only the two handed back since the cursor are read again.
+      assert.deepEqual(store.checkpointsAfter(PROJECT, cursor).map((item) => item.hash), [seven.hash, twelve.hash]);
+      assert.throws(() => store.checkpointsAfter(PROJECT, -1), refusal('invalid-record'));
+    } finally {
+      store.close();
+    }
+  });
+});
+
+test('WR-05, WR-02: a version 1 store with kept checkpoints is brought to the current schema with each checkpoint\'s coverage and covered heads filled from its body', async () => {
+  await withStoreDir(async (dir) => {
+    const db = new Database(path.join(dir, 'hub.db'));
+    migrate(db, MIGRATIONS.slice(0, 1));
+    db.prepare('INSERT INTO projects (project, genesis_hash, anchor, enrolment, created_at) VALUES (?, ?, ?, ?, ?)').run(PROJECT, GENESIS, canonicalize({ lead: 'fictional lead' }), ENROLMENT, T0);
+    const nine = coveringCheckpoint(9, 'nine');
+    const old = checkpoint(T0, 'not a checkpoint payload');
+    db.prepare('INSERT INTO checkpoints (project, hash, body, signed_at, received_at) VALUES (?, ?, ?, ?, ?)').run(PROJECT, nine.hash, nine.body, T0 + 1, T0 + 1);
+    db.prepare('INSERT INTO checkpoints (project, hash, body, signed_at, received_at) VALUES (?, ?, ?, ?, ?)').run(PROJECT, old.hash, old.body, T0, T0);
+    db.close();
+    const store = await openHubStore(dir);
+    try {
+      assert.equal(store.schemaVersion(), SCHEMA_VERSION);
+      // A handed-back checkpoint covering 4 goes below the one covering 9, which the migration read from its body.
+      const four = coveringCheckpoint(4, 'four');
+      assert.equal(store.putHandedBackCheckpoint(PROJECT, four, T0 + 60_000), 'stored');
+      assert.deepEqual(store.checkpoints(PROJECT).map((item) => item.hash), [old.hash, four.hash, nine.hash]);
+      // WR-02: the furthest head a kept checkpoint names, read from the body kept before the upgrade too, and never moved back by a smaller one.
+      assert.deepEqual(store.coveredHead(PROJECT, PROJECT, WRITER), { seq: 8, hash: sha256Hex(Buffer.from('head nine')) });
+      assert.equal(store.coveredHead(PROJECT, PROJECT, sha256Hex(Buffer.from('another writer'))), undefined);
+      const twenty = coveringCheckpoint(20, 'twenty');
+      assert.equal(store.putCheckpoint(PROJECT, { ...twenty, signedAt: T0 + 120_000, receivedAt: T0 + 120_000 }), 'stored');
+      assert.deepEqual(store.coveredHead(PROJECT, PROJECT, WRITER), { seq: 19, hash: sha256Hex(Buffer.from('head twenty')) });
+      assert.equal(store.putHandedBackCheckpoint(PROJECT, coveringCheckpoint(2, 'two'), T0 + 180_000), 'stored');
+      assert.deepEqual(store.coveredHead(PROJECT, PROJECT, WRITER), { seq: 19, hash: sha256Hex(Buffer.from('head twenty')) });
     } finally {
       store.close();
     }
