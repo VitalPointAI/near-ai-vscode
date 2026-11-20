@@ -13,6 +13,8 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | What kind of use a request is | **Use**, in plain words: "research only", "chat you review", "agent work", "operational work" | T0, T1, T2, T3, use tier | no |
 | Where a model runs | **Runs on**: "this computer", "your organization's server", "NEAR AI private hardware", "Cohere vault in {region}", "outside provider ({name})" | hosting class, `nearai-tee`, `org-tee`, `vendor-tee`, `vendor-region`, `org-plain`, `closed-api`, `local` | no |
 | What this extension checked | **Verified** / **Model verified, connection not proven** / **Not verified** (the three shipped proof levels), always followed by what | attested, attestation, TEE, enclave, TDX, SEV-SNP (details pane only) | no |
+| Export-controlled content (reserved compartments `CGP`, `ITAR`, `EAR`) | Shown after the level: "Controlled goods (Canada)", "ITAR", "US export-controlled (EAR)" ("Organization: Internal · ITAR") | compartment token, regime, `exportControl` | no |
+| A person or AI service approved for export-controlled content | "Allowed to see: Controlled goods (Canada) until {date}, decided by {name}"; "allowed by {name}'s export decision {id} until {date}" | `export-person`, `export-endpoint`, designated official, empowered official (admin and officials' pages only) | no |
 | Data must stay in a country | "must stay in Canada" (or the region named) | sovereign region, residency | no |
 | The organization approved a model for a use | "Approved for {use words} until {date}" | model passport, `models.passports` (admins: "model approval") | no |
 | A named person allowed an exception | "Allowed by {name} until {date}", plus "(self-signed on this computer)" until the organization layer exists | risk acceptance, authorization record, exception (admin pages say "authorization") | no |
@@ -84,5 +86,6 @@ One test, `src/test/copyLint.test.ts` (new, in the F1 foundation phase), reads e
 3. A panel title has a prefix ("Near AI:", "NEAR AI:") or the brand is spelled other than "NEAR AI" and "VS Code".
 4. An em-dash appears in user copy.
 5. The provider's name is put in front of "organization" (the user word is always "your organization"; NEAR AI is only the provider).
+6. A compliance claim about the product appears: "compliant", "accredited", "certified", and the export-control phrases "ITAR compliant", "CGP compliant", "export compliant" (`.planning/research/compliance-dashboard/CGP-ITAR.md`, section 10.3).
 
 It starts with a checked-in baseline of today's hits, so it passes on day one and fails on any new hit; each copy fix deletes baseline lines (the same ratchet as the architecture test in `DEVELOPER-STRUCTURE.md`).
