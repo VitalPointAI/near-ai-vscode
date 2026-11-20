@@ -6,9 +6,14 @@ import test from 'node:test';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { verifyEntry } from '../domain/replica/verify';
+import type { ProductTextOutput } from '../domain/replica/textFold';
 import type { ProductVersions } from '../domain/replica/versions';
+import type { StaffEvent } from '../domain/staff/events';
+import { headerDisagreement, productHash } from '../domain/staff/ledger';
 import type { ProductState } from '../domain/staff/ledger';
-import { PROJECTION_PROBLEMS, projectionEntry, projectLedgerReplay, projectProductStates } from '../staff/replica/projection';
+import { parseProductFile } from '../domain/staff/products';
+import type { ProductHeader } from '../domain/staff/products';
+import { PROJECTION_PROBLEMS, projectionEntry, projectLedgerReplay, projectProductFile, projectProductStates, projectStaffEvents } from '../staff/replica/projection';
 import type { ProjectionEntry, ProjectionInput } from '../staff/replica/projection';
 import { ANNEX, CONOPS, DECISION_ROLE, GUARD_DEVICE, TWIN_DEVICE, TWIN_RUN, TWIN_SCENARIOS, twinHistory } from './helpers/staffReplicaHistory';
 import type { TwinHistory, TwinScenario } from './helpers/staffReplicaHistory';
@@ -203,4 +208,98 @@ test('the projection reads only what the fold holds: an entry with no time given
   assert.equal(projected.record.state, 'draft');
   assert.equal(projected.record.hash, (twin.versionHashes.get(CONOPS) as string[])[0]);
   assert.deepEqual([projected.history, projected.guard, projected.request], [[], undefined, undefined]);
+});
+
+// ---- Task 3: product files and staff events as projections -----------------------------------------------------------------------------------
+
+const foldText = (fold: FoldResult, product: string): string => ((fold.families.doc as ProductTextOutput[]).find((item) => item.product === product) as ProductTextOutput).text;
+
+/** The header today's host would read from a product file, and the version hash of its body with the header's pins. */
+function fileCheck(text: string): { header: ProductHeader; hash: string } {
+  const parsed = parseProductFile(text);
+  assert.ok(parsed.ok, 'the file parses');
+  if (!parsed.ok) throw new Error('unreachable');
+  return { header: parsed.value.header, hash: productHash(parsed.value.body, parsed.value.header.dependsOn) };
+}
+
+for (const scenario of TWIN_SCENARIOS) {
+  test(`${scenario}: the product file written from the fold is byte-identical to today's, and today's header check finds nothing against the projection`, async () => {
+    const twin = await twinHistory(scenario);
+    const { fold, input } = folded(twin);
+    const products = projectProductStates(input);
+    for (const [product, legacyFile] of twin.legacyFiles) {
+      const state = products.get(product) as ProductState;
+      const file = projectProductFile(state, foldText(fold, product));
+      assert.equal(file, legacyFile, `${scenario}: ${product}`);
+      const check = fileCheck(file);
+      assert.equal(headerDisagreement(state, check.header, check.hash), undefined);
+    }
+  });
+}
+
+test('a header edited by hand gives the same tamper reason against the projection as against today\'s replay', async () => {
+  const twin = await twinHistory('awaiting-decision');
+  const { input } = folded(twin);
+  const projected = projectProductStates(input).get(CONOPS) as ProductState;
+  const legacy = twin.legacyReplay.products.get(CONOPS) as ProductState;
+  const original = twin.legacyFiles.get(CONOPS) as string;
+  const edits: Array<[string, string]> = [
+    [original.replace('state: awaiting-decision', 'state: approved'), 'header-state'],
+    [original.replace('version: 1', 'version: 2'), 'header-version'],
+    [original.replace('owner: lead-planner', 'owner: plans-writer'), 'header-identity'],
+    [original.replace(/^guard: .*$/m, ''), 'header-verdict']
+  ];
+  for (const [edited, reason] of edits) {
+    assert.notEqual(edited, original);
+    const check = fileCheck(edited);
+    assert.equal(headerDisagreement(legacy, check.header, check.hash), reason);
+    assert.equal(headerDisagreement(projected, check.header, check.hash), reason);
+  }
+});
+
+test('a released body changed on disk reads as locked-changed against the projection, as against today\'s replay', async () => {
+  const twin = await twinHistory('released');
+  const { input } = folded(twin);
+  const projected = projectProductStates(input).get(CONOPS) as ProductState;
+  const legacy = twin.legacyReplay.products.get(CONOPS) as ProductState;
+  const check = fileCheck(`${twin.legacyFiles.get(CONOPS) as string}A quiet change after release.\n`);
+  assert.equal(headerDisagreement(legacy, check.header, check.hash), 'locked-changed');
+  assert.equal(headerDisagreement(projected, check.header, check.hash), 'locked-changed');
+});
+
+/**
+ * What both sides' events say: type, product, version and, by type, the step and its states, the gate and verdict, the decision role and the person.
+ * The run is excluded (the projection is given one run for every event; today's events carry the run of each step) and so is `at`, the time the
+ * step was recorded, which the fold keeps per entry and today's host stamps from its clock.
+ */
+function eventKey(event: StaffEvent): unknown {
+  const value = event as unknown as Record<string, unknown>;
+  const pick = (...keys: string[]): Record<string, unknown> => Object.fromEntries(keys.filter((key) => value[key] !== undefined).map((key) => [key, value[key]]));
+  const person = value.person as { name: string } | undefined;
+  const actor = value.actor as { kind: string; member?: string; name?: string } | undefined;
+  return {
+    ...pick('type', 'product', 'version', 'from', 'to', 'event', 'hash', 'gate', 'verdict', 'reasons', 'role', 'decision'),
+    ...(actor ? { actor: actor.kind === 'person' ? actor.name : actor.member } : {}),
+    ...(person ? { person: person.name } : {})
+  };
+}
+
+for (const scenario of TWIN_SCENARIOS) {
+  test(`${scenario}: the staff events projected from the fold are today's events, in order`, async () => {
+    const twin = await twinHistory(scenario);
+    const events = projectStaffEvents(folded(twin).input, 'run-projected');
+    assert.ok(events.length > 0);
+    assert.deepEqual(events.map(eventKey), twin.legacyEvents.map(eventKey));
+    assert.ok(events.every((event) => event.run === 'run-projected'));
+  });
+}
+
+test('a product the projection cannot vouch for sends no events: no step the fold does not hold reaches the Staff Room', async () => {
+  const twin = await twinHistory('proposed');
+  const propose = deviceHead(twin);
+  const hash = (twin.versionHashes.get(CONOPS) as string[])[0];
+  twin.world.write(TWIN_DEVICE, { kind: 'version.verdict', data: { product: CONOPS, hash, gate: 'guard', verdict: 'CLEARED', reasons: [] }, actor: { kind: 'agent', member: 'release-guard', run: TWIN_RUN }, deps: [propose] });
+  twin.world.write(GUARD_DEVICE, { kind: 'version.verdict', data: { product: CONOPS, hash, gate: 'guard', verdict: 'HOLD', reasons: ['Compilation risk.'] }, actor: { kind: 'agent', member: 'release-guard', run: 'run-2' }, deps: [propose] });
+  const events = projectStaffEvents(folded({ ...twin, replicaEntries: [...twin.world.entries] }).input, 'run-projected');
+  assert.deepEqual(events, []);
 });
