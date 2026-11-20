@@ -18,6 +18,7 @@ import { checkpointCoverage, checkpointHash, readCheckpoint } from './checkpoint
 import type { SignedCheckpoint } from './checkpoint';
 import { streamDigests } from './digest';
 import { entryHash, parseHeaderShape, sha256Hex } from './entry';
+import { waitAnswered, waitOf } from './holdWaits';
 import type { EntryHeader } from './entry';
 import { kindFamily } from './kinds';
 import type { KindFamily } from './kinds';
@@ -469,6 +470,33 @@ function earliestLateEffect(before: Prepared, after: Prepared, reducers: readonl
   return undefined;
 }
 
+// The place in the old order of the first reducer-stage hold the context can now answer, or undefined when none can (D-01 (d)). A blob or a key put
+// behind the same context object arrives with no new entry and no new context, so without this the incremental fold would keep a hold the
+// from-scratch fold, which asks the context at apply time, would not. `admitted` is the new order when this call admitted entries: a hold waiting
+// for an entry is answerable only when a newly admitted one sorts before it (one sorting after it is after it in the from-scratch fold too).
+function earliestAnswerable(before: Prepared, run: Run, ctx: ReplicaContext, admitted?: Prepared): number | undefined {
+  if (run.held.length === 0) return undefined;
+  const waiting = new Map<string, HeldEntry>();
+  for (const held of run.held) if (held.hash !== undefined) waiting.set(held.hash, held);
+  let firstNew = Infinity;
+  const newPlace = new Map<string, number>();
+  if (admitted !== undefined) {
+    const known = new Set(before.ordered.map((entry) => entry.hash));
+    admitted.ordered.forEach((entry, index) => {
+      if (!known.has(entry.hash)) firstNew = Math.min(firstNew, index);
+      else if (waiting.has(entry.hash)) newPlace.set(entry.hash, index);
+    });
+  }
+  for (let index = 0; index < before.ordered.length; index += 1) {
+    const entry = before.ordered[index];
+    const held = waiting.get(entry.hash);
+    if (held === undefined) continue;
+    const wait = waitOf(held, entry);
+    if (wait !== undefined && waitAnswered(wait, ctx, firstNew < (newPlace.get(entry.hash) ?? -1))) return index;
+  }
+  return undefined;
+}
+
 // How many leading entries are the same in both orders, with the same ones skipped as quarantined.
 function commonPrefix(before: Prepared, after: Prepared): number {
   const limit = Math.min(before.ordered.length, after.ordered.length);
@@ -486,6 +514,8 @@ function commonPrefix(before: Prepared, after: Prepared): number {
 // differently, so held entries are looked at again and what the reducers decided under the old context is decided again under the new one. That
 // is a start from the beginning, counted in refolds, because a reducer reads the context while it applies (a compaction waiting for its blob, a
 // proposal waiting for its text), and so does the snapshot at the end of the final prefix. Pass the same object, or none, when nothing changed.
+// The same object may still answer more than before: a blob or a key the store put behind it. Each reducer-stage hold is asked (holdWaits.ts), and
+// one that can now be answered makes the fold start again from that hold (D-01 (d)); when none can, the very same state is returned.
 export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: ReplicaContext): FoldState {
   const next = ctx ?? state.ctx;
   const replaced = next !== state.ctx;
@@ -493,13 +523,16 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
   let changed = false;
   for (const item of inputs) if (ingest(store, item, next)) changed = true;
   if (retryHeld(store, next)) changed = true;
-  if (!changed && !replaced) {
+  let ready = changed || replaced ? undefined : earliestAnswerable(state.prepared, state.run, next);
+  if (!changed && !replaced && ready === undefined) {
     if (store.dropped === state.store.dropped) return state;
     // Only unreadable inputs arrived: the count changes and nothing is folded again.
     return { ...state, store, result: { ...state.result, dropped: store.dropped } };
   }
 
   const prepared = prepare(store, next, state.options);
+  // A new context starts again from the beginning below, so its holds need no asking.
+  if (changed && !replaced) ready = earliestAnswerable(state.prepared, state.run, next, prepared);
   let run: Run;
   let snapshot: Snapshot | undefined;
   let refolds = state.refolds;
@@ -507,13 +540,13 @@ export function addEntries(state: FoldState, inputs: readonly unknown[], ctx?: R
   const late = earliestLateEffect(state.prepared, prepared, state.options.reducers ?? DEFAULT_REDUCERS);
   // Nothing applied yet means nothing was decided under the old context, so a new one needs no start again.
   const restart = replaced && state.prepared.ordered.length > 0;
-  if (!restart && late === undefined && extendsOrder(state.prepared, prepared)) {
+  if (!restart && late === undefined && ready === undefined && extendsOrder(state.prepared, prepared)) {
     // Everything new sorts after what was applied: append.
     run = cloneRun(state.run);
     snapshot = applyFrom(run, prepared, next, state.prepared.ordered.length, state.snapshot);
   } else {
     refolds += 1;
-    const reusable = Math.min(commonPrefix(state.prepared, prepared), late ?? Infinity);
+    const reusable = Math.min(commonPrefix(state.prepared, prepared), late ?? Infinity, ready ?? Infinity);
     const kept = !restart && state.snapshot !== undefined && state.snapshot.count <= reusable ? state.snapshot : undefined;
     // Start again from the end of the final prefix when nothing at or before it changed, otherwise from the start.
     run = kept === undefined ? freshRun(state.options.reducers ?? DEFAULT_REDUCERS) : cloneRun(kept.run);

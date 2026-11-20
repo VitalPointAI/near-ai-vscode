@@ -3,9 +3,10 @@
 // clock) is replaced between deliveries.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyUpdate, createFoldDoc, createLocalDoc, docText, encodeFullState, localInsert, stateVectorOf, textHashOf } from '../domain/replica/doc';
+import { applyUpdate, createFoldDoc, createLocalDoc, docText, encodeFullState, localInsert, snapshotOf, stateVectorOf, textHashOf } from '../domain/replica/doc';
+import { canonicalBytes } from '../domain/team/canonical';
 import { sealBlob } from '../domain/replica/entry';
-import type { Dep, SealedEntry } from '../domain/replica/entry';
+import type { Dep, SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { checkpointHash, orderTipOf, signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint } from '../domain/replica/checkpoint';
 import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
@@ -14,9 +15,10 @@ import { totalOrder } from '../domain/replica/order';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { KeyRing, ReplicaContext, RosterView } from '../domain/replica/rosterView';
 import type { ProductTextOutput } from '../domain/replica/textFold';
+import { replicaVersionHash } from '../domain/replica/versions';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
-import { createWorld, fixedSigner, rng, shuffled } from './helpers/replicaWorld';
+import { createWorld, fixedSigner, rng, shuffled, streamId } from './helpers/replicaWorld';
 import type { World, Written } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
@@ -122,6 +124,16 @@ test('CR-02: one entry at a time in random order, and in random chunks, equals t
       from += size;
     }
     sameResult(chunked.result, reference, `seed ${seed}: chunks`);
+    // D-01 (d): the same delivery under one context object, with the compactions' blobs put behind it at a random point.
+    const shelf = shelfFor(s.world);
+    giveKey(shelf, s.world, s.world.stream);
+    const at = random.int(delivery.length + 1);
+    let shelved = createFoldState(shelf.ctx);
+    for (let index = 0; index <= delivery.length; index += 1) {
+      if (index === at) for (const [hash, blob] of s.world.blobs) shelf.blobs.set(hash, blob);
+      shelved = addEntries(shelved, delivery.slice(index, index + 1), shelf.ctx);
+    }
+    sameResult(shelved.result, reference, `seed ${seed}: blobs put behind the same context after ${at} entries`);
   }
   assert.ok(refolded > 0, 'the orders exercise the refold');
 });
@@ -203,6 +215,20 @@ test('CR-03: a compaction held for its blob is applied when a context that holds
     for (const entry of delivery.slice(cut + 2)) state = addEntries(state, [entry]);
     sameResult(state.result, reference, `seed ${seed}: context replaced after ${cut} entries`);
   }
+  // D-01 (d): the same, with the blob put behind the one context object instead of a new context (80 random orders).
+  for (let seed = 1; seed <= 80; seed += 1) {
+    const random = rng(seed * 130363);
+    const delivery = shuffled(everything, random);
+    const cut = random.int(delivery.length + 1);
+    const shelf = shelfFor(s.world);
+    giveKey(shelf, s.world, s.world.stream);
+    let state = createFoldState(shelf.ctx);
+    for (const entry of delivery.slice(0, cut)) state = addEntries(state, [entry], shelf.ctx);
+    for (const [hash, blob] of s.world.blobs) shelf.blobs.set(hash, blob);
+    state = addEntries(state, delivery.slice(cut, cut + 2), shelf.ctx);
+    for (const entry of delivery.slice(cut + 2)) state = addEntries(state, [entry], shelf.ctx);
+    sameResult(state.result, reference, `seed ${seed}: blob put behind the same context after ${cut} entries`);
+  }
 });
 
 test('CR-03: entries held for a missing key are applied when a context with the key replaces the old one, and the result equals the from-scratch fold', () => {
@@ -217,6 +243,15 @@ test('CR-03: entries held for a missing key are applied when a context with the 
   // Half of the entries arrive after the key does.
   const half = addEntries(createFoldState(noKeys), sealed(...s.all.slice(0, 5)));
   sameResult(addEntries(addEntries(half, [], withKeys), sealed(...s.all.slice(5))).result, reference, 'key arrived, rest later');
+  // D-01 (d): the key put into the key ring behind the same context object, with nothing new and with the rest of the entries.
+  const shelf = shelfFor(s.world);
+  for (const [hash, blob] of s.world.blobs) shelf.blobs.set(hash, blob);
+  const sameWaiting = addEntries(createFoldState(shelf.ctx), sealed(...s.all.slice(0, 5)));
+  assert.equal(sameWaiting.result.order.length, 0);
+  giveKey(shelf, s.world, s.world.stream);
+  const sameReleased = addEntries(sameWaiting, [], shelf.ctx);
+  sameResult(sameReleased.result, foldEntries(sealed(...s.all.slice(0, 5)), withKeys), 'key put behind the same context');
+  sameResult(addEntries(sameReleased, sealed(...s.all.slice(5)), shelf.ctx).result, reference, 'key put behind the same context, rest later');
 });
 
 test('CR-03: a future-dated entry is released when a context with a later clock replaces the old one, and the entries that waited on it fold with it', () => {
@@ -441,4 +476,211 @@ test('IN-03: a good copy that is permanently rejected and a corrupt copy that is
     assert.deepEqual(result.rejected, []);
     sameResult(result, results[0], 'every arrival order');
   }
+});
+
+// ---- (d): a reducer-stage hold is looked at again when the same context object can now answer it ---------------------------------------------------
+
+// A blob store and a key ring behind one context object, filled in as pieces arrive (the store owns one context, Pitfall 1).
+interface Shelf { blobs: Map<string, SealedBlob>; keys: Map<string, Buffer>; ctx: ReplicaContext }
+function shelfFor(world: World): Shelf {
+  const blobs = new Map<string, SealedBlob>();
+  const keys = new Map<string, Buffer>();
+  const ctx = world.ctx({ blobs: (hash) => blobs.get(hash), keys: (stream, epoch) => keys.get(`${stream}/${epoch}`) });
+  return { blobs, keys, ctx };
+}
+function giveKey(shelf: Shelf, world: World, stream: string, epoch = 0): void {
+  shelf.keys.set(`${stream}/${epoch}`, world.keyFor(stream, epoch));
+}
+function foldHeld(result: FoldResult): Array<[string, string]> {
+  return result.held.filter((item) => item.stage === 'fold').map((item): [string, string] => [item.hash as string, item.reason]).sort();
+}
+
+test('(d) a compaction held for its blob is applied when the blob is put behind the same context, with or without a new entry, and equals the from-scratch fold', () => {
+  const s = hostileScene();
+  const shelf = shelfFor(s.world);
+  giveKey(shelf, s.world, s.world.stream);
+  const everything = sealed(...s.all);
+  const waiting = addEntries(createFoldState(shelf.ctx), everything);
+  assert.deepEqual(foldHeld(waiting.result), [s.forgedLate, s.forgedGhost, s.honest].map((item): [string, string] => [item.hash, 'missing-blob']).sort());
+  // Nothing the context can answer yet: the very same state, and no refold.
+  assert.equal(addEntries(waiting, [], shelf.ctx), waiting);
+  assert.equal(addEntries(waiting, []), waiting);
+  for (const [hash, blob] of s.world.blobs) shelf.blobs.set(hash, blob);
+  const released = addEntries(waiting, [], shelf.ctx);
+  assert.notEqual(released, waiting);
+  assert.equal(released.refolds, waiting.refolds + 1);
+  sameResult(released.result, foldEntries(everything, shelf.ctx), 'blob arrived behind the same context');
+  assert.deepEqual(released.result.held, []);
+  // Once released, the same context and nothing new change nothing again.
+  assert.equal(addEntries(released, [], shelf.ctx), released);
+
+  // The blob arrives together with an entry that sorts last: still judged again, not appended.
+  const late = createWorldShelfCase();
+  sameResult(late.result, late.reference, 'blob and a last-sorting entry together');
+});
+
+// The hostile scene without `late`, folded without blobs, then the blobs and `late` (which sorts after every compaction) in one call.
+function createWorldShelfCase(): { result: FoldResult; reference: FoldResult } {
+  const s = hostileScene();
+  const shelf = shelfFor(s.world);
+  giveKey(shelf, s.world, s.world.stream);
+  const base = sealed(...s.all).filter((entry) => entry !== s.late.entry);
+  const waiting = addEntries(createFoldState(shelf.ctx), base);
+  for (const [hash, blob] of s.world.blobs) shelf.blobs.set(hash, blob);
+  return { result: addEntries(waiting, sealed(s.late), shelf.ctx).result, reference: foldEntries(sealed(...s.all), shelf.ctx) };
+}
+
+interface VersionScene { world: World; entries: SealedEntry[]; proposal: Written; textBlob: string; others: Map<string, SealedBlob> }
+
+// A product with typed text and a proposal of that text whose blob is held back.
+function versionScene(): VersionScene {
+  const world = createWorld({
+    members: [
+      { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] },
+      { member: 'mbr-p', roles: ['member', 'answers_for:j2'], devices: ['P'] }
+    ]
+  });
+  const roles = { owner: 'j2-chief', sectionLead: 'j2-lead', releaseGuard: 'release-guard' };
+  const create = world.write('LEAD', { kind: 'product.create', data: { product: PRODUCT, section: 'j2', roles, title: 'Intel estimate' } });
+  const editor = world.editor('P', PRODUCT, 101);
+  const reg = editor.register({ deps: [create] });
+  const typed = editor.insert(0, 'Hello world', { deps: [reg] });
+  const others = new Map(world.blobs);
+  const text = docText(editor.doc);
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, canonicalBytes({ text, header: { title: 'Intel estimate' } }));
+  world.blobs.set(blob.hash, blob);
+  const data = { product: PRODUCT, hash: replicaVersionHash(text, []), textBlob: blob.hash, snapshot: Buffer.from(snapshotOf(editor.doc)).toString('base64url'), pins: [] };
+  const proposal = world.write('P', { kind: 'version.propose', data, actor: { kind: 'person' }, deps: [typed] });
+  return { world, entries: sealed(create, reg, typed, proposal), proposal, textBlob: blob.hash, others };
+}
+
+test('(d) a version proposal held for its text blob is applied when the blob is put behind the same context, and equals the from-scratch fold', () => {
+  const v = versionScene();
+  const shelf = shelfFor(v.world);
+  giveKey(shelf, v.world, v.world.stream);
+  for (const [hash, blob] of v.others) shelf.blobs.set(hash, blob);
+  const waiting = addEntries(createFoldState(shelf.ctx), v.entries);
+  assert.deepEqual(foldHeld(waiting.result), [[v.proposal.hash, 'missing-blob']]);
+  assert.equal(addEntries(waiting, [], shelf.ctx), waiting);
+  // A blob under the right name with the wrong bytes answers nothing.
+  shelf.blobs.set(v.textBlob, { ...(v.world.blobs.get(v.textBlob) as SealedBlob), bytes: Buffer.from('not the blob').toString('base64url') });
+  assert.equal(addEntries(waiting, [], shelf.ctx), waiting);
+  shelf.blobs.set(v.textBlob, v.world.blobs.get(v.textBlob) as SealedBlob);
+  const released = addEntries(waiting, [], shelf.ctx);
+  assert.equal(released.refolds, waiting.refolds + 1);
+  sameResult(released.result, foldEntries(v.entries, shelf.ctx), 'text blob arrived');
+  assert.ok(released.result.applied.includes(v.proposal.hash));
+});
+
+test('(d) a compaction held at the reducer for its key is applied when the key ring behind the same context gains the key, and equals the from-scratch fold', () => {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['C'] }, { member: 'mbr-dddd', devices: ['D'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const regs = [a.register(), b.register()];
+  const updA = a.insert(0, 'alpha ');
+  const updB = b.insert(0, 'beta');
+  const merged = createFoldDoc();
+  applyUpdate(merged, encodeFullState(a.doc));
+  applyUpdate(merged, encodeFullState(b.doc));
+  const honest = compactEntry(world, 'C', encodeFullState(merged), [dep(updA), dep(updB)], [updA, updB]);
+  // An entry of another cell that sorts before the compaction: it makes the fold start again while this cell's key is gone.
+  const other = streamId('other-cell');
+  const early = world.write('D', { kind: 'doc.client', stream: other, data: { product: PRODUCT, clientId: 44, actor: { kind: 'person' } } });
+  const shelf = shelfFor(world);
+  for (const [hash, blob] of world.blobs) shelf.blobs.set(hash, blob);
+  giveKey(shelf, world, world.stream);
+  giveKey(shelf, world, other);
+  const first = addEntries(createFoldState(shelf.ctx), sealed(...regs, updA, updB, honest));
+  assert.ok(first.result.applied.includes(honest.hash));
+  shelf.keys.delete(`${world.stream}/0`);
+  const waiting = addEntries(first, sealed(early));
+  assert.deepEqual(foldHeld(waiting.result), [[honest.hash, 'missing-key']]);
+  assert.equal(addEntries(waiting, [], shelf.ctx), waiting, 'the key is still missing');
+  giveKey(shelf, world, world.stream);
+  const released = addEntries(waiting, [], shelf.ctx);
+  assert.equal(released.refolds, waiting.refolds + 1);
+  sameResult(released.result, foldEntries(sealed(...regs, updA, updB, honest, early), shelf.ctx), 'key arrived behind the same context');
+});
+
+test('(d) property: 80 seeded deliveries with blobs and keys put behind one context at random points equal the from-scratch fold after every step', () => {
+  const world = createWorld({
+    members: [
+      { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] },
+      { member: 'mbr-p', roles: ['member', 'answers_for:j2'], devices: ['P'] },
+      { member: 'mbr-sl', roles: ['member', 'section_lead:j2'], devices: ['SL'] },
+      { member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['C'] }, { member: 'mbr-dddd', devices: ['D'] }
+    ]
+  });
+  const roles = { owner: 'j2-chief', sectionLead: 'j2-lead', releaseGuard: 'release-guard' };
+  const create = world.write('LEAD', { kind: 'product.create', data: { product: PRODUCT, section: 'j2', roles, title: 'Intel estimate' } });
+  const p = world.editor('P', PRODUCT, 101);
+  const regP = p.register({ deps: [create] });
+  const typed = p.insert(0, 'Hello world', { deps: [regP] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const regA = a.register();
+  const regB = b.register();
+  const updA = a.insert(0, 'alpha ');
+  const updB = b.insert(0, 'beta');
+  const merged = createFoldDoc();
+  applyUpdate(merged, encodeFullState(a.doc));
+  applyUpdate(merged, encodeFullState(b.doc));
+  const beforeCompaction = new Set(world.blobs.keys());
+  const honest = compactEntry(world, 'C', encodeFullState(merged), [dep(updA), dep(updB)], [updA, updB]);
+  const compactionBlobs = [...world.blobs.keys()].filter((hash) => !beforeCompaction.has(hash));
+  // unregistered-client: D types before it registers, so the registration sorts after the update in the from-scratch fold too.
+  const d = world.editor('D', PRODUCT, 44);
+  const updD = d.insert(0, 'delta');
+  const regD = d.register();
+  // updates-missing: the section lead proposes, citing only the product, a snapshot of text typed later in the order.
+  const proposeData = (text: string): Record<string, unknown> => {
+    const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, canonicalBytes({ text, header: { title: 'Intel estimate' } }));
+    world.blobs.set(blob.hash, blob);
+    return { product: PRODUCT, hash: replicaVersionHash(text, []), textBlob: blob.hash, snapshot: Buffer.from(snapshotOf(p.doc)).toString('base64url'), pins: [] };
+  };
+  const early = world.write('SL', { kind: 'version.propose', data: proposeData(docText(p.doc)), actor: { kind: 'person' }, deps: [create] });
+  // missing-blob: the owner's proposal, whose text blob arrives at a random point.
+  const beforeProposal = new Set(world.blobs.keys());
+  const proposal = world.write('P', { kind: 'version.propose', data: proposeData(docText(p.doc)), actor: { kind: 'person' }, deps: [typed] });
+  const proposalBlobs = [...world.blobs.keys()].filter((hash) => !beforeProposal.has(hash));
+  // A second cell whose key arrives at a random point (held at verification until then).
+  const cell = streamId('second-cell');
+  const cellReg = world.write('B', { kind: 'doc.client', stream: cell, data: { product: PRODUCT, clientId: 23, actor: { kind: 'person' } } });
+  const all = sealed(create, regP, typed, regA, regB, updA, updB, honest, updD, regD, early, proposal, cellReg);
+  const held = new Set([...compactionBlobs, ...proposalBlobs]);
+
+  const reasons = new Set<string>();
+  let refolded = 0;
+  for (let seed = 1; seed <= 80; seed += 1) {
+    const random = rng(seed * 15485863);
+    const shelf = shelfFor(world);
+    for (const [hash, blob] of world.blobs) if (!held.has(hash)) shelf.blobs.set(hash, blob);
+    giveKey(shelf, world, world.stream);
+    type Step = { entry: SealedEntry } | { give: () => void };
+    const steps: Step[] = shuffled([
+      ...all.map((entry): Step => ({ entry })),
+      { give: () => { for (const hash of compactionBlobs) shelf.blobs.set(hash, world.blobs.get(hash) as SealedBlob); } },
+      { give: () => { for (const hash of proposalBlobs) shelf.blobs.set(hash, world.blobs.get(hash) as SealedBlob); } },
+      { give: () => giveKey(shelf, world, cell) }
+    ], random);
+    let state = createFoldState(shelf.ctx);
+    const delivered: SealedEntry[] = [];
+    for (let from = 0; from < steps.length;) {
+      const size = 1 + random.int(3);
+      const batch: SealedEntry[] = [];
+      for (const step of steps.slice(from, from + size)) {
+        if ('give' in step) step.give();
+        else batch.push(step.entry);
+      }
+      from += size;
+      delivered.push(...batch);
+      state = addEntries(state, batch, shelf.ctx);
+      for (const item of state.result.held) reasons.add(item.reason);
+      sameResult(state.result, foldEntries(delivered, shelf.ctx), `seed ${seed}: after ${from} steps`);
+    }
+    refolded += state.refolds;
+    sameResult(state.result, foldEntries(all, shelf.ctx), `seed ${seed}: everything`);
+  }
+  assert.ok(refolded > 0);
+  for (const reason of ['missing-blob', 'missing-key', 'unregistered-client', 'updates-missing']) assert.ok(reasons.has(reason), `the scenarios reach ${reason}`);
 });
