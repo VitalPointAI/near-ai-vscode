@@ -1470,6 +1470,12 @@ only by what the staff lead says about them.
   own key and given only to the devices whose declared clearance covers it. That helps prevent
   mistakes; it does not make any computer accredited for classified information, and a declared
   clearance can be wrong.
+- **Labelled products are not made multi-user yet.** Making a project multi-user puts every
+  product, its text and the old product ledger in the base cell, which everyone admitted to the
+  project receives whatever clearance is declared for them. So the command refuses a project with
+  any product labelled above `org/Public`, before it asks anything or writes anything, and names
+  those products and their labels. Such a project stays on one machine until a product can be
+  kept in a cell for its label.
 - **Off unless you turn it on.** Everything multi-user is a preview, off unless a person turns on
   `nearAi.staff.multiUserPreview` in their own settings. The setting applies to the whole editor,
   so a project folder cannot turn it on for you. While it is off, the multi-user commands are

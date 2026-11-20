@@ -97,7 +97,8 @@ function full(): Promise<Env> {
     const env = await freshEnv('template');
     const world = worldOf(env);
     await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
-    const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose'));
+    // Labelled org/Public: Make Multi-User refuses a product labelled above the base cell (W-1).
+    const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE, options: OPTIONS, dissent: DISSENT }, 'lead-planner'), 'submit');
     for (const action of ['approve', 'release'] as const) {
@@ -105,9 +106,9 @@ function full(): Promise<Env> {
       assert.ok(decided.ok, decided.ok ? '' : decided.message);
     }
     await writeBody(world.root, 'j5', ANNEX, ANNEX_BODY);
-    must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', dependsOn: [`${CONOPS}@1`] }, 'lead-planner'), 'propose annex');
+    must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: 'org/Public', dependsOn: [`${CONOPS}@1`] }, 'lead-planner'), 'propose annex');
     await writeBody(world.root, 'j5', ANNEX_C, CLEAN_BODY.replace('# Concept of operations', '# Annex C'));
-    const hashC = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX_C, kind: 'annex' }, 'lead-planner'), 'propose annex c'));
+    const hashC = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX_C, kind: 'annex', label: 'org/Public' }, 'lead-planner'), 'propose annex c'));
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: ANNEX_C, gate: 'guard', verdict: 'CLEARED', hash: hashC }, 'release-guard'), 'verdict c');
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: ANNEX_C, decisionFor: DECISION_ROLE, options: OPTIONS, dissent: DISSENT }, 'lead-planner'), 'submit c');
     const watch = await world.host.signWatchDecision(world.person(), { watch: 'watch-bridge', decision: 'approved', wording: createHash('sha256').update('watch the bridge').digest('hex'), reasons: [] });

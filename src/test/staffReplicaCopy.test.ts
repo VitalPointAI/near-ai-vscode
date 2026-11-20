@@ -95,7 +95,8 @@ function must(result: { ok: boolean; text: string }, what: string): string {
 /** A product proposed, guard-cleared, submitted, approved and released by today's host. */
 async function releasedProduct(world: StaffWorld): Promise<void> {
   await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
-  const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose'));
+  // Labelled org/Public: Make Multi-User refuses a product labelled above the base cell (W-1).
+  const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
   must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
   must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE }, 'lead-planner'), 'submit');
   const approved = await world.host.decide(world.person(), { product: CONOPS, action: 'approve', hash });

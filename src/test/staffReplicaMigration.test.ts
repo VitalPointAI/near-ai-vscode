@@ -13,6 +13,7 @@ import { x25519PrivateFromSeed } from '../domain/replica/cellKeys';
 import { entryHash } from '../domain/replica/entry';
 import { REPLICA_KINDS } from '../domain/replica/kinds';
 import type { ProjectOutput } from '../domain/replica/projectFold';
+import type { ProductTextOutput } from '../domain/replica/textFold';
 import type { ProductVersions } from '../domain/replica/versions';
 import type { StaffSectionId } from '../domain/staff/doctrine';
 import { parseLedgerHeadMark, productHash, replayLedger } from '../domain/staff/ledger';
@@ -27,9 +28,9 @@ import { verifyPayload } from '../domain/team/signedPayload';
 import type { DeviceIdentity } from '../team/identity';
 import { identityDir } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
-import { LEGACY_LEDGERS, MIGRATION_REFUSALS, MIGRATION_STEPS, PASSTHROUGH_LEDGERS, isMigrationRefused, ledgerHeadKey, makeMultiUser, projectionInputOf } from '../staff/replica/migrate';
+import { BASE_CELL_LABEL, LEGACY_LEDGERS, MIGRATION_REFUSALS, MIGRATION_STEPS, PASSTHROUGH_LEDGERS, isMigrationRefused, ledgerHeadKey, makeMultiUser, migrationComplete, projectionInputOf, verifyLegacyLedgers } from '../staff/replica/migrate';
 import type { MigrationDeps, MigrationOptions, MigrationRefused, MigrationResult, MigrationStep } from '../staff/replica/migrate';
-import { IMPORTED_APPROVAL_TEXT, importedFile, ledgerLinesOf, projectLedgerReplay, projectProductFile } from '../staff/replica/projection';
+import { IMPORTED_APPROVAL_TEXT, PROJECTION_LEFT_REASONS, importedFile, ledgerLinesOf, projectLedgerReplay, projectProductFile } from '../staff/replica/projection';
 import type { ProjectedProductState, ProjectionInput } from '../staff/replica/projection';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
@@ -44,6 +45,8 @@ const CONOPS = 'concept-of-operations';
 const ANNEX = 'annex-b';
 const ANNEX_BODY = '# Annex B\n\nThe force moves in two phases, as the concept of operations sets out.\n';
 const DECISION_ROLE = 'commander';
+// The one label a conversion takes (W-1): a product labelled higher is refused, so the products here are labelled with it.
+const PUBLIC = 'org/Public';
 const OPTIONS = [{ label: 'COA 1', risk: 'Moderate risk to the flank' }, { label: 'COA 2', risk: 'Slower, but the flank is covered' }];
 const DISSENT = ['The red team holds COA 2 is safer.'];
 const J4_TEAM: StaffTeamInfo = { slug: 'j4-logistics', section: 'j4', sectionLead: 'j4-director', members: ['j4-director', 'log-plans-officer', 'jloc-chief', 'release-guard'] };
@@ -104,7 +107,7 @@ function must(result: { ok: boolean; text: string }, what: string): string {
 /** A product proposed, guard-cleared, submitted, approved and released by today's host. */
 async function releasedProduct(world: StaffWorld): Promise<void> {
   await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
-  const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose'));
+  const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: PUBLIC }, 'lead-planner'), 'propose'));
   must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
   must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE, options: OPTIONS, dissent: DISSENT }, 'lead-planner'), 'submit');
   const approved = await world.host.decide(world.person(), { product: CONOPS, action: 'approve', hash });
@@ -116,7 +119,7 @@ async function releasedProduct(world: StaffWorld): Promise<void> {
 /** A second product pinned to the released version of the first. */
 async function pinnedProduct(world: StaffWorld): Promise<void> {
   await writeBody(world.root, 'j5', ANNEX, ANNEX_BODY);
-  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', dependsOn: [`${CONOPS}@1`] }, 'lead-planner'), 'propose annex');
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: PUBLIC, dependsOn: [`${CONOPS}@1`] }, 'lead-planner'), 'propose annex');
 }
 
 async function otherLedgers(world: StaffWorld, which: { decisions?: boolean; calculator?: boolean; wargame?: boolean }): Promise<void> {
@@ -442,7 +445,7 @@ test('a project missing some ledgers imports only the ones present', async () =>
   const env = await freshEnv('partial');
   const world = worldOf(env);
   await writeBody(env.root, 'j5', CONOPS, CLEAN_BODY);
-  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose');
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: PUBLIC }, 'lead-planner'), 'propose');
   await otherLedgers(world, { wargame: true });
   const result = await migrate(env);
   assert.deepEqual(result.imported.map((item) => item.ledger), ['products', 'wargame']);
@@ -698,4 +701,124 @@ test('the legacy paths keep each ledger\'s path under .planning/staff inside the
     ['wargame', '.planning/staff/wargame/ledger.jsonl', '.planning/staff/legacy/wargame/ledger.jsonl', false]
   ]);
   assert.deepEqual(PASSTHROUGH_LEDGERS.map((item) => item.ledger), ['decisions', 'calculator', 'wargame']);
+});
+
+// ---- W-1: labelled products are not put in the base cell --------------------------------------------------------------------------------------------
+
+test('W-1: products labelled above org/Public stop the conversion at verify, before the command asks anything: nothing written, each named with its label', async () => {
+  const env = await freshEnv('label');
+  const world = worldOf(env);
+  await writeBody(env.root, 'j5', CONOPS, CLEAN_BODY);
+  // No label given: today's host labels it org/Internal.
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose');
+  await writeBody(env.root, 'j5', ANNEX, ANNEX_BODY);
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: PUBLIC }, 'lead-planner'), 'propose annex');
+  // The lowest level of another scale is above the base cell too: an org clearance does not cover it.
+  await writeBody(env.root, 'j5', 'annex-c', ANNEX_BODY);
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: 'annex-c', kind: 'annex', label: 'nato/NATO Unclassified' }, 'lead-planner'), 'propose annex c');
+
+  // The command checks the ledgers with verifyLegacyLedgers before its dialog: the same refusal comes back there.
+  const early = await verifyLegacyLedgers(env.root, env.deps);
+  assert.ok(isMigrationRefused(early), 'refused before the dialog');
+  const refused = await refusedWithNothingWritten(env);
+  assert.deepEqual(early, refused);
+  assert.equal(refused.refused, 'label-above-base');
+  assert.equal(refused.message, `${MIGRATION_REFUSALS['label-above-base']} Labelled above org/Public: annex-c (nato/NATO Unclassified), ${CONOPS} (org/Internal).`);
+  assert.equal(BASE_CELL_LABEL, PUBLIC);
+  assert.ok(!refused.message.includes('\u2014'), 'no em-dash');
+  assert.match(refused.message, /Nothing was written\./);
+});
+
+test('W-1: a project whose products are all labelled org/Public converts', async () => {
+  const env = await cloneOf(await full(), 'label-public');
+  const verified = await verifyLegacyLedgers(env.root, env.deps);
+  assert.ok(!isMigrationRefused(verified), isMigrationRefused(verified) ? verified.message : '');
+  assert.equal((await migrate(env)).completed, 'complete');
+});
+
+// ---- MJ-09: a product file edited while a conversion is half done ----------------------------------------------------------------------------------
+
+function foldTextOf(input: ProjectionInput, product: string): string | undefined {
+  return ((input.fold.families.doc as ProductTextOutput[] | undefined) ?? []).find((item) => item.product === product)?.text;
+}
+
+const EDIT = '\nAn edit made while the conversion was half done.\n';
+
+test('MJ-09: interrupted after reconstruct, a product file edited, then run again: refused product-changed naming the file, nothing written, the edit kept; the text put back finishes', async () => {
+  const env = await cloneOf(await full(), 'product-changed');
+  const relative = productPath('j5', CONOPS);
+  const file = path.join(env.root, relative);
+  const original = readFileSync(file);
+  await migrate(env, { stopAfter: 'reconstruct' });
+  const edited = `${original.toString('utf8')}${EDIT}`;
+  await writeFile(file, edited);
+  const before = tree(env.root, true);
+
+  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  assert.ok(isMigrationRefused(refused), isMigrationRefused(refused) ? '' : `not refused: ${refused.completed}`);
+  assert.equal(refused.refused, 'product-changed');
+  assert.equal(refused.file, relative);
+  assert.equal(refused.message, `${MIGRATION_REFUSALS['product-changed']} The file: ${relative}.`);
+  assert.deepEqual(tree(env.root, true), before, 'no entry written, no ledger moved, no file written');
+  assert.equal(readFileSync(file, 'utf8'), edited, 'the edit is kept');
+  assert.equal(await migrationComplete(env.root), false);
+  const half = await projection(env);
+  assert.equal(foldTextOf(half, CONOPS), original.toString('utf8').replace(/^---\n[\s\S]*?\n---\n/, ''), 'the shared text is still the text the first run read');
+
+  // The text put back, the conversion finishes with the original text and file, and no fork.
+  await writeFile(file, original);
+  assert.equal((await migrate(env)).completed, 'complete');
+  assert.deepEqual(readFileSync(file), original);
+  const input = await projection(env);
+  assert.equal(foldTextOf(input, CONOPS), original.toString('utf8').replace(/^---\n[\s\S]*?\n---\n/, ''));
+  assert.equal(input.fold.proofs.length, 0);
+});
+
+test('MJ-09: a product file empty when its version was recorded and filled in before the rerun is refused product-changed too', async () => {
+  const env = await freshEnv('product-filled');
+  const world = worldOf(env);
+  await writeBody(env.root, 'j5', ANNEX, '');
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: PUBLIC }, 'lead-planner'), 'propose an empty annex');
+  const first = await migrate(env, { stopAfter: 'reconstruct' });
+  assert.deepEqual(first.versions, [ANNEX], 'the empty text was recorded as the version');
+  const file = path.join(env.root, productPath('j5', ANNEX));
+  const filled = `${readFileSync(file, 'utf8')}${ANNEX_BODY}`;
+  await writeFile(file, filled);
+  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  assert.ok(isMigrationRefused(refused) && refused.refused === 'product-changed', 'refused product-changed');
+  assert.equal(refused.file, productPath('j5', ANNEX));
+  assert.equal(readFileSync(file, 'utf8'), filled);
+  const input = await projection(env);
+  assert.equal(foldTextOf(input, ANNEX) ?? '', '', 'no update was written for the new text');
+});
+
+test('MJ-09: a product file edited after reconstruct read it, before the projections step writes it, is never written over and the conversion does not finish', async () => {
+  const env = await cloneOf(await full(), 'product-raced');
+  const relative = productPath('j5', CONOPS);
+  const file = path.join(env.root, relative);
+  const original = readFileSync(file);
+  const edited = `${original.toString('utf8')}${EDIT}`;
+  // The edit lands between the reconstruct step and the projections step of one run.
+  const projectionModule = require('../staff/replica/projection') as { writeProjections: (...args: unknown[]) => Promise<unknown> };
+  const real = projectionModule.writeProjections;
+  projectionModule.writeProjections = async (...args: unknown[]) => { await writeFile(file, edited); return real(...args); };
+  let refused: MigrationResult | MigrationRefused;
+  try {
+    refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  } finally {
+    projectionModule.writeProjections = real;
+  }
+  assert.ok(isMigrationRefused(refused), isMigrationRefused(refused) ? '' : `not refused: ${refused.completed}`);
+  assert.equal(refused.refused, 'product-changed');
+  assert.equal(refused.file, relative);
+  assert.equal(readFileSync(file, 'utf8'), edited, 'the edit is not written over');
+  assert.equal(await migrationComplete(env.root), false, 'the conversion did not finish');
+  assert.equal(PROJECTION_LEFT_REASONS['text-changed'], 'its text is not the text in the shared history (it was edited), so it was left as it is with the edit in it');
+
+  // Run again: the reconstruct step names the file before writing anything; with the text put back it finishes.
+  const again = await makeMultiUser(env.root, env.deps, { name: NAME });
+  assert.ok(isMigrationRefused(again) && again.refused === 'product-changed' && again.file === relative, 'refused again, naming the file');
+  await writeFile(file, original);
+  assert.equal((await migrate(env)).completed, 'complete');
+  assert.deepEqual(readFileSync(file), original);
 });

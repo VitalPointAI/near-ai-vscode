@@ -10,7 +10,11 @@
 - **Make This Staff Project Multi-User.** **NEAR AI: Staff: Make This Staff Project Multi-User**
   checks the four staff ledgers first, says what will happen, and then moves the project's history
   into a signed shared record. You become its staff lead. The original files are kept in
-  `.planning/staff/legacy/` and never deleted.
+  `.planning/staff/legacy/` and never deleted. For now it converts only projects whose products
+  are all labelled `org/Public`: everyone admitted receives a converted product, so a project with
+  a higher label is refused before anything is written, naming those products. A product file
+  edited while a conversion is half done is never written over: the conversion stops, names the
+  file and says how to finish.
 - **Invite, join and admit by file and six words.** **Staff: Invite to Staff Project** saves an
   invitation file to send any way you like. The person opens it with **Staff: Join Staff
   Project**, sends back a join request and reads you six words. **Staff: Admit to Staff Project**
