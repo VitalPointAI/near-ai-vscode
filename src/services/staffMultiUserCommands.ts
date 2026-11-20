@@ -55,6 +55,8 @@ export const SIX_WORDS_DIFFER = 'They do not match';
 
 export const MAKE_MULTI_USER_QUESTION = 'Make this staff project multi-user?';
 export const MAKE_MULTI_USER_ACTION = 'Make Multi-User';
+/** The title of the quick pick where the lead declares their own clearance, when Make Multi-User needs a label other than org/Public (D-19). */
+export const LEAD_CLEARANCE_TITLE = 'The clearance you declare for yourself';
 export const NO_FOLDER_TEXT = 'Open the folder of a staff project first. Nothing was changed.';
 export const NOT_SHARED_TEXT = 'This folder holds no shared staff project, so nothing was changed. To share this staff project, run Staff: Make This Staff Project Multi-User first.';
 export const WORDS_DIFFER_TEXT = 'Nobody was admitted, and nothing was changed. Do not admit a request whose words differ, because someone else may have made it. Ask the person to make a new join request from your invitation, or cancel the invitation with Staff: Remove from Staff Project.';
@@ -73,13 +75,18 @@ export const INVITE_SAVE_AGAIN_PREFIX = 'Save the invitation for ';
 export const INVITE_INSIDE_PROJECT_TEXT = 'The invitation holds a one-time secret, so it is not saved inside the project folder, where git could commit it. Nothing was changed. Choose a folder outside the project.';
 export const SEAT_TEXT = 'A seat is lowercase letters, digits and dashes, for example j2-analyst, so nothing was changed. Run the command again with a seat like that.';
 export const AGENT_SEATS_TEXT = 'Agent seats are lowercase letters, digits and dashes, separated by commas, so nothing was changed. Run the command again with seats like that.';
-/** What a Single-Machine Copy does not carry (31-22: no replica kind covers these yet), said plainly with what to do. */
 /** The Admit dialog's action for a join request whose person is already admitted (MJ-02). */
 export const MAKE_WELCOME_AGAIN = 'Make Welcome File';
 /** What the lead is told when an admitted person's welcome file could not be saved (MJ-02). */
 export const WELCOME_NOT_SAVED_TEXT = 'Run Staff: Admit to Staff Project again with the same join request to make their welcome file again.';
 /** The Remove list's first item when a removal or clearance change was left unfinished (MJ-03). */
 export const FINISH_UNFINISHED_LABEL = 'Finish the change left unfinished';
+/**
+ * The last sentence of a single-machine copy of a project made shared by the 0.4.35 preview, whose products sit in the base cell (D-22 revised):
+ * how to share the copy again with each product in its own part.
+ */
+export const COPY_SHARE_AGAIN_TEXT = 'To share it again with each product in its own part, open the copy\'s folder and run Staff: Make This Staff Project Multi-User.';
+/** What a Single-Machine Copy does not carry (31-22: no replica kind covers these yet), said plainly with what to do. */
 export const NOT_COPIED_TEXT = 'Not copied: the registers, the calculator record files, gate reports, proposals, settings, observations and the staff event log (events.jsonl). Copy the folders you need from the shared project by hand, and copy .planning/staff/calculator/ too, or the copy cannot check its calculator numbers.';
 
 /** The ledgers Make Multi-User checks, in the words the dialog uses. */
@@ -287,9 +294,9 @@ async function pickRoles(title: string, current: readonly string[] = ['member'])
 }
 
 /** A declared clearance (D-13): a scale and a level of the shipped scales. It is what the lead declares, not a verified clearance. */
-async function pickClearance(title: string): Promise<{ scale: string; level: string; compartments: string[]; releasability: string[] } | undefined> {
+async function pickClearance(title: string, placeHolder = 'The clearance you declare for them (self-declared, not verified)'): Promise<{ scale: string; level: string; compartments: string[]; releasability: string[] } | undefined> {
   const items = Object.entries(SCALE_PRESETS).flatMap(([scale, value]) => value.levels.map((level) => ({ label: level, description: value.name, scale })));
-  const picked = await vscode.window.showQuickPick(items, { title, placeHolder: 'The clearance you declare for them (self-declared, not verified)' });
+  const picked = await vscode.window.showQuickPick(items, { title, placeHolder });
   if (!picked) return undefined;
   return { scale: picked.scale, level: picked.label, compartments: [], releasability: [] };
 }
@@ -350,19 +357,62 @@ async function labelMapHashOf(root: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * Did the base cell of the open folder's shared project ever hold products (D-22 revised)? True for a project the 0.4.35 preview made shared, whose
+ * products sit in the part every member and the hub can read; false for one made shared in Phase 32, and false whenever the project cannot be opened
+ * or folded. Reads only: the project is opened, folded and closed.
+ */
+async function heldProductsInBase(context: StaffCommandContext, root: string): Promise<boolean> {
+  try {
+    const { ReplicaProject, isProjectRefused } = await import('../staff/replica/replicaProject');
+    const { baseCellHeldProducts } = await import('../domain/replica/productCells');
+    const opened = await ReplicaProject.open(root, await replicaDeps(context));
+    if (opened === undefined || isProjectRefused(opened)) return false;
+    try {
+      const { fold } = await opened.state();
+      return baseCellHeldProducts(fold, opened.projectId);
+    } finally {
+      await opened.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 // ---- the commands ---------------------------------------------------------------------------------------------------------------------------------
 
-/** Make This Staff Project Multi-User (D-28 to D-34): verify the ledgers first, confirm in a modal dialog that says what happens, then convert. */
+/**
+ * Make This Staff Project Multi-User (D-28 to D-34): verify the ledgers first, confirm in a modal dialog that says what happens, then convert.
+ * A project that needs a label other than org/Public (a product labelled above it, or a calculator or wargame ledger kept at org/Internal) asks the
+ * lead to declare their own clearance first, and checks it before the confirmation: a clearance that does not cover every label is refused with the
+ * D-19 sentence and nothing more is asked or written (D-19). An all org/Public project is asked nothing new (D-68).
+ */
 async function makeMultiUserCommand(context: StaffCommandContext): Promise<void> {
   const root = projectRoot();
   if (!root) { warn(NO_FOLDER_TEXT); return; }
   const migrate = await import('../staff/replica/migrate');
   if (!(await exists(path.join(root, '.planning', 'staff')))) { warn(shownRefusal('no-staff-project', migrate.MIGRATION_REFUSALS['no-staff-project'])); return; }
-  if (await migrate.migrationComplete(root)) { warn(shownRefusal('already-shared', migrate.MIGRATION_REFUSALS['already-shared'])); return; }
+  if (await migrate.migrationComplete(root)) {
+    // A project the 0.4.35 preview made shared is told the way forward instead, which carries its own next step (D-22 revised).
+    if (await heldProductsInBase(context, root)) {
+      const { PREVIEW_WAY_FORWARD_TEXT } = await import('../domain/replica/productCells');
+      warn(`${migrate.MIGRATION_REFUSALS['already-shared']} ${PREVIEW_WAY_FORWARD_TEXT}`);
+    } else warn(shownRefusal('already-shared', migrate.MIGRATION_REFUSALS['already-shared']));
+    return;
+  }
   const dir = identityDir(context.globalStorageUri.fsPath);
   const staffKeyStatus = () => localKeyStatus(dir, context.secrets);
   // The four ledgers are checked before anything is asked, so a broken one is refused with today's sentence and its way out, and nothing is written.
-  const verified = await migrate.verifyLegacyLedgers(root, { secrets: context.secrets, staffKeyStatus });
+  const verifyDeps = { secrets: context.secrets, staffKeyStatus };
+  let verified = await migrate.verifyLegacyLedgers(root, verifyDeps);
+  // With no clearance declared only org/Public is covered, so a project needing any other label is refused not-cleared-for-label with those labels.
+  // The lead then declares their own clearance, and the ledgers are checked again with it before anything else is asked.
+  let leadClearance: Awaited<ReturnType<typeof pickClearance>>;
+  if (!('ok' in verified) && verified.refused === 'not-cleared-for-label' && (verified.labels?.length ?? 0) > 0) {
+    leadClearance = await pickClearance(LEAD_CLEARANCE_TITLE, 'The clearance you declare for yourself (self-declared, not verified)');
+    if (!leadClearance) return;
+    verified = await migrate.verifyLegacyLedgers(root, verifyDeps, { leadClearance });
+  }
   if (!('ok' in verified)) { warn(shownRefusal(verified.refused, verified.message)); return; }
   const checked = migrate.LEGACY_LEDGERS.map((ledger) => {
     const read = verified.ledgers.find((item) => item.ledger === ledger.ledger);
@@ -372,11 +422,15 @@ async function makeMultiUserCommand(context: StaffCommandContext): Promise<void>
   const go = await confirm(MAKE_MULTI_USER_QUESTION, [
     `The four ledgers were checked with today's checks: ${checked.join('; ')}.`,
     'The project becomes shared: its history moves into a signed shared record in .planning/staff/replica/, which git ignores. You become its staff lead, signed with this device\'s key, and people join only when you invite and admit them.',
-    'The original ledger files are kept in .planning/staff/legacy/ and never deleted, and the files you know stay where they are. Steps that work on one machine only are refused in a shared project. To work alone again, use Staff: Make a Single-Machine Copy.'
+    'The original ledger files are kept in .planning/staff/legacy/ and never deleted, and the files you know stay where they are. Steps that work on one machine only are refused in a shared project. To work alone again, use Staff: Make a Single-Machine Copy.',
+    ...(leadClearance === undefined ? [] : [`Each product goes into a part of the project for its label: ${verified.labels.join(', ')}. Only people whose declared clearance covers a label receive that part. You declare yourself cleared for ${leadClearance.level}.`])
   ], MAKE_MULTI_USER_ACTION);
   if (!go) return;
   const labelMapHash = await labelMapHashOf(root);
-  const result = await migrate.makeMultiUser(root, { ...(await replicaDeps(context)), staffKeyStatus }, labelMapHash === undefined ? {} : { labelMapHash });
+  const result = await migrate.makeMultiUser(root, { ...(await replicaDeps(context)), staffKeyStatus }, {
+    ...(labelMapHash === undefined ? {} : { labelMapHash }),
+    ...(leadClearance === undefined ? {} : { leadClearance })
+  });
   if (migrate.isMigrationRefused(result)) { warn(shownRefusal(result.refused, result.message)); return; }
   // The staff host reopens the project as shared on its next read.
   await staffHostFor(root)?.close();
@@ -682,7 +736,11 @@ async function updateMemberCommand(context: StaffCommandContext): Promise<void> 
   });
 }
 
-/** Make a Single-Machine Copy (D-35, D-47): an empty folder outside the shared project, the person who copies, and a confirmation. */
+/**
+ * Make a Single-Machine Copy (D-35, D-47): an empty folder outside the shared project, the person who copies, and a confirmation. The result shows
+ * every notice the copy returns beyond the three every screen shows (D-23), and for a project the 0.4.35 preview made shared it ends with how to share
+ * the copy again (D-22 revised).
+ */
 async function singleCopyCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>): Promise<void> {
   const root = projectRoot();
   if (!root) { warn(NO_FOLDER_TEXT); return; }
@@ -701,6 +759,8 @@ async function singleCopyCommand(context: StaffCommandContext, identity: () => P
     `Steps other people took are carried under your name and signed with this device's key, written like ${copy.carriedApprovalName('A. Person', person.name)}. A decision that people made at the same time in the shared project is left open in the copy, marked ${copy.CONTESTED_AT_COPY_TEXT}.`,
     NOT_COPIED_TEXT
   ], 'Make Copy'))) return;
+  // Asked before the copy, so the answer is about the shared project as it was copied.
+  const preview = await heldProductsInBase(context, root);
   const result = await copy.makeSingleMachineCopy(root, destination, { ...(await replicaDeps(context)), copier: { name: person.name, role: person.role } });
   if (!result.ok) { warn(shownRefusal(result.refused, result.message)); return; }
   const parts = [`The single-machine copy is in ${destination}. Open that folder to work alone.`];
@@ -709,6 +769,11 @@ async function singleCopyCommand(context: StaffCommandContext, identity: () => P
   if (result.differs.length > 0) parts.push(`Carried only up to the step today's ledger can show: ${result.differs.map((item) => `${item.product} (${item.reason})`).join('; ')}.`);
   if (result.left.length > 0) parts.push(`Not carried, because their shared copy does not verify: ${result.left.map((item) => `${item.ledger} (${item.reason})`).join('; ')}.`);
   parts.push(NOT_COPIED_TEXT);
+  // Every notice the copy returns beyond the ones every multi-user screen shows (tell adds those), each once: for example that parts this computer
+  // is not cleared for were not copied (D-23).
+  const shownEverywhere = multiUserNoticeLines();
+  for (const line of new Set(result.notices)) if (!shownEverywhere.includes(line)) parts.push(line);
+  if (preview) parts.push(COPY_SHARE_AGAIN_TEXT);
   // The staff host of the shared project forgets the project it opened, so it never keeps one whose store was replaced (D-09).
   await staffHostFor(root)?.invalidateShared();
   tell(parts.join(' '));
