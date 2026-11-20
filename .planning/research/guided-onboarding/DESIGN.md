@@ -11,7 +11,7 @@
 
 1. **Ask about the work, never about security jargon.** Four short questions, one per screen: who you are and what you will do; what the work touches (in plain words: personal information, documents marked Protected A or B or classified, a client's information under a contract with a security clause); whether it must stay in Canada; and, only when it matters, one follow-up. Every question has "Not sure", and "Not sure" is treated as the stricter answer, said out loud.
 2. **The guide is a front door to the gate, not a second gate.** Answers become a project label (for example `ca-protected/Protected B`), and the routing table in your organization's signed policy decides where that label may go, exactly as it does for every request today. The guide has no security table of its own, so it can never disagree with what the gate will later enforce.
-3. **Only viable options appear.** An option is offered only when it is detected, configured, allowed by the policy and has just answered a test request. Local AI is offered only when a local server on this machine (or a server your organization names in its policy) answers with a model that has a passport. Anything that fails is listed apart under "Not available here", with the reason and how to enable it, and can never be picked.
+3. **Only viable options appear.** An option is offered only when it is detected, configured, allowed by the policy and has just answered a test request. Local AI is offered only when a server on this machine, or one on your network that your organization names, announces or finds by a confirmed scan of the ranges its policy lists and then approves, answers with a model that has a passport. A server found on the network is never sent anything but a signature request until it is approved and its certificate pinned. Anything that fails is listed apart under "Not available here", with the reason and how to enable it, and can never be picked.
 4. **One recommendation, with a one-sentence reason.** Each option card says, in plain words, where your text goes, who could see it, what is proven, what is not proven, the cost and the expected speed. Options your answers rule out stay visible but greyed, with the reason, and cannot be chosen.
 5. **Your organization's policy wins.** The guide recommends only inside what the policy allows. When your answers need something the policy does not allow, it says so and names who to ask (from the policy, or "your organization's security officer"); it never offers to edit the policy, lower a label or use another route.
 6. **Protected B, said correctly.** Protected B in a cloud service needs a provider assessed against the CCCS Medium cloud control profile through ITSM.50.100, plus your organization's own security assessment and authorization; a contractor also needs written IT approval from the Contract Security Program before processing a client's Protected information on its own systems. The guide states this, keeps Protected B local by default (today's routing), and offers a hosted option for Protected B only when your organization's policy records an authorization for it (the Cohere design's rule). Classified work and Protected C get no recommendation at all: the guide stops and points to your security officer (section 4.4).
@@ -121,7 +121,7 @@ viability (section 6) --> which endpoints and models answer right now
 | Option | Hosting class | Viable when (section 6) |
 |---|---|---|
 | This computer (local AI) | `local` | A local server on loopback answers a test request with a passported model |
-| Your organization's server | `local` via `routing.localHosts`, or `org-plain` | The policy names the host and it answers a test request |
+| Your organization's server | `local` via `routing.localHosts`, or `org-plain` | The policy names the host, or it was found on your network (section 6.4.1) and approved with its certificate pinned, and it answers a test request |
 | Your organization's attested hosting | `org-tee` (Phase 74.2) | Named in `routing.attestedHosts`, attestation verified, test request answered |
 | NEAR AI Cloud, private hardware | `nearai-tee` | Key present, endpoint reachable, attestation verified, test request answered by a TEE model |
 | NEAR AI Cloud, all models | `nearai-tee` plus `closed-api` (forwarded) | As above, and `privacyMode` is `standard` |
@@ -191,7 +191,29 @@ The result is a **device class**: `unified` (Strix Halo, GB10, Apple), `discrete
 
 ### 6.4 Local servers
 
-The guide probes **loopback only** (127.0.0.1 and ::1) on the known ports, plus hosts the policy names in `localHosts`. It never scans the network. Each server is identified by its signature endpoint before it is trusted to be what it says.
+The guide always probes **loopback** (127.0.0.1 and ::1) on the known ports and the hosts the policy names in `localHosts`. Model servers will often run on another machine (an appliance, a GPU server in a rack, a colleague's workstation), so the guide also **finds servers on your network**, under the rules in section 6.4.1. Each server is identified by its signature endpoint before it is trusted to be what it says, and a server found on the network is a **candidate**, never used, until it is approved.
+
+#### 6.4.1 Finding servers on your network (owner, 2026-11-20)
+
+The owner expects local model servers, and later data sources, to sit on other machines more often than on the client. Discovery therefore covers the network, in three ways, from least to most intrusive. All three are set in the signed policy's `onboarding.discovery` key, so your organization decides what the extension may do on its networks.
+
+| Way | What it does | Default |
+|---|---|---|
+| Named | Hosts and ports listed in `routing.localHosts` or `onboarding.discovery.hosts` | On |
+| Announced | Listens for servers that announce themselves: DNS-SD/mDNS service records (`_near-ai-models._tcp` for our appliance and any server your organization tags; known types such as Ollama behind a published record) and DNS SRV records in a domain the policy names. Nothing is sent to hosts that did not announce. | On, on networks the policy lists |
+| Scanned | Actively probes the known model-server ports on the address ranges (CIDRs) the policy lists, and only those | Off; the policy must list ranges, and the person confirms each scan |
+
+Rules for scanning:
+- **Only listed ranges, only on a listed network.** The policy names ranges and, optionally, the networks they belong to (by gateway or DNS suffix). If the computer is on a network the policy does not list (a hotel, a home network), scanning is off and the guide says why.
+- **Known ports only, slowly.** Only the model-server ports in section 6.4 (and the data-source ports in section 11 once that step exists), at most 50 hosts a second, one connection per port, no payloads beyond the signature request.
+- **Asked first, and told.** Each scan says which ranges and ports it will touch and that "your network team may see this as a scan", and runs only when the person confirms. Each scan is recorded (who, when, ranges, ports, what was found) beside the gate's records.
+- **From where it runs.** In code-server the scan runs from the server or container, which may sit on a different network; the guide names the machine, as in section 6.2.
+
+Found is not trusted:
+- **A candidate gets only the signature request and, after approval, the fixed one-word test request (section 6.5).** No project data, no prompt text and no key is ever sent to a candidate.
+- **Approval** is an administrator act: the server's address, its kind and version, and its TLS certificate fingerprint (pinned) are written into the signed policy (`routing.localHosts` or `org-plain` hosts), or the person approves it for their own use where the policy allows personal approvals. Until then it is listed under "Found on your network, not approved" with "Ask {contact} to approve it".
+- **Encryption on the wire.** A server on another machine is reached over TLS with the pinned certificate. A plain-HTTP server on another machine is offered only for labels the policy allows on that network segment (default: Public only), because prompts would cross the network unencrypted. Loopback stays as today.
+- **Hosting class.** An approved server on another machine is `org-plain` (your organization's hardware, not attested) unless it is in `routing.attestedHosts` with attestation verified (`org-tee`). Its label ceiling comes from the policy, as for any `org-plain` host.
 
 | Server | Ports probed | Identify by | Models it serves | Can install models |
 |---|---|---|---|---|
@@ -410,6 +432,7 @@ Landing never runs anything: it opens views and offers the next step.
 - **From the same answers:** the label default for new items is the project's proposed label or higher; residency Yes keeps sources whose processing would leave Canada out of the proposal, with the reason.
 - **One click each:** "Connect Microsoft 365", "Connect Google Workspace" and "Connect file shares" run the data platform's one-click setups (`00-DESIGN.md` 3.7, CONN-01 to CONN-04), each starting as a `proposed` source in inventory-only mode (DATA-07). The guide shows the permission list with reasons before the administrator signs in.
 - **Re-runnable:** the guide only proposes and starts setups; finishing, rotating and disconnecting stay with the connectors.
+- **Finding sources on the network:** file shares and other on-premises sources are found the same way as model servers (section 6.4.1): named in the policy, announced (DNS SRV, DFS namespaces your organization publishes), or scanned on policy-listed ranges for the SMB and NFS ports only, with the same confirmation and record. Listing a found share's contents is a connector setup step that needs the administrator, never part of discovery.
 
 ## 12. How it fits the rest
 
@@ -443,7 +466,8 @@ Landing never runs anything: it opens views and offers the next step.
 | The guide becomes a way around the gate | It writes only what a person can already do, never the bundle; labels only rise; every request is still routed by the gate |
 | A person answers "public" to reach the cloud | The guide is advice and setup, not enforcement: file labels still raise the chat's label, and the gate refuses by label. The record keeps the answers for review |
 | A fake local server on a loopback port | Identified by its signature endpoint; a local process already has this computer's trust, so this is not a new boundary; the record keeps the server kind and version; T2 use still needs a passported artifact |
-| Network scanning | Loopback and policy-named hosts only; no LAN scan, ever |
+| Network scanning | Only as section 6.4.1 allows: named hosts, announced servers on policy-listed networks, and scans of policy-listed ranges only, on known ports, rate-limited, confirmed by the person and recorded; off on networks the policy does not list |
+| A rogue or spoofed server on the network collecting prompts | A found server is a candidate: it gets only the signature request until approved; approval pins its TLS certificate; plain HTTP off-machine only for labels the policy allows (default Public); never a key, prompt or project data to a candidate |
 | Tool execution during detection | Fixed binaries with fixed arguments, no shell, known install paths before PATH, timeout and output cap, not run from the workspace folder |
 | Tampered or swapped model files | sha256 from the signed catalogue checked before the file is visible to a server; HTTPS from named sources pinned to a commit; safetensors or GGUF only; no remote code |
 | Licence surprises | Licence shown and accepted before download, recorded; passports carry obligations |
@@ -453,7 +477,7 @@ Landing never runs anything: it opens views and offers the next step.
 
 ### 14.2 SECURITY.md changes (in the phases, not now)
 
-- In **Where your data goes**, three rows: "Guided setup checks" (loopback probes, the policy-named hosts, the NEAR AI test request and its cost); "Local model downloads" (Hugging Face or the Ollama registry or your organization's mirror see your IP address and the model name; hashes checked before use); "Setup answers" (`project.json` and the gate's records; categories only, no content).
+- In **Where your data goes**, three rows: "Guided setup checks" (loopback probes, the policy-named hosts, listening for announced servers, network scans of the ranges your policy lists when you confirm one, the NEAR AI test request and its cost); "Local model downloads" (Hugging Face or the Ollama registry or your organization's mirror see your IP address and the model name; hashes checked before use); "Setup answers" (`project.json` and the gate's records; categories only, no content).
 - A new section **Guided setup and local models**: what is detected and how; the viability rule; that answers are self-declared and labels follow; that the guide never writes the policy; the Protected B paragraph of 4.5; what the guide does for classified work.
 - README: a short "Choosing where your AI runs" section with the option list and the plain words of 8.2, and the model manager in the feature list.
 
@@ -491,7 +515,7 @@ The data-connection step (GUIDE-09) is placed in Phase 89, because it needs the 
 |---|---|
 | GUIDE-01 | The question set of section 4 (role, data, Canada, conditional follow-ups, pre-answered agent work), one per screen, with Not sure mapped to the stricter reading and explained; the role remembered per person, the rest per project. |
 | GUIDE-02 | Answers map to a proposed project label on the policy's scales (4.3), applied through Set Label and only ever raised; Protected C, classified and contract work without approval stop with the plain sentence and no recommendation (4.4). |
-| GUIDE-03 | Viability per option (detected, configured, allowed, answered) for local servers on loopback and policy-named hosts, NEAR AI and the device class (6.1 to 6.5); only viable options can be chosen; the rest are listed apart with reason and fix; results go stale after 10 minutes or on a change. |
+| GUIDE-03 | Viability per option (detected, configured, allowed, answered) for local servers on loopback, policy-named hosts and servers found on your network and approved (6.4.1), NEAR AI and the device class (6.1 to 6.5); only viable options can be chosen; the rest are listed apart with reason and fix; results go stale after 10 minutes or on a change. |
 | GUIDE-04 | A pure `recommend()` that uses the gate's own route decisions, the residency, use tier and role rules R1 to R9, and gives one recommendation with a one-sentence reason; ruled-out options greyed with the gate's refusal sentence. |
 | GUIDE-05 | Option cards in plain words (where your text goes, who could see it, what is proven, what is not, cost, speed); a choice other than the recommendation records a reason. |
 | GUIDE-06 | The policy wins: only verified bundles, nothing outside the bundle offered, who to ask from the optional `onboarding` key or a generic contact, no policy edit or label lowering offered; the `onboarding` key parsed with strict key checks. |
@@ -519,7 +543,7 @@ The data-connection step (GUIDE-09) is placed in Phase 89, because it needs the 
 | Id | Requirement |
 |---|---|
 | LMOD-01 | Hardware detection per 6.3 with unified memory as a first-class device class (Strix Halo GTT, GB10 via meminfo, Apple working set), fixed tools only, no shell, timeouts and output caps. |
-| LMOD-02 | Server adapters for Ollama, llama.cpp server, Lemonade, LM Studio, vLLM, NVIDIA NIM, LocalAI and Jan, identified by signature endpoints on loopback and policy-named hosts, with install capability where the server supports it and list-only otherwise. |
+| LMOD-02 | Server adapters for Ollama, llama.cpp server, Lemonade, LM Studio, vLLM, NVIDIA NIM, LocalAI and Jan, identified by signature endpoints on loopback, policy-named hosts and approved servers found on your network (6.4.1), with install capability where the server supports it and list-only otherwise. |
 | LMOD-03 | Fit bands and speed estimates per artifact from GGUF header ranged reads and the bandwidth formula, labelled as estimates; an optional benchmark replaces them with measured numbers per machine, server and artifact. |
 | LMOD-04 | Recommendations by tier and role from passports and the signed local catalogue (shipped, replaceable by the policy); PRC-origin and passport-less models only into the T0 lane's list. |
 | LMOD-05 | Install with licence acceptance, disk check, HTTPS from pinned sources or your organization's mirror, sha256 verified before the file is visible to the server, safetensors or GGUF only; update offered only within the passport; remove after confirmation naming the tiers affected. |
@@ -544,7 +568,7 @@ The data-connection step (GUIDE-09) is placed in Phase 89, because it needs the 
 |---|---|---|---|---|
 | WP-0 Contract | Option registry, `ViabilityResult`, device class, `LocalServerAdapter`, answer and record types, `onboarding` bundle key parser | `feat/guide-contract` | None | Strict key cases for `onboarding`; a bundle without it parses as before |
 | WP-RECOMMEND | Pure answer-to-label mapping and `recommend()` | `feat/guide-recommend` | WP-0 | One test per row of 4.3, 5.3 and 5.4; uses the real `decideRoute` |
-| WP-VIABILITY | NEAR AI, local server probes, policy-named hosts, test requests, staleness | `feat/guide-viability` | WP-0 | Fake servers per adapter on loopback; no probe off loopback unless named; test request text fixed; staleness transitions |
+| WP-VIABILITY | NEAR AI, local server probes, policy-named hosts, test requests, staleness | `feat/guide-viability` | WP-0 | Fake servers per adapter on loopback and on a test network; scans only of listed ranges on listed networks, rate-limited and confirmed; a candidate gets only the signature request; approval pins the certificate; test request text fixed; staleness transitions |
 | WP-UI | Guide webview, check answers, change list, re-run, landing, walkthrough, accessibility | `feat/guide-ui` | WP-0 | Webview tests for each screen; keyboard path; focus moves; reduced motion |
 | WP-RECORD | Records, `project.json` answers, migration of old discovery answers | `feat/guide-record` | WP-0 | Record verifies; secrets scanned out; old answers map |
 | WP-HW | Hardware detection per platform (32.2) | `feat/local-hw` | WP-0 | Fixture files for Strix Halo, GB10, Apple, discrete NVIDIA, Windows; no shell |
@@ -566,6 +590,7 @@ The data-connection step (GUIDE-09) is placed in Phase 89, because it needs the 
 | D9 | Phase numbering: 32.1 and 32.2 (inserted, before 36), or 38 and 39 with a dependency note | 32.1 and 32.2 |
 | D10 | Local catalogue: inside `ceiling.models` (`localCatalogue`) or a separate signed file | Inside `ceiling.models`, so one signature covers models and their artifacts |
 | D11 | Allowed download sources by default | Hugging Face (pinned commits) and the Ollama registry; your organization's mirror replaces both when named |
+| D12 | Network discovery (owner asked for it, 2026-11-20) | Named hosts and announced servers on by default on policy-listed networks; active scans only of policy-listed ranges, confirmed by the person each time, rate-limited and recorded; found servers are candidates until an administrator approves them and their certificate is pinned |
 
 ## 18. Prior art drawn on
 
@@ -612,7 +637,7 @@ Research done 2026-11-20 on public sources; no downloaded code was run.
 | Lemonade (https://github.com/lemonade-sdk/lemonade) | Apache 2.0 | Active, AMD-backed | Port 13305 (8000 earlier), backend report for ROCm, Vulkan and NPU on Strix Halo |
 | vLLM (https://docs.vllm.ai) | Apache 2.0 | Mature | `/health`, `/version`, `/v1/models`; list only |
 | NVIDIA NIM (https://docs.nvidia.com/nim/large-language-models/) | NVIDIA terms | Mature | `/v1/health/ready`, `/v1/models`; memory-aware profile selection |
-| Open WebUI (https://docs.openwebui.com) | Open WebUI licence | Mature | Configured URLs rather than port scanning; we probe loopback only and take named hosts from the policy |
+| Open WebUI (https://docs.openwebui.com) | Open WebUI licence | Mature | Configured URLs rather than port scanning; we take named and announced hosts first and scan only policy-listed ranges, with confirmation (6.4.1) |
 | Jan (https://jan.ai/docs/desktop/api-server) | Apache 2.0 | Active | Port 1337 with a key |
 | Hugging Face `accelerate estimate-memory` (https://huggingface.co/docs/accelerate/usage_guides/model_size_estimator) | Apache 2.0 | Mature | Weights-only estimate for safetensors models |
 | OpenSSF Model Signing (https://github.com/sigstore/model-transparency) | Apache 2.0 | v1.0, few signed models yet | Optional signature check beside the required hash |
