@@ -8,7 +8,7 @@ import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
 import { currentSessionRoute, defaultSessionRoute, noteNotAccredited, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
 import { routeFactsFor } from './privateRoute';
-import type { SessionRoute } from '../gate/sessionMark';
+import type { RouteRecordContext, SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
 import { redactSecrets } from '../domain/redaction';
@@ -167,7 +167,7 @@ interface RouteCheck {
   readonly route: SessionRoute;
   readonly decision: RouteDecision;
   readonly facts: RouteFacts;
-  readonly context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable };
+  readonly context: Omit<RouteRecordContext, 'checkFailed' | 'connectionFallback'>;
   /** The binding fact the check read, when the client has a binding source. */
   readonly connection?: ConnectionBindingFact;
   /** The bound fact the request must be pinned to: set exactly when the request was allowed at attested-cloud to NEAR AI Cloud. */
@@ -1168,19 +1168,25 @@ export class NearAiClient implements ModelEndpoint {
     let decision: RouteDecision;
     let mark: Mark = [];
     let checkFailed = false;
+    let policyVersion: RouteRecordContext['policyVersion'];
     try {
       ({ routing, defaultLabel, bundleHash } = routingOf(route));
       mark = route.markOf();
+      // D-36: the effective policy of the route's own host; none (or a route without one) decides as the safety patch did. A throw is a failed check.
+      const policy = route.routePolicy?.(now);
+      policyVersion = policy?.policyVersion;
       // Coherence review S4: a private team or member, or nearAi.privacyMode tee-only, raises the tier to at least attested-cloud, so a model counts as
       // private only when the gate's own check passes, never on the catalog's word alone.
-      decision = decideRoute(mark, routing, facts, defaultLabel, privateOnlyNow() ? 'attested-cloud' : undefined);
+      decision = decideRoute(mark, routing, facts, defaultLabel, privateOnlyNow() ? 'attested-cloud' : undefined, policy);
     } catch {
       // A policy state, a mark or a routing table that cannot be read means the route cannot be worked out: it is refused with a fixed rule and a plain
       // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
       mark = [];
       checkFailed = true;
+      policyVersion = undefined;
       decision = routeCheckFailed();
     }
+    const context = { mark, defaultLabel, bundleHash, routing, ...(policyVersion === undefined ? {} : { policyVersion }) };
     // An attested-cloud request to NEAR AI Cloud is allowed only through a fresh bound fact (D-50); it is sent over a connection pinned to that fact's key.
     const pinned = decision.allowed && decision.tier === 'attested-cloud' && this.options.route === 'near' && facts.binding?.state === 'bound' ? facts.binding : undefined;
     // Owner, 2026-11-18: an any-cloud request to NEAR AI Cloud's own endpoint also goes over the pinned connection while a fresh proof for this host exists,
@@ -1191,11 +1197,11 @@ export class NearAiClient implements ModelEndpoint {
     // that dies mid-request still leaves it (PR #95 review round 3). A record that cannot be built or kept never changes the request (D-21).
     const write = (fellBack: boolean): void => {
       try {
-        route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed, ...(fellBack ? { connectionFallback: 'unpinned' as const } : {}) }));
+        route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { ...context, checkFailed, ...(fellBack ? { connectionFallback: 'unpinned' as const } : {}) }));
       } catch { /* see above */ }
     };
     write(false);
-    if (decision.allowed && !checkFailed) noteNotAccredited(route, decision, facts, model, { mark, defaultLabel, bundleHash, routing });
+    if (decision.allowed && !checkFailed) noteNotAccredited(route, decision, facts, model, context);
     let fellBackRecorded = false;
     const recordFallback = (): void => { if (!fellBackRecorded) { fellBackRecorded = true; write(true); } };
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
@@ -1203,7 +1209,7 @@ export class NearAiClient implements ModelEndpoint {
       route,
       decision,
       facts,
-      context: { mark, defaultLabel, bundleHash, routing },
+      context,
       ...(this.options.binding === undefined ? {} : { connection: fact }),
       ...(pinned === undefined ? {} : { pinned }),
       ...(optionalPin === undefined ? {} : { optionalPin, recordFallback })

@@ -14,10 +14,14 @@ import type { Mark } from '../domain/gate/dominance';
 import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionRecord } from '../domain/gate/record';
+import type { DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import { notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
-import type { RouteDecision, RouteEventId, RouteFacts, RoutingTable } from '../domain/gate/routing';
+import type { RouteDecision, RouteEventId, RouteFacts, RoutePolicy, RoutingTable, VerifiedAuthorization } from '../domain/gate/routing';
+import { verifyAuthorization } from '../domain/gate/authorizations';
+import type { BundleIssuer } from '../domain/gate/bundle';
+import type { PolicyDocument } from '../domain/gate/policyDocument';
+import type { PolicyLayersView } from './organizationStore';
 import type { InferTier } from '../domain/gate/vocabulary';
 
 /**
@@ -74,6 +78,8 @@ export interface SessionRoute {
   readonly onAnswerChecked?: AnswerCheckListener;
   /** Shows a chat notice (coherence review S2). Never awaited, and a notice that cannot be shown never changes a request. */
   readonly onNotice?: (text: string) => void;
+  /** The effective policy's inputs to each request's route decision, from the route's own host (GateRuntime.routePolicy, D-36). */
+  readonly routePolicy?: GateRuntime['routePolicy'];
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -92,6 +98,7 @@ export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () =>
     ...(runtime.clock === undefined ? {} : { clock: runtime.clock }),
     ...(runtime.newRecordId === undefined ? {} : { newRecordId: runtime.newRecordId }),
     ...(runtime.productVersion === undefined ? {} : { productVersion: runtime.productVersion }),
+    ...(runtime.routePolicy === undefined ? {} : { routePolicy: runtime.routePolicy }),
     attestation: options.attestation ?? { failed: false },
     ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
     ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice })
@@ -188,6 +195,66 @@ export function defaultSessionRoute(): SessionRoute {
   return fallback ?? NO_HOST_ROUTE;
 }
 
+// ---- The effective policy of a route (FND-03 to FND-06, D-15, D-36) ----
+
+/** A route policy as a host gives it: the effective policy's inputs and the version every record of the request names (D-10). */
+export type RoutePolicyNow = RoutePolicy & { readonly policyVersion: PolicyRecordVersion };
+
+/** How long a verified list of one effective policy's authorizations is reused: a minute, so one that starts later counts soon after it starts. */
+const VERIFIED_KEPT_MS = 60_000;
+const verifiedByPolicy = new WeakMap<PolicyDocument, { readonly at: number; readonly source: string; readonly found: readonly VerifiedAuthorization[] }>();
+
+/**
+ * The authorizations of the effective policy that verify now against exactly one key source (D-15, T-41-132): your organization's signers when its layer is
+ * in force (this device counts only when it is one of them), otherwise this device's own key alone, so what it signed reads as self-signed. One that does
+ * not verify is left out. Each list is reused for a minute per effective policy; whether an authorization covers a request (its dates included) is still
+ * judged at every decision.
+ */
+function verifiedAuthorizations(effective: PolicyDocument, organization: PolicyDocument | undefined, device: BundleIssuer | undefined, now: number): readonly VerifiedAuthorization[] {
+  const envelopes = effective.authorizations ?? [];
+  if (envelopes.length === 0) return Object.freeze([]);
+  const signers = organization === undefined ? undefined : organization.people?.signers ?? [];
+  const thisDevice = device === undefined ? undefined : { fingerprint: device.fingerprint, publicKey: device.publicKey };
+  const source = `${signers === undefined ? 'device' : signers.map((signer) => signer.fingerprint).join(',')}:${thisDevice?.fingerprint ?? ''}`;
+  const held = verifiedByPolicy.get(effective);
+  if (held !== undefined && held.source === source && now >= held.at && now - held.at < VERIFIED_KEPT_MS) return held.found;
+  const found: VerifiedAuthorization[] = [];
+  for (const envelope of envelopes) {
+    const verdict = verifyAuthorization(envelope, { ...(signers === undefined ? {} : { signers }), ...(thisDevice === undefined ? {} : { thisDevice }), now });
+    if (verdict.ok) found.push(Object.freeze({ body: verdict.body, selfSigned: verdict.selfSigned }));
+  }
+  const list = Object.freeze(found);
+  verifiedByPolicy.set(effective, { at: now, source, found: list });
+  return list;
+}
+
+/**
+ * The route policy of a request decided at `now` from the layers a host holds (D-36): undefined unless an effective policy is in force (never for a
+ * failed-closed state), so the request is then decided as the safety patch did. `organization` is true only for a valid organization layer; the
+ * accredited-device switch comes from the effective agents section and the clearances from its people section; `deviceId` is this device's fingerprint,
+ * and this device's key is the personal layer's issuer, since only this device signs that layer. The project is left out: a route does not know its
+ * project yet, so an authorization scoped to projects covers nothing (D-54, fail closed).
+ */
+export function routePolicyFor(layers: PolicyLayersView, now: number, deviceFingerprint: string, policyVersion: PolicyRecordVersion): RoutePolicyNow | undefined {
+  const effective = layers.effective;
+  if (effective === undefined || layers.failedLayer !== undefined || layers.organization.state === 'failed') return undefined;
+  const organization = layers.organization.state === 'valid' ? layers.organization.document : undefined;
+  return Object.freeze({
+    endpoints: effective.endpoints ?? [],
+    authorizations: verifiedAuthorizations(effective, organization, layers.personal?.document.issuer, now),
+    ...(effective.residency === undefined ? {} : { residency: effective.residency }),
+    ...(effective.models === undefined ? {} : { models: effective.models }),
+    scales: effective.labels.scales,
+    mappings: effective.labels.mappings,
+    clearances: effective.people?.clearances ?? [],
+    organization: organization !== undefined,
+    requireAccreditedDevice: effective.agents.requireAccreditedDevice === true,
+    deviceId: deviceFingerprint,
+    now,
+    policyVersion
+  });
+}
+
 // ---- The record of a model request (GATE-07, D-20, D-52) ----
 
 /** The rules of a routine allowed request, whose record is the short one: no reason, no tier beside the capability's, and no label at the default mark. */
@@ -245,6 +312,8 @@ export interface RouteRecordContext {
   readonly checkFailed?: boolean;
   /** An any-cloud request pinned to the proven connection that met another key and was sent unpinned instead (owner, 2026-11-18). */
   readonly connectionFallback?: 'unpinned';
+  /** The version of the policy that decided the request (D-10): bundle-2 under a version 2 policy; absent is bundle-1. */
+  readonly policyVersion?: PolicyRecordVersion;
 }
 
 /**
@@ -285,7 +354,10 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(decided === undefined ? {} : { label: decided }),
     ...(marked ? { mark: context.mark } : {}),
     ...(decision.tier === 'attested-cloud' ? { connection: facts.binding?.state ?? 'unknown' } : {}),
-    ...(context.connectionFallback === undefined ? {} : { connectionFallback: context.connectionFallback })
+    ...(context.connectionFallback === undefined ? {} : { connectionFallback: context.connectionFallback }),
+    ...(context.policyVersion === undefined ? {} : { policyVersion: context.policyVersion }),
+    // The report-only rules that would have refused (D-34, D-42), kept so a later version can say what your organization's switch would change.
+    ...(decision.wouldRefuse === undefined ? {} : { wouldRefuse: decision.wouldRefuse })
   });
 }
 
@@ -357,7 +429,8 @@ export function notAccreditedRecordFor(route: SessionRoute, decision: RouteDecis
     reason: context.reason,
     bundleHash: context.bundleHash,
     label: context.label,
-    ...(isDefaultMark(context.mark, context.defaultLabel) ? {} : { mark: context.mark })
+    ...(isDefaultMark(context.mark, context.defaultLabel) ? {} : { mark: context.mark }),
+    ...(context.policyVersion === undefined ? {} : { policyVersion: context.policyVersion })
   });
 }
 

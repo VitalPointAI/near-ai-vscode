@@ -10,7 +10,7 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
+import type { DecisionOutcome, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
 import { BundleStoreError, applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
@@ -20,7 +20,8 @@ import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
-import type { SessionRoute } from './sessionMark';
+import { routePolicyFor } from './sessionMark';
+import type { RoutePolicyNow, SessionRoute } from './sessionMark';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { labelMapKey, moveLabelEntry, resolveLabel, setLabelEntry } from '../domain/gate/labelMap';
 import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
@@ -266,6 +267,7 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
+      routePolicy: (now) => this.routePolicyNow(now),
       // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
       labels: (folder: string) => this.labelsFor(folder)
     };
@@ -618,6 +620,7 @@ export class GateHost {
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
       productVersion: this.options.productVersion,
+      routePolicy: (now) => this.routePolicyNow(now),
       attestation: { failed: false }
     };
   }
@@ -729,6 +732,16 @@ export class GateHost {
     try {
       const root = option();
       return root === undefined || root === '' ? undefined : root;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The route policy of a request decided now (D-36): from this host's own layers; one that cannot be worked out gives none, decided as the patch did. */
+  private routePolicyNow(now: number): RoutePolicyNow | undefined {
+    try {
+      const layers = this.policyLayers();
+      return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
     } catch {
       return undefined;
     }
@@ -849,6 +862,17 @@ export class GateHost {
       try { listener(); } catch { /* a listener never breaks the host */ }
     }
   }
+}
+
+/**
+ * The version of the policy every record names (D-10): bundle-2 while an effective policy is in force and either your organization's layer is valid or the
+ * stored personal layer is a version 2 one; bundle-1 otherwise, a failed-closed state included. The one function that decides it. Pure.
+ */
+export function policyVersionOf(layers: PolicyLayersView): PolicyRecordVersion {
+  if (layers.effective === undefined || layers.failedLayer !== undefined || layers.organization.state === 'failed') return 'bundle-1';
+  if (layers.organization.state === 'valid') return 'bundle-2';
+  const stored = layers.personal?.stored;
+  return typeof stored === 'object' && stored !== null && (stored as { readonly bundleVersion?: unknown }).bundleVersion === 2 ? 'bundle-2' : 'bundle-1';
 }
 
 /**

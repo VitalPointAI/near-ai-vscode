@@ -7,11 +7,12 @@ import { FAILED_CLOSED_VERBS, POLICY_EVENT_IDS } from './bundle';
 import type { BundleState, GateContextName } from './bundle';
 import { FLOOR_RULE_ORDER, floorFor } from './floor';
 import type { FloorInput, FloorLocations } from './floor';
-import type { DecisionRecord } from './record';
+import type { DecisionRecord, PolicyRecordVersion } from './record';
 import { LABEL_EVENT_IDS } from './labels';
 import type { Label } from './labels';
 import type { LabelSource } from './labelMap';
 import { ROUTE_EVENT_IDS, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD } from './routing';
+import type { RoutePolicy } from './routing';
 
 /** Whether a person can answer a card right now. A sub-agent of a chat run still has a person, so this is not the same idea as `unattended` (Pitfall 3). */
 export type Presence = 'person' | 'none';
@@ -141,6 +142,11 @@ export interface GateRuntime {
    * file trusting no key, so a label it holds only raises (fail closed).
    */
   readonly labels?: (root: string) => LabelSource;
+  /**
+   * The effective policy's inputs to each model request's route decision (FND-03 to FND-06, D-36), read at the decision from the host that made this
+   * runtime, never from a global, with the policy version every record of the request names (D-10). Absent or undefined: decided as the safety patch did.
+   */
+  readonly routePolicy?: (now: number) => (RoutePolicy & { readonly policyVersion?: PolicyRecordVersion }) | undefined;
 }
 
 /**
