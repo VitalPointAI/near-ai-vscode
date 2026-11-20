@@ -1375,6 +1375,40 @@ decisions) is sealed under that cell's key, so only the devices cleared for the 
   and the label scales, so they run on the lead's machine when a grant or a new key is written.
   The shared history then relies on the signed grant: it never decides clearance itself.
 
+### Device encryption keys and the key ring
+
+Each machine in a multi-user staff project has two keys of its own: the signing key it already
+uses for Team Mode and for signing staff records, and an encryption key that cell keys are wrapped
+to. Both stay on the machine.
+
+- **One encryption key per person per install.** The encryption key is an X25519 key pair made with
+  Node's built-in crypto the first time it is needed. Its private half is kept in the editor's
+  secret storage next to the signing key, under `nearAi.identity.encryptionKey`. It is made inside
+  the same lock as the signing key and read back before it is used, so two editor windows opening
+  at once never make two keys. A stored key is never replaced or deleted by the extension.
+- **Bound to the device by a signature.** The device signs its encryption public key together with
+  its writer id. The roster entry that admits or adds the device carries that signature, and the
+  roster checks it, so nobody can swap in another encryption key for the device without the
+  signature failing.
+- **Opened cell keys are cached in secret storage only.** When a grant addressed to this device
+  arrives, the device opens its wrap with the private encryption key and keeps the cell key in
+  memory and in secret storage (one value per project, `nearAi.staff.epochKeys.<project>`). If that
+  cached value is lost, nothing is lost with it: the grants on disk are encrypted to this device,
+  so the keys are opened again from them.
+- **The project is pinned outside the project folder.** When a device creates or joins a shared
+  project, it records which project that is (the hash of its first signed entry, and the staff
+  lead's public keys) in the extension's own storage, the way Team Mode keeps its trust record.
+  The copy in `.planning/staff/replica/project.json` is only a convenience: a copy that names
+  another project is refused, and opening a folder never records a new project by itself.
+- **Join secrets are kept only until they are used.** The secret in an invitation is kept in
+  secret storage under the invitation's id until the roster records what happened to the
+  invitation (the person was admitted, or the invitation was withdrawn). It is the only secret the
+  extension ever deletes.
+- **Never in the project folder, a log or a file.** Private keys, opened cell keys and join secrets
+  are never written to the project folder, to a log or output channel, to an error message or to
+  any other file. A test scans every file in the project folder and in the extension's storage
+  after a project is made and used, and fails if it finds any of them.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR
