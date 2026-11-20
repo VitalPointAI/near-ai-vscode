@@ -242,38 +242,28 @@ test('ROSTER_KIND_OWNER routes each of the 18 roster kinds and project.genesis t
   assert.ok(Object.isFrozen(ROSTER_KIND_OWNER));
 });
 
-// Every answer the view gives about the joiner, the lead and the base cell at a roster hash, so a test can show an entry changed none of them.
-function answersAt(state: RosterState, joined: Joined, hash: string): unknown[] {
-  const view = rosterView(state);
-  const { world, joiner } = joined;
-  return [
-    view.hasRoster(hash), view.rosterPosition(hash), view.isAdmitted(joiner.writer, hash), view.isAdmitted(world.lead.writer, hash),
-    view.memberName(JOINER_MEMBER, hash), view.hasRole(JOINER_MEMBER, 'member', hash), view.hasRole(JOINER_MEMBER, 'observer', hash),
-    view.hasRole(JOINER_MEMBER, 'deputy_lead', hash), view.hasRole(world.lead.member, 'staff_lead', hash), view.roleWithdrawnBy(JOINER_MEMBER, 'member', hash),
-    view.canRunAgent?.(JOINER_MEMBER, 'release-guard', hash), view.clientIdOwner?.(clientIdOf(2, 0), hash), view.deviceEncryptionKey?.(joiner.writer, hash),
-    view.cellGrantees?.(world.project, hash), view.cellGrantees?.('c'.repeat(32), hash), view.checkpointSigner(joiner.writer, hash), view.rosterBranchPending?.(hash)
-  ];
-}
-
-test('a roster entry of a kind whose rule is not written yet is refused roster-kind-pending and changes no answer of the view, for each owner module', () => {
+test('every roster kind that waited on a later plan now has its rule: none of them is refused roster-kind-pending, in any owner module', () => {
   const joined = joinScenario();
   const { world, admit } = joined;
   const base = [...world.entries];
-  const reference = joinerRoster(joined);
   const keys = world.ringFor(joined.joiner);
-  const pending: Array<[string, Record<string, unknown>]> = [
+  // These kinds were refused roster-kind-pending after 31-12; 31-14 wrote the members rules, 31-15 the cell rules and 31-17 the roster rules.
+  const once: Array<[string, Record<string, unknown>]> = [
+    ['member.update', { member: JOINER_MEMBER, roles: ['member', 'observer'], agentSeats: ['release-guard'] }],
+    ['member.remove', { member: JOINER_MEMBER }],
+    ['device.revoke', { member: JOINER_MEMBER, writer: joined.joiner.writer }],
+    ['invite.void', { invite: INVITE_ID }],
+    ['cell.create', { cell: 'c'.repeat(32), epoch: 1, grant: 'd'.repeat(64) }],
     ['deputy.name', { member: JOINER_MEMBER }],
     ['lead.handover', { to: JOINER_MEMBER, reason: 'planned' }]
   ];
-  for (const [kind, data] of pending) {
+  for (const [kind, data] of once) {
     const written = world.rosterEntry(world.lead, kind, data, admit.hash);
     const state = world.foldRoster({ entries: [...base, written.entry], keys });
-    assert.deepEqual(state.refused, [{ hash: written.hash, kind, reason: 'roster-kind-pending' }], kind);
-    assert.deepEqual(state.positions, reference.positions, kind);
-    for (const hash of [...reference.positions, written.hash]) assert.deepEqual(answersAt(state, joined, hash), answersAt(reference, joined, hash), `${kind} at ${hash}`);
+    assert.ok(!state.refused.some((r) => r.hash === written.hash && r.reason === 'roster-kind-pending'), kind);
   }
-  // The routing is what refuses them: only roster-module kinds are still pending (31-14 wrote the members rules, 31-15 the cell rules).
-  assert.deepEqual([...new Set(pending.map(([kind]) => ROSTER_KIND_OWNER[kind]))].sort(), ['roster']);
-  // The refusal reason has its plain sentence.
+  // Between them they cover all three owner modules.
+  assert.deepEqual([...new Set(once.map(([kind]) => ROSTER_KIND_OWNER[kind]))].sort(), ['cells', 'members', 'roster']);
+  // The refusal reason stays, with its plain sentence, for a kind a newer version adds.
   assert.ok(ROSTER_REFUSALS['roster-kind-pending'].length > 20);
 });
