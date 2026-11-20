@@ -2,6 +2,8 @@
 // ledger with its head mark, decision log, calculator ledger, wargame ledger, product files and the files no replica kind covers yet) is converted, and
 // the tests check: verify first, import whole with the right head, re-verify every import with today's verifiers forever, reconstruct products, files
 // as projections equal to today's, nothing deleted, and a conversion interrupted after any step reaching exactly the same entries, digests and files.
+// Since plan 32-10 (D-15 to D-21) each product goes into the cell for its label, the whole ledgers into the lead-only legacy cell, each label cell gets
+// a products import of its own lines, and the conversion refuses only the labels the lead's declared clearance does not cover.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -10,7 +12,8 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { x25519PrivateFromSeed } from '../domain/replica/cellKeys';
-import { entryHash } from '../domain/replica/entry';
+import { entryHash, openBody } from '../domain/replica/entry';
+import { BASE_CELL_KINDS, baseCellAllows } from '../domain/replica/productCells';
 import { REPLICA_KINDS } from '../domain/replica/kinds';
 import type { ProjectOutput } from '../domain/replica/projectFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
@@ -28,9 +31,10 @@ import { verifyPayload } from '../domain/team/signedPayload';
 import type { DeviceIdentity } from '../team/identity';
 import { identityDir } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
+import { NOT_CLEARED_TEXT } from '../staff/replica/labelCells';
 import { BASE_CELL_LABEL, LEGACY_LEDGERS, MIGRATION_REFUSALS, MIGRATION_STEPS, PASSTHROUGH_LEDGERS, isMigrationRefused, ledgerHeadKey, makeMultiUser, migrationComplete, projectionInputOf, verifyLegacyLedgers } from '../staff/replica/migrate';
 import type { MigrationDeps, MigrationOptions, MigrationRefused, MigrationResult, MigrationStep } from '../staff/replica/migrate';
-import { IMPORTED_APPROVAL_TEXT, PROJECTION_LEFT_REASONS, importedFile, ledgerLinesOf, projectLedgerReplay, projectProductFile } from '../staff/replica/projection';
+import { IMPORTED_APPROVAL_TEXT, PROJECTION_LEFT_REASONS, importOf, importedFile, ledgerLinesOf, projectLedgerReplay, projectProductFile } from '../staff/replica/projection';
 import type { ProjectedProductState, ProjectionInput } from '../staff/replica/projection';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
@@ -38,6 +42,8 @@ import { LEDGER_DIR, LEDGER_FILE, StaffHost, WARGAME_DIR, WARGAME_FILE, productP
 import type { StaffTeamInfo } from '../staff/staffHost';
 import { callLogistics, callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
+import { bringIn, orgClearance, project as keptProject, streamEntries, syncTo } from './helpers/labelCellWorld';
+import type { Install, Seat } from './helpers/labelCellWorld';
 
 const NOW = '2026-11-20T10:00:00.000Z';
 const NAME = 'Exercise Northwind';
@@ -45,8 +51,13 @@ const CONOPS = 'concept-of-operations';
 const ANNEX = 'annex-b';
 const ANNEX_BODY = '# Annex B\n\nThe force moves in two phases, as the concept of operations sets out.\n';
 const DECISION_ROLE = 'commander';
-// The one label a conversion takes (W-1): a product labelled higher is refused, so the products here are labelled with it.
+// Each product goes into the cell for its label (D-15): the released product is org/Public, the pinned one org/Internal, so the conversion makes two
+// label cells, and the calculator and wargame ledgers go into the org/Internal one (D-20).
 const PUBLIC = 'org/Public';
+const INTERNAL = 'org/Internal';
+// The clearance the staff lead declares when converting (D-19): it covers every label the full template needs.
+const LEAD_CLEARANCE = orgClearance('Internal');
+const CONVERT: MigrationOptions = { name: NAME, leadClearance: LEAD_CLEARANCE };
 const OPTIONS = [{ label: 'COA 1', risk: 'Moderate risk to the flank' }, { label: 'COA 2', risk: 'Slower, but the flank is covered' }];
 const DISSENT = ['The red team holds COA 2 is safer.'];
 const J4_TEAM: StaffTeamInfo = { slug: 'j4-logistics', section: 'j4', sectionLead: 'j4-director', members: ['j4-director', 'log-plans-officer', 'jloc-chief', 'release-guard'] };
@@ -116,10 +127,10 @@ async function releasedProduct(world: StaffWorld): Promise<void> {
   assert.ok(released.ok, released.ok ? '' : released.message);
 }
 
-/** A second product pinned to the released version of the first. */
+/** A second product, labelled org/Internal, pinned to the released org/Public version of the first (a pin down to a lower cell, D-18). */
 async function pinnedProduct(world: StaffWorld): Promise<void> {
   await writeBody(world.root, 'j5', ANNEX, ANNEX_BODY);
-  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: PUBLIC, dependsOn: [`${CONOPS}@1`] }, 'lead-planner'), 'propose annex');
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: INTERNAL, dependsOn: [`${CONOPS}@1`] }, 'lead-planner'), 'propose annex');
 }
 
 async function otherLedgers(world: StaffWorld, which: { decisions?: boolean; calculator?: boolean; wargame?: boolean }): Promise<void> {
@@ -174,7 +185,7 @@ async function cloneOf(template: Env, label: string): Promise<Env> {
 }
 
 async function migrate(env: Env, options: MigrationOptions = {}): Promise<MigrationResult> {
-  const result = await makeMultiUser(env.root, env.deps, { name: NAME, ...options });
+  const result = await makeMultiUser(env.root, env.deps, { ...CONVERT, ...options });
   assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
   return result as MigrationResult;
 }
@@ -240,7 +251,28 @@ function withoutImported(state: ProjectedProductState | undefined): ProductState
 
 // ---- Task 1: one approved product becomes multi-user, and its files are the same afterwards -------------------------------------------------------
 
-test('tracer: the store holds the genesis, one products import with today\'s head, count, mark and file hash, the reconstruct entries, and the original in the legacy folder', async () => {
+/** Every own entry of a kind in a project, with its stream and hash. */
+async function placed(project: ReplicaProject, kind: string): Promise<Array<{ stream: string; hash: string; data: Record<string, unknown> }>> {
+  return (await project.findOwnAll(kind, () => true)).map((item) => ({ stream: item.stream, hash: item.hash, data: item.data as Record<string, unknown> }));
+}
+
+/** The lines of a product ledger file naming one of the products, each byte for byte as in the file. */
+function linesFor(bytes: Buffer, products: readonly string[]): string[] {
+  return bytes.toString('utf8').split('\n').filter((line) => line.trim() !== '' && products.includes((JSON.parse(line) as { payload: { product: string } }).payload.product));
+}
+
+/** The kind of every entry of a stream, each opened with the key this project holds for its epoch. */
+function kindsIn(project: ReplicaProject, root: string, stream: string): string[] {
+  return streamEntries({ root } as Install, stream).map((entry) => {
+    const key = project.keys.epochKey(stream, entry.header.epoch);
+    assert.ok(key !== undefined, 'the entry opens with a key this device holds');
+    const plain = openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+    assert.ok(plain !== undefined, 'the entry opens with that key');
+    return (JSON.parse(plain.toString('utf8')) as { kind: string }).kind;
+  });
+}
+
+test('tracer: label cells: the org/Public product goes into an org/Public cell, the org/Internal one into an org/Internal cell with the calculator and wargame ledgers, and the whole ledgers into the legacy cell', async () => {
   const env = await cloneOf(await full(), 'tracer');
   const before = await todaysAnswers(env);
   const original = readFileSync(path.join(env.root, LEDGER_DIR, LEDGER_FILE));
@@ -249,22 +281,78 @@ test('tracer: the store holds the genesis, one products import with today\'s hea
 
   const result = await migrate(env);
   assert.equal(result.completed, 'complete');
-  const input = await projection(env);
-  const project = (input.fold.families.project as ProjectOutput)[0];
-  assert.ok(project.genesis !== null, 'the genesis is in the store');
-  const products = importsOf(input).find((item) => item.ledger === 'products');
-  assert.ok(products !== undefined);
-  assert.equal(products.legacyHead, before.replay.head);
-  assert.equal(products.count, before.replay.entries);
-  assert.equal(products.marked, true);
-  assert.equal(products.fileHash, sha256(original));
-  assert.equal((input.entries.get(products.entry)?.data as { mark?: string }).mark, mark, 'the signed head mark is carried as it is');
+  assert.deepEqual(result.cells.map((item) => [item.label, item.legacy, item.products]), [
+    [INTERNAL, undefined, [ANNEX]],
+    [PUBLIC, undefined, [CONOPS]],
+    [undefined, [INTERNAL, PUBLIC], [ANNEX, CONOPS]]
+  ]);
+  const [internal, publicCell, legacy] = result.cells.map((item) => item.cell);
+  assert.equal(new Set([internal, publicCell, legacy, result.project]).size, 4, 'three cells of their own, none of them the base cell');
 
-  // Every reconstruct entry cites the products import.
-  const reconstructKinds = ['member.update', 'product.create', 'doc.client', 'doc.update', 'version.propose'];
-  const rebuilt = [...input.entries.values()].filter((entry) => reconstructKinds.includes(entry.kind));
-  assert.ok(rebuilt.length >= 9, `the reconstruct entries are in the store (${rebuilt.length})`);
-  for (const entry of rebuilt) assert.ok(entry.deps?.includes(products.entry), `${entry.kind} cites the import`);
+  const input = await projection(env);
+  const outputs = input.fold.families.project as ProjectOutput;
+  const imports = (stream: string) => outputs.find((item) => item.stream === stream)?.imports ?? [];
+  assert.ok(outputs.find((item) => item.stream === result.project)?.genesis, 'the genesis is in the base cell');
+  assert.deepEqual(imports(result.project as string), [], 'nothing imported into the base cell');
+  assert.deepEqual(imports(legacy).map((item) => [item.ledger, item.scope]), [['decisions', 'whole'], ['products', 'whole']]);
+  assert.deepEqual(imports(publicCell).map((item) => [item.ledger, item.scope]), [['products', 'cell']]);
+  assert.deepEqual(imports(internal).map((item) => [item.ledger, item.scope]).sort(), [['calculator', 'whole'], ['products', 'cell'], ['wargame', 'whole']]);
+
+  // The whole product ledger, with today's head, count, mark and file, in the legacy cell only.
+  const whole = imports(legacy).find((item) => item.ledger === 'products');
+  assert.ok(whole !== undefined);
+  assert.equal(whole.legacyHead, before.replay.head);
+  assert.equal(whole.count, before.replay.entries);
+  assert.equal(whole.marked, true);
+  assert.equal(whole.fileHash, sha256(original));
+  assert.equal((input.entries.get(whole.entry)?.data as { mark?: string }).mark, mark, 'the signed head mark is carried as it is');
+
+  // Each label cell's products import holds exactly its products' lines, byte for byte, with the whole ledger's head and count.
+  const cellImport = new Map<string, string>();
+  for (const [cell, products] of [[publicCell, [CONOPS]], [internal, [ANNEX]]] as const) {
+    const scoped = imports(cell).find((item) => item.ledger === 'products');
+    assert.ok(scoped !== undefined && scoped.scope === 'cell');
+    const lines = linesFor(original, products);
+    assert.ok(lines.length > 0);
+    assert.equal(scoped.lines, lines.length);
+    assert.equal(scoped.legacyHead, before.replay.head);
+    assert.equal(scoped.count, before.replay.entries);
+    assert.equal(scoped.marked, false);
+    assert.equal(scoped.fileHash, sha256(`${lines.join('\n')}\n`));
+    assert.equal(importedFile(scoped, input.entries)?.toString('utf8'), `${lines.join('\n')}\n`);
+    cellImport.set(cell, scoped.entry);
+  }
+
+  const project = await opened(env);
+  try {
+    // Every entry of a product is in its label cell and cites that cell's products import.
+    const cellOf = new Map([[CONOPS, publicCell], [ANNEX, internal]]);
+    let written = 0;
+    for (const kind of ['product.create', 'doc.client', 'doc.update', 'version.propose']) {
+      for (const entry of await placed(project, kind)) {
+        const cell = cellOf.get(entry.data.product as string) as string;
+        assert.equal(entry.stream, cell, `${kind} of ${String(entry.data.product)} is in its label cell`);
+        assert.ok(input.entries.get(entry.hash)?.deps?.includes(cellImport.get(cell) as string), `${kind} cites its cell's import`);
+        written += 1;
+      }
+    }
+    assert.ok(written >= 8, `the reconstruct entries are in the store (${written})`);
+    // The lead's role and clearance changes are roster entries in the base cell and cite no import.
+    const importEntries = new Set([...input.entries.entries()].filter(([, entry]) => entry.kind === 'project.import').map(([hash]) => hash));
+    const updates = await placed(project, 'member.update');
+    assert.equal(updates.length, 2, 'one clearance change and one role change');
+    for (const update of updates) {
+      assert.equal(update.stream, result.project);
+      assert.deepEqual((input.entries.get(update.hash)?.deps ?? []).filter((dep) => importEntries.has(dep)), [], 'the lead\'s change cites no import');
+    }
+    // Opened with the base key, every base cell entry is the genesis or a roster or integrity kind (D-15, D-16).
+    const kinds = kindsIn(project, env.root, result.project as string);
+    assert.ok(kinds.includes('project.genesis') && kinds.includes('cell.create'));
+    for (const kind of kinds) assert.ok(baseCellAllows(kind), `${kind} may be in the base cell`);
+    assert.ok(BASE_CELL_KINDS.includes('member.update'));
+  } finally {
+    await project.close();
+  }
 
   // The original moved, byte for byte; nothing at its usual path; the head mark left as it is.
   assert.deepEqual(readFileSync(path.join(env.root, LEGACY_DIR, 'ledger', LEDGER_FILE)), original);
@@ -329,6 +417,10 @@ test('each reconstructed version\'s text, with its pins mapped back to today\'s 
   }
   const annexView = versions.find((item) => item.product === ANNEX)?.versions[0];
   assert.equal(annexView?.pins.length, 1, 'the annex pins the concept of operations by hash');
+  // The org/Internal annex pins down into the org/Public cell, which its label dominates (D-18): it gets its version, in its own cell.
+  assert.equal(versions.find((item) => item.product === ANNEX)?.stream, result.cells.find((item) => item.label === INTERNAL)?.cell);
+  assert.equal(versions.find((item) => item.product === CONOPS)?.stream, result.cells.find((item) => item.label === PUBLIC)?.cell);
+  assert.deepEqual(result.unversioned, []);
 });
 
 test('the result lists the notices every multi-user result shows, the imports and the moved files', async () => {
@@ -338,6 +430,15 @@ test('the result lists the notices every multi-user result shows, the imports an
   assert.deepEqual(result.imported.map((item) => item.ledger), ['products', 'decisions', 'calculator', 'wargame']);
   assert.deepEqual(result.moved, LEGACY_LEDGERS.map((item) => item.legacyPath));
   assert.deepEqual(result.products, [ANNEX, CONOPS]);
+  // One item per ledger in imported (the whole import); the products import of each label cell is listed in scoped.
+  const cellOf = new Map(result.cells.map((item) => [item.cell, item.label ?? 'legacy']));
+  const original = readFileSync(path.join(env.root, LEGACY_DIR, 'ledger', LEDGER_FILE));
+  assert.deepEqual(result.scoped.map((item) => [item.ledger, cellOf.get(item.cell), item.lines]).sort(), [
+    ['products', INTERNAL, linesFor(original, [ANNEX]).length],
+    ['products', PUBLIC, linesFor(original, [CONOPS]).length]
+  ]);
+  assert.ok(result.imported.every((item) => !result.scoped.some((scoped) => scoped.entry === item.entry)), 'imported names the whole imports');
+  assert.deepEqual(result.unversioned, []);
 });
 
 // ---- Task 2: all four ledgers ----------------------------------------------------------------------------------------------------------------------
@@ -355,8 +456,11 @@ test('all four ledgers: four imports; decisions and calculator heads are their l
   assert.equal(wargame.toString('utf8').split('\n').filter(Boolean).length, 2, 'the wargame file also holds a damaged line');
 
   await migrate(env);
-  const imports = importsOf(await projection(env));
+  const all = importsOf(await projection(env));
+  // One whole import per ledger, and the products import of each of the two label cells (D-20).
+  const imports = all.filter((item) => item.scope === 'whole');
   assert.equal(imports.length, 4);
+  assert.deepEqual(all.filter((item) => item.scope === 'cell').map((item) => item.ledger), ['products', 'products']);
   const by = new Map(imports.map((item) => [item.ledger, item]));
   assert.equal(by.get('decisions')?.legacyHead, decisions.head);
   assert.equal(by.get('decisions')?.count, decisions.entries);
@@ -374,7 +478,27 @@ test('re-verification: every import, opened from the fold, verifies with today\'
   await migrate(env);
   const input = await projection(env);
   const status: KeyStatusLookup = trusting(env.signer);
-  for (const record of importsOf(input)) {
+  const original = readFileSync(path.join(env.root, LEGACY_DIR, 'ledger', LEDGER_FILE));
+  // Each cell import: every line verifies on its own with today's verifier and key status, the seqs rise, and with the other cells' lines it is the
+  // whole ledger (D-20).
+  const cellLines: Array<{ seq: number; line: string }> = [];
+  for (const record of importsOf(input).filter((item) => item.scope === 'cell')) {
+    const bytes = importedFile(record, input.entries);
+    assert.ok(bytes !== undefined, 'the cell import opens from the fold and matches its hash');
+    let last = -1;
+    const lines = bytes.toString('utf8').split('\n').filter((item) => item.trim() !== '');
+    assert.equal(record.lines, lines.length);
+    for (const line of lines) {
+      const verdict = verifyPayload(JSON.parse(line) as unknown, { purpose: 'staff-ledger', status });
+      assert.ok(verdict.ok, 'the line verifies on its own');
+      const seq = (verdict.payload as { seq: number }).seq;
+      assert.ok(seq > last, 'the seqs rise');
+      last = seq;
+      cellLines.push({ seq, line });
+    }
+  }
+  assert.deepEqual(cellLines.sort((a, b) => a.seq - b.seq).map((item) => item.line), original.toString('utf8').split('\n').filter((item) => item.trim() !== ''), 'the cell imports together are the whole ledger');
+  for (const record of importsOf(input).filter((item) => item.scope === 'whole')) {
     const bytes = importedFile(record, input.entries);
     assert.ok(bytes !== undefined, `${record.ledger}: the file opens from the fold and matches its hash`);
     const lines = ledgerLinesOf(bytes);
@@ -453,7 +577,10 @@ test('a project missing some ledgers imports only the ones present', async () =>
   const result = await migrate(env);
   assert.deepEqual(result.imported.map((item) => item.ledger), ['products', 'wargame']);
   const imports = importsOf(await projection(env));
-  assert.deepEqual(imports.map((item) => item.ledger).sort(), ['products', 'wargame']);
+  assert.deepEqual(imports.filter((item) => item.scope === 'whole').map((item) => item.ledger).sort(), ['products', 'wargame']);
+  // The org/Public product's cell gets its products import; the wargame ledger goes whole into the org/Internal cell, which holds no product.
+  assert.deepEqual(imports.filter((item) => item.scope === 'cell').map((item) => item.ledger), ['products']);
+  assert.deepEqual(result.cells.map((item) => [item.label, item.legacy, item.products]), [[INTERNAL, undefined, []], [PUBLIC, undefined, [CONOPS]], [undefined, [PUBLIC], [CONOPS]]]);
   assert.deepEqual(result.moved, [LEGACY_LEDGERS[0].legacyPath, LEGACY_LEDGERS[3].legacyPath]);
   assert.equal(existsSync(path.join(env.root, LEGACY_DIR, 'ledger', 'decisions.jsonl')), false);
 });
@@ -466,11 +593,11 @@ async function breakOneByte(file: string): Promise<void> {
   await writeFile(file, `${text.slice(0, at)}1${text.slice(at + 1)}`);
 }
 
-async function refusedWithNothingWritten(env: Env): Promise<MigrationRefused> {
+async function refusedWithNothingWritten(env: Env, options: MigrationOptions = CONVERT): Promise<MigrationRefused> {
   const files = tree(env.root, true);
   const keys = [...env.secrets.values.keys()].sort();
   const globalFiles = existsSync(env.global) ? readdirSync(env.global, { recursive: true }).map(String).sort() : [];
-  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  const refused = await makeMultiUser(env.root, env.deps, options);
   assert.ok(isMigrationRefused(refused), 'the conversion is refused');
   assert.deepEqual(tree(env.root, true), files, 'no file written, moved or changed');
   assert.equal(existsSync(path.join(env.root, REPLICA_DIR)), false, 'no replica folder');
@@ -529,7 +656,7 @@ test('observations are not imported, and registers, calculator records, gate rep
   try {
     const kinds = new Set<string>();
     for (const kind of REPLICA_KINDS) await project.findOwn(kind, () => { kinds.add(kind); return false; });
-    assert.deepEqual([...kinds].sort(), ['doc.client', 'doc.update', 'member.update', 'product.create', 'project.genesis', 'project.import', 'version.propose']);
+    assert.deepEqual([...kinds].sort(), ['cell.create', 'doc.client', 'doc.update', 'member.update', 'product.create', 'project.genesis', 'project.import', 'version.propose']);
   } finally {
     await project.close();
   }
@@ -588,6 +715,7 @@ interface Capture {
   proofs: number;
   imports: Array<[string, string, number, string]>;
   importEntries: number;
+  cellCreates: number;
   files: Map<string, string>;
   replay: Array<[string, unknown]>;
 }
@@ -604,6 +732,7 @@ async function capture(env: Env): Promise<Capture> {
     const { fold } = await project.state();
     let importEntries = 0;
     await project.findOwn('project.import', () => { importEntries += 1; return false; });
+    const cellCreates = (await project.findOwnAll('cell.create', () => true)).length;
     const input = await projectionInputOf(project, env.deps);
     return {
       entries,
@@ -611,6 +740,7 @@ async function capture(env: Env): Promise<Capture> {
       proofs: fold.proofs.length,
       imports: importsOf(input).map((item) => [item.ledger, item.legacyHead, item.count, item.entry]),
       importEntries,
+      cellCreates,
       files: tree(env.root),
       replay: [...projectLedgerReplay(input).products.entries()].map(([name, state]) => [name, withoutImported(state)])
     };
@@ -635,7 +765,7 @@ async function interruptedAfter(step: MigrationStep): Promise<void> {
   await withFixedRandomness(async () => {
     const stopped = await migrate(env, { stopAfter: step });
     assert.equal(stopped.completed, step);
-    const again = await makeMultiUser(env.root, env.deps, { name: NAME });
+    const again = await makeMultiUser(env.root, env.deps, CONVERT);
     if (step === 'complete') {
       // A run after a finished conversion is refused already-shared, and writes nothing.
       assert.ok(isMigrationRefused(again) && again.refused === 'already-shared', 'refused already-shared');
@@ -652,11 +782,14 @@ async function interruptedAfter(step: MigrationStep): Promise<void> {
   assert.deepEqual(got.replay, want.replay, 'the same projected products');
   assert.deepEqual(got.imports, want.imports);
   assert.equal(got.proofs, 0, 'no equivocation proof');
-  assert.equal(got.importEntries, 4, 'one import entry per ledger, never a second');
+  // Four whole imports and the products import of each of the two label cells, never a second of any.
+  assert.equal(got.importEntries, 6, 'one import entry per ledger, scope and cell, never a second');
+  assert.equal(got.cellCreates, 3, 'one cell.create per label and one for the legacy cell, never a second');
 }
 
 test('interrupted after verify, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('verify'); });
 test('interrupted after genesis, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('genesis'); });
+test('interrupted after cells, then run again: the same entries, digests and files as one run, and one cell.create per label', async () => { await interruptedAfter('cells'); });
 test('interrupted after import, then run again: the same entries, digests and files as one run, and no second import', async () => { await interruptedAfter('import'); });
 test('interrupted after reconstruct, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('reconstruct'); });
 test('interrupted after move-legacy, then run again: the same entries, digests and files as one run', async () => { await interruptedAfter('move-legacy'); });
@@ -664,7 +797,7 @@ test('interrupted after projections, then run again: the same entries, digests a
 test('interrupted after complete, then run again: refused already-shared and the same entries, digests and files as one run', async () => { await interruptedAfter('complete'); });
 
 test('the interruption tests cover every step, in the order the conversion runs them', () => {
-  assert.deepEqual([...MIGRATION_STEPS], ['verify', 'genesis', 'import', 'reconstruct', 'move-legacy', 'projections', 'complete']);
+  assert.deepEqual([...MIGRATION_STEPS], ['verify', 'genesis', 'cells', 'import', 'reconstruct', 'move-legacy', 'projections', 'complete']);
 });
 
 test('a project already made multi-user is refused already-shared and nothing changes', async () => {
@@ -672,7 +805,7 @@ test('a project already made multi-user is refused already-shared and nothing ch
   await migrate(env);
   const files = tree(env.root, true);
   const secrets = new Map(env.secrets.values);
-  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  const refused = await makeMultiUser(env.root, env.deps, CONVERT);
   assert.ok(isMigrationRefused(refused));
   assert.equal(refused.refused, 'already-shared');
   assert.equal(refused.message, MIGRATION_REFUSALS['already-shared']);
@@ -706,37 +839,160 @@ test('the legacy paths keep each ledger\'s path under .planning/staff inside the
   assert.deepEqual(PASSTHROUGH_LEDGERS.map((item) => item.ledger), ['decisions', 'calculator', 'wargame']);
 });
 
-// ---- W-1: labelled products are not put in the base cell --------------------------------------------------------------------------------------------
+// ---- D-19: the lead converts only what the lead is declared cleared for -------------------------------------------------------------------------
 
-test('W-1: products labelled above org/Public stop the conversion at verify, before the command asks anything: nothing written, each named with its label', async () => {
-  const env = await freshEnv('label');
+/** A project of today's host holding the products given, each proposed with its label and pins, and the other ledgers asked for. */
+async function labelled(label: string, products: ReadonlyArray<{ product: string; label?: string; dependsOn?: string[] }>, ledgers: { decisions?: boolean; calculator?: boolean; wargame?: boolean } = {}): Promise<Env> {
+  const env = await freshEnv(label);
   const world = worldOf(env);
-  await writeBody(env.root, 'j5', CONOPS, CLEAN_BODY);
-  // No label given: today's host labels it org/Internal.
-  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose');
-  await writeBody(env.root, 'j5', ANNEX, ANNEX_BODY);
-  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ANNEX, kind: 'annex', label: PUBLIC }, 'lead-planner'), 'propose annex');
-  // The lowest level of another scale is above the base cell too: an org clearance does not cover it.
-  await writeBody(env.root, 'j5', 'annex-c', ANNEX_BODY);
-  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: 'annex-c', kind: 'annex', label: 'nato/NATO Unclassified' }, 'lead-planner'), 'propose annex c');
+  for (const item of products) {
+    await writeBody(env.root, 'j5', item.product, item.product === CONOPS ? CLEAN_BODY : ANNEX_BODY);
+    const input = { product: item.product, kind: item.product === CONOPS ? 'plan' : 'annex', ...(item.label === undefined ? {} : { label: item.label }), ...(item.dependsOn === undefined ? {} : { dependsOn: item.dependsOn }) };
+    must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', input, 'lead-planner'), `propose ${item.product}`);
+  }
+  await otherLedgers(world, ledgers);
+  return env;
+}
 
+const NO_CLEARANCE: MigrationOptions = { name: NAME };
+
+test('not-cleared-for-label: a product labelled nato/NATO Unclassified, with the lead declared org/Internal, stops the conversion at verify with the D-19 sentence naming it; nothing written; without it the project converts', async () => {
+  // No label given for the concept of operations: today's host labels it org/Internal.
+  const env = await labelled('label', [{ product: CONOPS }, { product: ANNEX, label: PUBLIC }, { product: 'annex-c', label: 'nato/NATO Unclassified' }]);
   // The command checks the ledgers with verifyLegacyLedgers before its dialog: the same refusal comes back there.
-  const early = await verifyLegacyLedgers(env.root, env.deps);
+  const early = await verifyLegacyLedgers(env.root, env.deps, { leadClearance: LEAD_CLEARANCE });
   assert.ok(isMigrationRefused(early), 'refused before the dialog');
   const refused = await refusedWithNothingWritten(env);
   assert.deepEqual(early, refused);
-  assert.equal(refused.refused, 'label-above-base');
-  assert.equal(refused.message, `${MIGRATION_REFUSALS['label-above-base']} Labelled above org/Public: annex-c (nato/NATO Unclassified), ${CONOPS} (org/Internal).`);
-  assert.equal(BASE_CELL_LABEL, PUBLIC);
+  assert.equal(refused.refused, 'not-cleared-for-label');
+  assert.equal(refused.message, `${MIGRATION_REFUSALS['not-cleared-for-label']} ${NOT_CLEARED_TEXT('nato/NATO Unclassified')} Products with that label: annex-c.`);
+  assert.deepEqual(refused.labels, ['nato/NATO Unclassified']);
+  assert.match(MIGRATION_REFUSALS['not-cleared-for-label'], /not made multi-user/);
+  assert.match(MIGRATION_REFUSALS['not-cleared-for-label'], /Nothing was written\./);
   assert.ok(!refused.message.includes('\u2014'), 'no em-dash');
-  assert.match(refused.message, /Nothing was written\./);
+  // The base cell label check is gone (D-21): the base cell keeps its label for the roster only.
+  assert.equal(Object.hasOwn(MIGRATION_REFUSALS, 'label-above-base'), false);
+  assert.equal(BASE_CELL_LABEL, PUBLIC);
+
+  const without = await labelled('label-without', [{ product: CONOPS }, { product: ANNEX, label: PUBLIC }]);
+  const result = await migrate(without);
+  assert.equal(result.completed, 'complete');
+  assert.deepEqual(result.cells.map((item) => [item.label, item.legacy, item.products]), [
+    [INTERNAL, undefined, [CONOPS]],
+    [PUBLIC, undefined, [ANNEX]],
+    [undefined, [INTERNAL, PUBLIC], [ANNEX, CONOPS]]
+  ]);
 });
 
-test('W-1: a project whose products are all labelled org/Public converts', async () => {
-  const env = await cloneOf(await full(), 'label-public');
-  const verified = await verifyLegacyLedgers(env.root, env.deps);
+test('not-cleared-for-label with no declared clearance: an all org/Public project converts into the org/Public cell; an org/Internal product or a calculator ledger is refused naming org/Internal (D-68)', async () => {
+  const allPublic = await labelled('no-clearance-public', [{ product: CONOPS, label: PUBLIC }], { decisions: true });
+  const converted = await makeMultiUser(allPublic.root, allPublic.deps, NO_CLEARANCE);
+  assert.ok(!isMigrationRefused(converted), isMigrationRefused(converted) ? converted.message : '');
+  assert.equal(converted.completed, 'complete');
+  assert.deepEqual(converted.cells.map((item) => [item.label, item.legacy, item.products]), [[PUBLIC, undefined, [CONOPS]], [undefined, [PUBLIC], [CONOPS]]]);
+  const project = await opened(allPublic);
+  try {
+    // No clearance was declared for the lead, so the only member.update is the role change.
+    assert.equal((await placed(project, 'member.update')).length, 1);
+  } finally {
+    await project.close();
+  }
+
+  const internalProduct = await labelled('no-clearance-internal', [{ product: CONOPS }]);
+  const refused = await refusedWithNothingWritten(internalProduct, NO_CLEARANCE);
+  assert.equal(refused.refused, 'not-cleared-for-label');
+  assert.equal(refused.message, `${MIGRATION_REFUSALS['not-cleared-for-label']} ${NOT_CLEARED_TEXT(INTERNAL)} Products with that label: ${CONOPS}.`);
+
+  const calculator = await labelled('no-clearance-calculator', [{ product: CONOPS, label: PUBLIC }], { calculator: true });
+  const byLedger = await refusedWithNothingWritten(calculator, NO_CLEARANCE);
+  assert.equal(byLedger.refused, 'not-cleared-for-label');
+  assert.ok(byLedger.message.startsWith(`${MIGRATION_REFUSALS['not-cleared-for-label']} ${NOT_CLEARED_TEXT(INTERNAL)} `), byLedger.message);
+  assert.match(byLedger.message, /calculator/);
+  assert.deepEqual(byLedger.labels, [INTERNAL]);
+});
+
+test('verifyLegacyLedgers returns the labels a conversion needs: the product labels, and org/Internal when a calculator or wargame ledger is present, sorted', async () => {
+  const env = await cloneOf(await full(), 'labels');
+  const verified = await verifyLegacyLedgers(env.root, env.deps, { leadClearance: LEAD_CLEARANCE });
   assert.ok(!isMigrationRefused(verified), isMigrationRefused(verified) ? verified.message : '');
-  assert.equal((await migrate(env)).completed, 'complete');
+  assert.deepEqual(verified.labels, [INTERNAL, PUBLIC]);
+  const publicOnly = await labelled('labels-public', [{ product: CONOPS, label: PUBLIC }]);
+  const plain = await verifyLegacyLedgers(publicOnly.root, publicOnly.deps);
+  assert.ok(!isMigrationRefused(plain), isMigrationRefused(plain) ? plain.message : '');
+  assert.deepEqual(plain.labels, [PUBLIC]);
+  const wargame = await labelled('labels-wargame', [{ product: CONOPS, label: PUBLIC }], { wargame: true });
+  const withGame = await verifyLegacyLedgers(wargame.root, wargame.deps, { leadClearance: LEAD_CLEARANCE });
+  assert.ok(!isMigrationRefused(withGame), isMigrationRefused(withGame) ? withGame.message : '');
+  assert.deepEqual(withGame.labels, [INTERNAL, PUBLIC]);
+  assert.ok(isMigrationRefused(await verifyLegacyLedgers(wargame.root, wargame.deps)), 'with no declared clearance the wargame ledger is refused');
+});
+
+test('pins across cells: a product labelled org/Public that pins an org/Internal one keeps its live text only and is listed unversioned with pin-above-cell (D-18)', async () => {
+  // The concept of operations has no label given: org/Internal. The annex, org/Public, pins it.
+  const env = await labelled('pin-above', [{ product: CONOPS }, { product: ANNEX, label: PUBLIC, dependsOn: [`${CONOPS}@1`] }]);
+  const result = await migrate(env);
+  assert.deepEqual(result.products, [ANNEX, CONOPS]);
+  assert.deepEqual(result.versions, [CONOPS]);
+  assert.deepEqual(result.unversioned, [{ product: ANNEX, reason: 'pin-above-cell' }]);
+  const input = await projection(env);
+  assert.equal(foldTextOf(input, ANNEX), ANNEX_BODY, 'the live text is there');
+  const annex = (input.fold.families.versions as ProductVersions[]).find((item) => item.product === ANNEX);
+  assert.ok(annex !== undefined, 'the product is there');
+  assert.deepEqual(annex.versions, [], 'with no version');
+  assert.equal(annex.stream, result.cells.find((item) => item.label === PUBLIC)?.cell);
+});
+
+/** The staff lead's seat over a converted project, for bringing people in with the label cell world. */
+async function leadSeat(env: Env): Promise<Seat> {
+  const p = keptProject(await ReplicaProject.open(env.root, env.deps));
+  const at = { root: env.root, global: env.global, secrets: env.secrets, deps: env.deps, clock: { now: new Date(NOW) } } as unknown as Install;
+  return { at, p, host: { project: p, deps: env.deps }, member: p.anchor.lead.member, writer: p.deviceWriter, results: [] };
+}
+
+test('legacy cell: a member admitted after the conversion with org/Restricted receives both org cells and not the legacy cell; one with org/Public receives only the org/Public cell', async () => {
+  const env = await cloneOf(await full(), 'admitted');
+  const result = await migrate(env);
+  const cell = (label: string): string => result.cells.find((item) => item.label === label)?.cell as string;
+  const legacy = result.cells.find((item) => item.legacy !== undefined)?.cell as string;
+  const lead = await leadSeat(env);
+  const restricted = await bringIn(lead, 'restricted', 'R. Demo', orgClearance('Restricted'));
+  const held = async (seat: Seat): Promise<string[]> => (await seat.p.heldCells()).map((item) => item.cell).sort();
+  assert.deepEqual(await held(restricted), [result.project as string, cell(INTERNAL), cell(PUBLIC)].sort());
+  assert.ok(!(await held(restricted)).includes(legacy), 'the legacy cell is the lead\'s only');
+  const plain = await bringIn(lead, 'public', 'P. Demo', orgClearance('Public'));
+  assert.deepEqual(await held(plain), [result.project as string, cell(PUBLIC)].sort());
+  // The lead holds every cell, the legacy cell included.
+  assert.deepEqual(await held(lead), [result.project as string, cell(INTERNAL), cell(PUBLIC), legacy].sort());
+});
+
+test('scoped import: a member cleared for org/Internal, given the base and both org cells, projects both products with the lead\'s states from the cell imports and holds no whole import; an org/Public member sees only its product', async () => {
+  const env = await cloneOf(await full(), 'member-view');
+  const result = await migrate(env);
+  const cell = (label: string): string => result.cells.find((item) => item.label === label)?.cell as string;
+  const lead = await leadSeat(env);
+  const leadReplay = projectLedgerReplay(await projectionInputOf(lead.p, env.deps));
+
+  const member = await bringIn(lead, 'member-internal', 'M. Demo', orgClearance('Internal'));
+  await syncTo(lead, member, [cell(PUBLIC), cell(INTERNAL)]);
+  const input = await projectionInputOf(member.p, member.at.deps);
+  const replay = projectLedgerReplay(input);
+  assert.deepEqual([...replay.products.keys()].sort(), [ANNEX, CONOPS]);
+  for (const product of [ANNEX, CONOPS]) {
+    const state = replay.products.get(product) as ProjectedProductState;
+    assert.equal(state.tampered, undefined, product);
+    assert.deepEqual(withoutImported(state), withoutImported(leadReplay.products.get(product) as ProjectedProductState), `${product}: the lead's state`);
+    const label = product === CONOPS ? PUBLIC : INTERNAL;
+    assert.equal(state.imported?.entry, result.scoped.find((item) => item.cell === cell(label))?.entry, `${product} is shown from its cell's import`);
+  }
+  assert.equal((replay.products.get(CONOPS) as ProjectedProductState).imported?.approval, IMPORTED_APPROVAL_TEXT);
+  assert.equal(importOf(input.fold, 'products'), undefined, 'the whole product ledger is in the legacy cell, which is not the member\'s');
+  assert.equal(importOf(input.fold, 'decisions'), undefined);
+
+  const plain = await bringIn(lead, 'member-public', 'P. Demo', orgClearance('Public'));
+  await syncTo(lead, plain, [cell(PUBLIC)]);
+  const seen = projectLedgerReplay(await projectionInputOf(plain.p, plain.at.deps));
+  assert.deepEqual([...seen.products.keys()], [CONOPS], 'exactly the products of the cell it holds');
+  assert.deepEqual(withoutImported(seen.products.get(CONOPS) as ProjectedProductState), withoutImported(leadReplay.products.get(CONOPS) as ProjectedProductState));
 });
 
 // ---- MJ-09: a product file edited while a conversion is half done ----------------------------------------------------------------------------------
@@ -757,7 +1013,7 @@ test('MJ-09: interrupted after reconstruct, a product file edited, then run agai
   await writeFile(file, edited);
   const before = tree(env.root, true);
 
-  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  const refused = await makeMultiUser(env.root, env.deps, CONVERT);
   assert.ok(isMigrationRefused(refused), isMigrationRefused(refused) ? '' : `not refused: ${refused.completed}`);
   assert.equal(refused.refused, 'product-changed');
   assert.equal(refused.file, relative);
@@ -787,7 +1043,7 @@ test('MJ-09: a product file empty when its version was recorded and filled in be
   const file = path.join(env.root, productPath('j5', ANNEX));
   const filled = `${readFileSync(file, 'utf8')}${ANNEX_BODY}`;
   await writeFile(file, filled);
-  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  const refused = await makeMultiUser(env.root, env.deps, CONVERT);
   assert.ok(isMigrationRefused(refused) && refused.refused === 'product-changed', 'refused product-changed');
   assert.equal(refused.file, productPath('j5', ANNEX));
   assert.equal(readFileSync(file, 'utf8'), filled);
@@ -807,7 +1063,7 @@ test('MJ-09: a product file edited after reconstruct read it, before the project
   projectionModule.writeProjections = async (...args: unknown[]) => { await writeFile(file, edited); return real(...args); };
   let refused: MigrationResult | MigrationRefused;
   try {
-    refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+    refused = await makeMultiUser(env.root, env.deps, CONVERT);
   } finally {
     projectionModule.writeProjections = real;
   }
@@ -820,7 +1076,7 @@ test('MJ-09: a product file edited after reconstruct read it, before the project
   assert.match(PROJECTION_LEFT_REASONS['text-changed'], /left as it is with the edit in it/);
 
   // Run again: the reconstruct step names the file before writing anything; with the text put back it finishes.
-  const again = await makeMultiUser(env.root, env.deps, { name: NAME });
+  const again = await makeMultiUser(env.root, env.deps, CONVERT);
   assert.ok(isMigrationRefused(again) && again.refused === 'product-changed' && again.file === relative, 'refused again, naming the file');
   await writeFile(file, original);
   assert.equal((await migrate(env)).completed, 'complete');
