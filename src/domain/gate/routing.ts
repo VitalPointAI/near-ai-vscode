@@ -3,10 +3,21 @@
 // and whether one client, endpoint and model satisfy that tier, judged from local facts only before anything is sent (D-36, D-37).
 // Strictness only goes one way: a handling flag, a compartment or a level can raise the tier, and the strictest of them wins when the decision is made.
 // A label can never relax a tier (D-47); only your organization changing the bundle's table does.
+// The policy steps (Phase 41, FND-03 to FND-06) read endpoints.ts, authorizations.ts, residency.ts, models.ts and dominance.ts. Their functions are called
+// only inside decideRoute, never at module load, so the cycles through endpoints.ts, sections.ts and bundle.ts stay safe at load.
 import { isLoopbackHost } from '../config';
+import { authorizationCovers } from './authorizations';
+import type { AuthorizationBody, AuthorizationKind, AuthorizationQuestion } from './authorizations';
+import { markDominated, meetClearance } from './dominance';
 import type { Mark } from './dominance';
+import { endpointCeilingAllows, findEndpoint, needsEndpointAuthorization } from './endpoints';
+import type { EndpointClass, EndpointRegion, PolicyEndpoint } from './endpoints';
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
-import type { Label, ScaleTable } from './labels';
+import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
+import { USE_TIERS, passportCovers, resolvePassport } from './models';
+import type { ModelsSection, UseTier } from './models';
+import { residencyAllows } from './residency';
+import type { ResidencySection } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
 import type { Parsed } from './shape';
 import { parseHostPattern } from './vocabulary';
@@ -386,6 +397,13 @@ export interface RouteFacts {
   readonly localModelAvailable?: boolean;
   /** True when the request ran outside any session route and was decided with the default one: an allowed answer is then `route.default-session`. */
   readonly sessionless?: boolean;
+  /**
+   * The use tier of the request (useTierFor, 41-05). The passport step checks an absent use as T1; an authorization whose `scope.uses` is a list covers
+   * nothing when it is absent (D-54).
+   */
+  readonly use?: UseTier;
+  /** Team Mode's `allowedModels` (D-37): when given, a request for a model whose id is not listed is refused, with or without a policy. */
+  readonly allowedModels?: readonly string[];
 }
 
 export const ROUTE_RULES = Object.freeze([
@@ -401,7 +419,16 @@ export const ROUTE_RULES = Object.freeze([
   'route.default-session',
   'route.connection-not-bound',
   'route.local-host-not-exact',
-  'route.this-computer-only'
+  'route.this-computer-only',
+  // Phase 41 (D-36, D-51): moved here from ROUTE_RULES_NAMED_AHEAD as decideRoute's policy steps reach each one, sentence unchanged.
+  'route.model-not-allowed',
+  'route.endpoint-unknown',
+  'route.endpoint-ceiling',
+  'route.endpoint-pin',
+  'route.authorization-missing',
+  'route.accredited-device',
+  'route.residency',
+  'route.clearance'
 ] as const);
 export type RouteRule = (typeof ROUTE_RULES)[number];
 export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only' | 'route.default-session'>;
@@ -424,7 +451,15 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, choose a local model, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven, so it stays on this computer. Choose a local model for this chat, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
   'route.local-host-not-exact': 'Nothing was sent. From this version, content at this level goes to a host other than this computer only when your organization\'s policy names that exact host, not a *. pattern, and the runtime uses https. Name the exact host in the policy, use https, run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
-  'route.this-computer-only': 'Nothing was sent. This chat has read content at Protected C, a classified level or NATO Confidential or above, which never leaves this computer: no cloud and no other host is accredited for it, whatever your organization\'s policy names. Run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
+  'route.this-computer-only': 'Nothing was sent. This chat has read content at Protected C, a classified level or NATO Confidential or above, which never leaves this computer: no cloud and no other host is accredited for it, whatever your organization\'s policy names. Run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
+  'route.model-not-allowed': 'Nothing was sent. This model is not allowed for this work. Choose one of the models allowed for this work, or ask whoever manages those settings to allow this one.',
+  'route.endpoint-unknown': 'Nothing was sent. This AI service is not one your organization\'s rules list as a place this chat\'s content may go. Choose a service your rules list or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.endpoint-ceiling': 'Nothing was sent. Your organization\'s rules do not allow content at this chat\'s label on this AI service. Choose a service your rules allow for this label or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.endpoint-pin': 'Nothing was sent. Content at this level may go to this AI service only over a connection whose certificate your organization\'s rules name, or one proven to end in private hardware, and this connection is neither. Use a model on this computer, ask your organization to name the certificate, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.authorization-missing': 'Nothing was sent. Content at this level may go to this AI service only with a signed approval from a person your organization names, and no approval covers this service. Ask your organization\'s security contact for one, use a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.accredited-device': 'Nothing was sent. Your organization\'s rules allow content at this level only on a computer recorded as accredited, and this computer is not. Use an accredited computer, ask your organization\'s security contact about this one, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.residency': 'Nothing was sent. Your organization\'s rules keep this content in the regions they name, and this AI service is not shown to run there. Choose a service in one of those regions or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.'
 });
 
 /**
@@ -435,35 +470,84 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
  * No id is on this list and another route list at once.
  */
 export const ROUTE_RULES_NAMED_AHEAD = Object.freeze([
-  'route.endpoint-unknown',
-  'route.endpoint-ceiling',
-  'route.endpoint-pin',
-  'route.authorization-missing',
-  'route.residency',
   'route.passport',
-  'route.accredited-device',
-  'route.clearance',
-  'route.model-not-allowed',
   'route.export-control'
 ] as const);
 export type NamedAheadRouteRule = (typeof ROUTE_RULES_NAMED_AHEAD)[number];
 
 /** One plain sentence per named-ahead rule, in ROUTE_REFUSALS' form: nothing was sent, why, and what to do. */
 export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, string>> = Object.freeze({
-  'route.endpoint-unknown': 'Nothing was sent. This AI service is not one your organization\'s rules list as a place this chat\'s content may go. Choose a service your rules list or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.endpoint-ceiling': 'Nothing was sent. Your organization\'s rules do not allow content at this chat\'s label on this AI service. Choose a service your rules allow for this label or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.endpoint-pin': 'Nothing was sent. Content at this level may go to this AI service only over a connection whose certificate your organization\'s rules name, or one proven to end in private hardware, and this connection is neither. Use a model on this computer, ask your organization to name the certificate, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.authorization-missing': 'Nothing was sent. Content at this level may go to this AI service only with a signed approval from a person your organization names, and no approval covers this service. Ask your organization\'s security contact for one, use a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.residency': 'Nothing was sent. Your organization\'s rules keep this content in the regions they name, and this AI service is not shown to run there. Choose a service in one of those regions or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.passport': 'Nothing was sent. Your organization has not approved this model for this use. Choose a model your organization approved for this work, or ask your organization\'s security contact to review this one.',
-  'route.accredited-device': 'Nothing was sent. Your organization\'s rules allow content at this level only on a computer recorded as accredited, and this computer is not. Use an accredited computer, ask your organization\'s security contact about this one, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.model-not-allowed': 'Nothing was sent. This model is not allowed for this work. Choose one of the models allowed for this work, or ask whoever manages those settings to allow this one.',
   'route.export-control': 'Nothing was sent. This content is marked Controlled goods (Canada), ITAR or US export-controlled (EAR), and your organization has not approved this AI service, or you sending it there, for that marking. Use a model on this computer, or ask your organization\'s export-control contact.'
 });
 
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
 export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window, or run NEAR AI: Show Policy to see whether your policy needs attention.';
+
+/** An authorization body that verifyAuthorization accepted against its one key source (D-15); decideRoute reads bodies only. */
+export interface VerifiedAuthorization {
+  readonly body: AuthorizationBody;
+  /** True when it verified against this device's own key because no organization layer exists: every screen then says "self-signed on this computer". */
+  readonly selfSigned: boolean;
+}
+
+/**
+ * The effective policy's inputs to decideRoute's policy steps (FND-03 to FND-06), passed by the caller already parsed and verified. Nothing here is fetched
+ * at decision time.
+ */
+export interface RoutePolicy {
+  /** The one list of places AI may run (D-24). */
+  readonly endpoints: readonly PolicyEndpoint[];
+  readonly authorizations: readonly VerifiedAuthorization[];
+  /** Absent: no residency rule (D-33). */
+  readonly residency?: ResidencySection;
+  /** Absent: the passport step does nothing (D-42). */
+  readonly models?: ModelsSection;
+  readonly scales: ScaleTable;
+  readonly mappings: readonly ScaleMapping[];
+  /** The personal layer's clearances. */
+  readonly clearances: readonly Clearance[];
+  /** The roster's clearances for the project (33.1). Absent: the clearance step does nothing (D-53). */
+  readonly rosterClearances?: readonly Clearance[];
+  /** True when an organization layer is present. */
+  readonly organization: boolean;
+  /** The agents section's switch (D-34); it refuses only together with `organization`. */
+  readonly requireAccreditedDevice: boolean;
+  /** This device's id, the subject an accredited-device authorization names. */
+  readonly deviceId?: string;
+  /** The project of the request. Absent in this phase, so an authorization scoped to projects covers nothing (D-54). */
+  readonly project?: string;
+  /** Epoch milliseconds, for authorizations and passports. */
+  readonly now: number;
+}
+
+/** Where a request goes: a listed entry, or an implicit place (this computer, NEAR AI Cloud's own endpoint) that has no id and adds no ceiling. */
+export interface RouteEndpoint {
+  readonly id?: string;
+  readonly class: EndpointClass;
+  readonly region: EndpointRegion;
+  readonly provider?: string;
+  readonly implicit: boolean;
+  readonly tlsPins: readonly string[];
+}
+
+/** What let a request go (D-38): the routing table for a label, a named person's authorization, or a model approval. */
+export type AllowingRecord =
+  | { readonly kind: 'routing'; readonly label: string }
+  | {
+    readonly kind: 'authorization';
+    readonly authorizationKind: AuthorizationKind;
+    readonly id: string;
+    readonly name: string;
+    readonly expiresAt: string;
+    readonly selfSigned: boolean;
+    /** The `scale/level` key the authorization was checked for; absent when it was checked for the whole mark (a residency exception). */
+    readonly label?: string;
+  }
+  | { readonly kind: 'model-approval'; readonly passport: string; readonly maxTier: UseTier; readonly expiresAt: string };
+
+/** The rules report mode records instead of refusing (D-34, D-42). */
+export type ReportedRouteRule = 'route.accredited-device' | 'route.passport';
 
 export interface RouteDecision {
   readonly allowed: boolean;
@@ -472,6 +556,16 @@ export interface RouteDecision {
   readonly rule: RouteRule;
   /** Present exactly when the request is refused. */
   readonly reason?: string;
+  /** With a policy: where the request goes. Absent for an unlisted host at any-cloud. */
+  readonly endpoint?: RouteEndpoint;
+  /** With a policy, on an allowed request: what let it go, the routing table's record first. */
+  readonly allowedBy?: readonly AllowingRecord[];
+  /** With a policy: the report-only rules that would have refused, sorted; absent when none would. */
+  readonly wouldRefuse?: readonly ReportedRouteRule[];
+  /** The label S2's notice names when this computer is not recorded as accredited for it (D-34). */
+  readonly notAccredited?: Label;
+  /** The TLS pins the send must hold the connection to (an org-plain place carrying a level that needs a pin, D-26). */
+  readonly pinTo?: readonly string[];
 }
 
 /** The decision for a request whose route could not be worked out: deny, under the fixed rule route.deny, with ROUTE_CHECK_FAILED_TEXT. */
@@ -554,7 +648,17 @@ function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFa
  * raises the tier to at least that tier (attested-cloud for a private member or team, or nearAi.privacyMode tee-only), so a model counts as private only
  * when the same check the labels use passed (coherence review S4).
  */
-export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label, floor?: RoutingTier): RouteDecision {
+export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label, floor?: RoutingTier, policy?: RoutePolicy): RouteDecision {
+  const decision = decideByTable(mark, routing, facts, defaultLabel, floor);
+  // A refusal of the safety patch's checks stands as it is, its words included (the private floor's among them); no policy step can widen it.
+  if (!decision.allowed) return decision;
+  // Step 0 (D-37): Team Mode's allowed models, with or without a policy. An unknown model is on no list.
+  if (facts.allowedModels !== undefined && (facts.model === undefined || !facts.allowedModels.includes(facts.model.id))) return refuse(decision.tier, 'route.model-not-allowed');
+  return policy === undefined ? decision : decidePolicySteps(decision, mark, routing, facts, defaultLabel, policy);
+}
+
+/** The safety patch's decision: the tier from the table and the floor, the local and attested checks, and the this-computer and floor sentences. */
+function decideByTable(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, floor: RoutingTier | undefined): RouteDecision {
   const marked = tierForMark(mark, routing, defaultLabel);
   // A floor (a private member or team, or nearAi.privacyMode tee-only) only ever raises the tier, never lowers it (coherence review S4).
   const tier = floor === undefined ? marked : stricter(marked, floor);
@@ -567,6 +671,183 @@ export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts
   }
   if (decision.allowed || tier === marked || decision.reason === undefined) return decision;
   return { ...decision, reason: `Nothing was sent. ${PRIVATE_FLOOR_TEXT} ${decision.reason.replace(/^Nothing was sent\. /, '')}` };
+}
+
+/** A listed entry and the place it gives, or an implicit place with no entry. */
+interface Place {
+  readonly endpoint: RouteEndpoint;
+  readonly listed?: PolicyEndpoint;
+}
+
+function placeOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'model'>, endpoints: readonly PolicyEndpoint[]): Place | undefined {
+  const found = findEndpoint(endpoints, facts.host);
+  if (found.kind === 'listed') {
+    const entry = found.endpoint;
+    const endpoint: RouteEndpoint = entry.provider === undefined
+      ? { id: entry.id, class: entry.class, region: entry.region, implicit: false, tlsPins: entry.tlsPins }
+      : { id: entry.id, class: entry.class, region: entry.region, provider: entry.provider, implicit: false, tlsPins: entry.tlsPins };
+    return { endpoint: Object.freeze(endpoint), listed: entry };
+  }
+  if (found.kind === 'this-computer') return { endpoint: implicitPlace('local') };
+  // NEAR AI Cloud's own endpoint with no entry: its private hardware for a model the catalog marks TEE, otherwise a model NEAR AI forwards elsewhere.
+  if (facts.nearEndpoint) return { endpoint: implicitPlace(facts.model?.privacyBoundary === 'tee' ? 'nearai-tee' : 'forwarded') };
+  return undefined;
+}
+
+function implicitPlace(placeClass: EndpointClass): RouteEndpoint {
+  return Object.freeze({ class: placeClass, region: 'unstated', implicit: true, tlsPins: Object.freeze([]) });
+}
+
+/**
+ * Where a request goes (D-24): the entry findEndpoint gives for its host (an exact host first, then a `*.` pattern); this computer for a loopback host no
+ * entry names; NEAR AI Cloud's own endpoint with no entry as its private hardware for a TEE model and as forwarded for any other; otherwise undefined.
+ */
+export function endpointOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'model'>, endpoints: readonly PolicyEndpoint[]): RouteEndpoint | undefined {
+  return placeOf(facts, endpoints)?.endpoint;
+}
+
+/**
+ * The policy steps, run only on a request the safety patch's checks allowed, in the order of D-36: the place (route.endpoint-unknown), its ceiling
+ * (route.endpoint-ceiling), a pin or binding (route.endpoint-pin), an authorization (route.authorization-missing), an accredited device
+ * (route.accredited-device, reported unless your organization turns refusal on), residency (route.residency), the passport (route.passport, reported
+ * only) and clearance (route.clearance). The first refusing step decides; a step that only reports never hides a later refusal.
+ */
+function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy): RouteDecision {
+  const labels: readonly Label[] = mark.length === 0 ? (defaultLabel === undefined ? [] : [defaultLabel]) : mark;
+  const strictest = strictestLabelOf(mark, routing) ?? defaultLabel;
+  const allowedBy: AllowingRecord[] = strictest === undefined ? [] : [Object.freeze({ kind: 'routing' as const, label: labelKey(strictest) })];
+  const place = placeOf(facts, policy.endpoints);
+  const endpoint = place?.endpoint;
+  // Step 1: a place your rules do not name. Above any-cloud every request needs one.
+  if (endpoint === undefined && decision.tier !== 'any-cloud') return refuse(decision.tier, 'route.endpoint-unknown');
+  // Step 2: a listed entry's ceiling holds every label of the mark; an implicit place adds none.
+  const listed = place?.listed;
+  if (listed !== undefined && !labels.every((label) => endpointCeilingAllows(listed, label, policy.scales))) return refuse(decision.tier, 'route.endpoint-ceiling');
+  const local = endpoint?.class === 'local';
+  const use = facts.use?.toLowerCase();
+  // The levels that need a pinned or proven connection and a named authorization off this computer (D-26, D-52): Protected B, and the other local-only
+  // levels except org Restricted and those that never leave this computer.
+  const needing = labels.filter((label) => needsEndpointAuthorization(labelKey(label), routing));
+  // Step 1 again for those levels: even at any-cloud, a place your rules do not name cannot carry them.
+  if (endpoint === undefined && needing.length > 0) return refuse(decision.tier, 'route.endpoint-unknown');
+  let pinTo: readonly string[] | undefined;
+  if (endpoint !== undefined && !local && needing.length > 0) {
+    // Step 3 (T-41-100): your organization's plain server only over a pinned connection, which the send holds it to; private hardware only over a fresh
+    // connection proven for this host. A vendor region, a forwarding service and a closed API have no pin rule (D-26 names none).
+    if (endpoint.class === 'org-plain') {
+      if (endpoint.tlsPins.length === 0) return refuse(decision.tier, 'route.endpoint-pin');
+      pinTo = endpoint.tlsPins;
+    } else if (BOUND_CLASSES.includes(endpoint.class) && !freshBindingFor(facts)) {
+      return refuse(decision.tier, 'route.endpoint-pin');
+    }
+    // Step 4 (T-41-102): a protected-b authorization naming this place's id, for each such label, project and use. A place with no id cannot be named.
+    const id = endpoint.id;
+    if (id === undefined) return refuse(decision.tier, 'route.authorization-missing');
+    for (const label of needing) {
+      const key = labelKey(label);
+      const found = covering(policy, { kind: 'protected-b', subject: { endpoint: id }, project: policy.project, label: key, use });
+      if (found.length === 0) return refuse(decision.tier, 'route.authorization-missing');
+      for (const record of found) addRecord(allowedBy, authorizationRecord(record, key));
+    }
+  }
+  // Step 5 (D-34): a this-computer-only level (only this computer reaches here) on a device no accredited-device authorization names is reported, and
+  // refused only when your organization's layer is present and turns the switch on.
+  const wouldRefuse = new Set<ReportedRouteRule>();
+  let notAccredited: Label | undefined;
+  for (const label of labels.filter((candidate) => isThisComputerOnly(candidate))) {
+    const key = labelKey(label);
+    const device = policy.deviceId;
+    const found = device === undefined ? [] : covering(policy, { kind: 'accredited-device', subject: { device }, project: policy.project, label: key, use });
+    if (found.length > 0) {
+      for (const record of found) addRecord(allowedBy, authorizationRecord(record, key));
+      continue;
+    }
+    if (policy.organization && policy.requireAccreditedDevice) return refuse(decision.tier, 'route.accredited-device');
+    wouldRefuse.add('route.accredited-device');
+    notAccredited ??= label;
+  }
+  // Step 6 (D-33, T-41-101): residency for every place but this computer; a host no entry names (only at any-cloud) counts as unstated.
+  if (!local) {
+    const residency = residencyAllows({ endpoint, labels, residency: policy.residency, authorizations: policy.authorizations, project: policy.project, use, now: policy.now });
+    if (!residency.ok) return refuse(decision.tier, 'route.residency');
+    if (residency.exception !== undefined) addRecord(allowedBy, authorizationRecord(residency.exception));
+  }
+  // Step 7 (D-42): the model's passport, report only whatever the section's mode says, until 74.1. No place counts as a closed API, the widest class.
+  if (policy.models !== undefined) {
+    const modelId = facts.model?.id ?? '';
+    const resolved = resolvePassport(policy.models, modelId, policy.now);
+    const requestUse: UseTier = facts.use ?? 'T1';
+    const subject = resolved?.passport.id ?? modelId;
+    const risks = policy.authorizations.filter((candidate) => keysOf(labels).every((key) => authorizationCovers(candidate.body, {
+      kind: 't1-risk', subject: { model: subject }, project: policy.project, label: key, use: 't1'
+    }, policy.now)));
+    const verdict = passportCovers({ resolved, use: requestUse, endpointClass: endpoint?.class ?? 'closed-api', t1RiskCovers: risks.length > 0, now: policy.now });
+    if (!verdict.covers) {
+      wouldRefuse.add('route.passport');
+    } else if (resolved !== undefined) {
+      addRecord(allowedBy, Object.freeze({ kind: 'model-approval' as const, passport: resolved.passport.id, maxTier: resolved.maxTier, expiresAt: resolved.passport.expiresAt }));
+      // A use above the passport's tier went only because a named person accepted the risk: that record allowed it too.
+      if (USE_TIERS.indexOf(requestUse) > USE_TIERS.indexOf(resolved.maxTier)) for (const risk of risks) addRecord(allowedBy, authorizationRecord(risk));
+    }
+  }
+  // Step 8 (D-35, D-53): clearance, only with a roster clearance. The personal clearance alone already decided every read that raised the mark.
+  if (policy.rosterClearances !== undefined) {
+    const effective = effectiveClearances(policy.clearances, policy.rosterClearances, policy.scales, policy.mappings);
+    if (!markDominated(effective, labels, { scales: policy.scales, mappings: policy.mappings, now: policy.now })) return refuse(decision.tier, 'route.clearance');
+  }
+  const out: { -readonly [K in keyof RouteDecision]: RouteDecision[K] } = { ...decision };
+  if (endpoint !== undefined) out.endpoint = endpoint;
+  out.allowedBy = Object.freeze(allowedBy);
+  if (wouldRefuse.size > 0) out.wouldRefuse = Object.freeze([...wouldRefuse].sort());
+  if (notAccredited !== undefined) out.notAccredited = notAccredited;
+  if (pinTo !== undefined) out.pinTo = pinTo;
+  return out;
+}
+
+/** The `scale/level` keys an authorization is asked about: one per label, or a single question with no label for a mark with none. */
+function keysOf(labels: readonly Label[]): ReadonlyArray<string | undefined> {
+  return labels.length === 0 ? [undefined] : labels.map((label) => labelKey(label));
+}
+
+/**
+ * The effective clearance (D-35): the personal clearances alone when no roster is given; otherwise every defined meet of a personal and a roster
+ * clearance, so the roster can only narrow what the person declared. Two clearances with no meet give nothing.
+ */
+export function effectiveClearances(personal: readonly Clearance[], roster: readonly Clearance[] | undefined, scales: ScaleTable, mappings: readonly ScaleMapping[]): readonly Clearance[] {
+  if (roster === undefined) return personal;
+  const out: Clearance[] = [];
+  for (const mine of personal) {
+    for (const theirs of roster) {
+      const met = meetClearance(mine, theirs, scales, mappings);
+      if (met !== undefined) out.push(met);
+    }
+  }
+  return Object.freeze(out);
+}
+
+/** The classes whose connection must be proven bound to private hardware before a level that needs it goes there (D-26). */
+const BOUND_CLASSES: readonly EndpointClass[] = Object.freeze(['nearai-tee', 'org-tee', 'vendor-tee'] as const);
+
+/** A fresh bound connection fact for the request's own host (the safety patch's test, D-50). */
+function freshBindingFor(facts: RouteFacts): boolean {
+  return isBindingFresh(facts.binding, facts.now) && facts.binding !== undefined && sameHost(facts.binding.host, facts.host);
+}
+
+/** The verified authorizations that cover the question now; each verified against its one key source before it got here (D-15). */
+function covering(policy: RoutePolicy, question: AuthorizationQuestion): readonly VerifiedAuthorization[] {
+  return policy.authorizations.filter((candidate) => authorizationCovers(candidate.body, question, policy.now));
+}
+
+function authorizationRecord(found: VerifiedAuthorization, label?: string): AllowingRecord {
+  const body = found.body;
+  const base = { kind: 'authorization' as const, authorizationKind: body.kind, id: body.id, name: body.namedPerson.name, expiresAt: body.expiresAt, selfSigned: found.selfSigned };
+  return Object.freeze(label === undefined ? base : { ...base, label });
+}
+
+/** Adds a record once: an authorization by kind, id and label, any other record by its fields. */
+function addRecord(records: AllowingRecord[], record: AllowingRecord): void {
+  const key = JSON.stringify(record);
+  if (!records.some((existing) => JSON.stringify(existing) === key)) records.push(record);
 }
 
 /** Said first in a refusal that only the private floor caused: why a request at a lower label still needed the check. */

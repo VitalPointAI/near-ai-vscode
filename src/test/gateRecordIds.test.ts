@@ -56,10 +56,22 @@ test('a record is valid with every known rule, and refused with a rule or an ope
   assert.equal(strange.ok ? '' : strange.path, 'api.operation');
 });
 
-test('D-10, D-51: every route rule Phase 41 writes is named ahead, on no other list, with a sentence that says nothing was sent', () => {
+/** The Phase 41 route rules decideRoute reaches (41-10), moved from the named-ahead list into ROUTE_RULES in this order, each with its sentence unchanged. */
+const ROUTE_RULES_MOVED = ['route.model-not-allowed', 'route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing',
+  'route.accredited-device', 'route.residency', 'route.clearance'];
+/** The Phase 41 route rules still named ahead, in order. */
+const ROUTE_RULES_STILL_AHEAD = ['route.passport', 'route.export-control'];
+
+test('D-10, D-51: every route rule Phase 41 writes is named ahead until decideRoute reaches it, on one list only, with a sentence that says nothing was sent', () => {
   const named = [...ROUTE_RULES_NAMED_AHEAD];
-  for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency', 'route.passport',
-    'route.accredited-device', 'route.clearance', 'route.model-not-allowed']) assert.ok(named.includes(id as never), id);
+  assert.deepEqual(named, ROUTE_RULES_STILL_AHEAD);
+  assert.deepEqual(ROUTE_RULES.slice(ROUTE_RULES.length - ROUTE_RULES_MOVED.length), ROUTE_RULES_MOVED, 'appended to ROUTE_RULES in order');
+  for (const id of ROUTE_RULES_MOVED) {
+    assert.ok(!(named as string[]).includes(id), `${id} is no longer named ahead`);
+    const sentence = (ROUTE_REFUSALS as Readonly<Record<string, string>>)[id];
+    assert.ok(sentence !== undefined && sentence.startsWith('Nothing was sent. ') && sentence.length < 400, id);
+    for (const word of [/NEAR organization/, /TEE/, /\btier/i, /endpoint/i]) assert.ok(!word.test(sentence), `${id} says ${String(word)}`);
+  }
   // D-63: route.export-control is named ahead last, until Phase 45, and its sentence uses the shown words, never the officials' words.
   assert.equal(named[named.length - 1], 'route.export-control');
   const exportSentence = ROUTE_REFUSALS_NAMED_AHEAD['route.export-control'];
