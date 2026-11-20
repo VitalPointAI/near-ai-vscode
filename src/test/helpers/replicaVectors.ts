@@ -1,6 +1,8 @@
 // Canonical vectors for the replica contract (D-28). Phases 31 and 32 and the hub test against the bytes this builder writes to
 // test/fixtures/replica/vectors.json, so every detail of the format shows up here: the header canonical bytes, the AES-GCM associated data, the
 // signatures, the entry hashes, sealed bodies and blobs, a checkpoint with its order tip, an equivocation proof and the version hash.
+// The checkpoint section is format version 1 and stays byte-identical (D-39); checkpointV2 (plan 31-08, D-42) is the same covered set in format
+// version 2, with each head's lamport and roster, under its own signature. A new format always gets a new section and the old ones never change.
 //
 // Every key comes from a public label (fixedSigner and epochKey in replicaWorld.ts): the fixture holds labels, public keys and outputs, never private
 // key bytes. These are TEST keys; nothing sealed or signed with them protects real data.
@@ -9,7 +11,7 @@
 import { createCipheriv, createHash } from 'node:crypto';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { IV_BYTES, TAG_BYTES } from '../../domain/state/keys';
-import { checkpointHash, orderTipOf, signCheckpoint } from '../../domain/replica/checkpoint';
+import { checkpointHash, checkpointHeads, orderTipOf, signCheckpoint } from '../../domain/replica/checkpoint';
 import type { Checkpoint } from '../../domain/replica/checkpoint';
 import { createLocalDoc, localInsert } from '../../domain/replica/doc';
 import { canonicalProof, proofHash } from '../../domain/replica/equivocation';
@@ -78,6 +80,8 @@ export interface ReplicaVectors {
   versionHashes: VectorVersionHash[];
   // The digest of each stream when the vector entries are folded with the default reducers (plan 30-12): the state, not only the bytes, is pinned.
   digests: Record<string, string>;
+  // The checkpoint in format version 2 (plan 31-08): the same entries, heads with lamport and roster, its own signature.
+  checkpointV2: VectorCheckpoint;
 }
 
 const b64 = (bytes: Buffer | Uint8Array): string => Buffer.from(bytes).toString('base64url');
@@ -186,8 +190,16 @@ export function buildVectors(): ReplicaVectors {
     })
     .sort((x, y) => (x.writer < y.writer ? -1 : 1));
   const orderTip = orderTipOf(order);
+  // Version 1 is built in its own shape on purpose: signCheckpoint signs the version it is given, and this section must not change.
   const unsigned: Checkpoint = { type: 'checkpoint', v: 1, project: VECTOR_LABELS.project, signer: a.writer, rosterHead: rosterHash, streams: [{ stream, heads, count: order.length, orderTip }] };
   const signed = signCheckpoint(a.signer, unsigned);
+
+  // Version 2: the heads come from the production checkpointHeads over the entries with their opened bodies, so the roster of each head is the newest
+  // cited in its past (the vector roster has one position).
+  const opened = entries.map((entry) => ({ hash: entry.entryHash, header: entry.header, body: JSON.parse(Buffer.from(entry.bodyPlaintext, 'base64url').toString('utf8')) as EntryBody }));
+  const headsV2 = checkpointHeads(opened, { rosterPosition: (hash) => (hash === rosterHash ? 0 : undefined) }).get(stream) ?? [];
+  const unsignedV2: Checkpoint = { type: 'checkpoint', v: 2, project: VECTOR_LABELS.project, signer: a.writer, rosterHead: rosterHash, streams: [{ stream, heads: headsV2, count: order.length, orderTip }] };
+  const signedV2 = signCheckpoint(a.signer, unsignedV2);
 
   const hashOfText = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
   const versionRows: Array<{ text: string; pins: Array<{ product: string; hash: string }> }> = [
@@ -216,7 +228,8 @@ export function buildVectors(): ReplicaVectors {
     checkpoint: { unsigned, orderTips: [{ stream, order, orderTip }], signed, hash: checkpointHash(signed), signerLabel: VECTOR_LABELS.writerA },
     proof: { proof, proofHash: proofHash(proof), secondIvLabel: 'vector iv a1 second' },
     versionHashes: versionRows.map((row) => ({ ...row, hash: replicaVersionHash(row.text, row.pins) })),
-    digests
+    digests,
+    checkpointV2: { unsigned: unsignedV2, orderTips: [{ stream, order, orderTip }], signed: signedV2, hash: checkpointHash(signedV2), signerLabel: VECTOR_LABELS.writerA }
   };
 }
 
