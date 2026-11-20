@@ -116,7 +116,7 @@ test('Show Policy opens a read-only document with the hash, the self-declared cl
   const filesBefore = (await readdir(gateDir(storage))).sort();
   const bytesBefore = await readFile(path.join(gateDir(storage), POLICY_BUNDLE_FILE), 'utf8');
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   assert.equal(stub.shownDocuments.length, 1);
   const shown = stub.shownDocuments[0] as { uri: string; text: string };
   assert.ok(shown.uri.startsWith('near-ai-policy:'));
@@ -154,7 +154,7 @@ test('Show Policy for a policy that failed shows the sentence, says only reading
   await writeFile(file, (await readFile(file, 'utf8')).replace('"Restricted"', '"Restricteb"'), 'utf8');
   await started(first.secrets, first.storage);
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = (stub.shownDocuments[0] as { text: string }).text;
   assert.ok(text.includes(BUNDLE_FAILURES['bad-signature']));
   assert.match(text, /only reading and planning/);

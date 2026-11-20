@@ -49,7 +49,7 @@
   },
   "package.json": {
     "bare-team": 21,
-    "glossary": 42,
+    "glossary": 40,
     "mode-word": 3
   },
   "src/domain/cyberModel.ts": {

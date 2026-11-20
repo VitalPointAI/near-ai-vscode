@@ -319,10 +319,21 @@
         "icon": "$(verified)"
       },
       {
+        "command": "nearAi.policy.open",
+        "title": "Policy",
+        "category": "NEAR AI",
+        "icon": "$(shield)"
+      },
+      {
         "command": "nearAi.policy.show",
         "title": "Show Policy",
         "category": "NEAR AI",
         "icon": "$(shield)"
+      },
+      {
+        "command": "nearAi.policy.showAsStored",
+        "title": "Show Policy as Stored",
+        "category": "NEAR AI"
       },
       {
         "command": "nearAi.policy.reset",
@@ -641,11 +652,11 @@
             "tee-only"
           ],
           "enumDescriptions": [
-            "Any NEAR AI model can be used; each is labelled private or forwarded.",
-            "Only models NEAR runs in an attested TEE can be used; messages to forwarded models are blocked."
+            "Any model your rules allow; each answer shows where it ran and what was checked.",
+            "Only verified private hardware or this computer: NEAR AI private hardware, checked each time it is used, or a model on this computer."
           ],
           "default": "standard",
-          "description": "Whether chats may use models that NEAR AI forwards to other providers."
+          "description": "Where chats may run. Your organization's rules and each chat's label decide first."
         },
         "nearAi.dailySpendLimitUsd": {
           "type": "number",
@@ -1051,6 +1062,26 @@
     },
     "menus": {
       "commandPalette": [
+        {
+          "command": "nearAi.policy.show",
+          "when": "false"
+        },
+        {
+          "command": "nearAi.policy.edit",
+          "when": "false"
+        },
+        {
+          "command": "nearAi.policy.applyDraft",
+          "when": "false"
+        },
+        {
+          "command": "nearAi.policy.reset",
+          "when": "false"
+        },
+        {
+          "command": "nearAi.policy.showAsStored",
+          "when": "false"
+        },
         {
           "command": "nearAi.team.enable",
           "when": "config.nearAi.team.preview"

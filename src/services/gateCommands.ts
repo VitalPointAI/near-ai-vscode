@@ -5,7 +5,7 @@
 // It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
 // nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
 // verification) and the Policy step in the setup view.
-import { readFile, rm, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -20,7 +20,7 @@ import { chatInView, isChatInView, onChatInViewChange, queueChatNotice } from '.
 import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
-import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, gateDir } from '../gate/bundleStore';
+import { BundleStoreError } from '../gate/bundleStore';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
 import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError, USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
@@ -37,6 +37,10 @@ import type { NoticeMemento } from './organizationRules';
 import { SELF_SIGNED_TEXT } from '../domain/gate/authorizations';
 import { contactShown } from '../domain/gate/enrolment';
 import type { PolicyLayersView } from '../gate/organizationStore';
+import { OPEN_FAILED_TEXT, defaultPolicyEditorPort, discardDraft, draftFiles, policyEditorDeps, proposeDraft } from './policyEditorWiring';
+import type { PolicyEditorPort } from './policyEditorWiring';
+export type { PolicyEditorPort } from './policyEditorWiring';
+export { NO_DRAFT_TEXT, POLICY_APPLIED_TEXT } from './policyEditorWiring';
 import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
@@ -44,6 +48,9 @@ export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
 export const SET_LABEL_COMMAND = 'nearAi.label.set';
 export const EDIT_POLICY_COMMAND = 'nearAi.policy.edit';
 export const APPLY_POLICY_DRAFT_COMMAND = 'nearAi.policy.applyDraft';
+/** NEAR AI: Policy, the editor page (D-44); Show Policy opens it too, and Show Policy as Stored keeps the read-only text view. */
+export const OPEN_POLICY_COMMAND = 'nearAi.policy.open';
+export const SHOW_POLICY_AS_STORED_COMMAND = 'nearAi.policy.showAsStored';
 export const APPLY_DRAFT_ACTION = 'Apply';
 export const DISCARD_DRAFT_ACTION = 'Discard';
 
@@ -57,8 +64,6 @@ export function editPolicyNotice(defaultLabel: Label): string {
   return `Your policy draft is open. Change it, then choose Apply, or run NEAR AI: Apply Policy Draft. NEAR AI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
 }
 
-export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
-export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Run NEAR AI: Edit Policy first.';
 export const POLICY_SCHEME = 'near-ai-policy';
 export const POLICY_DOCUMENT_URI = `${POLICY_SCHEME}:/NEAR-AI-Policy.txt`;
 
@@ -73,6 +78,8 @@ export const RESET_CONFIRM_ACTION = 'Reset Policy';
 export const RESET_TITLE = 'Reset your policy to the default?';
 export const RESET_DETAIL =
   "This replaces your policy file with the default policy and signs it with this computer's key. Your current file is kept beside it. Anything your policy narrowed is allowed again, up to what your settings allow.";
+export const RESET_DETAIL_ORGANIZATION =
+  "This replaces your own settings on this computer with the starting rules and signs them with this computer's key. Your organization's rules stay as they are. Your current file is kept beside the new one.";
 export const RESET_DONE_TEXT = 'Your policy was reset to the default. Your old policy file was kept beside the new one.';
 export const RESET_FAILED_TEXT = 'Nothing was changed: NEAR AI could not reset your policy.';
 
@@ -95,6 +102,8 @@ export interface RegisterGateOptions {
   readonly now?: () => Date;
   /** The timers the policy status bar refreshes itself with, for tests. */
   readonly statusTimers?: GateStatusTimers;
+  /** The policy editor page (D-44); by default the real page when the context has an extension folder. */
+  readonly policyEditor?: PolicyEditorPort;
 }
 
 function warn(message: string): void {
@@ -273,7 +282,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const clock = (): number => {
     try { return host.now(); } catch { return Date.now(); }
   };
-  registerPolicySurfaces(context, host, tell, clock, options.statusTimers);
+  registerPolicySurfaces(context, host, tell, clock, options);
   // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
   // It is cleared at deactivation (the context's subscriptions are disposed then), and only while it is still this host's (PR 4a review).
   const clearDefaultRoute = setDefaultSessionRoute(host.sessionRouteWithoutContext());
@@ -307,7 +316,8 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
 
 // The status bar, the two commands and the setup step. Each is set up on its own, so one that cannot be (a command id already taken, a status bar that
 // the editor refuses) never stops the gate or the rest of activation.
-function registerPolicySurfaces(context: GateActivationContext, host: GateHost, tell: (message: string) => void, clock: () => number, statusTimers?: GateStatusTimers): void {
+function registerPolicySurfaces(context: GateActivationContext, host: GateHost, tell: (message: string) => void, clock: () => number, options: RegisterGateOptions): void {
+  const statusTimers = options.statusTimers;
   const keep = (item: { dispose(): unknown }): void => { try { context.subscriptions?.push(item); } catch { /* the editor owns disposal; a test context may not */ } };
   const attempt = (what: string, run: () => void): void => {
     try { run(); } catch { try { tell(`NEAR AI could not set up ${what}.`); } catch { /* ignored */ } }
@@ -326,6 +336,7 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
     keep({ dispose: onChatInViewChange(refresh) });
   });
+  let showStored = async (): Promise<void> => { tell(OPEN_FAILED_TEXT); };
   attempt('the policy view', () => {
     const changed = new vscode.EventEmitter<vscode.Uri>();
     const provider: vscode.TextDocumentContentProvider = {
@@ -337,16 +348,31 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     };
     keep(vscode.workspace.registerTextDocumentContentProvider(POLICY_SCHEME, provider));
     keep({ dispose: host.onDidChange(() => { changed.fire(vscode.Uri.parse(POLICY_DOCUMENT_URI)); }) });
-    keep(vscode.commands.registerCommand(SHOW_POLICY_COMMAND, async () => {
+    showStored = async () => {
       try {
         await host.state();
         const uri = vscode.Uri.parse(POLICY_DOCUMENT_URI);
         changed.fire(uri);
         await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
       } catch {
-        tell('NEAR AI could not open your policy.');
+        tell(OPEN_FAILED_TEXT);
       }
-    }));
+    };
+    keep(vscode.commands.registerCommand(SHOW_POLICY_AS_STORED_COMMAND, () => showStored()));
+  });
+  // D-44: the editor page is the front door; Show Policy (the status bar, the setup step) opens it too. Without a page the stored view opens instead.
+  const port = options.policyEditor ?? defaultPolicyEditorPort(context);
+  attempt('the policy editor', () => {
+    if (port !== undefined) {
+      const wiring = policyEditorDeps(host, { secrets: context.secrets, reset: () => resetPolicy(host), showStored: () => showStored() });
+      keep({ dispose: wiring.dispose });
+      keep(port.register(wiring.deps));
+    }
+    const open = async (): Promise<void> => {
+      try { await host.state(); if (port === undefined) await showStored(); else port.open(); } catch { tell(OPEN_FAILED_TEXT); }
+    };
+    keep(vscode.commands.registerCommand(OPEN_POLICY_COMMAND, open));
+    keep(vscode.commands.registerCommand(SHOW_POLICY_COMMAND, open));
   });
   attempt("Add Your Organization's Rules", () => {
     keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell, ...(context.globalState === undefined ? {} : { memento: context.globalState }) })));
@@ -355,8 +381,8 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
   });
   attempt('Edit Policy', () => {
-    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
-    keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath)));
+    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath, port).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
+    keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath, port)));
   });
   attempt('Set Label', () => {
     keep(vscode.commands.registerCommand(SET_LABEL_COMMAND, async (uri?: unknown) => {
@@ -687,72 +713,32 @@ async function followRenames(host: GateHost, files: ReadonlyArray<{ readonly old
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Edit Policy and Apply Policy Draft (D-41, D-53)
 
-function draftFiles(globalStorageDir: string): { readonly draft: string; readonly base: string } {
-  return { draft: path.join(gateDir(globalStorageDir), POLICY_DRAFT_FILE), base: path.join(gateDir(globalStorageDir), POLICY_DRAFT_BASE_FILE) };
-}
-
 /**
- * NEAR AI: Edit Policy. Writes the policy in force, pretty-printed and unsigned, to this extension's storage (never the project) with the hash of that
- * policy beside it, opens it, and says what Apply does, with the self-declared clearance words. Show Policy stays read-only. Returns the draft's path.
+ * NEAR AI: Edit Policy. Writes the personal layer as stored (never your organization's narrowed view, D-44), pretty-printed and unsigned, to this extension's
+ * storage (never the project) with that layer's hash beside it, opens it, and says what Apply does, with the self-declared clearance words. Returns its path.
  */
-export async function editPolicy(host: GateHost, globalStorageDir: string): Promise<string | undefined> {
+export async function editPolicy(host: GateHost, globalStorageDir: string, port?: PolicyEditorPort): Promise<string | undefined> {
   await host.state();
   const state = host.bundleState();
-  if (state.state !== 'valid') {
-    void Promise.resolve(vscode.window.showWarningMessage(`Your policy cannot be edited while it cannot be trusted. ${state.sentence}`)).catch(() => undefined);
+  const personal = host.policyLayers().personal;
+  if (state.state !== 'valid' || personal === undefined) {
+    void Promise.resolve(vscode.window.showWarningMessage(`Your policy cannot be edited while it cannot be trusted.${state.state === 'valid' ? '' : ` ${state.sentence}`}`)).catch(() => undefined);
     return undefined;
   }
   const files = draftFiles(globalStorageDir);
-  await writeFileAtomic(files.draft, `${JSON.stringify(state.bundle, null, 2)}\n`);
-  await writeFileAtomic(files.base, `${state.hash}\n`);
+  await writeFileAtomic(files.draft, `${JSON.stringify(personal.stored, null, 2)}\n`);
+  await writeFileAtomic(files.base, `${personal.hash}\n`);
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(files.draft)), { preview: false });
   void Promise.resolve(vscode.window.showInformationMessage(editPolicyNotice(state.bundle.defaultLabel), APPLY_DRAFT_ACTION, DISCARD_DRAFT_ACTION)).then(async (answer) => {
-    if (answer === APPLY_DRAFT_ACTION) await applyPolicyDraftCommand(host, globalStorageDir);
+    if (answer === APPLY_DRAFT_ACTION) await applyPolicyDraftCommand(host, globalStorageDir, port);
     else if (answer === DISCARD_DRAFT_ACTION) await discardDraft(globalStorageDir);
   }).catch(() => undefined);
   return files.draft;
 }
 
-async function discardDraft(globalStorageDir: string): Promise<void> {
-  const files = draftFiles(globalStorageDir);
-  await rm(files.draft, { force: true });
-  await rm(files.base, { force: true });
-}
-
-/**
- * NEAR AI: Apply Policy Draft. Reads the draft and the hash it was made from and hands them to the host, which applies it only when it was made from the
- * policy in force (D-53). A refused draft shows the plain reasons and changes nothing; an applied one is signed, recorded as policy.edit and its draft files
- * are removed. Returns true when the policy changed.
- */
-export async function applyPolicyDraftCommand(host: GateHost, globalStorageDir: string): Promise<boolean> {
-  const files = draftFiles(globalStorageDir);
-  // A draft open in the editor with changes not yet saved is saved first, so what is applied is what the person sees.
-  try {
-    const open = vscode.workspace.textDocuments?.find((document) => document.uri.fsPath === files.draft);
-    if (open?.isDirty === true) await open.save();
-  } catch { /* the saved draft on disk is applied */ }
-  let draft: string;
-  let base: string;
-  try {
-    draft = await readFile(files.draft, 'utf8');
-    base = (await readFile(files.base, 'utf8')).trim();
-  } catch {
-    void Promise.resolve(vscode.window.showWarningMessage(NO_DRAFT_TEXT)).catch(() => undefined);
-    return false;
-  }
-  try {
-    const result = await host.applyPolicyDraft(draft, base);
-    if (result.state.state !== 'valid') {
-      void Promise.resolve(vscode.window.showWarningMessage(result.state.sentence)).catch(() => undefined);
-      return false;
-    }
-  } catch (error) {
-    void Promise.resolve(vscode.window.showWarningMessage(error instanceof BundleStoreError ? error.message : 'Nothing was changed: NEAR AI could not apply your policy draft.')).catch(() => undefined);
-    return false;
-  }
-  await discardDraft(globalStorageDir).catch(() => undefined);
-  void Promise.resolve(vscode.window.showInformationMessage(POLICY_APPLIED_TEXT)).catch(() => undefined);
-  return true;
+/** NEAR AI: Apply Policy Draft: the draft is shown on the policy page as a proposal and applied only from there (D-44). Returns true when applied. */
+export function applyPolicyDraftCommand(host: GateHost, globalStorageDir: string, port?: PolicyEditorPort): Promise<boolean> {
+  return proposeDraft(host, globalStorageDir, port);
 }
 
 /**
@@ -794,7 +780,8 @@ export async function labelRaiseRefused(host: GateHost, root: string, message: s
 
 /** The only path that re-signs a bundle that failed verification: a modal the person confirms, then host.reset(), which records policy.reset. */
 export async function resetPolicy(host: GateHost): Promise<boolean> {
-  const answer = await vscode.window.showWarningMessage(RESET_TITLE, { modal: true, detail: RESET_DETAIL }, RESET_CONFIRM_ACTION);
+  const detail = host.policyLayers().organization.state === 'none' ? RESET_DETAIL : RESET_DETAIL_ORGANIZATION;
+  const answer = await vscode.window.showWarningMessage(RESET_TITLE, { modal: true, detail }, RESET_CONFIRM_ACTION);
   if (answer !== RESET_CONFIRM_ACTION) return false;
   try {
     const result = await host.reset();

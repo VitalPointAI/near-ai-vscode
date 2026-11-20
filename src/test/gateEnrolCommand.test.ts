@@ -17,15 +17,17 @@ import { ignoredSettingsNotice } from '../domain/gate/layers';
 import { MAX_ORGANIZATION_LAYER_BYTES } from '../domain/gate/policyDocument';
 import { localHostPatternNotice } from '../domain/gate/routing';
 import { signPayload } from '../domain/team/signedPayload';
-import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
+import { POLICY_BUNDLE_FILE, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, STALE_DRAFT_TEXT, gateDir, parsePolicyDraft } from '../gate/bundleStore';
 import { writeLastValid } from '../gate/clockMarker';
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import type { GateHost } from '../gate/host';
 import { ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, migrationNoticeText, previewOrganizationFile } from '../gate/organizationStore';
 import type { PolicyLayersView } from '../gate/organizationStore';
+import type { PolicyChange } from '../services/policyEditor';
 import { loadDeviceIdentity } from '../team/identity';
 import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rotationTextFor, rulesTextFor } from './helpers/enrolmentFixtures';
 import { FIXED_NOW, issuerKey } from './helpers/policyFixtures';
+import { autoApplyPolicyEditor, recordingPolicyEditor } from './helpers/policyEditorFake';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -401,4 +403,238 @@ test('D-23: the stored view names where the rules come from; called without laye
   assert.doesNotMatch(failed, /Reset/);
   // A personal failure under no organization keeps today's note.
   assert.equal(gateCommands.policyDocumentText(failedClosed('bad-signature'), now, layersWith(undefined, { failedLayer: 'personal' })), gateCommands.policyDocumentText(failedClosed('bad-signature'), now));
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Task 3: the policy editor is the front door
+
+const PB_CLEARANCE = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [] };
+const draftFile = (pc: Computer): string => path.join(gateDir(pc.storage), POLICY_DRAFT_FILE);
+const baseFile = (pc: Computer): string => path.join(gateDir(pc.storage), POLICY_DRAFT_BASE_FILE);
+const storedBytes = (pc: Computer): Promise<string> => readFile(path.join(gateDir(pc.storage), POLICY_BUNDLE_FILE), 'utf8');
+
+/** Runs Edit Policy (its notice dismissed) and returns the draft. */
+async function editDraft(pc: Computer): Promise<Record<string, unknown>> {
+  resetUi();
+  assert.equal(await stub.commands.get('nearAi.policy.edit')?.(), draftFile(pc));
+  return JSON.parse(await readFile(draftFile(pc), 'utf8')) as Record<string, unknown>;
+}
+
+/** Edit Policy, then the draft with a Protected B clearance added (the v1 form Edit Policy writes for the starting rules). */
+async function draftWithClearance(pc: Computer): Promise<void> {
+  const draft = await editDraft(pc);
+  await writeFile(draftFile(pc), JSON.stringify({ ...draft, clearances: [...(draft['clearances'] as unknown[]), PB_CLEARANCE] }, null, 2));
+}
+
+async function applyDraft(): Promise<unknown> {
+  resetUi();
+  return stub.commands.get('nearAi.policy.applyDraft')?.();
+}
+
+function holdsProtectedB(host: GateHost): boolean {
+  return host.labelPolicy().clearances.some((clearance) => clearance.scale === 'ca-protected' && clearance.level === 'Protected B');
+}
+
+test('D-44: NEAR AI: Policy and Show Policy open the editor, whose deps read both layers from the host and judge direction with narrowingOf', async () => {
+  const pc = await computer();
+  const fake = recordingPolicyEditor();
+  const window = await windowOf(pc, { policyEditor: fake });
+  assert.equal(fake.registered.length, 1, 'registered once');
+  resetUi();
+  await stub.commands.get('nearAi.policy.open')?.();
+  await stub.commands.get('nearAi.policy.show')?.();
+  assert.equal(fake.opened.length, 2, 'each command opened the editor once');
+  assert.equal(stub.shownDocuments.length, 0, 'neither opened the stored text');
+  const layers = window.host.policyLayers();
+  const state = fake.deps().state();
+  assert.ok(state !== undefined);
+  assert.equal(state.personal, layers.personal?.document);
+  assert.equal(state.personalHash, layers.personal?.hash);
+  assert.equal(state.effective, layers.effective);
+  assert.equal(state.organization, undefined);
+  assert.equal(state.organizationSignedHere, false);
+  const directionOf = fake.deps().directionOf;
+  assert.equal(directionOf('labels', 'routing.levels.org/Internal', 'attested-cloud', 'any-cloud'), 'widens');
+  assert.equal(directionOf('labels', 'routing.levels.org/Internal', 'any-cloud', 'local-only'), 'narrows');
+  assert.equal(directionOf('labels', 'routing.levels.org/Internal', 'local-only', 'local-only'), 'neutral');
+  // Under your organization's rules the state carries its layer, and its key is not this computer's.
+  assert.equal(await addRules(await fileWith(enrolmentTextFor(issuerKey())), ISSUER_WORDS_MATCH), 'enrolled');
+  const organization = window.host.policyLayers().organization;
+  const enrolled = fake.deps().state();
+  assert.ok(organization.state === 'valid' && enrolled !== undefined);
+  if (organization.state === 'valid' && enrolled !== undefined) {
+    assert.equal(enrolled.organization, organization.document);
+    assert.equal(enrolled.organizationHash, organization.hash);
+    assert.equal(enrolled.organizationIssuer, organization.document.issuer.fingerprint);
+    assert.equal(enrolled.organizationSignedHere, false);
+    assert.equal(enrolled.effective, window.host.policyLayers().effective);
+  }
+});
+
+test('D-44: without an editor page the policy commands open the stored view, so the person always sees the policy', async () => {
+  const pc = await computer();
+  await windowOf(pc);
+  resetUi();
+  await stub.commands.get('nearAi.policy.open')?.();
+  assert.equal(stub.shownDocuments.length, 1);
+  assert.ok(stub.shownDocuments[0]?.uri.startsWith('near-ai-policy:'));
+});
+
+test('D-44: Apply Policy Draft shows the draft as a proposal, and nothing is signed until the page applies it through the deps', async () => {
+  const pc = await computer();
+  const fake = recordingPolicyEditor();
+  const window = await windowOf(pc, { policyEditor: fake });
+  await draftWithClearance(pc);
+  const bytes = await storedBytes(pc);
+  assert.equal(await applyDraft(), false, 'a discarded proposal changes nothing');
+  assert.equal(fake.proposed.length, 1);
+  assert.equal(fake.proposed[0]?.target, 'personal');
+  assert.equal(fake.proposed[0]?.from, 'Edit Policy');
+  assert.equal(await storedBytes(pc), bytes, 'nothing was signed');
+  assert.ok(existsSync(draftFile(pc)), 'a discarded proposal keeps the draft');
+  assert.equal(holdsProtectedB(window.host), false);
+  const state = fake.deps().state();
+  assert.ok(state !== undefined);
+  if (state === undefined) return;
+  const next = (fake.proposed[0] as PolicyChange).next(state.personal);
+  assert.ok(next.people?.clearances?.some((clearance) => clearance.scale === 'ca-protected' && clearance.level === 'Protected B'), 'the proposal is the draft');
+  // Refused side: a base that is not the stored personal layer's hash is stale and signs nothing.
+  const stale = await fake.deps().applyPersonal(next, 'f'.repeat(64));
+  assert.deepEqual(stale, { ok: false, text: `Nothing was changed. ${STALE_DRAFT_TEXT}` });
+  assert.equal(await storedBytes(pc), bytes);
+  // Allowed side: the page's Apply at the shown base signs it.
+  assert.deepEqual(await fake.deps().applyPersonal(next, state.personalHash), { ok: true });
+  assert.notEqual(await storedBytes(pc), bytes);
+  assert.equal(holdsProtectedB(window.host), true);
+});
+
+test('D-44: with the page\'s Apply the policy changes, the draft files are removed and the applied sentence is shown', async () => {
+  const pc = await computer();
+  const window = await windowOf(pc, { policyEditor: autoApplyPolicyEditor() });
+  await draftWithClearance(pc);
+  assert.equal(await applyDraft(), true);
+  assert.equal(holdsProtectedB(window.host), true);
+  assert.equal(existsSync(draftFile(pc)), false);
+  assert.equal(existsSync(baseFile(pc)), false);
+  assert.deepEqual(infos(), [gateCommands.POLICY_APPLIED_TEXT]);
+  assert.ok((await installOperations(window, pc)).includes('policy.edit'));
+});
+
+test('D-44, T-41-142: a stale or invalid draft is refused before anything is proposed', async () => {
+  const pc = await computer();
+  const fake = recordingPolicyEditor('applied');
+  const window = await windowOf(pc, { policyEditor: fake });
+  await draftWithClearance(pc);
+  // A later reset signs a different personal layer (on a fixed clock it would sign the same bytes again).
+  pc.clock.now += 60_000;
+  await window.host.reset();
+  assert.equal(await applyDraft(), false);
+  assert.deepEqual(warnings(), [`Nothing was changed. ${STALE_DRAFT_TEXT}`]);
+  assert.equal(fake.proposed.length, 0, 'a stale draft proposes nothing');
+  assert.ok(existsSync(draftFile(pc)), 'the draft is kept');
+  await editDraft(pc);
+  const broken = '{ "clearances": [';
+  await writeFile(draftFile(pc), broken);
+  let expected = '';
+  try {
+    parsePolicyDraft(broken, { issuer: { fingerprint: 'f', publicKey: 'p' }, issuedAt: '2026-11-20T00:00:00.000Z', expiresAt: '2027-11-20T00:00:00.000Z' });
+  } catch (error) {
+    expected = (error as Error).message;
+  }
+  assert.match(expected, /not valid JSON/);
+  assert.equal(await applyDraft(), false);
+  assert.deepEqual(warnings(), [expected]);
+  assert.equal(fake.proposed.length, 0, 'an invalid draft proposes nothing');
+});
+
+test('D-44: Edit Policy drafts the personal layer\'s own document, with the personal layer\'s hash as its base', async () => {
+  const pc = await computer();
+  const window = await windowOf(pc, { policyEditor: autoApplyPolicyEditor() });
+  await draftWithClearance(pc);
+  assert.equal(await applyDraft(), true);
+  const draft = await editDraft(pc);
+  const personal = window.host.policyLayers().personal;
+  assert.ok(personal !== undefined);
+  assert.equal(draft['bundleVersion'], 2, 'the stored v2 document');
+  assert.ok('people' in draft, 'it has people');
+  assert.equal('clearances' in draft, false, 'not a top-level clearances');
+  assert.deepEqual(draft, JSON.parse(JSON.stringify(personal?.stored)));
+  assert.equal((await readFile(baseFile(pc), 'utf8')).trim(), personal?.hash);
+  // Under your organization's rules the draft is still the personal layer's own document, never the narrowed view.
+  assert.equal(await addRules(await fileWith(enrolmentTextFor(issuerKey())), ISSUER_WORDS_MATCH), 'enrolled');
+  const underOrganization = await editDraft(pc);
+  const after = window.host.policyLayers();
+  assert.deepEqual(underOrganization, JSON.parse(JSON.stringify(after.personal?.stored)));
+  assert.equal((await readFile(baseFile(pc), 'utf8')).trim(), after.personal?.hash);
+  const composed = window.host.bundleState();
+  assert.ok(composed.state === 'valid' && composed.hash !== after.personal?.hash, 'the composed hash is not the base');
+});
+
+test('D-44: deps.reset runs the confirmed Reset modal, deps.showStored opens the stored text view, deps.record writes the proposal records', async () => {
+  const pc = await computer();
+  const fake = recordingPolicyEditor();
+  const window = await windowOf(pc, { policyEditor: fake });
+  resetUi();
+  stub.messageAnswers.push(gateCommands.RESET_CONFIRM_ACTION);
+  await fake.deps().reset();
+  assert.equal(stub.notifications[0]?.message, gateCommands.RESET_TITLE);
+  assert.deepEqual(stub.messageOptions[0], { message: gateCommands.RESET_TITLE, modal: true, detail: gateCommands.RESET_DETAIL });
+  assert.ok((await installOperations(window, pc)).includes('policy.reset'));
+  resetUi();
+  await fake.deps().showStored();
+  assert.equal(stub.shownDocuments.length, 1);
+  assert.ok(stub.shownDocuments[0]?.uri.startsWith('near-ai-policy:'));
+  assert.ok(stub.shownDocuments[0]?.text.startsWith('Your NEAR AI policy'));
+  fake.deps().record('policy.proposal-applied', { proposalHash: 'a'.repeat(64), changes: 2, from: 'Edit Policy' });
+  fake.deps().record('policy.proposal-exported', { proposalHash: 'b'.repeat(64), changes: 1, from: 'Edit Policy' });
+  await window.host.flush();
+  const records = (await readFile(path.join(gateDir(pc.storage), DECISIONS_DIR, `${INSTALL_LOG_KEY}.jsonl`), 'utf8')).split('\n').filter((line) => line !== '')
+    .map((line) => JSON.parse(line) as { api: { operation: string }; status_detail?: string });
+  assert.equal(records.find((record) => record.api.operation === 'policy.proposal-applied')?.status_detail, `2 changes from Edit Policy, proposal ${'a'.repeat(16)}`);
+  assert.equal(records.find((record) => record.api.operation === 'policy.proposal-exported')?.status_detail, `1 changes from Edit Policy, proposal ${'b'.repeat(16)}`);
+  // Under your organization's rules the Reset modal says only your own settings are replaced.
+  assert.equal(await addRules(await fileWith(enrolmentTextFor(issuerKey())), ISSUER_WORDS_MATCH), 'enrolled');
+  resetUi();
+  stub.messageAnswers.push(undefined);
+  await fake.deps().reset();
+  assert.equal(stub.messageOptions[0]?.detail, gateCommands.RESET_DETAIL_ORGANIZATION);
+  assert.match(gateCommands.RESET_DETAIL_ORGANIZATION, /Your organization's rules stay as they are\./);
+  assert.equal(window.host.policyLayers().organization.state, 'valid', 'declining changed nothing');
+});
+
+test('D-44, owner Q9: the palette offers NEAR AI: Policy; Show, Edit, Apply, Reset and Show as Stored keep their ids but leave the palette', async () => {
+  const manifest = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')) as {
+    contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: { commandPalette?: Array<{ command: string; when?: string }> } };
+  };
+  const find = (id: string) => manifest.contributes.commands.find((entry) => entry.command === id);
+  assert.deepEqual([find('nearAi.policy.open')?.title, find('nearAi.policy.open')?.category], ['Policy', 'NEAR AI']);
+  assert.deepEqual([find('nearAi.policy.showAsStored')?.title, find('nearAi.policy.showAsStored')?.category], ['Show Policy as Stored', 'NEAR AI']);
+  const hidden = ['nearAi.policy.show', 'nearAi.policy.edit', 'nearAi.policy.applyDraft', 'nearAi.policy.reset', 'nearAi.policy.showAsStored'];
+  const palette = manifest.contributes.menus.commandPalette ?? [];
+  for (const id of hidden) {
+    assert.ok(find(id) !== undefined, `${id} is still contributed`);
+    assert.deepEqual(palette.filter((entry) => entry.command === id), [{ command: id, when: 'false' }], id);
+  }
+  assert.equal(palette.some((entry) => entry.command === 'nearAi.policy.open'), false, 'NEAR AI: Policy stays in the palette');
+  const pc = await computer();
+  await windowOf(pc, { policyEditor: recordingPolicyEditor() });
+  for (const id of [...hidden, 'nearAi.policy.open', ADD_RULES]) assert.ok(stub.commands.has(id), `${id} is registered`);
+});
+
+test('D-37: nearAi.privacyMode keeps its id and values, and says what it does in the glossary\'s words', async () => {
+  const manifest = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')) as {
+    contributes: { configuration: { properties: Record<string, { enum?: string[]; default?: unknown; description?: string; enumDescriptions?: string[] }> } };
+  };
+  const setting = manifest.contributes.configuration.properties['nearAi.privacyMode'];
+  assert.ok(setting !== undefined);
+  assert.deepEqual(setting.enum, ['standard', 'tee-only']);
+  assert.equal(setting.default, 'standard');
+  assert.equal(setting.description, "Where chats may run. Your organization's rules and each chat's label decide first.");
+  assert.deepEqual(setting.enumDescriptions, [
+    'Any model your rules allow; each answer shows where it ran and what was checked.',
+    'Only verified private hardware or this computer: NEAR AI private hardware, checked each time it is used, or a model on this computer.'
+  ]);
+  const words = [setting.description, ...(setting.enumDescriptions ?? [])].join(' ');
+  assert.ok(words.includes('Only verified private hardware or this computer'));
+  assert.doesNotMatch(words, /TEE|\btiers?\b|Team Mode/i);
 });
