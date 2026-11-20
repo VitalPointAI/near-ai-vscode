@@ -96,9 +96,9 @@
     "agent/commandSafety.ts": 2900,
     "agent/gateAdapter.ts": 1400,
     "agent/teamTemplateHistory.ts": 2335,
-    "services/agentSession.ts": 2754,
+    "services/agentSession.ts": 2708,
     "services/chat.ts": 1517,
-    "services/nearAiClient.ts": 1861,
+    "services/nearAiClient.ts": 1860,
     "services/teamStudioPage.ts": 2236,
     "staff/replica/membership.ts": 1384,
     "staff/staffHost.ts": 1612
