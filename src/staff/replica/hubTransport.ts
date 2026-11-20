@@ -10,7 +10,7 @@
 //
 // Sessions (D-35). A session belongs to one TLS connection: POST /v1/session {project} gives a challenge, and the answer signs the hub's writer id,
 // the project, the challenge and exportKeyingMaterial(32, 'near-ai-hub-session/v1') of that connection. The token is kept on the connection object it
-// was issued on and is only ever sent there. The hub closes a connection idle for 5 seconds, so when a connection is gone the next call opens a new
+// was issued on and is only ever sent there. The hub closes a connection idle for 120 seconds, so when a connection is gone the next call opens a new
 // one and a new session first. A token the hub no longer knows on a live connection (expired, unknown) gets a new session on that connection.
 //
 // The states of one call:
