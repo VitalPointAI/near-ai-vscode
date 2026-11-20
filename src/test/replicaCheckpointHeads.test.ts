@@ -2,15 +2,22 @@
 // checkpoint still verifies, and a writer's log may start right after a verified version 2 head.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CHECKPOINT_VERSION, checkpointBases, checkpointHeads, orderTipOf, readCheckpoint, signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
+import { UNATTRIBUTED_WRITER } from '../domain/replica/attribution';
+import { classifyChains } from '../domain/replica/chain';
+import { CHECKPOINT_VERSION, checkpointBases, checkpointHash, checkpointHeads, orderTipOf, readCheckpoint, signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint, CheckpointHead, SignedCheckpoint } from '../domain/replica/checkpoint';
-import type { Dep } from '../domain/replica/entry';
+import { applyRemote, applyUpdate, createFoldDoc, docText, encodeFullState, stateVectorOf, textHashOf } from '../domain/replica/doc';
+import { sealBlob } from '../domain/replica/entry';
+import type { Dep, NewBody, SealedEntry } from '../domain/replica/entry';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
+import type { FoldResult } from '../domain/replica/fold';
+import type { ProductTextOutput } from '../domain/replica/textFold';
 import { totalOrder } from '../domain/replica/order';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { ReplicaContext, StaticRosterSpec } from '../domain/replica/rosterView';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
-import { createWorld, fixedSigner } from './helpers/replicaWorld';
+import { WORLD_AT, createWorld, fixedSigner, rng, shuffled } from './helpers/replicaWorld';
 import type { World, Written } from './helpers/replicaWorld';
 
 const PROJECT = 'project-main';
@@ -79,6 +86,10 @@ function v1Of(checkpoint: Checkpoint): Checkpoint {
 }
 
 const signHub = (s: Setup, checkpoint: Checkpoint): SignedCheckpoint => signCheckpoint(s.hub.signer, checkpoint);
+const sealed = (items: readonly Written[]): SealedEntry[] => items.map((item) => item.entry);
+const hashes = (items: readonly Written[]): string[] => items.map((item) => item.hash);
+const chainHeld = (result: FoldResult): string[] => result.held.filter((item) => item.stage === 'chain').map((item) => item.reason);
+const rejectedReasons = (result: FoldResult): Array<[string | undefined, string]> => result.rejected.map((item): [string | undefined, string] => [item.hash, item.reason]);
 
 // ---- Task 1: the format --------------------------------------------------------------------------------------------------------------------
 
@@ -202,4 +213,233 @@ test('checkpointHeads names, per stream and writer, the highest-seq entry, its l
   assert.deepEqual(byWriter.get(b.writer), { writer: b.writer, seq: b.seq, hash: b.hash, lamport: b.lamport, roster: second });
   const c = s.all.filter((item) => item.writer === s.world.writerOf('C')).pop() as Written;
   assert.deepEqual(byWriter.get(c.writer), { writer: c.writer, seq: c.seq, hash: c.hash, lamport: c.lamport, roster: s.world.rosterHash });
+});
+
+// ---- Task 2: a joiner's chain starts after a checkpoint head --------------------------------------------------------------------------------
+
+test('a late joiner with only the version 2 checkpoint and the 10 later entries admits all 10, and their order is the suffix of the full fold\'s order', () => {
+  const s = setup();
+  const prefix = s.all.slice(0, 20);
+  const post = s.all.slice(20);
+  const signed = signHub(s, v2Checkpoint(s, prefix));
+  const options = { checkpoints: [signed] };
+  const full = foldEntries(sealed(s.all), s.ctx, options);
+  assert.deepEqual([full.held, full.rejected], [[], []]);
+  assert.equal(full.checkpoint, checkpointHash(signed));
+  assert.deepEqual([...full.order.slice(0, 20)].sort(), [...hashes(prefix)].sort());
+
+  const joiner = foldEntries(sealed(post), s.ctx, options);
+  assert.deepEqual(rejectedReasons(joiner), []);
+  assert.deepEqual(chainHeld(joiner), []);
+  assert.equal(joiner.order.length, 10);
+  assert.deepEqual(joiner.order, full.order.slice(20));
+  assert.deepEqual(joiner.order, totalOrder(verified(s.ctx, post)).map((entry) => entry.hash));
+  // The registrations are in the prefix, so the joiner's text updates wait for them at the reducer stage (D-42: state written before the checkpoint
+  // is rebuilt only when the prefix is served). The heads are not in the graph, so the checkpoint fixes no order here.
+  assert.ok(joiner.held.length > 0);
+  for (const held of joiner.held) assert.deepEqual([held.stage, held.reason], ['fold', 'unregistered-client']);
+  assert.equal(joiner.checkpoint, null);
+
+  // In any delivery order and in any number of pieces, the incremental fold gives the same.
+  const random = rng(8);
+  for (let round = 0; round < 4; round += 1) {
+    const order = shuffled(post, random);
+    let state = createFoldState(s.ctx, options);
+    for (const piece of [order.slice(0, 3), order.slice(3, 7), order.slice(7)]) state = addEntries(state, sealed(piece));
+    assert.deepEqual(state.result.order, joiner.order);
+    assert.deepEqual(state.result.digests, joiner.digests);
+  }
+
+  // When the prefix is served later (Phase 32 serves it on demand), the joiner equals the full fold that uses the same checkpoint.
+  const served = addEntries(addEntries(createFoldState(s.ctx, options), sealed(post)), sealed(prefix));
+  assert.deepEqual(served.result.order, full.order);
+  assert.deepEqual(served.result.digests, full.digests);
+  assert.deepEqual(served.result.applied, full.applied);
+  assert.deepEqual([served.result.held, served.result.rejected, served.result.checkpoint], [[], [], full.checkpoint]);
+});
+
+test('without a usable version 2 checkpoint the later entries wait: none, a version 1 one, and one from a non-signer all leave them missing-predecessor', () => {
+  const s = setup();
+  const prefix = s.all.slice(0, 20);
+  const post = s.all.slice(20);
+  const v2 = v2Checkpoint(s, prefix);
+  const stranger = fixedSigner('A');
+  const cases: Array<[string, SignedCheckpoint[] | undefined]> = [
+    ['none', undefined],
+    ['version 1', [signHub(s, v1Of(v2))]],
+    ['not a checkpoint signer', [signCheckpoint(stranger.signer, { ...v2, signer: stranger.writer })]]
+  ];
+  for (const [name, checkpoints] of cases) {
+    const result = foldEntries(sealed(post), s.ctx, checkpoints === undefined ? {} : { checkpoints });
+    assert.deepEqual(result.order, [], name);
+    assert.deepEqual(rejectedReasons(result), [], name);
+    assert.deepEqual(chainHeld(result), post.map(() => 'missing-predecessor'), name);
+  }
+});
+
+test('a full holder folds the same with a version 2 checkpoint as with the version 1 checkpoint of the same covered set', () => {
+  const s = setup();
+  const prefix = s.all.slice(0, 20);
+  const v2 = v2Checkpoint(s, prefix);
+  const withV2 = foldEntries(sealed(s.all), s.ctx, { checkpoints: [signHub(s, v2)] });
+  const withV1 = foldEntries(sealed(s.all), s.ctx, { checkpoints: [signHub(s, v1Of(v2))] });
+  for (const key of ['order', 'applied', 'held', 'rejected', 'refused', 'kept', 'excluded', 'families', 'digests'] as const) assert.deepEqual(withV2[key], withV1[key], key);
+  // classifyChains with no bases is the Phase 30 behaviour, entry for entry.
+  const entries = verified(s.ctx, s.all);
+  assert.deepEqual(classifyChains(entries, s.ctx, [], new Map()), classifyChains(entries, s.ctx));
+});
+
+// A raw entry by `name` right after the checkpoint, with the given changes. By default it is the correct next entry: prev is the writer's head, seq is
+// one more, lamport is one more than the largest of the head and its deps, and the roster is the head's.
+interface AfterOptions { seq?: number; prev?: string; lamport?: number; deps?: Dep[]; roster?: string }
+function after(s: Setup, heads: readonly CheckpointHead[], name: string, options: AfterOptions = {}): Written {
+  const writer = s.world.writerOf(name);
+  const head = heads.find((candidate) => candidate.writer === writer) as CheckpointHead;
+  const deps = options.deps ?? [];
+  const lamports = [head.lamport, ...deps.map((dep) => heads.find((candidate) => candidate.hash === dep.hash)?.lamport ?? 0)];
+  const body: NewBody = {
+    deps,
+    roster: options.roster ?? head.roster,
+    lamport: options.lamport ?? 1 + Math.max(...lamports),
+    at: WORLD_AT,
+    actor: { kind: 'person' },
+    kind: 'doc.client',
+    data: { product: 'after-checkpoint', clientId: 4242, actor: { kind: 'person' } }
+  };
+  return s.world.writeRaw(name, { stream: s.world.stream, seq: options.seq ?? head.seq + 1, prev: options.prev ?? head.hash, body });
+}
+
+const asDep = (head: CheckpointHead): Dep => ({ writer: head.writer, seq: head.seq, hash: head.hash });
+
+test('after a checkpoint, a prev that names another head or a seq that skips is rejected bad-prev, and the correct next entry is admitted', () => {
+  const s = setup();
+  const checkpoint = v2Checkpoint(s, s.all);
+  const options = { checkpoints: [signHub(s, checkpoint)] };
+  const heads = checkpoint.streams[0].heads as CheckpointHead[];
+  const [headA, headB] = ['A', 'B'].map((name) => heads.find((head) => head.writer === s.world.writerOf(name)) as CheckpointHead);
+  const good = after(s, heads, 'A');
+  const admitted = foldEntries(sealed([good]), s.ctx, options);
+  assert.deepEqual([admitted.order, admitted.rejected, chainHeld(admitted)], [[good.hash], [], []]);
+  const cases: Array<[string, Written]> = [
+    ['prev is another writer\'s head', after(s, heads, 'A', { prev: headB.hash, seq: headB.seq + 1, lamport: headB.lamport + 1 })],
+    ['seq skips one', after(s, heads, 'A', { seq: headA.seq + 2 })],
+    ['seq repeats the head\'s', after(s, heads, 'A', { seq: headA.seq })]
+  ];
+  for (const [name, entry] of cases) {
+    const result = foldEntries(sealed([entry]), s.ctx, options);
+    assert.deepEqual(rejectedReasons(result), [[entry.hash, 'bad-prev']], name);
+    assert.deepEqual(result.order, [], name);
+  }
+});
+
+test('after a checkpoint, a lamport that is not one more than the largest of the head and its other deps is rejected bad-lamport', () => {
+  const s = setup();
+  const checkpoint = v2Checkpoint(s, s.all);
+  const options = { checkpoints: [signHub(s, checkpoint)] };
+  const heads = checkpoint.streams[0].heads as CheckpointHead[];
+  // The writer with the earliest head cites the head with the latest lamport, so the dep, not its own head, sets the lamport.
+  const byLamport = [...heads].sort((x, y) => x.lamport - y.lamport);
+  const [low, other] = [byLamport[0], byLamport[byLamport.length - 1]];
+  assert.ok(other.lamport > low.lamport);
+  const name = WRITERS.find((candidate) => s.world.writerOf(candidate) === low.writer) as string;
+  const withDep = after(s, heads, name, { deps: [asDep(other)] });
+  assert.deepEqual(foldEntries(sealed([withDep]), s.ctx, options).order, [withDep.hash]);
+  const cases: Array<[string, Written]> = [
+    ['too high', after(s, heads, name, { lamport: low.lamport + 5 })],
+    ['equal to the head\'s', after(s, heads, name, { lamport: low.lamport })],
+    ['ignores a later dep', after(s, heads, name, { deps: [asDep(other)], lamport: low.lamport + 1 })]
+  ];
+  for (const [name, entry] of cases) {
+    const result = foldEntries(sealed([entry]), s.ctx, options);
+    assert.deepEqual(rejectedReasons(result), [[entry.hash, 'bad-lamport']], name);
+  }
+});
+
+test('after a checkpoint, an entry citing a roster older than the head\'s roster is rejected stale-roster-citation, through its prev or a dep', () => {
+  const s = setup();
+  const second = 'e'.repeat(64);
+  const spec: StaticRosterSpec = { ...s.spec, rosters: [...s.spec.rosters, { ...s.spec.rosters[0], hash: second }] };
+  const ctx = s.world.ctx({ roster: staticRosterView(spec) });
+  // B moves to the newer roster before the checkpoint.
+  const newer = s.world.write('B', { kind: 'doc.client', data: { product: 'other', clientId: 919, actor: { kind: 'person' } }, roster: second });
+  const twoRosters: Setup = { ...s, ctx, spec };
+  const checkpoint = v2Checkpoint(twoRosters, [...s.all, newer]);
+  const options = { checkpoints: [signCheckpoint(s.hub.signer, checkpoint)] };
+  const heads = checkpoint.streams[0].heads as CheckpointHead[];
+  const headB = heads.find((head) => head.writer === s.world.writerOf('B')) as CheckpointHead;
+  assert.equal(headB.roster, second);
+  const fine = after(twoRosters, heads, 'B');
+  assert.deepEqual(foldEntries(sealed([fine]), ctx, options).order, [fine.hash]);
+  const cases: Array<[string, Written]> = [
+    ['the writer\'s own head', after(twoRosters, heads, 'B', { roster: s.world.rosterHash })],
+    ['a dep on that head', after(twoRosters, heads, 'A', { deps: [asDep(headB)], roster: s.world.rosterHash })]
+  ];
+  for (const [name, entry] of cases) {
+    const result = foldEntries(sealed([entry]), ctx, options);
+    assert.deepEqual(rejectedReasons(result), [[entry.hash, 'stale-roster-citation']], name);
+  }
+  // A dep on a head of the older roster with the older roster cited is fine.
+  const headC = heads.find((head) => head.writer === s.world.writerOf('C')) as CheckpointHead;
+  const older = after(twoRosters, heads, 'A', { deps: [asDep(headC)], roster: s.world.rosterHash });
+  assert.deepEqual(foldEntries(sealed([older]), ctx, options).order, [older.hash]);
+});
+
+test('after a checkpoint, a dep naming a covered entry that is not a head is held missing-predecessor, and a dep naming a head with the wrong seq is bad-dep', () => {
+  const s = setup();
+  const checkpoint = v2Checkpoint(s, s.all);
+  const options = { checkpoints: [signHub(s, checkpoint)] };
+  const heads = checkpoint.streams[0].heads as CheckpointHead[];
+  const headB = heads.find((head) => head.writer === s.world.writerOf('B')) as CheckpointHead;
+  const covered = s.all.find((item) => item.writer === headB.writer && item.seq === headB.seq - 2) as Written;
+  const coveredDep: Dep = { writer: covered.writer, seq: covered.seq, hash: covered.hash };
+  const waiting = after(s, heads, 'A', { deps: [coveredDep], lamport: 1 + Math.max(covered.lamport, (heads.find((head) => head.writer === s.world.writerOf('A')) as CheckpointHead).lamport) });
+  const held = foldEntries(sealed([waiting]), s.ctx, options);
+  assert.deepEqual([held.order, rejectedReasons(held), chainHeld(held)], [[], [], ['missing-predecessor']]);
+  // A full holder admits it: the conservative hold is the joiner's only, and goes once the covered entry is served.
+  assert.ok(foldEntries(sealed([...s.all, waiting]), s.ctx, options).order.includes(waiting.hash));
+  const wrongSeq = after(s, heads, 'A', { deps: [{ ...asDep(headB), seq: headB.seq + 1 }] });
+  assert.deepEqual(rejectedReasons(foldEntries(sealed([wrongSeq]), s.ctx, options)), [[wrongSeq.hash, 'bad-dep']]);
+  const wrongWriter = after(s, heads, 'A', { deps: [{ ...asDep(headB), writer: s.world.writerOf('C') }] });
+  assert.deepEqual(rejectedReasons(foldEntries(sealed([wrongWriter]), s.ctx, options)), [[wrongWriter.hash, 'bad-dep']]);
+});
+
+test('text a joiner has only from a compaction, its covered updates absent behind the checkpoint, keeps unverified: true in the doc output', () => {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['C'] }, { member: 'mbr-hhhh', devices: ['H'] }] });
+  const hub = fixedSigner('H');
+  const spec: StaticRosterSpec = { ...world.rosterSpec, rosters: world.rosterSpec.rosters.map((roster) => ({ ...roster, checkpointSigners: [hub.writer] })) };
+  const ctx = world.ctx({ roster: staticRosterView(spec) });
+  const product = 'intel-estimate';
+  const a = world.editor('A', product, 11);
+  const b = world.editor('B', product, 22);
+  const c = world.editor('C', product, 33);
+  const regs = [a.register(), b.register(), c.register()];
+  const updA = a.insert(0, 'alpha ');
+  applyRemote(b.doc, encodeFullState(a.doc));
+  const updB = b.insert(6, 'beta');
+  const merged = createFoldDoc();
+  applyUpdate(merged, encodeFullState(a.doc));
+  applyUpdate(merged, encodeFullState(b.doc));
+  const prefix = [...regs, updA, updB];
+  const s: Setup = { world, ctx, spec, hub, all: prefix };
+  const signed = signHub(s, v2Checkpoint(s, prefix));
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(encodeFullState(merged)));
+  world.blobs.set(blob.hash, blob);
+  const dep = (item: Written): Dep => ({ writer: item.writer, seq: item.seq, hash: item.hash });
+  const compaction = world.write('C', { kind: 'doc.compact', deps: [updA, updB], data: { product, covers: [dep(updA), dep(updB)], stateVector: stateVectorOf(merged), textHash: textHashOf(docText(merged)), stateBlob: blob.hash } });
+  const productOf = (result: FoldResult): ProductTextOutput => (result.families.doc as ProductTextOutput[])[0];
+
+  // The joiner holds the registrations (served with the welcome) and the compaction, but not the updates the compaction covers.
+  const joiner = foldEntries(sealed([...regs, compaction]), ctx, { checkpoints: [signed] });
+  assert.deepEqual([joiner.rejected, joiner.held, joiner.refused], [[], [], []]);
+  assert.ok(joiner.order.includes(compaction.hash));
+  const text = productOf(joiner);
+  assert.equal(text.text, docText(merged));
+  assert.deepEqual(text.compactions, [{ entry: compaction.hash, verified: false }]);
+  assert.ok(text.attribution.length > 0);
+  for (const span of text.attribution) assert.deepEqual([span.writer, span.unverified], [UNATTRIBUTED_WRITER, true]);
+  // With the covered updates the same compaction is checked against them, and nothing is unverified.
+  const full = productOf(foldEntries(sealed([...prefix, compaction]), ctx, { checkpoints: [signed] }));
+  assert.equal(full.text, text.text);
+  assert.deepEqual(full.compactions, [{ entry: compaction.hash, verified: true }]);
+  for (const span of full.attribution) assert.notEqual(span.unverified, true);
 });
