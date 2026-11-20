@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { grantHash } from '@ext/domain/replica/cellKeys';
 import { checkpointHash, signCheckpoint } from '@ext/domain/replica/checkpoint';
 import { verifyProof } from '@ext/domain/replica/equivocation';
 import { readHubFile } from '@ext/domain/replica/hubFile';
@@ -298,9 +299,125 @@ test('an earlier roster cited (once roster-not-at-head, CR-01): the lead\'s chan
     assert.equal((await new RosterCache(hub.store, hub.identity).get(world.project)).head, next.hash);
   }));
 
-test('roster-unreadable: a base-stream body the hub cannot open is refused', () =>
+test('roster-unreadable: a base-stream body that does not open with the epoch key the hub holds is refused', () =>
   withHub(undefined, async (hub) => {
     await expectRefused(hub, note(hub.world, hub.world.lead, { key: createHash('sha256').update('a key nobody granted').digest() }).entry, 'roster-unreadable');
+  }));
+
+// ---- CR-01 follow-up (D-42, D-44): a base-stream entry under an epoch the hub holds no key for yet is the writer's log; the fold judges it later ----
+
+/** A roster entry of the lead sealed under another epoch of the base cell, advancing the world's head. */
+function rosterAtEpoch(world: HubWorld, kind: string, data: Record<string, unknown>, epoch: number): Written {
+  const rosterPrev = world.head;
+  const written = world.write(world.lead, { kind, data: { ...data, rosterPrev }, roster: rosterPrev, epoch });
+  world.head = written.hash;
+  return written;
+}
+
+/** A base cell rekey to epoch 2 with its founding grant to the given devices, then the lead's first entry and a revocation of the analyst under it.
+ *  The founding grant gives the hub the stream's access list; the hub reads the epoch only from a grant wrapped to it. */
+function lateEpoch(hub: Hub, to: ReadonlyArray<{ writer: string; x25519: string }>): { founding: unknown; rekey: Written; first: Written; revoke: Written } {
+  const { world } = hub;
+  const analyst = analystOf(world);
+  const founding = world.grant(world.lead, { epoch: 2, roster: world.head, to });
+  const rekey = world.rosterEntry(world.lead, 'cell.rekey', { cell: world.project, epoch: 2, reason: 'scheduled', grant: grantHash(founding) });
+  const first = note(world, world.lead, { epoch: 2 });
+  const revoke = rosterAtEpoch(world, 'device.revoke', { member: analyst.member, writer: analyst.writer }, 2);
+  return { founding, rekey, first, revoke };
+}
+
+const hubDeviceOf = (hub: Hub): { writer: string; x25519: string } => ({ writer: hub.identity.writer, x25519: hub.identity.x25519 });
+
+test('epoch key late: the first entry under a base epoch not yet granted to the hub and a later revocation are both stored; the revocation takes effect when the grant arrives', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    // The new epoch goes to the members first; the hub's own grant of it comes later (a separate grant at the rekey).
+    const { founding, rekey, first, revoke } = lateEpoch(hub, [world.lead, analyst]);
+    const toHub = world.grant(world.lead, { epoch: 2, roster: rekey.hash, to: [hubDeviceOf(hub)] });
+    assert.deepEqual((await push(hub, [rekey.entry], { grants: [founding] })).accepted, [rekey.hash]);
+    // A batch with no grant: what the hub cannot open is still kept in the cached roster, so the later grant folds it without a reload.
+    const pushed = await push(hub, [first.entry, revoke.entry]);
+    assert.deepEqual(pushed.refused, []);
+    assert.deepEqual(pushed.accepted, [first.hash, revoke.hash]);
+    assert.equal(hub.store.headOf(world.project, world.project, world.lead.writer)?.hash, revoke.hash);
+    // Without the epoch key the hub cannot read the revocation yet: the analyst is still admitted and the roster stops at the rekey.
+    for (const roster of [await hub.cache.get(world.project), await new RosterCache(hub.store, hub.identity).get(world.project)]) {
+      assert.equal(roster.ring(world.project, 2), undefined);
+      assert.equal(roster.head, rekey.hash);
+      assert.equal(roster.standing(analyst.writer), 'admitted');
+    }
+    // The hub's grant arrives on its own: the hub folds the entries it kept, and the revocation is in force at once.
+    const granted = await push(hub, [], { grants: [toHub] });
+    assert.deepEqual(granted.grants.refused, []);
+    assert.equal(granted.grants.stored.length, 1);
+    assert.equal(granted.rosterChanged, true);
+    assert.equal(granted.rosterHead, revoke.hash);
+    for (const roster of [await hub.cache.get(world.project), await new RosterCache(hub.store, hub.identity).get(world.project)]) {
+      assert.equal(roster.head, revoke.hash);
+      assert.equal(roster.standing(analyst.writer), 'revoked');
+    }
+    await expectRefused(hub, note(world, analyst).entry, 'revoked', analyst.writer);
+    // The lead's log goes on under the new epoch.
+    const next = note(world, world.lead, { epoch: 2 });
+    assert.deepEqual((await push(hub, [next.entry])).accepted, [next.hash]);
+  }));
+
+test('epoch key late, hub restarted: the kept entries are loaded from the store and the grant that arrives after the restart folds them', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const { founding, rekey, first, revoke } = lateEpoch(hub, [world.lead, analyst]);
+    const toHub = world.grant(world.lead, { epoch: 2, roster: rekey.hash, to: [hubDeviceOf(hub)] });
+    assert.deepEqual((await push(hub, [rekey.entry, first.entry, revoke.entry], { grants: [founding] })).refused, []);
+    const restarted = new RosterCache(hub.store, hub.identity);
+    const checked = await checkBatch(input(hub, [], { grants: [toHub] }), hub.ctx({ cache: restarted }));
+    assert.ok(checked.ok);
+    const granted = commitBatch(hub.store, restarted, checked.checked, NOW_MS);
+    assert.equal(granted.rosterHead, revoke.hash);
+    assert.equal((await restarted.get(world.project)).standing(analyst.writer), 'revoked');
+  }));
+
+test('epoch key late, grant in the same batch after the entries: every entry is stored and the revocation applies in that batch', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const { founding, rekey, first, revoke } = lateEpoch(hub, [world.lead, analyst, hubDeviceOf(hub)]);
+    const result = await push(hub, [rekey.entry, first.entry, revoke.entry], { grants: [founding] });
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(result.accepted, [rekey.hash, first.hash, revoke.hash]);
+    assert.equal(result.rosterHead, revoke.hash);
+    assert.equal((await hub.cache.get(world.project)).standing(analyst.writer), 'revoked');
+  }));
+
+test('founding grant late: entries under the new epoch wait on a retryable refusal (not-on-access-list) and are accepted with the grant on the next push', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const { founding, rekey, first, revoke } = lateEpoch(hub, [world.lead, analyst, hubDeviceOf(hub)]);
+    const early = await push(hub, [rekey.entry, first.entry, revoke.entry]);
+    assert.deepEqual(early.accepted, [rekey.hash]);
+    assert.deepEqual(early.refused.map((item) => item.reason), ['not-on-access-list', 'not-on-access-list']);
+    const again = await push(hub, [first.entry, revoke.entry], { grants: [founding] });
+    assert.deepEqual(again.refused, []);
+    assert.deepEqual(again.accepted, [first.hash, revoke.hash]);
+    assert.equal((await hub.cache.get(world.project)).standing(analyst.writer), 'revoked');
+  }));
+
+test('epoch key never granted (zero knowledge): a base epoch the hub is left out of is kept as ciphertext it cannot read, and the writer\'s log is never cut', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const { founding, rekey, first, revoke } = lateEpoch(hub, [world.lead, analyst]);
+    const result = await push(hub, [rekey.entry, first.entry, revoke.entry], { grants: [founding] });
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(result.accepted, [rekey.hash, first.hash, revoke.hash]);
+    const roster = await hub.cache.get(world.project);
+    assert.equal(roster.ring(world.project, 2), undefined);
+    assert.equal(roster.head, rekey.hash);
+    assert.equal(hub.store.entryByHash(world.project, revoke.hash)?.body, revoke.entry.body);
+    const later = note(world, world.lead, { epoch: 2 });
+    assert.deepEqual((await push(hub, [later.entry])).accepted, [later.hash]);
   }));
 
 test('batch-too-large: 201 entries are refused as a whole and nothing is stored', () =>

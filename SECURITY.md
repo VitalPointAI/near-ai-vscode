@@ -2041,7 +2041,10 @@ are the hub's own suite, files under `src/test/` the extension's.
   holds, which carries only the roster. So the hub server holds the staff list of every project
   connected to it: the names, seats and declared clearances of the people in it, and their
   devices. It needs the roster to check every change against it (`hub/test/append.test.ts`,
-  `hub/test/enrol.test.ts`).
+  `hub/test/enrol.test.ts`). A roster change sealed with a new key the hub has not been given yet
+  is kept as ciphertext in its writer's log, and the hub applies it, a revocation included, as soon
+  as the key reaches it; it never refuses such a change, so the writer's later changes are never
+  cut off (`hub/test/append.test.ts`, "epoch key late").
 - **What it reads: only the parts the staff lead grants it.** The staff lead may grant the hub
   further parts of a project, for watches that must run when nobody is at a computer (watches
   arrive in a later release). Before any grant the lead's computer shows, and requires the lead to

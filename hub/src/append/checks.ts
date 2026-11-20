@@ -7,9 +7,16 @@
 // size; the body's size and ciphertext hash; the stream is the project's; the writer's signature with its roster key; the writer admitted and neither
 // revoked nor quarantined at the head (a device revoked since may still fill a place a kept checkpoint of this hub covers, WR-02); the writer on the
 // stream's access list; the place (same hash again: held; another hash at a used seq: an equivocation proof, D-43; beyond the next seq: seq-gap;
-// wrong prev: prev-mismatch); and for base-stream entries, a body the hub can open and, for
-// roster kinds, a lead or deputy device at the roster the entry cites (D-11). A roster kind citing an older roster than the hub's head is stored:
-// it is a concurrent branch the fold turns into a split (D-09), and refusing it would cut the writer's log at a seq gap for good (CR-01).
+// wrong prev: prev-mismatch); and for base-stream entries the hub can open, a body that opens and, for roster kinds, a lead or deputy device at the
+// roster the entry cites (D-11). A roster kind citing an older roster than the hub's head is stored: it is a concurrent branch the fold turns into a
+// split (D-09), and refusing it would cut the writer's log at a seq gap for good (CR-01).
+//
+// One rule for what the hub cannot judge yet (CR-01, and its follow-up for epoch keys): an entry is refused only for a fault the hub can prove from
+// what it holds, as verifyEntry rejects it; an entry verifyEntry would hold (no key for its epoch yet) is stored as the writer's log and the fold
+// judges it when the key arrives. So a base-stream entry under an epoch whose grant to the hub has not come yet is stored as ciphertext the hub
+// cannot read, the writer's later entries (a revocation among them) follow it, and the grant, when it comes, folds them all. Refusing it instead
+// would leave that writer's base-stream log at a seq gap for good, and a retry would wait forever on a hub that is never granted the epoch.
+// Entries of other cells are never opened here, so they already follow the rule; a missing blob refuses the batch so the client sends it again.
 //
 // A batch is checked in order against an in-memory overlay (heads, places and a roster folded again after each roster entry), then written by
 // commitBatch in one store transaction. Only after COMMIT does the overlay replace the cached roster, so a failed write accepts nothing (D-26).
@@ -48,7 +55,7 @@ export const APPEND_REFUSALS = {
   'prev-mismatch': 'The entry does not follow the entry before it in its writer\'s log.',
   equivocation: 'The writer already signed a different entry at this place. The hub keeps the first one and has recorded both as proof.',
   'not-a-roster-writer': 'Only a device of the staff lead or the deputy lead may change the roster, and the device that wrote this was not one at the roster it follows.',
-  'roster-unreadable': 'The hub cannot open this entry of the roster part of the project, so it cannot check it.',
+  'roster-unreadable': 'This entry of the roster part of the project does not open with the key its part names, or what it holds is not an entry.',
   'grant-not-placed': 'This cell grant does not fit the roster, so the hub does not keep it.'
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
@@ -153,36 +160,38 @@ interface OpenedBase {
   data: unknown;
 }
 
-type BaseRead = { ok: true; opened: OpenedBase; blob?: SealedBlob } | { ok: false; missingBlob: boolean };
+/** Why a base-stream body was not read: no key for its epoch yet (held: stored, judged by the fold later), its blob not held (the batch is sent
+ *  again), or a body that does not open or parse with the key the hub holds (a fault: refused). */
+type BaseRead = { ok: true; opened: OpenedBase; blob?: SealedBlob } | { ok: false; why: 'missing-key' | 'missing-blob' | 'unreadable' };
 
 /** Opens a base-stream body with the hub's ring, reading its blob from the overlay or the store. */
 async function readBase(roster: ProjectRoster, store: HubStore, project: string, header: EntryHeader, wire: Buffer, batchBlobs: Map<string, SealedBlob>): Promise<BaseRead> {
   const key = roster.ring(header.stream, header.epoch);
-  if (key === undefined) return { ok: false, missingBlob: false };
+  if (key === undefined) return { ok: false, why: 'missing-key' };
   const plaintext = openBody(key, header, wire);
-  if (plaintext === undefined) return { ok: false, missingBlob: false };
+  if (plaintext === undefined) return { ok: false, why: 'unreadable' };
   let parsed: unknown;
   try {
     parsed = JSON.parse(plaintext.toString('utf8')) as unknown;
   } catch {
-    return { ok: false, missingBlob: false };
+    return { ok: false, why: 'unreadable' };
   }
   const checked = validateBody(parsed);
-  if (!checked.ok) return { ok: false, missingBlob: false };
+  if (!checked.ok) return { ok: false, why: 'unreadable' };
   const body = checked.body;
   if (body.blob === undefined) return { ok: true, opened: { kind: body.kind, roster: body.roster, data: body.data } };
   let blob = batchBlobs.get(body.blob) ?? roster.blob(body.blob);
   if (blob === undefined) {
     const bytes = await store.readBlob(project, body.blob);
-    if (bytes === undefined) return { ok: false, missingBlob: true };
+    if (bytes === undefined) return { ok: false, why: 'missing-blob' };
     blob = { hash: body.blob, bytes: bytes.toString('base64url') };
   }
   const opened = openBlob(key, header.stream, header.epoch, blob);
-  if (opened === undefined) return { ok: false, missingBlob: false };
+  if (opened === undefined) return { ok: false, why: 'unreadable' };
   try {
     return { ok: true, opened: { kind: body.kind, roster: body.roster, data: JSON.parse(opened.toString('utf8')) as unknown }, blob };
   } catch {
-    return { ok: false, missingBlob: false };
+    return { ok: false, why: 'unreadable' };
   }
 }
 
@@ -230,9 +239,13 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   const places: Place[] = [];
   let overlay = offered.length > 0 ? base.withBatch([], offeredValues) : base;
   let dirty = false;
+  // Base entries the overlay was last folded with: the overlay that replaces the cached roster must hold every base entry this batch stores, so a
+  // grant in a later batch folds the ones the hub could not open yet.
+  let folded = 0;
   const current = (): ProjectRoster => {
     if (dirty) {
       overlay = base.withBatch(baseEntries, offeredValues, batchBlobs).withEquivocations(places);
+      folded = baseEntries.length;
       dirty = false;
     }
     return overlay;
@@ -354,13 +367,18 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
     }
     if (header.stream === project) {
       const read = await readBase(roster, store, project, header, wire, batchBlobs);
-      if (!read.ok) {
-        if (read.missingBlob) return refuseBatch('blob-missing');
+      if (!read.ok && read.why === 'missing-blob') return refuseBatch('blob-missing');
+      if (!read.ok && read.why === 'unreadable') {
         refuse('roster-unreadable', hash);
         continue;
       }
-      const { kind, data } = read.opened;
-      if (Object.prototype.hasOwnProperty.call(ROSTER_KIND_OWNER, kind)) {
+      if (!read.ok) {
+        // No key for its epoch yet: the writer's log, stored as ciphertext and folded when the grant arrives. With grants offered in this batch the
+        // next entry is judged at a fold that may now open it.
+        baseEntries.push({ header, body: raw.body as string });
+        if (offered.length > 0) dirty = true;
+      } else if (Object.prototype.hasOwnProperty.call(ROSTER_KIND_OWNER, read.opened.kind)) {
+        const { kind, data } = read.opened;
         // Authority at the roster the entry cites, never at the hub's head (D-11, CR-01). A roster entry citing an older head is an honest
         // concurrent branch (a lead and a deputy racing, a lead handover race): it is the writer's log, so it is stored and the fold makes it a
         // split for the lead to choose. Refusing it would leave a seq gap that cuts off every later entry of that device in the base stream.
@@ -382,6 +400,7 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
     kept.set(`${header.stream}/${header.writer}/${header.seq}`, { hash, header });
   }
 
+  if (folded !== baseEntries.length) dirty = true;
   const roster = current();
   const grants: GrantInput[] = [];
   for (const grant of offered) {
