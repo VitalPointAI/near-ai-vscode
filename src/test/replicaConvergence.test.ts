@@ -25,7 +25,7 @@ import { replicaVersionHash } from '../domain/replica/versions';
 import type { ProductVersions } from '../domain/replica/versions';
 import { forkAt, futureEntry, tamperHeader } from './helpers/replicaForks';
 import { createWorld, fixedSigner, rng, shuffled, streamId, updateData } from './helpers/replicaWorld';
-import type { Editor, Rng, Written, World } from './helpers/replicaWorld';
+import type { Editor, Rng, WorldMemberSpec, Written, World } from './helpers/replicaWorld';
 
 const OWNER: Actor = { kind: 'agent', member: 'j2-chief', run: 'r-1' };
 const TRADECRAFT: Actor = { kind: 'agent', member: 'tradecraft', run: 'r-t' };
@@ -56,12 +56,17 @@ function rolesOf(index: number): string[] {
   return ['member', 'answers_for:j2'];
 }
 
+// The agent seats each writer's devices run: every writer runs the owner seat and the analyst; writer 0 also gives the gate verdicts.
+function seatsOf(index: number): string[] {
+  return index === 0 ? ['j2-chief', 'j2-analyst', 'release-guard', 'tradecraft'] : ['j2-chief', 'j2-analyst'];
+}
+
 const hex = (random: Rng, length: number): string => Array.from({ length }, () => '0123456789abcdef'[random.int(16)]).join('');
 
 export function randomWorld(random: Rng, options: { withUnrelatedWriter?: boolean } = {}): RandomWorld {
   const count = 2 + random.int(4);
   const devices = Array.from({ length: count }, (_, index) => `W${index}`);
-  const members = devices.map((device, index) => ({ member: `mbr-w${index}`, name: `Writer ${index}`, roles: rolesOf(index), devices: [device] }));
+  const members: WorldMemberSpec[] = devices.map((device, index) => ({ member: `mbr-w${index}`, name: `Writer ${index}`, roles: rolesOf(index), devices: [device], agentSeats: seatsOf(index) }));
   if (options.withUnrelatedWriter === true) members.push({ member: 'mbr-zz', name: 'Zed', roles: ['member'], devices: ['Z'] });
   const world = createWorld({ members });
   const deviceOf = new Map(devices.map((device) => [world.writerOf(device), device]));

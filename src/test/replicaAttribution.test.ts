@@ -22,7 +22,7 @@ function productOf(result: ReturnType<typeof foldEntries>): ProductTextOutput {
 
 // The J2 scene: the chief types, an agent run on the chief's machine continues, and a second person types at the end at the same time.
 function j2Scene() {
-  const world = createWorld({ members: [{ member: 'mbr-pppp', name: 'Chief', devices: ['P'] }, { member: 'mbr-qqqq', name: 'Analyst', devices: ['Q'] }] });
+  const world = createWorld({ members: [{ member: 'mbr-pppp', name: 'Chief', devices: ['P'], agentSeats: ['j2-analyst'] }, { member: 'mbr-qqqq', name: 'Analyst', devices: ['Q'] }] });
   const person = world.editor('P', PRODUCT, 11);
   const agent = world.editor('P', PRODUCT, 12);
   const other = world.editor('Q', PRODUCT, 21);
@@ -129,7 +129,7 @@ function seededHistory(seed: number): Seeded {
   const random = rng(seed);
   const writers = 2 + random.int(4);
   const names = Array.from({ length: writers }, (_, index) => `D${index}`);
-  const world = createWorld({ members: names.map((name, index) => ({ member: `mbr-${index}`, name, devices: [name] })) });
+  const world = createWorld({ members: names.map((name, index) => ({ member: `mbr-${index}`, name, devices: [name], agentSeats: [`agent-${index}`] })) });
   const slots: Slot[] = [];
   names.forEach((name, index) => {
     slots.push({ editor: world.editor(name, PRODUCT, 100 + index * 2), actor: { kind: 'person' }, writerName: name, member: `mbr-${index}` });
