@@ -168,7 +168,7 @@ test('policyDocumentText for a policy that failed is exactly the title, the note
   const expected = [
     'Your NEAR AI policy',
     '',
-    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.',
+    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open NEAR AI: Policy and choose Reset my rules, which resets your own rules only.',
     '',
     'State: not usable, so only reading and planning are allowed',
     sentence
@@ -184,21 +184,21 @@ test('S6: Show Policy for a policy written for a newer version says to update an
   for (const reason of ['needs-update', 'unknown-field', 'unsupported-version', 'vocabulary-unknown'] as const) {
     const text = gateCommands.policyDocumentText(failedClosed(reason), 0);
     assert.match(text, /update the extension/i, reason);
-    assert.ok(!/Reset Policy to Defaults/.test(text), reason);
+    assert.ok(!/Reset my rules/.test(text), reason);
     assert.match(text, /State: not usable, so only reading and planning are allowed/);
   }
-  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset Policy to Defaults/);
+  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset my rules/);
 });
 
 test('S6 (PR #143 review): an unknown setting in the person\'s own policy names both ways on, update or Reset with what it discards; another signer\'s never offers Reset', () => {
   const own = gateCommands.policyDocumentText({ ...failedClosed('unknown-field'), ownPolicy: true }, 0);
   assert.match(own, /If a newer version of NEAR AI wrote it, update the extension/);
-  assert.match(own, /NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded/);
+  assert.match(own, /Reset my rules in NEAR AI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded/);
   const other = gateCommands.policyDocumentText(failedClosed('unknown-field'), 0);
   assert.match(other, /update the extension/);
-  assert.ok(!/Reset Policy to Defaults/.test(other));
+  assert.ok(!/Reset my rules/.test(other));
   // A policy written for a newer version is never offered Reset, even the person's own.
-  assert.ok(!/Reset Policy to Defaults/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
+  assert.ok(!/Reset my rules/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
 });
 
 test('policyDocumentText lists each MCP server\'s label ceiling, and says when none is set (WP-GATE)', () => {

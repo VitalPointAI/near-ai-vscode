@@ -320,7 +320,7 @@ export function patternLocalHosts(routing: Pick<RoutingTable, 'localHosts'>): re
  */
 export function localHostPatternNotice(patterns: readonly string[]): string {
   const named = patterns.slice(0, 5).join(', ');
-  return `Your policy names ${named} as local. From this version, content at a local-only level (Protected B, org Restricted and NATO Restricted by default) goes to a host other than this computer only when the policy names that exact host and the runtime uses https, and Protected C, classified and NATO Confidential and above never leave this computer. To keep using a host, replace the pattern with its exact name in the policy's local hosts (NEAR AI: Edit Policy).`;
+  return `Your policy names ${named} as local. From this version, content at a local-only level (Protected B, org Restricted and NATO Restricted by default) goes to a host other than this computer only when the policy names that exact host and the runtime uses https, and Protected C, classified and NATO Confidential and above never leave this computer. To keep using a host, replace the pattern with its exact name in the policy's local hosts (in NEAR AI: Policy, choose Edit my rules).`;
 }
 
 /** What a chat says once, and the record keeps, when classified work runs on a computer not recorded as accredited (coherence review S2). */
@@ -482,7 +482,7 @@ export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, st
 });
 
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
-export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window, or run NEAR AI: Show Policy to see whether your policy needs attention.';
+export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window, or open NEAR AI: Policy to see whether your policy needs attention.';
 
 /** An authorization body that verifyAuthorization accepted against its one key source (D-15); decideRoute reads bodies only. */
 export interface VerifiedAuthorization {

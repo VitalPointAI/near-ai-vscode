@@ -77,7 +77,17 @@ export interface PolicyEditorDeps {
   showStored(): Promise<void>;
   record(id: ProposalEventId, detail: { proposalHash: string; changes: number; from: string }): void;
   onDidChange(listener: () => void): { dispose(): void };
+  /** Opens an unsigned draft of your own rules (today's Edit Policy flow). Absent: the page offers no Edit my rules. */
+  editOwn?(): Promise<void>;
+  /** True while a draft of your own rules waits to be applied. */
+  hasDraft?(): boolean;
+  /** Shows the waiting draft on this page as a proposal (today's Apply Policy Draft flow). */
+  applyDraft?(): Promise<void>;
 }
+
+/** The page's own buttons beyond Show as stored and Reset: each is offered only when this device can sign your own rules (41-15). */
+export const PAGE_ACTIONS = Object.freeze(['edit-own', 'apply-draft'] as const);
+export type PageAction = (typeof PAGE_ACTIONS)[number];
 
 /** A change a flow proposes: who asks, why, and the next rules computed from the current ones. */
 export interface PolicyChange {
@@ -167,6 +177,17 @@ function checkStale(shown: Pending): boolean {
   return shown.stale;
 }
 
+/**
+ * Edit my rules, and Apply my draft while a draft waits: only while your own rules can be read and this device has the key that signs them, and never
+ * while a shown proposal is being applied or saved. The signer is asked only when the host offers the flow.
+ */
+function pageActionsOf(): PageAction[] {
+  const deps = host?.deps;
+  if (deps?.editOwn === undefined || pending?.busy === true) return [];
+  if (deps.state() === undefined || deps.signer() === undefined) return [];
+  return deps.applyDraft !== undefined && deps.hasDraft?.() === true ? ['edit-own', 'apply-draft'] : ['edit-own'];
+}
+
 function actionsOf(): Action[] {
   if (pending === undefined) return [];
   if (pending.stale || pending.changes.length === 0) return ['discard'];
@@ -196,6 +217,7 @@ async function post(): Promise<void> {
     sections: state === undefined ? [] : policySections(state.effective, state.effective.labels.scales),
     ...(proposal === undefined ? {} : { proposal }),
     actions: actionsOf(),
+    pageActions: pageActionsOf(),
     ...(text === undefined ? {} : { notice: text }),
     ...(at === undefined ? {} : { at, atSeq })
   });
@@ -285,6 +307,17 @@ async function receive(message: unknown): Promise<void> {
     }
     case 'show-stored': await deps.showStored(); break;
     case 'reset': await deps.reset(); break;
+    case 'edit-own': {
+      if (!pageActionsOf().includes('edit-own')) break;
+      await deps.editOwn?.();
+      break;
+    }
+    case 'apply-draft': {
+      // The draft becomes a proposal on this page, which settles only when it ends, so it is not awaited here.
+      if (!pageActionsOf().includes('apply-draft')) break;
+      void deps.applyDraft?.().catch(() => undefined).then(() => post());
+      break;
+    }
     default: break;
   }
 }

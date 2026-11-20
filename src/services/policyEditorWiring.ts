@@ -1,6 +1,7 @@
 // The policy editor's wiring (FND-09, D-44): the port the gate's commands reach the editor page through, the host-backed dependencies the page is given,
 // and Apply Policy Draft as a proposal on that page. Editor layer. The page applies a change only through `applyPersonal`, which hands it to the host's own
 // checks (the stale base, the widening check against your organization's rules, the signature); nothing here signs or writes the policy itself.
+import { existsSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -17,12 +18,12 @@ import { openPolicyEditor, openPolicyProposal, registerPolicyEditor } from './po
 import type { PolicyChange, PolicyEditorDeps, PolicyEditorState, ProposalOutcome } from './policyEditor';
 
 export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
-export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Run NEAR AI: Edit Policy first.';
+export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Open NEAR AI: Policy and choose Edit my rules first.';
 export const OPEN_FAILED_TEXT = 'NEAR AI could not open your policy.';
 const APPLY_FAILED_TEXT = 'Nothing was changed: NEAR AI could not apply your policy draft.';
 const UNTRUSTED_TEXT = 'Nothing was changed: your policy cannot be trusted right now, so it cannot be edited.';
 /** Who proposes a draft, as the page shows it. */
-const DRAFT_FROM = 'Edit Policy';
+const DRAFT_FROM = 'Edit my rules';
 
 /** How the gate's commands reach the policy editor page; a test passes its own. */
 export interface PolicyEditorPort {
@@ -62,6 +63,8 @@ export interface PolicyEditorHooks {
   reset(): Promise<unknown>;
   /** Today's read-only stored text view. */
   showStored(): Promise<void>;
+  /** Edit Policy and Apply Policy Draft, for the page's Edit my rules and Apply my draft; the draft lives under this storage folder. */
+  readonly ownRules?: { readonly globalStorageDir: string; edit(): Promise<unknown>; applyDraft(): Promise<unknown> };
 }
 
 /** The host-backed deps the page is registered with, and a disposer for the device key refresh. */
@@ -92,9 +95,18 @@ export function policyEditorDeps(host: GateHost, hooks: PolicyEditorHooks): { re
     reset: async () => { await hooks.reset(); },
     showStored: () => hooks.showStored(),
     record: (id, detail) => { host.recordPolicyEvent(id, `${String(detail.changes)} changes from ${detail.from}, proposal ${detail.proposalHash.slice(0, 16)}`); },
-    onDidChange: (listener) => ({ dispose: host.onDidChange(listener) })
+    onDidChange: (listener) => ({ dispose: host.onDidChange(listener) }),
+    ...(hooks.ownRules === undefined ? {} : ownRulesDeps(hooks.ownRules))
   };
   return { deps, dispose: stop };
+}
+
+function ownRulesDeps(own: NonNullable<PolicyEditorHooks['ownRules']>): Pick<PolicyEditorDeps, 'editOwn' | 'hasDraft' | 'applyDraft'> {
+  return {
+    editOwn: async () => { await own.edit(); },
+    hasDraft: () => existsSync(draftFiles(own.globalStorageDir).draft),
+    applyDraft: async () => { await own.applyDraft(); }
+  };
 }
 
 export function draftFiles(globalStorageDir: string): { readonly draft: string; readonly base: string } {

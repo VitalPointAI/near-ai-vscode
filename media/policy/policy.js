@@ -63,9 +63,12 @@
     }
   }
 
-  // Show as stored and Reset live on this page only; the host decides what each does.
-  function renderPageActions() {
+  // Edit my rules and Apply my draft only when the host offers them; Show as stored and Reset always. The host checks each message again.
+  const PAGE_ACTION_LABELS = { 'edit-own': 'Edit my rules', 'apply-draft': 'Apply my draft' };
+  function renderPageActions(offered) {
+    const own = (Array.isArray(offered) ? offered : []).filter((action) => Object.prototype.hasOwnProperty.call(PAGE_ACTION_LABELS, action));
     $('page-actions').replaceChildren(
+      ...own.map((action) => button(PAGE_ACTION_LABELS[action], () => vscode.postMessage({ type: action }), false)),
       button('Show as stored', () => vscode.postMessage({ type: 'show-stored' }), true),
       button('Reset my rules', () => vscode.postMessage({ type: 'reset' }), true)
     );
@@ -79,6 +82,7 @@
       $('set-by').textContent = text(message.setBy);
       $('notice').textContent = text(message.notice);
       renderProposal(message.proposal, message.actions);
+      renderPageActions(message.pageActions);
       // Scroll to the section asked for once per request, not on every update.
       const seq = typeof message.atSeq === 'number' ? message.atSeq : 0;
       renderSections(message.sections, seq !== lastAtSeq ? text(message.at) : '');
@@ -88,6 +92,6 @@
     }
   });
 
-  renderPageActions();
+  renderPageActions([]);
   vscode.postMessage({ type: 'ready' });
 })();

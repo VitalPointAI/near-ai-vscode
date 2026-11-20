@@ -985,12 +985,12 @@ export function markVerdictFor(runtime: GateRuntime, before: Mark | undefined, m
  * names Lower This Chat's Label too, so the chat offers that button under the refusal.
  */
 export function mcpCeilingText(server: string, above: Label, ceiling: Clearance): string {
-  return `This chat holds content at ${labelKeyShown(above)}, above the highest label your policy lets the MCP server "${server}" receive (${labelKeyShown(ceiling)}${ceiling.expiresAt === undefined ? '' : `, until ${ceiling.expiresAt}`}), so nothing was sent to it. Use this server from a chat that has not read that content, or change its ceiling with NEAR AI: Edit Policy. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.`;
+  return `This chat holds content at ${labelKeyShown(above)}, above the highest label your policy lets the MCP server "${server}" receive (${labelKeyShown(ceiling)}${ceiling.expiresAt === undefined ? '' : `, until ${ceiling.expiresAt}`}), so nothing was sent to it. Use this server from a chat that has not read that content, or change its ceiling in NEAR AI: Policy with Edit my rules. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.`;
 }
 
 /** The sentence of label.mcp-ceiling when the ceiling could not be checked (review round 1): the call is refused, fail closed, and no label is blamed. */
 export function mcpCeilingUnjudgedText(server: string): string {
-  return `NEAR AI could not check this chat's label against the highest label your policy lets the MCP server "${server}" receive, so the call was refused and nothing was sent to it. Try again; if it keeps happening, reload the window or check the server's ceiling with NEAR AI: Show Policy.`;
+  return `NEAR AI could not check this chat's label against the highest label your policy lets the MCP server "${server}" receive, so the call was refused and nothing was sent to it. Try again; if it keeps happening, reload the window or check the server's ceiling in NEAR AI: Policy.`;
 }
 
 /**

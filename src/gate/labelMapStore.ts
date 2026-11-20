@@ -69,6 +69,9 @@ export const LABEL_MAP_RESIGN_QUESTION = "Sign it again with this computer's key
 /** The question before the labels this computer last verified are signed again over a missing, older or unreadable file (D-59). */
 export const LABEL_MAP_RESTORE_QUESTION = 'Sign the labels this computer last checked again?';
 
+/** Said when a label change needs this computer's signing key and there is none yet. */
+export const NO_SIGNING_KEY_TEXT = 'Nothing was written: NEAR AI has no signing key on this computer yet. Open NEAR AI: Policy and try again.';
+
 /** A change that wrote nothing, with a plain message. */
 export class LabelMapError extends Error {
   public constructor(message: string, options?: ErrorOptions) {
@@ -483,7 +486,7 @@ function secretLikeKey(map: LabelMapPayload): string | undefined {
 export async function updateLabelMap(root: string, change: (map: LabelMapPayload) => LabelMapPayload, options: UpdateLabelMapOptions): Promise<LabelMapWrite> {
   return withLabelLock(options.globalStorageDir, root, async () => {
     const identity = await loadDeviceIdentity(options.secrets).catch(() => undefined);
-    if (identity === undefined) throw new LabelMapError('Nothing was written: NEAR AI has no signing key on this computer yet. Open the policy with NEAR AI: Show Policy and try again.');
+    if (identity === undefined) throw new LabelMapError(NO_SIGNING_KEY_TEXT);
     const status = await statusOf(options);
     const held = await readLabelMarker(options.globalStorageDir, options.secrets, root);
     const raw = await readRaw(root, status);

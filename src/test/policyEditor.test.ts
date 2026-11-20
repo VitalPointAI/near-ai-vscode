@@ -36,12 +36,18 @@ interface Calls {
   reset: number;
   showStored: number;
   signer: number;
+  editOwn: number;
+  applyDraft: number;
 }
 
 interface HarnessOptions {
   state: EditorState | undefined;
   applyAnswer?: { ok: true } | { ok: false; text: string };
   signer?: PayloadSigner;
+  /** The host offers Edit my rules and Apply my draft (41-15); `draft` says whether a draft waits. */
+  ownRules?: { draft: { on: boolean } };
+  /** applyPersonal waits for this before it answers (an Apply still running). */
+  applyGate?: Promise<void>;
 }
 
 interface Harness {
@@ -122,17 +128,23 @@ function harness(options: HarnessOptions): Harness {
   } finally {
     nodeModule._load = originalLoad;
   }
-  const calls: Calls = { applyPersonal: [], record: [], reset: 0, showStored: 0, signer: 0 };
+  const calls: Calls = { applyPersonal: [], record: [], reset: 0, showStored: 0, signer: 0, editOwn: 0, applyDraft: 0 };
+  const own = options.ownRules;
   const context = { extensionUri: uri('/extension'), subscriptions: [] as unknown[] };
   editor.registerPolicyEditor(context as never, {
     state: () => state,
     directionOf: () => undefined,
-    applyPersonal: async (next, baseHash) => { calls.applyPersonal.push({ next, baseHash }); return options.applyAnswer ?? { ok: true }; },
+    applyPersonal: async (next, baseHash) => { calls.applyPersonal.push({ next, baseHash }); await options.applyGate; return options.applyAnswer ?? { ok: true }; },
     signer: () => { calls.signer += 1; return options.signer; },
     reset: async () => { calls.reset += 1; },
     showStored: async () => { calls.showStored += 1; },
     record: (id, detail) => { calls.record.push({ id, detail: { ...detail } }); },
-    onDidChange: (listener) => { listeners.push(listener); return { dispose: () => undefined }; }
+    onDidChange: (listener) => { listeners.push(listener); return { dispose: () => undefined }; },
+    ...(own === undefined ? {} : {
+      editOwn: async () => { calls.editOwn += 1; own.draft.on = true; },
+      hasDraft: () => own.draft.on,
+      applyDraft: async () => { calls.applyDraft += 1; }
+    })
   });
   return {
     editor,
@@ -552,4 +564,83 @@ test('copy on the page', async () => {
   for (const change of proposalOf(state.personal, widenInternal.next(state.personal))) assertCopy(change.effect, 'effect');
   assert.doesNotMatch(readFileSync(path.join(__dirname, '..', 'services', 'policyEditor.js'), 'utf8'), /getConfiguration/);
   assert.doesNotMatch(readFileSync(path.join(__dirname, '..', 'services', 'webview', 'openPanel.js'), 'utf8'), /getConfiguration/);
+});
+
+// ---- 41-15: with Edit Policy off the palette, the page itself starts an edit of your own rules (Edit my rules) and applies a waiting draft ----
+
+test('41-15: Edit my rules is offered when this device can sign your own rules and runs the Edit Policy flow; Apply my draft follows a waiting draft', async () => {
+  const draft = { on: false };
+  const h = harness({ state: ownState(), signer: deviceKey(), ownRules: { draft } });
+  h.editor.openPolicyEditor();
+  await settle();
+  assert.deepEqual(h.lastState().pageActions, ['edit-own'], 'no draft yet: Edit my rules only');
+  await h.send({ type: 'edit-own' });
+  assert.equal(h.calls.editOwn, 1, 'the Edit Policy flow ran');
+  assert.deepEqual(h.lastState().pageActions, ['edit-own', 'apply-draft'], 'the draft it wrote can be applied from the page');
+  await h.send({ type: 'apply-draft' });
+  await settle();
+  assert.equal(h.calls.applyDraft, 1, 'the Apply Policy Draft flow ran');
+  // Under your organization's rules the draft is still of your own rules, which this device signs.
+  const organization = harness({ state: organizationState(), signer: deviceKey(), ownRules: { draft: { on: false } } });
+  organization.editor.openPolicyEditor();
+  await settle();
+  assert.deepEqual(organization.lastState().pageActions, ['edit-own']);
+  await organization.send({ type: 'edit-own' });
+  assert.equal(organization.calls.editOwn, 1);
+  // The page script draws exactly the offered buttons, with these words.
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'policy', 'policy.js'), 'utf8');
+  assert.match(script, /'edit-own': 'Edit my rules'/);
+  assert.match(script, /'apply-draft': 'Apply my draft'/);
+  assert.match(script, /renderPageActions\(message\.pageActions\)/);
+});
+
+test('41-15: Edit my rules and Apply my draft are refused unless offered: no signing key, rules that cannot be read, no draft, no flow, or an Apply running', async () => {
+  const tryAll = async (h: Harness): Promise<void> => { for (const type of ['edit-own', 'apply-draft']) await h.send({ type }); await settle(); };
+  // No key on this device to sign your own rules.
+  const unsigned = harness({ state: ownState(), ownRules: { draft: { on: true } } });
+  unsigned.editor.openPolicyEditor();
+  await settle();
+  assert.deepEqual(unsigned.lastState().pageActions, []);
+  await tryAll(unsigned);
+  assert.equal(unsigned.calls.editOwn + unsigned.calls.applyDraft, 0);
+  // Your rules cannot be read right now.
+  const unreadable = harness({ state: undefined, signer: deviceKey(), ownRules: { draft: { on: true } } });
+  unreadable.editor.openPolicyEditor();
+  await settle();
+  assert.deepEqual(unreadable.lastState().pageActions, []);
+  await tryAll(unreadable);
+  assert.equal(unreadable.calls.editOwn + unreadable.calls.applyDraft, 0);
+  // No draft waits: only Edit my rules.
+  const noDraft = harness({ state: ownState(), signer: deviceKey(), ownRules: { draft: { on: false } } });
+  noDraft.editor.openPolicyEditor();
+  await settle();
+  await noDraft.send({ type: 'apply-draft' });
+  await settle();
+  assert.equal(noDraft.calls.applyDraft, 0, 'Apply my draft with no draft changes nothing');
+  // The host offers no flow (a page with no draft storage): nothing is offered, and the signer is never asked.
+  const noFlow = harness({ state: ownState(), signer: deviceKey() });
+  noFlow.editor.openPolicyEditor();
+  await settle();
+  assert.deepEqual(noFlow.lastState().pageActions, []);
+  await tryAll(noFlow);
+  assert.equal(noFlow.calls.signer, 0);
+  // While a shown proposal is being applied, neither starts.
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const busy = harness({ state: ownState(), signer: deviceKey(), ownRules: { draft: { on: true } }, applyGate: gate });
+  const outcome = busy.editor.openPolicyProposal(widenInternal);
+  await settle();
+  const applying = busy.send({ type: 'apply', id: busy.lastState().proposal.id });
+  await settle();
+  await tryAll(busy);
+  assert.equal(busy.calls.editOwn + busy.calls.applyDraft, 0, 'refused while an Apply runs');
+  release();
+  await applying;
+  assert.equal(await outcome, 'applied');
+  assert.deepEqual(busy.lastState().pageActions, ['edit-own', 'apply-draft'], 'offered again once the Apply ended');
+  // Forged shapes are ignored.
+  const forged = harness({ state: ownState(), signer: deviceKey(), ownRules: { draft: { on: true } } });
+  for (const message of [{ type: ['edit-own'] }, { type: 'Edit-Own' }, 'edit-own', { type: 'apply-draft ' }]) await forged.send(message);
+  await settle();
+  assert.equal(forged.calls.editOwn + forged.calls.applyDraft, 0);
 });
