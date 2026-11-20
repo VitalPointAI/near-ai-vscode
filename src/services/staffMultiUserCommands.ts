@@ -13,7 +13,7 @@
 // Admission (D-16): the lead opens the join request, sees the person's name and the six words, and the person is admitted only when the lead picks
 // "The six words match" in a modal dialog; "They do not match" or closing the dialog writes nothing.
 import { createHash } from 'node:crypto';
-import { lstat, realpath, writeFile } from 'node:fs/promises';
+import { chmod, lstat, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -193,12 +193,18 @@ async function inside(folder: string, file: string): Promise<boolean> {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+/** Saves a file readable by this user account only: an invitation holds a one-time secret. An existing file chosen in the dialog is narrowed too. */
+async function saveFile(target: string, text: string): Promise<void> {
+  await writeFile(target, text, { encoding: 'utf8', mode: 0o600 });
+  await chmod(target, 0o600);
+}
+
 /** Writes the file a flow returned to the place the person chose, and shows the flow's sentence with where it was saved. */
 async function deliver(result: MembershipResult, target: string, ifNotSaved: string): Promise<void> {
   if (!result.ok) { show(result); return; }
   if (result.file === undefined) { tell(result.message); return; }
   try {
-    await writeFile(target, result.file.text, { encoding: 'utf8', mode: 0o600 });
+    await saveFile(target, result.file.text);
   } catch (error) {
     warn(`${result.message} But the file could not be saved at ${target} (${error instanceof Error ? error.message : String(error)}). ${ifNotSaved}`);
     return;
@@ -377,7 +383,7 @@ async function joinCommand(context: StaffCommandContext): Promise<void> {
   const result = await membership.joinFromInvite(root, deps, read.text, { name });
   if (!result.ok) { show(result); return; }
   try {
-    await writeFile(target, result.file?.text ?? '', { encoding: 'utf8', mode: 0o600 });
+    await saveFile(target, result.file?.text ?? '');
   } catch (error) {
     warn(`The join request could not be saved at ${target} (${error instanceof Error ? error.message : String(error)}). Run Staff: Join Staff Project again and choose another place.`);
     return;

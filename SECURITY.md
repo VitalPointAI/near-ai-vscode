@@ -1451,6 +1451,43 @@ USB stick), and there is no server to trust.
   not verified." The six words check that the right device joined; they do not check who the
   person is or what clearance they really hold.
 
+### People and clearances are declared by the staff lead
+
+Verified credentials arrive in a later release. Until then, a shared staff project knows people
+only by what the staff lead says about them.
+
+- **Declared, not checked.** The name, seat, roles and clearance of each person in a shared
+  project are what the staff lead (or the deputy lead) declares when inviting or changing them.
+  NEAR AI does not check who a person is or what clearance they really hold. The six words check
+  only that the device that joined is the one the person used.
+- **Every screen says so.** Every multi-user confirmation and result shows three notices: that a
+  clearance is self-declared and not an enforced boundary, that labels and routing help prevent
+  mistakes but are not accreditation, and "People and clearances in this project are declared by
+  the staff lead, not verified."
+- **Labels are not accreditation.** A part of the project with a higher label is sealed under its
+  own key and given only to the devices whose declared clearance covers it. That helps prevent
+  mistakes; it does not make any computer accredited for classified information, and a declared
+  clearance can be wrong.
+- **Off unless you turn it on.** Everything multi-user is a preview, off unless a person turns on
+  `nearAi.staff.multiUserPreview` in their own settings. The setting applies to the whole editor,
+  so a project folder cannot turn it on for you. While it is off, the multi-user commands are
+  hidden from the Command Palette, a command run anyway only says how to turn it on, no
+  multi-user code is loaded, and no file, folder or secret is made.
+- **Only a person runs these steps.** Making a project multi-user, inviting, joining, admitting,
+  removing, adding a computer, choosing a roster branch, naming the deputy, handing over the lead,
+  changing a member and making a single-machine copy are commands a person runs, each change
+  behind a confirmation. No agent tool runs a command, and none of them is a decision the Staff
+  Room's buttons can run. A person is admitted only after the lead picks "The six words match".
+- **The invitation stays out of the project.** An invitation holds a one-time secret, so the
+  command does not save it inside the project folder, where git could commit it, and saves every
+  invitation, join request and welcome file readable by your own user account only.
+- **The single-machine copy is honest about what it carries.** Steps other people took in the
+  shared project are carried under the name and key of the person who makes the copy, written
+  like "A. Person (approved in the shared project, carried by B. Person)". A decision people made
+  at the same time is left open. The result lists what is not copied (registers, calculator
+  records, gate reports, proposals, settings, observations and the staff event log), and the
+  shared project is not changed.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR

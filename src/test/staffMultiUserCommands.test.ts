@@ -311,6 +311,7 @@ test('invite, join, admit with the six words matching, and the welcome: each thr
   const expires = /expires on (\d{4}-\d{2}-\d{2})/.exec(invited.message)?.[1];
   assert.equal(expires, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), 'open 7 days');
   hasNotices(invited.message, 'the invitation result');
+  if (process.platform !== 'win32') assert.equal(statSync(invitation).mode & 0o777, 0o600, 'the invitation is readable by its owner only');
   assert.equal(stub.saveDialogRequests[stub.saveDialogRequests.length - 1].filters?.['Staff invitation']?.[0], 'near-staff-invite');
 
   const { request, words } = await joinBy(joiner, invitation, 'B. Example');
@@ -646,4 +647,28 @@ test('join: a file that is not an invitation is refused with the invitation read
   await run(C.join);
   assert.ok(lastNotification().message.startsWith(MEMBERSHIP_REFUSALS['folder-has-staff-project']), lastNotification().message);
   assert.deepEqual(state(occupied).files, before.files, 'nothing written in the folder or the out folder');
+});
+
+// ---- Task 3: every text plain, each refusal with a next step -----------------------------------------------------------------------------------------
+
+test('every text a command can show has no em-dash, calls an organization only "your organization", and every refusal says what to do next', () => {
+  const own = [
+    multi.MULTI_USER_PREVIEW_OFF_TEXT, multi.MAKE_MULTI_USER_QUESTION, multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT,
+    multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.NOT_COPIED_TEXT, multi.SIX_WORDS_MATCH, multi.SIX_WORDS_DIFFER, ...Object.values(multi.REFUSAL_NEXT_STEPS)
+  ];
+  const refusals: Array<[string, string]> = [
+    ...Object.entries(MEMBERSHIP_REFUSALS), ...Object.entries(MIGRATION_REFUSALS), ...Object.entries(COPY_REFUSALS), ...Object.entries(PROJECT_REFUSALS_HOST),
+    ...Object.entries(INVITE_REFUSALS), ...Object.entries(ROSTER_REFUSALS), ...Object.entries(MEMBER_REFUSALS), ...Object.entries(CELL_REFUSALS)
+  ];
+  const shown = refusals.map(([reason, message]) => multi.shownRefusal(reason, message));
+  for (const text of [...own, ...shown, ...NOTICES]) {
+    assert.equal(text.includes(EM_DASH), false, text);
+    assert.equal(/organi[sz]ation/i.test(text.replace(/your organization/gi, '').replace(/organizational control/gi, '')), false, text);
+  }
+  const NEXT = /\b(ask|use|choose|open|try|run|check|make|send|compare|put|look|admit|turn on|cancel|move|fix|copy|pick|hand|add|invite|close|set it aside|remove)\b/i;
+  for (const text of shown) assert.match(text, NEXT, 'a refusal says what to do next');
+  for (const text of [multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT, multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.MULTI_USER_PREVIEW_OFF_TEXT]) assert.match(text, NEXT, text);
+  assert.deepEqual(NOTICES, [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, 'People and clearances in this project are declared by the staff lead, not verified.']);
+  // None of the commands is a person decision the Staff Room may run (D-37).
+  for (const id of Object.values(C)) assert.equal(PERSON_DECISION_COMMANDS.includes(id), false, id);
 });

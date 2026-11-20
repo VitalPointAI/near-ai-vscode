@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Staff collaboration (preview)
+
+- **Multi-user staff projects, behind a setting.** Turn on `nearAi.staff.multiUserPreview` (off by
+  default) to try staff projects that several people work on from their own computers. While it
+  is off nothing changes: the commands below are hidden and do nothing.
+- **Make This Staff Project Multi-User.** **NEAR AI: Staff: Make This Staff Project Multi-User**
+  checks the four staff ledgers first, says what will happen, and then moves the project's history
+  into a signed shared record. You become its staff lead. The original files are kept in
+  `.planning/staff/legacy/` and never deleted.
+- **Invite, join and admit by file and six words.** **Staff: Invite to Staff Project** saves an
+  invitation file to send any way you like. The person opens it with **Staff: Join Staff
+  Project**, sends back a join request and reads you six words. **Staff: Admit to Staff Project**
+  shows the same six words and admits them only when you confirm the words match. They open the
+  welcome file you send back with **Staff: Join Staff Project**.
+- **Manage who is in the project.** **Staff: Remove from Staff Project** removes a person, one of
+  their devices or an open invitation. **Staff: Change a Staff Project Member** changes a name,
+  seat, roles, declared clearance or agent seats. **Staff: Add My Other Machine**, **Staff: Name
+  Deputy Lead**, **Staff: Hand Over Staff Lead** and **Staff: Choose Roster Branch** cover a
+  second computer, the deputy, the handover and a roster changed in two places at once. Removing
+  someone or lowering their clearance tells you plainly: "They keep what they already received.
+  They will not receive anything new."
+- **Make a Single-Machine Copy.** **Staff: Make a Single-Machine Copy** writes a copy you can work
+  in alone into an empty folder, and says what it does not copy.
+- **Declared, not verified.** Every multi-user screen says that people and clearances are declared
+  by the staff lead, not verified, and that labels are not accreditation.
+- In a shared project, Set Aside the Product Ledger, the product decisions and Decide a PIR now say
+  at once that the step is not available there, instead of after their dialogs.
+
 ## 0.4.34
 
 This release adds military staff teams. Set up a J2 intelligence, J5 plans, J3 operations or J4
