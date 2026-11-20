@@ -1,0 +1,55 @@
+import { randomBytes } from 'node:crypto';
+import * as vscode from 'vscode';
+import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from '../layoutProbe';
+
+// The start of the webview kit (DEVELOPER-STRUCTURE section 2); new pages use it, existing pages move later.
+// Copied from mcpView.ts: one content security policy that loads nothing by default, styles only from the extension, and scripts only with a fresh
+// nonce; the shared base.css before the page's own stylesheet; the layout probe under the extension-host tests. The page builds everything else with
+// textContent from the messages its host posts.
+
+export interface PanelSpec {
+  /** The panel's view type, unique to the page. */
+  readonly viewType: string;
+  /** The tab title, with no brand prefix (GLOSSARY section 5 rule 3). */
+  readonly title: string;
+  /** The page's folder under media/. */
+  readonly folder: string;
+  /** The page script's file name in that folder. */
+  readonly script: string;
+  /** The page stylesheet's file name in that folder. */
+  readonly style: string;
+  /** Static HTML the host writes into the body; never built from data. */
+  readonly body: string;
+  /** The page's name for the layout probe. */
+  readonly probe: string;
+  /** Keep the page alive while its tab is hidden. */
+  readonly retain?: boolean;
+}
+
+/** A tab title with a brand prefix ("NEAR AI:", "Near AI:"): the title says what the page is, never whose it is. */
+export const BRANDED_TITLE = /^(NEAR AI|Near AI)\s*:/i;
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Opens one webview page. Throws for a branded title, a programming error, before any panel is made. */
+export function openPanel(context: { readonly extensionUri: vscode.Uri }, spec: PanelSpec): vscode.WebviewPanel {
+  if (BRANDED_TITLE.test(spec.title)) throw new Error(`The panel title "${spec.title}" has a brand prefix; say what the page is.`);
+  const media = vscode.Uri.joinPath(context.extensionUri, 'media', spec.folder);
+  const shared = sharedMedia(context.extensionUri);
+  const view = vscode.window.createWebviewPanel(spec.viewType, spec.title, vscode.ViewColumn.Active, {
+    enableScripts: true, localResourceRoots: [media, shared], retainContextWhenHidden: spec.retain === true
+  });
+  view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
+  const nonce = randomBytes(16).toString('base64');
+  const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
+  const base = view.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString();
+  view.webview.html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${base}"><link rel="stylesheet" href="${asset(spec.style)}"><title>${escapeHtml(spec.title)}</title></head><body>
+${spec.body}
+${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="${nonce}" src="${asset(spec.script)}"></script></body></html>`;
+  registerLayoutProbe(spec.probe, view.webview);
+  return view;
+}

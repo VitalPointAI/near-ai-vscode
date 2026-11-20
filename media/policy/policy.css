@@ -1,0 +1,31 @@
+/* The rules page. Colours come from the VS Code theme; base.css sets the type and the buttons. */
+#notice:empty { display: none; }
+#notice {
+  padding: 8px 12px;
+  border-left: 3px solid var(--vscode-focusBorder);
+  background: var(--vscode-editorWidget-background);
+}
+#proposal {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+.changes { list-style: none; padding: 0; margin: 8px 0; }
+.change { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; overflow-wrap: anywhere; }
+.marker {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  border: 1px solid currentColor;
+}
+.marker.wider { color: var(--vscode-editorWarning-foreground); }
+.marker.stricter { color: var(--vscode-testing-iconPassed); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.rules { margin: 16px 0; }
+.rows { display: grid; grid-template-columns: minmax(8em, 1fr) 2fr; gap: 4px 12px; margin: 0; }
+.rows dt { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.rows dd { margin: 0; overflow-wrap: anywhere; }
+.page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+#set-by:empty { display: none; }
