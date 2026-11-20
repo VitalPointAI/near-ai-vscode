@@ -27,7 +27,8 @@ labels:    { scales, mappings, defaultLabel,
              lowering: { who, needsReason } }
 endpoints: [ { id, class, host (exact; a wildcard only for class org-plain and only up to a stated maxLabel),
                scheme: "https" | "http-loopback", tlsPin?, region, maxLabel, attestation?, provider? } ]
-authorizations: [ { id, kind: "protected-b" | "t1-risk" | "accredited-device" | "residency-exception" | "declassify",
+authorizations: [ { id, kind: "protected-b" | "t1-risk" | "accredited-device" | "residency-exception" | "declassify"
+                          | "export-person" | "export-endpoint",
                     subject: { endpoint | model | device | item }, scope: { projects, labels, uses },
                     conditions, evidence (assessment reference), namedPerson: { name, key },
                     signature (inner, by the named person), issuedAt, expiresAt (maximum per kind), revokedBy? } ]
@@ -35,6 +36,7 @@ models:    { mode: "report" | "enforce", unknownMaxTier, tierByLevel, tierByProj
              passports, defaults, localCatalogue, order }
 agents:    { maxMode, contexts, mcp: { unattended, labelCeilings } }
 residency: { required?: "CA", byLevel? }
+exportControl: { regimes, officials, registration, suggestRules, agentNetwork, retention, incidents }   // CGP-ITAR.md 6.4
 people:    { clearances (personal layer only, self-declared),
              organization: { mode, allowedModes, projectMayChoose, settings } }
 onboarding:{ contacts, locked, kindsOfWork, defaultScale,
@@ -102,6 +104,7 @@ Migration: each existing `localHosts` entry becomes an `org-plain` endpoint at t
 4. Residency: the endpoint's `region` must satisfy `residency` for this label or project (`route.residency`).
 5. The passport covers the use and matches the class (`models`).
 6. The clearance covers the label: effective clearance is the meet of the personal-layer clearance and the roster clearance for that project.
+7. Export control (`route.export-control`): for each reserved compartment (`CGP`, `ITAR`, `EAR`) on the label, the endpoint is `local` or an `export-endpoint` authorization covers it, and the person holds an `export-person` authorization for that regime. Reserved compartments come only from those signed decisions, never from a self-declared clearance. See `.planning/research/compliance-dashboard/CGP-ITAR.md`, sections 6 to 8.
 
 The same function serves the guide's `recommend()`, the model picker, sub-agent resolution, `privacy: private` members, `nearAi.privacyMode`, Team Mode's `teeOnly` and `allowedModels`, the hub and the Cohere adapter. Its output also feeds the trust line (`EXPERIENCE.md`, section 3) and the decision record. `privacyMode: tee-only` becomes a personal floor ("at least `attested-cloud`") inside it, and `SovereigntyMode` and `PrivacyPreflight`'s routing role are retired (the data-class checks for secrets and personal data stay, as label facts).
 

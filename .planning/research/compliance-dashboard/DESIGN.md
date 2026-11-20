@@ -5,6 +5,7 @@
 **Owner request (2026-11-20):** "We will need to obtain security accreditation (ITSG-33 controls and those from its successor from the Canadian Centre for Cyber Security). Perhaps as part of the docs site or in another area, we must provide a dashboard that reports compliance in real-time and provides the exact security control documentation required for each level of accreditation, and clearly showing where we are deficient at each level (and what needs to be done to reach compliance)."
 **Agreed shape:** the orchestrator's proposal (section 2), refined here by research.
 **Fits into:** the docs site (`docs-site/`, PR #141), CI (`.github/workflows/ci.yml`) and the release workflow (`.github/workflows/release.yml`), the guided setup's labels and its "never overclaim" rule (`.planning/research/guided-onboarding/DESIGN.md`, sections 4 and 14), the coherence glossary (`.planning/research/coherence/GLOSSARY.md`), the organization policy's `authorizations[]` records (Phase 41) and the Phase 25 cybersecurity harness (a later evidence source).
+**Extended by:** `CGP-ITAR.md` in this folder (2026-11-20): Canada's Controlled Goods Program and the US ITAR as two overlays beside the level pages, plus the markings, person and endpoint decisions, records and incidents they need.
 **Proposed phase:** Phase 44, in the 0.4.x line. It changes no part of the extension's user interface, so it can run beside Phases 30 to 43 (section 18).
 
 ## 1. Key points first
@@ -169,6 +170,7 @@ Levels follow the guided setup's labels and routing (guided-onboarding design, s
 | **Protected A** | Canada, Protected: Protected A | Our tailored selection of ITSP.10.033-01 with every removal justified; ITSP.10.171 as an overlay for contractors; cloud endpoints: Cloud Low or Medium assessment | as above; cloud only through attested routes (today's routing) | No official low profile exists (section 3.2), so tailoring decisions are shown, not hidden |
 | **Protected B** | Canada, Protected: Protected B | **ITSP.10.033-01** (official); cloud endpoints: provider's Cloud Medium assessment through ITSM.50.100 as inherited controls; contractors: Contract Security Program IT approval and ITSP.10.171 (CPCSC Level 2 or 3); optional PBHVA overlay for high value assets | local by default; hosted endpoints only with an `authorizations[kind=protected-b]` record | Matches the guide's Protected B copy |
 | **Classified** (later) | Canada, Classified: Confidential and Secret | ITSG-33 Annex 4A **Profile 3** (Secret / Medium / Medium), until a successor is published | the appliance only (L1b), never cloud | Page lists the documentation an assessor needs and states that the product makes no claim; COMSEC, emanation and physical security are your organization's |
+| Overlays: **Controlled goods (Canada)**, **ITAR** | Labels carrying the reserved compartments `CGP`, `ITAR`, `EAR`, on any level | Requirement catalogues from the Defence Production Act Part 2, the Controlled Goods Regulations and 22 CFR 120 to 130, mapped to ITSP.10.033 and product controls (`CGP-ITAR.md`, section 10) | this computer, or endpoints with a signed `export-person`/`export-endpoint` decision | Not levels: they combine with any level. Most rows are your organization's responsibility; the TEE question is shown as unsettled |
 | Not covered | Protected C, Top Secret, NATO Restricted and above | none published or not applicable | none | Page states the guide's stop rule: such work runs only on systems accredited for that level |
 
 Each level page also shows which components the level assumes (for example Protected B assumes local models or an authorized endpoint, and the relay with inbound authentication), so an organization reads only what applies to how it deploys.
@@ -333,6 +335,7 @@ The biggest gaps, with remediation and owner:
 | D9 | How tests are tied to controls | One mapping in `compliance/evidence-rules/`, checked for missing or skipped tests, not comments in tests |
 | D10 | Include ITSP.10.171 and CPCSC levels for defence suppliers? | Yes, as an overlay on the Protected A and Protected B pages, from the start |
 | D11 | Show your organization's view from a private overlay folder in the docs site? | Yes, local only, read-only, never uploaded |
+| D12 | Controlled Goods Program and ITAR? | Yes, as two overlay pages from requirement catalogues (`CGP-ITAR.md`, sections 10 and 14; ACCR-13, ACCR-14) |
 
 ## 18. Phase proposal
 
@@ -356,6 +359,8 @@ The biggest gaps, with remediation and owner:
 - ACCR-10: The pull request job summarizes control state changes; a drop from Met without a reviewed tailoring or POA&M change fails it once D5's switch is made.
 - ACCR-11: Nothing generated says compliant, accredited or certified about the product; the evidence bundle holds no secrets or organization data; an organization overlay is merged locally only.
 - ACCR-12: Gaps G1, G4, G5, G6, G7, G9 and G12 from the design are closed or have a dated POA&M item.
+- ACCR-13: Controlled goods (Canada) and ITAR overlays: requirement catalogues from the official texts with source hashes and an unofficial-representation notice, mapped to ITSP.10.033 and NIST SP 800-53 controls and to product statements, shown as two Accreditation pages with the same six states (`CGP-ITAR.md`, section 10).
+- ACCR-14: The copy lint refuses "ITAR compliant", "CGP compliant" and similar phrases about the product; rows that depend on unsettled questions (TEEs, encrypted storage at third parties) are never Met; a docs page gives the interim settings and what the product cannot stop (`CGP-ITAR.md`, sections 10.3 and 11).
 
 **Success criteria** (what must be TRUE):
 
