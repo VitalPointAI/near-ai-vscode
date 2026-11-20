@@ -30,8 +30,8 @@ const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_NAME_CHARS = 120;
 
 export interface InviteLead { member: string; writer: string; publicKey: string; x25519: string }
-export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; invite: string; secret: string; expiresAt: string }
-export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; mac: string }
+export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string }
+export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; mac: string; member?: string }
 export interface JoinMacFields { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string }
 
 export const INVITE_REFUSALS = {
@@ -41,7 +41,11 @@ export const INVITE_REFUSALS = {
   'wrong-project': 'This join request is for a different project. Check that you chose the right file.',
   'unknown-invite': 'This join request answers an invitation this project does not have. Ask the person to use the invitation you sent.',
   'bad-binding': 'The device keys in this join request do not belong together, so it cannot be used. Ask the person to make a new join request.',
-  'wrong-secret': 'This join request was not made with the invitation you sent. Ask the person to make a new join request from your invitation.'
+  'wrong-secret': 'This join request was not made with the invitation you sent. Ask the person to make a new join request from your invitation.',
+  'too-large': 'TODO',
+  'invite-used': 'TODO',
+  'invite-voided': 'TODO',
+  'wrong-device': 'TODO'
 } as const;
 export type InviteRefusal = keyof typeof INVITE_REFUSALS;
 export type InviteFailure = { ok: false; reason: InviteRefusal; message: string };
@@ -110,7 +114,7 @@ function joinPayloadOf(value: unknown): JoinRequestPayload | undefined {
 // The envelope's signer must be the key the payload names, so the status lookup answers active for that key only.
 const onlyKey = (publicKey: string): KeyStatusLookup => (key) => ({ state: key.publicKey === publicKey ? 'active' : 'unknown' });
 
-export interface BuildInviteInput { genesisHash: string; project: string; name: string; lead: { member: string; x25519: string }; invite: string; secret: string; expiresAt: string; now: Date }
+export interface BuildInviteInput { genesisHash: string; project: string; name: string; lead: { member: string; x25519: string }; invite: string; secret: string; expiresAt: string; now: Date; forMember?: string }
 
 // Signs an invite with the lead's device. Throws when the content is not a valid invite.
 export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): SignedPayload<InvitePayload> {
@@ -147,7 +151,7 @@ export function readInvite(file: unknown, now: Date): InviteRead {
   }
 }
 
-export interface BuildJoinRequestInput { name: string; x25519: string; now: Date }
+export interface BuildJoinRequestInput { name: string; x25519: string; now: Date; member?: string }
 
 // Signs a join request with the joining device for the invite it read. The X25519 binding signature is made by the same signer.
 export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, input: BuildJoinRequestInput): SignedPayload<JoinRequestPayload> {
@@ -161,7 +165,7 @@ export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, i
 export type JoinRequestCheck = { ok: true; request: JoinRequestPayload; writer: string } | InviteFailure;
 
 // The lead's check of a join request file (its JSON text or its parsed content) against the invite it answers and the secret the lead kept. Never throws.
-export function checkJoinRequest(file: unknown, expected: { invite: InvitePayload; secret: string }): JoinRequestCheck {
+export function checkJoinRequest(file: unknown, expected: { invite: InvitePayload; secret: string; now?: Date; rosterInvite?: { state: 'open' | 'used' | 'voided' } }): JoinRequestCheck {
   try {
     const parsed = fileValue(file, MAX_PAYLOAD_BYTES);
     if (!parsed.ok) return parsed;

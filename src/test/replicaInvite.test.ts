@@ -3,9 +3,9 @@
 // welcome file that lets a new device catch up on the roster with only the grants addressed to it.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildInvite, buildJoinRequest, checkJoinRequest, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
+import { INVITE_REFUSALS, buildInvite, buildJoinRequest, checkJoinRequest, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import type { InvitePayload, JoinRequestPayload } from '../domain/replica/invite';
-import { signPayload } from '../domain/team/signedPayload';
+import { MAX_PAYLOAD_BYTES, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_NOW, createRosterWorld } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
@@ -30,28 +30,30 @@ interface Invited {
 }
 
 // The lead writes the genesis and member.invite, then sends the invite file. The joiner has not answered yet.
-function invited(options: { expiresAt?: string } = {}): Invited {
+function invited(options: { forMember?: string; expiresAt?: string; genesisHash?: string } = {}): Invited {
   const world = createRosterWorld();
   const joiner = world.device('JO', JOINER_MEMBER);
   const { entry: genesis } = world.genesis();
   const secret = newJoinSecret();
   const expiresAt = options.expiresAt ?? INVITE_EXPIRES;
   const inviteEntry = world.rosterEntry(world.lead, 'member.invite', {
-    invite: INVITE_ID, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt, secretHash: joinSecretHash(secret)
+    invite: INVITE_ID, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt, secretHash: joinSecretHash(secret),
+    ...(options.forMember === undefined ? {} : { forMember: options.forMember })
   }, genesis.hash);
   const signed = buildInvite(world.lead.signer, {
-    genesisHash: genesis.hash, project: world.project, name: world.projectName, lead: { member: world.lead.member, x25519: world.lead.x25519 }, invite: INVITE_ID, secret, expiresAt, now: NOW
+    genesisHash: options.genesisHash ?? genesis.hash, project: world.project, name: world.projectName, lead: { member: world.lead.member, x25519: world.lead.x25519 }, invite: INVITE_ID,
+    secret, expiresAt, now: NOW, ...(options.forMember === undefined ? {} : { forMember: options.forMember })
   });
   const inviteText = asFile(signed);
   return { world, joiner, genesis, inviteEntry, secret, inviteText, invite: signed.payload };
 }
 
 // The joiner's side: read the invite text, answer it with this device, return the request as text.
-function answer(state: Invited, device: RosterDevice = state.joiner): string {
+function answer(state: Invited, device: RosterDevice = state.joiner, extra: { member?: string } = {}): string {
   const read = readInvite(state.inviteText, NOW);
   assert.equal(reasonOf(read), 'ok');
   const invite = (read as { ok: true; invite: InvitePayload }).invite;
-  return asFile(buildJoinRequest(device.signer, invite, { name: 'Jo Analyst', x25519: device.x25519, now: NOW }));
+  return asFile(buildJoinRequest(device.signer, invite, { name: 'Jo Analyst', x25519: device.x25519, now: NOW, ...extra }));
 }
 
 const requestOf = (text: string): SignedPayload<JoinRequestPayload> => JSON.parse(text) as SignedPayload<JoinRequestPayload>;
@@ -117,4 +119,192 @@ test('a request fully re-made by another device with a stolen invite file checks
   // Only the X25519 key substituted (the signing key kept) also changes the words.
   const halfSwap = inviteSafetyCode(state.invite, { publicKey: state.joiner.publicKey, x25519: mallory.x25519 });
   assert.notDeepEqual(halfSwap, joinerWords);
+});
+
+// ---- Task 2: every refusal by name (D-17, D-37) ----
+
+type Json = Record<string, unknown>;
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const inviteObject = (state: Invited): Json => JSON.parse(state.inviteText) as Json;
+// Every refusal any test below saw, so the leak test can search all of them.
+const seenRefusals: Array<{ reason: string; message: string }> = [];
+function refusedAs(result: { ok: boolean; reason?: string; message?: string }, reason: string): void {
+  assert.equal(reasonOf(result), reason);
+  assert.equal(result.message, (INVITE_REFUSALS as Record<string, string>)[reason]);
+  seenRefusals.push({ reason, message: result.message as string });
+}
+
+test('invite-expired: an invite read after its expiry is refused, one read at the expiry instant is not, and the lead\'s check given a later time refuses too', () => {
+  const state = invited();
+  assert.equal(reasonOf(readInvite(state.inviteText, new Date(INVITE_EXPIRES))), 'ok');
+  refusedAs(readInvite(state.inviteText, new Date(Date.parse(INVITE_EXPIRES) + 1)), 'invite-expired');
+  const request = answer(state);
+  assert.equal(reasonOf(checkJoinRequest(request, { invite: state.invite, secret: state.secret, now: new Date(INVITE_EXPIRES) })), 'ok');
+  refusedAs(checkJoinRequest(request, { invite: state.invite, secret: state.secret, now: new Date(Date.parse(INVITE_EXPIRES) + 1) }), 'invite-expired');
+});
+
+test('wrong-secret: a join request whose MAC was made with another secret is refused', () => {
+  const state = invited();
+  const request = answer(state);
+  refusedAs(checkJoinRequest(request, { invite: state.invite, secret: newJoinSecret() }), 'wrong-secret');
+  // The same device answering a copy of the invite carrying another secret (same id) is refused against the lead's real secret.
+  const other = clone(state.invite);
+  other.secret = newJoinSecret();
+  const forged = asFile(buildJoinRequest(state.joiner.signer, other, { name: 'Jo Analyst', x25519: state.joiner.x25519, now: NOW }));
+  refusedAs(checkJoinRequest(forged, { invite: state.invite, secret: state.secret }), 'wrong-secret');
+});
+
+test('wrong-project: a join request naming another genesis is refused, and so is a request checked against an invite of another project', () => {
+  const state = invited();
+  const elsewhere = invited({ genesisHash: 'e'.repeat(64) });
+  const request = answer(elsewhere);
+  refusedAs(checkJoinRequest(request, { invite: state.invite, secret: state.secret }), 'wrong-project');
+  refusedAs(checkJoinRequest(answer(state), { invite: elsewhere.invite, secret: state.secret }), 'wrong-project');
+});
+
+test('bad-signature: an invite or a join request with any changed field is refused', () => {
+  const state = invited();
+  const invite = inviteObject(state);
+  const inviteChanges: Array<(payload: Json & { lead: Json }) => void> = [
+    (payload) => { payload.name = 'Exercise Southwind'; },
+    (payload) => { payload.invite = 'inv-other'; },
+    (payload) => { payload.expiresAt = '2027-11-26T11:00:00.000Z'; },
+    (payload) => { payload.secret = newJoinSecret(); },
+    (payload) => { payload.genesisHash = 'e'.repeat(64); },
+    (payload) => { payload.project = 'f'.repeat(32); },
+    (payload) => { payload.lead.member = 'mbr-other'; },
+    (payload) => { payload.lead.x25519 = state.world.device('MALLORY', 'mbr-mallory').x25519; }
+  ];
+  for (const change of inviteChanges) {
+    const copy = clone(invite) as Json & { payload: Json & { lead: Json } };
+    change(copy.payload);
+    refusedAs(readInvite(asFile(copy), NOW), 'bad-signature');
+  }
+  const signedAt = clone(invite);
+  signedAt.signedAt = '2026-11-19T12:00:00.001Z';
+  refusedAs(readInvite(asFile(signedAt), NOW), 'bad-signature');
+  // An invite signed by another device that claims to be the lead's: its signer is not the key the payload names.
+  const mallory = state.world.device('MALLORY', 'mbr-mallory');
+  const byMallory = signPayload(mallory.signer, 'staff-invite', state.invite, { now: () => NOW });
+  refusedAs(readInvite(asFile(byMallory), NOW), 'bad-signature');
+
+  const request = JSON.parse(answer(state)) as Json & { payload: Json };
+  const requestChanges: Array<(payload: Json) => void> = [
+    (payload) => { payload.name = 'Someone Else'; },
+    (payload) => { payload.invite = 'inv-other'; },
+    (payload) => { payload.genesisHash = 'e'.repeat(64); },
+    (payload) => { payload.publicKey = mallory.publicKey; },
+    (payload) => { payload.x25519 = mallory.x25519; },
+    (payload) => { payload.x25519Sig = mallory.x25519Sig; },
+    (payload) => { payload.mac = joinMac(newJoinSecret(), { invite: INVITE_ID, genesisHash: state.genesis.hash, name: 'Jo Analyst', publicKey: state.joiner.publicKey, x25519: state.joiner.x25519 }); }
+  ];
+  for (const change of requestChanges) {
+    const copy = clone(request);
+    change(copy.payload);
+    refusedAs(checkJoinRequest(asFile(copy), { invite: state.invite, secret: state.secret }), 'bad-signature');
+  }
+});
+
+test('unknown-invite: a join request answering an invitation the lead does not hold is refused', () => {
+  const state = invited();
+  // An invitation of the same project with another id (as if the lead had voided and forgotten it, or it came from someone else).
+  const other = clone(state.invite);
+  other.invite = 'inv-someone-else';
+  const answered = asFile(buildJoinRequest(state.joiner.signer, other, { name: 'Jo Analyst', x25519: state.joiner.x25519, now: NOW }));
+  refusedAs(checkJoinRequest(answered, { invite: state.invite, secret: state.secret }), 'unknown-invite');
+});
+
+test('invite-used and invite-voided: the lead\'s check refuses a request for an invitation the roster shows as used or voided, and accepts it while open', () => {
+  const state = invited();
+  const request = answer(state);
+  assert.equal(reasonOf(checkJoinRequest(request, { invite: state.invite, secret: state.secret, rosterInvite: { state: 'open' } })), 'ok');
+  refusedAs(checkJoinRequest(request, { invite: state.invite, secret: state.secret, rosterInvite: { state: 'used' } }), 'invite-used');
+  refusedAs(checkJoinRequest(request, { invite: state.invite, secret: state.secret, rosterInvite: { state: 'voided' } }), 'invite-voided');
+});
+
+test('malformed: a missing field, an extra field, a __proto__ key, a non-object and text that is not JSON are each refused, for the invite and the request', () => {
+  const state = invited();
+  const invite = inviteObject(state);
+  const request = JSON.parse(answer(state)) as Json;
+  const variants = (file: Json): string[] => {
+    const missing = clone(file) as Json & { payload: Json };
+    delete missing.payload.name;
+    const extra = clone(file) as Json & { payload: Json };
+    extra.payload.hub = 'hub.example.test';
+    const protoText = asFile(file).replace('{"', '{"__proto__":{"polluted":true},"');
+    const protoInPayload = asFile(file).replace('"payload":{', '"payload":{"__proto__":{"polluted":true},');
+    return [asFile(missing), asFile(extra), protoText, protoInPayload, '42', '[]', 'null', '"text"', 'not json at all', '{"v":1'];
+  };
+  for (const text of variants(invite)) refusedAs(readInvite(text, NOW), 'malformed');
+  for (const text of variants(request)) refusedAs(checkJoinRequest(text, { invite: state.invite, secret: state.secret }), 'malformed');
+  for (const value of [undefined, null, 7, [], new Map(), Object.create({ payload: (invite as { payload: unknown }).payload }) as unknown]) {
+    refusedAs(readInvite(value, NOW), 'malformed');
+    refusedAs(checkJoinRequest(value, { invite: state.invite, secret: state.secret }), 'malformed');
+  }
+  // Nothing leaked onto the shared prototype.
+  assert.equal(({} as Json).polluted, undefined);
+});
+
+test('too-large: a file over MAX_PAYLOAD_BYTES is refused before it is parsed, as text or as a parsed value', () => {
+  const state = invited();
+  const padding = ' '.repeat(MAX_PAYLOAD_BYTES);
+  refusedAs(readInvite(`${state.inviteText}${padding}`, NOW), 'too-large');
+  refusedAs(checkJoinRequest(`${answer(state)}${padding}`, { invite: state.invite, secret: state.secret }), 'too-large');
+  // Text that is not even JSON is refused for its size first, so a huge file is never parsed.
+  refusedAs(readInvite(`{${'x'.repeat(MAX_PAYLOAD_BYTES + 1)}`, NOW), 'too-large');
+  const big = inviteObject(state) as Json & { payload: Json };
+  big.payload.name = 'x'.repeat(MAX_PAYLOAD_BYTES);
+  refusedAs(readInvite(big, NOW), 'too-large');
+});
+
+test('Add My Other Machine: an invite for an existing member is answered by that member\'s other machine; a request naming another member, or none, is refused wrong-device', () => {
+  const lead = invited({ forMember: JOINER_MEMBER });
+  assert.equal(lead.invite.forMember, JOINER_MEMBER);
+  const read = readInvite(lead.inviteText, NOW);
+  assert.equal(reasonOf(read), 'ok');
+  assert.equal((read as { ok: true; invite: InvitePayload }).invite.forMember, JOINER_MEMBER);
+  // The other machine names the member the invite is for (by default the request copies it from the invite).
+  const laptop = lead.world.device('JO-LAPTOP', JOINER_MEMBER);
+  const honest = checkJoinRequest(answer(lead, laptop), { invite: lead.invite, secret: lead.secret });
+  assert.equal(reasonOf(honest), 'ok');
+  assert.equal((honest as { ok: true; request: JoinRequestPayload }).request.member, JOINER_MEMBER);
+  assert.equal(inviteSafetyCode(lead.invite, (honest as { ok: true; request: JoinRequestPayload }).request).length, 6);
+  // Another member's machine answering it is refused, with a right MAC and a valid signature.
+  refusedAs(checkJoinRequest(answer(lead, laptop, { member: 'mbr-other' }), { invite: lead.invite, secret: lead.secret }), 'wrong-device');
+  // A request naming no member for a member's invite, and one naming a member for a new-person invite, are refused too.
+  const stripped = clone(lead.invite);
+  delete stripped.forMember;
+  const noMember = asFile(buildJoinRequest(laptop.signer, stripped, { name: 'Jo Analyst', x25519: laptop.x25519, now: NOW }));
+  refusedAs(checkJoinRequest(noMember, { invite: lead.invite, secret: lead.secret }), 'wrong-device');
+  const person = invited();
+  refusedAs(checkJoinRequest(answer(person, person.joiner, { member: JOINER_MEMBER }), { invite: person.invite, secret: person.secret }), 'wrong-device');
+});
+
+test('every refusal message is one or two plain sentences that say what to do next, with no em-dash, and no refusal carries the secret, the MAC or a key', () => {
+  const reasons = Object.keys(INVITE_REFUSALS).sort();
+  assert.deepEqual(reasons, ['bad-binding', 'bad-signature', 'invite-expired', 'invite-used', 'invite-voided', 'malformed', 'too-large', 'unknown-invite', 'wrong-device', 'wrong-project', 'wrong-secret']);
+  for (const [reason, message] of Object.entries(INVITE_REFUSALS)) {
+    const sentences = message.split(/(?<=\.)\s+/).filter((part) => part.length > 0);
+    assert.ok(sentences.length >= 1 && sentences.length <= 2, `${reason}: ${message}`);
+    assert.ok(message.endsWith('.'), reason);
+    assert.ok(!message.includes('\u2014') && !message.includes('\u2013'), `${reason} has a dash`);
+    assert.match(message, /\b(Ask|Check|Choose|Use)\b/, `${reason} does not say what to do next`);
+  }
+  // Every refusal seen above, plus the refusals of one fresh scenario, contain no secret, MAC or key of that scenario.
+  const state = invited();
+  const request = JSON.parse(answer(state)) as { payload: JoinRequestPayload };
+  const results = [
+    checkJoinRequest(asFile(request), { invite: state.invite, secret: newJoinSecret() }),
+    checkJoinRequest(asFile(request), { invite: state.invite, secret: state.secret, rosterInvite: { state: 'used' } }),
+    readInvite(state.inviteText, new Date('2027-01-01T00:00:00.000Z'))
+  ];
+  const secrets = [state.secret, request.payload.mac, request.payload.publicKey, request.payload.x25519, request.payload.x25519Sig, state.invite.lead.publicKey, state.invite.lead.x25519];
+  for (const result of results) {
+    assert.equal(result.ok, false);
+    assert.deepEqual(Object.keys(result), ['ok', 'reason', 'message']);
+    const text = JSON.stringify(result);
+    for (const value of secrets) assert.ok(!text.includes(value), `a refusal carries ${value.slice(0, 4)}...`);
+  }
+  assert.ok(seenRefusals.length >= 20, `expected the named tests to record their refusals first, saw ${seenRefusals.length}`);
+  for (const seen of seenRefusals) assert.deepEqual(Object.keys(seen), ['reason', 'message']);
 });
