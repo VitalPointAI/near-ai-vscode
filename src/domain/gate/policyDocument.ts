@@ -10,6 +10,8 @@
 import { BUNDLE_VERSION, CLOCK_SKEW_MS, UPDATE_REASONS, bundleHash, checkNumbers, checkRequires, effectiveNow, failedClosed, needsRenewal, needsUpdateSentence,
   parseBundle, parseIssuer, parseTimestamp, payloadReason, shapeReason, FINGERPRINT_PATTERN, HEX_64 } from './bundle';
 import type { BundleIssuer, BundleState, PolicyBundle } from './bundle';
+import { migrateLocalHosts, parseEndpoints } from './endpoints';
+import type { PolicyEndpoint } from './endpoints';
 import { ALWAYS_REQUIRED_FEATURES, POLICY_SECTIONS, featureForSection } from './features';
 import type { FeatureId } from './features';
 import { parseModelsSection } from './models';
@@ -57,6 +59,8 @@ export interface PolicyDocument {
   readonly minClient?: string;
   readonly labels: LabelsSection;
   readonly agents: AgentsSection;
+  /** Where AI may run (D-24). Absent means no place beyond this computer is named, today's behaviour with no local hosts. */
+  readonly endpoints?: readonly PolicyEndpoint[];
   readonly models?: ModelsSection;
   readonly people?: PeopleSection;
   readonly reserved?: ReservedSection;
@@ -177,7 +181,12 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
   const agents = parseAgentsSection(ownValue(value, 'agents'), scales, childPath(path, 'agents'));
   if (!agents.ok) return agents;
   out['agents'] = agents.value;
-  for (const name of ['endpoints', 'authorizations', 'residency', 'onboarding', 'limits', 'exportControl'] as const) {
+  if (has(value, 'endpoints')) {
+    const endpoints = parseEndpoints(ownValue(value, 'endpoints'), scales, childPath(path, 'endpoints'));
+    if (!endpoints.ok) return endpoints;
+    out['endpoints'] = endpoints.value;
+  }
+  for (const name of ['authorizations', 'residency', 'onboarding', 'limits', 'exportControl'] as const) {
     if (has(value, name)) return refused('not-available-yet', childPath(path, name));
   }
   if (has(value, 'models')) {
@@ -210,7 +219,8 @@ function requiredFeaturesOf(document: Readonly<Record<string, unknown>>): Featur
 
 /**
  * A v1 bundle as a v2 document (D-04, POLICY-SCHEMA 3): a personal layer; `ceiling` to `agents` (requireAccreditedDevice false); scales, mappings,
- * defaultLabel and routing without localHosts to `labels`; `clearances` to `people.clearances`; the reserved fields to `reserved`; `requires` the sorted
+ * defaultLabel and routing without localHosts to `labels`; `localHosts` to `endpoints` through migrateLocalHosts (D-27, omitted when it makes none);
+ * `clearances` to `people.clearances`; the reserved fields to `reserved`; `requires` the sorted
  * union of the bundle's own and the features of the sections it now has. The stored bytes and their hash never change: this is a reading, not a rewrite.
  */
 export function documentFromBundle(bundle: PolicyBundle): PolicyDocument {
@@ -233,6 +243,7 @@ export function documentFromBundle(bundle: PolicyBundle): PolicyDocument {
       routing: Object.freeze({ levels: bundle.routing.levels, handling: bundle.routing.handling, compartments: bundle.routing.compartments })
     }),
     agents: Object.freeze({ v: 1, maxMode: ceiling.maxMode, contexts: ceiling.contexts, mcp, requireAccreditedDevice: false }),
+    ...endpointsOf(bundle),
     people: Object.freeze({ v: 1, clearances: bundle.clearances }),
     reserved: Object.freeze({ v: 1, anchorRoots: bundle.anchorRoots, statusLists: bundle.statusLists, maxOfflineAge: bundle.maxOfflineAge })
   };
@@ -241,9 +252,19 @@ export function documentFromBundle(bundle: PolicyBundle): PolicyDocument {
   return Object.freeze(document) as unknown as PolicyDocument;
 }
 
+function endpointsOf(bundle: PolicyBundle): { endpoints?: readonly PolicyEndpoint[] } {
+  const migrated = migrateLocalHosts(bundle.routing, bundle.scales);
+  return migrated.endpoints.length === 0 ? {} : { endpoints: migrated.endpoints };
+}
+
+/** The hosts of your organization's plain servers, sorted: what a v1 view calls `localHosts`. */
+function localHostsOf(doc: PolicyDocument): readonly string[] {
+  return Object.freeze((doc.endpoints ?? []).filter((endpoint) => endpoint.class === 'org-plain').map((endpoint) => endpoint.host).sort());
+}
+
 /**
  * A document projected onto today's PolicyBundle names (bundleVersion 1), for the consumers that read them until 41-09 and 41-14 switch: `clearances` from
- * people (none when absent), the reserved fields (empty when absent), and no `requires`. A view is read, never signed (D-49).
+ * people (none when absent), `localHosts` the org-plain hosts sorted, the reserved fields (empty when absent), and no `requires`. A view is read, never signed (D-49).
  */
 export function bundleViewOf(doc: PolicyDocument): PolicyBundle {
   const agents = doc.agents;
@@ -261,7 +282,7 @@ export function bundleViewOf(doc: PolicyDocument): PolicyBundle {
     scales: doc.labels.scales,
     mappings: doc.labels.mappings,
     clearances: doc.people?.clearances ?? Object.freeze([]),
-    routing: Object.freeze({ levels: routing.levels, handling: routing.handling, compartments: routing.compartments, localHosts: Object.freeze([]) }),
+    routing: Object.freeze({ levels: routing.levels, handling: routing.handling, compartments: routing.compartments, localHosts: localHostsOf(doc) }),
     defaultLabel: doc.labels.defaultLabel,
     anchorRoots: doc.reserved?.anchorRoots ?? Object.freeze([]),
     statusLists: doc.reserved?.statusLists ?? Object.freeze([]),

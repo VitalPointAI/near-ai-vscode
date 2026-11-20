@@ -73,19 +73,35 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     ...base,
     layer,
     minClient: '0.4.40',
-    requires: ['agents@1', 'labels@1', 'layers@1', 'models@1', 'people@1'],
+    requires: ['agents@1', 'endpoints@1', 'labels@1', 'layers@1', 'models@1', 'people@1'],
     labels: { ...base['labels'], routing: { ...base['labels'].routing, compartments: { ...base['labels'].routing.compartments, PROJECT_X: 'attested-cloud' } } },
     agents: {
       ...base['agents'],
       mcp: { unattended: ['git'], labelCeilings: { git: { scale: 'org', level: 'Internal', compartments: [], releasability: [] } } },
       requireAccreditedDevice: true
     },
+    endpoints: fixtureEndpoints(),
     models: { v: 1 },
     people: { v: 1, clearances: base['people'].clearances },
     reserved: { v: 1, anchorRoots: [{ root: 'a'.repeat(64), proof: ['b'.repeat(64)] }], statusLists: [{ uri: 'https://status.example.org/list', purpose: 'revocation' }], maxOfflineAge: { 'org/Restricted': 86400 } }
   };
   if (layer !== 'organization') document['parent'] = { hash: 'c'.repeat(64), issuer: issuerKey().fingerprint };
   return document;
+}
+
+/** One endpoint of every class, sorted by id, each at the highest ceiling its class and host may hold (fictional hosts). */
+export function fixtureEndpoints(): Array<Record<string, unknown>> {
+  return [
+    { id: 'closed-api', class: 'closed-api', host: 'api.example.com', scheme: 'https', tlsPins: [], region: 'US', maxLabel: ['org/Public'] },
+    { id: 'enclave-example-org', class: 'org-tee', host: 'enclave.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected B', 'nato/NATO Restricted', 'org/Restricted'], attestation: 'org-tee-v1' },
+    { id: 'forwarder', class: 'forwarded', host: 'router.example.com', scheme: 'https', tlsPins: [], region: 'unstated', maxLabel: ['org/Public'] },
+    { id: 'lab-example-org', class: 'org-plain', host: '*.lab.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected A', 'nato/NATO Unclassified', 'org/Restricted'] },
+    { id: 'laptop', class: 'local', host: 'localhost', scheme: 'http-loopback', tlsPins: [], region: 'CA', maxLabel: ['ca-classified/Top Secret', 'ca-protected/Protected C', 'nato/Cosmic Top Secret', 'org/Restricted'], provider: 'ollama' },
+    { id: 'models-example-org', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: ['d'.repeat(64), 'e'.repeat(64)], region: 'CA', maxLabel: ['ca-protected/Protected B', 'nato/NATO Restricted', 'org/Restricted'] },
+    { id: 'nearai-private', class: 'nearai-tee', host: 'private.example.net', scheme: 'https', tlsPins: [], region: 'US', maxLabel: ['ca-protected/Protected B', 'org/Confidential'], provider: 'nearai' },
+    { id: 'vendor-enclave', class: 'vendor-tee', host: 'enclave.example.net', scheme: 'https', tlsPins: [], region: 'EU', maxLabel: ['ca-protected/Protected B', 'org/Confidential'], attestation: 'vendor-tee-v1' },
+    { id: 'vendor-region', class: 'vendor-region', host: 'ca.example.net', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected A', 'org/Internal'], provider: 'example' }
+  ];
 }
 
 /** The personal layer signed by this device with the one signer (purpose policy-bundle), at the document's own issuedAt (D-12's repeat check). */
