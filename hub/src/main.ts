@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, type HubConfig } from './config';
 import { HealthRegistry } from './health';
 import { createHubServer, listen, TLS_VERSION, type HubTls } from './http/server';
-import { KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
-import { Logger } from './log/logger';
+import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
+import { Logger, printKeyFile } from './log/logger';
 import { Redactor } from './log/redact';
 import { HUB_SECRETS, loadSecrets, refusePlainSecretEnv, SecretError } from './secrets';
 import { finishStartup } from './startup';
@@ -129,9 +129,22 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exit(1);
   });
 
+  // --generate-key signing|encryption (D-30) prints one key line and nothing else: no logger line before or after it, no settings read, no
+  // secrets read, nothing written to disk. Any other word after it is refused without being repeated.
+  if (argv[0] === '--generate-key') {
+    const kind = KEY_KINDS.find((candidate) => candidate === argv[1]);
+    if (argv.length !== 2 || kind === undefined) {
+      logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --generate-key signing, or --generate-key encryption' });
+      process.exitCode = 1;
+      return;
+    }
+    await printKeyFile(generateKeyFile(kind));
+    return;
+  }
+
   const healthcheck = argv.length === 1 && argv[0] === '--healthcheck';
   if (argv.length > 0 && !healthcheck) {
-    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck' });
+    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck or --generate-key' });
     process.exitCode = 1;
     return;
   }

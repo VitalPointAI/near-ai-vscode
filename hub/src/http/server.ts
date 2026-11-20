@@ -41,6 +41,18 @@ export const CONNECTIONS_CHECKING_INTERVAL_MS = 1000;
 export const MAX_HEADER_BYTES = 4096;
 export const TLS_VERSION = 'TLSv1.3';
 
+/** The TLS exporter label a device's session answer binds to (D-35). */
+export const SESSION_KEYING_LABEL = 'near-ai-hub-session/v1';
+export const SESSION_KEYING_BYTES = 32;
+
+/**
+ * exportKeyingMaterial(32, 'near-ai-hub-session/v1') of one TLS 1.3 connection, without a context: both ends of that connection get the same 32
+ * bytes and any other connection gets others (Pitfall 5). Node's types ask for a context argument; leaving it out is the call D-35 names.
+ */
+export function sessionKeying(socket: TLSSocket): Buffer {
+  return socket.exportKeyingMaterial(SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, undefined as unknown as Buffer);
+}
+
 export function sendJson(res: http.ServerResponse, status: number, body: string, extra: Record<string, string> = {}): void {
   res.writeHead(status, { ...BASE_HEADERS, ...extra, 'content-length': Buffer.byteLength(body) });
   res.end(body);

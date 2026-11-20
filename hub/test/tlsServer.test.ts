@@ -1,12 +1,47 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import http from 'node:http';
+import type https from 'node:https';
 import path from 'node:path';
 import test from 'node:test';
-import { hubRoot, startHubProcess, within } from './helpers/hubProcess';
-import { tlsGet } from './helpers/tlsFixture';
+import tls, { type TLSSocket } from 'node:tls';
+import { HealthRegistry } from '../src/health';
+import { createHubServer, listen, MAX_HEADER_BYTES, SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, sessionKeying, type HubServerOptions } from '../src/http/server';
+import { hubRoot, startHubProcess, within, type StartedHub } from './helpers/hubProcess';
+import { makeTlsFixture, tlsGet } from './helpers/tlsFixture';
 
-// Phase 32, plan 14 (D-26, D-29, D-30): the hub serves HTTPS itself, TLS 1.3 only, with the operator's certificate and key from secret files.
-// The tracer starts the real built hub and reaches /healthz over TLS 1.3.
+// Phase 32, plan 14 (D-26, D-29, D-30, D-35): the hub serves HTTPS itself, TLS 1.3 only, with the operator's certificate and key from secret files.
+// The tracer starts the real built hub and reaches /healthz over TLS 1.3. The other tests show what TLS 1.3 only means in practice (a TLS 1.2
+// client and a plain HTTP client get nothing), the 4 KiB header cap, and that both ends of one connection derive the same keying material, which
+// the session answer of 32-20 binds to (Pitfall 5).
+
+const fixture = makeTlsFixture();
+test.after(() => fixture.cleanup());
+
+async function withServer<T>(extra: Partial<HubServerOptions>, body: (port: number, server: https.Server) => Promise<T>): Promise<T> {
+  const server = createHubServer({
+    tls: { cert: fixture.certPem, key: fixture.keyPem },
+    health: new HealthRegistry({ version: '9.9.9-test', startedAt: Date.now() }),
+    ...extra,
+  });
+  const port = await listen(server, '127.0.0.1', 0);
+  try {
+    return await body(port, server);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+async function withHub<T>(body: (hub: StartedHub) => Promise<T>): Promise<T> {
+  const hub = await startHubProcess();
+  try {
+    return await body(hub);
+  } finally {
+    await within(hub.kill('SIGTERM'), 10_000, 'the hub stopping');
+    hub.cleanup();
+  }
+}
 
 test('tracer: the built hub starts from secret files, answers GET /healthz over TLS 1.3 with its certificate, and SIGTERM stops it with exit 0', async () => {
   const hub = await startHubProcess();
@@ -39,4 +74,103 @@ test('tracer: the built hub starts from secret files, answers GET /healthz over 
     assert.equal(hub.stderr(), '', 'the hub wrote to stderr');
     hub.cleanup();
   }
+});
+
+test('a client limited to TLS 1.2 fails the handshake with the real hub', async () => {
+  await withHub(async (hub) => {
+    const outcome = await new Promise<string>((resolve) => {
+      const socket = tls.connect({ host: '127.0.0.1', port: hub.port, rejectUnauthorized: false, minVersion: 'TLSv1.2', maxVersion: 'TLSv1.2' }, () => {
+        resolve(`connected with ${socket.getProtocol()}`);
+        socket.destroy();
+      });
+      socket.on('error', (error) => resolve(`refused: ${(error as NodeJS.ErrnoException).code ?? error.name}`));
+    });
+    assert.match(outcome, /^refused: /, outcome);
+  });
+});
+
+test('a plain HTTP client on the hub port gets no 200 and no health body', async () => {
+  await withHub(async (hub) => {
+    const outcome = await new Promise<{ status?: number; body?: string; error?: string }>((resolve) => {
+      const request = http.get({ host: '127.0.0.1', port: hub.port, path: '/healthz', agent: false, timeout: 5000 }, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk: string) => { body += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, body }));
+        response.on('error', (error) => resolve({ error: error.message }));
+      });
+      request.on('timeout', () => request.destroy(new Error('timeout')));
+      request.on('error', (error) => resolve({ error: (error as NodeJS.ErrnoException).code ?? error.message }));
+    });
+    assert.notEqual(outcome.status, 200, JSON.stringify(outcome));
+    assert.ok(!(outcome.body ?? '').includes('uptimeSeconds'), 'the health body reached a plain HTTP client');
+  });
+});
+
+test(`a request header over ${MAX_HEADER_BYTES} bytes gets 431 and one just under the cap is served`, async () => {
+  await withServer({}, async (port) => {
+    const big = await tlsGet(port, '/healthz', { headers: { 'x-fill': 'a'.repeat(MAX_HEADER_BYTES + 1) } });
+    assert.equal(big.status, 431);
+    const small = await tlsGet(port, '/healthz', { headers: { 'x-fill': 'a'.repeat(MAX_HEADER_BYTES - 512) } });
+    assert.equal(small.status, 200);
+  });
+});
+
+interface KeyingSample {
+  client: string;
+  server: string;
+}
+
+/** One TLS 1.3 connection: the client's keying material, and the server's as the handler saw it on the same connection. */
+function keyingOnOneConnection(port: number): Promise<KeyingSample> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({ host: '127.0.0.1', port, rejectUnauthorized: false, minVersion: 'TLSv1.3', servername: 'localhost' }, () => {
+      const client = sessionKeying(socket).toString('hex');
+      socket.write('GET /v1/keying HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+      let raw = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => { raw += chunk; });
+      socket.on('end', () => {
+        const server = raw.slice(raw.indexOf('\r\n\r\n') + 4).trim();
+        resolve({ client, server });
+      });
+    });
+    socket.on('error', reject);
+  });
+}
+
+test('exportKeyingMaterial(32, near-ai-hub-session/v1) is the same 32 bytes on both ends of one TLS 1.3 connection and different on another', async () => {
+  const secured: TLSSocket[] = [];
+  const protocols: (string | null)[] = [];
+  const hookRanFirst: boolean[] = [];
+  await withServer(
+    {
+      onSecureConnection: (socket) => {
+        secured.push(socket);
+        protocols.push(socket.getProtocol());
+      },
+      handler: (req, res) => {
+        req.resume();
+        const socket = req.socket as TLSSocket;
+        // The hook ran for this connection, before its first request.
+        hookRanFirst.push(secured.includes(socket));
+        const body = sessionKeying(socket).toString('hex');
+        res.writeHead(200, { 'content-type': 'text/plain', 'content-length': Buffer.byteLength(body) });
+        res.end(body);
+      },
+    },
+    async (port) => {
+      const first = await keyingOnOneConnection(port);
+      const second = await keyingOnOneConnection(port);
+      assert.equal(SESSION_KEYING_LABEL, 'near-ai-hub-session/v1');
+      assert.equal(SESSION_KEYING_BYTES, 32);
+      assert.match(first.client, /^[0-9a-f]{64}$/, 'the client got 32 bytes');
+      assert.equal(first.server, first.client, 'both ends of one connection agree');
+      assert.equal(second.server, second.client, 'both ends of the second connection agree');
+      assert.notEqual(second.client, first.client, 'another connection gives other bytes');
+      assert.equal(secured.length, 2, 'onSecureConnection ran once per connection');
+      assert.deepEqual(protocols, ['TLSv1.3', 'TLSv1.3']);
+      assert.deepEqual(hookRanFirst, [true, true], 'onSecureConnection saw each connection before its request');
+    },
+  );
 });
