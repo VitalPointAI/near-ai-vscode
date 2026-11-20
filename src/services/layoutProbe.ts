@@ -26,7 +26,25 @@ export interface LayoutReport {
   /** Content security policy violations the page met since the probe loaded. */
   cspViolations?: string[];
   /** The COP map, on pages with one: MapLibre drew into a canvas, the room shows the COP map, and the fallback line if any. */
-  map?: { maplibre: boolean; cop: boolean; note: string };
+  map?: {
+    maplibre: boolean; cop: boolean; note: string;
+    /** The map's box in the page's viewport (CSS pixels), the viewport's height and how far the page is scrolled. */
+    box?: { top: number; bottom: number; height: number; viewport: number; scrollY: number };
+    /** The full map is on. */
+    full?: boolean;
+    /** The open layer drawer: open, focus inside it, focus on its Layers button, and how many layer switches it shows. */
+    drawer?: { open: boolean; focusInside: boolean; buttonFocused: boolean; switches: number };
+    /** The COP map's ground: base, 3D terrain and why it is off, projection, renderer, and the 3D height at Harrow Ridge's crest. */
+    ground?: { base: string; terrain: string; terrainReason: string; projection: string; renderer: string; height?: number; tiles?: { globe: boolean; frame: boolean; terrain: boolean; problems: string[] }; errors?: string[]; pitch?: number; onMap?: { units: number; shapes: number; frame: boolean }; camera?: { centre: [number, number]; zoom: number; inFrame?: boolean } };
+    /** Every origin the page loaded a resource from. */
+    origins?: string[];
+    /** A PNG data URL of the map canvas, after a map-snapshot act. */
+    snapshot?: string;
+  };
+  /** The chat's message box, on the chat page: its text and where the cursor is, so a test can check what a button put there. */
+  composer?: { value: string; caret: number | null };
+  /** The empty chat's cards, on the chat page: the "Staff teams" card's text and whether the "no team yet" card is there. */
+  cards?: { staffTeams?: string; setupNudge: boolean };
 }
 
 export function layoutProbeEnabled(): boolean {

@@ -2,7 +2,7 @@
 // 5), cop-map, logistics, orders and battle-rhythm. The Tools page, the Team Studio tool picker and a staff team's run all read this one list. The servers run inside the
 // extension and are given only to a staff team's run (a team file with a `staff:` block); a member reaches them through its `tools:` line, by the
 // whole server (`mcp:<id>`), a family pattern or one tool at a time (`mcp__<id>__<tool>`). staff-products and guard-scan are gated by role inside the
-// staff tools; every other server is gated on grants (staffGrantGate.ts), so the run's lead and an ungranted member cannot call it. The tool objects
+// staff tools; every other server is gated on grants (staffGrantGate.ts), so the run's lead and an ungranted member are neither offered nor allowed it. The tool objects
 // the pages show are built by the same factories as a run's, without a project, so the lists cannot drift from what a run gets. None of them approves,
 // rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
 import type { ObservationStore } from '../staff/observationStore';
@@ -114,8 +114,8 @@ export function builtInStaffServers(): BuiltInStaffServer[] {
 }
 
 /**
- * The grant-gated servers' tools for one staff team's run: for each server, only the tools some member is granted, each refusing the run's lead and any
- * member whose own tools line does not grant it. A team with no grant for a server gets none of its tools.
+ * The grant-gated servers' tools for one staff team's run: for each server, only the tools some member is granted, each offered only to the members
+ * whose own tools line grants it (never to the run's lead) and refusing everyone else at call time. A team with no grant for a server gets none of its tools.
  */
 export function staffServerToolsForRun(team: GrantedTeam, access: StaffServerAccess): AgentTool<any>[] {
   return GATED_STAFF_SERVERS.flatMap((server) => grantedToMembers(team, server.id, server.build(access), server.hint));

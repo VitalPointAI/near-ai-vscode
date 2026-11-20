@@ -7,6 +7,11 @@
 //   dem.json          a digital elevation model: heights in metres on a regular latitude and longitude grid
 //   coastline.geojson the land outline (polygons) and coastline (lines)
 //   weather.json      an optional forecast grid: the model, its run time, and one frame of values per valid time
+//   landcover.geojson (version 2, optional) land cover areas and the roads and tracks (landcover.ts), for the imagery and the topographic map
+//   tiles/index.json  (version 2, optional) the map tiles: imagery, the 3D terrain heights and the relief heights, each tile hashed (tiles.ts)
+//
+// Version 1 packs stay valid. The tiles are not read here: the host checks the folder against the index before it gives the page a tile address
+// (src/staff/mapTiles.ts), and this file only checks the index's own entry in the manifest.
 //
 // Validation on load refuses a pack, never repairs it: a manifest or file that breaks the format, a file whose bytes do not match the hash the
 // manifest records, any coordinate outside the exercise frame (for a pack drawn in a frame), and a real-data pack without its attribution and the
@@ -14,13 +19,23 @@
 import { createHash } from 'node:crypto';
 import { gridToWgs84, insideFrame, wgs84ToGrid } from '../obs/frame';
 import type { ExerciseFrame } from '../obs/frame';
+import { checkLandcover, writeLandcover } from './landcover';
+import type { Landcover } from './landcover';
 
 export const ENV_PACK_FORMAT = 'near-env-pack';
 export const ENV_DEM_FORMAT = 'near-env-dem';
 export const ENV_WEATHER_FORMAT = 'near-env-weather';
-export const ENV_PACK_VERSION = 1;
+/** The manifest version this build writes when a pack has land cover or tiles; version 1 packs are still read. */
+export const ENV_PACK_VERSION = 2;
+export const ENV_PACK_VERSIONS = [1, 2] as const;
+/** The version of the dem.json and weather.json formats (unchanged since version 1). */
+export const ENV_FILE_VERSION = 1;
 /** The file names of a pack, by role. A manifest may name only these, so a manifest can never point outside its own folder. */
-export const ENV_FILES = { dem: 'dem.json', coastline: 'coastline.geojson', weather: 'weather.json' } as const;
+export const ENV_FILES = { dem: 'dem.json', coastline: 'coastline.geojson', weather: 'weather.json', landcover: 'landcover.geojson' } as const;
+/** The tile index of a version 2 pack, relative to the pack folder. */
+export const ENV_TILE_INDEX = 'tiles/index.json';
+/** The tile sets a pack may carry (tiles.ts): the imagery at low and high zooms, the 3D terrain heights (sea at 0) and the relief heights. */
+export const ENV_TILE_SETS = ['imagery', 'imagery-detail', 'terrain', 'relief'] as const;
 export type EnvFileRole = keyof typeof ENV_FILES;
 export const ENV_MANIFEST = 'manifest.json';
 
@@ -58,7 +73,7 @@ export interface EnvSource { readonly name: string; readonly licence: string; re
 
 export interface EnvManifest {
   readonly format: typeof ENV_PACK_FORMAT;
-  readonly version: typeof ENV_PACK_VERSION;
+  readonly version: (typeof ENV_PACK_VERSIONS)[number];
   readonly id: string;
   readonly title: string;
   /** Synthetic (generated, nothing real) or real (built from a real DEM or forecast on a developer machine). */
@@ -75,12 +90,14 @@ export interface EnvManifest {
   readonly licence: string;
   /** Where real data came from, each with its licence. Required, and at least one, for real data. */
   readonly sources?: readonly EnvSource[];
-  readonly files: { readonly dem: EnvFileEntry; readonly coastline: EnvFileEntry; readonly weather?: EnvFileEntry };
+  readonly files: { readonly dem: EnvFileEntry; readonly coastline: EnvFileEntry; readonly weather?: EnvFileEntry; readonly landcover?: EnvFileEntry };
+  /** Version 2: the tile index (path ENV_TILE_INDEX), checked by its size and hash before any tile is used. */
+  readonly tiles?: EnvFileEntry;
 }
 
 export interface Dem {
   readonly format: typeof ENV_DEM_FORMAT;
-  readonly version: typeof ENV_PACK_VERSION;
+  readonly version: typeof ENV_FILE_VERSION;
   /** The grid's outer points: the first height is at (west, north), the last at (east, south). */
   readonly bounds: Bounds;
   readonly width: number;
@@ -96,7 +113,7 @@ export interface WeatherFrameValues { readonly validAt: string; readonly values:
 
 export interface WeatherGrid {
   readonly format: typeof ENV_WEATHER_FORMAT;
-  readonly version: typeof ENV_PACK_VERSION;
+  readonly version: typeof ENV_FILE_VERSION;
   readonly bounds: Bounds;
   readonly width: number;
   readonly height: number;
@@ -120,6 +137,7 @@ export interface EnvPack {
   readonly dem: Dem;
   readonly coastline: Coastline;
   readonly weather?: WeatherGrid;
+  readonly landcover?: Landcover;
 }
 
 export type PackResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly problems: readonly string[] };
@@ -163,9 +181,9 @@ function checkEntry(value: unknown, role: EnvFileRole, problems: string[]): void
 export function checkManifest(value: unknown): PackResult<EnvManifest> {
   const problems: string[] = [];
   if (!isObject(value)) return { ok: false, problems: ['manifest: not a JSON object.'] };
-  onlyKeys(value, ['format', 'version', 'id', 'title', 'data', 'crs', 'bounds', 'frame', 'generator', 'attribution', 'licence', 'sources', 'files'], 'manifest', problems);
+  onlyKeys(value, ['format', 'version', 'id', 'title', 'data', 'crs', 'bounds', 'frame', 'generator', 'attribution', 'licence', 'sources', 'files', 'tiles'], 'manifest', problems);
   if (value.format !== ENV_PACK_FORMAT) problems.push(`manifest: format must be "${ENV_PACK_FORMAT}".`);
-  if (value.version !== ENV_PACK_VERSION) problems.push(`manifest: version ${String(value.version).slice(0, 20)} is not supported (this build reads version ${ENV_PACK_VERSION}).`);
+  if (!(ENV_PACK_VERSIONS as readonly unknown[]).includes(value.version)) problems.push(`manifest: version ${String(value.version).slice(0, 20)} is not supported (this build reads versions ${ENV_PACK_VERSIONS.join(' and ')}).`);
   if (typeof value.id !== 'string' || !ID.test(value.id)) problems.push('manifest: id must be lowercase letters, digits and hyphens.');
   if (!isText(value.title)) problems.push('manifest: title is required.');
   if (value.data !== 'synthetic' && value.data !== 'real') problems.push('manifest: data must be "synthetic" or "real".');
@@ -200,10 +218,25 @@ export function checkManifest(value: unknown): PackResult<EnvManifest> {
   if (value.data === 'synthetic' && value.generator === undefined) problems.push('manifest: a synthetic pack must name its generator and seed.');
   if (!isObject(value.files)) problems.push('manifest: files is required.');
   else {
-    onlyKeys(value.files, ['dem', 'coastline', 'weather'], 'manifest files', problems);
+    onlyKeys(value.files, ['dem', 'coastline', 'weather', 'landcover'], 'manifest files', problems);
     checkEntry(value.files.dem, 'dem', problems);
     checkEntry(value.files.coastline, 'coastline', problems);
     if (value.files.weather !== undefined) checkEntry(value.files.weather, 'weather', problems);
+    if (value.files.landcover !== undefined) {
+      if (value.version === 1) problems.push('manifest: land cover needs a version 2 pack.');
+      checkEntry(value.files.landcover, 'landcover', problems);
+    }
+  }
+  if (value.tiles !== undefined) {
+    if (value.version === 1) problems.push('manifest: tiles need a version 2 pack.');
+    const t = value.tiles;
+    if (!isObject(t)) problems.push('manifest tiles: must be the tile index entry.');
+    else {
+      onlyKeys(t, ['path', 'sha256', 'bytes'], 'manifest tiles', problems);
+      if (t.path !== ENV_TILE_INDEX) problems.push(`manifest tiles: path must be "${ENV_TILE_INDEX}".`);
+      if (typeof t.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(t.sha256)) problems.push('manifest tiles: sha256 must be 64 lowercase hex characters.');
+      if (!Number.isSafeInteger(t.bytes) || (t.bytes as number) < 1 || (t.bytes as number) > ENV_LIMITS.fileBytes) problems.push(`manifest tiles: bytes must be a whole number from 1 to ${ENV_LIMITS.fileBytes}.`);
+    }
   }
   return problems.length ? { ok: false, problems } : { ok: true, value: value as unknown as EnvManifest };
 }
@@ -213,7 +246,7 @@ export function checkDem(value: unknown): PackResult<Dem> {
   if (!isObject(value)) return { ok: false, problems: ['dem: not a JSON object.'] };
   onlyKeys(value, ['format', 'version', 'bounds', 'width', 'height', 'units', 'noData', 'heights'], 'dem', problems);
   if (value.format !== ENV_DEM_FORMAT) problems.push(`dem: format must be "${ENV_DEM_FORMAT}".`);
-  if (value.version !== ENV_PACK_VERSION) problems.push('dem: unsupported version.');
+  if (value.version !== ENV_FILE_VERSION) problems.push('dem: unsupported version.');
   checkBounds(value.bounds, 'dem', problems);
   if (value.units !== 'm') problems.push('dem: units must be "m".');
   if (!Number.isSafeInteger(value.noData)) problems.push('dem: noData must be a whole number.');
@@ -230,7 +263,7 @@ export function checkWeather(value: unknown): PackResult<WeatherGrid> {
   if (!isObject(value)) return { ok: false, problems: ['weather: not a JSON object.'] };
   onlyKeys(value, ['format', 'version', 'bounds', 'width', 'height', 'model', 'stepHours', 'variables', 'frames'], 'weather', problems);
   if (value.format !== ENV_WEATHER_FORMAT) problems.push(`weather: format must be "${ENV_WEATHER_FORMAT}".`);
-  if (value.version !== ENV_PACK_VERSION) problems.push('weather: unsupported version.');
+  if (value.version !== ENV_FILE_VERSION) problems.push('weather: unsupported version.');
   checkBounds(value.bounds, 'weather', problems);
   const { width, height } = value;
   const sized = Number.isSafeInteger(width) && Number.isSafeInteger(height) && (width as number) >= 2 && (height as number) >= 2 && (width as number) <= ENV_LIMITS.weatherSide && (height as number) <= ENV_LIMITS.weatherSide && (width as number) * (height as number) <= ENV_LIMITS.weatherCells;
@@ -297,6 +330,11 @@ export function packCoordinates(pack: EnvPack): Array<readonly [number, number]>
   const corners = (b: Bounds) => [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]] as const;
   const out: Array<readonly [number, number]> = [...corners(pack.manifest.bounds), ...corners(pack.dem.bounds)];
   if (pack.weather) out.push(...corners(pack.weather.bounds));
+  for (const feature of pack.landcover?.features ?? []) {
+    const g = feature.geometry;
+    if (g.type === 'Polygon') for (const ring of g.coordinates) out.push(...ring);
+    else out.push(...g.coordinates);
+  }
   for (const feature of pack.coastline.features) {
     const g = feature.geometry;
     if (g.type === 'Polygon') for (const ring of g.coordinates) out.push(...ring);
@@ -378,9 +416,10 @@ export function readEnvPack(files: PackFiles, options: PackCheckOptions = {}): P
   const dem = checkDem(parsed.dem);
   const coastline = checkCoastline(parsed.coastline);
   const weather = m.files.weather ? checkWeather(parsed.weather) : undefined;
-  for (const result of [dem, coastline, weather]) if (result && !result.ok) problems.push(...result.problems);
-  if (problems.length || !dem.ok || !coastline.ok || (weather && !weather.ok)) return { ok: false, problems };
-  const pack: EnvPack = { manifest: m, dem: dem.value, coastline: coastline.value, ...(weather && weather.ok ? { weather: weather.value } : {}) };
+  const landcover = m.files.landcover ? checkLandcover(parsed.landcover, m.bounds) : undefined;
+  for (const result of [dem, coastline, weather, landcover]) if (result && !result.ok) problems.push(...result.problems);
+  if (problems.length || !dem.ok || !coastline.ok || (weather && !weather.ok) || (landcover && !landcover.ok)) return { ok: false, problems };
+  const pack: EnvPack = { manifest: m, dem: dem.value, coastline: coastline.value, ...(weather && weather.ok ? { weather: weather.value } : {}), ...(landcover && landcover.ok ? { landcover: landcover.value } : {}) };
   const strays = packCoordinates(pack).filter((point) => !insideBounds(m.bounds, point));
   if (strays.length) problems.push(`${strays.length} coordinate${strays.length === 1 ? '' : 's'} lie outside the manifest's bounding box, for example ${strays[0].join(', ')}.`);
   if (options.frame) {
@@ -401,23 +440,25 @@ export function fileEntry(role: EnvFileRole, bytes: Uint8Array | string): EnvFil
  * Writes a pack's files as text, in a fixed key order, and the manifest that records their hashes. The generator and the pack builder both use it,
  * so a synthetic and a real pack are the same format byte for byte.
  */
-export function writeEnvPack(input: Omit<EnvManifest, 'format' | 'version' | 'crs' | 'files'> & { readonly dem: Dem; readonly coastline: Coastline; readonly weather?: WeatherGrid }): Record<string, string> {
-  const demText = `{"format":${JSON.stringify(ENV_DEM_FORMAT)},"version":${ENV_PACK_VERSION},"bounds":${JSON.stringify(input.dem.bounds)},"width":${input.dem.width},"height":${input.dem.height},"units":"m","noData":${input.dem.noData},"heights":[\n${rows(input.dem.heights, input.dem.width)}\n]}\n`;
+export function writeEnvPack(input: Omit<EnvManifest, 'format' | 'version' | 'crs' | 'files' | 'tiles'> & { readonly dem: Dem; readonly coastline: Coastline; readonly weather?: WeatherGrid; readonly landcover?: Landcover; readonly tiles?: EnvFileEntry }): Record<string, string> {
+  const demText = `{"format":${JSON.stringify(ENV_DEM_FORMAT)},"version":${ENV_FILE_VERSION},"bounds":${JSON.stringify(input.dem.bounds)},"width":${input.dem.width},"height":${input.dem.height},"units":"m","noData":${input.dem.noData},"heights":[\n${rows(input.dem.heights, input.dem.width)}\n]}\n`;
   const coastText = `{"type":"FeatureCollection","features":[\n${input.coastline.features.map((feature) => JSON.stringify({ type: 'Feature', properties: feature.properties, geometry: feature.geometry })).join(',\n')}\n]}\n`;
   let weatherText: string | undefined;
   if (input.weather) {
     const w = input.weather;
     const frames = w.frames.map((frame) => `{"validAt":${JSON.stringify(frame.validAt)},"values":{${w.variables.map((variable) => `${JSON.stringify(variable.id)}:[${(frame.values[variable.id] ?? []).join(',')}]`).join(',')}}}`);
-    weatherText = `{"format":${JSON.stringify(ENV_WEATHER_FORMAT)},"version":${ENV_PACK_VERSION},"bounds":${JSON.stringify(w.bounds)},"width":${w.width},"height":${w.height},"model":${JSON.stringify({ name: w.model.name, runAt: w.model.runAt })},"stepHours":${w.stepHours},"variables":${JSON.stringify(w.variables.map((v) => ({ id: v.id, units: v.units })))},"frames":[\n${frames.join(',\n')}\n]}\n`;
+    weatherText = `{"format":${JSON.stringify(ENV_WEATHER_FORMAT)},"version":${ENV_FILE_VERSION},"bounds":${JSON.stringify(w.bounds)},"width":${w.width},"height":${w.height},"model":${JSON.stringify({ name: w.model.name, runAt: w.model.runAt })},"stepHours":${w.stepHours},"variables":${JSON.stringify(w.variables.map((v) => ({ id: v.id, units: v.units })))},"frames":[\n${frames.join(',\n')}\n]}\n`;
   }
+  const landcoverText = input.landcover ? writeLandcover(input.landcover) : undefined;
   const manifest: EnvManifest = {
-    format: ENV_PACK_FORMAT, version: ENV_PACK_VERSION, id: input.id, title: input.title, data: input.data, crs: 'EPSG:4326', bounds: input.bounds,
+    format: ENV_PACK_FORMAT, version: landcoverText || input.tiles ? 2 : 1, id: input.id, title: input.title, data: input.data, crs: 'EPSG:4326', bounds: input.bounds,
     ...(input.frame ? { frame: { scenario: input.frame.scenario, grid: input.frame.grid } } : {}),
     ...(input.generator ? { generator: { script: input.generator.script, seed: input.generator.seed, version: input.generator.version } } : {}),
     attribution: [...input.attribution], licence: input.licence, ...(input.sources ? { sources: input.sources.map((s) => ({ name: s.name, licence: s.licence, ...(s.url ? { url: s.url } : {}) })) } : {}),
-    files: { dem: fileEntry('dem', demText), coastline: fileEntry('coastline', coastText), ...(weatherText ? { weather: fileEntry('weather', weatherText) } : {}) }
+    files: { dem: fileEntry('dem', demText), coastline: fileEntry('coastline', coastText), ...(weatherText ? { weather: fileEntry('weather', weatherText) } : {}), ...(landcoverText ? { landcover: fileEntry('landcover', landcoverText) } : {}) },
+    ...(input.tiles ? { tiles: { path: ENV_TILE_INDEX, sha256: input.tiles.sha256, bytes: input.tiles.bytes } } : {})
   };
-  return { [ENV_MANIFEST]: `${JSON.stringify(manifest, null, 2)}\n`, [ENV_FILES.dem]: demText, [ENV_FILES.coastline]: coastText, ...(weatherText ? { [ENV_FILES.weather]: weatherText } : {}) };
+  return { [ENV_MANIFEST]: `${JSON.stringify(manifest, null, 2)}\n`, [ENV_FILES.dem]: demText, [ENV_FILES.coastline]: coastText, ...(weatherText ? { [ENV_FILES.weather]: weatherText } : {}), ...(landcoverText ? { [ENV_FILES.landcover]: landcoverText } : {}) };
 }
 
 function rows(values: readonly number[], width: number): string {

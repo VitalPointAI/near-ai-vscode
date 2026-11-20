@@ -9,6 +9,9 @@ import { parseGsdPlanningState } from '../domain/gsdStatus';
 import type { OrganizationProfile } from '../domain/auth';
 import type { ActionPolicyMode } from '../domain/policy';
 import { isPolicyMode } from './approvalPolicy';
+import { isStaffTeamSection } from '../domain/staff/profiles';
+import type { StaffTeamSection } from '../domain/staff/profiles';
+import { STAFF_SLUG } from '../domain/staff/parse';
 
 /** The longest message the composer may send to a running agent. */
 export const MAX_MESSAGE_CHARS = 100_000;
@@ -65,7 +68,10 @@ export type ChatWebviewMessage =
   /** The welcome's "Open a folder" when no folder is open: runs VS Code's own Open Folder. */
   | { type: 'open-folder' }
   /** The empty chat's "no team yet" card: set up the team, hide the card for this project, or open all setup steps. */
-  | { type: 'setup-nudge'; action: 'team' | 'later' | 'menu' }
+  | { type: 'setup-nudge'; action: 'team' | 'staff' | 'later' | 'menu' }
+  /** A staff project's "Staff teams" card: set up (or set up again) one section's team, or link a matching library team after the host confirms. */
+  | { type: 'staff-teams'; action: 'set-up'; section: StaffTeamSection }
+  | { type: 'staff-teams'; action: 'link'; section: StaffTeamSection; team: string }
   /** The "Pick up where you left off" card: reopen the last chat (the only thing it does), or hide the card for this pointer. */
   | { type: 'pickup-card'; action: 'open'; id: string }
   | { type: 'pickup-card'; action: 'later' }
@@ -333,7 +339,15 @@ export function parseChatWebviewMessage(value: unknown): ChatWebviewMessage | un
   }
   if (message.type === 'setup-nudge') {
     if (Object.keys(message).some((key) => key !== 'type' && key !== 'action')) return undefined;
-    return message.action === 'team' || message.action === 'later' || message.action === 'menu' ? { type: 'setup-nudge', action: message.action } : undefined;
+    return message.action === 'team' || message.action === 'staff' || message.action === 'later' || message.action === 'menu' ? { type: 'setup-nudge', action: message.action } : undefined;
+  }
+  if (message.type === 'staff-teams') {
+    // Exactly these keys, each the message's own: none extra, none missing, none inherited.
+    const own = (keys: readonly string[]) => Object.keys(message).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(message, key));
+    if (!isStaffTeamSection(message.section)) return undefined;
+    if (message.action === 'set-up' && own(['type', 'action', 'section'])) return { type: 'staff-teams', action: 'set-up', section: message.section };
+    if (message.action === 'link' && own(['type', 'action', 'section', 'team']) && typeof message.team === 'string' && STAFF_SLUG.test(message.team)) return { type: 'staff-teams', action: 'link', section: message.section, team: message.team };
+    return undefined;
   }
   if (message.type === 'pickup-card') {
     if (message.action === 'later') return Object.keys(message).length === 2 ? { type: 'pickup-card', action: 'later' } : undefined;

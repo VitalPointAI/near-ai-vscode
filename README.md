@@ -32,7 +32,8 @@ exactly what is allowed to leave your machine.
 **NEAR AI: Set Up Project Team** asks which kind of project you have and sets
 up a team and workflow for it. Your files stay in your workspace, and work is
 sent only to the model you pick. After you connect NEAR AI, the extension
-suggests this as your next step in the chat when the project has no team yet.
+suggests this as your next step in the chat when the project has no team yet;
+the same card offers **Set up a staff team** for a military staff project.
 **NEAR AI: Project Setup** shows every setup step again: your project team, a
 spending limit and web search. **NEAR AI: Set Up a New Profile** connects
 another NEAR AI key or local runtime, and **NEAR AI: Select Profile** picks the
@@ -264,7 +265,22 @@ between markers of its own, so teams of different sections can share a project. 
 earlier team file of the same name moves to your teams archive. The team is
 private, its members draft and recommend, and a named person decides: only
 the **NEAR AI: Staff** commands approve, reject or release a product. It then
-offers to load the starter scenario. **NEAR AI: Update Team…** recognises a
+offers to load the starter scenario. The project records each section's team
+(`staff.teams` in its settings), and the message when setup finishes names the
+team, with **Task it now** (puts `/team:<name> ` in the chat's message box,
+nothing sent) and **Open the Staff Room**. In a staff project the empty chat
+shows a **Staff teams** card instead of "This project has no team yet": each
+section with its team and a **Task** button, and **Set up** for sections not set
+up yet. The card appears as soon as the setup finishes, even with the chat
+already open; if the staff settings cannot be read, it says why and the reason
+is in the **NEAR AI** output. The `/team` menu lists the project's staff teams first, labelled by
+section, and each section card in the Staff Room has **Task in chat**. A team
+file deleted or renamed in your teams shows as missing with **Set up again**. A
+project set up before this was recorded is offered the matching teams already in
+your teams to **Link**, after you confirm. Staff projects work on one machine
+for now: several people and machines on one staff project are not supported
+yet, because the signed ledgers trust only this computer's key. Multi-user
+staff workspaces are planned. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
@@ -364,10 +380,39 @@ decision points they support, the collection plan and the standing watches
 (`.planning/staff/products/j2/standing-watches.json`). The map in both
 workspaces is the COP map: the scenario's synthetic geography, the product
 layers and the observations your clearance covers, in 2D or on the globe, with
-its time slider. Hillshade, contours and the exercise weather (wind, fog, rain
+its time slider. It opens on **Imagery**: photo-like aerial imagery of the
+exercise area with 3D terrain (drag with the right button or Ctrl to tilt;
+the **3D terrain** switch and its height slider are in the drawer), and NASA
+Blue Marble imagery on the globe. **Topographic** is one choice away in the
+drawer's **Base map** (colour relief, land cover, hillshade, contours every
+20 m with labelled index contours every 100 m, red roads and the blue KQ grid;
+Natural Earth on the globe), and **Plain** keeps the flat 2D map. A margin on
+the map gives the datum, the grid, the contour interval and a declination
+diagram (the scenario's magnetic declination is fictional), with scale bars in
+kilometres and nautical miles. On a computer that draws without a graphics
+card, 3D starts off and the drawer says why. On the globe, **Spin** turns it
+slowly until you touch the map (never under Calm or reduced motion); dragging
+spins it too. All of it is bundled with the extension and drawn offline: no
+map server is asked for anything. The exercise imagery and terrain are
+synthetic, made from a seed, and not a real place. Hillshade, contours and the exercise weather (wind, fog, rain
 and rough sea, for the time on the slider) are layers you turn on and off,
-drawn offline from a bundled synthetic terrain and weather pack. Where WebGL or the map library is not available, the room
-draws a 2D map instead and says why in a line on the map. On either map a
+drawn offline from a bundled synthetic terrain and weather pack. Once a
+scenario is loaded the map is the room's main panel: the process rail and the
+section cards fold into one line (**Show the process and sections** opens
+them, and **Staff teams** opens them at the first section's **Task in chat**
+or **Set up**), and the map fills the rest of the panel. Its controls float over it:
+the classification line, **Layers** (a drawer that slides in from the map's
+edge, with the layers grouped as Picture, Environment and Reference, each
+with its count and a SIM badge where the data is simulated), **Globe** (flies
+out until the curve of the earth shows, with the exercise frame ringed in
+gold; **Map** flies back), **As happened** or **As known**, **Map as table**,
+**Full map** (the map over the whole Staff Room; Escape returns) and the time
+slider. The map opens on the land, the named places and the units with a
+margin, inside the exercise frame (its dashed line stays drawn), and units that would cover
+each other draw as one stacked symbol with a count until you zoom in. Nothing
+moves under reduced motion or Calm. Where WebGL or the map library is not available, the room
+draws a 2D map instead, with the same drawer on its Topographic base (the
+terrain pack's land cover, hillshade and contours), and says why in a line on the map. On either map a
 name that would cover another name or a symbol moves to a free spot nearby,
 is shortened, or is left off; the symbol always stays, and its name is still
 in its description and in **Map as table**. The J2 workspace also lists the
@@ -1537,6 +1582,23 @@ Read the full [security and trust report](SECURITY.md).
   shows the run failed, and the work so far is kept: send a message to continue
   or switch models. The cut-off requests are recorded with NEAR's request ID and
   settled with what NEAR bills.
+- **NEAR AI is overloaded (HTTP 429 "service_overloaded"):** NEAR AI asks the
+  extension to wait, and it does: every agent of the run waits together, then
+  one request goes to that model to test it, and while NEAR keeps refusing the
+  model only two requests at a time go to it, with longer waits each time it
+  refuses again. A team member that keeps getting "overloaded" for about a
+  minute, or whose model sends nothing twice in a row, moves to the next model
+  and carries on, and Team Live, the Staff Room and the chat say so, for
+  example "threat-analyst switched from Kimi K3 to Qwen 3.6: Kimi K3 is
+  overloaded at NEAR AI". The next model is your backup model
+  (`nearAi.agent.backupModel`), then the standard, deep and fast tier models,
+  then the chat's own model, skipping any that is busy too, and only ones at
+  least as private (a TEE model stays in the TEE; a `privacy: private` member
+  stays private; TEE-only mode is respected). A member whose team file names
+  its model moves too, and the notice says so. If no model is left, the member
+  stops and says why in words ("GLM 5.3 is overloaded at NEAR AI", "Kimi K3
+  gave no answer for 90 s", "refused by policy"), and the lead is told the
+  same.
 - **Runs pause or stop in code-server (VS Code in a browser):** two things
   in code-server affect long runs. First, VS Code's proxy support asks the
   browser tab which proxy to use for every new connection; when the browser

@@ -8,7 +8,7 @@ import type {
   AnnexPlacement, AnnexSubject, CrosswalkStep, DoctrineProfile, FunctionSetId, LevelOffer, PlanningType, PlanningTypeRule, StaffLevel, StaffNation,
   StaffProcess, StaffProfileId, StaffSectionId
 } from './doctrine';
-import { checkStaffKeys, childPath, isOneLine, isOneOf, isRecord, ok, ownValue, staffRefused } from './parse';
+import { checkStaffKeys, childPath, isOneLine, isOneOf, isRecord, ok, ownValue, STAFF_SLUG, staffRefused } from './parse';
 import type { StaffParsed } from './parse';
 
 /** The planning horizons in hours (design 10, 2.1): current operations up to the first, future operations up to the second, future plans beyond. */
@@ -24,6 +24,21 @@ export interface StaffSettings {
   readonly horizons: StaffHorizons;
   /** Phase names the person chooses (03 A2); empty by default. */
   readonly phases: readonly string[];
+  /**
+   * The project's section teams: for each staff section set up here, the name of its team file in the person's team library (run as /team:<name>).
+   * Written by Set Up a Staff Team; absent until one section is set up. The one record the chat, the /team menu and the Staff Room read.
+   */
+  readonly teams?: StaffTeamLinks;
+}
+
+/** The staff sections that have a team template, in the order the surfaces list them. */
+export const STAFF_TEAM_SECTIONS = ['j2', 'j5', 'j3', 'j4'] as const;
+export type StaffTeamSection = (typeof STAFF_TEAM_SECTIONS)[number];
+/** Section to team name; each name is a team-library file name without `.md`. */
+export type StaffTeamLinks = Readonly<Partial<Record<StaffTeamSection, string>>>;
+
+export function isStaffTeamSection(value: unknown): value is StaffTeamSection {
+  return isOneOf(STAFF_TEAM_SECTIONS, value);
 }
 
 /** The longest horizon accepted, in hours (ten years): strategic horizons run to months and years. */
@@ -69,7 +84,7 @@ export function offeredCombinations(): ReadonlyArray<{ readonly profile: StaffPr
  */
 export function parseStaffSettings(value: unknown): StaffParsed<StaffSettings> {
   if (!isRecord(value)) return staffRefused('not-an-object', 'staff');
-  const keys = checkStaffKeys(value, 'staff', [], ['profile', 'level', 'nation', 'planningType', 'horizons', 'phases']);
+  const keys = checkStaffKeys(value, 'staff', [], ['profile', 'level', 'nation', 'planningType', 'horizons', 'phases', 'teams']);
   if (keys) return keys;
   const profile = ownValue(value, 'profile') ?? STAFF_DEFAULTS.profile;
   if (!isOneOf(STAFF_PROFILE_IDS, profile)) return staffRefused('unknown-value', 'staff.profile');
@@ -91,7 +106,25 @@ export function parseStaffSettings(value: unknown): StaffParsed<StaffSettings> {
   if (!horizons.ok) return horizons;
   const phases = parsePhases(ownValue(value, 'phases'));
   if (!phases.ok) return phases;
-  return ok({ profile, level, ...(nation ? { nation } : {}), planningType, horizons: horizons.value, phases: phases.value });
+  const teams = parseTeamLinks(ownValue(value, 'teams'));
+  if (!teams.ok) return teams;
+  return ok({ profile, level, ...(nation ? { nation } : {}), planningType, horizons: horizons.value, phases: phases.value, ...(teams.value ? { teams: teams.value } : {}) });
+}
+
+/** `staff.teams`: only the four section keys, each its own, each a team name (a library file name: lower case letters, digits and dashes). */
+function parseTeamLinks(value: unknown): StaffParsed<StaffTeamLinks | undefined> {
+  if (value === undefined) return ok(undefined);
+  if (!isRecord(value)) return staffRefused('not-an-object', 'staff.teams');
+  const keys = checkStaffKeys(value, 'staff.teams', [], STAFF_TEAM_SECTIONS);
+  if (keys) return keys;
+  const links: Partial<Record<StaffTeamSection, string>> = {};
+  for (const section of STAFF_TEAM_SECTIONS) {
+    const name = ownValue(value, section);
+    if (name === undefined) continue;
+    if (typeof name !== 'string' || !STAFF_SLUG.test(name)) return staffRefused('wrong-type', childPath('staff.teams', section));
+    links[section] = name;
+  }
+  return ok(Object.keys(links).length ? links : undefined);
 }
 
 function parseHorizons(value: unknown): StaffParsed<StaffHorizons> {
@@ -131,7 +164,8 @@ export function staffSettingsJson(settings: StaffSettings): Record<string, unkno
     ...(settings.nation ? { nation: settings.nation } : {}),
     planningType: settings.planningType,
     horizons: { currentOpsHours: settings.horizons.currentOpsHours, futureOpsHours: settings.horizons.futureOpsHours },
-    phases: [...settings.phases]
+    phases: [...settings.phases],
+    ...(settings.teams && STAFF_TEAM_SECTIONS.some((section) => settings.teams?.[section]) ? { teams: Object.fromEntries(STAFF_TEAM_SECTIONS.flatMap((section) => settings.teams?.[section] ? [[section, settings.teams[section]]] : [])) } : {})
   };
 }
 

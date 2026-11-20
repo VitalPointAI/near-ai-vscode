@@ -8,8 +8,9 @@ import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { TeamLibrary } from '../agent/teams';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
 import type { StaffTemplateOptions } from '../agent/staff/templates';
+import type { StaffTeamSection } from '../domain/staff/profiles';
 import {
-  applyStaffSetup, existingStaffSettings, levelChoices, nationChoices, planningTypeChoices, planStaffSetup, profileChoices, readStaffSetupInputs, settingsFrom,
+  applyStaffSetup, existingStaffSettings, requestedSection, levelChoices, nationChoices, planningTypeChoices, planStaffSetup, profileChoices, readStaffSetupInputs, settingsFrom,
   SET_UP_STAFF_TEAM_COMMAND, staffTeamTarget, templateQuestions, type Choice, type StaffSetupPlan
 } from './staffSetup';
 import { hasLoadedScenario, loadScenarioIntoProject, readScenarioFile, STARTER_SCENARIO_FILE } from './staffScenarioLoader';
@@ -43,7 +44,15 @@ export function rosterItems(plan: StaffSetupPlan): vscode.QuickPickItem[] {
   ];
 }
 
-export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder()))): Promise<string | undefined> {
+/** Where "Task it now" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
+export interface StaffSetupChat { prefill(text: string): Promise<void> }
+
+/** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
+export function readyMessage(teamName: string, slug: string, archived: boolean): string {
+  return `${teamName} is set up for this project as /team:${slug}. Task it now to put its command in the NEAR AI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
+}
+
+export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat): Promise<string | undefined> {
   const root = await projectFolder();
   if (!root) return undefined;
   const inputs = await readStaffSetupInputs(root);
@@ -51,7 +60,8 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   const title = 'Set up a staff team';
   const steps = 6;
 
-  const templateId = await pick(title, 'Which staff section?', STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })), 1, steps);
+  const asked = section ? STAFF_TEMPLATES.find((candidate) => candidate.section === section) : undefined;
+  const templateId = asked ? asked.id : await pick(title, 'Which staff section?', STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })), 1, steps);
   const template = STAFF_TEMPLATES.find((candidate) => candidate.id === templateId);
   if (!template) return undefined;
   const profile = await pick(title, 'Which doctrine profile? Its terms, steps and annex letters follow it.', profileChoices(template), 2, steps);
@@ -94,8 +104,12 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   try {
     const result = await applyStaffSetup(root, library, plan, { replace: target.exists });
     const slug = path.basename(result.teamFile, '.md');
-    void Promise.resolve(vscode.window.showInformationMessage(`${plan.roster.teamName} is ready: run it with /team:${slug} in the NEAR AI chat.${result.archived ? ' The earlier file is in your teams archive.' : ''}`, OPEN_STAFF_ROOM_ACTION))
-      .then((choice) => { if (choice === OPEN_STAFF_ROOM_ACTION) void vscode.commands.executeCommand(OPEN_STAFF_ROOM_COMMAND); }, () => undefined);
+    const actions = chat ? [TASK_NOW_ACTION, OPEN_STAFF_ROOM_ACTION] : [OPEN_STAFF_ROOM_ACTION];
+    void Promise.resolve(vscode.window.showInformationMessage(readyMessage(plan.roster.teamName, slug, Boolean(result.archived)), ...actions))
+      .then((choice) => {
+        if (choice === TASK_NOW_ACTION && chat) void chat.prefill(`/team:${slug}`);
+        if (choice === OPEN_STAFF_ROOM_ACTION) void vscode.commands.executeCommand(OPEN_STAFF_ROOM_COMMAND);
+      }, () => undefined);
     await offerStarterScenario(root);
     return result.teamFile;
   } catch (error) {
@@ -118,7 +132,9 @@ async function offerStarterScenario(root: string): Promise<void> {
 
 /** The action on the "team is ready" message that opens the Staff Room. */
 export const OPEN_STAFF_ROOM_ACTION = 'Open the Staff Room';
+/** The action on the "team is ready" message that puts `/team:<name> ` in the chat's message box. */
+export const TASK_NOW_ACTION = 'Task it now';
 
-export function registerStaffSetup(context: vscode.ExtensionContext): void {
-  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, () => setUpStaffTeam()));
+export function registerStaffSetup(context: vscode.ExtensionContext, chat?: StaffSetupChat): void {
+  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) => setUpStaffTeam(undefined, requestedSection(arg), chat)));
 }

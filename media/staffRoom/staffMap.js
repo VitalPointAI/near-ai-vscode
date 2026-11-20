@@ -21,7 +21,15 @@
   /** The nonce of this script, which the COP map's lazy loads carry, so the page's policy needs no new script source. */
   const NONCE = typeof document !== 'undefined' && document.currentScript && document.currentScript.nonce ? document.currentScript.nonce : undefined;
   /** The theme's map colours the COP map takes, read from the page's CSS custom properties. */
-  const THEME_VARS = { ocean: '--map-sea', land: '--map-land', marsh: '--map-ridge', contour: '--map-contour', river: '--map-river', road: '--map-road', line: '--map-ink', label: '--map-ink', halo: '--map-halo' };
+  const THEME_VARS = {
+    ocean: '--map-sea', land: '--map-land', marsh: '--map-ridge', contour: '--map-contour', river: '--map-river', road: '--map-road', line: '--map-ink', label: '--map-ink', halo: '--map-halo',
+    hillShadow: '--map-hill-shadow', hillLight: '--map-hill-light', relief: '--map-relief', space: '--map-space'
+  };
+  /** The terrain pack's layers the SVG map draws (weather stays on the COP map, which has the time slider). */
+  const ENV_DRAWN = { 'env-hillshade': true, 'env-contours': true };
+  /** The host's earth radius (src/domain/staff/obs/frame.ts EARTH_RADIUS_M) and how much stronger than the pack's tones the hillshade is drawn (as copMap.js). */
+  const EARTH_RADIUS_M = 6371008.8;
+  const RELIEF = 1.8;
 
   // ---- Label placement (shared with media/staff/copMap.js) ------------------------------------------------------------------------------------
 
@@ -114,16 +122,25 @@
     tableButton.type = 'button';
     tableButton.setAttribute('aria-pressed', 'false');
     tableButton.setAttribute('aria-keyshortcuts', 'M');
-    const layersButton = el('button', 'btn small', 'Layers');
-    layersButton.type = 'button';
-    layersButton.setAttribute('aria-expanded', 'false');
-    tools.append(layersButton, tableButton);
+    // Full map: the map fills the whole Staff Room panel; the button or Escape brings the room back (D-48 of 0.4.34).
+    const fullButton = el('button', 'btn small map-full', 'Full map');
+    fullButton.type = 'button';
+    fullButton.setAttribute('aria-pressed', 'false');
+    fullButton.title = 'Fill the Staff Room with the map (Escape returns)';
+    // The layer drawer (media/staff/layerDrawer.js), the same one the COP map uses: it slides in from the map's right edge.
+    const drawerApi = typeof window !== 'undefined' ? window.nearLayerDrawer : undefined;
+    const drawer = drawerApi ? drawerApi.create(box, {
+      motion, footnote: 'Each layer has one writer, named on its row.', onToggle: (id, on) => setLayer(id, on),
+      // The 2D map's base: Topographic (the pack's land cover, hillshade and contours) or Plain; Imagery needs the WebGL map.
+      onChoose: (group, id) => { if (group === 'base' && (id === 'topo' || id === 'plain') && id !== svgBase) { svgBase = id; if (options.onMapSettings) options.onMapSettings(Object.assign({}, options.mapSettings || {}, { base: id })); if (model) render(model); } }
+    }) : undefined;
+    let svgBase = options.mapSettings && options.mapSettings.base === 'plain' ? 'plain' : 'topo';
+    /** The pack's land cover for the 2D Topographic base, fetched once from the address the host checked; undefined until it arrives. */
+    let landcover;
+    let landcoverFrom;
+    if (drawer) { drawer.button.classList.add('layers-toggle'); tools.append(drawer.button); }
+    tools.append(tableButton, fullButton);
     box.append(tools);
-    const layerPanel = el('div', 'layerpanel');
-    layerPanel.hidden = true;
-    layerPanel.setAttribute('role', 'group');
-    layerPanel.setAttribute('aria-label', 'Map layers, each with the one section that writes it');
-    box.append(layerPanel);
     const table = el('div', 'listview');
     table.hidden = true;
     box.append(table);
@@ -155,6 +172,8 @@
     let copView;
     let copReason;
     let picture;
+    /** The host's checked tile addresses (src/staff/mapTiles.ts), for the COP map and the SVG map's land cover. */
+    let basemap;
     let destroyed = false;
     const subscribers = new Set();
     const clock = {
@@ -163,14 +182,46 @@
       subscribe: (fn) => { subscribers.add(fn); return () => subscribers.delete(fn); },
       set: (t) => { clock.t = t; clock.manual = true; for (const fn of subscribers) fn(t); }
     };
-    layersButton.className = 'btn small layers-toggle';
+    let full = false;
+    let toolsMoved = false;
 
     tableButton.addEventListener('click', () => showTable(!tableOn));
-    layersButton.addEventListener('click', () => {
-      const open = layerPanel.hidden;
-      layerPanel.hidden = !open;
-      layersButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
+    fullButton.addEventListener('click', () => setFull(!full));
+    // Escape leaves the full map (a drawer open over it closes first, and stops the key there); Tab stays inside the full map while it covers the room.
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('keydown', (event) => {
+        if (!full || destroyed) return;
+        if (event.key === 'Escape') {
+          if ((drawer && drawer.isOpen()) || (copView && copView.layers && copView.layers())) return;
+          if (event.preventDefault) event.preventDefault();
+          setFull(false);
+          if (typeof fullButton.focus === 'function') fullButton.focus();
+          return;
+        }
+        if (event.key === 'Tab' && drawerApi) {
+          const list = drawerApi.focusables(box);
+          if (!list.length) return;
+          const active = document.activeElement;
+          const first = list[0], last = list[list.length - 1];
+          if (event.shiftKey && (active === first || !drawerApi.within(box, active))) { if (event.preventDefault) event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (active === last || !drawerApi.within(box, active))) { if (event.preventDefault) event.preventDefault(); first.focus(); }
+        }
+      });
+    }
+
+    /** The map over the whole Staff Room panel, or back in its place. Only opacity and transform animate, and not under reduced motion or Calm. */
+    function setFull(on) {
+      const next = Boolean(on);
+      if (next === full) return;
+      full = next;
+      box.classList.toggle('full', full);
+      fullButton.setAttribute('aria-pressed', full ? 'true' : 'false');
+      fullButton.textContent = full ? 'Exit full map' : 'Full map';
+      box.setAttribute('role', full ? 'dialog' : 'region');
+      box.setAttribute('aria-modal', full ? 'true' : 'false');
+      anim(box, [{ opacity: 0.55, transform: 'scale(.985)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 260 });
+      if (options.onFull) options.onFull(full);
+    }
     if (typeof svg.addEventListener === 'function') {
       svg.addEventListener('pointermove', (event) => {
         if (!model || !model.available || typeof svg.getScreenCTM !== 'function' || typeof svg.createSVGPoint !== 'function') return;
@@ -221,26 +272,31 @@
 
     const layerTitle = (id) => { const layer = model && model.layers.find((entry) => entry.id === id); return layer ? layer.title : id; };
 
+    /** The drawer's rows for the SVG map: each staff layer with its one writer, and the terrain pack's layers when the picture carries them. */
     function renderLayers() {
-      layerPanel.replaceChildren();
-      layerPanel.append(el('p', 'kicker', 'Layers · one writer each'));
-      for (const layer of model.layers) {
-        const row = el('div', 'sw');
-        const button = el('button');
-        button.type = 'button';
-        button.setAttribute('role', 'switch');
-        button.setAttribute('aria-checked', hidden.has(layer.id) ? 'false' : 'true');
-        const label = layer.title + ', written by ' + layer.owner.member + ' (' + layer.owner.section.toUpperCase() + ')';
-        button.setAttribute('aria-label', label);
-        button.addEventListener('click', () => setLayer(layer.id, hidden.has(layer.id)));
-        const name = el('span', 'swname', layer.title);
-        const owner = el('span', 'chip sec', layer.owner.section.toUpperCase());
-        owner.title = 'Written only by ' + layer.owner.member;
-        const count = el('span', 'faint mono', String(layer.drawn) + (layer.reported !== undefined ? ' · COP ' + layer.reported : ''));
-        count.title = layer.reported !== undefined ? 'Drawn here, and the count the writer last reported through the COP' : 'Drawn here';
-        row.append(button, name, owner, count);
-        layerPanel.append(row);
+      if (!drawer || !drawerApi) return;
+      const items = (model && model.available ? model.layers : []).map((layer) => ({
+        id: layer.id, title: layer.title, count: layer.drawn, on: !hidden.has(layer.id), sim: false, owner: layer.owner.member + ' (' + layer.owner.section.toUpperCase() + ')',
+        note: layer.reported !== undefined ? 'Drawn here: ' + layer.drawn + '. The writer last reported ' + layer.reported + ' through the COP.' : 'Drawn here: ' + layer.drawn + '.',
+        group: layer.id === 'cop-terrain-layer' ? 'environment' : 'picture'
+      }));
+      const env = envPicture();
+      if (env) {
+        for (const layer of env.layers) {
+          if (layer.kind !== 'environment' || !ENV_DRAWN[layer.id]) continue;
+          items.push({ id: layer.id, title: layer.title, count: layer.count, on: !hidden.has(layer.id), sim: Boolean(layer.simulated), owner: layer.owner || '', note: layer.note || '', group: 'environment' });
+        }
+        items.unshift({ id: 'map-terrain', title: '3D terrain', count: '', on: false, disabled: true, reason: '3D terrain needs the WebGL map' + (copReason ? ': ' + copReason : '') + '.', group: 'environment' });
       }
+      const groups = drawerApi.grouped(items);
+      if (env && env.environment) {
+        groups.unshift({ id: 'base', title: 'Base map', choice: true, items: [
+          { id: 'imagery', title: 'Imagery', on: false, disabled: true, reason: 'Imagery needs the WebGL map' + (copReason ? ': ' + copReason : '') + '.' },
+          { id: 'topo', title: 'Topographic', on: svgBase === 'topo' },
+          { id: 'plain', title: 'Plain', on: svgBase === 'plain' }
+        ] });
+      }
+      drawer.setGroups(groups);
     }
 
     function setLayer(id, on) {
@@ -263,7 +319,9 @@
       sv('path', { class: 'marshline', d: 'M0,3 L4,3 M1,1 L2,1' }, hatch);
       sv('rect', { x: f(x - w), y: f(y - h), width: f(w * 3), height: f(h * 3), fill: 'url(#seaGrad)' }, parent);
       for (let i = 0; i < 7; i += 1) sv('path', { class: 'swell', d: 'M' + f(x - w) + ',' + f(14 + i * 9) + ' C' + f(x + w * 0.3) + ',' + f(8 + i * 9) + ' ' + f(x + w * 0.6) + ',' + f(20 + i * 9) + ' ' + f(x + 2 * w) + ',' + f(12 + i * 9) }, parent);
-      if (model.land) { sv('path', { class: 'land-glow', d: model.land }, parent); sv('path', { class: 'land', d: model.land }, parent); }
+      // The ground: the terrain pack's land, hillshade and contours when the picture carries them (the same ground the COP map draws), else the outline
+      // the host drew round the scenario's places.
+      if (!drawEnvironment(parent) && model.land) { sv('path', { class: 'land-glow', d: model.land }, parent); sv('path', { class: 'land', d: model.land }, parent); }
       // The grid: a line every 5 squares, labelled with its number.
       const step = 50;
       const startX = Math.ceil(x / step) * step;
@@ -281,6 +339,83 @@
         const node = text({ class: 'plab', x: label.at[0], y: label.at[1], 'text-anchor': 'middle' }, label.name.toUpperCase(), parent);
         register(node, { id: 's:' + index, x: label.at[0], y: label.at[1], first: [0, 0, 'middle'], gap: 8, prio: 0.5, size: 8, factor: 0.8, text: label.name.toUpperCase() });
       });
+    }
+
+    /** The land cover the host's checked address points at, fetched once (connect-src allows only the extension); redraws when it arrives. */
+    function landcoverData() {
+      const from = basemap && basemap.frame && typeof basemap.frame.landcover === 'string' && /\.geojson$/.test(basemap.frame.landcover) ? basemap.frame.landcover : undefined;
+      if (!from || typeof fetch !== 'function') return undefined;
+      if (landcoverFrom !== from) {
+        landcoverFrom = from;
+        landcover = undefined;
+        fetch(from).then((r) => r.json()).then((json) => {
+          if (landcoverFrom !== from || !json || json.type !== 'FeatureCollection' || !Array.isArray(json.features)) return;
+          landcover = json;
+          if (model && copState !== 'on') render(model);
+        }, () => { /* the 2D map stays without land cover */ });
+      }
+      return landcover;
+    }
+
+    /** The picture whose terrain the SVG map draws: one with a frame, while the COP map is not the one on screen. */
+    function envPicture() {
+      return picture && picture.frame && Array.isArray(picture.frame.bounds) && copState !== 'on' && !copView ? picture : undefined;
+    }
+
+    /**
+     * Draws the picture's synthetic land and the terrain pack's hillshade, contours and coastline in the SVG map's own units: longitude and latitude to
+     * metres from the frame's origin (the host's rule, src/domain/staff/obs/frame.ts wgs84ToGrid), then to the map's grid. False when there is nothing.
+     */
+    function drawEnvironment(parent) {
+      const env = envPicture();
+      if (!env || !model.grid || !model.grid.unitMetres) return false;
+      const b = env.frame.bounds;
+      const cosC = Math.cos(((b[1] + b[3]) / 2) * Math.PI / 180);
+      const k = (Math.PI / 180) * EARTH_RADIUS_M;
+      const at = (c) => [((c[0] - b[0]) * k * cosC - model.grid.originEasting) / model.grid.unitMetres, (model.grid.originNorthing - (c[1] - b[1]) * k) / model.grid.unitMetres];
+      const path = (ring, close) => ring.map((c, i) => { const p = at(c); return (i ? 'L' : 'M') + f(p[0]) + ',' + f(p[1]); }).join(' ') + (close ? ' Z' : '');
+      const ground = (env.geography && env.geography.features) || [];
+      const land = ground.filter((g) => g.properties && (g.properties.kind === 'land' || g.properties.kind === 'marsh') && g.geometry.type === 'Polygon');
+      const terrain = env.environment;
+      if (!land.length && !terrain) return false;
+      for (const g of land) {
+        const d = path(g.geometry.coordinates[0], true);
+        if (g.properties.kind === 'land') sv('path', { class: 'land-glow', d }, parent);
+        sv('path', { class: g.properties.kind === 'marsh' ? 'land env-marsh' : 'land', d }, parent);
+      }
+      if (!terrain) return land.length > 0;
+      // Topographic: the pack's land cover in a topographic map's tints, under the hillshade and contours.
+      const cover = svgBase === 'topo' ? landcoverData() : undefined;
+      if (cover) {
+        const fills = sv('g', { class: 'env-landcover' }, parent);
+        for (const g of cover.features || []) {
+          if (!g || !g.geometry || g.geometry.type !== 'Polygon' || !g.properties) continue;
+          const kind = String(g.properties.kind);
+          if (!/^(forest|scrub|farmland|beach|rock|built-up|marsh)$/.test(kind)) continue;
+          sv('path', { class: 'lc lc-' + kind, d: g.geometry.coordinates.map((ring) => path(ring, true)).join(' '), 'fill-rule': 'evenodd' }, fills);
+        }
+        for (const g of cover.features || []) {
+          if (!g || !g.geometry || g.geometry.type !== 'LineString' || !g.properties) continue;
+          sv('path', { class: g.properties.kind === 'road' ? 'lc-road' : 'lc-track', d: path(g.geometry.coordinates, false), 'vector-effect': 'non-scaling-stroke' }, fills);
+        }
+      }
+      const shade = sv('g', { class: 'layer env-hillshade', 'data-layer': 'env-hillshade' }, parent);
+      for (const g of (terrain.hillshade && terrain.hillshade.features) || []) {
+        if (!g.geometry || g.geometry.type !== 'Polygon') continue;
+        const p = g.properties || {};
+        sv('path', { class: 'env-hill ' + (p.tone === 'light' ? 'light' : 'shadow'), d: path(g.geometry.coordinates[0], true), 'fill-opacity': Math.min(0.85, RELIEF * (Number(p.opacity) || 0.2)).toFixed(2) }, shade);
+      }
+      const lines = sv('g', { class: 'layer env-contours', 'data-layer': 'env-contours' }, parent);
+      for (const g of (terrain.contours && terrain.contours.features) || []) {
+        if (!g.geometry || g.geometry.type !== 'LineString') continue;
+        const p = g.properties || {};
+        sv('path', { class: p.kind === 'coastline' ? 'env-coast' : 'env-contour' + (p.index ? ' index' : ''), d: path(g.geometry.coordinates, false), 'vector-effect': 'non-scaling-stroke' }, lines);
+      }
+      for (const [id, group] of [['env-hillshade', shade], ['env-contours', lines]]) {
+        if (hidden.has(id)) group.setAttribute('visibility', 'hidden');
+        layerGroups.set(id, group);
+      }
+      return true;
     }
 
     function drawFeature(feature, parent, index) {
@@ -461,7 +596,7 @@
       opts = opts || {};
       model = next;
       mode = opts.mode || mode;
-      box.className = 'mapbox mode-' + mode + (copView ? ' has-cop' : copState === 'mounting' ? ' cop-mounting' : '');
+      box.className = 'mapbox mode-' + mode + (copView ? ' has-cop' : copState === 'mounting' ? ' cop-mounting' : '') + (copView && toolsMoved ? ' cop-tools' : '') + (full ? ' full' : '');
       svg.replaceChildren();
       labelItems = [];
       layerGroups.clear();
@@ -470,7 +605,7 @@
         empty.hidden = false;
         empty.replaceChildren(el('p', 'mapempty-t', 'No map yet'), el('p', 'faint', model ? model.reason || '' : ''));
         if (options.onEmptyAction && model) { const b = el('button', 'btn', 'Load a staff exercise scenario'); b.type = 'button'; b.addEventListener('click', options.onEmptyAction); empty.append(b); }
-        layerPanel.replaceChildren();
+        renderLayers();
         if (tableOn) renderTable();
         placement = {};
         return;
@@ -560,6 +695,8 @@
       box.classList.remove('has-cop');
       box.classList.remove('cop-mounting');
       showNote('2D map: ' + reason + '.');
+      // The SVG map now draws the picture's terrain too.
+      if (model && model.available && envPicture()) render(model);
       if (options.onRenderer) options.onRenderer('svg', reason);
     }
 
@@ -583,7 +720,12 @@
       const cop = options.cop || {};
       let mounting;
       try {
-        mounting = api.mount(copSlot, { resources: cop.resources, nonce: cop.nonce || NONCE, renderer: 'auto', projection: 'map', clock, still: true, colours: themeColours() });
+        mounting = api.mount(copSlot, {
+          resources: cop.resources, nonce: cop.nonce || NONCE, renderer: 'auto', projection: 'map', clock, still: true, motion, colours: themeColours(),
+          basemap, mapSettings: options.mapSettings, onMapSettings: options.onMapSettings,
+          // A layer turned on or off in the map's drawer is remembered like one turned in the SVG map's.
+          onLayer: (id, on) => { if (on) hidden.delete(id); else hidden.add(id); if (options.onLayers) options.onLayers([...hidden]); }
+        });
       } catch (error) { copOff('the COP map could not start (' + (error && error.message ? error.message : String(error)) + ')'); return; }
       Promise.resolve(mounting).then((view) => {
         if (destroyed) { if (view && view.destroy) view.destroy(); return; }
@@ -601,8 +743,9 @@
         copSlot.setAttribute('aria-hidden', tableOn ? 'true' : 'false');
         box.classList.remove('cop-mounting');
         box.classList.add('has-cop');
-        layerPanel.hidden = true;
-        layersButton.setAttribute('aria-expanded', 'false');
+        if (drawer) drawer.close(false);
+        // The room's own controls join the map's, over the map.
+        if (typeof view.addTool === 'function') { view.addTool(tableButton); view.addTool(fullButton); toolsMoved = true; box.classList.add('cop-tools'); }
         try {
           view.setPicture(picture);
           for (const id of hidden) view.setLayerVisible(id, false);
@@ -627,9 +770,19 @@
         if (copState !== 'on' && copState !== 'off') showNote(info.problem ? '2D map: ' + info.problem + '.' : '');
         return;
       }
+      const groundBefore = picture ? JSON.stringify([picture.frame, picture.geography, picture.environment]) : '';
       picture = next;
       if (copView) { try { copView.setPicture(next); } catch (error) { /* a picture the map refuses leaves the last one */ } return; }
-      if (copState === 'idle' && next.frame) mountCop();
+      if (copState === 'idle' && next.frame) { mountCop(); return; }
+      // The SVG map redraws when the ground it takes from the picture changed.
+      if (copState === 'off' && model && model.available && JSON.stringify([next.frame, next.geography, next.environment]) !== groundBefore) render(model);
+    }
+
+    /** The host's checked tile addresses: kept for the COP map's mount, and given to a running map. */
+    function setBasemap(next) {
+      basemap = next;
+      if (copView && copView.setBasemap) { try { copView.setBasemap(next); } catch (error) { /* the map keeps what it had */ } }
+      if (copState === 'off' && model && model.available) render(model);
     }
 
     /** The theme changed: the COP map takes the page's map colours (the SVG map follows the CSS by itself). */
@@ -641,12 +794,15 @@
     return {
       element: box,
       render, highlight, showTable, focusFirst,
-      setLayer, setPicture, setTheme,
+      setLayer, setPicture, setTheme, setBasemap,
       renderer: () => ({ kind: copView ? 'maplibre' : 'svg', state: copState, reason: copReason }),
       labels: () => Object.values(placement),
       tableShown: () => tableOn,
       hiddenLayers: () => [...hidden],
-      destroy: () => { destroyed = true; if (copView) copView.destroy(); copView = undefined; box.remove(); }
+      setFull, fullShown: () => full, drawer: () => drawer,
+      /** Fits the COP map to the exercise frame again once its box has its new size (the map moved to another workspace). */
+      refit: () => { if (copView && copView.fitFrame) setTimeout(() => { if (copView) copView.fitFrame(); }, 120); },
+      destroy: () => { destroyed = true; if (drawer) drawer.destroy(); if (copView) copView.destroy(); copView = undefined; box.remove(); }
     };
   }
 

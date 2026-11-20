@@ -2,6 +2,94 @@
 
 ## Unreleased
 
+### Military staff teams
+
+- **The COP map looks like the ground.** The map now opens on photo-like aerial imagery of the
+  exercise area with 3D terrain, and the globe on NASA Blue Marble imagery (credit: NASA Earth
+  Observatory). **Topographic** (colour relief, land cover, hillshade, contours every 20 m with
+  labelled index contours every 100 m, roads and the KQ grid; Natural Earth on the globe) is one
+  choice away in the layer drawer's **Base map**, and **Plain** keeps the flat map. The drawer also
+  has **3D terrain** with a height slider (1 to 3 times, 1.5 to start) and **Grid**. Everything is
+  bundled with the extension and drawn offline; the exercise imagery and terrain are synthetic and
+  not a real place.
+- **Military map margin.** Scale bars in kilometres and nautical miles, the datum, the grid, the
+  contour interval and a declination diagram. IRON LANTERN's magnetic declination, 17 degrees
+  east, is fictional and says so.
+- **3D starts off where it would be slow.** On a computer that draws the map without a graphics
+  card, 3D terrain starts off and the drawer says why; you can still turn it on.
+- **Spin the globe.** On the globe, **Spin** turns it slowly until you touch the map; dragging
+  spins it with momentum. Spin never runs under Calm or reduced motion, and stops when the room is
+  hidden.
+- **The 2D map is topographic.** Where WebGL is not available, the 2D map keeps the drawer and
+  shows the Topographic base, and says why Imagery and 3D are not there.
+
+- **The project knows its staff teams.** Set Up a Staff Team now records each section's team in
+  the project's staff settings, so after setting up a J2 the chat no longer says "This project has
+  no team yet". A staff project shows a **Staff teams** card instead: each section with its team's
+  name and a **Task** button that puts `/team:<name> ` in the message box without sending it, and
+  **Set up** for the sections not set up yet.
+- **The Staff teams card appears right after setup.** With the chat already open (as in a browser
+  editor such as code-server), setting up a staff team now replaces "This project has no team yet"
+  with the **Staff teams** card at once. If the staff settings cannot be read, the card says why
+  and the reason is written to the **NEAR AI** output, instead of the "no team yet" card showing
+  with nothing said.
+- **Set up a staff team from the chat.** The "This project has no team yet" card now offers **Set
+  up a staff team** beside **Set up your project team**, so a staff project can start there.
+- **Task a staff team from anywhere.** The message when setup finishes names the team and offers
+  **Task it now** and **Open the Staff Room**. The `/team` menu lists the project's staff teams
+  first, labelled by section, and each section card in the Staff Room shows its team with **Task
+  in chat** (or **Set up** for a section without one).
+- **Missing and older teams.** A team file that was deleted or renamed in your teams shows as
+  missing with **Set up again**, never as a command that would fail. A project set up before this
+  release is offered the matching teams already in your teams to **Link**, only after you confirm.
+- **The Staff Room's map has the room.** Once a scenario is loaded the map is the main panel and
+  fills the panel's height without scrolling; the process rail and the section cards fold into
+  one line that opens them again, and that line's **Staff teams** opens the cards at the first
+  section's **Task in chat** or **Set up**. **Full map** puts the map over the whole Staff Room,
+  and Escape brings the room back. The J2 and J3 workspaces' map fills its view the same way.
+- **A layer drawer instead of a block of checkboxes.** **Layers** over the map shows how many
+  layers are on and slides in a drawer from the map's edge, with the layers grouped as Picture,
+  Environment and Reference, each with its count and a SIM badge for simulated data. Escape or a
+  click outside closes it, and focus stays inside while it is open. The classification line,
+  the track count, the time slider and the data's attribution now float over the map.
+- **A closer first view.** The map opens on the land, the named places and the units with a
+  margin, so the peninsula fills most of the map; the exercise frame's dashed line is still drawn
+  round it. The hillshade and contours read in every theme, and units that would cover each other
+  are drawn as one stacked symbol with a count until you zoom in (a click on the stack lists what
+  is in it). Symbols are smaller at the wide view.
+- **Globe that shows the globe.** **Globe** flies out until the curve of the earth is plain, with
+  a graticule and the exercise frame ringed in gold, and **Map** flies back to the first view.
+  Units stay hidden at the globe's zoom. Under reduced motion or Calm the view jumps instead.
+- **The 2D map draws the ground.** Where WebGL is not available, the room's 2D map draws the
+  terrain pack's land, hillshade and contours under the units, and uses the same layer drawer.
+- **One machine for now.** Staff projects work on one machine: several people and machines on one
+  staff project are not supported yet, because the signed ledgers trust only this computer's key.
+  Multi-user staff workspaces are planned.
+- Fixed: symbols could go missing after zooming in on the COP map, leaving only their names.
+- Fixed: a staff team's run could sit on "working" without tasking anyone, after an error card
+  such as "COP layers failed. Not allowed". The run's lead was offered the members' tools (the COP
+  map, the feeds, the workbenches), tried one and was refused. Each agent is now offered only the
+  tools it may use: the lead coordinates, marks the step and starts the members at once, and each
+  member gets what its tools line grants.
+- **A member carries on when NEAR AI is overloaded.** In a J2 staff run, five of twelve members
+  failed: the ones on GLM 5.3 got "service overloaded" for four minutes, and the ones on Kimi K3
+  sent nothing for 90 seconds again and again. A member whose model is overloaded for about a
+  minute, or sends nothing twice, now moves to the next model and continues the same task, for
+  example "threat-analyst switched from Kimi K3 to Qwen 3.6: Kimi K3 is overloaded at NEAR AI".
+  Team Live, the Staff Room activity and the chat show the switch, and spend and the activity
+  record name the model that did the work. The next model is the backup model, then the standard,
+  deep and fast tiers, then the chat's model, skipping one that is busy; it is always at least as
+  private (TEE stays TEE, a private member stays private, TEE-only mode holds). A member whose
+  team file names its model moves too, with the notice.
+- **Members no longer crowd one busy model.** While NEAR AI refuses a model, the extension sends
+  it at most two requests at a time and waits longer each time it refuses again, instead of every
+  member trying at once.
+- **A member that fails says why.** Its activity, the Staff Room and the lead's report now say
+  "overloaded at NEAR AI", "no answer for 90 s" or "refused by policy" instead of only
+  "AgentRunError".
+- Fixed: a `privacy: private` member whose reply stalled could be retried on the chat's own model
+  even when that model is forwarded. The retry now uses only a model at least as private.
+
 ## 0.4.34
 
 This release adds military staff teams. Set up a J2 intelligence, J5 plans, J3 operations or J4

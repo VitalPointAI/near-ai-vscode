@@ -11,6 +11,12 @@ import { deriveProfileId } from '../domain/auth';
 import { ProfileStore } from '../services/profileStore';
 import { parseChatWebviewMessage } from '../services/chatBridge';
 import { SETUP_NUDGE_DISMISSED_KEY } from '../services/setupSteps';
+import { applyStaffSetup, planStaffSetup } from '../services/staffSetup';
+import { defaultStaffSettings } from '../domain/staff/profiles';
+import { J2_STAFF_TEMPLATE } from '../agent/staff/templates';
+import { TeamLibrary } from '../agent/teams';
+import { teamLibraryDir, homeFolder } from '../domain/teamStorage';
+import { setNearAiDiagnostics } from '../services/nearAiClient';
 import { FakeDocument, FakeNode } from './helpers/fakeDom';
 import { testGateHost } from './helpers/gatedRuns';
 
@@ -50,6 +56,7 @@ test('the card sits at the top of the empty chat, labelled, with the team button
   const buttons = card.all((node) => node.tagName === 'button');
   assert.deepEqual(buttons.map((button) => [button.textContent, button.type, button.className]), [
     ['Set up your project team', 'button', 'text-button primary'],
+    ['Set up a staff team', 'button', 'text-button'],
     ['Not now', 'button', 'text-button'],
     ['All setup steps', 'button', 'link']
   ], 'real buttons, so they are reachable with Tab and work with Enter and Space');
@@ -65,10 +72,11 @@ test('the buttons ask the host, and "Not now" hides the card and returns focus',
   const posts: unknown[] = [];
   let focused = 0;
   const card = setup.renderSetupNudge(doc, welcome, true, (message) => posts.push(message), () => { focused += 1; })!;
-  const [team, later, menu] = card.all((node) => node.tagName === 'button');
+  const [team, staff, later, menu] = card.all((node) => node.tagName === 'button');
   team.click();
+  staff.click();
   menu.click();
-  assert.deepEqual(posts, [{ type: 'setup-nudge', action: 'team' }, { type: 'setup-nudge', action: 'menu' }]);
+  assert.deepEqual(posts, [{ type: 'setup-nudge', action: 'team' }, { type: 'setup-nudge', action: 'staff' }, { type: 'setup-nudge', action: 'menu' }]);
   assert.equal(card.attached, true, 'the card stays until the team exists');
   later.click();
   assert.deepEqual(posts.at(-1), { type: 'setup-nudge', action: 'later' });
@@ -251,7 +259,7 @@ test('the sidebar HTML has the Connect panel, hidden until the profile is known,
 });
 
 test('the view\'s card messages are parsed strictly', () => {
-  for (const action of ['team', 'later', 'menu'] as const) assert.deepEqual(parseChatWebviewMessage({ type: 'setup-nudge', action }), { type: 'setup-nudge', action });
+  for (const action of ['team', 'staff', 'later', 'menu'] as const) assert.deepEqual(parseChatWebviewMessage({ type: 'setup-nudge', action }), { type: 'setup-nudge', action });
   assert.equal(parseChatWebviewMessage({ type: 'setup-nudge', action: 'workbench.action.terminal.new' }), undefined);
   assert.equal(parseChatWebviewMessage({ type: 'setup-nudge' }), undefined);
   assert.equal(parseChatWebviewMessage({ type: 'setup-nudge', action: 'team', command: 'x' }), undefined);
@@ -386,5 +394,92 @@ test('the host does not show the card before a profile works', async () => {
     assert.equal(setup.welcomeState(status()), 'no-folder');
   } finally {
     vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  }
+});
+
+test('a staff team set up while the chat is open replaces the "no team yet" card at once, with no file watcher event; "Set up a staff team" runs the setup (D-48 of 0.4.35)', async () => {
+  // code-server did not deliver the watcher's event, so the open chat kept "no team yet" after the J2 team was set up. The setup now tells the chat.
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-setup-nudge-staff-'));
+  const previousTeams = process.env.NEAR_AI_TEAMS_DIR;
+  process.env.NEAR_AI_TEAMS_DIR = await mkdtemp(path.join(tmpdir(), 'near-ai-setup-nudge-teams-'));
+  const auth = new AuthService(new MemorySecrets());
+  await new ProfileStore(root, auth, { validator: async () => undefined }).configure({ profileId: deriveProfileId(root, 'Demo'), displayName: 'Demo', organization: 'Demo', baseUrl: 'https://cloud-api.near.ai/v1', authMode: 'apiKey' }, 'sk-test-key');
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  const context = { subscriptions: [] as unknown[], globalStorageUri: { fsPath: path.join(tmpdir(), `near-ai-nudge-staff-${process.pid}`) }, extensionUri: { fsPath: ROOT, path: ROOT }, secrets: new MemorySecrets(), workspaceState: { get: () => undefined, update: async () => undefined }, globalState: { get: () => undefined, update: async () => undefined } };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => String(input).endsWith('/models') ? Response.json({ data: [{ id: 'z-ai/glm-5.3' }] }) : String(input).endsWith('/model/list') ? Response.json({ models: [] }) : new Response('{}', { status: 404 })) as typeof fetch;
+  const posted: Array<Record<string, unknown>> = [];
+  let receive: ((message: unknown) => Promise<void>) | undefined;
+  let dispose: (() => void) | undefined;
+  let shown: (() => void) | undefined;
+  const sidebar = { visible: true, webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } }, onDidDispose: (listener: () => void) => { dispose = listener; return { dispose() {} }; }, onDidChangeVisibility: (listener: () => void) => { shown = listener; return { dispose() { shown = undefined; } }; } };
+  const nudge = () => posted.filter((message) => message.type === 'setup-nudge').at(-1)?.show;
+  const staffCard = () => posted.filter((message) => message.type === 'staff-teams').at(-1)?.model as { sections: Array<{ section: string; state: string; team?: string }> } | null | undefined;
+  const until = async (done: () => boolean) => { for (let wait = 0; wait < 200 && !done(); wait += 1) await new Promise((resolve) => setTimeout(resolve, 10)); };
+  try {
+    const { attachChatToView } = load<typeof import('../services/chat')>('../services/chat');
+    await attachChatToView(context as never, auth, sidebar as never, '<html></html>', testGateHost());
+    assert.equal(nudge(), true, '"no team yet" when the chat opens');
+    assert.equal(staffCard(), null, 'no Staff teams card outside a staff project');
+    // The card's "Set up a staff team" runs the setup command (the host's own command, nothing the view names).
+    executed.length = 0;
+    await receive!({ type: 'setup-nudge', action: 'staff' });
+    assert.deepEqual(executed.splice(0), [['nearAi.setUpStaffTeam']]);
+    // What the command writes for J2, US Joint, operational, contingency. No watcher listener is called: only the setup's own notice.
+    posted.length = 0;
+    const plan = planStaffSetup({ templateId: J2_STAFF_TEMPLATE.id, options: { settings: { ...defaultStaffSettings(), profile: 'us-joint', level: 'operational', planningType: 'contingency' }, locality: 'local' } });
+    await applyStaffSetup(root, new TeamLibrary(teamLibraryDir(homeFolder())), plan);
+    await until(() => Boolean(staffCard()) && nudge() === false);
+    const j2 = staffCard()?.sections.find((entry) => entry.section === 'j2');
+    assert.deepEqual([j2?.state, j2?.team], ['ready', 'j2-us-joint-operational']);
+    assert.equal(nudge(), false, 'the "no team yet" card goes');
+    // Shown again after being hidden: the cards are worked out again, so a message lost while hidden never leaves an old card.
+    posted.length = 0;
+    shown!();
+    await until(() => Boolean(staffCard()));
+    assert.equal(staffCard()?.sections.find((entry) => entry.section === 'j2')?.state, 'ready');
+    // A setup in another folder does not concern this chat.
+    posted.length = 0;
+    const other = await mkdtemp(path.join(tmpdir(), 'near-ai-setup-nudge-other-'));
+    const { staffTeamsChanged } = await import('../services/staffSetup');
+    staffTeamsChanged(other);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(posted.filter((message) => message.type === 'staff-teams'), []);
+    dispose!();
+    assert.equal(shown, undefined, 'stops listening with the view');
+    staffTeamsChanged(root);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(posted.filter((message) => message.type === 'staff-teams'), [], 'nothing posted after the view is gone');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousTeams === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previousTeams;
+  }
+});
+
+test('a staff project whose teams cannot be read shows the Staff teams card with the reason and logs it, never the "no team yet" card in silence', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-setup-nudge-unread-'));
+  const auth = new AuthService(new MemorySecrets());
+  await new ProfileStore(root, auth, { validator: async () => undefined }).configure({ profileId: deriveProfileId(root, 'Demo'), displayName: 'Demo', organization: 'Demo', baseUrl: 'https://cloud-api.near.ai/v1', authMode: 'apiKey' }, 'sk-test-key');
+  await mkdir(path.join(root, '.planning', '.near-ai'), { recursive: true });
+  await writeFile(path.join(root, '.planning', '.near-ai', 'project.json'), JSON.stringify({ staff: { profile: 'us-joint', level: 'operational', teams: { j2: 'Not A Name' } } }));
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  const context = { subscriptions: [] as unknown[], globalStorageUri: { fsPath: path.join(tmpdir(), `near-ai-nudge-unread-${process.pid}`) }, extensionUri: { fsPath: ROOT, path: ROOT }, secrets: new MemorySecrets(), workspaceState: { get: () => undefined, update: async () => undefined }, globalState: { get: () => undefined, update: async () => undefined } };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => String(input).endsWith('/models') ? Response.json({ data: [{ id: 'z-ai/glm-5.3' }] }) : new Response('{}', { status: 404 })) as typeof fetch;
+  const logged: string[] = [];
+  setNearAiDiagnostics((line) => logged.push(line));
+  const posted: Array<Record<string, unknown>> = [];
+  const sidebar = { webview: { html: '', postMessage: async (message: Record<string, unknown>) => { posted.push(message); return true; }, onDidReceiveMessage: () => ({ dispose() {} }) }, onDidDispose: () => ({ dispose() {} }) };
+  try {
+    const { attachChatToView } = load<typeof import('../services/chat')>('../services/chat');
+    await attachChatToView(context as never, auth, sidebar as never, '<html></html>', testGateHost());
+    const card = posted.filter((message) => message.type === 'staff-teams').at(-1)?.model as { staff: boolean; problem?: string } | null;
+    assert.equal(card?.staff, true);
+    assert.match(card?.problem ?? '', /staff settings in \.planning\/\.near-ai\/project\.json are not valid/);
+    assert.equal(posted.filter((message) => message.type === 'setup-nudge').at(-1)?.show, false, 'no "no team yet" card in a staff project');
+    assert.ok(logged.some((line) => /^Staff teams: The staff settings/.test(line)), JSON.stringify(logged));
+  } finally {
+    setNearAiDiagnostics(undefined);
+    globalThis.fetch = originalFetch;
   }
 });

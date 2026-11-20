@@ -78,6 +78,11 @@ export function labelHiddenNote(count: number, what: 'file' | 'line'): string {
   return `${String(count)} ${what}${count === 1 ? '' : 's'} hidden because ${count === 1 ? 'its file is' : 'their files are'} labelled above your clearance.`;
 }
 
+/** The tools an agent is offered: those whose `offeredTo` lets it (`agentLabel` undefined is the run's lead). Offered equals allowed by caller. */
+export function offeredTools<T extends Pick<AgentTool<any>, 'offeredTo'>>(tools: readonly T[], agentLabel: string | undefined): T[] {
+  return tools.filter((tool) => tool.offeredTo?.(agentLabel) ?? true);
+}
+
 export interface SecurityEvent { kind: 'injection' | 'hidden-content' | 'held' | 'blocked'; source: string; detail: string }
 
 /** What an approval card shows before a risky call runs. */
@@ -113,6 +118,12 @@ export interface AgentTool<I = Record<string, unknown>> {
    * (src/domain/protectedPaths.ts, STATE_KEYS_PATH). Checked before the approval policy, so nothing asks first and nothing can allow it.
    */
   forbidden?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
+  /**
+   * Whether the agent is offered this tool at all: `agentLabel` is a sub-agent's label (a team member's slug), undefined for the run's lead. A tool whose
+   * `forbidden` refuses callers by who they are says the same thing here, so an agent is never offered a tool it may not call (0.4.35: the J2 lead was
+   * offered the COP map's tools, called one and was refused). `forbidden` stays the check at call time. Absent means every agent is offered it.
+   */
+  offeredTo?(agentLabel: string | undefined): boolean;
   /** A reason to always ask first, e.g. reading a likely credential file or writing into `.git/`. */
   sensitive?(input: I, context: ToolContext): string | undefined | Promise<string | undefined>;
   /** A reason to ask even under fully-autonomous mode, e.g. a command that could send data out after the run read untrusted content. */

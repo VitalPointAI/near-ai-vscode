@@ -420,6 +420,200 @@ function projectTests(): Array<[string, () => Promise<void>]> {
       assert.ok(report.map?.maplibre || /2D map/.test(report.map?.note ?? ''), `the room drew the COP map, or said why it fell back (${JSON.stringify(report.map)})`);
       await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }],
+    ['once a scenario is loaded the Staff Room\'s map draws its units and the exercise frame, and the first view is the exercise area, not the world (D-48 of 0.4.35)', async () => {
+      // The scenario the test above wrote is still in the project; the real host sends the room its picture and its checked tile addresses. In 0.4.35
+      // a land cover file MapLibre's worker could not fetch held the map's load, so the room showed the whole world with no units and no frame.
+      samples.delete('staff-room');
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
+        await waitForProbe('staff-room');
+        await editorAreaOnly();
+        let report = await probe('staff-room');
+        for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
+        if (!report.map?.maplibre) {
+          // Without WebGL (the default run) the room draws its 2D map from the host's model; NEAR_AI_E2E_WEBGL=1 checks the COP map.
+          console.log(`[real-window] COP map picture check skipped: ${report.map?.note || 'no WebGL'}`);
+          assert.match(report.map?.note ?? '', /2D map/);
+          return;
+        }
+        const drawn = (r: typeof report) => Boolean(r.map?.ground?.onMap && r.map.ground.onMap.units > 0 && r.map.ground.onMap.frame && r.map.ground.camera?.inFrame);
+        for (let waited = 0; waited < 40_000 && !drawn(report); waited += 500) { await pause(500); report = await probe('staff-room'); }
+        const ground = report.map?.ground;
+        const seen = JSON.stringify({ onMap: ground?.onMap, camera: ground?.camera, errors: ground?.errors, tiles: ground?.tiles });
+        assert.ok((ground?.onMap?.units ?? 0) > 0, `the map was given the scenario's units (${seen})`);
+        assert.equal(ground?.onMap?.frame, true, `the map draws the exercise frame (${seen})`);
+        assert.equal(ground?.camera?.inFrame, true, `the first view looks at the exercise area (${seen})`);
+        assert.ok((ground?.camera?.zoom ?? 0) >= 5, `the first view is the exercise area, not the world (${seen})`);
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      }
+    }],
+    ['the Staff Room\'s map draws the bundled imagery and 3D terrain from the extension alone: no policy violation, no other origin, Harrow Ridge stands over 150 m (real-window check)', async () => {
+      // The scenario the test above wrote is still in the project; the real host sends the room with its checked tile addresses.
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+      const shots = process.env.NEAR_AI_E2E_SHOTS;
+      samples.delete('staff-room');
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
+        await waitForProbe('staff-room');
+        // The room alone in the editor area and in front, so its page draws frames (a page in the background is throttled and loads no tiles).
+        await editorAreaOnly();
+        let report = await probe('staff-room');
+        for (let waited = 0; waited < 20_000 && !(report.map?.maplibre || report.map?.note); waited += 500) { await pause(500); report = await probe('staff-room'); }
+        if (!report.map?.maplibre) {
+          // Without WebGL (the default run) the room's 2D map says why; NEAR_AI_E2E_WEBGL=1 runs the rest.
+          console.log(`[real-window] imagery check skipped: ${report.map?.note || 'no WebGL'}`);
+          assert.match(report.map?.note ?? '', /2D map/);
+          return;
+        }
+        // The view registers once MapLibre has loaded its style (up to 15 s on a software renderer).
+        for (let waited = 0; waited < 40_000 && !report.map?.ground; waited += 500) { await pause(500); report = await probe('staff-room'); }
+        assert.equal(report.map?.ground?.base, 'imagery', `Imagery is the default base (${JSON.stringify(report.map?.ground)})`);
+        await postToPage('staff-room', { type: 'layout-act', act: 'map-terrain', on: true });
+        await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { center: [-123.45, -49.1], zoom: 11.4, pitch: 62, bearing: -25, instant: true } });
+        let height: number | undefined;
+        for (let waited = 0; waited < 60_000; waited += 1000) {
+          await pause(1000);
+          report = await probe('staff-room');
+          height = report.map?.ground?.height;
+          // The room refits its map when its box changes size (the side bars closing); look again until the view holds.
+          if ((report.map?.ground?.pitch ?? 0) < 30) await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { center: [-123.45, -49.1], zoom: 11.4, pitch: 62, bearing: -25, instant: true } });
+          if (typeof height === 'number' && height > 150) break;
+        }
+        // The pictures are taken whatever the outcome, so a failure can be seen.
+        if (shots) {
+          const snap = async (name: string) => {
+            await postToPage('staff-room', { type: 'layout-act', act: 'map-snapshot' });
+            for (let waited = 0; waited < 10_000; waited += 500) {
+              await pause(500);
+              const shot = (await probe('staff-room')).map?.snapshot;
+              if (shot && shot.startsWith('data:image/png;base64,')) { await mkdir(shots, { recursive: true }); await writeFile(path.join(shots, `${name}.png`), Buffer.from(shot.slice(22), 'base64')); return; }
+            }
+          };
+          await snap('e2e-imagery-3d');
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-base', base: 'topo' });
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-look', camera: { pitch: 0, bearing: 0, zoom: 11, instant: true } });
+          await pause(6000);
+          await snap('e2e-topographic');
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-base', base: 'imagery' });
+          await postToPage('staff-room', { type: 'layout-act', act: 'map-projection', projection: 'globe' });
+          await pause(8000);
+          await snap('e2e-globe');
+        }
+        console.log(`[real-window] 3D terrain at Harrow Ridge: ${height === undefined ? 'no height' : `${Math.round(height)} m`}; origins: ${(report.map?.origins ?? []).join(', ')}`);
+        // Advisory (owner decision, 2026-11-19): in this window the map draws with software WebGL under xvfb, where tile loads can time out
+        // before MapLibre settles, so the height is a diagnostic here, not a gate. The headless-browser page tests measure it (166 to 168 m), and the
+        // security checks below stay blocking.
+        if (!(typeof height === 'number' && height > 150)) {
+          console.warn(`[real-window] ADVISORY: Harrow Ridge did not reach 150 m in 3D in this software-WebGL window (${height}; ${JSON.stringify(report.map?.ground)})`);
+        }
+        assert.deepEqual(report.cspViolations ?? [], [], 'no content security policy violation');
+        const foreign = (report.map?.origins ?? []).filter((origin) => !/vscode-resource|vscode-cdn\.net|^vscode-webview:|^null$/.test(origin));
+        assert.deepEqual(foreign, [], 'every request goes to the extension');
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      }
+    }],
+    ['the Staff Room\'s map is the main panel once a scenario is loaded: in view without scrolling, most of the panel\'s height, with a working layer drawer and full map, at a normal and a narrow width (D-48 of 0.4.34)', async () => {
+      // The scenario the test above wrote is still in the project. The real host sends the room, so no sample model is posted over it.
+      samples.delete('staff-room');
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const { postToPage } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
+      const problems: string[] = [];
+      try {
+        await vscode.commands.executeCommand('nearAi.openStaffRoom', 'war-room');
+        await waitForProbe('staff-room');
+        await editorAreaOnly();
+        const { room, editor } = await editorRoom('staff-room');
+        for (const target of [editor, room >= 800 ? 420 : Math.max(380, Math.min(420, room))]) {
+          let report = target === editor ? await settled('staff-room') : await sizeEditor('staff-room', target, editor);
+          for (let waited = 0; waited < 20_000 && !(report.map?.box && (report.map.maplibre || report.map.note)); waited += 500) { await pause(500); report = await probe('staff-room'); }
+          await pause(800);
+          report = await probe('staff-room');
+          const where = `staff-room war room at ${report.width}px (${report.map?.maplibre ? 'MapLibre' : 'SVG map'})`;
+          const box = report.map?.box;
+          console.log(`  ${where}: map ${box ? `${box.top}-${box.bottom} (${box.height}px) of ${box.viewport}px, scrolled ${box.scrollY}` : 'not found'}; page ${report.scrollWidth}/${report.clientWidth}`);
+          if (!box) { problems.push(`${where}: no map box`); continue; }
+          if (box.scrollY !== 0 || box.top < 0 || box.bottom > box.viewport + 1) problems.push(`${where}: the map is not in view without scrolling (${JSON.stringify(box)})`);
+          // At the normal width the map is most of the panel; at the narrow width the header and tabs wrap, so it must only be in view.
+          if (target === editor && box.height < 0.55 * box.viewport) problems.push(`${where}: the map covers ${Math.round((100 * box.height) / box.viewport)}% of the panel's height, under 55%`);
+          if (report.scrollWidth > report.clientWidth + 1 || report.bodyScrollWidth > report.bodyClientWidth + 1) problems.push(`${where}: scrolls sideways (${report.scrollWidth} in ${report.clientWidth})`);
+          for (const offender of report.offenders) problems.push(`${where}: ${offender}`);
+          // The layer drawer opens with focus inside, and Escape closes it with focus back on its button.
+          await postToPage('staff-room', { type: 'layout-act', act: 'open-layers' });
+          await pause(700);
+          const opened = await probe('staff-room');
+          if (!opened.map?.drawer?.open || !opened.map.drawer.focusInside || !opened.map.drawer.switches) problems.push(`${where}: the layer drawer did not open with focus inside (${JSON.stringify(opened.map?.drawer)})`);
+          if (opened.scrollWidth > opened.clientWidth + 1) problems.push(`${where}: the open drawer scrolls the page sideways`);
+          await postToPage('staff-room', { type: 'layout-act', act: 'escape' });
+          await pause(700);
+          const closed = await probe('staff-room');
+          if (closed.map?.drawer?.open || !closed.map?.drawer?.buttonFocused) problems.push(`${where}: Escape did not close the drawer back to its button (${JSON.stringify(closed.map?.drawer)})`);
+          // Full map covers the whole panel, and Escape brings the room back.
+          await postToPage('staff-room', { type: 'layout-act', act: 'full-map' });
+          await pause(700);
+          const full = await probe('staff-room');
+          if (!full.map?.full || !full.map.box || full.map.box.top > 1 || full.map.box.height < full.map.box.viewport - 2) problems.push(`${where}: Full map does not fill the panel (${JSON.stringify(full.map?.box)})`);
+          await postToPage('staff-room', { type: 'layout-act', act: 'escape' });
+          await pause(700);
+          if ((await probe('staff-room')).map?.full) problems.push(`${where}: Escape did not leave the full map`);
+        }
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await vscode.commands.executeCommand('vscode.setEditorLayout', { orientation: 0, groups: [{}] });
+        await vscode.commands.executeCommand('workbench.view.explorer');
+      }
+      assert.deepEqual(problems, []);
+    }],
+    ['after Set Up a Staff Team (J2, US Joint, operational) the chat lists the J2 team, and Task fills the message box without sending (D-48 of 0.4.34)', async () => {
+      const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
+      const load = <T>(file: string) => require(path.join(extension.extensionPath, 'dist', file)) as T;
+      const setup = load<typeof import('../../services/staffSetup')>('services/staffSetup');
+      const { TeamLibrary } = load<typeof import('../../agent/teams')>('agent/teams');
+      const storage = load<typeof import('../../domain/teamStorage')>('domain/teamStorage');
+      const { postToPage } = load<typeof import('../../services/layoutProbe')>('services/layoutProbe');
+      // The team goes to a library in a temporary folder, never the person's own (~/.near-ai-teams).
+      const previous = process.env.NEAR_AI_TEAMS_DIR;
+      process.env.NEAR_AI_TEAMS_DIR = await mkdtemp(path.join(tmpdir(), 'near-ai-e2e-teams-'));
+      try {
+        // What the command writes once the person has chosen J2, US Joint, operational: the same plan and write, without the quick picks.
+        // The chat is open on an empty conversation before the setup, as in code-server (D-48 of 0.4.35). The card must come by itself: no refresh is asked
+        // for here. (Until 0.4.35 this step asked for one, so it passed while the real flow, which relies on the setup's own notice, did not.)
+        await api.sidebar.newChat();
+        const before = observer.toView.length;
+        const asked = observer.fromView.length;
+        const inputs = await setup.readStaffSetupInputs(workspace);
+        const settings = setup.settingsFrom(setup.existingStaffSettings(inputs.projectJson), { profile: 'us-joint', level: 'operational', planningType: 'contingency' });
+        const plan = setup.planStaffSetup({ templateId: 'j2-intelligence', options: { settings, locality: 'local' }, ...inputs });
+        await setup.applyStaffSetup(workspace, new TeamLibrary(storage.teamLibraryDir(storage.homeFolder())), plan);
+        const project = JSON.parse(await readFile(path.join(workspace, '.planning', '.near-ai', 'project.json'), 'utf8')) as { staff: { teams: Record<string, string> } };
+        assert.deepEqual(project.staff.teams, { j2: 'j2-us-joint-operational' }, 'the project records its J2 team');
+        const card = await observer.next('toView', (message) => message.type === 'staff-teams' && Boolean(message.model), before);
+        assert.deepEqual(observer.fromView.slice(asked).filter((message) => message.type === 'refresh-status'), [], 'the card came without the view asking for a refresh');
+        // And it is drawn in the real page, with J2 and its Task button, and without the "no team yet" card.
+        let drawn = await probe('chat');
+        for (let waited = 0; waited < 5_000 && !drawn.cards?.staffTeams?.includes('j2-us-joint-operational'); waited += 250) { await pause(250); drawn = await probe('chat'); }
+        assert.match(drawn.cards?.staffTeams ?? '', /J-2.*j2-us-joint-operational.*Task/, JSON.stringify(drawn.cards));
+        assert.equal(drawn.cards?.setupNudge, false, 'no "no team yet" card on the page');
+        const j2 = (card.model as { sections: Array<{ section: string; state: string; team?: string }> }).sections.find((entry) => entry.section === 'j2');
+        assert.deepEqual([j2?.state, j2?.team], ['ready', 'j2-us-joint-operational'], JSON.stringify(card.model));
+        const nudges = observer.toView.slice(before).filter((message) => message.type === 'setup-nudge');
+        assert.ok(nudges.every((message) => message.show === false), 'no "no team yet" card in a staff project');
+        const menu = await observer.next('toView', (message) => message.type === 'commands' && JSON.stringify(message.commands).includes('team:j2-us-joint-operational'), before);
+        assert.equal((menu.commands as Array<{ command: string }>)[0].command, 'team:j2-us-joint-operational', 'the /team menu lists the staff team first');
+        // Task, clicked in the real page: the command is in the message box, the cursor after it, and nothing is sent.
+        const sent = observer.fromView.length;
+        await postToPage('chat', { type: 'layout-click', selector: '#staff-teams button[data-key="task-j2"]' });
+        let report = await probe('chat');
+        for (let waited = 0; waited < 5_000 && report.composer?.value !== '/team:j2-us-joint-operational '; waited += 250) { await pause(250); report = await probe('chat'); }
+        assert.deepEqual(report.composer, { value: '/team:j2-us-joint-operational ', caret: '/team:j2-us-joint-operational '.length });
+        assert.deepEqual(observer.fromView.slice(sent).filter((message) => message.type === 'send' || message.type === 'open-command'), [], 'nothing was sent');
+        await postToPage('chat', { type: 'prefill', text: '' });
+      } finally {
+        if (previous === undefined) delete process.env.NEAR_AI_TEAMS_DIR; else process.env.NEAR_AI_TEAMS_DIR = previous;
+      }
+    }],
     ...teamProjectTests(() => api)
   ];
 }

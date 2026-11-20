@@ -360,7 +360,8 @@ ${PARALLEL_MERGE_NOTE}
 </team>`;
 }
 
-export function teamLeadPrompt(team: TeamDefinition, task: string): string {
+/** `addendum` is a team kind's own lead section (a staff section's, staffLead.ts), placed before the task. */
+export function teamLeadPrompt(team: TeamDefinition, task: string, addendum?: string): string {
   // Owner, 2026-11-08: "ensure all our teams and default instructions prompt the orchestrating agent or team lead to allow use of parallelism where
   // appropriate". The old wording mentioned parallelism in a clause; this makes it a rule with the test for what may run together, and says to fan out in
   // ONE turn, because starting members across several turns is the measured way teams end up sequential (30 of 37 runs had one request in flight).
@@ -384,7 +385,7 @@ ${team.members.map((member) => `- ${member.name}${member.role ? ` (${member.role
 - Parts that are not branches (findings, sections of a document) are brought together the same way: combine them, settle where they disagree, then check the whole.
 
 Finish with a short summary of what each member did, what ran at the same time, which branches merged, which conflicts came up and how each was resolved, and the outcome.
-
+${addendum ? `\n${addendum}\n` : ''}
 Task: ${task}`;
 }
 

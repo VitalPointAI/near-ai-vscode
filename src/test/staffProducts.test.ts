@@ -185,7 +185,7 @@ test('events: one product.state per transition, plus the gate verdict, the decis
 test('the event list covers design 4.5 and the UX concept\'s wargame turn; nested team states match design 5.4', () => {
   assert.deepEqual([...STAFF_EVENT_TYPES].sort(), [
     'staff.ccir.triggered', 'staff.cop.updated', 'staff.decision.recorded', 'staff.decision.requested', 'staff.gate.verdict', 'staff.lane.finished',
-    'staff.lane.started', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.merge.started', 'staff.product.state', 'staff.rfi.answered',
+    'staff.lane.started', 'staff.lane.switched', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.merge.started', 'staff.product.state', 'staff.rfi.answered',
     'staff.rfi.opened', 'staff.rfi.overdue', 'staff.step.entered', 'staff.team.nested', 'staff.waiting', 'staff.wargame.turn'
   ]);
   assert.equal(NESTED_TEAM_STATES.length, 14);

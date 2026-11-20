@@ -8,6 +8,7 @@
     title: 'This project has no team yet',
     body: 'A project team is the set of agents that work on this project and the models they use. Setting it up takes a minute.',
     team: 'Set up your project team',
+    staff: 'Set up a staff team',
     later: 'Not now',
     menu: 'All setup steps'
   };
@@ -51,9 +52,108 @@
     const title = make('h3', '', TEXT.title);
     title.id = 'setup-nudge-title';
     const actions = make('div', 'setup-nudge-actions');
-    actions.append(button(TEXT.team, 'text-button primary', 'team'), button(TEXT.later, 'text-button', 'later'), button(TEXT.menu, 'link', 'menu'));
+    // A military staff project starts from "Set up a staff team" (J2, J5, J3, J4), so it is offered here too, not only in the command palette.
+    actions.append(button(TEXT.team, 'text-button primary', 'team'), button(TEXT.staff, 'text-button', 'staff'), button(TEXT.later, 'text-button', 'later'), button(TEXT.menu, 'link', 'menu'));
     card.append(title, make('p', '', TEXT.body), actions);
     container.prepend(card);
+    return card;
+  }
+
+  const STAFF_TEXT = {
+    title: 'Staff teams',
+    body: 'Each staff section set up in this project has its own team. Task one to put its command in the message box; nothing is sent until you send it.',
+    task: 'Task',
+    setUp: 'Set up',
+    setUpAnother: 'Set up another section',
+    setUpAgain: 'Set up again',
+    link: 'Link',
+    missing: 'Missing from your teams: it was deleted or renamed.',
+    none: 'Set up a section',
+    found: 'Found in your teams but not linked to this project: ',
+    problem: 'The staff settings could not be read: '
+  };
+  const SECTIONS = ['j2', 'j5', 'j3', 'j4'];
+  const TEAM_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+  /** The host's list, checked before anything is drawn: only the four sections, each in a known state, and team names in the library's form. */
+  function staffModel(value) {
+    if (!value || typeof value !== 'object' || !Array.isArray(value.sections)) return undefined;
+    const sections = value.sections.filter((entry) => entry && typeof entry === 'object' && SECTIONS.includes(entry.section)
+      && ['ready', 'missing', 'none'].includes(entry.state) && typeof entry.code === 'string' && typeof entry.role === 'string'
+      && (entry.state === 'none' || (typeof entry.team === 'string' && TEAM_NAME.test(entry.team))));
+    return { sections, problem: typeof value.problem === 'string' ? value.problem : '' };
+  }
+
+  /**
+   * The "Staff teams" card of a staff project, in place of the "no team yet" card: each section with its team and a Task button that puts
+   * `/team:<name> ` in the message box (`fill`, nothing sent), a missing team with "Set up again", and sections not set up yet with "Set up" (or "Link"
+   * for a matching team already in the library, which the host confirms first). `model` undefined removes the card. Returns the card or undefined.
+   */
+  function renderStaffTeams(doc, container, value, post, fill) {
+    const existing = doc.getElementById('staff-teams');
+    const model = staffModel(value);
+    const focusedKey = existing && doc.activeElement && existing.contains(doc.activeElement) && doc.activeElement.getAttribute ? doc.activeElement.getAttribute('data-key') : undefined;
+    if (!model) { if (existing) existing.remove(); return undefined; }
+    const make = (tag, className, text) => {
+      const node = doc.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    const keyed = [];
+    const button = (label, className, key, onClick, aria) => {
+      const node = make('button', className, label);
+      node.type = 'button';
+      node.setAttribute('data-key', key);
+      if (aria) node.setAttribute('aria-label', aria);
+      node.addEventListener('click', onClick);
+      keyed.push(node);
+      return node;
+    };
+    const card = make('section', 'setup-nudge staff-teams');
+    card.id = 'staff-teams';
+    card.setAttribute('role', 'region');
+    card.setAttribute('aria-labelledby', 'staff-teams-title');
+    const title = make('h3', '', STAFF_TEXT.title);
+    title.id = 'staff-teams-title';
+    card.append(title, make('p', '', STAFF_TEXT.body));
+    if (model.problem) card.append(make('p', 'staff-teams-problem', STAFF_TEXT.problem + model.problem));
+    const list = make('ul', 'staff-teams-list');
+    const notSetUp = [];
+    for (const entry of model.sections) {
+      const name = entry.code + ' ' + entry.role.toLowerCase();
+      if (entry.state === 'none' && !(Array.isArray(entry.candidates) && entry.candidates.length)) { notSetUp.push(entry); continue; }
+      const item = make('li', 'staff-team s-' + entry.state);
+      item.append(make('strong', '', entry.code));
+      if (entry.state === 'ready') {
+        item.append(make('span', 'staff-team-name', entry.team));
+        if (typeof entry.title === 'string' && entry.title) item.append(make('span', 'staff-team-title', entry.title));
+        const command = '/team:' + entry.team;
+        item.append(button(STAFF_TEXT.task, 'text-button primary', 'task-' + entry.section, () => fill(command), 'Task the ' + name + ' team, ' + entry.team));
+      } else if (entry.state === 'missing') {
+        item.append(make('span', 'staff-team-name', entry.team), make('span', 'staff-team-missing', STAFF_TEXT.missing));
+        item.append(button(STAFF_TEXT.setUpAgain, 'text-button', 'setup-' + entry.section, () => post({ type: 'staff-teams', action: 'set-up', section: entry.section }), 'Set up the ' + name + ' team again'));
+      } else {
+        const candidates = entry.candidates.filter((team) => typeof team === 'string' && TEAM_NAME.test(team)).slice(0, 2);
+        item.append(make('span', 'staff-team-missing', STAFF_TEXT.found + candidates.join(', ')));
+        for (const team of candidates) item.append(button(STAFF_TEXT.link + ' ' + team, 'text-button', 'link-' + entry.section + '-' + team, () => post({ type: 'staff-teams', action: 'link', section: entry.section, team: team }), 'Link ' + team + ' as this project\'s ' + name + ' team'));
+        item.append(button(STAFF_TEXT.setUp, 'link', 'setup-' + entry.section, () => post({ type: 'staff-teams', action: 'set-up', section: entry.section }), 'Set up a new ' + name + ' team'));
+      }
+      list.append(item);
+    }
+    card.append(list);
+    if (notSetUp.length) {
+      const actions = make('div', 'setup-nudge-actions');
+      const first = notSetUp.length === model.sections.length;
+      actions.append(make('span', 'staff-teams-none', (first ? STAFF_TEXT.none : STAFF_TEXT.setUpAnother) + ':'));
+      for (const entry of notSetUp) actions.append(button(entry.code + ' ' + entry.role.toLowerCase(), 'link', 'setup-' + entry.section, () => post({ type: 'staff-teams', action: 'set-up', section: entry.section }), STAFF_TEXT.setUp + ' the ' + entry.code + ' ' + entry.role.toLowerCase() + ' team'));
+      card.append(actions);
+    }
+    if (existing) existing.remove();
+    container.prepend(card);
+    // A redraw keeps the keyboard focus on the same button.
+    const again = focusedKey ? keyed.find((node) => node.getAttribute('data-key') === focusedKey) : undefined;
+    if (again) again.focus();
     return card;
   }
 
@@ -129,7 +229,7 @@
     return focusBusy(doc) ? undefined : main || undefined;
   }
 
-  const api = { renderSetupNudge, welcomeState, applyWelcomeState, focusBusy, TEXT, WELCOME };
+  const api = { renderSetupNudge, renderStaffTeams, welcomeState, applyWelcomeState, focusBusy, TEXT, STAFF_TEXT, WELCOME };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.nearSetup = api;
 })(typeof window === 'undefined' ? globalThis : window);
