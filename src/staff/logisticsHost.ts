@@ -8,7 +8,10 @@
 // - LOGSTAT reports:    .planning/staff/logistics/logstat/reports/<id>.json, and the validation log beside them (validation.jsonl)
 // - the road graph:     .planning/staff/logistics/roads.json
 // A record is written to a temporary file, entered in the ledger, then renamed into place, all under the ledger lock, so two members never take one id.
-import { appendFile, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+//
+// In a shared (multi-user) project (.planning/staff/replica/project.json exists; D-29, plan 31-21) the three writes (a calculator record, a LOGSTAT
+// report, the validation log) are refused with SHARED_PROJECT_REFUSAL before any file is touched; the reads answer from the files as they are.
+import { appendFile, lstat, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { snapshotOfBytes, writeIfUnchanged } from './staffFiles';
 import * as path from 'node:path';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
@@ -23,6 +26,7 @@ import type {
 import { STAFF_SLUG } from '../domain/staff/parse';
 import { withFileLock } from '../services/stateMirrorLock';
 import type { StaffHostOptions } from './staffHost';
+import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
 
 export const STAFF_LEDGER_DIR = '.planning/staff/ledger';
 const CALC_LOCK = 'calculator.lock';
@@ -31,6 +35,30 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_RECORDS = 5000;
 
 const fail = <T>(message: string): CalcResult<T> => ({ ok: false, message });
+
+/**
+ * Thrown by a staff or logistics write that has no result to carry a refusal, in a shared project (D-29): its message is SHARED_PROJECT_REFUSAL, the
+ * one plain sentence that points to Make a Single-Machine Copy. Callers show a thrown error's message as it is.
+ */
+export class SharedProjectError extends Error {
+  public readonly refusal = SHARED_PROJECT_REFUSAL;
+
+  public constructor() {
+    super(SHARED_PROJECT_REFUSAL);
+    this.name = 'SharedProjectError';
+  }
+}
+
+/** Whether the project is shared: one stat of its replica project file (as StaffHost.isSharedProject), failing closed on anything but its absence. */
+async function sharedProject(root: string): Promise<boolean> {
+  try {
+    await stat(path.join(root, ...REPLICA_PROJECT_FILE.split('/')));
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ENOENT' && code !== 'ENOTDIR';
+  }
+}
 
 async function readText(file: string): Promise<string | undefined> {
   try {
@@ -126,6 +154,7 @@ export class LogisticsHost {
    * refusal from it, an id already used, a folder that is a symbolic link or a ledger that cannot be trusted writes nothing.
    */
   public async writeRecord(member: string, run: string, build: (stamp: RecordStamp) => CalcResult<CalcRecord>): Promise<CalcResult<{ record: CalcRecord; hash: string }>> {
+    if (await sharedProject(this.options.root)) return fail(SHARED_PROJECT_REFUSAL);
     const ledgerDir = await safeDir(this.options.root, STAFF_LEDGER_DIR);
     const recordDir = await safeDir(this.options.root, CALCULATOR_RECORD_DIR);
     if (!ledgerDir || !recordDir) return fail('A folder on the way to the calculator records or the staff ledger is a symbolic link, so nothing was written. Ask the person to replace it with a real folder.');
@@ -180,6 +209,7 @@ export class LogisticsHost {
 
   /** Enters one unit's report as received. A report is never changed: a corrected report is a new one with its own id and a later time. */
   public async submitReport(member: string, raw: unknown): Promise<CalcResult<LogstatReport>> {
+    if (await sharedProject(this.options.root)) return fail(SHARED_PROJECT_REFUSAL);
     const parsed = parseLogstatReport(raw);
     if (!parsed.ok) return parsed;
     const dir = await safeDir(this.options.root, LOGSTAT_REPORTS_DIR);
@@ -211,6 +241,7 @@ export class LogisticsHost {
 
   public async appendValidation(entries: readonly ValidationLogEntry[]): Promise<void> {
     if (!entries.length) return;
+    if (await sharedProject(this.options.root)) throw new SharedProjectError();
     const dir = await safeDir(this.options.root, path.posix.dirname(LOGSTAT_VALIDATION_FILE));
     if (!dir) throw new Error('A folder on the way to the LOGSTAT validation log is a symbolic link, so nothing was written.');
     await mkdir(dir, { recursive: true });
