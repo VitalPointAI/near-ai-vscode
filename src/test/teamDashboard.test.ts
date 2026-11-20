@@ -761,3 +761,78 @@ test('a role test cancelled part-way is not kept as the team\'s last role test; 
   const panel = await readFile(path.join(__dirname, '..', '..', 'src', 'services', 'teamStudioPanel.ts'), 'utf8');
   assert.match(panel, /keptRoleTests\([^)]*options\.signal\?\.aborted === true/);
 });
+
+// ---------- follow-up after 0.4.35: PR 86 review leftovers ----------
+
+test('a reason naming a single-part path (/home) is replaced too, and a /team: command still passes through (PR 86 review)', async () => {
+  const { plainTeamError, UNREADABLE_TEAM } = await import('../services/teamStudioPage');
+  for (const raw of ['Cannot read /home', 'Missing folder: /tmp', 'Bad file (/etc)', "Bad file '/srv'"]) assert.equal(plainTeamError(raw), UNREADABLE_TEAM, raw);
+  for (const reason of ['Run it with /team:web-team <task>.', 'Use /team:project for this project.', 'The model z-ai/glm-5.3 is not available.']) assert.equal(plainTeamError(reason), reason);
+});
+
+test('a team archived before the upgrade gets its legacy role test back: it is looked for under the path the team had in the library (PR 86 review)', async () => {
+  const old = { at: ago(DAY), members: 1, tested: 1, score: 80 };
+  const h = await host();
+  // Tested in the library, then archived (twice under one name, so the second archive is told apart with a number), all before the upgrade.
+  const one = await h.library.create('Web team', TEAM);
+  await h.library.archive(one);
+  const two = await h.library.create('Web team', TEAM);
+  h.state.roleTests = { [legacyRoleTestKey(two)]: old };
+  const archived = await h.library.archive(two);
+  assert.equal(path.basename(archived), 'web-team-2.md');
+  await h.send({ type: 'ready' });
+  assert.deepEqual(h.state.roleTests, { 'archived:web-team-2': old }, 'moved to the archived team\'s identity');
+  // Restore brings it back as the team's own.
+  await h.send({ type: 'restore', id: 'archived:web-team-2' });
+  assert.deepEqual(Object.values(h.state.roleTests as Record<string, unknown>), [old]);
+  assert.equal(Object.keys(h.state.roleTests as Record<string, unknown>).some((key) => key.startsWith('archived:')), false);
+});
+
+test('setting up the project team again with the same team keeps its rating and role test; another team clears them, and the question says so (PR 86 review)', async () => {
+  const h = await host();
+  const web = await h.library.create('Web team', TEAM);
+  await h.library.create('Api team', renderTeam('Api team', 'Builds the API', [{ name: 'dev', instructions: 'Build it.' }]));
+  const asked: string[] = [];
+  h.deps.confirm = async (message) => { asked.push(message); return true; };
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  const key = `project:${await projectIdentity(h.root)}`;
+  await h.send({ type: 'rate', id: 'project', rating: 5 });
+  h.state.roleTests = { [key]: { at: ago(DAY), members: 1, tested: 1, score: 90 } };
+  // The same team again: kept, and nothing about them in the question.
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  assert.equal(parseRatings(h.state.ratings)[key]?.rating, 5);
+  assert.ok(key in (h.state.roleTests as Record<string, unknown>));
+  assert.doesNotMatch(asked.at(-1)!, /rating/);
+  // Another team: the question says they go, and they do.
+  await h.send({ type: 'use-team', id: 'lib:api-team' });
+  assert.match(asked.at(-1)!, /^This project already has a team\. Replace it\? Its earlier versions stay in the team history\. Your rating of it and its role-test health are cleared, because they describe the team it replaces\.$/);
+  assert.equal(key in parseRatings(h.state.ratings), false);
+  assert.equal(key in (h.state.roleTests as Record<string, unknown>), false);
+  assert.ok(web);
+});
+
+test('a team with no check and no error has a local check that is not known, not one that needs fixing (PR 86 review)', () => {
+  const unknown = teamHealth(undefined);
+  assert.match(unknown.parts[0]!.detail, /^Not known/);
+  assert.doesNotMatch(unknown.parts[0]!.detail, /needs fixing/);
+  assert.equal(unknown.score, undefined);
+  assert.match(teamHealth(undefined, undefined, 'bad front matter').parts[0]!.detail, /needs fixing/);
+});
+
+test('Team Live reads /team:team from the history as the project team, as the dashboard does, while the project has one (PR 86 review)', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'near-ai-run-team-'));
+  const root = path.join(base, 'project');
+  const library = new TeamLibrary(path.join(base, 'global'));
+  // A team in My teams whose file name is team.md: without a project team, /team:team is that one.
+  await library.create('Team', renderTeam('Team', 'A library team called team', [{ name: 'dev', instructions: 'Build it.' }]));
+  assert.equal((await library.findRunTeam('team', root))?.name, 'Team');
+  await mkdir(path.dirname(TeamLibrary.projectTeamFile(root)), { recursive: true });
+  await writeFile(TeamLibrary.projectTeamFile(root), renderTeam('Project team', 'For this repo', [{ name: 'dev', instructions: 'Build it.' }]));
+  assert.equal((await library.findRunTeam('team', root))?.name, 'Project team');
+  assert.equal((await library.findRunTeam('project', root))?.name, 'Project team');
+  assert.equal((await library.findRunTeam('team'))?.name, 'Team', 'no folder open: the library team');
+  // Team Live asks this way.
+  const live = await readFile(path.join(__dirname, '..', '..', 'src', 'services', 'teamLiveView.ts'), 'utf8');
+  assert.match(live, /\.findRunTeam\(slug, root\)/);
+});

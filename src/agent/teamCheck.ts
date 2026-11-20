@@ -51,10 +51,17 @@ const NEGATED = /\b(?:do not|don't|never|must not|does not|without|no need to|in
 const DELIVERABLE = /\b(?:report|reports|return|returns|write|writes|produce|produces|record|records|deliver|delivers|hand (?:back|over)|output|summari[sz]e|save|draft|list|answer|say (?:whether|which|what|where|how)|ends? (?:in|with)|finish with|design|build|break (?:it|them|the [a-z ]{1,30}?|[a-z]+) into|prepare|compile|propose|create|into (?:one|a|an) (?:[a-z-]+ ){0,2}(?:summary|report|plan|list|table|brief|document|memo))\b/i;
 const GENERIC_ROLES = new Set(['helper', 'agent', 'assistant', 'member', 'worker', 'general', 'generalist', 'custom', 'ai', 'bot', 'misc', 'other', 'team member', 'everything']);
 const LEAD_ROLES = /\b(?:lead|leader|planner|coordinator|manager|orchestrator|director|chief|head|captain|editor-in-chief|gsd-planner)\b/i;
-/** Instructions that give a member its own area of the work, or say what it must leave alone. */
-export const SEPARATE_AREA = /\b(?:own (?:area|part|parts|section|sections|files?|modules?|worktree|branch|notes|report|draft|output file|test report)|owns?\b|owned by|your area|its area|area (?:it|you) (?:is|are) given|outside (?:your|its|that|their) (?:area|part|section|files?|modules?)|(?:must not|do not|don't|never) touch|worktree|leaves? (?:the |everything |all )[^.\n]{0,80}? to (?:its|their|the)\b)/i;
-/** Instructions (or a description) that say who brings the members' parts together: merges them, settles conflicts, and checks the whole. */
-export const INTEGRATION_STEP = /\b(?:merg(?:e|es|ed|ing)|integrat(?:e|es|ed|ing|ion|or)|assembl(?:e|es|ed|ing|y)|combin(?:e|es|ed|ing)|brings? (?:the (?:work|parts) |it |them )?together|brought together|checks? the whole|resolv(?:e|es|ed|ing) (?:the )?conflicts?)\b/i;
+/**
+ * Instructions that give a member its own area of the work, or say what it must leave alone. An area is named, never only implied (PR #91 review): "your
+ * own area", "owns the API", "your area is", "must not touch". A bare "own" ("in your own words"), "owns" or "worktree" is not one.
+ */
+export const SEPARATE_AREA = /\b(?:(?:your|its|their) own (?:area|part|parts|section|sections|files?|modules?|branch|notes|report|draft|output file|test report|findings file)|owns? (?:the|its|your|their|this|that|these|those)\b|owned by|(?:your|its|their) area\b|area (?:it|you) (?:is|are) given|outside (?:your|its|that|their) (?:area|part|section|files?|modules?)|(?:must not|do not|don't|never) touch|leaves? (?:the |everything |all )[^.\n]{0,80}? to (?:its|their|the)\b)/i;
+/**
+ * Instructions that say who brings the members' parts together: merges them, settles conflicts, and checks the whole. The words name the parts being
+ * brought together (PR #91 review): "merges the branches", "combines the findings into one", "resolves conflicts", "checks the whole", "for the lead to merge". A bare "merge"
+ * ("merges with the existing setup"), "integration tests" or "combine the notes" is not one.
+ */
+export const INTEGRATION_STEP = /\b(?:merg(?:e|es|ed|ing) (?:the |their |its |each |all |every )?(?:members'? |member's )?(?:branch(?:es)?|parts?|work|results|findings|drafts|sections|reports|changes|outputs)\b|integrator\b|integrat(?:e|es|ed|ing) (?:the |their |each |all )?(?:parts?|members'? work|branch(?:es)?|results|findings|drafts|sections|reports)\b|combin(?:e|es|ed|ing) (?:them|the (?:parts|findings|reports|results|drafts|sections|branches)|their (?:parts|findings|reports|results|work)) into\b|brings? (?:the (?:work|parts|findings|results) |it |them |their (?:work|parts) )?together|brought (?:the parts |them )?together|checks? the whole|resolv(?:e|es|ed|ing) (?:the |any )?conflicts?|sorts? out (?:the |any )?conflicts?|the lead (?:to )?(?:merges?|combines?|integrates?|assembles?)\b)/i;
 /** More words than this and a member is unlikely to follow all of its instructions (Copilot Studio: keep them short and simple). */
 export const MAX_INSTRUCTION_WORDS = 1200;
 
@@ -150,8 +157,9 @@ export function checkTeam(draft: TeamDraft, options: CheckOptions = {}): TeamFin
     if (!draft.members.some((member) => SEPARATE_AREA.test(member.instructions))) {
       findings.push({ id: 'no-separate-areas', severity: 'advice', field: 'members', message: 'No member\'s instructions say which part of the work it owns. Members run at the same time where they can, so give each one its own area (files, modules, or sections of the deliverable) and say what it must leave alone. That keeps their work from clashing.' });
     }
+    // The description counts as well as the members (PR #91 review), so the finding names both places and points at neither one alone.
     if (!INTEGRATION_STEP.test(draft.description) && !draft.members.some((member) => INTEGRATION_STEP.test(member.instructions))) {
-      findings.push({ id: 'no-integration', severity: 'advice', field: 'members', message: 'No member\'s instructions say who brings the parts together. Say who merges the members\' work, sorts out conflicts, and checks the whole (an integrator or editor member, or the lead, which does it when no member does).' });
+      findings.push({ id: 'no-integration', severity: 'advice', message: 'Neither the team\'s description nor any member\'s instructions say who brings the parts together. Say who merges the members\' work, sorts out conflicts, and checks the whole (an integrator or editor member, or the lead, which does it when no member does).' });
     }
   }
   return findings;

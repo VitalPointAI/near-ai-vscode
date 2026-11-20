@@ -295,6 +295,41 @@ export const TEMPLATE_HISTORY: Record<string, TemplateSnapshot[]> = {
           'e8a94dda54943fb8'
         ]
       }
+    },
+    {
+      version: 6,
+      definition: '50536181e1fb5540',
+      guidance: [
+        'ac175d0bf7821a52'
+      ],
+      members: {
+        investigator: [
+          '4ff8f83e7aa94b76',
+          '58e65c187457b9d0'
+        ],
+        'source-verifier': [
+          '4ce61cd591aff9e2',
+          'dc7e11aeb6347b8e'
+        ],
+        analyst: [
+          '2baf60169e7e56c8'
+        ],
+        writer: [
+          '874024fabb5bc954'
+        ],
+        'plagiarism-checker': [
+          'a1218a163b19b75d',
+          '3f4be9bd2187e99b'
+        ],
+        'red-team': [
+          'a41fb9088a1e24ea',
+          '1f141d5da5ac9efc'
+        ],
+        editor: [
+          'a006bba7bb2ff1ef',
+          'e8a94dda54943fb8'
+        ]
+      }
     }
   ],
   presales: [

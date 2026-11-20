@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Team Studio: a project team that was written but not fully recorded says so.** When the project's
+  team file was written and a later step failed (keeping it in History, noting where its members
+  came from, or writing the project type's guidance to AGENTS.md), Team Studio used to say the team
+  was not used. It now says the team was written and which step did not happen, and shows the new
+  team.
+- **Team Studio: Use as is and Clone and modify no longer get each other's answers.** A late answer
+  to a Clone you had left behind could turn the buttons back on while Use as is was still being
+  answered. Use as is is also announced only once Team Studio has answered.
+- **Team Studio: very large pictures are refused before they are opened.** An uploaded or generated
+  picture is checked for its size in pixels first (at most 16 megapixels, 8192 pixels a side), so a
+  small file that describes a huge picture cannot stall the editor.
+- **Team Studio: icon fixes.** A failed icon change no longer leaves a copy of the icon that is still
+  in use in History; Duplicate makes the copy even when its icon cannot be copied, and says it has
+  the default icon; earlier icons load when you open the History tab instead of with every team.
+- **Team Studio dashboard fixes.** Setting up the same project team again keeps your rating and its
+  role-test health, and replacing it with another team says in the question that they are cleared.
+  A team archived before the dashboard arrived gets its role-test health back. A team whose local
+  check has not run shows "not known" instead of "needs fixing", and a file problem that names a
+  one-part path such as `/home` no longer shows that path.
+- **Team Live: the project team's run from history.** A run of the project team saved in the history
+  is shown with the project team, not with a team in My teams that happens to be called "team".
+- **Team Studio: clones stay clones.** A cloned team is still checked for a name of its own after you
+  reword every member, and a team made after Use as is is no longer taken for a clone.
+- **Parallel-work suggestions fire when they should.** The suggestions to give each member its own
+  area and to say who brings the parts together now look for those things being said, rather than
+  any use of words like "own" or "merge". The research team's investigators that run at the same
+  time each write their own findings file, which the lead combines, instead of writing parts of one
+  shared file. Update Team offers the new research team wording.
+
 ## 0.4.35
 
 The COP map now looks like the ground: photo-like imagery with 3D terrain by default, a

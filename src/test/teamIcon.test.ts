@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { checkTeamIcon, decodeIconBase64, iconDataUri, iconReference, iconSourceType, MAX_TEAM_ICON_BYTES, teamIconPrompt, withIconReference } from '../agent/teamIcon';
+import { checkTeamIcon, decodeIconBase64, iconDataUri, iconPixelProblem, iconReference, iconSourceProblem, iconSourceSize, iconSourceType, MAX_TEAM_ICON_BYTES, teamIconPrompt, withIconReference } from '../agent/teamIcon';
 import { draftFromMarkdown, teamMarkdown } from '../agent/teamMarkdown';
 import { parseTeam, renderTeam, TeamLibrary } from '../agent/teams';
 import { parseFrontmatter } from '../gsd/library';
-import { JPEG, png, SVG, WEBP } from './iconFixtures';
+import { JPEG, jpegOfSize, png, SVG, WEBP, webpOfSize } from './iconFixtures';
 
 // Team icons (0.4.30, owner 2026-11-17: "give user ability to upload or AI generate an icon for the team. Ensure there's a default icon available if none
 // are selected/generated"). An icon is a 128 x 128 PNG beside the team's Markdown, named from its front matter; the host checks every byte it writes.
@@ -251,4 +251,70 @@ test('the icon line goes after a one-line description, never inside a block or q
     if (described >= 0 && /^description: \S[^"|>]*$/.test(lines[described]!) && !/^\s/.test(lines[described + 1] ?? '')) assert.equal(at, described + 1, `${what}: right after a one-line description`);
     assert.equal(withIconReference(after, undefined), text, `${what}: removing it gives back the file`);
   }
+});
+
+// ---------- follow-up after 0.4.35: PR #82 review leftovers ----------
+
+/** A PNG header that states `width` x `height` (a few bytes can state a huge picture): enough for the size check, which reads only the header. */
+function pngHeader(width: number, height: number): Buffer {
+  const header = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header);
+  header.writeUInt32BE(13, 8); header.write('IHDR', 12, 'latin1'); header.writeUInt32BE(width, 16); header.writeUInt32BE(height, 20);
+  header[24] = 8; header[25] = 6;
+  return header;
+}
+
+test('a picture\'s pixel size is read from its header and capped before the page ever decodes it (a decompression bomb is refused)', () => {
+  assert.deepEqual(iconSourceSize(png(300, 200)), { width: 300, height: 200 });
+  assert.deepEqual(iconSourceSize(JPEG), { width: 16, height: 16 });
+  assert.deepEqual(iconSourceSize(jpegOfSize(4032, 3024)), { width: 4032, height: 3024 });
+  assert.deepEqual(iconSourceSize(WEBP), { width: 16, height: 16 });
+  assert.deepEqual(iconSourceSize(webpOfSize(1792, 1024)), { width: 1792, height: 1024 });
+  // A phone photo and an image model's picture are fine.
+  for (const ok of [png(300, 200), JPEG, jpegOfSize(4032, 3024), webpOfSize(1792, 1024), webpOfSize(4096, 4096)]) assert.equal(iconSourceProblem(ok), undefined);
+  // A tiny file stating a huge picture is refused, by pixels and by its longest side.
+  for (const bomb of [pngHeader(50_000, 50_000), jpegOfSize(65_000, 65_000), webpOfSize(16_000, 16_000), pngHeader(5000, 5000), pngHeader(10_000, 10)]) {
+    assert.ok(bomb.length < 100);
+    assert.match(iconSourceProblem(bomb)!, /too large to make an icon from/);
+  }
+  // A header with no size it states (cut short, zero, or a frame that never comes) is refused as damaged, never decoded.
+  for (const damaged of [png().subarray(0, 20), pngHeader(0, 10), Buffer.from([0xff, 0xd8, 0xff, 0xd9]), Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBPVP8 '), Buffer.alloc(18)])]) {
+    assert.match(iconPixelProblem(damaged)!, /damaged/);
+  }
+});
+
+test('library: when the new icon cannot be put in place, the old one stays the team\'s and History gets no copy of it (PR #82 review)', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a folder this user cannot write to' : false }, async () => {
+  const { lib } = await library();
+  const file = await lib.create('Web team', TEAM);
+  const first = png(128, 128, { seed: 31 });
+  const second = png(128, 128, { seed: 32 });
+  await lib.setIcon(file, first);
+  await lib.setIcon(file, second);
+  const history = await lib.iconVersions(file);
+  assert.equal(history.length, 1, 'the first icon is in History');
+  // The team's folder can no longer be written to: the new icon file cannot be written, though History (its own folder) still can.
+  await chmod(lib.directory, 0o555);
+  try {
+    await assert.rejects(() => lib.placeIcon(file, png(128, 128, { seed: 33 })));
+  } finally { await chmod(lib.directory, 0o755); }
+  assert.deepEqual(await lib.iconVersions(file), history, 'no copy of the icon that is still in place');
+  assert.deepEqual(await lib.readIcon(file), second);
+  assert.deepEqual((await readdir(lib.directory)).filter((name) => name.endsWith('.tmp')), [], 'no half-written file');
+});
+
+test('library: Duplicate makes the copy even when its icon cannot be copied, and says it has the default icon (PR #82 review)', async () => {
+  const { lib } = await library();
+  const file = await lib.create('Web team', TEAM);
+  await lib.setIcon(file, png(128, 128, { seed: 41 }));
+  const patched = lib as unknown as { setIcon: (...args: unknown[]) => Promise<unknown> };
+  const real = patched.setIcon.bind(lib);
+  patched.setIcon = async () => { throw new Error('disk full'); };
+  const copied = await lib.duplicateTeam(file, 'Web copy');
+  patched.setIcon = real;
+  assert.equal(copied.icon, 'default');
+  assert.ok(existsSync(copied.file));
+  assert.equal(await lib.readIcon(copied.file), undefined, 'the copy shows the default icon');
+  assert.equal(iconReference(await readFile(copied.file, 'utf8')), undefined);
+  assert.equal((await lib.duplicateTeam(file, 'Web copy two')).icon, 'copied');
+  assert.equal((await lib.duplicateTeam(copied.file, 'Plain copy')).icon, 'none');
 });
