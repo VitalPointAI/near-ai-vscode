@@ -2361,6 +2361,12 @@
         dash = message.dashboard || dash;
         if (!work) render();
         break;
+      // A run of the open team started or ended: the Team shape tab's Watch it live link follows, drawn again only on that tab and only on a change.
+      case 'live-run':
+        if (!work || work.mode !== 'editor' || work.id !== message.id || currentLive === (message.liveRun === true)) break;
+        currentLive = message.liveRun === true;
+        if (work.tab === TAB_SHAPE) render();
+        break;
       case 'rated':
         // The host kept it on this computer (never in the team file, so an open editor has nothing to catch up on).
         pendingRating.delete(message.id);

@@ -464,6 +464,8 @@ export class AgentConversation {
   private title = '';
   /** The team the newest /team run of this conversation led (0.4.21); kept through compaction, which summarizes the message that named it. */
   private teamSlug: string | undefined;
+  /** The team the current run leads or works with (its /team:, or the team a workflow works with), so the agents strip offers Watch the team. */
+  private runTeamSlug: string | undefined;
   /** The team note this conversation's model has in context (its full text, so an edited team is sent again), so it is sent once rather than every turn. */
   private notedTeam: string | undefined;
   private shell: ShellSession | undefined;
@@ -709,6 +711,7 @@ export class AgentConversation {
     const boundary = runBoundary(request);
     // 0.4.28: the team the run leads or works with, as it is now, so Team Live draws the run against the team it started with.
     const runTeam = request.team ?? request.memberTeam;
+    this.runTeamSlug = runTeam?.slug;
     if (runTeam) this.activity?.setRunTeam(runId, runTeam);
     this.activity?.agentStarted({ agentId: mainId, agent: request.skill ? `/${request.skill.name}` : request.team ? `team:${request.team.slug}` : 'agent', runId, model: request.model, conversationId: this.conversationId, ...(boundary ? { boundary } : {}), ...(runTeam ? { team: runTeam.slug } : {}) }, prompt, freshConversation ? String(this.messages[0].content) : undefined);
     this.post({ type: 'assistant-start', model: request.model, privacy: request.privacy });
@@ -1498,6 +1501,9 @@ export class AgentConversation {
     const agents = this.spawnableAgents(request);
     if (!agents.length) return base;
     const gsd = request.gsd;
+    // The team's members, and those offered as members: a member whose name a project agent took is not offered, since that name runs the project agent.
+    const memberNames = this.teamMembersOf(request).map((agent) => agent.name);
+    const offeredMembers = memberNames.filter((name) => !(request.projectAgents ?? []).some((agent) => agent.name === name));
     let all: AgentTool<any>[] = [];
     const extra = gsdTools({
       home: gsd?.home ?? '',
@@ -1505,7 +1511,7 @@ export class AgentConversation {
       skills: gsd?.skills ?? [],
       agents,
       // A member whose name a run's own agent took is not offered as a member: that name runs the run's agent.
-      teamMembers: this.teamMembersOf(request).map((agent) => agent.name).filter((name) => !(request.projectAgents ?? []).some((agent) => agent.name === name)),
+      teamMembers: offeredMembers,
       ask: (questions, askSignal, askerId) => this.askQuestions(questions, askSignal, request.policy, askerId),
       spawn: async (spawn, callSignal) => {
         const label = spawn.agent?.name ?? spawn.type;
@@ -1524,6 +1530,10 @@ export class AgentConversation {
         const tiers = request.tiers ?? { deep: request.model, standard: request.model, fast: request.model };
         // A team member's own model line wins; then the role's configured model; then the tier the workflow asked for.
         const teamMember = Boolean(spawn.agent && (!gsd || !spawn.agent.file.startsWith(gsd.home)));
+        // Whether it is one of the run's team members (not merely an agent with a file of its own): a project agent that took a member's name is not
+        // that member, so the feed says so (member: false) and Team Live and the staff lanes never put it on the member's card.
+        const onTeam = Boolean(spawn.agent) && offeredMembers.includes(label);
+        const membership = onTeam ? { member: true } : memberNames.includes(label) ? { member: false } : {};
         const roleModel = spawn.agent && !(teamMember && spawn.agent.model) ? roleModelFor(label, request.roleModels ?? {}) : undefined;
         // A model the Agent call names that is not on this key fails the call, naming it and the models that are; a role, agent-file or
         // tier model that is not on this key falls back to the chat's model with a note the lead sees (in the result) and the person sees.
@@ -1581,9 +1591,10 @@ export class AgentConversation {
         // helper) as its parent. It shows as queued until it gets a slot.
         const parentId = spawn.parentId ?? `main-${runId}`;
         const agentBoundary = runBoundary(request);
-        const identity = { agentId: agent.id, agent: label, runId, model, parentId, conversationId: this.conversationId, task: spawn.description, member: teamMember, background: spawn.background, ...(agentBoundary ? { boundary: agentBoundary } : {}) };
+        const identity = { agentId: agent.id, agent: label, runId, model, parentId, conversationId: this.conversationId, task: spawn.description, ...membership, background: spawn.background, ...(agentBoundary ? { boundary: agentBoundary } : {}) };
         this.activity?.agentQueued(identity);
         this.queuedAgents.set(agent.id, agent);
+        this.postAgents();
         // A background agent outlives the tool call but not the run; a foreground one ends with the call too.
         const parent = spawn.background ? runSignal : callSignal;
         const onParentAbort = () => agent.abort.abort();
@@ -1631,7 +1642,7 @@ export class AgentConversation {
         const tools = allowed.map((tool) => (tool.name === 'Agent' || tool.name === 'Task' ? yieldingSlot(tool) : tool));
         const execute = async (): Promise<string> => {
           // Stopped before it got a slot (0.4.28): it ends as stopped on the feed rather than staying queued.
-          try { await this.acquireSlot(limit, agent.abort.signal); } catch (error) { this.activity?.agentEnded(agent.id, 'cancelled'); throw error; } finally { this.queuedAgents.delete(agent.id); }
+          try { await this.acquireSlot(limit, agent.abort.signal); } catch (error) { this.activity?.agentEnded(agent.id, 'cancelled'); this.queuedAgents.delete(agent.id); this.postAgents(); throw error; } finally { this.queuedAgents.delete(agent.id); }
           slot.held = true;
           // PERF-04: agents in their own worktree also take a worktree slot (nearAi.agent.maxParallelWorktrees), since each one checks out and builds.
           // Like the agent slot (#36), it is handed back while the agent waits for a foreground helper, so a worktree cap of 1 cannot deadlock either.
@@ -1660,7 +1671,7 @@ export class AgentConversation {
             const base = `${this.systemPrompt({ ...request, model }, agentRoot, tools.some((tool) => tool.name === 'Agent' || tool.name === 'Task'))}${isolationNote}`;
             const system = agentBody ? `${agentBody}\n\n${base}` : base;
             this.activity?.agentStarted(identity, spawn.prompt, system);
-            staffLane(request, this.root, runId, label, teamMember, 'started');
+            staffLane(request, this.root, runId, label, onTeam, 'started');
             // Paused while it waited for a slot: it starts paused.
             if (agent.paused) this.activity?.setPaused(agent.id, true);
             this.inboxes.set(agent.id, inbox);
@@ -1728,7 +1739,7 @@ export class AgentConversation {
                   this.activity?.modelSwitched(agent.id, event.to, text);
                   this.postAgents();
                   void record({ status: 'running', kind: 'model', agentId: agent.id, parentAgentId: parentId, agentRole: label, model: event.to, summary: text, errorCode: `model-switch-${event.cause}` });
-                  staffSwitch(request, this.root, runId, label, teamMember, event.from, event.to, event.reason);
+                  staffSwitch(request, this.root, runId, label, onTeam, event.from, event.to, event.reason);
                 }
               }
             });
@@ -1739,7 +1750,7 @@ export class AgentConversation {
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
             this.activity?.agentEnded(agent.id, result.outcome);
-            staffLane(request, this.root, runId, label, teamMember, result.outcome === 'cancelled' ? 'cancelled' : result.outcome === 'completed' ? 'done' : 'failed');
+            staffLane(request, this.root, runId, label, onTeam, result.outcome === 'cancelled' ? 'cancelled' : result.outcome === 'completed' ? 'done' : 'failed');
             await this.persistAgent(request, agent.id);
             const total = sumUsage(usage);
             const report = [...result.messages].reverse().find((message) => message.role === 'assistant' && message.content)?.content;
@@ -1764,7 +1775,7 @@ export class AgentConversation {
             const tried = switches.length ? ` ${switches.join(' ')}` : '';
             const said = reason ? `${label} failed: ${reason}.${tried}` : undefined;
             this.activity?.agentEnded(agent.id, 'failed', said ?? message);
-            staffLane(request, this.root, runId, label, teamMember, 'failed', reason);
+            staffLane(request, this.root, runId, label, onTeam, 'failed', reason);
             await this.persistAgent(request, agent.id);
             await this.recordReputation(request.reputation, label, -1, agent.id);
             const cause = error instanceof AgentRunError && error.cause instanceof Error ? error.cause : error;
@@ -1881,7 +1892,11 @@ export class AgentConversation {
 
   private postAgents(): void {
     if (this.agentsTimer) { clearTimeout(this.agentsTimer); this.agentsTimer = undefined; }
-    this.post({ type: 'agents', count: this.agents.size, agents: [...this.agents.values()].map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, state: agentDotState(agent, this.activity?.agentStat(agent.id)), activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns, ...(agent.todos?.length ? { steps: agentSteps(agent.todos) } : {}) })) });
+    // The agents working and those waiting for a slot (queued), each with its state; `team`: this run leads or works with a team, so the page offers
+    // its dots and Watch the team (a run with no team has no team to watch).
+    const listed = [...this.agents.values(), ...[...this.queuedAgents.values()].filter((agent) => !this.agents.has(agent.id))];
+    const stateOf = (agent: LiveAgent) => agentDotState(agent, this.activity?.agentStat(agent.id) ?? (this.queuedAgents.has(agent.id) ? { phase: 'queued' as const } : undefined));
+    this.post({ type: 'agents', count: this.agents.size, ...(this.runTeamSlug ? { team: true } : {}), agents: listed.map((agent) => ({ id: agent.id, label: agent.label, description: agent.description, model: agent.model, paused: agent.paused, background: agent.background, activity: agent.activity, state: stateOf(agent), activitySince: agent.activitySince, lastAction: agent.lastAction, startedAt: agent.startedAt, toolCalls: agent.toolCalls, turns: agent.turns, ...(agent.todos?.length ? { steps: agentSteps(agent.todos) } : {}) })) });
   }
 
   /** Refreshes the agents strip at most once a second. */

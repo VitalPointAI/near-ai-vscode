@@ -85,24 +85,27 @@ class FakeDoc {
   addEventListener(type: string, listener: () => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
 }
 
-async function runPage(options: { reduced?: boolean; width?: number; state?: Record<string, unknown> } = {}) {
+async function runPage(options: { reduced?: boolean; width?: number; state?: Record<string, unknown>; clocks?: Set<unknown> } = {}) {
   const doc = new FakeDoc();
   doc.getElementById('stage')!.clientWidth = options.width ?? 1000;
   const posts: Array<Record<string, any>> = [];
   const states: Array<Record<string, unknown>> = [];
   const listeners: Array<(event: { data: unknown }) => void> = [];
+  const windowEvents = new Map<string, Array<() => void>>();
+  // The page's clocks still running, when a test asks to watch them.
+  const clocks = options.clocks;
   const sandbox = vm.createContext({
     document: doc,
-    window: { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); } },
+    window: { addEventListener: (type: string, listener: (event: { data: unknown }) => void) => { if (type === 'message') listeners.push(listener); else windowEvents.set(type, [...(windowEvents.get(type) ?? []), listener as () => void]); } },
     matchMedia: (query: string) => ({ matches: Boolean(options.reduced) && /reduce/.test(query), addEventListener() {} }),
     acquireVsCodeApi: () => ({ postMessage: (message: Record<string, any>) => posts.push(JSON.parse(JSON.stringify(message))), getState: () => options.state, setState: (state: Record<string, unknown>) => states.push({ ...state }) }),
     // The page's one clock must not keep the test process alive.
-    setTimeout, clearTimeout, setInterval: (fn: () => void, ms: number) => setInterval(fn, ms).unref(), clearInterval, JSON, Map, Set, Date, String, Number, Boolean, Object, Array, Math, RegExp
+    setTimeout, clearTimeout, setInterval: (fn: () => void, ms: number) => { const handle = setInterval(fn, ms).unref(); clocks?.add(handle); return handle; }, clearInterval: (handle: ReturnType<typeof setInterval>) => { clocks?.delete(handle); clearInterval(handle); }, JSON, Map, Set, Date, String, Number, Boolean, Object, Array, Math, RegExp
   });
   vm.runInContext(await readFile(SCRIPT, 'utf8'), sandbox, { timeout: 1000 });
   const cards = () => doc.getElementById('tree')!.children;
   const card = (id: string) => cards().find((node) => node.dataset.id === id)!;
-  return { doc, posts, states, cards, card, dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), settle: () => new Promise((resolve) => setTimeout(resolve, 450)) };
+  return { doc, posts, states, cards, card, fireWindow: (type: string) => (windowEvents.get(type) ?? []).forEach((listener) => listener()), dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), settle: () => new Promise((resolve) => setTimeout(resolve, 450)) };
 }
 
 const TEAM = parseTeam(`---
@@ -287,4 +290,35 @@ test('page: when the reading order changes mid-run, the focused card keeps the f
   // A helper joins under the researcher: the cards are put back in reading order.
   page.dispatch(frame([LEAD, stat('researcher-aaa111', 'researcher', { task: 'Find sources' }), stat('helper-bbb111', 'gsd-verifier', { parentId: 'researcher-aaa111' })], first.view).message);
   assert.equal(page.doc.activeElement, page.card('m:researcher'));
+});
+
+test('page: the run picker offers a finished run while another run is live, and selecting it asks the host', async () => {
+  const page = await runPage();
+  const { message } = frame([LEAD]);
+  page.dispatch({ ...message, runs: [{ runId: RUN, title: 'team:research', running: true, startedAt: 2_000 }, { runId: 'run-1600000000000-bbb222', title: 'team:research', running: false, startedAt: 1_000 }] });
+  assert.equal(page.doc.getElementById('run-picker')!.hidden, false, 'one live run and one finished: the picker is there');
+  const options = page.doc.getElementById('run')!.children;
+  assert.deepEqual(options.map((option) => option.textContent), ['team:research', 'team:research (ended)']);
+  const picker = page.doc.getElementById('run')!;
+  picker.value = 'run-1600000000000-bbb222';
+  picker.fire('change');
+  assert.deepEqual(page.posts.at(-1), { type: 'select-run', runId: 'run-1600000000000-bbb222' });
+  // Only one run: nothing to pick.
+  page.dispatch(message);
+  assert.equal(page.doc.getElementById('run-picker')!.hidden, true);
+});
+
+test('page: the clock stops when the picture goes away and when the page is hidden for good', async () => {
+  const clocks = new Set<unknown>();
+  const page = await runPage({ clocks });
+  const { message } = frame([LEAD, stat('researcher-aaa111', 'researcher')]);
+  page.dispatch(message);
+  assert.equal(clocks.size, 1, 'a running team keeps its elapsed times moving');
+  // The host has no run to show any more: no picture, no clock.
+  page.dispatch({ type: 'team-live', now: Date.now(), runs: [] });
+  assert.equal(clocks.size, 0);
+  page.dispatch(message);
+  assert.equal(clocks.size, 1);
+  page.fireWindow('pagehide');
+  assert.equal(clocks.size, 0);
 });
