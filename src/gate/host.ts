@@ -259,7 +259,7 @@ export class GateHost {
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
       // Each record goes to the log of its own kind (owner decision after PR 4a): model requests to the model-request log, everything else here.
-      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(record); } catch { /* reported once above */ } } } },
+      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(this.withPolicyVersion(record, policyVersionOf(this.policyLayers()))); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
@@ -389,6 +389,7 @@ export class GateHost {
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
+        policyVersion: policyVersionOf(this.policyLayers()),
         // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it. With a
         // mark, the target is always the mark's strictest label, whoever records it (PR #87 review), as label.mark-raised records it.
         ...((): { label?: Label } => {
@@ -613,7 +614,7 @@ export class GateHost {
         record: (record) => {
           try {
             const root = this.projectRootNow();
-            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(record);
+            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(this.withPolicyVersion(record, policyVersionOf(this.policyLayers())));
           } catch { /* a record that cannot be kept never changes a request (D-21) */ }
         }
       },
@@ -747,6 +748,15 @@ export class GateHost {
     }
   }
 
+  /**
+   * A record as this host's sinks append it (D-10): a copy whose authorizations[0].policy.version is `version`, every other field as it was, so every record
+   * a runtime writes (tool calls, mark raises, refusals before the gate, model requests) names the policy version without agent/gateAdapter.ts knowing it.
+   */
+  private withPolicyVersion(record: DecisionRecord, version: PolicyRecordVersion): DecisionRecord {
+    const [first, ...rest] = record.authorizations;
+    return first === undefined ? record : { ...record, authorizations: [{ ...first, policy: { ...first.policy, version } }, ...rest] };
+  }
+
   private deviceFingerprint(): string {
     return this.current.state === 'valid' ? this.current.signer.fingerprint : DEVICE_UNKNOWN;
   }
@@ -843,7 +853,8 @@ export class GateHost {
         outcome,
         rule,
         ...(reason === undefined ? {} : { reason }),
-        bundleHash: state.state === 'valid' ? state.hash : ''
+        bundleHash: state.state === 'valid' ? state.hash : '',
+        policyVersion: policyVersionOf(this.policyLayers())
       });
       const named = { ...record, api: { ...record.api, operation: name } };
       const root = this.projectRootNow();
