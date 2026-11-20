@@ -1,13 +1,25 @@
 // The one label module (D-35, FND-06): labels.ts and dominance.ts parse, rank, join and meet labels for the gate, the staff tools and the chat label, on
 // whatever scales the active policy holds. Fictional data only; every key is made in the test.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { atLeast, belowOnScale, dominates, markAtLeast, meetClearance, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { DominanceContext, Mark } from '../domain/gate/dominance';
 import { SCALE_PRESETS, levelIndex, parseLabelKey } from '../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../domain/gate/labels';
+import { activeScales, setActiveScaleSource } from '../domain/gate/labelAlgebra';
 import { STAFF_TEMPLATE_LABELS } from '../domain/staff/doctrine';
-import { LICENCE_CLASS_RULES } from '../domain/staff/obs/feeds';
+import { LICENCE_CLASS_RULES, parseFeedDescriptor } from '../domain/staff/obs/feeds';
+import type { FeedDescriptor } from '../domain/staff/obs/feeds';
+import { clampImportLabel } from '../domain/staff/obs/importers';
+import type { Observation } from '../domain/staff/obs/observation';
+import { segmentId } from '../domain/staff/obs/observation';
+import { rowFits } from '../domain/staff/obs/store';
+import { judgeChatLowering, signChatLowering } from '../gate/chatLabel';
+import type { KeyStatusLookup } from '../domain/team/keyStatus';
+import { createDeviceIdentity } from '../team/identity';
+import { MemorySecrets } from './helpers/stateFixtures';
 import { guardScan } from '../domain/staff/guardScan';
 import type { ProductHeader } from '../domain/staff/products';
 
@@ -214,4 +226,90 @@ test('D-35: meetClearance never dominates a label either input does not, and mee
     }
   }
   assert.ok(met > clearances.length, 'cross-scale and same-scale meets were checked');
+});
+
+// ---- Task 3: the staff tools and the chat label agree with the gate on a custom scale (VALIDATION FND-06), and the module stays dependency-free ----
+
+/** A policy whose organization scale has a level between Internal and Confidential. */
+const CUSTOM: ScaleTable = { ...SCALE_PRESETS, org: { name: 'Organization', levels: ['Public', 'Internal', 'Partner', 'Confidential', 'Restricted'] } };
+
+/** A valid simulated feed whose every channel is stamped `channelLabel` (built past the template ceiling on purpose: the stamp is what is tested). */
+function stampedFeed(channelLabel: string): FeedDescriptor {
+  const parsed = parseFeedDescriptor({
+    id: 'iron-cot', title: 'IRON LANTERN CoT replay', category: 'intelligence', feedClass: 'events', format: 'cot', transport: 'loopback', licenceClass: 'simulated',
+    trainingRights: 'no', simulated: true, channels: [{ id: 'recce-net', title: 'RECCE net', discipline: 'GEOINT' }]
+  });
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  return { ...parsed.value, channels: parsed.value.channels.map((channel) => ({ ...channel, label: channelLabel })) };
+}
+
+function rowAt(label: string): Observation {
+  const knownAt = '2026-11-18T05:45:00.000Z';
+  return { feed: 'iron-cot', channel: 'recce-net', discipline: 'GEOINT', simulated: true, label, handling: [], knownAt, segment: segmentId('iron-cot', 'recce-net', knownAt) } as unknown as Observation;
+}
+
+/** The gate's own answer: `label` is at least `floor` on `scales`, both read by the label module. */
+function gateAtLeast(label: string, floor: string, scales: ScaleTable): boolean {
+  const read = parseLabelKey(label, scales);
+  const least = parseLabelKey(floor, scales);
+  return read !== undefined && least !== undefined && atLeast(read, least, scales);
+}
+
+function orgLabel(level: string): Label {
+  return { scale: 'org', level, compartments: [], releasability: [], handling: [] };
+}
+
+async function judgeLowering(): Promise<{ apply: boolean; cause?: string }> {
+  const identity = await createDeviceIdentity(new MemorySecrets());
+  const ownKeys: KeyStatusLookup = (key) => (key.fingerprint === identity.fingerprint ? { state: 'active' } : { state: 'unknown' });
+  const signed = signChatLowering(identity, { chatId: 'conv-custom-1', from: [orgLabel('Partner')], to: [orgLabel('Internal')], reason: 'reviewed and cleared', at: '2026-11-17T11:00:00.000Z' });
+  const verdict = judgeChatLowering(signed, { chatId: 'conv-custom-1', otherMark: [orgLabel('Partner')], otherLastUsedAt: '2026-11-17T10:00:00.000Z' }, ownKeys);
+  return verdict.apply ? { apply: true } : { apply: false, cause: verdict.cause };
+}
+
+test('D-35: on a custom scale the importer, the store, the guard scan and the chat label give the gate\'s answer', async () => {
+  const clear = setActiveScaleSource(() => CUSTOM);
+  try {
+    assert.equal(activeScales(), CUSTOM);
+    const clamped = clampImportLabel('org/Internal', stampedFeed('org/Partner'));
+    assert.deepEqual(clamped, { ok: true, label: 'org/Partner', raised: true }, 'an import below the channel is raised to it');
+    assert.equal(clamped.ok && clamped.raised, !gateAtLeast('org/Internal', 'org/Partner', CUSTOM));
+    const partnerFeed = { descriptor: stampedFeed('org/Partner'), state: 'live' as const, since: '2026-11-18T05:00:00.000Z' };
+    assert.equal(rowFits(rowAt('org/Internal'), partnerFeed), 'label-too-low');
+    assert.equal(rowFits(rowAt('org/Confidential'), partnerFeed), undefined, 'a row above the channel fits');
+    assert.equal(rowFits(rowAt('org/Partner'), partnerFeed), undefined);
+    for (const level of ['Internal', 'Partner', 'Confidential']) assert.equal(rowFits(rowAt(`org/${level}`), partnerFeed) === 'label-too-low', !gateAtLeast(`org/${level}`, 'org/Partner', CUSTOM), level);
+    const header = headerRules('org/Partner');
+    assert.ok(header.hold && header.rules.includes('label-ceiling'), 'a header above the Internal ceiling is held');
+    assert.equal(header.hold, !gateAtLeast('org/Internal', 'org/Partner', CUSTOM));
+    assert.deepEqual(headerRules('org/Internal'), { rules: [], hold: false });
+    const lowering = await judgeLowering();
+    assert.deepEqual(lowering, { apply: true }, 'a signed lowering from Partner to Internal is read as lower and applied');
+    const context: DominanceContext = { scales: CUSTOM, mappings: [], now: NOW };
+    assert.equal(lowering.apply, dominates(clearanceOf('org/Partner'), orgLabel('Internal'), context) && !dominates(clearanceOf('org/Internal'), orgLabel('Partner'), context));
+  } finally { clear(); }
+});
+
+test('D-35: with no policy source the same calls answer on the presets, where org/Partner is unknown: refused or held', async () => {
+  assert.equal(activeScales(), SCALE_PRESETS);
+  const clamped = clampImportLabel('org/Internal', stampedFeed('org/Partner'));
+  assert.deepEqual(clamped, { ok: true, label: 'org/Partner', raised: true }, 'never left below a stamp it cannot rank');
+  const partnerFeed = { descriptor: stampedFeed('org/Partner'), state: 'live' as const, since: '2026-11-18T05:00:00.000Z' };
+  assert.equal(rowFits(rowAt('org/Internal'), partnerFeed), 'label-too-low');
+  assert.equal(rowFits(rowAt('org/Confidential'), partnerFeed), 'label-too-low', 'nothing is at least an unknown stamp');
+  assert.equal(gateAtLeast('org/Confidential', 'org/Partner', SCALE_PRESETS), false);
+  const header = headerRules('org/Partner');
+  assert.ok(header.hold && header.rules.includes('label-ceiling'));
+  assert.deepEqual(await judgeLowering(), { apply: false, cause: 'does-not-verify' }, 'a lowering on a scale this computer cannot read is not applied');
+});
+
+test('D-35: the label module stays dependency-free: labels.ts imports only shape.ts and dominance.ts only labels.ts', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const specifiers = (file: string): string[] => {
+    const text = readFileSync(path.join(root, 'src', 'domain', 'gate', file), 'utf8');
+    assert.ok(!/\brequire\s*\(/.test(text) && !/\bimport\s*\(/.test(text), `${file} loads nothing at run time`);
+    return [...new Set([...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s+'([^']+)'/gm)].map((match) => match[1] as string))].sort();
+  };
+  assert.deepEqual(specifiers('labels.ts'), ['./shape']);
+  assert.deepEqual(specifiers('dominance.ts'), ['./labels']);
 });
