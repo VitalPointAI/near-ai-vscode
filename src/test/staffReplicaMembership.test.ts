@@ -628,3 +628,107 @@ test('no-grant-key: changing the clearance of a member who holds a cell whose la
   const { roster, hash } = await head(t.lead.p);
   assert.deepEqual(rosterView(roster).cellGrantees?.(y, hash), [t.lead.p.deviceWriter]);
 });
+
+// ---- Task 4: split and choose, deputy, handover --------------------------------------------------------------------------------------------------
+
+test('two lead devices each change the roster offline: the state reports a split with ROSTER_SPLIT_TEXT, a member\'s choice is refused not-a-roster-writer, the lead\'s choice resolves it', async () => {
+  const t = await team();
+  const second = await addMachine(t.lead, 'mbr-lead', 'a2', 'Lee Lead');
+  const point = await head(t.lead.p);
+  assert.equal((await head(second.p)).hash, point.hash);
+  // Offline: each lead device writes one roster change on the same head.
+  const one = ok(await updateMember(t.lead.host, { member: t.n.member, name: 'Nell One' }), 'first device');
+  const two = ok(await updateMember(second.host, { member: t.n.member, name: 'Nell Two' }), 'second device');
+  assert.ok(one.ok && two.ok);
+  const branchTwo = (await head(second.p)).hash;
+  await sync(second, t.lead);
+  const split = await head(t.lead.p);
+  assert.equal(split.hash, point.hash, 'nothing on either branch applies');
+  assert.equal(split.roster.pending.length, 1);
+  assert.equal(split.roster.pending[0].text, ROSTER_SPLIT_TEXT);
+  assert.ok(split.roster.pending[0].branches.includes(branchTwo));
+  // Any other change is refused while the roster is split.
+  const blocked = await updateMember(t.lead.host, { member: t.n.member, name: 'Nell Three' });
+  assert.equal(blocked.reason, 'roster-split');
+  assert.ok(blocked.message.startsWith(ROSTER_SPLIT_TEXT));
+  // A member sees the split and cannot choose.
+  await sync(t.lead, t.m);
+  assert.equal((await head(t.m.p)).roster.pending.length, 1);
+  const byMember = await chooseRosterBranch(t.m.host, branchTwo);
+  assert.equal(byMember.reason, 'not-a-roster-writer');
+  // The lead chooses the second device's branch.
+  assert.equal((await chooseRosterBranch(t.lead.host, 'f'.repeat(64))).reason, 'not-a-branch');
+  const chosen = ok(await chooseRosterBranch(t.lead.host, branchTwo), 'choose');
+  assert.deepEqual(chosen.notices, multiUserNoticeLines());
+  const resolved = await head(t.lead.p);
+  assert.deepEqual(resolved.roster.pending, []);
+  assert.equal(resolved.hash, branchTwo);
+  assert.equal(memberAt(resolved.roster.members, t.n.member, resolved.position)?.name, 'Nell Two');
+  assert.equal((await chooseRosterBranch(t.lead.host, branchTwo)).reason, 'no-split');
+});
+
+test('with a deputy named, the deputy revokes the lead\'s only device (the lead\'s own attempt is refused), then chooses a roster split between the deputy\'s two devices', async () => {
+  const t = await team();
+  const d = await bringIn(t.lead, 'd', 'Dee Deputy', CLEARED_X);
+  ok(await nameDeputy(t.lead.host, d.member), 'name the deputy');
+  const d2 = await addMachine(t.lead, d.member, 'd2', 'Dee Deputy');
+  await sync(t.lead, d);
+  await sync(t.lead, d2);
+  const named = await head(d.p);
+  assert.equal(deputyAt(named.roster, named.position), d.member);
+  assert.equal((await removeFromProject(t.lead.host, { member: 'mbr-lead', writer: t.lead.p.deviceWriter })).reason, 'last-lead-device');
+  // The deputy cuts off the lead's only device; the cells it held move to new keys without it.
+  const revoked = ok(await removeFromProject(d.host, { member: 'mbr-lead', writer: t.lead.p.deviceWriter }), 'deputy revokes');
+  assert.ok(revoked.message.includes(REKEY_KEEP_TEXT));
+  assert.ok((revoked.rekeyed ?? []).includes(t.lead.p.projectId));
+  const cut = await head(d.p);
+  assert.equal(rosterView(cut.roster).isAdmitted(t.lead.p.deviceWriter, cut.hash), false);
+  assert.equal(leadAt(cut.roster, cut.position), 'mbr-lead', 'still the lead, with no device');
+  // The deputy's two devices each change the roster offline.
+  await sync(d, d2);
+  assert.equal((await head(d2.p)).hash, cut.hash);
+  ok(await updateMember(d.host, { member: t.n.member, name: 'Nell One' }), 'deputy device one');
+  ok(await updateMember(d2.host, { member: t.n.member, name: 'Nell Two' }), 'deputy device two');
+  const branchTwo = (await head(d2.p)).hash;
+  await sync(d2, d);
+  assert.equal((await head(d.p)).roster.pending.length, 1);
+  ok(await chooseRosterBranch(d.host, branchTwo), 'the deputy chooses');
+  const resolved = await head(d.p);
+  assert.deepEqual(resolved.roster.pending, []);
+  assert.equal(resolved.hash, branchTwo);
+  assert.deepEqual(resolved.roster.refused.filter((item) => item.kind !== 'grant'), []);
+});
+
+test('nameDeputy writes deputy.name; the deputy cannot name a deputy; a planned handover from the deputy is refused; the deputy\'s lead-lost handover makes it the lead', async () => {
+  const t = await team();
+  const named = ok(await nameDeputy(t.lead.host, t.m.member), 'name');
+  assert.deepEqual(named.notices, multiUserNoticeLines());
+  await sync(t.lead, t.m);
+  const atM = await head(t.m.p);
+  assert.equal(deputyAt(atM.roster, atM.position), t.m.member);
+  const byDeputy = await nameDeputy(t.m.host, t.n.member);
+  assert.equal(byDeputy.reason, 'deputy-cannot-name-deputy');
+  assert.equal(byDeputy.message, ROSTER_REFUSALS['deputy-cannot-name-deputy']);
+  const planned = await handOverLead(t.m.host, { to: t.m.member, reason: 'planned' });
+  assert.equal(planned.reason, 'handover-not-allowed');
+  assert.equal(planned.message, ROSTER_REFUSALS['handover-not-allowed']);
+  assert.equal((await head(t.m.p)).hash, atM.hash, 'nothing written');
+  ok(await handOverLead(t.m.host, { to: t.m.member, reason: 'lead-lost' }), 'lead-lost handover');
+  const after = await head(t.m.p);
+  assert.equal(leadAt(after.roster, after.position), t.m.member);
+  assert.equal(deputyAt(after.roster, after.position), undefined, 'the deputy role ended');
+  // The lead can hand over for any reason; naming the lead or an unknown member is refused.
+  assert.equal((await handOverLead(t.lead.host, { to: 'mbr-lead', reason: 'planned' })).reason, 'names-the-lead');
+  assert.equal((await nameDeputy(t.lead.host, 'mbr-nobody')).reason, 'member-unknown');
+});
+
+test('SECURITY.md has the invitations subsection inside the multi-user section, with no em-dash', () => {
+  const text = readFileSync(path.join(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
+  const section = text.indexOf('## Multi-user staff projects (preview)');
+  const heading = text.indexOf('### Invitations, join secrets and the safety code');
+  assert.ok(section >= 0 && heading > section);
+  const next = text.indexOf('\n## ', section + 5);
+  assert.ok(next === -1 || heading < next, 'inside the multi-user section');
+  assert.equal(text.split('### Invitations, join secrets and the safety code').length - 1, 1);
+  assert.ok(!/—/.test(text));
+});
