@@ -4,7 +4,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type { ActionCapability, ActionPolicy } from '../domain/policy';
-import type { AgentMessage, CompletionEvent, ToolCall, ToolDefinition, UsageMetadata } from '../services/nearAiClient';
+import type { AgentMessage, ToolCall, ToolDefinition, UsageMetadata } from '../domain/provider/messages';
+import type { ModelEndpoint } from '../domain/provider/endpoint';
 import { AutoApprovalContext, allowRuleBlocker, isAutoAllowed, PermissionRules, RunGrants, suggestAllowRule } from './permissions';
 import { CREDENTIAL_HOLD_RULE, OUTSIDE_WORKSPACE_RULE } from '../domain/gate/decide';
 import type { GateRuntime } from '../domain/gate/decide';
@@ -24,8 +25,6 @@ import type { AgentTool, SecurityEvent, Todo, ToolContext, ToolPreview } from '.
 import { resolveInWorkspace, ToolError } from './workspace';
 import { isScratchPath } from '../domain/scratch';
 import { ModelSwitchCause, SWITCH_AFTER_MS, SWITCH_AFTER_STALLS, switchReason } from './modelFallback';
-
-
 
 /** The kinds of risk whose card never offers "always allow", because the docs promise those always ask (0.4.17). */
 const ALWAYS_ASKS_KINDS: ReadonlySet<string> = new Set(['credentials', 'destructive', 'leaves-machine']);
@@ -169,7 +168,7 @@ export interface RunInput {
 }
 
 export interface AgentRunOptions {
-  client: { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal, options?: { idleTimeoutMs?: number; maxOutputTokens?: number }): AsyncGenerator<CompletionEvent>; cooldownRemainingMs?(model: string): number };
+  client: Pick<ModelEndpoint, 'streamCompletion' | 'cooldownRemainingMs'>;
   model: string;
   tools: AgentTool<any>[];
   context: Omit<ToolContext, 'signal' | 'onTodos'>;

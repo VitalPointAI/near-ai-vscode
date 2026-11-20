@@ -1,5 +1,5 @@
 // How a thread's entries are shown and how they become the model's messages again. Pure: no VS Code, no files.
-import type { AgentMessage, ToolCall } from '../../services/nearAiClient';
+import type { AgentMessage, ToolCall } from '../provider/messages';
 import type { ThreadEntry, ThreadLines } from './threadEntries';
 
 /** One turn of the reopened view: what the person typed, or what the agent answered with a count of the tool steps it took. */
