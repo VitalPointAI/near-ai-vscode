@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GENESIS_PREV, buildEntry, entryHash, signHeader } from '../domain/replica/entry';
 import type { SealedEntry } from '../domain/replica/entry';
-import { canonicalProof, findEquivocations, proofHash, quarantineRecords, verifyProof } from '../domain/replica/equivocation';
+import { canonicalBytes } from '../domain/team/canonical';
+import { canonicalProof, findEquivocations, forkChosen, parseProof, proofHash, quarantineRecords, verifyProof } from '../domain/replica/equivocation';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { staticRosterView } from '../domain/replica/rosterView';
@@ -280,4 +281,78 @@ test('the integrity output and the digests are the same under all 24 arrival ord
     assert.deepEqual([...result.applied].sort(), [...reference.applied].sort());
   }
   assert.equal(count, 24);
+});
+
+// WR-03, D-01 (b), D-20: W writes seq 0 and 1, then signs `count` different headers at seq 2, all following the same seq 1. The fork has that many
+// branches, and the lead's device.release may name any one of them.
+function manyBranches(count: number): { world: ReturnType<typeof createWorld>; w1: Written; branches: Written[]; hashes: string[] } {
+  const world = createWorld({ members: [{ member: 'mbr-wwww', name: 'Wren', devices: ['W'] }, { member: 'mbr-xxxx', name: 'Xia', devices: ['X'] }] });
+  const client = (clientId: number): { kind: string; data: unknown } => ({ kind: 'doc.client', data: { product: PRODUCT, clientId, actor: { kind: 'person' } } });
+  world.write('W', client(401));
+  const w1 = world.write('W', client(402));
+  const first = world.write('W', client(410));
+  const branches = [first, ...Array.from({ length: count - 1 }, (_, index) => forkAt(world, 'W', world.stream, 2, client(411 + index)))];
+  return { world, w1, branches, hashes: branches.map((item) => item.hash).sort() };
+}
+
+const slotOf = (items: readonly Written[]): Array<{ hash: string; header: SealedEntry['header'] }> => items.map((item) => ({ hash: item.hash, header: item.entry.header }));
+
+function choosing(world: ReturnType<typeof createWorld>, seq: number, hash: string): ReturnType<typeof staticRosterView> {
+  return staticRosterView({ ...world.rosterSpec, chosenBranches: [{ writer: world.writerOf('W'), stream: world.stream, seq, hash }] });
+}
+
+test('WR-03: a fork with three branches is resolved when the release names the highest hash, which is not one of the two in the proof', () => {
+  const { world, w1, branches, hashes } = manyBranches(3);
+  const proofs = findEquivocations(slotOf([w1, ...branches]), world.ctx().roster);
+  assert.equal(proofs.length, 1, 'one proof per slot, whatever the number of branches');
+  const [proof] = proofs;
+  assert.deepEqual([entryHash(proof.a), entryHash(proof.b)], hashes.slice(0, 2), 'the proof is still the two lowest hashes');
+  assert.deepEqual(proof.branches, hashes, 'every branch at the slot, sorted');
+  const highest = hashes[2];
+  assert.equal(forkChosen(proof, choosing(world, 2, highest)), highest, 'the highest branch is a branch the lead may choose');
+  assert.deepEqual(quarantineRecords(proofs, choosing(world, 2, highest)), []);
+  for (const hash of hashes) assert.equal(forkChosen(proof, choosing(world, 2, hash)), hash);
+  assert.deepEqual(quarantineRecords(proofs, world.ctx().roster), [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 2 }], 'no choice: quarantined');
+});
+
+test('a four-branch fork accepts each of its four branches; a hash that is not a branch at the slot, or a choice at another seq, resolves nothing', () => {
+  const { world, w1, branches, hashes } = manyBranches(4);
+  const [proof] = findEquivocations(slotOf([...branches].reverse()), world.ctx().roster);
+  assert.deepEqual(proof.branches, hashes);
+  for (const hash of hashes) {
+    assert.equal(forkChosen(proof, choosing(world, 2, hash)), hash);
+    assert.deepEqual(quarantineRecords([proof], choosing(world, 2, hash)), []);
+  }
+  for (const stranger of ['e'.repeat(64), w1.hash]) {
+    assert.equal(forkChosen(proof, choosing(world, 2, stranger)), undefined);
+    assert.deepEqual(quarantineRecords([proof], choosing(world, 2, stranger)), [{ writer: world.writerOf('W'), stream: world.stream, fromSeq: 2 }]);
+  }
+  assert.equal(forkChosen(proof, choosing(world, 1, hashes[3])), undefined, 'a choice recorded for another seq is not a choice for this fork');
+});
+
+test('the branches never reach the wire: JSON, canonical bytes and proofHash equal the proof of the two lowest headers alone (D-39)', () => {
+  const { world, branches, hashes } = manyBranches(4);
+  const [proof] = findEquivocations(slotOf(branches), world.ctx().roster);
+  const byHash = new Map(branches.map((item) => [item.hash, item.entry.header]));
+  const key = world.signerOf('W').publicKey;
+  const plain = canonicalProof(byHash.get(hashes[0]) as SealedEntry['header'], byHash.get(hashes[1]) as SealedEntry['header'], key);
+  assert.equal(proof.branches?.length, 4);
+  assert.equal(plain.branches, undefined, 'a proof made from two headers has no list of branches');
+  assert.equal(proofHash(proof), proofHash(plain));
+  assert.equal(JSON.stringify(proof), JSON.stringify(plain));
+  assert.deepEqual(canonicalBytes(proof), canonicalBytes(plain));
+  assert.deepEqual(Object.keys(proof).sort(), ['a', 'b', 'publicKey']);
+  const wire = JSON.parse(JSON.stringify(proof)) as unknown;
+  assert.equal(verifyProof(wire), true, 'the proof as sent still checks out alone');
+  assert.equal(parseProof(wire)?.branches, undefined, 'a proof read from the wire carries no branches');
+  assert.equal(proofHash(parseProof(wire) as NonNullable<ReturnType<typeof parseProof>>), proofHash(proof));
+});
+
+test('a proof read from the wire, with no branches of its own, accepts a choice of either of its two headers and nothing else', () => {
+  const { world, branches, hashes } = manyBranches(3);
+  const [found] = findEquivocations(slotOf(branches), world.ctx().roster);
+  const wire = parseProof(JSON.parse(JSON.stringify(found))) as NonNullable<ReturnType<typeof parseProof>>;
+  assert.equal(forkChosen(wire, choosing(world, 2, hashes[0])), hashes[0]);
+  assert.equal(forkChosen(wire, choosing(world, 2, hashes[1])), hashes[1]);
+  assert.equal(forkChosen(wire, choosing(world, 2, hashes[2])), undefined, 'the third branch is unknown to a bare pair; the chain stage adds it (31-06 Task 2)');
 });

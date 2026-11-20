@@ -8,9 +8,9 @@
 // - an entry with any predecessor (prev or dep) that is not admitted is held, until the predecessor arrives. Excluded entries stay admitted graph
 //   nodes, so other writers' entries that cite them are admitted too ("satisfied by absence"): one forked device never stalls the project.
 import { buildCausalGraph } from './causal';
-import { GENESIS_PREV } from './entry';
-import { acceptableProof, canonicalProof, findEquivocations, forkChosen, parseProof, proofHash, quarantineRecords } from './equivocation';
-import type { EquivocationProof, QuarantineRecord } from './equivocation';
+import { GENESIS_PREV, entryHash } from './entry';
+import { acceptableProof, canonicalProof, findEquivocations, forkStanding, parseProof, proofHash, withBranches } from './equivocation';
+import type { EquivocationProof, ForkResolution, QuarantineRecord } from './equivocation';
 import { totalOrder } from './order';
 import type { ReplicaContext } from './rosterView';
 import type { VerifiedEntry } from './verify';
@@ -89,14 +89,11 @@ function pushTo<T>(map: Map<string, T[]>, key: string, value: T): void {
   else list.push(value);
 }
 
-// The entries to skip: in a forked (writer, stream), every admitted entry from the fork seq on except the chosen branch and its descendants; in
-// other streams, every admitted entry of that writer whose causal past holds one of those excluded forked entries.
-function excludedEntries(admitted: ReadonlyMap<string, VerifiedEntry>, proofs: readonly EquivocationProof[], ctx: ReplicaContext): Set<string> {
+// The entries to skip: in a forked (writer, stream), for every fork slot forkStanding lists, every admitted entry from its seq on except the branch
+// kept there and its descendants; in other streams, every admitted entry of that writer whose causal past holds one of those excluded forked entries.
+function excludedEntries(admitted: ReadonlyMap<string, VerifiedEntry>, resolutions: readonly ForkResolution[]): Set<string> {
   const forks = new Map<string, Array<{ seq: number; chosen: string | undefined }>>();
-  for (const proof of proofs) {
-    const key = `${proof.a.writer}/${proof.a.stream}`;
-    pushTo(forks, key, { seq: proof.a.seq, chosen: forkChosen(proof, ctx.roster) });
-  }
+  for (const resolution of resolutions) pushTo(forks, `${resolution.writer}/${resolution.stream}`, { seq: resolution.seq, chosen: resolution.chosen });
   const chains = new Map<string, VerifiedEntry[]>();
   for (const entry of admitted.values()) {
     const key = `${entry.header.writer}/${entry.header.stream}`;
@@ -245,8 +242,19 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
       known.set(proofHash(proof), proof);
     }
   }
-  const proofs = [...known.values()];
-  const excluded = excludedEntries(admitted, proofs, ctx);
+  // Every proof, found or carried, lists every branch this machine knows at its slot (the headers it holds there and the headers of every proof of
+  // that slot), so a device.release naming any branch resolves it in every arrival order (D-01 (b), WR-03). The list is in memory only; the proof's
+  // wire form and hash do not change.
+  const atSlot = new Map<string, string[]>();
+  const headers = new Map<string, VerifiedEntry['header']>();
+  for (const entry of sorted) {
+    pushTo(atSlot, slot(entry.header.stream, entry.header.writer, entry.header.seq), entry.hash);
+    headers.set(entry.hash, entry.header);
+  }
+  for (const proof of known.values()) for (const header of [proof.a, proof.b]) pushTo(atSlot, slot(header.stream, header.writer, header.seq), entryHash(header));
+  const proofs = [...known.values()].map((proof) => withBranches(proof, atSlot.get(slot(proof.a.stream, proof.a.writer, proof.a.seq)) ?? []));
+  const standing = forkStanding(proofs, ctx.roster, headers);
+  const excluded = excludedEntries(admitted, standing.resolutions);
 
   const byText = (a: { hash?: string }, b: { hash?: string }): number => compareText(a.hash ?? '', b.hash ?? '');
   return {
@@ -254,7 +262,7 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
     excluded,
     held: held.sort(byText),
     rejected: rejected.sort(byText),
-    quarantined: quarantineRecords(proofs, ctx.roster),
+    quarantined: standing.quarantined,
     proofs: proofs.sort((a, b) => compareText(proofHash(a), proofHash(b)))
   };
 }
