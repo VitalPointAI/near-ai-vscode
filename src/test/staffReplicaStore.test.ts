@@ -320,7 +320,7 @@ test('no refusal message names a key, a secret or a hash longer than 12 characte
   for (const [reason, message] of Object.entries(STORE_REFUSALS)) {
     assert.doesNotMatch(message, /[0-9a-f]{13,}/i, reason);
     assert.doesNotMatch(message, /\bkey\b|secret|nearAi\./i, reason);
-    assert.doesNotMatch(message, /—/, reason);
+    assert.doesNotMatch(message, /\u2014/, reason);
     assert.ok(message.length > 20, reason);
   }
 });
@@ -609,6 +609,6 @@ test('SECURITY.md has the replica store subsection once, inside the multi-user s
   assert.equal(text.split('\n').filter((line) => line === '### The replica store and rollback detection').length, 1);
   const section = text.slice(text.indexOf('## Multi-user staff projects (preview)'), text.indexOf('\n## ', text.indexOf('## Multi-user staff projects (preview)') + 1));
   assert.ok(section.includes('### The replica store and rollback detection'));
-  assert.doesNotMatch(text, /—/);
+  assert.doesNotMatch(text, /\u2014/);
   for (const phrase of ['.planning/staff/replica/', 'git', 'secret storage', 'private key', 'set aside']) assert.ok(section.toLowerCase().includes(phrase.toLowerCase()), phrase);
 });
