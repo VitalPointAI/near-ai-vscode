@@ -1357,6 +1357,21 @@ in `vendor/manifest.json` from esbuild's record of what it bundled:
 | imagetracer.js | 1.2.6 | Unlicense | Tracing images into SVG |
 | pptxgenjs (with jszip and 12 small helpers) | 4.0.1 | MIT | Writing .pptx decks |
 | DejaVu Sans | 2.37.3 | Bitstream Vera | Text in rendered SVG |
+| Yjs (`yjs`, with `lib0`) | 13.6.33 (lib0 0.2.119) | MIT | Shared product text in the replica core (not used by the extension yet) |
+
+Yjs and lib0 are the first third-party code inside the signed replica core
+(`src/domain/replica/`), the pure code that later staff collaboration releases
+use to check and merge signed entries from several people. In this release the
+replica core exists but the extension does not use it yet. Other vendored
+libraries already run in the extension host, for PDFs, SVG and decks. Both are
+built from exact devDependency pins into `vendor/yjs/yjs.cjs`; lib0 is 0.2.119
+rather than the newest release, because a release must be at least two weeks old
+when it is vendored. `scripts/crdt-vendor.json` records each package's npm
+integrity, the SHA-256 of every source file esbuild bundled, the esbuild version
+and the SHA-256 of the built file. `npm run compile`,
+`src/test/replicaVendor.test.ts` and `npm run verify:release` check those
+hashes, so a changed or substituted copy fails the build, CI and the release.
+Both packages appear in the extension's SBOM like the other bundled packages.
 
 The COP map page's two libraries are committed under `media/vendor/` byte for
 byte from their published npm packages, each with its license, and
