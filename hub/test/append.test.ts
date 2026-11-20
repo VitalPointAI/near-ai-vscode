@@ -654,3 +654,26 @@ test('WR-02 restore: without a kept checkpoint covering the place, an entry of a
     await push(hub, [revoke.entry]);
     await expectRefused(hub, written.entry, 'revoked', world.lead.writer);
   }));
+
+// ---- IN-01 (D-44, D-69): a blob reference on an entry the hub already holds is kept only from that entry's own writer ----
+
+test('IN-01 blob references: another device naming a blob for an entry the hub already holds is dropped, so the upload stays unreferenced; the writer\'s own is kept', () =>
+  withHub((world) => { world.admitMember(analystOf(world)); }, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const written = note(world, analyst);
+    assert.deepEqual((await push(hub, [written.entry], { device: analyst.writer })).accepted, [written.hash]);
+    const blobBytes = Buffer.from('fictional sealed blob bytes of the lead');
+    const blobHash = createHash('sha256').update(blobBytes).digest('hex');
+    await hub.store.putBlob(world.project, blobHash, blobBytes, world.lead.writer, NOW_MS);
+
+    // The lead re-pushes the analyst's entry naming its own upload: the entry is held, the reference is not kept.
+    const byLead = await push(hub, [written.entry], { device: world.lead.writer, blobRefs: [{ entry: written.hash, blob: blobHash }] });
+    assert.deepEqual(byLead.held, [written.hash]);
+    assert.equal(hub.store.blobInfo(world.project, blobHash)?.referencedAt, undefined, 'a device attached its upload to another writer\'s entry');
+
+    // The analyst's own device may name a blob for its entry.
+    const byWriter = await push(hub, [written.entry], { device: analyst.writer, blobRefs: [{ entry: written.hash, blob: blobHash }] });
+    assert.deepEqual(byWriter.held, [written.hash]);
+    assert.equal(hub.store.blobInfo(world.project, blobHash)?.referencedAt, NOW_MS);
+  }));

@@ -393,13 +393,18 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   }
   grantsRefused.sort((a, b) => a.index - b.index);
 
-  // Blob references for entries the hub has after this batch; a reference for a refused entry is dropped with it.
+  // Blob references for entries this batch stores; a reference for a refused entry is dropped with it. For an entry the hub already held, only its
+  // own writer's device may add a reference (IN-01): otherwise any device could mark its uploads referenced by naming someone else's entry,
+  // escaping the pending quota and the 24 hour sweep (D-44), and widen who may read that blob to the entry's stream.
   const streamOf = new Map<string, string>();
   for (const entry of entries) streamOf.set(entry.hash, entry.stream);
   const blobRefs: BlobRef[] = [];
   for (const ref of refsIn) {
     let stream = streamOf.get(ref.entry);
-    if (stream === undefined && held.includes(ref.entry)) stream = store.entryByHash(project, ref.entry)?.stream;
+    if (stream === undefined && held.includes(ref.entry)) {
+      const stored = store.entryByHash(project, ref.entry);
+      if (stored !== undefined && stored.writer === input.device) stream = stored.stream;
+    }
     if (stream !== undefined) blobRefs.push({ entry: ref.entry, blob: ref.blob, stream });
   }
 
