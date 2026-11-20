@@ -246,3 +246,17 @@ export function inviteSafetyCode(invite: InvitePayload, joiner: SafetyCodeKeys):
     joiner: { publicKey: joiner.publicKey, x25519: joiner.x25519 }
   });
 }
+
+// RED stubs (31-16 Task 3): replaced by the welcome file in the next commit.
+export const WELCOME_MAX_BYTES = 0;
+export interface WelcomeFile { v: 1; genesis: import('./entry').SealedEntry; roster: import('./entry').SealedEntry[]; blobs: import('./entry').SealedBlob[]; grants: unknown[] }
+export interface BuildWelcomeInput { genesis: import('./entry').SealedEntry; roster: readonly import('./entry').SealedEntry[]; blobs: readonly import('./entry').SealedBlob[]; grants: readonly unknown[]; writer: string; cells: readonly string[] }
+export function buildWelcome(input: BuildWelcomeInput): WelcomeFile {
+  return { v: 1, genesis: input.genesis, roster: [], blobs: [], grants: [] };
+}
+export function readWelcome(_value: unknown, _pinned: { genesisHash: string; writer: string }): { ok: true; welcome: WelcomeFile; entries: import('./entry').SealedEntry[] } | InviteFailure {
+  return refuse('malformed');
+}
+export function inviteAnchor(invite: InvitePayload): import('./roster').RosterAnchor {
+  return { genesisHash: invite.genesisHash, project: invite.project, lead: { member: invite.lead.member, writer: invite.lead.writer, publicKey: invite.lead.publicKey, x25519: invite.lead.x25519 } };
+}

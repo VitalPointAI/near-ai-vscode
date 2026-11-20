@@ -3,12 +3,21 @@
 // welcome file that lets a new device catch up on the roster with only the grants addressed to it.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { INVITE_REFUSALS, buildInvite, buildJoinRequest, checkJoinRequest, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
-import type { InvitePayload, JoinRequestPayload } from '../domain/replica/invite';
+import { sealBlob } from '../domain/replica/entry';
+import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
+import { grantHash } from '../domain/replica/cellKeys';
+import type { CellGrant } from '../domain/replica/cellKeys';
+import {
+  INVITE_REFUSALS, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest, buildWelcome, checkJoinRequest, inviteAnchor, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite,
+  readWelcome
+} from '../domain/replica/invite';
+import type { InvitePayload, JoinRequestPayload, WelcomeFile } from '../domain/replica/invite';
+import { foldRoster } from '../domain/replica/roster';
 import { MAX_PAYLOAD_BYTES, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_NOW, createRosterWorld } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
+import { streamId } from './helpers/replicaWorld';
 import type { Written } from './helpers/replicaWorld';
 
 const INVITE_ID = 'inv-jo';
@@ -307,4 +316,132 @@ test('every refusal message is one or two plain sentences that say what to do ne
   }
   assert.ok(seenRefusals.length >= 20, `expected the named tests to record their refusals first, saw ${seenRefusals.length}`);
   for (const seen of seenRefusals) assert.deepEqual(Object.keys(seen), ['reason', 'message']);
+});
+
+// ---- Task 3: the welcome file (D-22, D-44, D-45) ----
+
+const KIM_MEMBER = 'mbr-kim';
+
+interface Admitted {
+  world: RosterWorld;
+  invite: InvitePayload;
+  joiner: RosterDevice;
+  kim: RosterDevice;
+  genesis: Written;
+  // J's own grants (base cell epochs 1 and 2), the grants J must not receive, and a sealed blob of the project stream.
+  joinerGrants: Array<SignedPayload<CellGrant>>;
+  notForJoiner: { lead: SignedPayload<CellGrant>; kim: SignedPayload<CellGrant>; mixed: SignedPayload<CellGrant>; otherCell: SignedPayload<CellGrant> };
+  blob: SealedBlob;
+}
+
+// The lead founds the project (founding grant to L), invites and admits J at slot 2 and K at slot 3, and grants the base cell to each device on its
+// own grant. A mixed grant (J and K on one grant) and a grant of another cell addressed to J also exist on the lead's side.
+function admittedWorld(): Admitted {
+  const state = invited();
+  const { world, joiner, genesis, inviteEntry } = state;
+  const kim = world.device('KIM', KIM_MEMBER);
+  const admitJo = world.rosterEntry(world.lead, 'member.admit', {
+    member: JOINER_MEMBER, invite: INVITE_ID, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, device: joiner.descriptor(2), agentSeats: []
+  }, inviteEntry.hash);
+  const inviteKim = world.rosterEntry(world.lead, 'member.invite', {
+    invite: 'inv-kim', name: 'Kim Planner', seat: 'j5-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(newJoinSecret())
+  }, admitJo.hash);
+  const admitKim = world.rosterEntry(world.lead, 'member.admit', {
+    member: KIM_MEMBER, invite: 'inv-kim', name: 'Kim Planner', seat: 'j5-chief', roles: ['member'], clearance: DEMO_CLEARANCE, device: kim.descriptor(3), agentSeats: []
+  }, inviteKim.hash);
+  const lead = world.grants[0];
+  const joinerEpoch1 = world.grant(world.lead, { roster: admitJo.hash, to: [joiner] });
+  const kimGrant = world.grant(world.lead, { roster: admitKim.hash, to: [kim] });
+  const mixed = world.grant(world.lead, { roster: admitKim.hash, to: [joiner, kim] });
+  // Cell creation is 31-15's in this wave, so the base cell's second epoch and the other cell are standalone grant objects here.
+  const joinerEpoch2 = world.grant(world.lead, { epoch: 2, roster: admitKim.hash, to: [joiner] });
+  const otherCell = world.grant(world.lead, { cell: streamId('other-cell'), roster: admitKim.hash, to: [joiner] });
+  const blob = sealBlob(world.epochKeyOf(world.project, 1), world.project, 1, Buffer.from('a large roster body, sealed apart', 'utf8'));
+  return { world, invite: state.invite, joiner, kim, genesis, joinerGrants: [joinerEpoch1, joinerEpoch2], notForJoiner: { lead, kim: kimGrant, mixed, otherCell }, blob };
+}
+
+function welcomeFor(admitted: Admitted): WelcomeFile {
+  const { world, genesis, joiner, blob } = admitted;
+  return buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [blob], grants: world.grants, writer: joiner.writer, cells: [world.project] });
+}
+
+test('buildWelcome carries the genesis, every roster entry and blob and exactly the joining device\'s grants; the device folds the roster from the welcome alone to the lead\'s head', () => {
+  const admitted = admittedWorld();
+  const { world, joiner, genesis, joinerGrants, blob } = admitted;
+  const welcome = welcomeFor(admitted);
+  assert.equal(welcome.v, 1);
+  assert.deepEqual(welcome.genesis, genesis.entry);
+  assert.deepEqual(welcome.roster, world.entries.filter((entry) => entry !== genesis.entry));
+  assert.deepEqual(welcome.blobs, [blob]);
+  assert.deepEqual(welcome.grants.map(grantHash).sort(), joinerGrants.map(grantHash).sort());
+  // The device reads the welcome as text, with the genesis hash it pinned from the invite and its own writer id.
+  const read = readWelcome(JSON.stringify(welcome), { genesisHash: admitted.invite.genesisHash, writer: joiner.writer });
+  assert.equal(reasonOf(read), 'ok');
+  const received = (read as { ok: true; welcome: WelcomeFile; entries: SealedEntry[] });
+  assert.deepEqual(received.entries, [welcome.genesis, ...welcome.roster]);
+  const blobs = new Map(received.welcome.blobs.map((item) => [item.hash, item]));
+  const ring = world.ringFor(joiner, received.welcome.grants as Array<SignedPayload<CellGrant>>);
+  assert.deepEqual(ring(world.project, 1), world.epochKeyOf(world.project, 1));
+  assert.deepEqual(ring(world.project, 2), world.epochKeyOf(world.project, 2));
+  const joinerSide = foldRoster({ entries: received.entries, anchor: inviteAnchor(admitted.invite), keys: ring, blobs: (hash) => blobs.get(hash), grants: received.welcome.grants, now: NOW });
+  const leadSide = world.foldRoster();
+  assert.equal(leadSide.positions.length, 6);
+  assert.deepEqual(joinerSide.positions, leadSide.positions);
+  assert.deepEqual(joinerSide.refused.filter((item) => item.kind !== 'grant'), []);
+});
+
+test('the serialised welcome holds no grant of another cell, of another device or shared with another device', () => {
+  const admitted = admittedWorld();
+  const text = JSON.stringify(welcomeFor(admitted));
+  for (const [name, grant] of Object.entries(admitted.notForJoiner)) {
+    assert.ok(!text.includes(grantHash(grant)), `${name} grant hash found`);
+    assert.ok(!text.includes(grant.sig), `${name} grant found`);
+  }
+  assert.ok(!text.includes(streamId('other-cell')));
+  assert.ok(!text.includes(admitted.kim.x25519));
+});
+
+test('readWelcome refuses a welcome for another genesis (wrong-project) and one holding a grant for another device (wrong-device), and accepts the honest one', () => {
+  const admitted = admittedWorld();
+  const welcome = welcomeFor(admitted);
+  const pinned = { genesisHash: admitted.invite.genesisHash, writer: admitted.joiner.writer };
+  assert.equal(reasonOf(readWelcome(JSON.stringify(welcome), pinned)), 'ok');
+  assert.equal(reasonOf(readWelcome(welcome, pinned)), 'ok');
+  refusedAs(readWelcome(JSON.stringify(welcome), { ...pinned, genesisHash: 'e'.repeat(64) }), 'wrong-project');
+  // Another project's genesis carried in the file is refused against this pin as well.
+  const elsewhere = admittedWorld();
+  refusedAs(readWelcome(JSON.stringify({ ...welcome, genesis: elsewhere.genesis.entry }), pinned), 'wrong-project');
+  for (const grant of [admitted.notForJoiner.kim, admitted.notForJoiner.mixed, admitted.notForJoiner.lead]) {
+    refusedAs(readWelcome(JSON.stringify({ ...welcome, grants: [...welcome.grants, grant] }), pinned), 'wrong-device');
+  }
+  // The honest welcome read by another device is refused the same way.
+  refusedAs(readWelcome(JSON.stringify(welcome), { ...pinned, writer: admitted.kim.writer }), 'wrong-device');
+});
+
+test('readWelcome reads hostile input: oversized, malformed, a changed grant, an entry of another stream and a blob that does not match its name are refused', () => {
+  const admitted = admittedWorld();
+  const welcome = welcomeFor(admitted);
+  const pinned = { genesisHash: admitted.invite.genesisHash, writer: admitted.joiner.writer };
+  const text = JSON.stringify(welcome);
+  refusedAs(readWelcome(`${text}${' '.repeat(WELCOME_MAX_BYTES)}`, pinned), 'too-large');
+  const malformed: unknown[] = [
+    '[]', 'null', 'not json', JSON.stringify({ ...welcome, v: 2 }), JSON.stringify({ ...welcome, extra: true }), text.replace('{"', '{"__proto__":{"polluted":true},"'),
+    JSON.stringify({ ...welcome, roster: 'all of it' }), JSON.stringify({ ...welcome, genesis: { header: welcome.genesis.header } }),
+    JSON.stringify({ ...welcome, roster: [...welcome.roster, { header: { ...welcome.genesis.header, stream: 'f'.repeat(32) }, body: welcome.genesis.body }] }),
+    JSON.stringify({ ...welcome, blobs: [{ hash: 'e'.repeat(64), bytes: admitted.blob.bytes }] }),
+    JSON.stringify({ ...welcome, grants: [{ not: 'a grant' }] }), undefined, 7
+  ];
+  for (const value of malformed) refusedAs(readWelcome(value, pinned), 'malformed');
+  const changed = clone(welcome.grants[0]) as { payload: { labelSealed: string } };
+  changed.payload.labelSealed = 'AAAA';
+  refusedAs(readWelcome(JSON.stringify({ ...welcome, grants: [changed] }), pinned), 'bad-signature');
+  assert.equal(({} as Json).polluted, undefined);
+});
+
+test('buildWelcome refuses to make a welcome from an unreadable grant or a roster entry of another stream', () => {
+  const admitted = admittedWorld();
+  const { world, genesis, joiner } = admitted;
+  assert.throws(() => buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [], grants: [{ not: 'a grant' }], writer: joiner.writer, cells: [world.project] }), /welcome/i);
+  const foreign = { header: { ...genesis.entry.header, stream: 'f'.repeat(32) }, body: genesis.entry.body };
+  assert.throws(() => buildWelcome({ genesis: genesis.entry, roster: [...world.entries, foreign], blobs: [], grants: [], writer: joiner.writer, cells: [world.project] }), /welcome/i);
 });
