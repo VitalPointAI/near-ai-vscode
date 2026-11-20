@@ -1,0 +1,66 @@
+{
+  "note": "The hashes of the vendored Yjs build (scripts/entries/yjs.mjs bundled by scripts/vendor-libs.mjs into vendor/yjs/yjs.cjs); change this file only in a reviewed change that bumps yjs, lib0 or esbuild.",
+  "esbuild": "0.28.2",
+  "packages": [
+    {
+      "name": "yjs",
+      "version": "13.6.33",
+      "license": "MIT",
+      "integrity": "sha512-q/UYvr1gOk4XII+Cu1CW2dINjYqJJFifTzogEaIARznrvX7uOlHsdTEXcnOBMuIsrCGEEKdNxi74kyMLZlKVfw==",
+      "why": "The shared-text and merge library chosen by the owner (design 21.1); bundled into vendor/yjs/yjs.cjs."
+    },
+    {
+      "name": "lib0",
+      "version": "0.2.119",
+      "license": "MIT",
+      "integrity": "sha512-vh+TiejVy8Xm+hCdnRfn9BthGNvNUZdEXltNjVZL3TzRIKP3s1lnQh8pWd/Q0wCgY0FPAGVVjFF4ZiHUV3LFgA==",
+      "why": "yjs depends on it and it is bundled into vendor/yjs/yjs.cjs; pinned to 0.2.119 as its own exact devDependency because 0.2.120 was younger than the two-week vendoring rule on 2026-11-19."
+    },
+    {
+      "name": "isomorphic.js",
+      "version": "0.2.5",
+      "license": "MIT",
+      "integrity": "sha512-PIeMbHqMt4DnUP3MA/Flc0HElYjMXArsw1qwJZcm9sqR8mq3l8NYizFMty0pWwE/tzIGH3EKK5+jes5mAr85yw==",
+      "why": "Installed as lib0 dependency; esbuild does not bundle it, so it is not in the shipped file or the SBOM."
+    }
+  ],
+  "inputs": {
+    "node_modules/lib0/array.js": "b0f4e52537362ca84c64c9d17549eaff17ff5b506ec331e2583ab88f07c1af5e",
+    "node_modules/lib0/binary.js": "c44eec3285213b298564babcea382f910a09d8657f3ec05ad3f171f25510cc05",
+    "node_modules/lib0/buffer.js": "f182d5f3adbd7e7b3f508f614586ed8a680ce07ba1c5171a636c32ec55e2b97b",
+    "node_modules/lib0/conditions.js": "dd174fa5200e2fc4f6325fda1a7043793cacad69b1c11a9d20d18ae974762433",
+    "node_modules/lib0/decoding.js": "30d733a78cdb085b4b92f081713c16be9ab8587ba1505bb9d3bc0028c28b46f7",
+    "node_modules/lib0/encoding.js": "e5c782283528460e02a517628d7fdf48f793b2c792d2a780242dac9df6522fa2",
+    "node_modules/lib0/environment.js": "3022ebbf8f4cb35bd52ada7befe7cb458a97cd5bb077a591965330fdf8235e2c",
+    "node_modules/lib0/error.js": "dd7ac530dd94836bf798dc9170531f7050e92b9b2613e588b9044977aedcca5e",
+    "node_modules/lib0/function.js": "4ce913e752586f691c56bcf7ee9fbb1fda4097db316d48d1fef56394b6a0469b",
+    "node_modules/lib0/iterator.js": "86bf6a4608082091555b993557035960eb64f981aae0ffb8b69cb56c804f0ac5",
+    "node_modules/lib0/json.js": "cfba9734e6ed81949d3c726c8f64f8ab12b58e3815a2e5e282b2afa3e197f96e",
+    "node_modules/lib0/logging.common.js": "ea52cdbf8777996211950d65b81ef0435e2c8baa96b213e96d264dabf444ba1b",
+    "node_modules/lib0/logging.node.js": "4dbd4711f851eb4f6ae354c9ffbe38cb5a3cb2b65aec811336f27e134eeb2f68",
+    "node_modules/lib0/map.js": "4074780f109b37e1e0e7eae4d72e7c11da3b04c4b0294e1b55e3b51067f09c89",
+    "node_modules/lib0/math.js": "8bdf1601a1713dcd65c6cd5830f6ad080c8ac08d3864db6f1c4e58b2b7141aab",
+    "node_modules/lib0/metric.js": "b4f5d05d4d4d7d65dd40ef3200830842fea6d8a4870189dce6a6a75db5157a43",
+    "node_modules/lib0/number.js": "458b685c1585298f06085c45afdca812ac0db136e4cefba68032854cb47f8b61",
+    "node_modules/lib0/object.js": "3fb8b259f284aa9c190425e32f5fae70c97cc6a42c1519bc55107daa51bf8faa",
+    "node_modules/lib0/observable.js": "49ecb00719eab2c30c18a39fa6acaeda15f5003c81715ac82b8f209e59dff4e5",
+    "node_modules/lib0/promise.js": "c781e7b6a23d32856aa988d0a65c19fcdfd001d4a0e30b9c82f72428102f19c0",
+    "node_modules/lib0/random.js": "56bc09bc3304f8d55e3e6189786f16083129303af6e18c5f1c2c417ffb0e2121",
+    "node_modules/lib0/set.js": "f8aa6fa7d336e3b5b3f40a2f2acb3cf1a500814809a56037d6faf52ee46d4698",
+    "node_modules/lib0/storage.js": "cd5038e8a00cac99a34ea9703cbd53d49732db227d0ecf8e10f4a0b853f40f27",
+    "node_modules/lib0/string.js": "39bca44ea6071eb898e9e58a736dbc621d1e6677005d93b8ead41416b0a88ca2",
+    "node_modules/lib0/symbol.js": "30682e132119c47046e1d70982f9f74c226b34360ee3ed7041302c41d8ccd001",
+    "node_modules/lib0/time.js": "4ad029ed8e2f5657618e535469e7d7d2a52c82295b198352a43b92de5deba25e",
+    "node_modules/lib0/trait/equality.js": "32f13f1a01dafafa727c4414d4d3e4a6058adde9a45626f7219b042e2140ac2d",
+    "node_modules/lib0/webcrypto.node.js": "ea1ba9cc77711cac1a5c67956f80a59ee5586d6f16c208fa8d73dd6912aa7c1b",
+    "node_modules/yjs/dist/yjs.mjs": "a514c183100fc375eb46df9cb58acaf0deabbf414d2508841336179b1cb45107"
+  },
+  "licenses": {
+    "node_modules/lib0/LICENSE": "5446db1e43fe52faf3faab7e9959fe3762ac11bdc61c0945934c498affd52d73",
+    "node_modules/yjs/LICENSE": "341baa53605ed85d6f95782322854cca56c655ebc7fd4712649b8e7afc6020ff"
+  },
+  "output": {
+    "file": "vendor/yjs/yjs.cjs",
+    "sha256": "74fe708b18c6494d3f698b8a66ea7d5861c3a8c802938f545e3b060e33841ef4"
+  }
+}

@@ -1113,9 +1113,11 @@
     "dejavu-fonts-ttf": "2.37.3",
     "esbuild": "0.28.2",
     "imagetracerjs": "1.2.6",
+    "lib0": "0.2.119",
     "pdfjs-dist": "6.4.299",
     "pptxgenjs": "4.0.1",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "yjs": "13.6.33"
   },
   "overrides": {
     "image-size": "2.0.3",

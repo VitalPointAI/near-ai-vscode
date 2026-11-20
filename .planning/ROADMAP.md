@@ -160,15 +160,32 @@ These phases ship in the 0.4.x line as two staff collaboration drops, like staff
   2. Two signed entries at one position by one writer produce a proof and quarantine that device on every machine, whatever the arrival order; a changed old entry breaks only that writer's chain. (MUS-01)
   3. Product text is a Yjs document carried in signed entries; random concurrent edits by persons and agents converge, every character's author is the writer that inserted it, and an update under another writer's client id is rejected. Yjs and `lib0` are vendored at pinned versions with licences (owner question 1). (MUS-02)
   4. Versions pin a content hash that must equal the text at the state vector named; concurrent conflicting decisions on one version fold to "contested" and only a fresh decision that has seen them settles it; no agent actor can approve, reject, release or supersede. (MUS-03)
-**Plans:** 0 plans
+**Plans:** 12/12 plans executed in 5 waves (1 {01}; 2 {02, 03}; 3 {04, 05, 06, 07, 08, 09}; 4 {10, 11}; 5 {12})
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 30 to break down)
+- [x] 30-01-PLAN.md — Vendor Yjs 13.6.33 and lib0 0.2.119 (automatic pin gate, hash manifest checked at compile, test and release), the staff-replica purpose, SECURITY.md
+- [x] 30-02-PLAN.md — Tracer: two writers each sign and seal one doc.update; same text and digest in both orders; every layer of the replica core and its shared contracts
+- [x] 30-03-PLAN.md — CRDT spike (D-22): update sizes, full state and garbage collection for a 30-page, 20-author product
+- [x] 30-04-PLAN.md — Entry hardening and closed schemas for the project, roster, registers, watches, runs and obs families; project reducer
+- [x] 30-05-PLAN.md — Per-writer chains: equivocation proof and quarantine in any order, tamper, withholding, lamport, roster citation, future time
+- [x] 30-06-PLAN.md — Co-editing core: ownership check, hostile updates, per-character attribution, deletion records, compaction
+- [x] 30-07-PLAN.md — Decision algebra: effective, contested, settling, pending-confirmation, every table row under all permutations
+- [x] 30-08-PLAN.md — Products and versions: proposals checked against the text at their snapshot, numbering, owner prompt, gate chain to awaiting-decision
+- [x] 30-09-PLAN.md — Total order against a topological reference, checkpoints with order tips, incremental fold and refold, transport types
+- [x] 30-10-PLAN.md — Decisions on versions through the fold: every 15.4 and 15.5 row, forbidden acts, attribution summary, source changed
+- [x] 30-11-PLAN.md — Canonical vectors for Phases 31 and 32 and the hub; the replica import boundary
+- [x] 30-12-PLAN.md — Integration: default reducers, convergence properties across every family, full suite and release check once
 
 ### Phase 31: Staff roster, cell keys and migration
 **Goal**: A staff lead turns a staff project multi-user, invites people by signed file, and decides what each person may see, and today's ledgers move into the new format without loss.
 **Depends on**: Phase 30
 **Requirements**: MUS-04, MUS-05, MUS-06
+**Prerequisites from Phase 30** (open owner decisions in 30-UAT.md; each must be settled and built before any transport or store feeds the fold):
+  1. Bind each Yjs client id to its writer through the signed roster, so no admitted writer can take another's attribution by registering the id first.
+  2. Late joiners: decide whether a writer's log may start from a signed checkpoint that records each writer's head (this may add a lamport per head to the checkpoint format, so decide before Phase 32 signs checkpoints).
+  3. Refuse an update above a byte limit before Yjs decodes it, and decode in a memory-capped worker (a 4 MiB hostile update used about 1.16 GB in a probe).
+  4. Schedule the Phase 30 review warnings WR-01..WR-09, recommended as the first plan of this phase.
+
 **Success Criteria** (what must be TRUE):
   1. Genesis and a single-writer, linear roster (members, seats, decision roles, declared clearances, devices, the hub member) exist; two lead devices changing the roster offline produce a visible split that only the lead's choice resolves. (MUS-04)
   2. Invite and join work by file alone (signed invitation, signed join request with the one-time secret, six-word safety code, admission), and expired, reused or wrong-secret invitations are refused. (MUS-04)
@@ -1354,7 +1371,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 27. Project state follows the project (0.4.20) | 36/36 | Complete: shipped in 0.4.20; owner host check passed | 2026-11-17 (released 2026-11-14) |
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
-| 30. Replication contract and co-editing core | 0/TBD | Not started (staff collaboration drop A) | - |
+| 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/TBD | Not started (drop A) | - |
 | 32. Your organization's sync hub | 0/TBD | Not started (drop A; may run beside Phase 31) | - |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
