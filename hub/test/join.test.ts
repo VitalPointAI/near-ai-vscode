@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { buildHubJoin, buildInvite, buildJoinRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac, joinRequestHash, newJoinSecret, readHubJoin } from '@ext/domain/replica/invite';
+import type { SealedEntry } from '@ext/domain/replica/entry';
+import { buildHubJoin, buildInvite, buildJoinRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac, joinRequestHash, joinSecretHash, newJoinSecret, readHubJoin } from '@ext/domain/replica/invite';
 import type { InvitePayload, JoinRequestPayload } from '@ext/domain/replica/invite';
 import type { SignedPayload } from '@ext/domain/team/signedPayload';
 import { HubTransport, HubTransportError } from '@ext/staff/replica/hubTransport';
+import { JoinDesk } from '../src/join';
+import type { JoinChecks } from '../src/join';
+import type { HubConnection } from './helpers/hubClient';
 import { withHub } from './helpers/hubHarness';
 import type { Hub, StartOptions } from './helpers/hubHarness';
-import { HUB_ADDRESS, createHubWorld } from './helpers/hubWorld';
+import { DEMO_CLEARANCE, HUB_ADDRESS, INVITE_EXPIRES, createHubWorld } from './helpers/hubWorld';
 import type { HubWorld, WorldDevice } from './helpers/hubWorld';
 import { EventClient, ManualScheduler } from './helpers/sseReader';
 
@@ -243,3 +248,395 @@ test('tracer: a post the client builds passes the hub\'s own check, and the same
       transport.close();
     }
   }));
+
+// ---- Task 2: every invitation state on the hub, the lock, who may read, and the 7 day removal ---------------------------------------------------
+
+/** Counts every call of the two checks that cost a signature or a MAC. */
+function countingChecks(): { checks: JoinChecks; counts: { read: number; mac: number } } {
+  const counts = { read: 0, mac: 0 };
+  return {
+    counts,
+    checks: {
+      readHubJoin: (join, request) => {
+        counts.read += 1;
+        return readHubJoin(join, request);
+      },
+      checkHubJoinMac: (key, fields, mac) => {
+        counts.mac += 1;
+        return checkHubJoinMac(key, fields, mac);
+      },
+    },
+  };
+}
+
+/** Sends roster entries (and their grants) the lead's device wrote after enrolment to the hub. */
+async function pushRoster(hub: Hub, world: HubWorld, written: ReadonlyArray<{ entry: SealedEntry }>, grants: readonly unknown[] = []): Promise<void> {
+  const transport = transportFor(hub, world, world.lead);
+  try {
+    const answer = await transport.append({ entries: written.map((item) => item.entry), grants });
+    assert.equal(answer.accepted.length, written.length, JSON.stringify(answer.refused));
+  } finally {
+    transport.close();
+  }
+}
+
+/** A refusal answer: its status and id, and that it names nothing from the request (the joiner's name and keys, the MAC). */
+function assertRefused(answer: { status: number; json: Record<string, unknown>; text: string }, status: number, error: string, post?: JoinPost): void {
+  assert.equal(answer.status, status, answer.text);
+  assert.equal(answer.json.error, error);
+  assert.deepEqual(Object.keys(answer.json).sort(), ['error', 'message']);
+  if (post !== undefined) {
+    const request = post.request.payload;
+    for (const value of [request.name, request.publicKey, request.x25519, request.mac, request.nonce]) assert.equal(answer.text.includes(value), false, 'nothing from the request is echoed');
+  }
+}
+
+/** A session token of a device, on a connection of its own, for raw calls. */
+async function rawSession(hub: Hub, device: WorldDevice, project: string): Promise<{ connection: HubConnection; token: string }> {
+  const opened = await hub.openSession(device, project);
+  return { connection: opened.connection, token: opened.token };
+}
+
+test('unknown: a post for an invitation the hub never registered is refused unknown-invite, and nothing from the request is echoed', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'));
+    assertRefused(await postRaw(hub, post), 404, 'unknown-invite', post);
+    assert.equal(hub.store.joinRequests(world.project).length, 0);
+  }));
+
+test('unknown: a post naming a project this hub does not hold is refused unknown-invite before any signature is checked', () => {
+  const { checks, counts } = countingChecks();
+  return withJoinHub({ joinChecks: checks }, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const other = createHubWorld({ projectLabel: 'other-exercise' });
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'), { project: other.project });
+    assertRefused(await postRaw(hub, post), 404, 'unknown-invite', post);
+    assert.deepEqual(counts, { read: 0, mac: 0 });
+  });
+});
+
+test('expired: once the hub\'s clock passes the invitation\'s expiry a correct post is refused invite-expired and no failure is counted', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world, { expiresAt: new Date(hub.now() + DAY_MS).toISOString() });
+    await register(hub, world, world.lead, invite);
+    hub.advance(DAY_MS + 1);
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'));
+    assertRefused(await postRaw(hub, post), 403, 'invite-expired', post);
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, 0);
+  }));
+
+test('expired: an invitation registered with an expiry already past is refused invite-expired and nothing is kept', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const session = await rawSession(hub, world.lead, world.project);
+    try {
+      const invite = invitation(hub, world);
+      const answer = await session.connection.post(`/v1/projects/${world.project}/invites`, { invite: invite.payload.invite, expiresAt: new Date(hub.now() - 1).toISOString(), checkKey: invite.checkKey }, session.token);
+      assert.equal(answer.status, 403);
+      assert.equal(answer.json().error, 'invite-expired');
+      assert.equal(hub.store.invite(world.project, invite.payload.invite), undefined);
+    } finally {
+      session.connection.close();
+    }
+  }));
+
+test('used: once the roster records member.admit naming the invitation, a correct post is refused invite-used', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    // admitMember writes member.invite inv-2 and member.admit naming it (the world numbers its invitations).
+    const invite = invitation(hub, world, { invite: 'inv-2' });
+    await register(hub, world, world.lead, invite);
+    const officer = world.device('OFFICER-C', 'mbr-officer');
+    const admitted = world.admitMember(officer);
+    assert.equal(admitted.invite.entry.header.stream, world.project);
+    await pushRoster(hub, world, [admitted.invite, admitted.admit], admitted.grant === undefined ? [] : [admitted.grant]);
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'));
+    assertRefused(await postRaw(hub, post), 403, 'invite-used', post);
+    assert.equal(hub.store.joinRequests(world.project).length, 0);
+  }));
+
+test('voided: once the roster records invite.void, a correct post is refused invite-voided', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const made = world.rosterEntry(world.lead, 'member.invite', {
+      invite: invite.payload.invite, name: 'Person J', seat: 'j2-analyst', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(invite.secret),
+    });
+    const voided = world.rosterEntry(world.lead, 'invite.void', { invite: invite.payload.invite });
+    await pushRoster(hub, world, [made, voided]);
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'));
+    assertRefused(await postRaw(hub, post), 403, 'invite-voided', post);
+  }));
+
+test('locked: after 5 posts with a wrong hub MAC the invitation is locked, and a sixth with the right MAC is refused locked', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const joiner = world.device('JOINER-J', 'mbr-joiner');
+    for (let round = 1; round <= 5; round += 1) {
+      const wrong = joinPost(hub, invite, joiner, { tamperMac: true });
+      assertRefused(await postRaw(hub, wrong), 403, 'wrong-secret', wrong);
+      assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, round);
+    }
+    const record = hub.store.invite(world.project, invite.payload.invite);
+    assert.ok(record?.lockedAt !== undefined, 'the fifth failure locks the invitation');
+    const right = joinPost(hub, invite, joiner);
+    assertRefused(await postRaw(hub, right), 403, 'invite-locked', right);
+    assert.equal(hub.store.joinRequests(world.project).length, 0);
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, 5, 'a refusal for a locked invitation counts nothing more');
+    assert.ok(hub.joinLogs.some((line) => line.event === 'invite.locked' && line.fields.invite === invite.payload.invite));
+  }));
+
+test('locked: a wrong check key (a guessed secret) is a wrong MAC and counts toward the lock', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const guessed = hubJoinCheckKey(newJoinSecret(), invite.payload.invite);
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'), { checkKey: guessed });
+    assertRefused(await postRaw(hub, post), 403, 'wrong-secret', post);
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, 1);
+  }));
+
+test('a post naming another hub\'s writer id is refused wrong-hub; one whose request answers another project is refused wrong-project; neither is counted', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const joiner = world.device('JOINER-J', 'mbr-joiner');
+    const otherHub = createHash('sha256').update('another hub', 'utf8').digest('hex');
+    const elsewhere = joinPost(hub, invite, joiner, { hub: otherHub });
+    assertRefused(await postRaw(hub, elsewhere), 403, 'wrong-hub', elsewhere);
+
+    // An invitation of another project (another genesis) under an invite id this project registered.
+    const foreign = invitation(hub, createHubWorld({ projectLabel: 'other-exercise' }), { invite: 'inv-foreign' });
+    const local = { ...foreign, payload: { ...foreign.payload, project: world.project } };
+    await register(hub, world, world.lead, local);
+    const crossed = joinPost(hub, local, joiner);
+    assertRefused(await postRaw(hub, crossed), 403, 'wrong-project', crossed);
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, 0);
+    assert.equal(hub.store.invite(world.project, 'inv-foreign')?.failures, 0);
+  }));
+
+test('signatures: an envelope or a join request whose signature does not verify is refused bad-signature; an envelope from another device wrong-device', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const joiner = world.device('JOINER-J', 'mbr-joiner');
+    const post = joinPost(hub, invite, joiner);
+    const envelope = post.join as SignedPayload<Record<string, unknown>>;
+    const badEnvelope = { ...envelope, sig: flipFirst(envelope.sig) };
+    assertRefused(await postRaw(hub, { join: badEnvelope, request: post.request }), 403, 'bad-signature');
+    const badRequest = { ...post.request, sig: flipFirst(post.request.sig) };
+    assertRefused(await postRaw(hub, { join: post.join, request: badRequest }), 403, 'bad-signature');
+    // The envelope of another device naming this request.
+    const stranger = world.device('STRANGER-S', 'mbr-stranger');
+    const read = readHubJoin(post.join, post.request);
+    assert.ok(read.ok);
+    const strangers = { ...post.join as object, signer: { ...(envelope.signer as object), publicKey: stranger.publicKey } };
+    assertRefused(await postRaw(hub, { join: strangers, request: post.request }), 403, 'wrong-device');
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, 0);
+    assert.equal(hub.store.joinRequests(world.project).length, 0);
+  }));
+
+test('a join body over 64 KiB is refused 413 before it is read or parsed, and no check runs', () => {
+  const { checks, counts } = countingChecks();
+  return withJoinHub({ joinChecks: checks }, async (hub) => {
+    await team(hub);
+    const connection = await hub.connect();
+    try {
+      const answer = await connection.call('POST', '/v1/join', { declaredLength: 64 * 1024 + 1, headers: { 'content-type': 'application/json' } });
+      assert.equal(answer.status, 413);
+      assert.equal(answer.json().error, 'too-large');
+    } finally {
+      connection.close();
+    }
+    const big = await postRaw(hub, { join: 'x'.repeat(70 * 1024), request: {} });
+    assert.equal(big.status, 413);
+    assert.deepEqual(counts, { read: 0, mac: 0 });
+  });
+});
+
+test('429: the 11th join post from one address within a minute is refused with Retry-After before any signature is checked', () => {
+  const { checks, counts } = countingChecks();
+  return withJoinHub({ joinChecks: checks }, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'));
+    for (let round = 1; round <= 10; round += 1) assert.equal((await postRaw(hub, post)).status, 202, `post ${round}`);
+    const before = { ...counts };
+    const refused = await postRaw(hub, post);
+    assert.equal(refused.status, 429);
+    assert.equal(refused.json.error, 'rate-limited');
+    assert.ok(Number(refused.headers['retry-after']) >= 1, 'Retry-After is given');
+    assert.deepEqual(counts, before, 'the verifier was not called for the refused post');
+    hub.advance(60_000);
+    assert.equal((await postRaw(hub, post)).status, 202, 'the bucket refills');
+  });
+});
+
+test('registration: a member\'s device is refused 403, a check key of the wrong length 400, and only the lead or deputy device registers', () =>
+  withJoinHub({}, async (hub) => {
+    const { world, member, deputy } = await team(hub, { deputy: true });
+    const invite = invitation(hub, world);
+    const body = { invite: invite.payload.invite, expiresAt: invite.payload.expiresAt, checkKey: invite.checkKey };
+    const asMember = await rawSession(hub, member, world.project);
+    try {
+      const refused = await asMember.connection.post(`/v1/projects/${world.project}/invites`, body, asMember.token);
+      assert.equal(refused.status, 403);
+      assert.equal(refused.json().error, 'forbidden');
+      assert.equal(hub.store.invite(world.project, invite.payload.invite), undefined);
+    } finally {
+      asMember.connection.close();
+    }
+    const asLead = await rawSession(hub, world.lead, world.project);
+    try {
+      const short = await asLead.connection.post(`/v1/projects/${world.project}/invites`, { ...body, checkKey: Buffer.alloc(31, 1).toString('base64url') }, asLead.token);
+      assert.equal(short.status, 400);
+      assert.equal(short.json().error, 'malformed');
+      const extra = await asLead.connection.post(`/v1/projects/${world.project}/invites`, { ...body, secret: invite.secret }, asLead.token);
+      assert.equal(extra.status, 400, 'a body with any other field, a secret included, is refused');
+      assert.equal(hub.store.invite(world.project, invite.payload.invite), undefined);
+    } finally {
+      asLead.connection.close();
+    }
+    await register(hub, world, deputy as WorldDevice, invite);
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.registeredBy, (deputy as WorldDevice).writer);
+  }));
+
+test('registration: the same invitation again keeps the first; with the same check key it is held, with another it is refused and the first stays', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    const lead = transportFor(hub, world, world.lead);
+    try {
+      const first = await lead.registerInvite({ invite: invite.payload.invite, expiresAt: invite.payload.expiresAt, checkKey: invite.checkKey });
+      assert.equal(first.held, false);
+      const again = await lead.registerInvite({ invite: invite.payload.invite, expiresAt: invite.payload.expiresAt, checkKey: invite.checkKey });
+      assert.equal(again.held, true);
+      const other = hubJoinCheckKey(newJoinSecret(), invite.payload.invite);
+      await assert.rejects(lead.registerInvite({ invite: invite.payload.invite, expiresAt: invite.payload.expiresAt, checkKey: other }), (error: unknown) => error instanceof HubTransportError && error.status === 409 && error.reason === 'invite-exists');
+      assert.equal(hub.store.invite(world.project, invite.payload.invite)?.checkKey, invite.checkKey, 'the first check key stays');
+    } finally {
+      lead.close();
+    }
+  }));
+
+test('the same accepted request posted twice is kept once, is not a failure, and the lead hears of it once', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const reader = await EventClient.open(hub, world.lead, world.project);
+    const stream = await reader.events();
+    await stream.until((item) => item.retries.length === 1, 'the stream open');
+    const post = joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner'));
+    const first = await postRaw(hub, post);
+    assert.equal(first.status, 202);
+    assert.equal(first.json.held, false);
+    await stream.frame(1);
+    const second = await postRaw(hub, post);
+    assert.equal(second.status, 202);
+    assert.equal(second.json.held, true);
+    assert.equal(hub.store.joinRequests(world.project).length, 1);
+    assert.equal(hub.store.invite(world.project, invite.payload.invite)?.failures, 0);
+    // A post for a second invitation: frames on one stream arrive in order, so once its frame is here a frame for the duplicate would be too.
+    const marker = invitation(hub, world);
+    await register(hub, world, world.lead, marker);
+    assert.equal((await postRaw(hub, joinPost(hub, marker, world.device('JOINER-K', 'mbr-joiner-k')))).status, 202);
+    await stream.until((item) => item.frames.some((frame) => (frame.data as { invite?: string }).invite === marker.payload.invite), 'the marker frame');
+    assert.deepEqual(stream.frames.map((frame) => (frame.data as { invite: string }).invite), [invite.payload.invite, marker.payload.invite], 'the duplicate sent no event');
+    reader.close();
+  }));
+
+test('who may read: the deputy\'s device hears the join-request event and lists the requests; a member\'s device is refused 403', () =>
+  withJoinHub({}, async (hub) => {
+    const { world, member, deputy } = await team(hub, { deputy: true });
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const reader = await EventClient.open(hub, deputy as WorldDevice, world.project);
+    const stream = await reader.events();
+    await stream.until((item) => item.retries.length === 1, 'the stream open');
+    assert.equal((await postRaw(hub, joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner')))).status, 202);
+    assert.deepEqual((await stream.frame(1)).data, { project: world.project, invite: invite.payload.invite });
+    reader.close();
+    const asDeputy = transportFor(hub, world, deputy as WorldDevice);
+    const asMember = transportFor(hub, world, member);
+    try {
+      assert.equal((await asDeputy.joinRequests()).length, 1);
+      await assert.rejects(asMember.joinRequests(), (error: unknown) => error instanceof HubTransportError && error.status === 403 && error.reason === 'forbidden');
+    } finally {
+      asDeputy.close();
+      asMember.close();
+    }
+  }));
+
+test('7 days: an accepted request is listed until 7 days after it was accepted, then the hourly removal takes it from the list and the database; the invitation stays', () =>
+  withJoinHub({}, async (hub, scheduler) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world, { expiresAt: new Date(hub.now() + 30 * DAY_MS).toISOString() });
+    await register(hub, world, world.lead, invite);
+    assert.equal((await postRaw(hub, joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner')))).status, 202);
+    scheduler.advance(7 * DAY_MS - 60 * 60 * 1000);
+    const lead = transportFor(hub, world, world.lead);
+    try {
+      assert.equal((await lead.joinRequests()).length, 1, 'still listed just before 7 days');
+      assert.equal(hub.store.joinRequests(world.project).length, 1);
+      scheduler.advance(2 * 60 * 60 * 1000);
+      assert.equal(hub.store.joinRequests(world.project).length, 0, 'removed from the database by the hourly sweep');
+      assert.equal((await lead.joinRequests()).length, 0, 'and gone from the list');
+    } finally {
+      lead.close();
+    }
+    assert.ok(hub.store.invite(world.project, invite.payload.invite) !== undefined, 'the invitation record is never removed');
+    assert.ok(hub.joinLogs.some((line) => line.event === 'join.removed' && line.fields.removed === 1));
+  }));
+
+test('7 days: the removal also runs when the hub starts, so requests accepted before a long stop are gone at once', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world, { expiresAt: new Date(hub.now() + 30 * DAY_MS).toISOString() });
+    await register(hub, world, world.lead, invite);
+    assert.equal((await postRaw(hub, joinPost(hub, invite, world.device('JOINER-J', 'mbr-joiner')))).status, 202);
+    hub.advance(8 * DAY_MS);
+    // A second desk over the same store, as a restarted hub builds one, removes the old request when it starts.
+    const restarted = new JoinDesk({ store: hub.store, cache: hub.cache, identity: hub.identity, events: hub.events, now: () => hub.now() });
+    const scheduler = new ManualScheduler();
+    restarted.start(scheduler);
+    assert.equal(hub.store.joinRequests(world.project).length, 0);
+    assert.equal(scheduler.pending, 1, 'and the hourly timer is set');
+    restarted.stop();
+    assert.equal(scheduler.pending, 0);
+  }));
+
+test('log lines of the join desk carry the project id, the invite id and a reason word only', () =>
+  withJoinHub({}, async (hub) => {
+    const { world } = await team(hub);
+    const invite = invitation(hub, world);
+    await register(hub, world, world.lead, invite);
+    const joiner = world.device('JOINER-J', 'mbr-joiner');
+    await postRaw(hub, joinPost(hub, invite, joiner, { tamperMac: true }));
+    const post = joinPost(hub, invite, joiner);
+    await postRaw(hub, post);
+    assert.ok(hub.joinLogs.length >= 3);
+    for (const line of hub.joinLogs) {
+      assert.ok(Object.keys(line.fields).every((key) => ['project', 'invite', 'reason', 'removed'].includes(key)), JSON.stringify(line.fields));
+      const text = JSON.stringify(line);
+      for (const value of [invite.secret, invite.checkKey, post.request.payload.mac, post.request.payload.publicKey, post.request.payload.name]) assert.equal(text.includes(value), false);
+    }
+  }));
+
+function flipFirst(text: string): string {
+  const bytes = Buffer.from(text, 'base64url');
+  bytes[0] = (bytes[0] as number) ^ 1;
+  return bytes.toString('base64url');
+}
