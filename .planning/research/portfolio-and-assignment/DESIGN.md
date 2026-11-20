@@ -2,6 +2,8 @@
 
 Date: 2026-11-20. Status: design and phase proposal, no code changed. Read against `origin/main` at d8862260.
 
+**Conforms to the coherence review (2026-11-20):** the mode table and `term()` build in Phase 41, not 32.1 (32.1 keeps only the mode suggestion); the policy key is the `people.organization` section of bundle v2, named in `requires`, in the organization layer, with the project layer only narrowing; positions exist in every shared project, created silently per seat in invitation mode; decision authority lives on the position and team files name a position, never a person; posting authority uses the one delegation rule (subset, scope, expiry, depth) shared with Phase 71; the roster member id is the person id, with an optional `did`; effective clearance is the meet of the personal and roster clearances; aggregation has one evaluator in `src/domain/gate/` (built in Phase 38, with `effect` and `remedy`, chat label raises recorded); one Portfolio Room with a capital tab (Phase 43); cross-hub roll-up is hub federation, not a relay; "cell" in the key sense is written "key group", and Corporate mode words no longer use "team" or "seat" for people (open question O1); joining by invitation or posting file opens Get Started already filled in; the copy lint is the Phase 41 one. Superseded text is kept with dated notes. See `.planning/research/coherence/REVIEW.md` and `GLOSSARY.md`, `POLICY-SCHEMA.md` and `EXPERIENCE.md` beside it.
+
 Owner requests of 2026-11-20, accepted with the recommendations in the brief: (A) assigned positions, because military tasking is not an invitation; (B) organization modes that change vocabulary and default behaviour together; (C) mixed organizations rolled up into one portfolio view for prioritization and resource allocation.
 
 Inputs: the multi-user staff design (`.planning/research/multiuser-sync/DESIGN.md`, cited "MUS"), the roster code (`src/domain/replica/roster.ts`, `rosterMembers.ts`, `rosterCells.ts`, `invite.ts`, `safetyCode.ts`), the doctrine table (`src/domain/staff/doctrine.ts`), the staff teams design (`.planning/research/staff-teams/10-STAFF-TEAMS-DESIGN.md` and note 07 on J1 and J8), the capital projects design (`.planning/research/capital-projects/DESIGN.md`, cited "CAP"), the data platform design (`.planning/research/data-platform/00-DESIGN.md` and note 02, cited "DP"), guided onboarding (`.planning/research/guided-onboarding/DESIGN.md`, cited "GUIDE"), the model provenance and Cohere Model Vault designs, and the roadmap (Phases 30 to 37, 70, 71, 93, 97, L4, L5).
@@ -14,24 +16,31 @@ Words used here:
 - A **unit** is one organization unit inside a portfolio, with its own mode: a command, a branch, a project office.
 - A **publication** is a signed, labelled item that a unit releases upward (or a portfolio releases downward). It is the only way information crosses between units.
 - The **portfolio office** is the people who run the portfolio view. In P3O terms it is the permanent portfolio office.
+- Three nouns for authority, and only three: a **position** (a person's authority, on the roster), an **agent job** (in a team file), and a **model for a job** ("Models by job" in Settings). "Role" is not used for any of them on screens.
+- A **person** is identified by the roster member id, which is the one person id per organization and carries an optional `did` slot for Phase 71 identities (coherence review K20).
+- A **key group** is what the multi-user design calls a label cell (MUS 8): the set of keys that decides who can see a piece of shared work. Users see "Who can see this". Entry kind ids such as `cell.rekey.staged` keep their names. "Cell" as an organization unit word appears only where a mode table says so.
+- **Roster** here names the signed membership stream. On screens it reads **People**, except in Military mode, where it reads **Roster** (`GLOSSARY.md`, section 2).
 
 ---
 
 ## 1. Key points first
 
 1. **People are posted, not invited, in military and public-service work.** A position exists on its own and keeps its history across rotations. An authorized tasker posts a person to it with a start date. The person cannot decline. They can only report for duty, or report that they are unable, with a reason that goes back to the tasker. The tasker then confirms, defers or reassigns. Today's invite-and-accept flow stays for software teams.
-2. **Posting is a signed authority, not a menu item.** The staff lead holds it and may delegate it, for example to J1 personnel staff or J3, limited to some positions and for a time. Every posting records who ordered it, under whose authority, and when.
+2. **Posting is a signed authority, not a menu item.** The lead's position holds it and its holder may delegate it, for example to J1 personnel staff or J3, limited to some positions and for a time, under the one delegation rule the whole product uses (a subset of what the delegator holds, with scope, expiry and depth; Phase 71 later wraps it as credentials). Every posting records who ordered it, under whose authority, and when.
 3. **Proving the computer is still required, and it is key delivery, not consent.** The six-word safety code makes sure the keys reach the posted person's own machine. Nothing in that step lets them say no.
 4. **A position is never held by two people and never left empty by a handover.** The outgoing holder's authority ends at the exact roster entry where the incoming holder reports for duty. The keys for new work move at the same point, because the tasker prepares the next key epoch in advance.
-5. **One table sets an organization's words and its default behaviour together.** There are four modes: Military, Public service, Corporate and software, and Capital projects. Each mode decides the words on screen (billet or position or team or role, posted or assigned or invited or appointed) and the joining model (assignment, invitation or appointment). It generalizes the doctrine profiles in `doctrine.ts`. Your organization's signed policy sets the default mode, and projects choose within what it allows. The guided setup's role question suggests one.
-6. **A defence portfolio mixes modes, and each unit keeps its own.** A command posts people, a branch assigns them, a project office appoints them, and a software cell invites them. All of them can still roll up into one strategic portfolio view, because they publish to it in one neutral format.
-7. **The portfolio never gets anyone's cells.** Units release signed publications upward: status, milestones, risks, issues, resource demand and supply, spend, benefits, capability and results links, and gate state. Each publication is sealed to a write-only intake key of the portfolio, so a unit can publish without being able to read anything else there.
+5. **One table sets an organization's words and its default behaviour together.** There are four modes: Military, Public service, Corporate and software, and Capital projects. Each mode decides the words on screen (billet or position or team or role, posted or assigned or invited or appointed) and the joining model (assignment, invitation or appointment). It generalizes the doctrine words in `doctrine.ts` (doctrine stays one profile under `term()`). Your organization's rules set the default mode in the `people.organization` section of the organization layer, and a project chooses within what they allow (the project layer only narrows). Get Started's "kind of work" question suggests one.
+6. **A defence portfolio mixes modes, and each unit keeps its own.** A command posts people, a branch assigns them, a project office appoints them, and a software group invites them. All of them can still roll up into one strategic portfolio view, because they publish to it in one neutral format.
+7. **The portfolio never gets anyone's key groups.** Units release signed publications upward: status, milestones, risks, issues, resource demand and supply, spend, benefits, capability and results links, and gate state. Each publication is sealed to a write-only intake key of the portfolio, so a unit can publish without being able to read anything else there.
 8. **Each publication carries its own label, and the view is labelled as a whole.** The view takes the highest label among its inputs, raised further by signed aggregation rules in the policy, because many Protected B items together can be more sensitive than any one of them. A viewer who is not cleared for the whole sees only the views whose aggregate they are cleared for. They are never told that more exists, which is the data platform's strict default. Only a person can make a lower-labelled summary, with a sanitization note.
 9. **People decide and agents draft.** Agents score against the portfolio office's weighted criteria with cited evidence, model scenarios, compute the efficient frontier and capacity against demand, and write the portfolio brief. Priorities, allocations and gate outcomes are signed person decisions, and can be contested under the same rules as staff products.
-10. **One hub first, federation later.** A pilot portfolio of a few units fits on one hub, which takes about 10 projects and 150 people. Publications are self-contained sealed envelopes, so from Phase 34 they can also move between hubs by file. Live roll-up across hubs, sites and organizations needs L5 federation and Phase 71 identities.
+10. **One hub first, federation later.** A pilot portfolio of a few units fits on one hub (people see it as "your organization's server"), which takes about 10 projects and 150 people. Publications are self-contained sealed envelopes, so from Phase 34 they can also move between hubs by file. Live roll-up across hubs, sites and organizations needs L5 hub federation and Phase 71 identities.
 11. **Placement.**
-   - **Modes:** inside Phase 32.1.
+   - **Modes:** the mode table and `term()` in Phase 41 (the organization policy foundation); the mode suggestion in Phase 32.1.
    - **Assigned positions:** a small inserted Phase 33.1 right after drop A. Its "require this feature" check should land in Phase 33 so that older clients fail safe.
+
+   > **Superseded 2026-11-20 (coherence review):** the first placement put the whole mode table inside Phase 32.1. It moves to Phase 41 (REVIEW conflict K22) because Phase 33.1 needs it and `mayDecline` is a security rule; 32.1 reads it.
+12. **Positions in every shared project.** Every project shared with people has positions, so there is one authority model. In invitation mode they are created silently, one per seat, and nobody sees the word. Before a project is shared, the one local person holds every position. A team file names a position for each decision, never a person (REVIEW K18, owner question Q10).
    - **Portfolio view:** a group of three 0.4.x phases (38 to 40) after drop B, on fictional data, on one hub.
    - **Later work:** real data and the knowledge base views come with v0.6.0 (Phases 93 and 97). Cross-hub roll-up comes with L5.
 
@@ -45,13 +54,13 @@ Words used here:
 | Roster writers | Only the devices of the staff lead and the deputy lead (`LEAD_ROLES`; MUS 7.1, owner decision 5). The roster is linear through `rosterPrev`, and a split is resolved by `roster.choose` | The authority to post cannot be delegated |
 | Membership machine | invited, then join-requested, then active or refused (MUS 15.1) | "Refused" and "expired" are the only outcomes besides active. There is no "unable to report" path and no handover |
 | Doctrine profiles | `doctrine.ts`: three staff profiles (`us-joint`, `us-army`, `nato-ca`), levels, processes, step names, annex letters, all as one pure data table | It covers planning vocabulary only. Joining and organization words are not in it |
-| Capital pack | Neutral slots filled by a private profile, with a display rule of `label` or `name` (CAP 2.1). It has a portfolio office template (CAP 5.5) and a Portfolio Room that reads one organization's ledgers on one machine (CAP 8) | The pack is designed but not built. It has no cross-unit roll-up, no labels on roll-up items, and no aggregation |
+| Capital pack | Neutral slots filled by your directive (the capital profile, kept out of the repository), with a display rule of `label` or `name` (CAP 2.1). It has a portfolio office template (CAP 5.5) and a Portfolio Room that reads one organization's ledgers on one machine (CAP 8) | The pack is designed but not built. It has no cross-unit roll-up, no labels on roll-up items, and no aggregation |
 | Guided setup | Q1 asks the role (software, staff, analysis, capital projects, writing). The bundle has an optional `onboarding` key (GUIDE 4.2, 9.3) | It asks the role but suggests no mode |
-| Labels | Phase 70 scales and levels (`scale/level`), label cells (MUS 8), the write-up-never-down rule, and lowering only by a person | Joining labels across projects is not defined |
+| Labels | Phase 70 scales and levels (`scale/level`), label key groups (MUS 8), the write-up-never-down rule, and lowering only by a person | Joining labels across projects is not defined |
 | Aggregation | Designed for the data platform: rules in the signed bundle ("N distinct people or M items in a compartment raise one level"), default thresholds (DP owner decision 13), and strict indistinguishability by default (DP decision 7) | Nothing is built yet. The rules are designed for indexes and exports, not for cross-unit views |
 | Hub scale | About 10 projects, 150 persons and 400 devices per hub; "beyond that, a hub per site and L5 federation" (MUS 10.9) | A full defence portfolio needs several hubs |
 
-The lesson is that the roster already holds the hard parts: linear authority, signed facts, safety codes, cells, grants and rekeys. Positions and postings are new roster kinds on that machinery, not a second membership system.
+The lesson is that the roster already holds the hard parts: linear authority, signed facts, safety codes, key groups, grants and rekeys. Positions and postings are new roster kinds on that machinery, not a second membership system.
 
 ---
 
@@ -66,23 +75,42 @@ A position is a roster object with:
 - an optional shift or variant, for example "night";
 - the **decision roles** it carries, for example `decision_for: commander` or "approves intelligence estimates";
 - the **clearance it requires**;
-- the **cells it grants**;
+- the **key groups it grants**;
 - whether it may be held **acting** or **dual-hatted**;
 - an optional **establishment reference**, the line in a manning document (later, 3.11).
 
-Roles, decision authority and cell grants attach to the position, not to the person. A person gets them while they hold the position and loses them when relieved, unless another posting of theirs carries the same thing.
+Roles, decision authority and key group grants attach to the position, not to the person. A person gets them while they hold the position and loses them when relieved, unless another posting of theirs carries the same thing.
 
 Positions persist. "Who held J2 Chief at 14:00 on 3 December?" has one answer from the fold. Every decision records both the person and the position they decided as, so an approval stays attributable after the holder rotates out.
+
+**Decision authority lives on the position, everywhere** (coherence review K18). This is the one place the product records who decides:
+- A team file (staff templates included) names the **position** that decides each product, for example "J2 Chief decides intelligence estimates", never a person. The staff setup's section lead (`humanLead`) becomes the position that section's decisions name, and the multi-user design's staff lead is the holder of the lead position.
+- Screens say **Decides** ("J2 Chief decides intelligence estimates"); "decision roles" and `decision_for` stay in code and records.
+- **Every shared project has positions.** In Military, Public service and Capital projects mode they are visible and filled by posting. In invitation mode (Corporate and software) they are created silently, one per seat, when a member is admitted, and the screens never show the word (owner question Q10, accepted).
+- **Before a project is shared,** the one local person holds every position, so a single-machine project decides exactly as it does today.
+- The **person** in a posting is the roster member id, which is the one person id per organization, with an optional `did` slot that Phase 71 fills (K20).
+
+**Clearance.** A position's required clearance is checked against the holder's **effective clearance**: the meet (the lower on each scale, the intersection of compartments) of the clearance the person declares in their personal policy layer and the clearance the roster records for them in this project (K31). "Why this label" shows both and the result. Phase 71 credentials later replace both sources.
 
 ### 3.2 The authority to post
 
 | Item | Rule |
 |---|---|
-| Who holds it | The staff lead, from genesis. In Military and Public service mode the lead is itself a position, filled by posting |
-| Delegation | `authority.delegate` names a member, the scope (a list of positions, a section, or all), the posting kinds allowed (substantive, acting, temporary), an expiry, and whether they may sub-delegate (default no). Delegation only narrows: a delegate passes on at most what they hold, which is Phase 71's rule applied early |
+| Who holds it | The lead position, from genesis (in invitation mode, the silent lead position the founder holds). In Military and Public service mode the lead is itself a position, filled by posting |
+| Delegation | `authority.delegate` names a member, the scope (a list of positions, a section, or all), the posting kinds allowed (substantive, acting, temporary), an expiry, and a depth (how many further times it may be passed on; default 0, meaning no sub-delegation). It is checked by the one delegation rule below |
 | Typical delegates | J1 or personnel staff for all positions, J3 for the watch roster, or whoever sets up teams. The policy default is "lead plus delegates" |
 | Revoking | `authority.revoke` by the lead or the delegator. Postings already ordered stand. Pending ones show "ordered under an authority that has since ended" to the lead, who confirms or cancels them |
 | Record | Every posting carries `orderedBy` (member and device), `authority` (the delegation chain up to the lead), the signed time, and an optional order reference (free text, for example a posting message number) |
+
+**The one delegation rule** (coherence review K21). One pure function, `mayDelegate(held, granted)`, in the domain layer with no dependencies, decides every delegation in the product. A grant is valid only when all four hold:
+1. **Subset:** the granted scope and posting kinds are a subset of what the delegator holds at the cited roster head.
+2. **Scope:** it names positions, a section or "all", never more than the delegator's own scope.
+3. **Expiry:** it ends no later than the delegator's own authority ends.
+4. **Depth:** the granted depth is less than the delegator's own remaining depth; at 0 it cannot be passed on.
+
+The roster uses this rule now for posting authority. Phase 71 wraps the same rule as delegation credentials, so the credential checker and the roster fold call one function and cannot disagree. Team Mode's `permissions.ts` matrix is not extended; Team Mode is frozen and imports at L2.
+
+> **Superseded 2026-11-20 (coherence review):** the first draft said "whether they may sub-delegate (default no)" and called the narrowing "Phase 71's rule applied early". The owner's default (no sub-delegation) is kept as depth 0; the rule is now one shared function rather than a roster copy of Phase 71's algebra.
 
 Delegates become roster writers, but only for posting and position kinds within their scope. The roster fold checks the scope at the cited roster head, exactly as it checks the lead's devices today. More roster writers mean more chances of an offline split. Online, the hub accepts only entries that cite the current head, so delegates are serialized. Offline, section 3.7 keeps splits rare.
 
@@ -128,7 +156,7 @@ Agents never post, never report, and never decide on a report-unable. These are 
 
 ### 3.5 Proving the computer is key delivery, not consent
 
-The posting file (or hub delivery) works like today's invitation. It carries the genesis hash, the posting id, the hub address and pin, a one-time secret and the tasker's signature.
+The posting file (or hub delivery) works like today's invitation. It carries the genesis hash, the posting id, the hub address and pin, a one-time secret and the tasker's signature. Opening it opens **Get Started** already filled in at the first question, with the person's section and mode set from the posting, as an invitation file does (`EXPERIENCE.md`, section 1). There is no separate "join" command.
 
 1. The posted person's extension makes a device request: their Ed25519 and X25519 keys, with a MAC under the secret.
 2. Both sides show the six-word safety code. Any tasker for that position, or the lead, compares it by voice or in person and confirms. The roster then records `posting.enrol`, binding the device to the person and the posting.
@@ -145,7 +173,7 @@ In military and public service work, a person replacing another in one position 
 3. When the incoming person reports for duty, the fold applies `posting.report`. At that same roster position, the outgoing holder is **relieved**, and the position's roles and decisions pass to the incoming.
 4. Any entry the outgoing holder signs after that position, under the position's roles, is refused as unauthorized, with "Relieved from J2 Chief at 09:12; this was signed after."
 
-**Keys switch at the same entry, prepared in advance.** A cryptographic key cannot wait for a date, so the tasker's machine prepares the next epoch for each cell the outgoing holder loses at the time of the order:
+**Keys switch at the same entry, prepared in advance.** A cryptographic key cannot wait for a date, so the tasker's machine prepares the next epoch for each key group the outgoing holder loses at the time of the order:
 - `cell.rekey.staged` holds wraps for every remaining member plus the incoming device, and none for the outgoing.
 - It is marked "activates at the report of posting P".
 - Writers switch to the staged epoch the moment their fold applies the report.
@@ -169,7 +197,7 @@ If membership changes between the order and the report, the staging goes stale. 
 | `posting.report` | **The posted person's enrolled device** (see below) | Posting id |
 | `posting.decide` | Tasker | confirm, defer (new start) or reassign, after a report-unable |
 | `posting.return`, `posting.end`, `posting.cancel` | Tasker, or the fold for end dates | Return from away, relief without replacement, cancellation |
-| `posting.unable` (**personnel cell**, not the roster) | The posted person's device | Posting id and reason, sealed to the personnel cell |
+| `posting.unable` (**personnel key group**, not the roster) | The posted person's device | Posting id and reason, sealed to the personnel key group |
 | `cell.rekey.staged` | Tasker or lead | Section 3.6 |
 | `roster.require` | Lead | Features the project needs (3.9) |
 
@@ -177,7 +205,7 @@ If membership changes between the order and the report, the staging goes stale. 
 - **Online:** the hub accepts it only if it cites the head, so reports serialize with everything else.
 - **Offline:** a report and another roster entry concurrent on one head **commute**. The fold applies the other entry first and the report after it, in a fixed order, when they touch different positions and postings. Only a conflict on the same posting or position is a real split for `roster.choose`. Example: the tasker cancelled the posting while the person reported.
 
-**The personnel cell.** A label cell created with the first delegation, held by the lead, the deputy and taskers. It keeps report-unable reasons and order references away from the base cell, which every member reads. By-name personnel detail stays in this cell, in line with note 07's two-zone J1 design.
+**The personnel key group.** A key group created with the first delegation, held by the lead, the deputy and taskers. It keeps report-unable reasons and order references away from the base key group, which every member reads. By-name personnel detail stays in this key group, in line with note 07's two-zone J1 design.
 
 ### 3.8 State machines
 
@@ -222,7 +250,7 @@ There is no transition from ordered to declined. An ordered posting whose author
 |---|---|---|
 | (none) | staged | `cell.rekey.staged` with the order |
 | staged | active | The matching `posting.report` is folded |
-| staged | stale | A roster change after staging alters who should hold the cell |
+| staged | stale | A roster change after staging alters who should hold the key group |
 | stale | staged | Restaged automatically by the tasker's or lead's machine |
 | staged | withdrawn | The posting is cancelled |
 
@@ -239,17 +267,21 @@ Turning on positions for an existing multi-user project:
 - writes one substantive posting per member with a seat, already in effect, ordered by the lead "at migration";
 - moves the seat's roles to the position.
 
-The fold gives the same decisions and grants before and after, which is a parity test. Projects in invitation mode keep `member.invite` and are untouched.
+The fold gives the same decisions and grants before and after, which is a parity test.
+
+Projects in invitation mode keep `member.invite` as the way people join, but they also get positions, silently: admitting a member creates one position for their seat and one substantive posting already in effect, ordered by the lead at admit. Nothing on screen changes, and the parity test covers it. This is what lets one decision rule (the position decides) hold in every shared project.
+
+> **Superseded 2026-11-20 (coherence review):** the first draft left invitation-mode projects with no positions ("untouched"). Owner question Q10 (accepted) puts positions in every shared project, invisible in invitation mode.
 
 ### 3.11 Later: manning documents and directory groups
 
 - **From a manning document.** A joint manning document (note 07) or an establishment table, imported as a signed file, creates positions and proposes postings. A tasker still signs each posting, because an import never posts anyone by itself.
 - **From your organization's directory groups.** With Phase 71 identities and the directory snapshot the data platform keeps (DP 4, the Microsoft 365 connector in Phase 89), a posting can name a verified person. A group change proposes a posting or a relief for a tasker to confirm.
-- **Clearances.** These become credentials checked against the position's required clearance. Before Phase 71, clearances stay declared, and every screen says so (MUS 7.2).
+- **Clearances.** These become credentials checked against the position's required clearance. Before Phase 71, the effective clearance is the meet of the personal-layer declaration and the roster's `member.admit` clearance (3.1), both declared, and every screen says so (MUS 7.2).
 
 ### 3.12 Plain-words copy
 
-- **Tasker:** "Post a person to J2 Chief. Start date: 1 December. Kind: substantive. You are posting under the staff lead's authority (delegated to you on 18 November, all J2 positions)."
+- **Tasker:** "Post a person to J2 Chief. Start date: 1 December. Kind: substantive. You are posting under the staff lead's authority (delegated to you on 18 November, all J2 positions, until 31 March, may not be passed on)."
 - **Person:** "You have been posted. You cannot decline a posting here; if you cannot take it up, report that you are unable and say why. Your tasker decides."
 - **Handover:** "Handover: Maj Example will take over J2 Chief when they report for duty. Until then, you hold it."
 - **Relieved:** "You were relieved from J2 Chief at 09:12 on 3 December. You keep what you already received. Your decisions as J2 Chief before 09:12 still stand."
@@ -277,7 +309,7 @@ A mode bundles two things that must not drift apart:
 - the **words** on every screen;
 - the **joining model and default behaviour** behind them.
 
-A screen that says "posted" while the code allows declining would be a lie, so both come from one row. The table is pure data, like `doctrine.ts`, in a new `src/domain/org/modes.ts`. The staff doctrine profiles stay as they are and become what a Military-mode project selects for planning words. Mode and profile are separate axes: a Public service project can still use the NATO/Canadian planning profile.
+A screen that says "posted" while the code allows declining would be a lie, so both come from one row. The table is pure data, like `doctrine.ts`, in a new `src/domain/org/modes.ts`, built in Phase 41 (the organization policy foundation, requirement FND-07) with `term()` in `src/domain/org/terms.ts`. The staff doctrine profiles stay as they are and become one profile under `term()` that a Military-mode project selects for planning words (on screens: **Doctrine**). Mode and doctrine are separate axes: a Public service project can still use the NATO/Canadian doctrine.
 
 **Concept keys.** Code never spells a mode word. It asks for a concept, for example `term('position', mode)` or `term('report', mode)`, much as the capital pack's display rule renders a slot's `name` or `label` (CAP 2.1). The portfolio also rolls up by concept key, which is what lets units of different modes add up (section 6).
 
@@ -285,7 +317,7 @@ A screen that says "posted" while the code allows declining would be a lie, so b
 
 | Concept key | Military | Public service | Corporate and software | Capital projects |
 |---|---|---|---|---|
-| `position` | Billet (position) | Position | Seat on the team | Role |
+| `position` | Billet (position) | Position | Position (created silently; shown only to the lead) | Role |
 | `group` | Section, staff, unit | Directorate, branch, unit | Team | Project office |
 | `join` | Posting | Assignment | Invitation | Appointment |
 | `joined` | Posted | Assigned | Invited | Appointed |
@@ -301,7 +333,9 @@ A screen that says "posted" while the code allows declining would be a lie, so b
 | `lead` | Staff lead (commander's representative) | Responsible manager | Team lead | Project leader |
 | `member` | Staff officer | Employee | Member | Project team member |
 
-Each military and public service term in the shipped table is checked against a doctrine or policy source in a terms note and the staff terms register before the phase ships (research flag in 10.2). The owner's reference copies are used to check words, never quoted. Capital-mode words are the pack's neutral labels. Your organization's private capital profile can rename them, as it renames every capital slot (CAP 2.1).
+> **Superseded 2026-11-20 (coherence review):** the Corporate `position` word was "Seat on the team"; "seat" never appears on main screens (`GLOSSARY.md`, section 2), and positions in invitation mode are silent. The Corporate `group`, `tasker`, `dual` and `lead` words ("Team", "Team admin", "Member of two teams", "Team lead") are kept for now, as the glossary's mode-word list does, but they collide with "team means agents only" (glossary section 4); see open question O1 in section 9. The Capital `position` word "Role" is a mode word for positions, not one of the retired "role" meanings.
+
+Each military and public service term in the shipped table is checked against a doctrine or policy source in a terms note and the staff terms register before the phase ships (research flag in 10.2). The owner's reference copies are used to check words, never quoted. Capital-mode words are the pack's neutral labels. Your directive (the capital profile, kept out of the repository and carried as the `directives.capital` policy section) can rename them, as it renames every capital slot (CAP 2.1).
 
 ### 5.3 Behaviour
 
@@ -326,30 +360,36 @@ Each military and public service term in the shipped table is checked against a 
 
 | Layer | What | Rule |
 |---|---|---|
-| Signed policy bundle | `organization: { mode, allowedModes, projectMayChoose, settings }` | It is the default for everything under the policy, parsed with strict key checks like the `onboarding` key (GUIDE 9.3). `settings` may tighten behaviour (for example `enrolAtReport`, the overdue days, dual-hatting off) but never loosen what a mode forbids. Declining can never be enabled in an assignment mode |
-| Project | `project.genesis.mode` | It must be in `allowedModes`. A change is a roster entry, `project.mode`, by the lead, within what the policy allows, and is refused while postings are pending |
+| Organization layer of the policy (bundle v2) | `people.organization: { mode, allowedModes, projectMayChoose, settings }`, named in `requires` as `organization@1` | Signed by your organization's pinned issuer. It is the default for everything under the policy; an older client that does not know the section says "update the extension", never "reset". `settings` may tighten behaviour (for example `enrolAtReport`, the overdue days, dual-hatting off) but never loosen what a mode forbids; each key has a declared narrowing direction. Declining can never be enabled in an assignment mode |
+| Personal layer | The same section, narrowing only | Without an organization layer it is the whole policy, as today, and screens say "Your rules" instead of "Set by your organization" |
+| Project layer | `project.genesis.mode`, then `project.mode` entries on the project stream | It must be in `allowedModes` and may only narrow. A change is a project-stream entry, `project.mode`, by the holder of the lead position, with a reason, within what the policy allows, and is refused while postings are pending. In a single-machine project the mode sits in the project file, as the guide's answers do |
 | Unit in a portfolio | The unit's own policy | Each unit keeps its mode. The portfolio stores the unit's mode only to render its terms in a crosswalk (6.5) |
 
-A project without a mode, which is every project today, behaves as Corporate and software for joining. Staff profiles are unchanged, so nothing changes for existing users.
+A project without a mode, which is every project today, behaves as Corporate and software for joining. Doctrine profiles are unchanged, so nothing changes for existing users.
+
+> **Superseded 2026-11-20 (coherence review):** the first draft stored the mode in a v1 bundle key `organization`, parsed with strict key checks, and a project change as a roster entry. It is now the v2 `people.organization` section with `requires`, inside the layer model (organization ceiling, personal and project layers that only narrow), and the project's mode is a project-layer entry (`POLICY-SCHEMA.md`, sections 2 to 4).
 
 ### 5.5 How it is applied
 
-- **Words:** `term()` everywhere, with a lint test that fails when a joining or organization word is spelled in a webview or host string outside the table, like the doctrine rule that "code in profiles.ts never spells a doctrine term of its own".
+- **Words:** `term()` everywhere. The check is the product's one copy lint (`src/test/copyLint.test.ts`, built in Phase 41 with a checked-in baseline): it fails when a joining or organization word is spelled in a webview or host string outside the table, like the doctrine rule that "code in profiles.ts never spells a doctrine term of its own", and it also covers the glossary's "never on main screens" words.
 - **Behaviour:** the roster host picks the flow from `joiningModel`: `member.invite` for invitation, `posting.order` for assignment and appointment. The fold enforces `mayDecline`. A decline entry in an assignment-mode project is refused, not just hidden.
-- **Templates:** team templates and the Staff Room read `term()`. Capital pack screens keep their profile names.
+- **Templates:** team templates and the Staff Room read `term()`, and name the position that decides each product, never a person (3.1). Capital pack screens keep the names from your directive.
+- **Policy changes:** an administrator changes `people.organization` only in the one policy editor ("Your organization's rules"). Get Started and the mode change flow never write the policy; they write a proposal there.
 
-### 5.6 Suggested by guided setup
+### 5.6 Suggested by Get Started
 
-The guide's Q1 role suggests a mode when the policy lets the project choose:
+Get Started's question 1, "kind of work", suggests a mode when the policy lets the project choose:
 
-| Q1 answer | Suggested mode |
+| Q1 answer (kind of work) | Suggested mode |
 |---|---|
 | Staff work in a headquarters section | Military |
 | Plan or manage capital projects | Capital projects |
 | Write or review software | Corporate and software |
 | Anything else | The policy's default mode |
 
-The suggestion is shown on the check-answers page ("People join this project by posting, as in a military staff. Change"), never applied silently. When the policy fixes the mode, the row shows "Set by your organization" and cannot be changed. This adds one row to GUIDE 8.3 and one optional field to the setup record.
+The suggestion is shown on the check-answers page ("People join this project by posting, as in a military staff. Change"), never applied silently. When the policy fixes the mode, the row shows "Set by your organization" and cannot be changed. This adds one row to GUIDE 8.3 and one optional field to the setup record (in a shared project, a project-stream entry). Opening an invitation or posting file starts Get Started at question 1 with the mode already set by the project; the row then reads "Set by this project".
+
+> **Superseded 2026-11-20 (coherence review):** "the guide's Q1 role" is now "kind of work" (the word "role" is kept for positions only), and the guided setup's user name is Get Started.
 
 ### 5.7 Mode change
 
@@ -388,7 +428,7 @@ Sources are listed in section 11. "[S]" marks facts seen only in search summarie
 - **Defence investment planning.** The public Defence Investment Plan says planning decisions follow the forces' capability requirements, and projects enter the plan when fully assessed and funded [S].
 - **Project phases.** A public audit describes five project phases: identification, options analysis, definition, implementation and close-out. It names a capabilities board that approves early documents and a programme management board that advises on the investment plan [F].
 - **Independent review.** The Independent Review Panel for Defence Acquisition advises the Minister on large projects [S].
-- **What the portfolio needs.** Capability links, stage gates, a complexity and risk rating per project, a capacity class per unit, and results-framework links. Your organization's own approval directive is mirrored only through the capital pack's private profile (CAP 2.1), and none of its text enters the repository.
+- **What the portfolio needs.** Capability links, stage gates, a complexity and risk rating per project, a capacity class per unit, and results-framework links. Your organization's own approval directive is mirrored only through your directive, the capital pack's profile kept out of the repository (CAP 2.1), and none of its text enters the repository.
 
 **Open-source portfolio tools.** These were read for design only, as untrusted pages. No code was run or copied, and the extension is MIT-licensed, so GPL and AGPL code could not be copied in anyway.
 
@@ -437,13 +477,13 @@ None of them labels roll-up items, handles aggregation, or keeps each unit's dat
 ### 6.3 The organization tree
 
 ```
-Portfolio            (a portfolio project: its own genesis, roster, cells, mode)
- +- Unit             (a command, a branch, a project office, a software cell; each with its own mode and policy)
+Portfolio            (a portfolio project: its own genesis, roster, key groups, mode)
+ +- Unit             (a command, a branch, a project office, a software group; each with its own mode and policy)
      +- Programme    (optional; a programme office, a team of teams, CAP 5.4)
          +- Project or staff team   (a replica project: staff project, capital project office, or a plain project)
 ```
 
-- **Each node that does work is its own replica project.** It has its own roster, cells and mode. A unit node is a small project of its own (the unit's office), so the unit can review its children's publications before they go up.
+- **Each node that does work is its own replica project.** It has its own roster, key groups and mode. A unit node is a small project of its own (the unit's office), so the unit can review its children's publications before they go up.
 - **The tree itself is a signed structure in the portfolio project.** It is made of `portfolio.unit.add`, `portfolio.programme.add`, `portfolio.project.link` and `portfolio.node.retire` entries, written by the portfolio lead. A link is only active when the child side has signed the matching **publication agreement** (6.4). The portfolio cannot claim a unit that has not agreed to report.
 - **Mixed modes.** Each node records its mode, so the portfolio can show "Posted: 41 of 44 billets" for a command and "Assigned: 18 of 20 positions" for a branch. They still roll up under one concept key (`position`, filled against established).
 - **Node ids are opaque.** A node's name and mode are visible only at the node's own label. A classified unit can sit in the tree without lower-cleared viewers learning that it exists (6.10).
@@ -451,21 +491,21 @@ Portfolio            (a portfolio project: its own genesis, roster, cells, mode)
 ### 6.4 Publications: what each level sends upward
 
 **Publication agreement.** A signed pair:
-- the portfolio's offer names the intake cells and their labels, the item types wanted, the cadence (for example status monthly, risks on change), and the route (direct, or through the unit's office);
+- the portfolio's offer names the intake key groups and their labels, the item types wanted, the cadence (for example status monthly, risks on change), and the route (direct, or through the unit's office);
 - the node's acceptance names the **publishers**: the positions allowed to release publications, for example the unit PMO reporting officer.
 
 Either side may end the agreement. Ending it stops new publications, and the portfolio keeps what it received, marked "no longer reporting since ...".
 
-**Intake keys (write-only).** For each intake cell and epoch, the portfolio creates an X25519 intake key pair:
-- the private half is wrapped only to the portfolio's members on that cell, like any epoch key (MUS 8.2);
+**Intake keys (write-only).** For each intake key group and epoch, the portfolio creates an X25519 intake key pair:
+- the private half is wrapped only to the portfolio's members on that key group, like any epoch key (MUS 8.2);
 - the public half goes to the node in the agreement;
 - a publisher seals a publication to the intake public key with the same ephemeral X25519, HKDF and AES-256-GCM wrap the roster uses.
 
-So a unit can publish into the portfolio's Protected B intake without holding any key that reads it, and without seeing what other units sent. The hub holds ciphertext and an opaque cell id, as it does for every ungranted cell.
+So a unit can publish into the portfolio's Protected B intake without holding any key that reads it, and without seeing what other units sent. The hub holds ciphertext and an opaque key group id, as it does for every ungranted key group.
 
 **Publisher proof.** The portfolio cannot read the node's roster, so each publication carries a **roster attestation**: a statement signed by a roster writer of the node that device D holds a publisher position at roster head H. The portfolio's fold checks the attestation against the node lead keys pinned in the agreement. With Phase 71 it becomes a verifiable credential. Each publisher's publications carry a sequence number, so a gap shows as "missing 2 publications from the logistics command since 3 December", which is MUS 4.5's withholding rule.
 
-**Release by a person.** A publication is a product in the node's cell at its label. Agents draft it from the node's own products, registers and ledgers. A publisher person releases it through the release guard. The guard holds:
+**Release by a person.** A publication is a product in the node's key group at its label. Agents draft it from the node's own products, registers and ledgers. A publisher person releases it through the release guard. The guard holds:
 - personal data and markings;
 - a label below the join of what the publication cites;
 - compilation within the node's own publications (6.10).
@@ -495,7 +535,7 @@ Lowering a publication below its sources is the existing downgrade act, a person
 
 > **Coherence review (2026-11-20):** this is the one Portfolio Room. The capital projects design's Portfolio Room and Project Room (capital 8) become its capital tab, built in Phase 43. See `.planning/research/coherence/REVIEW.md`, conflict K26.
 
-The Portfolio Room is a webview built from Staff Room components, extending CAP 8 from one organization's ledgers to publications from many units. It draws only from the portfolio's folded publications at the viewer's cells, never from units' own streams.
+The Portfolio Room is a webview built from Staff Room components, extending CAP 8 from one organization's ledgers to publications from many units. It draws only from the portfolio's folded publications at the viewer's key groups, never from units' own streams.
 
 | View | Content | Answers |
 |---|---|---|
@@ -509,6 +549,9 @@ The Portfolio Room is a webview built from Staff Room components, extending CAP 
 | Risk and issues | Aggregated heat map; risks waiting past escalation age; issues waiting on the portfolio | What needs the portfolio's attention now |
 | Spend and benefits | Planned, committed, actual and forecast by fiscal year and fund; benefits realized against target | Is the money buying what was promised |
 | Decision queue | Every prioritization, allocation, gate and escalation decision waiting on a person, with options, risk and dissent | Where the portfolio board's time goes |
+| Capital (tab) | The capital projects design's portfolio and Project Room views (CAP 8): gate paths, calculator records, spend by fund, in the words of your directive. A project opens as a tab here, not a separate page. Built in Phase 43 | How the capital projects are doing, through the same publications and labels |
+
+This is the only portfolio screen. People reach it from their Home (a portfolio analyst lands on it after Get Started, `EXPERIENCE.md`, section 4); its title is the plain noun "Portfolio Room". Agent-drafted content in it carries the one trust line (Runs on, Verified, Allowed) like every other answer.
 
 Every view shows its label at the top, a **"Why this label"** link (6.10), and the fixed sentence "Built from the publications available to you." The sentence is the same for every viewer, so it reveals nothing.
 
@@ -574,25 +617,27 @@ The portfolio office template is CAP 5.5's ten members, extended:
 
 Agents draft scores with evidence, scenarios, briefs, gate calendars and reports. They never approve a criteria set, a score reconciliation, a scenario, a priority or an allocation. These are person decisions through signed commands that no agent tool can reach, as everywhere else.
 
-Agents run inside the portfolio cell whose label covers their inputs. The gate routes them by that label, raised by aggregation (6.10). A portfolio view labelled Secret by aggregation can only be drafted by models the policy allows for Secret, which usually means local models on an accredited machine. Model passports and use tiers (Phase 74.1) and Cohere vault ceilings (Phases 36 and 37) apply unchanged, at the view's label rather than the items' labels.
+Agents run inside the portfolio key group whose label covers their inputs. The gate's one decision function, `decideRoute`, routes them by that label, raised by aggregation (6.10). A portfolio view labelled Secret by aggregation can only be drafted on an endpoint whose `maxLabel` covers Secret, which today means a model on this computer, and only with an `accredited-device` authorization (warned and recorded until the organization layer exists). Model approvals by use (Phase 74.1), the `endpoints[]` list (including Cohere vault entries, Phases 36 and 37), residency and the holder's effective clearance apply unchanged, all inside `decideRoute`, at the view's label rather than the items' labels.
 
 ### 6.10 Labels and aggregation (central)
 
-**Rule 1: every published item carries a label.** A publication's label is at least the join of the labels of everything it cites. The node's release guard enforces this, and only a person lowers it, with a sanitization note. The label travels inside the sealed body and in the intake cell choice: a publication labelled Protected B goes to the Protected B intake cell.
+**Rule 1: every published item carries a label.** A publication's label is at least the join of the labels of everything it cites. The node's release guard enforces this, and only a person lowers it, with a sanitization note. The label travels inside the sealed body and in the intake key group choice: a publication labelled Protected B goes to the Protected B intake key group.
 
 **Rule 2: a view is labelled as a whole.** For each render, export or snapshot, the view's label is:
 - the **join** (highest on each scale, union of compartments) of the labels of the items in it;
 - raised by any **aggregation rule** the set of items in it triggers.
 
-Aggregation rules are signed policy data (the bundle's `aggregation` key, shared with the data platform's rules from DP 6.2 and decision 13). One evaluator serves both. Each rule names:
+Aggregation rules are signed policy data in the `labels.aggregation` section of policy bundle v2 (named in `requires`), shared with the data platform's rules from DP 6.2 and decision 13. **One evaluator** in `src/domain/gate/`, dependency-free and built in Phase 38, serves the portfolio, the chat and the data platform; Phase 93 extends it to indexes, exports and datasets (coherence review K27). Each rule names:
 - a scope (a scale and level, or compartments);
 - a trigger: a count (N items, N distinct units, N distinct capabilities) or a combination (item types present together, for example `capability` with `risk` and `supply`);
-- an effect: raise to level L, add a compartment, add a handling flag, or (for scales whose policy says so, like Canadian personal information in the aggregate) **add safeguards only**;
-- a remedy order (Rule 4).
+- an `effect`: raise to level L, add a compartment, add a handling flag, or (for scales whose policy says so, like Canadian personal information in the aggregate) **add safeguards only**;
+- a `remedy` order (Rule 4).
+
+When a count rule raises a chat's label (for example an agent pulling many publications into one chat), the raise is a routing input like any other label change and is written to the local audit record with the rule that fired.
 
 **"Why this label"** lists the highest inputs and every rule that fired, with the rule's text. A person can always see why a view is labelled as it is.
 
-**Rule 3: the viewer sees only what they may, and learns nothing about the rest.** A viewer's machine holds only the intake cells their clearance dominates (MUS 8.1 sender filtering), so items above them never arrive. By default, following the data platform's owner decision 7(a):
+**Rule 3: the viewer sees only what they may, and learns nothing about the rest.** A viewer's machine holds only the intake key groups their clearance dominates (MUS 8.1 sender filtering), so items above them never arrive. By default, following the data platform's owner decision 7(a):
 - there are no counts, placeholders or "some items hidden" notes;
 - every view carries the same fixed sentence ("Built from the publications available to you");
 - totals over what they hold are labelled as such.
@@ -608,7 +653,7 @@ Each option is labelled, and the Room says "This combined view needs a higher cl
 
 **Rule 5: no lower view is ever derived from higher items.** Lower-labelled views are computed only from lower-labelled items, the write-down rule. Subtracting two views at different labels therefore reveals nothing, and the only way information moves down is a person's sanitized publication. This closes the classic difference attack, where totals at two clearances are compared.
 
-**Rule 6: cross-organization sharing is by publication, never by cells.** The portfolio office gets intake keys, not units' cells. A unit's own cells, products, registers and observations never leave it except as publications its people release. Revoking an agreement or a publisher position rekeys the intake cell for new epochs (MUS 8.3).
+**Rule 6: cross-organization sharing is by publication, never by key groups.** The portfolio office gets intake keys, not units' key groups. A unit's own key groups, products, registers and observations never leave it except as publications its people release. Revoking an agreement or a publisher position rekeys the intake key group for new epochs (MUS 8.3).
 
 **Rule 7: labels are not accreditation, and networks stay separate.** Labels decide where items go inside one system. A portfolio that mixes Secret and unclassified units runs on a network and hub accredited for the highest label it holds. Moving a sanitized publication from a classified network to an unclassified one is a cross-domain transfer through your organization's approved process. It is outside this product, as MUS 2 states. The extension can export a sealed publication bundle for that process and can import one, but it never bridges networks itself.
 
@@ -626,11 +671,11 @@ Each option is labelled, and the Room says "This combined view needs a higher cl
 
 | From | To | Trigger | Who |
 |---|---|---|---|
-| (none) | draft | Agent or person drafts in the node's cell | Agent or person |
+| (none) | draft | Agent or person drafts in the node's key group | Agent or person |
 | draft | guarded | Release guard CLEARED (or HOLD, back to draft) | Guard |
 | guarded | released | Publisher person releases; sealed to the intake key | Publisher |
 | released | received | Portfolio fold verifies signature, attestation, sequence and label | Portfolio fold |
-| received | refused | Bad attestation, label below what the agreement's cell requires, or sequence replay | Portfolio fold |
+| received | refused | Bad attestation, label below what the agreement's key group requires, or sequence replay | Portfolio fold |
 | received | superseded | A newer publication of the same item id | Node |
 | received | withdrawn | Node publishes a withdrawal (kept in history, shown as withdrawn) | Publisher |
 | received | stale | Cadence passes with no newer publication (display state) | Portfolio fold |
@@ -644,13 +689,15 @@ Each option is labelled, and the Room says "This combined view needs a higher cl
 | Capability | One hub (Phases 32 to 35, then 38 to 40) | Needs L5 federation and Phase 71 |
 |---|---|---|
 | Units, programmes and projects in one portfolio | Yes, within one hub's capacity (about 10 projects, 150 people) and one organization's policy | Many hubs and sites; hundreds of projects |
-| Live publications | Yes: intake streams on the hub, ciphertext only | Hub-to-hub relay of sealed envelopes, with checkpoints naming their signer (MUS 4.6) |
+| Live publications | Yes: intake streams on the hub, ciphertext only | Hub federation: hubs exchange the same sealed streams, with checkpoints naming their signer (MUS 4.6) |
 | Publications across an air gap | Yes from Phase 34: sealed bundle files carry publications, which are self-contained | Automatic when links return |
 | Publisher identity | Roster attestations by the node's lead, declared clearances, and the self-declared sentences on every screen | Verifiable credentials for positions and clearances, revocation through status lists, maximum offline age per level |
 | Cross-organization portfolios (for example a defence portfolio with a partner department) | Only by file exchange of sealed publications, with keys pinned manually in the agreement | Organization DIDs anchored (L4), issuer delegation for a second site (L5) |
 | Real data | No: fictional data until verified identities and an accredited host (CAP owner decision 2) | Yes, after Phase 71, the Stage 1 gate and accreditation |
 
-Because publications are self-contained (signed, sealed, labelled, sequenced), federation only changes the transport and trust anchors, never the format. The L5 outline gets a line for this.
+Because publications are self-contained (signed, sealed, labelled, sequenced), federation only changes the transport and trust anchors, never the format. The L5 outline, rewritten by the coherence review as hub federation of the same replica streams, gets a line for this. People see one thing throughout: "your organization's server".
+
+> **Superseded 2026-11-20 (coherence review):** this table first said "hub-to-hub relay". "Relay" now means the messaging relay only (REVIEW K51); cross-hub movement is hub federation (L5).
 
 ---
 
@@ -659,22 +706,26 @@ Because publications are self-contained (signed, sealed, labelled, sequenced), f
 | Phase or design | Relation |
 |---|---|
 | 30 replica core | Reused unchanged: entries, fold, digest, decisions, contested state |
-| 31 roster | Positions, postings, delegations and staged rekeys are new roster kinds on `ROSTER_KIND_OWNER`. Self-report is a narrow writer rule. The personnel cell is an ordinary cell |
+| 31 roster | Positions, postings, delegations and staged rekeys are new roster kinds on `ROSTER_KIND_OWNER`. Self-report is a narrow writer rule. The personnel key group is an ordinary key group |
 | 32 hub | Append checks extended to delegate scope and self-report. Intake streams for publications. No new service |
-| 32.1 guided setup | Mode table, `organization` policy key, `term()`, and the mode suggestion (ORG-01 to ORG-04) |
+| 41 organization policy foundation (new) | Mode table, `term()` and the copy lint (FND-07, carrying ORG-01 and ORG-03); the `people.organization` v2 section (ORG-02); the person id with its `did` slot; effective clearance as a meet |
+| 32.1 Get Started | The mode suggestion from "kind of work" (ORG-04); invitation and posting files open Get Started filled in |
 | 33 live staff | Adds the generic `roster.require` feature check (POST-01), so older clients fail safe before positions ship |
 | 33.1 (new) | Assigned positions and handover |
 | 34 offline | Bundle files carry publications between hubs before L5 |
 | 35 watches | A hub watch may draft a stale-publication reminder. Never a release |
-| Capital pack (not yet on the roadmap) | Supplies gates, the path calculator, calculator records and the portfolio office template. The portfolio works without it (staff and plain projects publish status, risks, demand), and it adds gate and spend detail |
-| 70 gate | Labels, joins and routing reused. Aggregation raises the route label |
-| 71 identities | Verified publishers, positions and clearances. Delegation that only narrows becomes credentials |
-| 74.1, 36, 37 | Model passports and vault ceilings apply at the view's label |
+| Capital pack (Phases 42 and 43) | Supplies gates, the path calculator, calculator records and the portfolio office template. The portfolio works without it (staff and plain projects publish status, risks, demand), and it adds gate and spend detail |
+| 42, 43 capital projects | Phase 42 builds the capital pack on the replica layer and positions (after 33.1); Phase 43 builds the Portfolio Room's capital tab (after 39) |
+| 70 gate | Labels, joins and routing reused through `decideRoute`. Aggregation raises the route label |
+| 71 identities | Verified publishers, positions and clearances. The one delegation rule (3.2) is wrapped as delegation credentials; credentials replace declared clearances |
+| 74.1, 36, 37 | Model approvals by use and the `endpoints[]` entries (vaults included) apply at the view's label, through `decideRoute` |
 | 93 classification | Shares the aggregation rule evaluator built in Phase 38. Phase 93 extends it to indexes, exports and datasets |
 | 97 analytics and views | Becomes the rendering and ad-hoc analysis layer over the publication fold |
 | 100 easy sources | Financial, procurement and schedule feeds into project publications (CAP 9). Optional OpenProject exchange |
-| L2 Team Mode | Corporate-mode invitation stays the Team Mode flow |
-| L5 federation | Cross-hub publication relay and checkpoints |
+| L2 (Team Mode moved onto shared projects) | Team Mode is frozen and its name retired from user copy. At L2 its people import onto the replica, their Team Mode ids mapped to roster member ids, and Corporate-mode invitation is the "Share with people" flow with silent positions |
+| L5 hub federation | Cross-hub publication streams and checkpoints |
+
+> **Superseded 2026-11-20 (coherence review):** this table first placed the mode table, the `organization` key and `term()` in 32.1, called the capital pack "not yet on the roadmap", said "Corporate-mode invitation stays the Team Mode flow", and gave L5 a "publication relay". The rows above replace them.
 
 ---
 
@@ -683,14 +734,15 @@ Because publications are self-contained (signed, sealed, labelled, sequenced), f
 | Risk | Severity | Mitigation |
 |---|---|---|
 | A handover leaves two people with authority, or none | High | Authority switches at one roster entry in the fold. Property tests over random orders and offline splits. A position is vacant only by a signed act |
-| Keys lag the authority switch | High | Staged rekey activates at the report. Stale staging is refused and restaged. Writers hold writes to an affected cell until the staged epoch is folded |
+| Keys lag the authority switch | High | Staged rekey activates at the report. Stale staging is refused and restaged. Writers hold writes to an affected key group until the staged epoch is folded |
 | Older clients ignore a relief | High | `roster.require` in Phase 33, failing closed |
 | More roster writers mean more splits | Medium | Hub serialization online. Self-report commutes offline. Delegates are scoped |
-| Report-unable reasons leak | Medium | Personnel cell only. Never shown to other members or the portfolio |
-| Mode words diverge from behaviour | Medium | One table. Lint for spelled words. The fold enforces `mayDecline` |
+| Report-unable reasons leak | Medium | Personnel key group only. Never shown to other members or the portfolio |
+| Mode words diverge from behaviour | Medium | One table. The copy lint for spelled words. The fold enforces `mayDecline` |
+| Two delegation checkers drift apart | Medium | One pure `mayDelegate` function used by the roster fold now and the Phase 71 credential checker later; property tests that a chain never widens |
 | Aggregation rules over- or under-classify | High | Rules are policy data a security officer sets. "Why this label" on every view. Defaults ship conservative and are adjustable with simulation (DP decision 13). Some scales add safeguards rather than raise |
 | Difference attacks across clearances | High | Lower views only from lower items (Rule 5). No automatic counts. Two-compartment indistinguishability test on every view |
-| Portfolio office becomes a super-reader | High | Intake keys only. No unit cells. The portfolio project's own roster and clearances decide who in the office reads which intake cell |
+| Portfolio office becomes a super-reader | High | Intake keys only. No unit key groups. The portfolio project's own roster and clearances decide who in the office reads which intake key group |
 | Score gaming and false precision | Medium | Evidence required. Independent scorers and spread. Sensitivity bands. Self-assessed and portfolio-assessed scores kept apart. Frontier rather than rank alone |
 | Stale publications drive decisions | Medium | As-of age on every view. Stale state. Scenarios pinned to publication heads |
 | Hub capacity limits a real portfolio | Medium | Pilot on one hub. Bundles between hubs from Phase 34. L5 for scale |
@@ -718,13 +770,26 @@ Because publications are self-contained (signed, sealed, labelled, sequenced), f
 | D11 | Military handover words | "Handover" for one position, "relief in place" for a team or watch, "transfer of authority" for command | **As listed**, checked against doctrine before shipping |
 | D12 | Mode for projects without one | Corporate and software (today's behaviour) | **Keep**, so nothing changes for existing users |
 
+D2's "lead plus delegates" and the "may not sub-delegate" default stand; under the one delegation rule (3.2) they read as delegation depth 0.
+
+### 9.1 Open after the coherence review
+
+The coherence review (accepted 2026-11-20) settled the placement of modes, the policy section, positions in every shared project, the one delegation rule and the one Portfolio Room. Bringing this design in line raised two questions it did not settle:
+
+| # | Question | Recommended default | Why |
+|---|---|---|---|
+| O1 | The Corporate and software column of the vocabulary table (5.2) uses "Team" for the organization unit and builds "Team admin", "Team lead" and "Member of two teams" on it. The glossary lists "team" and "team lead" as Corporate mode words (section 2) but also reserves "team" for agents only (section 4). Which wins? | Agents only: Corporate `group` becomes "Group", `tasker` "Group admin", `lead` "Group lead", `dual` "Member of two groups"; the glossary's mode-word rows are updated to match in the same change | One meaning per word is the review's rule, and in a software project the agent team and a group of people sit on the same screens |
+| O2 | How deep may posting authority be delegated, at most? | Depth 0 by default (no sub-delegation, as D2 decided); your organization's rules may allow up to depth 2 in `people.organization.settings` | Matches the owner's default, keeps chains short enough to read on one screen, and leaves Phase 71 credentials the same limit |
+
 ---
 
 ## 10. Phase proposal
 
 ### 10.1 Placement and reasoning
 
-- **Modes go in Phase 32.1** (ORG-01 to ORG-04). The guide already asks the role and reads the bundle. The mode table is pure data plus a policy key, so it adds little to 32.1 and gives Phase 33.1 its words.
+- **Modes go in Phase 41 and 32.1.** The mode table, `term()`, the copy lint and the `people.organization` section (ORG-01 to ORG-03) build in Phase 41, the organization policy foundation, as part of FND-07; Get Started's mode suggestion (ORG-04) builds in 32.1, which reads the table.
+
+  > **Superseded 2026-11-20 (coherence review):** "Modes go in Phase 32.1 (ORG-01 to ORG-04). The guide already asks the role and reads the bundle. The mode table is pure data plus a policy key, so it adds little to 32.1 and gives Phase 33.1 its words." Moved because 33.1 needs the table before 32.1 and `mayDecline` is a security rule (REVIEW K22).
 - **Assigned positions get an inserted Phase 33.1**, after drop A (Phase 33) and before drop B (Phase 34) (POST-01 to POST-08). It needs the live roster host flows and the hub's append checks from 31 to 33, and changes only roster kinds, the hub's append checks and the Staff Room. POST-01 (the feature check) is planned into Phase 33 so it ships with drop A.
 - **The portfolio layer goes in Phases 38 to 40 in the 0.4.x line, after drop B**, on fictional data and one hub (PORT-01 to PORT-12).
   - It needs only the replica layer, the hub, positions (for supply), modes and the Phase 70 gate, all of which exist by then.
@@ -735,7 +800,7 @@ Because publications are self-contained (signed, sealed, labelled, sequenced), f
   - v0.6.0 Phase 97 (views over the publication fold);
   - Phase 100 (financial, procurement and schedule feeds into publications);
   - Phase 71 (verified publishers and positions);
-  - L5 (cross-hub relay).
+  - L5 (hub federation).
   Real data waits for Phase 71, the Stage 1 gate and an accredited host.
 
 Order and parallel work:
@@ -750,51 +815,53 @@ The sequential links are the publication contract (38) and the roster feature ch
 
 **Goal:** In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so. They cannot decline, only report for duty or report unable, and a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
 
-**Depends on:** Phase 33 (live roster, hub append checks, POST-01). Phase 32.1 (mode table and `term()`).
+**Depends on:** Phase 33 (live roster, hub append checks, POST-01). Phase 41 (mode table, `term()`, `people.organization`, the person id).
 
 | Id | Requirement |
 |---|---|
 | POST-01 | `roster.require` feature check: a client that lacks a required feature refuses to fold the project with the update sentence (lands in Phase 33) |
-| POST-02 | Positions as roster objects with title, section, shift, decision roles, required clearance, cells, acting and dual-hat flags; history answers who held what when |
-| POST-03 | Signed authority to post: held by the lead, delegated with scope, kinds and expiry, only narrowing; every posting records who ordered it, under whose authority, and when |
+| POST-02 | Positions as roster objects with title, section, shift, decision roles, required clearance, key groups, acting and dual-hat flags; history answers who held what when |
+| POST-03 | Signed authority to post: held by the lead position, delegated with scope, kinds, expiry and depth under the one pure delegation rule (`mayDelegate`, shared with Phase 71); every posting records who ordered it, under whose authority, and when |
 | POST-04 | Posting machine (3.8): ordered, device proven, unable reported, decided (confirm, defer, reassign), in effect, overdue, away, relieved, cancelled; no decline path in assignment modes, enforced by the fold |
 | POST-05 | Device proof by safety code as key delivery, with the "not consent" sentence; expired secrets never cancel a posting |
 | POST-06 | Atomic handover: authority switches at the incoming's report entry; staged rekey activates at the same point; stale staging refused and restaged; writes held until the staged epoch is folded |
 | POST-07 | Acting, temporary and dual-hatted postings with the single-authority invariant and separation-of-duty checks |
-| POST-08 | Personnel cell for report-unable reasons and order references; migration from seats with parity; Staff Room screens in the mode's words |
+| POST-08 | Personnel key group for report-unable reasons and order references; migration from seats with parity; silent positions per seat in invitation mode; team files name positions, never people; Staff Room screens in the mode's words |
 
 **Success criteria:**
 1. A J1 delegate posts a person to "Watch Officer, night" from 1 December. The person proves their computer by safety code, sees no Decline, and reports for duty on 1 December. The roster shows the posting with the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
 2. A person reports unable with "conflicting tasking". Only the tasker sees the reason. Confirm, Defer and Reassign each lead to their state, and an unanswered posting becomes overdue after 2 days with the tasker's actions. (POST-04, POST-08)
-3. In a handover, the outgoing holder's decision signed one entry after the incoming's report is refused. The incoming can read new entries in the position's cells and the outgoing cannot. A membership change between order and report forces a restage. All of this holds in random fold orders and in an offline split resolved by `roster.choose`. (POST-06)
+3. In a handover, the outgoing holder's decision signed one entry after the incoming's report is refused. The incoming can read new entries in the position's key groups and the outgoing cannot. A membership change between order and report forces a restage. All of this holds in random fold orders and in an offline split resolved by `roster.choose`. (POST-06)
 4. An acting posting moves decision roles to the acting holder and back on return. A dual-hatted person cannot approve a product they own. A client without the positions feature refuses the project with the update sentence. (POST-01, POST-07)
 5. An existing multi-user project switched to Military mode gives the same decisions and grants before and after migration, and an invitation-mode project is unchanged. (POST-08)
 
-### 10.3 Modes in Phase 32.1 (added requirements)
+### 10.3 Modes in Phase 41 and 32.1 (added requirements)
+
+ORG-01 to ORG-03 are built in Phase 41 (they are FND-07 and part of FND-01's `people` section); ORG-04 stays in 32.1.
 
 | Id | Requirement |
 |---|---|
 | ORG-01 | One pure mode table (`src/domain/org/modes.ts`): four modes, concept-key vocabulary and behaviour settings (5.2, 5.3), with sources per military and public service term |
-| ORG-02 | The `organization` policy key (mode, allowed modes, project may choose, tightening-only settings) parsed with strict key checks; genesis mode; `project.mode` change rules (5.7) |
-| ORG-03 | `term()` used by every joining and organization string, with a lint test that fails on spelled words |
-| ORG-04 | The guide suggests a mode from Q1 on the check-answers page, shows "Set by your organization" when fixed, and records the choice |
+| ORG-02 | The `people.organization` section of policy bundle v2 (mode, allowed modes, project may choose, tightening-only settings with declared narrowing directions), named in `requires`; genesis mode; `project.mode` project-layer change rules (5.7) |
+| ORG-03 | `term()` used by every joining and organization string, checked by the copy lint with its baseline |
+| ORG-04 | Get Started suggests a mode from "kind of work" on the check-answers page, shows "Set by your organization" when fixed, and records the choice |
 
 **Added success criterion for 32.1:** A staff officer's setup suggests Military mode and the Staff Room then says "Post a person"; a policy fixing Public service shows the mode as set by your organization; a software project keeps "Invite", unchanged. (ORG-01 to ORG-04)
 
 ### 10.4 Phases 38 to 40: the portfolio view (one hub, fictional data)
 
 **Phase 38: Organization tree, publications and label-safe roll-up.**
-Goal: units of different modes agree to report to a portfolio and release signed, labelled publications into write-only intake cells. The portfolio folds them into views whose label covers the whole, under signed aggregation rules.
-Depends on: drop B (Phases 34 and 35, for hub intake streams beside its hub changes and bundle transport), Phase 33.1 (supply), Phase 32.1 (modes).
+Goal: units of different modes agree to report to a portfolio and release signed, labelled publications into write-only intake key groups. The portfolio folds them into views whose label covers the whole, under signed aggregation rules.
+Depends on: drop B (Phases 34 and 35, for hub intake streams beside its hub changes and bundle transport), Phase 33.1 (supply), Phase 41 (modes, policy v2 sections).
 
 | Id | Requirement |
 |---|---|
 | PORT-01 | Portfolio project and signed organization tree (portfolio, unit, programme, project) with opaque node ids and each node's mode |
-| PORT-02 | Publication agreements (offer and acceptance, publishers, cadence, route, item types, intake cells) and their state machine |
-| PORT-03 | Write-only intake keys per cell and epoch; publications sealed to them; roster attestations; per-publisher sequence and withholding detection |
+| PORT-02 | Publication agreements (offer and acceptance, publishers, cadence, route, item types, intake key groups) and their state machine |
+| PORT-03 | Write-only intake keys per key group and epoch; publications sealed to them; roster attestations; per-publisher sequence and withholding detection |
 | PORT-04 | Publication item schemas (6.4) by concept key, released by a person through the release guard with label and compilation checks; downward publications |
-| PORT-05 | One aggregation rule evaluator shared with the data platform: join plus signed rules (raise, compartment, handling, safeguards-only), "Why this label", remedy order |
-| PORT-06 | Reader-relative views: only held cells, the fixed sentence, Rule 4 degradation, Rule 5 (no lower view from higher items), opt-in sanitized count publications; two-compartment indistinguishability test on every view |
+| PORT-05 | One aggregation rule evaluator in `src/domain/gate/`, shared with the chat label and the data platform: join plus signed `labels.aggregation` rules, each with an `effect` (raise, compartment, handling, safeguards-only) and a `remedy` order; "Why this label"; chat label raises recorded |
+| PORT-06 | Reader-relative views: only held key groups, the fixed sentence, Rule 4 degradation, Rule 5 (no lower view from higher items), opt-in sanitized count publications; two-compartment indistinguishability test on every view |
 
 Success criteria:
 1. A Military-mode unit and a Public service unit each publish status, risks and supply counts. Neither can read the other's publications or the portfolio's, as proven by byte capture on the hub. (PORT-01 to PORT-03)
@@ -836,7 +903,8 @@ Success criteria:
 - Phase 97: views over the publication fold.
 - Phase 100: feeds into publications.
 - Phase 71: verified publishers and positions.
-- L5: hub-to-hub publication relay and cross-organization portfolios.
+- L5: hub federation of publication streams and cross-organization portfolios.
+- Phase 43: the Portfolio Room's capital tab.
 
 ---
 
