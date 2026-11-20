@@ -1271,6 +1271,37 @@ own account and run records in `.planning/.near-ai/` stay on this computer by de
 in the chat bar shows a sync problem as a plain sentence under it and never includes a token or
 a password.
 
+## Multi-user staff projects (preview)
+
+Multi-user staff projects, where several people and their agents work on the same staff products
+from their own machines, are being built over several releases. What exists in this release is
+switched off unless a person turns on the preview setting `nearAi.staff.multiUserPreview` (off by
+default). A project that never turns multi-user behaves exactly as before.
+
+### Update size limits and the decode worker
+
+Every change to a staff product's text that arrives from another machine is checked before the
+shared text library reads it, because a hostile or damaged change could otherwise make that
+library use a lot of memory or crash.
+
+- **Size limits.** One text change may be at most 256 KiB, and a saved state of a whole product or
+  a snapshot of it at most 2 MiB. Anything larger is refused before it is read. A long text is
+  still fine: it is built from many changes.
+- **Counted before it is unpacked.** A quick pass counts the parts of each change without building
+  anything from them, and refuses a change with more than 100,000 parts or deleted ranges. It also
+  refuses every kind of content except plain text, deleted text and gaps, so embedded objects,
+  formatting and nested structures never reach the library.
+- **A separate worker with its own limits.** Changes from other machines are then read in a
+  separate worker thread with a memory limit (128 MB, plus 32 MB for short-lived data and a 4 MB
+  stack) and a 5 second time limit per change. The extension also watches the worker's memory
+  while it reads, because some ways of starting the editor raise the memory limit of every worker.
+  A worker that runs out of memory or time is stopped and started again for the next change, and
+  the change is reported as too large. A refused or crashed check cannot take the editor down
+  with it.
+- **The check only reports.** The worker reads and answers; it never stores, changes or keeps
+  anything. The same counting checks also run inside the extension as a second line, so a change
+  is refused the same way on every machine.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR
