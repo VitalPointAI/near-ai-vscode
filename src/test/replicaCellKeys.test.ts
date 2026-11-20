@@ -3,8 +3,9 @@
 // earlier epochs for a device admitted later, and the cell label sealed inside each grant.
 // Builders beyond the shared roster world live in this file (the helper is not edited in wave 6).
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { REKEY_KEEP_TEXT, buildGrant, earlierEpochGrants, grantHash, openLabel, planRekey, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
+import { GRANT_MAX_BYTES, MAX_GRANT_WRAPS, MAX_LABEL_BYTES, REKEY_KEEP_TEXT, WRAP_BYTES, buildGrant, earlierEpochGrants, grantHash, openLabel, planRekey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
 import type { RekeyReason } from '../domain/replica/cellKeys';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import { CELL_REFUSALS, epochsAt, granteesAt } from '../domain/replica/rosterCells';
@@ -13,6 +14,8 @@ import type { MembersState } from '../domain/replica/rosterMembers';
 import { rosterView } from '../domain/replica/roster';
 import { CELL_REKEY_REASONS } from '../domain/replica/kindSchemas/roster';
 import type { RosterState } from '../domain/replica/roster';
+import { canonicalBytes } from '../domain/team/canonical';
+import { MAX_PAYLOAD_BYTES } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
@@ -364,4 +367,25 @@ test('a machine without the founding grant of the current epoch does not know wh
   assert.ok(!Buffer.from(sealed, 'base64url').toString('utf8').includes('KESTREL'));
   assert.notEqual(sealLabel(key, CELL_X, 1, LABEL_X), sealLabel(key, CELL_X, 1, LABEL_X));
   assert.throws(() => sealLabel(key, CELL_X, 1, { text: 'x'.repeat(7000) }));
+});
+
+test('MN-04: a grant to the most devices a project can hold, with the longest label, is signed and reads back; one more wrap is refused by shape, not by size', () => {
+  const lead = createRosterWorld().lead;
+  const key = Buffer.alloc(32, 7);
+  // Wraps of the right length (a wrap is checked by shape when a grant is signed or read; only its own device opens it), one per slot.
+  const wraps = Array.from({ length: MAX_GRANT_WRAPS + 1 }, (_, index) => ({
+    writer: createHash('sha256').update(`mn04/${index}`).digest('hex'),
+    wrap: Buffer.concat([createHash('sha512').update(`mn04/wrap/${index}`).digest(), createHash('sha512').update(`mn04/more/${index}`).digest()]).subarray(0, WRAP_BYTES).toString('base64url')
+  }));
+  const label = { text: 'x'.repeat(MAX_LABEL_BYTES - 20) };
+  const labelSealed = sealLabel(key, CELL_X, 1, label);
+  const full = buildGrant(lead.signer, { cell: CELL_X, epoch: 1, roster: '0'.repeat(64), labelSealed, wraps: wraps.slice(0, MAX_GRANT_WRAPS) });
+  const size = canonicalBytes(full).length;
+  assert.ok(size > MAX_PAYLOAD_BYTES, `the full grant (${size} bytes) is larger than other signed items`);
+  assert.ok(size <= GRANT_MAX_BYTES, `the full grant (${size} bytes) fits the grant limit`);
+  const read = readGrant(full);
+  assert.ok(read.ok, 'the full grant reads');
+  assert.equal(read.grant.wraps.length, MAX_GRANT_WRAPS);
+  assert.deepEqual(openLabel(key, CELL_X, 1, read.grant.labelSealed), label);
+  assert.throws(() => buildGrant(lead.signer, { cell: CELL_X, epoch: 1, roster: '0'.repeat(64), labelSealed, wraps }), { message: 'The grant was not signed: bad wraps.' });
 });

@@ -38,6 +38,9 @@ export const WRAP_BYTES = X25519_KEY_BYTES + IV_BYTES + TAG_BYTES + EPOCH_KEY_BY
 export const MAX_GRANT_WRAPS = 4095;
 // The cell label sealed under the epoch key (sealLabel), as base64url; empty when the grant carries no label.
 const MAX_LABEL_SEALED_CHARS = 8192;
+// The largest signed grant, in canonical bytes. One wrap takes about 210 bytes, so a grant to MAX_GRANT_WRAPS devices with the longest label is about
+// 880 KiB: over the 256 KiB every other signed payload is held to, so grants are signed and read with this limit instead (MN-04).
+export const GRANT_MAX_BYTES = 1024 * 1024;
 export const CELL_LABEL_INFO = 'near-ai/cell-label/v1';
 // The largest label sealLabel accepts, so the sealed form (iv, tag, ciphertext as base64url) always fits MAX_LABEL_SEALED_CHARS.
 export const MAX_LABEL_BYTES = Math.floor((MAX_LABEL_SEALED_CHARS * 3) / 4) - 12 - 16;
@@ -149,7 +152,7 @@ export function buildGrant(signer: PayloadSigner, grant: CellGrant): SignedPaylo
   const problem = grantProblem(grant);
   if (problem !== undefined) throw new Error(`The grant was not signed: ${problem}.`);
   const copy: CellGrant = { cell: grant.cell, epoch: grant.epoch, roster: grant.roster, labelSealed: grant.labelSealed, wraps: grant.wraps.map((item) => ({ writer: item.writer, wrap: item.wrap })) };
-  return signPayload(signer, 'staff-cell-grant', copy, { now: () => new Date(REPLICA_SIGNED_AT) });
+  return signPayload(signer, 'staff-cell-grant', copy, { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
 }
 
 // sha256 hex of the canonical signed grant: what project.genesis cells, cell.create and cell.rekey commit to.
@@ -193,7 +196,7 @@ function grantProblem(value: unknown): string | undefined {
 // roster fold's question.
 export function readGrant(value: unknown): GrantRead {
   try {
-    const verdict = verifyPayload<unknown>(value, { purpose: 'staff-cell-grant', status: ALWAYS_ACTIVE });
+    const verdict = verifyPayload<unknown>(value, { purpose: 'staff-cell-grant', status: ALWAYS_ACTIVE, maxBytes: GRANT_MAX_BYTES });
     if (!verdict.ok) return { ok: false, reason: verdict.reason === 'bad-signature' ? 'bad-signature' : 'malformed' };
     const payload = verdict.payload;
     if (grantProblem(payload) !== undefined) return { ok: false, reason: 'malformed' };

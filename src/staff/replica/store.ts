@@ -38,6 +38,7 @@ import { canonicalBytes } from '../../domain/team/canonical';
 import { checkpointHash } from '../../domain/replica/checkpoint';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import { MAX_PAYLOAD_BYTES } from '../../domain/team/signedPayload';
+import { GRANT_MAX_BYTES } from '../../domain/replica/cellKeys';
 import { isRecord } from '../../domain/team/validate';
 import { readWhole } from '../staffFiles';
 import { compareWithMark, markKey, readMark, writeMark } from './marks';
@@ -105,7 +106,8 @@ export interface UnreadableFile { file: string; reason: string }
 /** The most held.json may hold, and the longest reason kept for one held entry. */
 const HELD_MAX_BYTES = 16 * 1024 * 1024;
 const MAX_HELD_REASON = 200;
-const SIGNED_FILE_MAX_BYTES = 2 * MAX_PAYLOAD_BYTES;
+// A grant to every device a project can hold is larger than other signed items (GRANT_MAX_BYTES, MN-04).
+const SIGNED_FILE_MAX_BYTES = Math.max(2 * MAX_PAYLOAD_BYTES, GRANT_MAX_BYTES);
 
 /** A check's reason as one plain line of at most MAX_HELD_REASON characters. */
 function heldReason(reason: unknown): string {
@@ -500,7 +502,7 @@ export class ReplicaStore {
   public async putGrant(cell: string, epoch: number, signed: unknown): Promise<{ ok: true; hash: string } | StoreRefused> {
     if (!STREAM_ID_PATTERN.test(cell) || !Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Nothing was written: a grant needs a cell id and an epoch of 1 or more.');
     const bytes = canonicalBytes(signed);
-    if (bytes.length > MAX_PAYLOAD_BYTES) throw new Error('Nothing was written: the grant is larger than a signed item may be.');
+    if (bytes.length > GRANT_MAX_BYTES) throw new Error('Nothing was written: the grant is larger than a signed item may be.');
     const hash = sha256Hex(bytes);
     return this.putSigned(['grants', cell], `${epoch}-${hash}.json`, bytes, hash);
   }

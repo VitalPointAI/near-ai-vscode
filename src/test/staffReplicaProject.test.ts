@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { buildGrant, wrapEpochKey } from '../domain/replica/cellKeys';
+import { MAX_GRANT_WRAPS, WRAP_BYTES, buildGrant, grantHash, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, localInsert } from '../domain/replica/doc';
 import { MAX_STRUCTS } from '../domain/replica/kindSchemas/doc';
@@ -365,6 +365,23 @@ test('a welcome whose genesis differs from the pin is refused pin-mismatch and c
   assert.ok(!isProjectRefused(again));
   assert.equal(again.added, 0);
   await joined.b.close();
+});
+
+test('MN-04: a grant to the most devices a project can hold is stored in the project folder and read back for the roster fold', async () => {
+  const lead = install('big-grant');
+  const a = await created(lead);
+  const wraps = Array.from({ length: MAX_GRANT_WRAPS }, (_, index) => ({
+    writer: createHash('sha256').update(`mn04/${index}`).digest('hex'),
+    wrap: Buffer.concat([createHash('sha512').update(`mn04/wrap/${index}`).digest(), createHash('sha512').update(`mn04/more/${index}`).digest()]).subarray(0, WRAP_BYTES).toString('base64url')
+  }));
+  const big = buildGrant(a.signer, { cell: a.projectId, epoch: 1, roster: 'd'.repeat(64), labelSealed: '', wraps });
+  const stored = await a.putGrants([big]);
+  assert.ok(!isProjectRefused(stored));
+  assert.equal(stored.stored, 1);
+  const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
+  const { roster } = await reopened.state();
+  assert.ok(roster.held.some((item) => item.hash === grantHash(big) && item.reason === 'missing-roster'), 'the store read the grant back and gave it to the roster fold');
+  await reopened.close();
 });
 
 // ---- Task 4: the notices every multi-user result shows ------------------------------------------------------------------------------------------
