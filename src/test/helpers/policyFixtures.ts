@@ -84,7 +84,7 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     },
     endpoints: fixtureEndpoints(),
     authorizations: fixtureAuthorizations(key),
-    models: { v: 1 },
+    models: fixtureModelsSection(),
     residency: { v: 1, required: ['CA', 'EU'], byLevel: { 'ca-protected/Protected B': ['CA'] } },
     onboarding: {
       v: 1,
@@ -103,12 +103,71 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
       }
     },
     limits: { v: 1, spend: { dailyNanoUsd: 5_000_000_000, vaultHoursPerDay: 8, hubDailyNanoUsd: 50_000_000_000 } },
-    people: { v: 1, clearances: base['people'].clearances, signers: [signerEntry(key)] },
+    people: { v: 1, clearances: base['people'].clearances, signers: [signerEntry(key)], organization: fixtureOrganizationBlock() },
     exportControl: exportControlExample(),
     reserved: { v: 1, anchorRoots: [{ root: 'a'.repeat(64), proof: ['b'.repeat(64)] }], statusLists: [{ uri: 'https://status.example.org/list', purpose: 'revocation' }], maxOfflineAge: { 'org/Restricted': 86400 } }
   };
   if (layer !== 'organization') document['parent'] = { hash: 'c'.repeat(64), issuer: issuerKey().fingerprint };
   return document;
+}
+
+/** The id of the one passport the fixtures' models section holds. */
+export const FIXTURE_PASSPORT_ID = 'example-model-7b';
+
+/**
+ * One model passport with every key the passport parser accepts (fictional model, developer, references and hashes), valid at FIXED_NOW. Any field can be
+ * replaced; the result is plain JSON.
+ */
+export function fixturePassport(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: FIXTURE_PASSPORT_ID,
+    match: ['example/model-7b*'],
+    developer: 'Example Labs',
+    origin: 'CA',
+    lineage: { family: 'example', base: 'example/base-7b', teachers: [{ model: 'example/teacher-70b', origin: 'CA', method: 'distillation' }], method: 'pretrain+sft' },
+    licence: { id: 'apache-2.0', obligations: ['attribution'], inherited: [] },
+    legal: { coveredByUsLaw: false, entityList: false, removalOrders: [] },
+    hosting: ['local', 'org-plain'],
+    artifact: { format: 'gguf', sha256: '1'.repeat(64), quantization: 'q4_k_m', remoteCode: false },
+    evaluation: { report: 'EVAL-2026-0001', sha256: '2'.repeat(64), at: new Date(FIXED_NOW - DAY_MS).toISOString() },
+    maxTier: 'T3',
+    issuedAt: new Date(FIXED_NOW).toISOString(),
+    expiresAt: new Date(FIXED_NOW + 300 * DAY_MS).toISOString(),
+    reevaluateOn: ['artifact-change', 'quantization'],
+    ...overrides
+  };
+}
+
+/** A models section with every key the parser accepts and every default filled: one passport, a default, a local catalogue entry and an order. */
+export function fixtureModelsSection(): Record<string, unknown> {
+  return {
+    v: 1,
+    mode: 'report',
+    unknownMaxTier: 'T0',
+    tierByLevel: { 'ca-protected/Protected B': 'T2' },
+    tierByProject: { staff: 'T2' },
+    passports: [fixturePassport()],
+    defaults: { standard: FIXTURE_PASSPORT_ID },
+    localCatalogue: [{
+      passport: FIXTURE_PASSPORT_ID,
+      artifacts: [{
+        format: 'gguf', quantization: 'q4_k_m', source: 'https://models.example.org/example-model-7b.gguf', sha256: '1'.repeat(64), sizeBytes: 4_000_000_000,
+        licence: { id: 'apache-2.0', url: 'https://licences.example.org/apache-2.0' }
+      }],
+      minFitBand: 'laptop-16gb'
+    }],
+    order: [FIXTURE_PASSPORT_ID]
+  };
+}
+
+/** A people.organization block with every setting written (D-40): corporate by default, military allowed, nothing turned on that a mode lacks. */
+export function fixtureOrganizationBlock(): Record<string, unknown> {
+  return {
+    mode: 'corporate',
+    allowedModes: ['corporate', 'military'],
+    projectMayChoose: true,
+    settings: { acting: false, dualHatting: false, enrolAtReport: true, guests: false, maxDelegationDepth: 1, mayDecline: false, overdueDays: 3, temporary: false }
+  };
 }
 
 /** One endpoint of every class, sorted by id, each at the highest ceiling its class and host may hold (fictional hosts). */

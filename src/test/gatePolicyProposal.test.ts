@@ -158,6 +158,25 @@ test('D-44: unknown direction counts as widening', () => {
   assert.equal(asked, 0);
 });
 
+test('D-42: a models change reads in plain words, never the schema\'s names', () => {
+  const base = startingRules();
+  const withModels = (tier: string, mode: string) => edited(base, (doc) => {
+    doc['models'] = { v: 1, mode, tierByLevel: { 'org/Internal': tier }, tierByProject: { staff: tier } };
+    doc['requires'] = [...(doc['requires'] as string[]), 'models@1'].sort();
+  });
+  const full = fullRules();
+  const effects = [...proposalOf(withModels('T1', 'report'), withModels('T2', 'enforce'), always('narrows')), ...proposalOf(full, base), ...proposalOf(base, full)]
+    .filter((change) => change.section === 'models').map((change) => change.effect);
+  assert.ok(effects.includes('Models: whether model checks only record or also refuse changes. This makes the rules stricter.'), effects.join(' | '));
+  assert.ok(effects.includes('Models: the models your organization approved changes. This makes the rules wider.'), effects.join(' | '));
+  assert.ok(effects.includes('Organization: Internal work: which models may handle it changes. This makes the rules stricter.'), effects.join(' | '));
+  assert.ok(effects.includes('Projects marked staff: which models may handle them changes. This makes the rules stricter.'), effects.join(' | '));
+  for (const effect of effects) {
+    assertPlain(effect);
+    assert.doesNotMatch(effect, /passport|tierBy|maxTier|localCatalogue/i, effect);
+  }
+});
+
 test('D-44: every effect is one plain sentence', () => {
   const base = startingRules();
   const withVault = edited(base, (doc) => { doc['endpoints'] = [VAULT]; });
