@@ -408,8 +408,10 @@ export async function enrolProject(ctx: EnrolContext, request: unknown): Promise
     if (error instanceof StoreError && error.id === 'not-found') return refuse('enrolment-unknown');
     throw error;
   }
-  ctx.cache?.replace(read.project, roster);
-  return { ok: true, project: read.project, rosterHead: roster.head, roster };
+  // The grants just stored were placed by this fold, so they are kept grants from here on, as a roster loaded from the store would have them.
+  const enrolled = roster.withKept(grants.map((grant) => grant.hash));
+  ctx.cache?.replace(read.project, enrolled);
+  return { ok: true, project: read.project, rosterHead: enrolled.head, roster: enrolled };
 }
 
 /** sha256 hex of text, for tests that check the store keeps a hash. */

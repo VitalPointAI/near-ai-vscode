@@ -268,12 +268,33 @@ test('not-a-roster-writer: a member\'s member.invite is refused', () =>
     await expectRefused(hub, invite.entry, 'not-a-roster-writer', analyst.writer);
   }));
 
-test('roster-not-at-head: the lead citing an earlier roster is refused and the head stays', () =>
+test('an earlier roster cited (once roster-not-at-head, CR-01): the lead\'s change citing a roster from before the hub was admitted is stored, the hub keeps its key through the split, and the lead\'s choice resolves it', () =>
   withHub(undefined, async (hub) => {
-    const head = (await hub.cache.get(hub.world.project)).head;
-    const invite = hub.world.rosterEntry(hub.world.lead, 'member.invite', { invite: 'inv-late', name: 'Someone', seat: 'j2-analyst', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: DIGITS('secret') }, { rosterPrev: hub.world.genesisHash, advance: false });
-    await expectRefused(hub, invite.entry, 'roster-not-at-head');
-    assert.equal((await hub.cache.get(hub.world.project)).head, head);
+    const { world } = hub;
+    const head = (await hub.cache.get(world.project)).head;
+    const late = world.rosterEntry(world.lead, 'member.invite', inviteData('inv-late'), { rosterPrev: world.genesisHash, advance: false });
+    const result = await push(hub, [late.entry]);
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(result.accepted, [late.hash]);
+    assert.ok(hub.store.entryByHash(world.project, late.hash) !== undefined);
+    // It cites the genesis, where the hub admission already sits: two changes at one roster are a split, so the head goes back to the genesis.
+    // The hub still holds the base cell key from the grant it kept, so it still reads the roster.
+    for (const roster of [await hub.cache.get(world.project), await new RosterCache(hub.store, hub.identity).get(world.project)]) {
+      assert.equal(roster.head, world.genesisHash);
+      assert.ok(roster.ring(world.project, 1) !== undefined);
+      assert.equal(roster.state.pending.length, 1);
+    }
+    const hubAdmit = (await hub.cache.get(world.project)).state.pending[0]?.branches.find((hash) => hash !== late.hash) as string;
+    // The lead chooses the hub admission: the line comes back as it was, and the lead goes on from the old head.
+    const choose = world.rosterEntry(world.lead, 'roster.choose', { chosen: hubAdmit }, { rosterPrev: world.genesisHash, advance: false });
+    const chose = await push(hub, [choose.entry]);
+    assert.deepEqual(chose.refused, []);
+    const resolved = await hub.cache.get(world.project);
+    assert.deepEqual(resolved.state.pending, []);
+    assert.equal(resolved.head, head);
+    const next = world.rosterEntry(world.lead, 'member.invite', inviteData('inv-next'), { rosterPrev: head });
+    assert.deepEqual((await push(hub, [next.entry])).accepted, [next.hash]);
+    assert.equal((await new RosterCache(hub.store, hub.identity).get(world.project)).head, next.hash);
   }));
 
 test('roster-unreadable: a base-stream body the hub cannot open is refused', () =>
@@ -475,14 +496,114 @@ test('a roster entry the fold refuses is still stored as the writer\'s log and t
     assert.deepEqual((await push(hub, [invite.entry])).accepted, [invite.hash]);
   }));
 
-test('appendBatch runs one batch at a time per project, so two roster changes citing one head cannot both apply', () =>
+// ---- CR-01 (D-09, D-11, D-42): a roster entry citing an older roster head is the writer's log; the hub's roster fold decides what it does ----
+
+const deputyOf = (world: HubWorld): WorldDevice => world.device('DEPUTY', 'mbr-deputy');
+const inviteData = (invite: string): Record<string, unknown> => ({ invite, name: 'Someone', seat: 'j2-analyst', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: DIGITS(invite) });
+
+/** The enrolled world with a deputy lead (an admitted member named deputy by the lead). */
+const withDeputy = (world: HubWorld): void => {
+  const deputy = deputyOf(world);
+  world.admitMember(deputy);
+  world.rosterEntry(world.lead, 'deputy.name', { member: deputy.member });
+};
+
+test('CR-01 roster race: the lead and the deputy each change the roster at one head; both are stored, the hub shows a split, and the lead\'s roster.choose resolves it', () =>
+  withHub(withDeputy, async (hub) => {
+    const { world } = hub;
+    const deputy = deputyOf(world);
+    const head = (await hub.cache.get(world.project)).head;
+    const byDeputy = world.rosterEntry(deputy, 'member.invite', inviteData('inv-deputy'), { advance: false });
+    const byLead = world.rosterEntry(world.lead, 'member.invite', inviteData('inv-lead'), { advance: false });
+    // The deputy pushes first: its change applies at the hub.
+    assert.deepEqual((await push(hub, [byDeputy.entry], { device: deputy.writer })).accepted, [byDeputy.hash]);
+    assert.equal((await hub.cache.get(world.project)).head, byDeputy.hash);
+    // The lead's change cites the same head. It is the lead's log, so it is stored, and the fold now holds a split at that head.
+    const raced = await push(hub, [byLead.entry]);
+    assert.deepEqual(raced.refused, []);
+    assert.deepEqual(raced.accepted, [byLead.hash]);
+    assert.ok(hub.store.entryByHash(world.project, byLead.hash) !== undefined);
+    const split = await hub.cache.get(world.project);
+    assert.equal(split.head, head);
+    assert.deepEqual(split.state.pending.map((item) => ({ at: item.at, branches: item.branches })), [{ at: head, branches: [byDeputy.hash, byLead.hash].sort() }]);
+    // A fresh fold from the store agrees with the cache.
+    assert.equal((await new RosterCache(hub.store, hub.identity).get(world.project)).head, head);
+
+    // The lead chooses its own change: the choice and the chosen change apply, and the lead's log goes on.
+    const choose = world.rosterEntry(world.lead, 'roster.choose', { chosen: byLead.hash }, { rosterPrev: head });
+    const chose = await push(hub, [choose.entry]);
+    assert.deepEqual(chose.refused, []);
+    assert.deepEqual(chose.accepted, [choose.hash]);
+    const resolved = await hub.cache.get(world.project);
+    assert.deepEqual(resolved.state.pending, []);
+    assert.equal(resolved.head, byLead.hash);
+    assert.ok(resolved.state.notChosen.has(byDeputy.hash));
+    world.head = byLead.hash;
+    const next = world.rosterEntry(world.lead, 'member.invite', inviteData('inv-after'));
+    assert.deepEqual((await push(hub, [next.entry])).accepted, [next.hash]);
+    assert.equal((await hub.cache.get(world.project)).head, next.hash);
+  }));
+
+test('CR-01 no wedge: after a roster entry citing an older head, the same device\'s later base-stream entries are still accepted (its log is not cut)', () =>
+  withHub(withDeputy, async (hub) => {
+    const { world } = hub;
+    const deputy = deputyOf(world);
+    const head = world.head;
+    const byDeputy = world.rosterEntry(deputy, 'member.invite', inviteData('inv-deputy'), { advance: false });
+    await push(hub, [byDeputy.entry], { device: deputy.writer });
+    const byLead = world.rosterEntry(world.lead, 'member.invite', inviteData('inv-lead'), { rosterPrev: head, advance: false });
+    // The lead goes on writing in its own log: a note citing the roster it knows.
+    const later = note(world, world.lead, { roster: head });
+    const result = await push(hub, [byLead.entry, later.entry]);
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(result.accepted, [byLead.hash, later.hash]);
+    assert.equal(hub.store.headOf(world.project, world.project, world.lead.writer)?.hash, later.hash);
+  }));
+
+test('CR-01 handover race: the lead\'s roster entry written offline is stored after the deputy took over the lead, and makes a split for the new lead to choose', () =>
+  withHub(withDeputy, async (hub) => {
+    const { world } = hub;
+    const deputy = deputyOf(world);
+    const head = world.head;
+    // Offline, the lead invites someone at head H. Meanwhile the deputy, finding the lead lost, takes over the lead at the same head.
+    const offline = world.rosterEntry(world.lead, 'member.invite', inviteData('inv-offline'), { advance: false });
+    const handover = world.rosterEntry(deputy, 'lead.handover', { to: deputy.member, reason: 'lead-lost' }, { advance: false });
+    assert.deepEqual((await push(hub, [handover.entry], { device: deputy.writer })).accepted, [handover.hash]);
+    assert.equal((await hub.cache.get(world.project)).isRosterWriter(world.lead.writer), false);
+    // The old lead's entry reaches the hub later. At H the old lead was the lead, so it is stored and the fold splits there.
+    const result = await push(hub, [offline.entry]);
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(result.accepted, [offline.hash]);
+    const roster = await hub.cache.get(world.project);
+    assert.equal(roster.head, head);
+    assert.deepEqual(roster.state.pending.map((item) => item.branches), [[handover.hash, offline.hash].sort()]);
+  }));
+
+test('CR-01 still refused: a roster entry by a device that is not a roster writer at the roster it cites is refused not-a-roster-writer and stored nowhere', () =>
+  withHub(withDeputy, async (hub) => {
+    const { world } = hub;
+    const analyst = analystOf(world);
+    const admitted = world.admitMember(analyst);
+    await push(hub, [admitted.invite.entry, admitted.admit.entry], { grants: admitted.grant === undefined ? [] : [admitted.grant] });
+    // At the hub's head the analyst is a plain member, and at the older roster it cites it was not even admitted.
+    const atHead = world.write(analyst, { kind: 'member.invite', data: { ...inviteData('inv-a'), rosterPrev: world.head }, roster: world.head, seq: 0 });
+    await expectRefused(hub, atHead.entry, 'not-a-roster-writer', analyst.writer);
+    const atGenesis = world.write(analyst, { kind: 'member.invite', data: { ...inviteData('inv-b'), rosterPrev: world.genesisHash }, roster: world.genesisHash, seq: 0 });
+    await expectRefused(hub, atGenesis.entry, 'not-a-roster-writer', analyst.writer);
+  }));
+
+test('appendBatch runs one batch at a time per project, so two roster changes citing one head are judged in turn: the second makes a split', () =>
   withHub(undefined, async (hub) => {
     const a = hub.world.rosterEntry(hub.world.lead, 'member.invite', { invite: 'inv-a', name: 'Someone', seat: 'j2-analyst', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: DIGITS('a') }, { advance: false });
     const b = hub.world.rosterEntry(hub.world.lead, 'member.invite', { invite: 'inv-b', name: 'Someone', seat: 'j2-analyst', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: DIGITS('b') }, { advance: false });
     const [first, second] = await Promise.all([appendBatch(input(hub, [a.entry]), hub.ctx()), appendBatch(input(hub, [b.entry]), hub.ctx())]);
     assert.ok(first.ok && second.ok);
     assert.deepEqual(first.result.accepted, [a.hash]);
-    // b follows a in the lead's log but cites the roster before a: checked after a was stored, it no longer cites the head.
-    assert.deepEqual(second.result.refused.map((item) => item.reason), ['roster-not-at-head']);
-    assert.equal((await hub.cache.get(hub.world.project)).head, a.hash);
+    // b follows a in the lead's log but cites the roster before a: checked after a was stored, the fold sees two changes at one roster.
+    assert.equal(first.result.rosterHead, a.hash);
+    assert.deepEqual(second.result.refused, []);
+    assert.deepEqual(second.result.accepted, [b.hash]);
+    const roster = await hub.cache.get(hub.world.project);
+    assert.deepEqual(roster.state.pending.map((item) => item.branches), [[a.hash, b.hash].sort()]);
+    assert.equal(second.result.rosterHead, roster.head);
   }));
