@@ -203,6 +203,13 @@ export type EventReport =
 export const HUB_EVENT_NAMES = ['heads', 'presence', 'checkpoint', 'roster', 'equivocation', 'join-request', 'resync'] as const;
 export type HubEventName = typeof HUB_EVENT_NAMES[number];
 
+/**
+ * Why a subscription ended without the caller unsubscribing (D-37): the hub asked for a resync, frames were missed (an id gap: the reader is closed
+ * rather than going on without them), the hub stopped the stream (204, 401 or 403), the stream ended or broke, or it could not be opened. After any
+ * of them the caller runs heads-based catch-up, and may subscribe again after retryMs.
+ */
+export type SubscriptionEnd = 'resync' | 'gap' | 'stopped' | 'closed' | 'malformed' | 'failed';
+
 export interface EventReader extends AsyncIterable<EventReport> {
   /** The retry delay the hub asked for, in milliseconds, once read. */
   readonly retryMs: number | undefined;
@@ -507,14 +514,24 @@ export class HubTransport implements ReplicaTransport {
     return { accepted, refused };
   }
 
-  public subscribe(onHeads: (heads: HeadSet) => void, onPresence: (sealed: Uint8Array) => void): Unsubscribe {
+  /**
+   * Hands heads frames to onHeads and each presence device's sealed bytes to onPresence. onEnd is called once when the subscription ends by anything
+   * but the caller's unsubscribe (IN-03), with why and the hub's retry delay; it is never called after unsubscribe.
+   */
+  public subscribe(onHeads: (heads: HeadSet) => void, onPresence: (sealed: Uint8Array) => void, onEnd?: (reason: SubscriptionEnd, retryMs: number | undefined) => void): Unsubscribe {
     let reader: EventReader | undefined;
     let stopped = false;
     void (async () => {
+      let reason: SubscriptionEnd = 'closed';
       try {
         reader = await this.events();
         if (stopped) { reader.close(); return; }
         for await (const report of reader) {
+          if (report.kind === 'gap') {
+            reason = 'gap';
+            break;
+          }
+          if (report.kind === 'resync' || report.kind === 'stopped' || report.kind === 'closed' || report.kind === 'malformed') reason = report.kind;
           if (report.kind !== 'frame') continue;
           if (report.event === 'heads' && isStream(report.data.stream) && Array.isArray(report.data.heads)) {
             onHeads({ streams: [{ stream: report.data.stream, heads: report.data.heads.filter((head): head is { writer: string; seq: number; hash: string } => isRecord(head) && isHash(head.writer) && isSeq(head.seq) && isHash(head.hash)).map((head) => ({ writer: head.writer, seq: head.seq, hash: head.hash })) }] });
@@ -525,8 +542,13 @@ export class HubTransport implements ReplicaTransport {
           }
         }
       } catch {
-        // A stream that cannot open ends the subscription; the caller's next catch-up finds what it missed.
+        // A stream that cannot open ends the subscription; the caller's catch-up finds what it missed.
+        reason = 'failed';
       }
+      reader?.close();
+      if (stopped) return;
+      stopped = true;
+      onEnd?.(reason, reader?.retryMs);
     })();
     return () => {
       stopped = true;

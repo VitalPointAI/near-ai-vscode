@@ -376,6 +376,34 @@ test('subscribe hands heads frames to onHeads and each presence device\'s sealed
   });
 });
 
+test('IN-03: subscribe tells the caller when the stream ends (resync, an id gap, the end of the stream, a 204) so it runs heads catch-up, and never after unsubscribe', { timeout: 20_000 }, async () => {
+  const frame = (event: string, id: number): string => `event: ${event}\nid: ${id}\ndata: ${JSON.stringify({ project: PROJECT, stream: PROJECT, heads: [] })}\n\n`;
+  const ended = (transport: HubTransport): Promise<{ reason: string; heads: number }> => new Promise((resolve) => {
+    let heads = 0;
+    transport.subscribe(() => { heads += 1; }, () => undefined, (reason) => resolve({ reason, heads }));
+  });
+  const cases: Array<{ answer: FakeHandler; want: { reason: string; heads: number } }> = [
+    { answer: () => sse([frame('heads', 1), frame('resync', 2)], 5_000), want: { reason: 'resync', heads: 1 } },
+    // A gap: the subscription closes its reader at once rather than going on without the frames it missed.
+    { answer: () => sse([frame('heads', 1), frame('heads', 3)], 5_000), want: { reason: 'gap', heads: 1 } },
+    { answer: () => sse([frame('heads', 1)]), want: { reason: 'closed', heads: 1 } },
+    { answer: () => ({ stream: (res): void => { res.writeHead(204, { 'cache-control': 'no-store' }); res.end(); } }), want: { reason: 'stopped', heads: 0 } }
+  ];
+  for (const item of cases) {
+    await withFake({ handle: routes({ [EVENTS]: item.answer }) }, async (_fake, transport) => {
+      assert.deepEqual(await ended(transport), item.want);
+    });
+  }
+  await withFake({ handle: routes({ [EVENTS]: () => sse([frame('heads', 1)], 5_000) }) }, async (_fake, transport) => {
+    let ends = 0;
+    let stop: () => void = () => undefined;
+    await new Promise<void>((resolve) => { stop = transport.subscribe(() => resolve(), () => undefined, () => { ends += 1; }); });
+    stop();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(ends, 0, 'the caller who unsubscribed is not told');
+  });
+});
+
 // ---- enrol, append, blobs, grants, checkpoints ----
 
 test('enrol posts without a session on a connection of its own and returns the project, roster head and hub id', async () => {
