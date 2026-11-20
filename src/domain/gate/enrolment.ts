@@ -18,7 +18,7 @@
 // carry no key or signature. No reader throws.
 import { createHash } from 'node:crypto';
 import { SAFETY_WORDS } from '../replica/safetyWords';
-import { canonicalBytes, canonicalize, isStrictBase64url } from '../team/canonical';
+import { canonicalBytes, canonicalize, isStrictBase64url, verifySignature } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
 import { signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadFailureReason, PayloadSigner, SignedPayload } from '../team/signedPayload';
@@ -410,9 +410,88 @@ export function readEnrolmentFile(file: unknown, options: ReadEnrolmentOptions):
   }
 }
 
-/** Filled in by the key handover check (Task 2 of 41-03); a file with no handover needs none. */
+/** A file with a handover needs the previous key's signature over the new key, the serial and the time; a handover to the same key is refused. */
 function rotationRefusal(payload: EnrolmentPayload): EnrolmentRefusal | undefined {
-  return payload.rotation === undefined ? undefined : 'rotation-invalid';
+  const rotation = payload.rotation;
+  if (rotation === undefined) return undefined;
+  if (rotation.previous.publicKey === payload.issuer.publicKey) return 'rotation-invalid';
+  const input = rotationSigningInput({ newPublicKey: payload.issuer.publicKey, previousPublicKey: rotation.previous.publicKey, serial: payload.serial, issuedAt: payload.issuedAt });
+  return verifySignature(input, rotation.sig, rotation.previous.publicKey) ? undefined : 'rotation-invalid';
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Key handover (D-14)
+
+/** The handover signature's domain: it starts unlike PAYLOAD_DOMAIN and unlike canonical JSON, so it can never be another signature. Never changes. */
+export const ROTATION_DOMAIN = 'near-ai/org-issuer-rotation/v1';
+
+export interface RotationFields {
+  readonly newPublicKey: string;
+  readonly previousPublicKey: string;
+  readonly serial: number;
+  readonly issuedAt: string;
+}
+
+/** The bytes the pinned key signs to hand over: ROTATION_DOMAIN, NUL, then each field as a 4-byte big-endian length and its UTF-8 bytes, in this order. */
+export function rotationSigningInput(fields: RotationFields): Buffer {
+  const parts = [fields.newPublicKey, fields.previousPublicKey, String(fields.serial), fields.issuedAt];
+  for (const part of parts) if (typeof part !== 'string') throw new TypeError('Every handover field is text.');
+  return Buffer.concat([Buffer.from(`${ROTATION_DOMAIN}\0`, 'utf8'), ...parts.map((part) => lengthPrefixed(Buffer.from(part, 'utf8')))]);
+}
+
+/** What an enrolment file that read back means for this computer. The last two are refusals (ENROLMENT_REFUSALS has their sentences). */
+export type EnrolmentClass = 'enrol' | 'same-key' | 'rotate' | 'older-file' | 'other-organization';
+
+export interface OrganizationPinRef {
+  readonly publicKey: string;
+  readonly serial: number;
+}
+
+/**
+ * Classifies a file that read back against this computer's pin: no pin is a first enrolment; the pinned key is the same key (an update of its layer); a
+ * handover from the pinned key with a higher serial is a rotation and a serial not higher an older file; anything else is another organization's key.
+ */
+export function classifyEnrolment(read: Extract<EnrolmentRead, { ok: true }>, pin?: OrganizationPinRef): EnrolmentClass {
+  if (pin === undefined) return 'enrol';
+  const enrolment = read.enrolment;
+  if (enrolment.issuer.publicKey === pin.publicKey) return 'same-key';
+  if (enrolment.rotation !== undefined && enrolment.rotation.previous.publicKey === pin.publicKey) return enrolment.serial > pin.serial ? 'rotate' : 'older-file';
+  return 'other-organization';
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// The words people read (D-12, D-14); 41-14 shows them
+
+/** The one button of the twelve-words modal. Declining writes nothing. */
+export const ISSUER_WORDS_MATCH = 'The twelve words match';
+/** Shown before the words when a file hands over to a new key: the words are compared again before the new pin is kept. */
+export const ROTATION_WORDS_LEAD = 'Your organization replaced the key that signs its rules.';
+
+export function issuerWordsPrompt(words: readonly string[]): string {
+  return `Ask your organization's security contact to read their twelve words. Compare them with these: ${issuerWordsText(words)}`;
+}
+
+export function issuerWordsQuestion(name: string): string {
+  return `Use the rules from ${name} on this computer?`;
+}
+
+export function issuerDetailsLine(hex: string): string {
+  return `Details: key fingerprint ${hex}`;
+}
+
+export function organizationEndedText(date: string, contact: string): string {
+  return `Your organization's rules ended on ${date}. Ask ${contact} for the current rules.`;
+}
+
+export function organizationEndingText(date: string, contact: string): string {
+  return `Your organization's rules end on ${date}. Ask ${contact} for the current rules.`;
+}
+
+/** The contact a sentence names: the first security contact, else the first contact, as "{name} ({how})", else your organization's security contact. */
+export function contactShown(contacts: readonly PolicyContact[] | undefined): string {
+  const list = contacts ?? [];
+  const contact = list.find((entry) => entry.topic === 'security') ?? list[0];
+  return contact === undefined ? 'your organization\'s security contact' : `${contact.name} (${contact.how})`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -524,7 +603,9 @@ export function buildEnrolment(signer: PayloadSigner, input: BuildEnrolmentInput
   return envelope;
 }
 
-/** Filled in by the key handover (Task 2 of 41-03). */
-function rotationFor(_previous: PayloadSigner, _newPublicKey: string, _serial: number, _issuedAt: string): EnrolmentRotation {
-  throw new Error('A key handover is not available yet.');
+/** The handover the pinned key signs over the new key, the serial and the time. */
+function rotationFor(previous: PayloadSigner, newPublicKey: string, serial: number, issuedAt: string): EnrolmentRotation {
+  if (previous.publicKey === newPublicKey) throw new Error('The key handover was not made: the new key is the same as the old key.');
+  const sig = previous.sign(rotationSigningInput({ newPublicKey, previousPublicKey: previous.publicKey, serial, issuedAt }));
+  return { previous: { publicKey: previous.publicKey }, sig };
 }
