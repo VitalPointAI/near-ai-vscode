@@ -7,8 +7,10 @@
 //   (DEVICE_KEY_SECRET), stored the same way (PKCS8 DER as base64). It is made inside the same identity-create lock as the device key, with the same
 //   read-back check, so two windows never make two keys. Its public half is bound to the device by an Ed25519 signature over x25519BindingBytes,
 //   which the roster entry that admits the device carries (D-19).
-// - Opened epoch keys: in memory, written through to one SecretStorage value per project (EPOCH_KEY_SECRET_PREFIX + project). That value is only a
-//   cache: the grants on disk are ciphertext wrapped to this device, so a lost value is rebuilt by opening them again (D-24).
+// - Epoch keys: in memory, written through to one SecretStorage value per project (EPOCH_KEY_SECRET_PREFIX + project): the keys the roster settled
+//   and the keys this device made, each with the hash of the grant that carries it. For a grant on disk the value is only a cache: the grants are
+//   ciphertext wrapped to this device, so a lost value is rebuilt by opening them again once the roster places them (D-24). Only a grant the roster
+//   placed, or a key this device made for a grant the roster committed to, ever becomes the key of an epoch (DeviceKeyRing.settle, CR-01).
 // - Join secrets: in SecretStorage keyed by invite id (JOIN_SECRET_PREFIX + invite) until a roster entry records what happened to the invitation
 //   (used or voided). forgetJoinSecret is the only SecretStorage delete in this module (Pitfall 7): keys are only ever added (P-31-24).
 //
@@ -21,8 +23,10 @@ import { withFileLock } from '../../services/stateMirrorLock';
 import { IDENTITY_CREATE_LOCK_FILE } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
 import { EPOCH_KEY_BYTES, readGrant, unwrapEpochKey, x25519BindingBytes, x25519PublicRaw } from '../../domain/replica/cellKeys';
-import { STREAM_ID_PATTERN, writerIdOf } from '../../domain/replica/entry';
+import type { CellGrant } from '../../domain/replica/cellKeys';
+import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from '../../domain/replica/entry';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
+import type { CellRecord, CellsState, EpochRecord } from '../../domain/replica/rosterCells';
 import type { KeyRing } from '../../domain/replica/rosterView';
 import { isRecord } from '../../domain/team/validate';
 
@@ -87,119 +91,219 @@ export async function loadOrCreateEncryptionKey(secrets: SecretStorageLike, opti
   return { publicKey, privateKey, binding };
 }
 
-// ---- the key ring (D-24) -------------------------------------------------------------------------------------------------------------------------
+// ---- the key ring (D-24, D-44) -------------------------------------------------------------------------------------------------------------------
 
 /** The device a key ring opens grants for: its writer id and its X25519 private key. */
 export interface KeyRingDevice { writer: string; privateKey: KeyObject }
 
-const ringId = (cell: string, epoch: number): string => `${cell}/${epoch}`;
+/** A key this device made for a new cell or a new epoch, with the hash of the founding grant that carries it (addOwn). */
+export interface OwnEpochKey { cell: string; epoch: number; grant: string; key: Buffer }
 
-function cachedKeys(text: string | undefined): Map<string, Buffer> {
-  const keys = new Map<string, Buffer>();
-  if (!text) return keys;
+/** A key this device could read a roster entry with while it catches up (readingCandidates): never a key it writes with. */
+export interface ReadingCandidate { epoch: number; key: Buffer; own: boolean; grant: string }
+
+const ringId = (cell: string, epoch: number): string => `${cell}/${epoch}`;
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+interface CachedRing { keys: Map<string, Buffer>; own: Map<string, OwnEpochKey> }
+
+function epochKeyBytes(value: unknown): Buffer | undefined {
+  if (typeof value !== 'string') return undefined;
+  const bytes = Buffer.from(value, 'base64url');
+  return bytes.length === EPOCH_KEY_BYTES ? bytes : undefined;
+}
+
+function cachedRing(text: string | undefined): CachedRing {
+  const ring: CachedRing = { keys: new Map(), own: new Map() };
+  if (!text) return ring;
   try {
     const value = JSON.parse(text) as unknown;
-    if (!isRecord(value) || value.v !== 1 || !Array.isArray(value.keys)) return keys;
+    // Version 1 cached every key opened from any grant addressed to this device, before the roster had placed the grant, so it is not trusted: those
+    // keys are opened again from the grants the roster places (CR-01).
+    if (!isRecord(value) || value.v !== 2 || !Array.isArray(value.keys) || !Array.isArray(value.own)) return ring;
     for (const item of value.keys as unknown[]) {
       if (!Array.isArray(item) || item.length !== 3) continue;
       const [cell, epoch, key] = item as unknown[];
-      if (typeof cell !== 'string' || !STREAM_ID_PATTERN.test(cell) || !Number.isSafeInteger(epoch) || (epoch as number) < 1 || typeof key !== 'string') continue;
-      const bytes = Buffer.from(key, 'base64url');
-      if (bytes.length === EPOCH_KEY_BYTES) keys.set(ringId(cell, epoch as number), bytes);
+      const bytes = epochKeyBytes(key);
+      if (typeof cell !== 'string' || !STREAM_ID_PATTERN.test(cell) || !Number.isSafeInteger(epoch) || (epoch as number) < 1 || bytes === undefined) continue;
+      ring.keys.set(ringId(cell, epoch as number), bytes);
+    }
+    for (const item of value.own as unknown[]) {
+      if (!Array.isArray(item) || item.length !== 4) continue;
+      const [cell, epoch, grant, key] = item as unknown[];
+      const bytes = epochKeyBytes(key);
+      if (typeof cell !== 'string' || !STREAM_ID_PATTERN.test(cell) || !Number.isSafeInteger(epoch) || (epoch as number) < 1) continue;
+      if (typeof grant !== 'string' || !HASH_PATTERN.test(grant) || bytes === undefined) continue;
+      ring.own.set(grant, { cell, epoch: epoch as number, grant, key: bytes });
     }
   } catch {
     // A cache that does not read is the same as no cache: every key in it can be opened again from the grants.
   }
-  return keys;
+  return ring;
+}
+
+/** The cell id a signed grant names, read without checking anything else, so a grant for another cell is skipped before its signature is checked. */
+function grantCell(signed: unknown): string | undefined {
+  if (!isRecord(signed) || !isRecord(signed.payload)) return undefined;
+  return typeof signed.payload.cell === 'string' ? signed.payload.cell : undefined;
 }
 
 /**
- * The epoch keys this device holds for one project. Opened keys live in memory and are written through to one SecretStorage value per project, never
- * to a file. The cache can be lost without losing anything: openGrants opens the same keys again from the grants on disk.
+ * The epoch keys this device holds for one project. Keys live in memory and are written through to one SecretStorage value per project, never to a
+ * file. The cache can be lost without losing anything a grant on disk carries: settle opens the same keys again once the roster places the grants.
  * A cell's stream id is its cell id, and the roster stream is the base cell (the project id), so keyRing() answers (stream, epoch) directly.
+ *
+ * Only the roster decides which key an epoch has (CR-01, D-44). A key enters the answers of epochKey and keyRing only through settle: from a grant
+ * the roster fold placed (its signer could change the roster at the roster it names and every device it wraps to was admitted there, or it is the
+ * founding grant the roster committed to by hash), or from a key this device made for the founding grant the roster committed to. A grant from
+ * anyone else, or for an epoch the roster has not founded, never decides which key this device writes with.
  */
 export class DeviceKeyRing {
   private readonly keys: Map<string, Buffer>;
+  private readonly own: Map<string, OwnEpochKey>;
+  // What this device's wrap in a grant opens to, by grant hash, so each grant is unwrapped once. Memory only; null when nothing opens.
+  private readonly unwrapped = new Map<string, Buffer | null>();
   private changes = 0;
 
-  private constructor(private readonly secrets: SecretStorageLike, public readonly project: string, private readonly device: KeyRingDevice, keys: Map<string, Buffer>) {
-    this.keys = keys;
+  private constructor(private readonly secrets: SecretStorageLike, public readonly project: string, private readonly device: KeyRingDevice, cached: CachedRing) {
+    this.keys = cached.keys;
+    this.own = cached.own;
   }
 
   /** The ring of a project for a device, starting from the SecretStorage cache (or empty when there is none or it does not read). */
   public static async load(secrets: SecretStorageLike, project: string, device: KeyRingDevice): Promise<DeviceKeyRing> {
     if (!STREAM_ID_PATTERN.test(project)) throw new Error('A project id is 32 lowercase hex characters.');
-    return new DeviceKeyRing(secrets, project, device, cachedKeys(await secrets.get(EPOCH_KEY_SECRET_PREFIX + project)));
+    return new DeviceKeyRing(secrets, project, device, cachedRing(await secrets.get(EPOCH_KEY_SECRET_PREFIX + project)));
   }
 
-  /** Counts every time a key was added, so a host can tell that the ring answers more than it did (and replace its fold context). */
+  /** Counts every time the ring changed, so a host can tell that the ring answers differently than it did (and replace its fold context). */
   public get version(): number {
     return this.changes;
   }
 
-  /** How many epoch keys the ring holds. */
+  /** How many epoch keys the ring answers for. */
   public get size(): number {
     return this.keys.size;
   }
 
   /**
-   * Opens the wraps addressed to this device in the given grants and adds the keys it did not hold yet. A grant that does not read, a wrap for another
-   * device and a wrap that does not open are skipped. Returns how many keys were added; the new keys are written through to SecretStorage.
+   * Takes the keys the roster settles. For every epoch the roster founded, the key is the one this device made for the founding grant the roster
+   * committed to (addOwn); else what this device's wrap opens to in the founding grant the roster placed; else in another grant the roster placed for
+   * that epoch (the grants of a device admitted later, D-45), smallest hash first. A held key that differs is replaced: the key of an epoch is the one
+   * its committed grant carries. Returns how many keys were added or replaced; a change is written through to SecretStorage.
    */
-  public async openGrants(grants: readonly unknown[]): Promise<number> {
-    let added = 0;
-    for (const signed of grants) {
-      const read = readGrant(signed);
-      if (!read.ok) continue;
-      const mine = read.grant.wraps.find((wrap) => wrap.writer === this.device.writer);
-      if (mine === undefined) continue;
-      const id = ringId(read.grant.cell, read.grant.epoch);
-      if (this.keys.has(id)) continue;
-      const opened = unwrapEpochKey({ cell: read.grant.cell, epoch: read.grant.epoch, writer: this.device.writer, privateKey: this.device.privateKey, wrap: mine.wrap });
-      if (opened === undefined) continue;
-      this.keys.set(id, opened);
-      added += 1;
+  public async settle(cells: CellsState): Promise<number> {
+    let changed = 0;
+    for (const record of cells.cells.values()) {
+      for (const founded of record.epochs) {
+        const key = this.settledKey(record, founded);
+        if (key === undefined) continue;
+        const id = ringId(record.cell, founded.epoch);
+        const held = this.keys.get(id);
+        if (held !== undefined && held.equals(key)) continue;
+        this.keys.set(id, key);
+        changed += 1;
+      }
     }
-    if (added > 0) {
+    if (changed > 0) {
       this.changes += 1;
       await this.persist();
     }
-    return added;
+    return changed;
   }
 
-  /** Adds a key this device made itself (a new cell or a new epoch, before its grant is stored). An epoch already held keeps its key. */
-  public async addOwn(cell: string, epoch: number, key: Buffer): Promise<void> {
+  /**
+   * Keeps a key this device made for a new cell or a new epoch, with the hash of the founding grant that carries it, before the roster entry that
+   * commits to that grant is written, so a crash never leaves an epoch nobody can open. The key answers epochKey only once settle finds the roster
+   * committed to that grant. A key made for a rekey whose entry was never written stays unused beside the key of the next rekey of the same epoch,
+   * which is the one the roster then commits to (MJ-04). The same grant with another key is refused.
+   */
+  public async addOwn(cell: string, epoch: number, key: Buffer, grant: string): Promise<void> {
     if (!STREAM_ID_PATTERN.test(cell) || !Number.isSafeInteger(epoch) || epoch < 1) throw new Error('A cell key needs a cell id and an epoch of 1 or more.');
     if (key.length !== EPOCH_KEY_BYTES) throw new Error('An epoch key must be 32 bytes.');
-    const id = ringId(cell, epoch);
-    if (this.keys.has(id)) return;
-    this.keys.set(id, Buffer.from(key));
+    if (typeof grant !== 'string' || !HASH_PATTERN.test(grant)) throw new Error('A cell key this device made is kept with the hash of the grant that carries it.');
+    const held = this.own.get(grant);
+    if (held !== undefined) {
+      if (held.cell === cell && held.epoch === epoch && held.key.equals(key)) return;
+      throw new Error('This computer already holds another key for that grant, so the key was not replaced.');
+    }
+    this.own.set(grant, { cell, epoch, grant, key: Buffer.from(key) });
     this.changes += 1;
     await this.persist();
   }
 
-  /** The epoch key of a cell, as a copy, or undefined when this device does not hold it. */
+  /**
+   * Keys this device could read the roster stream with while it catches up. The roster stream is sealed under the base cell's epoch keys, and the
+   * grants that give a device admitted later those keys are placed only once the fold reaches its admission (D-45), so the host first tries these:
+   * this device's own keys for the cell, then what its wraps open to in any grant for the cell that reads, for every epoch the ring does not answer.
+   * They are never added to the ring, never cached and never written with; only the grants the fold then places settle a key.
+   */
+  public readingCandidates(cell: string, grants: readonly unknown[]): ReadingCandidate[] {
+    const out: ReadingCandidate[] = [];
+    const own = [...this.own.values()].filter((item) => item.cell === cell && !this.keys.has(ringId(cell, item.epoch))).sort((a, b) => byText(a.grant, b.grant));
+    for (const item of own) out.push({ epoch: item.epoch, key: Buffer.from(item.key), own: true, grant: item.grant });
+    for (const signed of grants) {
+      if (grantCell(signed) !== cell) continue;
+      const read = readGrant(signed);
+      if (!read.ok || this.keys.has(ringId(cell, read.grant.epoch))) continue;
+      const key = this.open(read.grant, read.hash);
+      if (key !== undefined) out.push({ epoch: read.grant.epoch, key, own: false, grant: read.hash });
+    }
+    return out;
+  }
+
+  /** The epoch key of a cell, as a copy, or undefined when the roster has not settled one for this device. */
   public epochKey(cell: string, epoch: number): Buffer | undefined {
     const key = this.keys.get(ringId(cell, epoch));
     return key === undefined ? undefined : Buffer.from(key);
   }
 
-  /** The KeyRing the fold reads. It answers from the live ring, so a key added later is answered by the same function. */
+  /** Whether the roster has settled a key of the cell's epoch for this device. */
+  public holds(cell: string, epoch: number): boolean {
+    return this.keys.has(ringId(cell, epoch));
+  }
+
+  /** The KeyRing the fold reads. It answers from the live ring, so a key settled later is answered by the same function. */
   public keyRing(): KeyRing {
     return (stream, epoch) => this.epochKey(stream, epoch);
   }
 
-  /** Writes the ring through to SecretStorage, merged with what another window stored, so no window drops a key the other opened. */
+  private settledKey(record: CellRecord, founded: EpochRecord): Buffer | undefined {
+    const own = this.own.get(founded.grant);
+    if (own !== undefined && own.cell === record.cell && own.epoch === founded.epoch) return Buffer.from(own.key);
+    const placed = record.grants
+      .filter((grant) => grant.epoch === founded.epoch && grant.writers.includes(this.device.writer))
+      .sort((a, b) => Number(b.founding) - Number(a.founding) || byText(a.hash, b.hash));
+    for (const grant of placed) {
+      const key = this.open(grant.grant, grant.hash);
+      if (key !== undefined) return key;
+    }
+    return undefined;
+  }
+
+  /** What this device's wrap in a grant opens to, or undefined. */
+  private open(grant: CellGrant, hash: string): Buffer | undefined {
+    let key = this.unwrapped.get(hash);
+    if (key === undefined) {
+      const mine = grant.wraps.find((wrap) => wrap.writer === this.device.writer);
+      key = (mine === undefined ? undefined : unwrapEpochKey({ cell: grant.cell, epoch: grant.epoch, writer: this.device.writer, privateKey: this.device.privateKey, wrap: mine.wrap })) ?? null;
+      this.unwrapped.set(hash, key);
+    }
+    return key === null ? undefined : Buffer.from(key);
+  }
+
+  /** Writes the ring through to SecretStorage, merged with what another window stored, so no window drops a key the other settled or made. */
   private async persist(): Promise<void> {
     const name = EPOCH_KEY_SECRET_PREFIX + this.project;
-    const merged = cachedKeys(await this.secrets.get(name));
-    for (const [id, key] of this.keys) merged.set(id, key);
-    for (const [id, key] of merged) if (!this.keys.has(id)) this.keys.set(id, key);
-    const keys = [...merged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([id, key]) => {
+    const stored = cachedRing(await this.secrets.get(name));
+    for (const [id, key] of stored.keys) if (!this.keys.has(id)) this.keys.set(id, key);
+    for (const [grant, item] of stored.own) if (!this.own.has(grant)) this.own.set(grant, item);
+    const keys = [...this.keys].sort(([a], [b]) => byText(a, b)).map(([id, key]) => {
       const [cell, epoch] = id.split('/');
       return [cell, Number(epoch), key.toString('base64url')];
     });
-    await this.secrets.store(name, JSON.stringify({ v: 1, keys }));
+    const own = [...this.own.values()].sort((a, b) => byText(a.grant, b.grant)).map((item) => [item.cell, item.epoch, item.grant, item.key.toString('base64url')]);
+    await this.secrets.store(name, JSON.stringify({ v: 2, keys, own }));
   }
 }
 

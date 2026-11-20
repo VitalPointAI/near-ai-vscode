@@ -29,7 +29,7 @@ import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import { isRecord } from '../../domain/team/validate';
 import { buildGrant, newEpochKey, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
-import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, entryHash, openBlob, openBody, writerIdOf } from '../../domain/replica/entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { addEntries, createFoldState } from '../../domain/replica/fold';
 import type { FoldResult, FoldState } from '../../domain/replica/fold';
@@ -40,6 +40,7 @@ import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
+import { deviceKeyOf } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
@@ -354,7 +355,7 @@ export class ReplicaProject {
     const anchor: RosterAnchor = { genesisHash: genesis.hash, project, lead: { member: input.lead.member, writer: device.writer, publicKey: device.identity.publicKey, x25519: device.encryption.publicKey } };
 
     const ring = await DeviceKeyRing.load(deps.secrets, project, { writer: device.writer, privateKey: device.encryption.privateKey });
-    await ring.addOwn(project, 1, baseKey);
+    await ring.addOwn(project, 1, baseKey, grantHash(founding));
     if (!(await writeAnchorFile(genesisPinFile(deps.globalStorageDir, project), anchor))) return refuse('pin-damaged');
     const grant = await store.putGrant(project, 1, founding);
     if (!('ok' in grant)) return storeRefused(grant);
@@ -383,9 +384,10 @@ export class ReplicaProject {
   /**
    * Joins a shared project in `root` from the welcome file the lead returned after admitting this device (D-15, D-44, D-45). The welcome is read
    * against the pinned genesis (the pin from pinAnchor, or `anchor` on a first join when nothing is pinned yet) and this device's writer; a welcome
-   * for another project is refused pin-mismatch and anything else wrong welcome-refused, before anything is written. Then: the grants are opened
-   * into the key ring (SecretStorage), the pin is written if it was not, the roster entries go into the store through the decode check as entries
-   * from outside (D-05), the grants are stored, and project.json is written. A folder that holds another shared project is refused pin-mismatch.
+   * for another project is refused pin-mismatch and anything else wrong welcome-refused, before anything is written. Then: the pin is written if it
+   * was not, the roster entries go into the store through the decode check as entries from outside (D-05), the grants are stored, the roster is
+   * folded so the key ring takes the keys of the grants it placed (CR-01), and project.json is written. A folder that holds another shared project
+   * is refused pin-mismatch.
    */
   public static async joinFromWelcome(root: string, deps: ReplicaProjectDeps, welcome: unknown, anchor?: RosterAnchor): Promise<ReplicaProject | ProjectRefused> {
     const project = anchor?.project ?? welcomeProject(welcome);
@@ -404,7 +406,6 @@ export class ReplicaProject {
     if (local.kind === 'anchor' && !sameAnchor(local.anchor, pinned)) return refuse('pin-mismatch');
     // Every check has passed; from here on the join writes.
     const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, { writer: device.writer, privateKey: device.encryption.privateKey });
-    await ring.openGrants(read.welcome.grants);
     if (pin.kind === 'missing' && !(await writeAnchorFile(pinFile, pinned))) return refuse('pin-mismatch');
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
@@ -469,6 +470,8 @@ export class ReplicaProject {
   /** This device's own stored entry of a kind whose data the predicate accepts, or undefined. Used so a retried step does not write twice (Pitfall 4). */
   public findOwn(kind: string, predicate: (data: unknown) => boolean): Promise<OwnEntry | undefined> {
     return this.exclusive(async () => {
+      // The ring answers only the keys the roster settled, so the roster is folded first.
+      await this.foldNow();
       for (const entry of this.store.entries()) {
         if (entry.header.writer !== this.device.writer) continue;
         const opened = await this.openEntry(entry);
@@ -479,7 +482,11 @@ export class ReplicaProject {
     });
   }
 
-  /** Stores signed cell grants (every one must read) and opens the ones addressed to this device into its key ring. */
+  /**
+   * Stores signed cell grants (every one must read), then folds the roster, so the key ring takes the keys of the grants the roster placed. A grant the
+   * roster does not place (a signer who may not change the roster, an epoch it has not founded) is stored and never opened (CR-01). opened is how many
+   * epoch keys the ring answers for that it did not before.
+   */
   public putGrants(grants: readonly unknown[]): Promise<{ ok: true; stored: number; opened: number } | ProjectRefused> {
     return this.exclusive(async () => {
       const read = grants.map((signed) => {
@@ -491,8 +498,10 @@ export class ReplicaProject {
         const stored = await this.store.putGrant(item.grant.cell, item.grant.epoch, item.signed);
         if (!('ok' in stored)) return storeRefused(stored);
       }
-      const opened = await this.keys.openGrants(grants);
-      return { ok: true as const, stored: read.length, opened };
+      const before = this.keys.size;
+      const folded = await this.settledFold();
+      if (folded !== undefined) return folded;
+      return { ok: true as const, stored: read.length, opened: this.keys.size - before };
     });
   }
 
@@ -569,9 +578,11 @@ export class ReplicaProject {
     return this.ownDecoder;
   }
 
-  /** A welcome already read and checked: its grants opened, its entries stored through the decode check, its grants stored. */
+  /**
+   * A welcome already read and checked: its entries stored through the decode check, its grants stored, and the roster folded so the key ring takes
+   * the keys of the grants the roster placed. The welcome is not signed as a whole, so none of its grants is opened on its own word (CR-01).
+   */
   private async receiveWelcome(welcome: WelcomeFile, entries: readonly SealedEntry[]): Promise<WelcomeResult> {
-    await this.keys.openGrants(welcome.grants);
     const ingested = await this.store.ingestForeign(entries, welcome.blobs, this.foreignCheck(welcome.blobs));
     if (!('ok' in ingested)) return storeRefused(ingested);
     for (const signed of welcome.grants) {
@@ -580,6 +591,8 @@ export class ReplicaProject {
       const stored = await this.store.putGrant(grant.grant.cell, grant.grant.epoch, signed);
       if (!('ok' in stored)) return storeRefused(stored);
     }
+    const folded = await this.settledFold();
+    if (folded !== undefined) return folded;
     return { ok: true, added: ingested.added, held: ingested.held };
   }
 
@@ -638,10 +651,10 @@ export class ReplicaProject {
     await this.loadGrants();
     await this.loadBlobs();
     const entries = this.store.entries();
-    const rosterKey = `${entries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}`;
-    if (this.rosterState === undefined || rosterKey !== this.rosterKey) {
-      this.rosterState = foldRoster({ entries, anchor: this.anchor, keys: this.keys.keyRing(), blobs: (hash) => this.blobCache.get(hash), grants: this.grantList, now: this.now() });
-      this.rosterKey = rosterKey;
+    const rosterKey = (): string => `${entries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}`;
+    if (this.rosterState === undefined || rosterKey() !== this.rosterKey) {
+      this.rosterState = await this.foldRosterAndKeys(entries);
+      this.rosterKey = rosterKey();
     }
     const roster = this.rosterState;
     const ctxKey = `${rosterSignature(roster)}|${this.keys.version}|${this.blobCache.size}`;
@@ -675,17 +688,85 @@ export class ReplicaProject {
     };
   }
 
-  /** Grants new on disk since the last look: kept for the roster fold and opened into the key ring. Unreadable grant files are left out. */
+  /** A fold run for its effect on the key ring, after grants or a welcome were stored: undefined, or the refusal when the store refuses on refresh. */
+  private async settledFold(): Promise<ProjectRefused | undefined> {
+    try {
+      await this.foldNow();
+      return undefined;
+    } catch (error) {
+      if (error instanceof ReplicaProjectError) return error.refusal;
+      throw error;
+    }
+  }
+
+  /**
+   * Folds the roster and settles the key ring in turns until neither changes (CR-01, D-44). The ring takes a key only from what the fold placed, and
+   * the roster stream is sealed under the base cell's epoch keys, so a fold places the grants of the epochs it reached, settle takes their keys, and
+   * the next fold reads the roster entries sealed under them. While the ring does not answer a base epoch a roster entry is sealed under, the fold
+   * may also read with a reading key (readingKeys), which is never written with and never kept.
+   */
+  private async foldRosterAndKeys(entries: readonly SealedEntry[]): Promise<RosterState> {
+    const project = this.anchor.project;
+    let reading = new Map<number, Buffer>();
+    const keys = (stream: string, epoch: number): Buffer | undefined => this.keys.epochKey(stream, epoch) ?? (stream === project ? reading.get(epoch) : undefined);
+    const fold = (): RosterState => foldRoster({ entries, anchor: this.anchor, keys, blobs: (hash) => this.blobCache.get(hash), grants: this.grantList, now: this.now() });
+    let roster = fold();
+    // Each turn reaches at least one more base epoch or ends the loop, so the bound only stops a roster that keeps changing its mind.
+    const epochs = new Set(entries.filter((entry) => entry.header.stream === project).map((entry) => entry.header.epoch)).size;
+    for (let turn = 0; turn < 2 * epochs + 2; turn += 1) {
+      const settled = await this.keys.settle(roster.cells);
+      const next = this.readingKeys(roster, entries);
+      if (settled === 0 && sameKeys(next, reading)) break;
+      reading = next;
+      roster = fold();
+    }
+    return roster;
+  }
+
+  /**
+   * Base cell keys to read the roster with while this device catches up (a device admitted after a rekey of the base cell gets the earlier epochs in
+   * grants placed only at its admission, D-45). For each base epoch the ring does not answer, the first of the ring's reading candidates that opens a
+   * roster entry of that epoch signed by a device of someone who has held the lead or deputy role on this roster (the pinned lead from the start).
+   * A key from a grant planted by anyone else opens no such entry, so it is never used; and no reading key is ever written with or kept.
+   */
+  private readingKeys(roster: RosterState, entries: readonly SealedEntry[]): Map<number, Buffer> {
+    const project = this.anchor.project;
+    const keys = new Map<number, Buffer>();
+    const unheld = new Set<number>();
+    for (const entry of entries) if (entry.header.stream === project && !this.keys.holds(project, entry.header.epoch)) unheld.add(entry.header.epoch);
+    if (unheld.size === 0) return keys;
+    const candidates = this.keys.readingCandidates(project, this.grantList).filter((candidate) => unheld.has(candidate.epoch));
+    if (candidates.length === 0) return keys;
+    const tried = new Set(candidates.map((candidate) => candidate.epoch));
+    const holders = new Set<string>([this.anchor.lead.member]);
+    for (const lead of roster.leads) holders.add(lead.member);
+    for (const deputy of roster.deputies) if (deputy.member !== undefined) holders.add(deputy.member);
+    const waiting = new Map<number, SealedEntry[]>();
+    for (const entry of entries) {
+      const { stream, epoch, writer } = entry.header;
+      if (stream !== project || !tried.has(epoch)) continue;
+      const device = deviceKeyOf(roster.members, writer);
+      if (device === undefined || !holders.has(device.member) || !verifyHeader(entry.header, device.publicKey)) continue;
+      const list = waiting.get(epoch) ?? [];
+      list.push(entry);
+      waiting.set(epoch, list);
+    }
+    for (const candidate of candidates) {
+      const sealed = waiting.get(candidate.epoch);
+      if (sealed === undefined || keys.has(candidate.epoch)) continue;
+      if (sealed.some((entry) => openBody(candidate.key, entry.header, Buffer.from(entry.body, 'base64url')) !== undefined)) keys.set(candidate.epoch, candidate.key);
+    }
+    return keys;
+  }
+
+  /** Grants new on disk since the last look, kept for the roster fold. Only the grants the fold places are opened into the key ring (settle). */
   private async loadGrants(): Promise<void> {
     const { grants } = await this.store.grants();
-    const fresh: unknown[] = [];
     for (const grant of grants) {
       if (this.grantHashes.has(grant.hash)) continue;
       this.grantHashes.add(grant.hash);
       this.grantList.push(grant.signed);
-      fresh.push(grant.signed);
     }
-    if (fresh.length > 0) await this.keys.openGrants(fresh);
   }
 
   /** Blobs new on disk since the last look, read through the store (which checks each against its name and refuses links). */
@@ -762,6 +843,13 @@ export class ReplicaProject {
     this.lamports.set(built.hash, lamport);
     return built;
   }
+}
+
+/** Two sets of reading keys hold the same key for every epoch. */
+function sameKeys(a: ReadonlyMap<number, Buffer>, b: ReadonlyMap<number, Buffer>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [epoch, key] of a) if (b.get(epoch)?.equals(key) !== true) return false;
+  return true;
 }
 
 /** What the main fold's roster view answers from: the applied line, the splits and choices, and the grants placed. */

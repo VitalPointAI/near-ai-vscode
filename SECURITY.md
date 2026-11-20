@@ -1390,11 +1390,20 @@ to. Both stay on the machine.
   its writer id. The roster entry that admits or adds the device carries that signature, and the
   roster checks it, so nobody can swap in another encryption key for the device without the
   signature failing.
-- **Opened cell keys are cached in secret storage only.** When a grant addressed to this device
-  arrives, the device opens its wrap with the private encryption key and keeps the cell key in
-  memory and in secret storage (one value per project, `nearAi.staff.epochKeys.<project>`). If that
-  cached value is lost, nothing is lost with it: the grants on disk are encrypted to this device,
-  so the keys are opened again from them.
+- **Only the roster decides which key a cell uses.** A device takes a cell key only from a grant
+  the shared roster has accepted (signed by a device that could change the roster, for a key epoch
+  the roster has started, or the exact grant the roster recorded by hash), or a key it made itself
+  for a grant the roster then recorded. A grant from anyone else, or for a key epoch that has not
+  started yet, is kept on disk but never opened into the key ring, so it cannot choose the key this
+  device writes with. If a new key could not be recorded, the next one is made for the same epoch
+  and only the recorded one is used. While a device catches up on the roster, it may try the keys
+  of other grants addressed to it to read the roster's own entries signed by the lead or the
+  deputy, but it never writes with such a key or keeps it.
+- **Opened cell keys are cached in secret storage only.** The device opens its wrap with the
+  private encryption key and keeps the cell key in memory and in secret storage (one value per
+  project, `nearAi.staff.epochKeys.<project>`), together with the keys it made for new cells and
+  new key epochs. If that cached value is lost, nothing in a grant is lost with it: the grants on
+  disk are encrypted to this device, so the keys are opened again from them.
 - **The project is pinned outside the project folder.** When a device creates or joins a shared
   project, it records which project that is (the hash of its first signed entry, and the staff
   lead's public keys) in the extension's own storage, the way Team Mode keeps its trust record.

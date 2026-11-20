@@ -700,8 +700,10 @@ async function writeRekeys(shared: SharedProjectHost, plans: readonly RekeyPlan[
       return { writer, wrap: wrapEpochKey({ cell: plan.cell, epoch, writer, recipient, epochKey: key }) };
     });
     const founding = buildGrant(project.signer, { cell: plan.cell, epoch, roster: head.hash, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw), wraps });
-    // The key and the founding grant are kept before the entry that commits to them, so a crash never leaves an epoch nobody can open.
-    await project.keys.addOwn(plan.cell, epoch, key);
+    // The key and the founding grant are kept before the entry that commits to them, so a crash never leaves an epoch nobody can open. The key is
+    // kept with its grant's hash: if the entry is not written, the next rekey of the cell makes another key for the same epoch, and the ring takes
+    // the one whose grant the roster commits to (MJ-04).
+    await project.keys.addOwn(plan.cell, epoch, key, grantHash(founding));
     const stored = await project.putGrants([founding]);
     if (isProjectRefused(stored)) return fromProject(stored);
     const written = await append(shared, 'cell.rekey', { cell: plan.cell, epoch, reason: plan.reason, grant: grantHash(founding) }, head.hash);
