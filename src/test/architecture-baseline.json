@@ -1,0 +1,37 @@
+{
+  "rules": {
+    "upward-import": [
+      "agent/attachments.ts -> services/nearAiClient",
+      "agent/context.ts -> services/spendLedger",
+      "agent/cyberExploitTools.ts -> services/cyberSandbox",
+      "agent/extraTools.ts -> services/contextGraphMemory",
+      "agent/extraTools.ts -> services/nearAiClient",
+      "agent/safetyModel.ts -> services/spendLedger",
+      "agent/teamLiveState.ts -> services/agentActivity",
+      "agent/teams.ts -> services/agentTeams",
+      "agent/toolCatalog.ts -> services/contextGraphMemory",
+      "agent/toolCatalog.ts -> services/nearAiClient",
+      "benchmark/results.ts -> services/nearAiClient",
+      "benchmark/runner.ts -> services/nearAiClient",
+      "benchmark/runner.ts -> services/spendLedger",
+      "benchmark/store.ts -> services/stateHome",
+      "benchmark/tasks.ts -> services/nearAiClient",
+      "domain/auth.ts -> services/nearAiClient",
+      "domain/cyberLimits.ts -> agent/permissions",
+      "domain/state/syncStatus.ts -> services/syncFlows",
+      "gsd/host.ts -> services/agentSession",
+      "staff/logisticsHost.ts -> services/stateMirrorLock",
+      "staff/observationStore.ts -> services/stateMirrorLock",
+      "staff/replica/keyring.ts -> services/auth",
+      "staff/replica/keyring.ts -> services/stateMirrorLock",
+      "staff/replica/marks.ts -> services/auth",
+      "staff/replica/replicaProject.ts -> services/auth",
+      "staff/replica/store.ts -> services/auth",
+      "staff/replica/store.ts -> services/stateMirrorLock",
+      "staff/sim/simSession.ts -> services/staffScenarioLoader",
+      "staff/staffHost.ts -> services/auth",
+      "staff/staffHost.ts -> services/stateMirrorLock"
+    ]
+  },
+  "fileSizes": {}
+}
