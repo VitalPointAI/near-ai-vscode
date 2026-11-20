@@ -1,11 +1,17 @@
 // The route decision (CLAS-05, CLAS-06, D-30, D-36, D-37, D-47): which tier a mark needs, and whether one client, endpoint and model satisfy it, from
 // local facts only. No network, no clock, no key.
+// Phase 41 (D-36): on a request those checks allowed, decideRoute's policy steps then run in this order: allowed models (route.model-not-allowed), the
+// place (route.endpoint-unknown), its ceiling (route.endpoint-ceiling), a pin or binding (route.endpoint-pin), an authorization
+// (route.authorization-missing), an accredited device (route.accredited-device, reported unless your organization turns refusal on), residency
+// (route.residency), the passport (route.passport, reported only) and clearance (route.clearance). gateDecideRoute.test.ts holds their behaviour.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as config from '../domain/config';
 import { isLoopbackHost, isSecureEndpoint } from '../domain/config';
 import { raiseMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
+import { parseEndpoints } from '../domain/gate/endpoints';
+import type { PolicyEndpoint } from '../domain/gate/endpoints';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import {
@@ -13,7 +19,7 @@ import {
   isBindingFresh, isLocalRouteHost, localHostMatch, localHostPatternNotice, parseRouting, patternLocalHosts, routingWhileFailedClosed, tierForLabel, tierForMark,
   usesHttps
 } from '../domain/gate/routing';
-import type { ConnectionBindingFact, RouteFacts, RoutingTable } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
 
 function label(scale: string, level: string, extra: Partial<Label> = {}): Label {
   return { scale, level, compartments: [], releasability: [], handling: [], ...extra };
@@ -72,9 +78,19 @@ test('tracer: a mark goes to a tier and the client, endpoint and model are judge
   assert.equal(decideRoute(markOf(org('Restricted')), withLocalHosts('models.example.org'), LOCAL_REMOTE).allowed, true);
 });
 
+/** A v2 policy for decideRoute's sixth argument: these places, nothing else (no authorization, residency, passport or roster). */
+function policyOf(...entries: Array<Record<string, unknown>>): RoutePolicy {
+  const parsed = parseEndpoints(entries, SCALE_PRESETS);
+  if (!parsed.ok) throw new Error(`endpoints: ${parsed.reason} ${parsed.path}`);
+  const endpoints: readonly PolicyEndpoint[] = parsed.value;
+  return { endpoints, authorizations: [], scales: SCALE_PRESETS, mappings: [], clearances: [], organization: false, requireAccreditedDevice: false, now: NOW };
+}
+
+const MODELS_INTERNAL = { id: 'models', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Internal'] };
+
 test('every rule id can be reached, and every refusing rule has one plain sentence that says nothing was sent', () => {
   const reached = new Set<string>();
-  const cases: Array<[Mark, RoutingTable, RouteFacts]> = [
+  const cases: Array<[Mark, RoutingTable, RouteFacts, RoutePolicy?]> = [
     [markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD],
     [markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE_BOUND],
     [markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE],
@@ -89,9 +105,13 @@ test('every rule id can be reached, and every refusing rule has one plain senten
     [markOf(org('Internal')), DEFAULT_ROUTING, { ...NEAR_TEE, clientRoute: undefined }],
     // Coherence review S1: a local-only level on a host only a *. pattern names, and a classified level on any host but this computer.
     [markOf(org('Restricted')), withLocalHosts('*.example.org'), LOCAL_REMOTE],
-    [markOf(label('ca-classified', 'Secret')), withLocalHosts('models.example.org'), LOCAL_REMOTE]
+    [markOf(label('ca-classified', 'Secret')), withLocalHosts('models.example.org'), LOCAL_REMOTE],
+    // Phase 41 (D-36, D-37): the policy steps, each reached by a request the checks above allowed.
+    [markOf(org('Public')), DEFAULT_ROUTING, { ...NEAR_CLOUD, allowedModels: ['example/other-model'] }],
+    [markOf(org('Restricted')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf()],
+    [markOf(org('Restricted')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf(MODELS_INTERNAL)]
   ];
-  for (const [mark, routing, facts] of cases) reached.add(decideRoute(mark, routing, facts).rule);
+  for (const [mark, routing, facts, policy] of cases) reached.add(decideRoute(mark, routing, facts, undefined, undefined, policy).rule);
   assert.deepEqual([...reached].sort(), [...ROUTE_RULES].sort());
   assert.deepEqual(Object.keys(ROUTE_REFUSALS).sort(), ROUTE_RULES.filter((rule) => !['route.any-cloud', 'route.attested-cloud', 'route.local-only', 'route.default-session'].includes(rule)).sort());
   for (const sentence of Object.values(ROUTE_REFUSALS)) {
