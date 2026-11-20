@@ -2,13 +2,19 @@
 // caught from what this computer already holds and named in one plain sentence. Pure: every test passes time in and builds checkpoints by hand.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import test from 'node:test';
-import { signCheckpoint } from '../domain/replica/checkpoint';
+import { CHECKPOINT_MAX_BYTES, signCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint, SignedCheckpoint } from '../domain/replica/checkpoint';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { RosterView } from '../domain/replica/rosterView';
 import type { HeadSet } from '../domain/replica/transport';
-import { HUB_FINDINGS, createWitness, findingSentence, witnessBlob, witnessCheckpoint, witnessEntry, witnessHeads, witnessResponse } from '../domain/replica/hubWitness';
+import type { Citation } from '../domain/replica/chain';
+import {
+  DELAYED_AFTER_MS, HUB_FINDINGS, MAX_OWN_WAITS, MAX_SEEN_HEADS, MAX_WAITING, WITHHELD_GRACE_MS, WITNESS_MAX_BYTES, WITNESS_REFUSALS, createWitness, findingSentence, readWitness,
+  serializeWitness, witnessBlob, witnessCheckpoint, witnessCitations, witnessEntry, witnessHeads, witnessOwn, witnessResponse
+} from '../domain/replica/hubWitness';
 import type { HubFinding, WitnessState } from '../domain/replica/hubWitness';
 import { fixedSigner } from './helpers/replicaWorld';
 
@@ -295,8 +301,200 @@ test('every finding carries kind, sentence and detail, with ids cut to 12 charac
     assert.deepEqual(Object.keys(item).filter((key) => key !== 'count').sort(), ['detail', 'kind', 'sentence']);
     assert.equal(typeof item.sentence, 'string');
     const text = JSON.stringify(item);
-    assert.doesNotMatch(text, /—/);
+    assert.doesNotMatch(text, /\u2014/);
     assert.doesNotMatch(text, /[0-9a-f]{64}/);
     assert.doesNotMatch(text, /[0-9a-f]{13,}/);
   }
+});
+
+// Task 3: withheld and delayed over injected time, the saved state, the sentence table and the import rule (D-50, D-52, D-63).
+
+const T0 = new Date('2026-11-19T12:00:00.000Z');
+const at = (ms: number): Date => new Date(T0.getTime() + ms);
+const cite = (writer: string, seq: number, stream = STREAM): Citation => ({ stream, writer, seq, hash: headHash(writer, seq) });
+
+test('withheld: cited entries not delivered within the grace period are counted, and a delivered one stops waiting', () => {
+  const cited = [cite(A.writer, 1), cite(A.writer, 2), cite(B.writer, 4)];
+  const held = new Set<string>();
+  const first = witnessCitations(deepFreeze(createWitness(HUB_ID, PROJECT)), cited, held, T0);
+  assert.deepEqual(first.findings, []);
+  assert.equal(first.state.waiting.length, 3);
+  const early = witnessCitations(first.state, cited, held, at(WITHHELD_GRACE_MS - 1));
+  assert.deepEqual(early.findings, []);
+  // The first time each hash was seen missing is kept: a later citation does not restart the clock.
+  assert.deepEqual(early.state.waiting.map((row) => row.since), [T0.toISOString(), T0.toISOString(), T0.toISOString()]);
+  const due = witnessCitations(early.state, cited, held, at(WITHHELD_GRACE_MS));
+  assert.deepEqual(kinds(due.findings), ['withheld']);
+  assert.equal(due.findings[0].count, 3);
+  assert.equal(due.findings[0].sentence, 'The hub has not delivered 3 changes that other people\'s work refers to.');
+  // One is delivered meanwhile; a fourth is cited later and is not due yet.
+  const delivered = (hash: string): boolean => hash === headHash(A.writer, 1);
+  const later = witnessCitations(due.state, [...cited, cite(B.writer, 5)], delivered, at(WITHHELD_GRACE_MS + 1000));
+  assert.deepEqual(kinds(later.findings), ['withheld']);
+  assert.equal(later.findings[0].count, 2);
+  assert.equal(later.state.waiting.some((row) => row.hash === headHash(A.writer, 1)), false);
+  assert.equal(later.state.waiting.length, 3);
+  // A verified new entry stops waiting as well.
+  const entry = witnessEntry(later.state, { hash: headHash(A.writer, 2), verified: true });
+  assert.equal(entry.state.waiting.length, 2);
+  const single = witnessCitations(entry.state, [], new Set([headHash(B.writer, 5)]), at(WITHHELD_GRACE_MS * 2));
+  assert.equal(single.findings[0].sentence, 'The hub has not delivered 1 change that other people\'s work refers to.');
+});
+
+const ownHeads = (seq: number, stream = STREAM): HeadSet['streams'] => [{ stream, heads: [{ writer: A.writer, seq, hash: headHash(A.writer, seq) }] }];
+
+test('delayed: own entries no checkpoint covers for 5 minutes while connected are named in whole minutes', () => {
+  const start = witnessOwn(deepFreeze(createWitness(HUB_ID, PROJECT)), ownHeads(2), T0, true);
+  assert.deepEqual(start.findings, []);
+  assert.equal(start.state.own.length, 1);
+  assert.deepEqual(witnessOwn(start.state, ownHeads(2), at(DELAYED_AFTER_MS - 1), true).findings, []);
+  const due = witnessOwn(start.state, ownHeads(3), at(DELAYED_AFTER_MS), true);
+  assert.deepEqual(kinds(due.findings), ['delayed']);
+  assert.equal(due.findings[0].count, 5);
+  assert.equal(due.findings[0].sentence, 'The hub has not confirmed your changes for 5 minutes.');
+  const longer = witnessOwn(due.state, ownHeads(3), at(DELAYED_AFTER_MS + 150000), true);
+  assert.equal(longer.findings[0].sentence, 'The hub has not confirmed your changes for 7 minutes.');
+});
+
+test('delayed: nothing while not connected, and the clock starts again on the next connection', () => {
+  const start = witnessOwn(createWitness(HUB_ID, PROJECT), ownHeads(2), T0, true);
+  const offline = witnessOwn(start.state, ownHeads(2), at(DELAYED_AFTER_MS * 2), false);
+  assert.deepEqual(offline.findings, []);
+  assert.deepEqual(offline.state.own, []);
+  const back = witnessOwn(offline.state, ownHeads(2), at(DELAYED_AFTER_MS * 2 + 1000), true);
+  assert.deepEqual(back.findings, []);
+  assert.deepEqual(kinds(witnessOwn(back.state, ownHeads(2), at(DELAYED_AFTER_MS * 3 + 1000), true).findings), ['delayed']);
+});
+
+test('delayed: a checkpoint covering own entries clears it, and entries past the covered part start a new clock', () => {
+  const start = witnessOwn(createWitness(HUB_ID, PROJECT), ownHeads(4), T0, true);
+  const covered = feed(start.state, checkpoint(one(A.writer, 4)));
+  const after = witnessOwn(covered, ownHeads(4), at(DELAYED_AFTER_MS * 2), true);
+  assert.deepEqual(after.findings, []);
+  assert.deepEqual(after.state.own, []);
+  // Part covered: seq 4 is in the checkpoint, seq 6 is not, so the clock starts when that was first seen.
+  const partly = witnessOwn(feed(start.state, checkpoint(one(A.writer, 4))), ownHeads(6), at(DELAYED_AFTER_MS), true);
+  assert.deepEqual(partly.findings, []);
+  assert.equal(partly.state.own[0].since, at(DELAYED_AFTER_MS).toISOString());
+  // Covered below the first uncovered entry: seq 4 is still uncovered since T0, so the clock keeps running from then.
+  const behind = witnessOwn(feed(start.state, checkpoint(one(A.writer, 3))), ownHeads(6), at(DELAYED_AFTER_MS), true);
+  assert.deepEqual(kinds(behind.findings), ['delayed']);
+});
+
+test('delayed: only cells the hub can checkpoint count (D-63), and a distrusted hub gives none', () => {
+  const start = witnessOwn(createWitness(HUB_ID, PROJECT), [...ownHeads(2), ...ownHeads(1, STREAM_B)], T0, true, [STREAM]);
+  assert.deepEqual(start.state.own.map((row) => row.stream), [STREAM]);
+  const due = witnessOwn(start.state, [...ownHeads(2), ...ownHeads(1, STREAM_B)], at(DELAYED_AFTER_MS), true, [STREAM_B]);
+  assert.deepEqual(due.findings, []);
+  const forked = witnessCheckpoint(feed(createWitness(HUB_ID, PROJECT), checkpoint(one(B.writer, 5))), checkpoint(one(B.writer, 5, 'other')), roster()).state;
+  const first = witnessOwn(forked, ownHeads(2), T0, true);
+  assert.deepEqual(witnessOwn(first.state, ownHeads(2), at(DELAYED_AFTER_MS * 2), true).findings, []);
+});
+
+// A state holding every kind of record: marks, waits, own waits, replays and the newest checkpoint.
+function richState(): WitnessState {
+  let state = feed(createWitness(HUB_ID, PROJECT), checkpoint({ streams: [{ heads: [{ writer: A.writer, seq: 3 }, { writer: B.writer, seq: 1 }] }] }));
+  state = witnessHeads(state, headSet([STREAM, A.writer, 5], [STREAM_B, B.writer, 2]), roster()).state;
+  state = witnessCitations(state, [cite(B.writer, 7)], new Set(), T0).state;
+  state = witnessOwn(state, ownHeads(6), T0, true).state;
+  state = witnessEntry(state, { hash: headHash(A.writer, 1), held: true }).state;
+  return state;
+}
+
+test('the saved state reads back unchanged, for a trusted hub and for a distrusted one with its proof', () => {
+  const state = richState();
+  const back = readWitness(serializeWitness(state), { hub: HUB_ID, project: PROJECT });
+  assert.equal(back.ok, true);
+  assert.deepEqual((back as { state: WitnessState }).state, state);
+  const forked = witnessCheckpoint(state, checkpoint({ streams: [{ heads: [{ writer: A.writer, seq: 3, label: 'other' }, { writer: B.writer, seq: 1 }] }] }), roster()).state;
+  assert.equal(forked.distrusted, true);
+  const forkedBack = readWitness(serializeWitness(forked), { hub: HUB_ID, project: PROJECT });
+  assert.equal(forkedBack.ok, true);
+  assert.deepEqual((forkedBack as { state: WitnessState }).state, forked);
+  // The read-back state keeps working: the distrusted hub is still distrusted after a restart.
+  assert.deepEqual(kinds(witnessCheckpoint((forkedBack as { state: WitnessState }).state, checkpoint(one(A.writer, 9)), roster()).findings), ['forked-view']);
+});
+
+test('reading refuses a state over its size cap, for another hub or project, or malformed, each with a plain sentence', () => {
+  const text = serializeWitness(richState());
+  const expect = { hub: HUB_ID, project: PROJECT };
+  const refused = (input: string, wanted = expect): string => {
+    const result = readWitness(input, wanted);
+    assert.equal(result.ok, false);
+    const failure = result as { reason: keyof typeof WITNESS_REFUSALS; message: string };
+    assert.equal(failure.message, WITNESS_REFUSALS[failure.reason]);
+    return failure.reason;
+  };
+  assert.equal(refused(' '.repeat(WITNESS_MAX_BYTES + 1)), 'too-large');
+  assert.equal(refused(text, { hub: 'hub-exercise-south', project: PROJECT }), 'other-hub');
+  assert.equal(refused(text, { hub: HUB_ID, project: OTHER_PROJECT }), 'other-project');
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  const variant = (change: (value: Record<string, unknown>) => void): string => {
+    const copy = structuredClone(parsed);
+    change(copy);
+    return JSON.stringify(copy);
+  };
+  for (const input of [
+    'not json',
+    '[]',
+    variant((value) => { value.extra = 1; }),
+    variant((value) => { value.v = 2; }),
+    variant((value) => { (value.seen as Array<Record<string, unknown>>)[0].hash = 'short'; }),
+    variant((value) => { (value.waiting as Array<Record<string, unknown>>)[0].since = 'yesterday'; }),
+    variant((value) => { (value.own as Array<Record<string, unknown>>)[0].seq = -1; }),
+    variant((value) => { value.replayed = 1.5; }),
+    variant((value) => { value.distrusted = 'no'; }),
+    variant((value) => { (value.newest as Record<string, unknown>).payload = { type: 'checkpoint' }; }),
+    variant((value) => { value.proof = { a: value.newest, b: value.newest, stream: STREAM, reason: 'made-up' }; }),
+    variant((value) => { value.distrusted = true; })
+  ]) assert.equal(refused(input), 'malformed', input.slice(0, 60));
+  for (const sentence of Object.values(WITNESS_REFUSALS)) assert.doesNotMatch(sentence, /\u2014/);
+});
+
+test('the caps keep a full saved state under its size limit with room for a proof of two full checkpoints', () => {
+  let state = createWitness(HUB_ID, PROJECT);
+  const members = Array.from({ length: MAX_SEEN_HEADS + 10 }, (_unused, index) => fixedSigner(`cap-${index}`));
+  const capRoster = { deviceKey: (writer: string) => (members.some((member) => member.writer === writer) ? { publicKey: 'x', member: 'm' } : undefined) };
+  state = witnessHeads(state, { streams: [{ stream: STREAM, heads: members.map((member) => ({ writer: member.writer, seq: Number.MAX_SAFE_INTEGER, hash: headHash(member.writer, 1) })) }] }, capRoster).state;
+  assert.equal(state.seen.length, MAX_SEEN_HEADS);
+  state = witnessCitations(state, members.map((member) => cite(member.writer, Number.MAX_SAFE_INTEGER)), new Set(), T0).state;
+  assert.equal(state.waiting.length, MAX_WAITING);
+  const own = members.map((member, index) => ({ stream: hex(`own/${index}`).slice(0, 32), heads: [{ writer: member.writer, seq: Number.MAX_SAFE_INTEGER, hash: headHash(member.writer, 1) }] }));
+  state = witnessOwn(state, own, T0, true).state;
+  assert.equal(state.own.length, MAX_OWN_WAITS);
+  const size = Buffer.byteLength(serializeWitness(state), 'utf8');
+  assert.ok(size + 2 * CHECKPOINT_MAX_BYTES + 4096 < WITNESS_MAX_BYTES, `a full state is ${size} bytes`);
+});
+
+test('the sentence table: all eight ids, one plain sentence each, counts filled in, no em-dash', () => {
+  assert.deepEqual(Object.keys(HUB_FINDINGS).sort(), ['corrupt-blob', 'delayed', 'forked-view', 'injected', 'replayed', 'rolled-back', 'withheld', 'wrong-project']);
+  for (const [kind, sentence] of Object.entries(HUB_FINDINGS)) {
+    assert.equal(typeof sentence, 'string', kind);
+    assert.match(sentence, /^The hub [^.]*\.$/, kind);
+    assert.doesNotMatch(sentence, /\u2014/, kind);
+    assert.doesNotMatch(findingSentence(kind as keyof typeof HUB_FINDINGS, 2), /\bN\b/, kind);
+  }
+  assert.equal(findingSentence('delayed', 1), 'The hub has not confirmed your changes for 1 minute.');
+  assert.equal(findingSentence('withheld', 12), 'The hub has not delivered 12 changes that other people\'s work refers to.');
+  assert.equal(findingSentence('withheld'), 'The hub has not delivered some changes that other people\'s work refers to.');
+});
+
+test('the module imports only hub-side replica modules and team helpers, so no Yjs or fold code reaches the hub test bundle', () => {
+  const source = readFileSync(path.resolve(__dirname, '..', '..', 'src', 'domain', 'replica', 'hubWitness.ts'), 'utf8');
+  const specifiers = [...source.matchAll(/^[ \t]*(?:import|export)[^;'"]*?\bfrom[ \t]*['"]([^'"\n]+)['"]/gm)].map((match) => match[1]);
+  assert.ok(specifiers.length > 0);
+  const allowed = new Set(['./entry', './checkpoint', './chain', './rosterView', './transport']);
+  for (const specifier of specifiers) {
+    if (specifier.startsWith('node:')) continue;
+    assert.ok(allowed.has(specifier) || /^\.\.\/team\/[A-Za-z]+$/.test(specifier), `hubWitness.ts may not import ${specifier}`);
+  }
+  assert.doesNotMatch(source, /\brequire\(|\bimport\(/);
+  assert.doesNotMatch(source, /\u2014/);
+});
+
+test('ids and times are checked: a bad hub or project id and an invalid time are refused', () => {
+  assert.throws(() => createWitness('', PROJECT));
+  assert.throws(() => createWitness(HUB_ID, 'bad project'));
+  assert.throws(() => witnessCitations(createWitness(HUB_ID, PROJECT), [], new Set(), new Date('nope')));
+  assert.throws(() => witnessOwn(createWitness(HUB_ID, PROJECT), [], new Date(Number.NaN), true));
 });

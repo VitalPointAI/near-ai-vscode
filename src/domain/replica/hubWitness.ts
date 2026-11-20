@@ -13,8 +13,9 @@
 import { fingerprintOf } from '../team/canonical';
 import { CHECKPOINT_CONFLICTS, checkpointConflict, checkpointHash, readCheckpoint, verifyCheckpoint } from './checkpoint';
 import type { Checkpoint, CheckpointEntry, CheckpointStream, SignedCheckpoint } from './checkpoint';
-import { isSafeIntegerInRange } from '../team/validate';
+import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, sha256Hex } from './entry';
+import type { Citation } from './chain';
 import type { RosterView } from './rosterView';
 import type { HeadSet } from './transport';
 
@@ -50,8 +51,8 @@ export type WitnessProofReason = keyof typeof WITNESS_PROOF_REASONS;
 // The two signed checkpoints are the proof: anyone can check both signatures and the disagreement.
 export interface WitnessProof { a: SignedCheckpoint; b: SignedCheckpoint; stream: string; reason: WitnessProofReason }
 
-// The highest place in a writer's log this hub has shown, from heads or from an accepted checkpoint.
-export interface SeenHead { stream: string; writer: string; seq: number; hash: string }
+// The highest place in a writer's log this hub has shown, from heads or from an accepted checkpoint. Rollback is judged by seq, so no hash is kept.
+export interface SeenHead { stream: string; writer: string; seq: number }
 // A cited entry (a dep or a checkpoint head) this computer does not hold, and when it was first seen missing.
 export interface WaitingCitation { hash: string; stream: string; writer: string; seq: number; since: string }
 // One of this device's writer logs whose head no checkpoint covers yet, from when it was first seen uncovered while connected.
@@ -81,8 +82,17 @@ export interface CheckpointWitness extends WitnessResult { trusted: boolean }
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const REASON_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const SHORT = 12;
-// Caps that keep a saved state under WITNESS_MAX_BYTES even holding a proof of two full-size checkpoints. 400 heads is what a full checkpoint holds.
+// How long a cited entry may be missing before it is withheld, and how long this device's own entries may go without a checkpoint while connected
+// before they are delayed (D-50). Exported so the malicious-hub harness (32-26) drives them; time is always an argument.
+export const WITHHELD_GRACE_MS = 60_000;
+export const DELAYED_AFTER_MS = 300_000;
+export const WITNESS_MAX_BYTES = 256 * 1024;
+// Caps that keep a saved state under WITNESS_MAX_BYTES even holding a proof of two full-size checkpoints (two times CHECKPOINT_MAX_BYTES). 400
+// heads is about what a full checkpoint holds. Past a cap new rows are not added; rows already held keep working, and withheld counts at most
+// MAX_WAITING changes.
 export const MAX_SEEN_HEADS = 400;
+export const MAX_WAITING = 128;
+export const MAX_OWN_WAITS = 64;
 
 const isHash = (value: unknown): value is string => typeof value === 'string' && HASH_PATTERN.test(value);
 const isStream = (value: unknown): value is string => typeof value === 'string' && STREAM_ID_PATTERN.test(value);
@@ -128,12 +138,12 @@ function raiseSeen(seen: readonly SeenHead[], heads: ReadonlyArray<SeenHead>): S
     const key = `${head.stream}/${head.writer}`;
     const known = next.get(key);
     if (known === undefined && next.size >= MAX_SEEN_HEADS) continue;
-    if (known === undefined || head.seq > known.seq) next.set(key, { stream: head.stream, writer: head.writer, seq: head.seq, hash: head.hash });
+    if (known === undefined || head.seq > known.seq) next.set(key, { stream: head.stream, writer: head.writer, seq: head.seq });
   }
   return [...next.values()].sort((a, b) => compareText(a.stream, b.stream) || compareText(a.writer, b.writer));
 }
 
-const headsOf = (checkpoint: Checkpoint): SeenHead[] => checkpoint.streams.flatMap((stream) => stream.heads.map((head) => ({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash })));
+const headsOf = (checkpoint: Checkpoint): SeenHead[] => checkpoint.streams.flatMap((stream) => stream.heads.map((head) => ({ stream: stream.stream, writer: head.writer, seq: head.seq })));
 
 interface Below { stream: string; writer: string; seq: number; had: number }
 interface Comparison { below: Below[]; fork?: { stream: string; reason: WitnessProofReason } }
@@ -210,7 +220,7 @@ export function witnessHeads(state: WitnessState, heads: HeadSet, roster: Pick<R
     if (!isStream(stream?.stream) || !Array.isArray(stream.heads)) continue;
     for (const head of stream.heads) {
       if (!isHash(head?.writer) || !isSeq(head.seq) || !isHash(head.hash) || roster.deviceKey(head.writer) === undefined) continue;
-      rows.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
+      rows.push({ stream: stream.stream, writer: head.writer, seq: head.seq });
     }
   }
   const marks = new Map(state.seen.map((row) => [`${row.stream}/${row.writer}`, row]));
@@ -270,4 +280,161 @@ export function witnessBlob(state: WitnessState, name: string, bytes: Uint8Array
   }
   if (isHash(name) && raw !== undefined && sha256Hex(raw) === name) return { state: make(state), findings: [] };
   return { state: make(state), findings: [finding('corrupt-blob', { blob: short(String(name)) })] };
+}
+
+function assertTime(now: Date): number {
+  const ms = now instanceof Date ? now.getTime() : Number.NaN;
+  if (Number.isNaN(ms)) throw new Error('The witness was given no valid time.');
+  return ms;
+}
+
+const sinceMs = (since: string): number => Date.parse(since);
+
+// Cited entries this computer does not hold: the missing deps of held entries and the heads of verified checkpoints, as Citation rows (D-50).
+// The first time each hash is seen missing is kept; a hash held now stops waiting. At WITHHELD_GRACE_MS one withheld finding counts every hash
+// missing that long, naming the oldest. held is the set of hashes this computer holds, or a lookup.
+export function witnessCitations(state: WitnessState, cited: readonly Citation[], held: ReadonlySet<string> | ((hash: string) => boolean), now: Date): WitnessResult {
+  const ms = assertTime(now);
+  const isHeld = typeof held === 'function' ? held : (hash: string): boolean => held.has(hash);
+  const waiting = state.waiting.filter((row) => !isHeld(row.hash));
+  const known = new Set(waiting.map((row) => row.hash));
+  for (const citation of cited) {
+    if (!isHash(citation?.hash) || !isStream(citation.stream) || !isHash(citation.writer) || !isSeq(citation.seq)) continue;
+    if (known.has(citation.hash) || isHeld(citation.hash) || waiting.length >= MAX_WAITING) continue;
+    known.add(citation.hash);
+    waiting.push({ hash: citation.hash, stream: citation.stream, writer: citation.writer, seq: citation.seq, since: now.toISOString() });
+  }
+  waiting.sort((a, b) => compareText(a.since, b.since) || compareText(a.hash, b.hash));
+  const next = make(state, { waiting });
+  const due = waiting.filter((row) => ms - sinceMs(row.since) >= WITHHELD_GRACE_MS);
+  if (due.length === 0) return { state: next, findings: [] };
+  const first = due[0];
+  return { state: next, findings: [finding('withheld', { stream: short(first.stream), writer: short(first.writer), seq: first.seq, entry: short(first.hash) }, due.length)] };
+}
+
+// This device's own writer logs against the newest checkpoint (D-50, D-63). ownHeads are this device's heads per stream; covered, when given, lists
+// the streams the hub can checkpoint (the base cell and cells granted with hub.grant), since the hub cannot cover a cell it cannot open. A head the
+// newest checkpoint covers needs nothing. Otherwise its clock starts when it is first seen uncovered while connected and keeps running while the
+// entries it started with stay uncovered; once a checkpoint covers those, the clock starts again for the rest. At DELAYED_AFTER_MS one delayed
+// finding names the whole minutes of the oldest clock. Not connected, or a hub already distrusted, gives none and stops every clock.
+export function witnessOwn(state: WitnessState, ownHeads: HeadSet['streams'], now: Date, connected: boolean, covered?: readonly string[]): WitnessResult {
+  const ms = assertTime(now);
+  if (!connected || state.distrusted) return { state: make(state, { own: [] }), findings: [] };
+  const newest = state.newest === undefined ? undefined : readCheckpoint(state.newest.payload);
+  const coverage = new Map((newest === undefined ? [] : headsOf(newest)).map((head) => [`${head.stream}/${head.writer}`, head.seq]));
+  const before = new Map(state.own.map((row) => [`${row.stream}/${row.writer}`, row]));
+  const own: OwnWait[] = [];
+  const done = new Set<string>();
+  for (const stream of Array.isArray(ownHeads) ? ownHeads : []) {
+    if (!isStream(stream?.stream) || !Array.isArray(stream.heads) || (covered !== undefined && !covered.includes(stream.stream))) continue;
+    for (const head of stream.heads) {
+      if (!isHash(head?.writer) || !isSeq(head.seq)) continue;
+      const key = `${stream.stream}/${head.writer}`;
+      const coveredSeq = coverage.get(key) ?? -1;
+      if (head.seq <= coveredSeq || done.has(key) || own.length >= MAX_OWN_WAITS) continue;
+      done.add(key);
+      const known = before.get(key);
+      own.push(known !== undefined && known.seq > coveredSeq ? known : { stream: stream.stream, writer: head.writer, seq: head.seq, since: now.toISOString() });
+    }
+  }
+  own.sort((a, b) => compareText(a.stream, b.stream) || compareText(a.writer, b.writer));
+  const next = make(state, { own });
+  const oldest = [...own].sort((a, b) => compareText(a.since, b.since))[0];
+  if (oldest === undefined || ms - sinceMs(oldest.since) < DELAYED_AFTER_MS) return { state: next, findings: [] };
+  const minutes = Math.floor((ms - sinceMs(oldest.since)) / 60_000);
+  return { state: next, findings: [finding('delayed', { stream: short(oldest.stream), writer: short(oldest.writer), seq: oldest.seq }, minutes)] };
+}
+
+// The saved form: plain JSON of the state, whose keys are already in a fixed order. With the caps above it stays under WITNESS_MAX_BYTES.
+export function serializeWitness(state: WitnessState): string {
+  return JSON.stringify(state);
+}
+
+export const WITNESS_REFUSALS = {
+  'too-large': 'The saved record of this hub is larger than the allowed size, so it was not read.',
+  malformed: 'The saved record of this hub is not one this version can read.',
+  'other-hub': 'The saved record belongs to another hub, so it was not read.',
+  'other-project': 'The saved record belongs to another project, so it was not read.'
+} as const;
+export type WitnessRefusal = keyof typeof WITNESS_REFUSALS;
+export type WitnessRead = { ok: true; state: WitnessState } | { ok: false; reason: WitnessRefusal; message: string };
+
+class Malformed extends Error {}
+
+function exactKeys(value: unknown, required: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
+  if (!isRecord(value)) throw new Malformed();
+  const keys = Object.keys(value);
+  if (!required.every((key) => keys.includes(key)) || !keys.every((key) => required.includes(key) || optional.includes(key))) throw new Malformed();
+  return value;
+}
+
+function readTime(value: unknown): string {
+  if (typeof value !== 'string' || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) throw new Malformed();
+  return value;
+}
+
+function readList<T>(value: unknown, cap: number, row: (item: unknown) => T): T[] {
+  if (!Array.isArray(value) || value.length > cap) throw new Malformed();
+  return value.map(row);
+}
+
+function need<T>(ok: boolean, value: T): T {
+  if (!ok) throw new Malformed();
+  return value;
+}
+
+// A kept signed checkpoint, rebuilt from its closed keys. The signature is not checked again here: this is this computer's own record, and
+// witnessCheckpoint verified it before keeping it.
+function readKept(value: unknown, project: string): SignedCheckpoint {
+  const signed = exactKeys(value, ['v', 'purpose', 'signer', 'signedAt', 'payload', 'sig']);
+  const signer = exactKeys(signed.signer, ['fingerprint', 'publicKey']);
+  const checkpoint = readCheckpoint(signed.payload);
+  need(signed.v === 1 && signed.purpose === 'staff-replica' && signed.signedAt === REPLICA_SIGNED_AT && typeof signed.sig === 'string', null);
+  need(typeof signer.fingerprint === 'string' && typeof signer.publicKey === 'string' && checkpoint !== undefined && checkpoint.project === project, null);
+  return { v: 1, purpose: 'staff-replica', signer: { fingerprint: signer.fingerprint as string, publicKey: signer.publicKey as string }, signedAt: REPLICA_SIGNED_AT, payload: checkpoint as Checkpoint, sig: signed.sig as string };
+}
+
+const writerKey = (row: { stream: string; writer: string }): string => `${row.stream}/${row.writer}`;
+const distinct = (keys: readonly string[]): boolean => new Set(keys).size === keys.length;
+
+// Reads a saved state back for the hub and project the caller expects. Never throws: too large, another hub or project, or any shape this version
+// does not write is refused with a plain sentence.
+export function readWitness(text: string, expect: { hub: string; project: string }): WitnessRead {
+  const refuse = (reason: WitnessRefusal): WitnessRead => ({ ok: false, reason, message: WITNESS_REFUSALS[reason] });
+  if (typeof text !== 'string') return refuse('malformed');
+  if (Buffer.byteLength(text, 'utf8') > WITNESS_MAX_BYTES) return refuse('too-large');
+  try {
+    const value = exactKeys(JSON.parse(text), ['v', 'hub', 'project', 'seen', 'waiting', 'own', 'replayed', 'distrusted'], ['newest', 'proof']);
+    const { hub, project } = value;
+    if (value.v !== 1 || typeof hub !== 'string' || !ID_PATTERN.test(hub) || typeof project !== 'string' || !ID_PATTERN.test(project)) return refuse('malformed');
+    if (hub !== expect.hub) return refuse('other-hub');
+    if (project !== expect.project) return refuse('other-project');
+    const seen = readList(value.seen, MAX_SEEN_HEADS, (item): SeenHead => {
+      const row = exactKeys(item, ['stream', 'writer', 'seq']);
+      return need(isStream(row.stream) && isHash(row.writer) && isSeq(row.seq), { stream: row.stream as string, writer: row.writer as string, seq: row.seq as number });
+    });
+    const waiting = readList(value.waiting, MAX_WAITING, (item): WaitingCitation => {
+      const row = exactKeys(item, ['hash', 'stream', 'writer', 'seq', 'since']);
+      return need(isHash(row.hash) && isStream(row.stream) && isHash(row.writer) && isSeq(row.seq), { hash: row.hash as string, stream: row.stream as string, writer: row.writer as string, seq: row.seq as number, since: readTime(row.since) });
+    });
+    const own = readList(value.own, MAX_OWN_WAITS, (item): OwnWait => {
+      const row = exactKeys(item, ['stream', 'writer', 'seq', 'since']);
+      return need(isStream(row.stream) && isHash(row.writer) && isSeq(row.seq), { stream: row.stream as string, writer: row.writer as string, seq: row.seq as number, since: readTime(row.since) });
+    });
+    need(distinct(seen.map(writerKey)) && distinct(waiting.map((row) => row.hash)) && distinct(own.map(writerKey)), null);
+    need(isSeq(value.replayed) && typeof value.distrusted === 'boolean', null);
+    const state: WitnessState = { v: 1, hub, project, seen, waiting, own, replayed: value.replayed as number, distrusted: value.distrusted as boolean };
+    if (value.newest !== undefined) state.newest = readKept(value.newest, project);
+    if (value.proof !== undefined) {
+      const proof = exactKeys(value.proof, ['a', 'b', 'stream', 'reason']);
+      const reason = proof.reason;
+      need(isStream(proof.stream) && typeof reason === 'string' && Object.prototype.hasOwnProperty.call(WITNESS_PROOF_REASONS, reason), null);
+      state.proof = { a: readKept(proof.a, project), b: readKept(proof.b, project), stream: proof.stream as string, reason: reason as WitnessProofReason };
+    }
+    // A distrusted hub always has its proof and no newest checkpoint; a trusted one has no proof.
+    need(state.distrusted === (state.proof !== undefined) && !(state.distrusted && state.newest !== undefined), null);
+    return { ok: true, state };
+  } catch {
+    return refuse('malformed');
+  }
 }
