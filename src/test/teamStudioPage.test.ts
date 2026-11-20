@@ -1166,6 +1166,22 @@ test('page: the Team shape tab draws the hierarchy and opens a member card when 
   assert.match(panel.textContent, /Reports to: lead/);
 });
 
+// Follow-up to 0.4.35: Watch it live on the Team shape tab follows a run of the open team starting and ending, not only the moment it was opened.
+test('page: the Team shape tab\'s Watch it live appears and goes as a run of the open team starts and ends', async () => {
+  const page = await runPage();
+  page.dispatch({ type: 'state', context: context(), library: { teams: [], archived: [] } });
+  page.dispatch({ type: 'team', id: 'user:web', kind: 'user', file: 'My teams/web.md', command: '/team:web ', draft: draft(), base: 'd'.repeat(64), versions: [], graph: { team: { name: 'Web team', description: 'Builds pages', members: 0 }, roots: [], orphaned: [] } });
+  page.doc.body.all().find((node) => node.tagName === 'button' && /Team shape/.test(node.textContent))!.click();
+  assert.doesNotMatch(page.text(), /This team is running now/);
+  page.dispatch({ type: 'live-run', id: 'user:other', liveRun: true });
+  assert.doesNotMatch(page.text(), /This team is running now/, 'another team\'s run is not this one');
+  page.dispatch({ type: 'live-run', id: 'user:web', liveRun: true });
+  assert.match(page.text(), /This team is running now/);
+  assert.ok(page.byLabel('Watch this team work live in Team Live'));
+  page.dispatch({ type: 'live-run', id: 'user:web', liveRun: false });
+  assert.doesNotMatch(page.text(), /This team is running now/);
+});
+
 // The role-test step was added with no test coverage of its own (0.4.19 review): the sequence of what the person is shown matters, because it spends real
 // minutes and tokens. These drive the REAL handler with a stubbed optimiser.
 test('optimise-all asks once for every team with the total, then reports each team as it finishes', async () => {

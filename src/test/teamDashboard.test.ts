@@ -761,3 +761,19 @@ test('a role test cancelled part-way is not kept as the team\'s last role test; 
   const panel = await readFile(path.join(__dirname, '..', '..', 'src', 'services', 'teamStudioPanel.ts'), 'utf8');
   assert.match(panel, /keptRoleTests\([^)]*options\.signal\?\.aborted === true/);
 });
+
+test('host: the open team\'s Watch it live follows a run of it starting and ending, not only when the team was opened', async () => {
+  const h = await host();
+  await h.library.create('Web team', TEAM);
+  let running = false;
+  h.deps.liveRun = (slug) => running && slug === 'web-team';
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  assert.equal('liveRun' in h.latest('team'), false);
+  running = true;
+  h.runsChanged();
+  assert.deepEqual(h.latest('live-run'), { type: 'live-run', id: 'user:web-team', liveRun: true });
+  running = false;
+  h.runsChanged();
+  assert.deepEqual(h.latest('live-run'), { type: 'live-run', id: 'user:web-team', liveRun: false });
+});

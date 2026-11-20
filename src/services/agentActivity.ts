@@ -213,7 +213,8 @@ export interface AgentIdentity {
 function withoutEmpty(agent: AgentIdentity): AgentIdentity {
   const { task, member, background, team, ...rest } = agent;
   const label = taskLabel(task);
-  return { ...rest, ...(label ? { task: label } : {}), ...(member ? { member: true } : {}), ...(background ? { background: true } : {}), ...(team ? { team } : {}) };
+  // `member: false` is kept (a project agent that took a member's name is not that member), so Team Live never draws it on the member's card.
+  return { ...rest, ...(label ? { task: label } : {}), ...(member !== undefined ? { member } : {}), ...(background ? { background: true } : {}), ...(team ? { team } : {}) };
 }
 
 function freshCounters(): Omit<AgentStats, 'agentId' | 'agent' | 'runId' | 'model' | 'status' | 'startedAt' | 'phase' | 'phaseSince'> {
@@ -269,6 +270,22 @@ export class ActivityFeed {
   }
 
   public runTeam(runId: string): TeamDefinition | undefined { return this.teams.get(runId); }
+
+  /**
+   * The runs that lead or work with a team, as their main agents stand: run, team slug, status and whether their counters were saved. A cheap read for
+   * pages that ask on every feed change (Team Studio), with no copy of any agent's counters.
+   */
+  public teamRuns(): Array<{ runId: string; team: string; status: AgentStats['status']; persisted: boolean }> {
+    const runs: Array<{ runId: string; team: string; status: AgentStats['status']; persisted: boolean }> = [];
+    for (const stat of this.stats.values()) if (stat.team && stat.agentId === `main-${stat.runId}`) runs.push({ runId: stat.runId, team: stat.team, status: stat.status, persisted: stat.persisted === true });
+    return runs;
+  }
+
+  /** Whether a run of the team with this slug is going now. */
+  public teamRunning(slug: string): boolean {
+    for (const stat of this.stats.values()) if (stat.team === slug && stat.status === 'running' && stat.agentId === `main-${stat.runId}`) return true;
+    return false;
+  }
 
   /**
    * The end of the agent's newest reply text, at most `max` characters, with secrets removed (0.4.28: Team Live's open card). Never a prompt, reasoning or

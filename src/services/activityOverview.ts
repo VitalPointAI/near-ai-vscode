@@ -71,6 +71,8 @@ export interface NowRow {
   runId: string;
   label: string;
   sub: boolean;
+  /** On a run's own agent: the run leads or works with a team, so Agent Activity offers Watch the team (even while the lead works alone). */
+  team?: boolean;
   /** 0.4.28: the label of the agent that started this one, when that agent is still listed. */
   startedBy?: string;
   model: string;
@@ -181,7 +183,7 @@ export function nowRows(live: AgentStats[], spend?: OverviewSpend): NowRow[] {
     const totals = spend?.totals({ agentId: stat.agentId });
     const startedBy = stat.parentId ? labels.get(stat.parentId) : undefined;
     return {
-      agentId: stat.agentId, runId: stat.runId, label: stat.agent, sub: Boolean(stat.parentId), ...(startedBy ? { startedBy } : {}), model: stat.model, ...(stat.boundary ? { boundary: stat.boundary } : {}),
+      agentId: stat.agentId, runId: stat.runId, label: stat.agent, sub: Boolean(stat.parentId), ...(stat.team ? { team: true } : {}), ...(startedBy ? { startedBy } : {}), model: stat.model, ...(stat.boundary ? { boundary: stat.boundary } : {}),
       phase: stat.phase, phaseSince: stat.phaseSince, ...(stat.waitingKind ? { waitingKind: stat.waitingKind } : {}), ...(stat.coolUntil ? { coolUntil: stat.coolUntil } : {}), ...(stat.coolReason ? { coolReason: stat.coolReason } : {}), ...(stat.tool ? { tool: stat.tool } : {}),
       startedAt: stat.startedAt, turns: stat.turns, toolCalls: stat.toolCalls, ...(totals?.requests ? { costUsd: nanoToUsd(totalNanoUsd(totals)) } : {})
     };

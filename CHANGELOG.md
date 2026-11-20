@@ -4,10 +4,26 @@
 
 ### Fixes
 
+### Fixes
+
 - **Agents that start together in their own git worktrees no longer fail at random.** When a team
   started several members with worktree isolation in one repository, git could refuse one of the
   worktrees ("failed to read .../commondir") because they were created at the same moment. They
   are now created, and removed, one at a time per repository.
+- **Team Live and the agents strip.** The run picker in Team Live now offers finished runs too, so
+  the last finished run stays reachable while another team run is live. An agent stopped while it
+  waited for a free slot no longer shows a task travelling to it. A project agent that shares its
+  name with a team member is drawn as a helper, not as that member. Team Live's clock stops when
+  there is nothing to show, and a closed panel is sent nothing more.
+- **Watch the team only where there is a team.** The chat's team dots and Watch the team show only
+  for a run that leads or works with a team, and agents waiting for a slot are listed there with a
+  queued dot. Agent Activity offers Watch the team for a team run from its start, even while the
+  lead works alone. Team Studio's Watch it live link on the Team shape tab now appears and goes as
+  a run of the open team starts and ends.
+- **No secrets in the activity history.** The description an agent gives when it starts another
+  agent, and the role it names, are redacted before they are saved to the project's activity
+  history, as the live view already showed them.
+
 
 ## 0.4.35
 

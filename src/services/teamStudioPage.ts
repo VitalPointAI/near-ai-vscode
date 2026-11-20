@@ -1044,6 +1044,11 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     dashboardTimer = setTimeout(() => { dashboardTimer = undefined; void dashboardOf().then((dashboard) => post({ type: 'dashboard', dashboard }), () => undefined); }, 150);
     dashboardTimer.unref?.();
   };
+  /** A run of the open team started or ended: its Team shape tab's Watch it live link follows (it was only set when the team was opened). */
+  const liveSoon = () => {
+    if (!open || !deps.liveRun) return;
+    post({ type: 'live-run', id: open.id, liveRun: deps.liveRun(slugify(path.basename(open.file, '.md'))) === true });
+  };
   const soon = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => { timer = undefined; void refreshLibrary(); }, 150);
@@ -2050,7 +2055,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
     ...(deps.onStop ? [deps.onStop(() => cancelRefine())] : []),
     ...(deps.onDidChangeSettings ? [deps.onDidChangeSettings(() => { void refresh(); })] : []),
     ...(deps.onDidChangeFolder ? [deps.onDidChangeFolder(() => { void refresh(); })] : []),
-    ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { forgetHistory(); if (pageReady) dashboardSoon(); })] : []),
+    ...(deps.onDidChangeRuns ? [deps.onDidChangeRuns(() => { forgetHistory(); if (pageReady) { dashboardSoon(); liveSoon(); } })] : []),
     host.webview.onDidReceiveMessage(async (value) => {
       const message = parseStudioMessage(value);
       if (!message) return;

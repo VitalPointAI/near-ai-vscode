@@ -220,3 +220,38 @@ test('the page: only the status region speaks; the card, rebuilt with every fram
   assert.match(regions[0], /id="announce"/);
   assert.match(html, /<section id="card"(?![^>]*aria-live)[^>]*>/);
 });
+
+test('sends run one at a time, so an older picture never lands after a newer one; a panel closed mid-send gets nothing more', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-live-view-serial-'));
+  const store = new ActivityStore(root);
+  const runId = 'run-1700000000000-eee555';
+  const session = await store.start({ project: 'demo', model: 'm', runId, title: '/team:research find sources' });
+  await store.append(session.sessionId, { status: 'completed', kind: 'agent', agentId: 'researcher-eee111', parentAgentId: `main-${runId}`, agentRole: 'researcher', action: 'Find sources', model: 'm', summary: 'Sub-agent researcher completed.' });
+  await store.flush();
+  const h = load(root);
+  // Each send reads the history (the feed is empty after a reload); count how many reads overlap.
+  const list = ActivityStore.prototype.list;
+  let inFlight = 0;
+  let most = 0;
+  ActivityStore.prototype.list = async function (this: ActivityStore) {
+    inFlight += 1; most = Math.max(most, inFlight);
+    try { await wait(30); return await list.call(this); } finally { inFlight -= 1; }
+  };
+  try {
+    h.open();
+    await h.send({ type: 'ready' });
+    await h.send({ type: 'open-card', agentId: 'researcher-eee111' });
+    await h.send({ type: 'select-run', runId });
+    await until(h.posted, 0, (message) => message.runId === runId);
+    await wait(150);
+    assert.equal(most, 1, 'never two sends at once');
+    // Closed while a send reads the history: nothing is posted after the close, and nothing keeps running.
+    const before = frames(h.posted).length;
+    await h.send({ type: 'open-card' });
+    h.close();
+    await wait(150);
+    assert.equal(frames(h.posted).length, before, 'no frame after the panel closed');
+  } finally {
+    ActivityStore.prototype.list = list;
+  }
+});
