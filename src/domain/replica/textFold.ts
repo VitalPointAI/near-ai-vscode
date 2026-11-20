@@ -17,7 +17,8 @@ export interface Registration { clientId: number; writer: string; member: string
 export interface AcceptedUpdate { hash: string; writer: string; actor: Actor; update: Uint8Array }
 // Which entry deleted which clock range (D-19). The first entry in fold order to delete a range is the one recorded.
 export interface DeletionRecord { entry: string; client: number; clock: number; length: number }
-// A compaction the fold accepted. verified: the covered updates were all held and the state matched them (D-37); otherwise it stands in for them.
+// A compaction the fold accepted. verified: the covered entries were all in the set and the state matched the accepted ones among them (D-37,
+// WR-04); otherwise it stands in for them.
 export interface CompactionRecord { entry: string; verified: boolean }
 export interface ProductText {
   stream: string;
@@ -174,8 +175,8 @@ function applyUpdateEntry(state: TextState, entry: VerifiedEntry, data: UpdateDa
 
 const sameVector = (a: ReadonlyArray<readonly [number, number]>, b: ReadonlyArray<readonly [number, number]>): boolean => canonicalize(a) === canonicalize(b);
 
-// A compaction is a verified cache, never a source of truth (D-21, D-37). With the covered updates in the set it is checked against them and
-// changes nothing. Without them it may stand in for them, but only for clients some device registered, and it is marked unverified.
+// A compaction is a verified cache, never a source of truth (D-21, D-37). With the covered updates in the set it is checked against the accepted
+// ones among them and changes nothing. Without them it may stand in for them, but only for clients some device registered, and it is marked unverified.
 function applyCompaction(state: TextState, entry: VerifiedEntry, data: CompactData, view: FoldView): ReduceOutcome {
   const { stream, epoch } = entry.header;
   const key = view.ctx.keys(stream, epoch);
@@ -203,11 +204,10 @@ function applyCompaction(state: TextState, entry: VerifiedEntry, data: CompactDa
       const target = view.entry(hash);
       if (target !== undefined && target.body.kind === 'doc.update' && target.header.stream === stream && (target.data as UpdateData).product === data.product) included.add(hash);
     }
-    const accepted = known?.accepted ?? [];
-    const acceptedHashes = new Set(accepted.map((item) => item.hash));
-    // A covered update the fold did not accept cannot be checked against the state, so the state is not trusted.
-    for (const hash of included) if (!acceptedHashes.has(hash)) return refused('compact-mismatch');
-    const scratch = rebuilt(accepted.filter((item) => included.has(item.hash)));
+    // The check is against the covered updates the fold accepted (WR-04). A covered update the fold refused or holds adds nothing to the text, so
+    // it is left out of the scratch document; a compaction that adds its text, or leaves out an accepted one, differs from the scratch below.
+    const usable = (known?.accepted ?? []).filter((item) => included.has(item.hash));
+    const scratch = rebuilt(usable);
     const vector = stateVectorOf(scratch);
     const hash = textHashOf(docText(scratch));
     if (!sameVector(vector, data.stateVector) || hash !== data.textHash || !sameVector(vector, storedVector) || hash !== storedHash) return refused('compact-mismatch');

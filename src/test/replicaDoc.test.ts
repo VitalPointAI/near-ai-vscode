@@ -254,7 +254,7 @@ function dep(item: Written): Dep {
   return { writer: item.writer, seq: item.seq, hash: item.hash };
 }
 
-interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string; covers?: Dep[]; writer?: string }
+interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string; covers?: Dep[]; writer?: string; deps?: Written[] }
 
 // Each compaction needs its own scene: the writer's chain would otherwise make a second one wait for the first.
 function sceneWith(options: CompactOptions = {}): { scene: Scene; entry: Written } {
@@ -273,7 +273,7 @@ function compaction(scene: Scene, options: CompactOptions = {}): Written {
   const covers = options.covers ?? [dep(scene.updA), dep(scene.updB)];
   return world.write(options.writer ?? 'C', {
     kind: 'doc.compact',
-    deps: options.withDeps === false ? [] : [scene.updA, scene.updB],
+    deps: options.withDeps === false ? [] : options.deps ?? [scene.updA, scene.updB],
     data: { product: PRODUCT, covers, stateVector: options.stateVector ?? stateVectorOf(doc), textHash: options.textHash ?? textHashOf(options.blobText ?? scene.text), stateBlob: blob.hash }
   });
 }
@@ -442,4 +442,59 @@ test('CR-01: the log\'s own text keeps its author next to unverified text, the s
   const own = compaction(second, { withDeps: false, covers: [ghost], ...stateOf(33, [[0, 'my own words']]) });
   const ownProduct = productOf(foldEntries(sealed([second.regC, second.regA, second.regB, own]), second.world.ctx()));
   assert.deepEqual(ownProduct.attribution.map((span) => [span.writer, span.member, span.unverified]), [[writerC, 'mbr-cccc', true]]);
+});
+
+// ---- WR-04 (D-01 (a)): one refused or held update in the covered history no longer switches compaction off ------------------------------------
+
+// C writes an update the fold does not accept, inside the history an honest compaction by B covers.
+function coveredRejectScene(kind: 'refused' | 'held'): { scene: Scene; bad: Written; base: Written[] } {
+  const scene = compactScene();
+  // Refused: text under A's registered client id 11 (foreign-client). Held: text under client 77, which nobody registered (unregistered-client).
+  const stranger = createLocalDoc(kind === 'refused' ? 11 : 77);
+  const bad = scene.world.write('C', { kind: 'doc.update', data: updateData(PRODUCT, localInsert(stranger, 0, 'not accepted')) });
+  return { scene, bad, base: [scene.regC, scene.regA, scene.regB, scene.updA, scene.updB, bad] };
+}
+
+const coveringAll = (scene: Scene, bad: Written): CompactOptions => ({ writer: 'B', deps: [scene.updA, scene.updB, bad], covers: [dep(scene.updA), dep(scene.updB), dep(bad)] });
+
+test('WR-04: an honest compaction whose covered history holds a refused foreign-client update is accepted as verified, and its text is the fold\'s', () => {
+  const { scene, bad, base } = coveredRejectScene('refused');
+  const entry = compaction(scene, coveringAll(scene, bad));
+  const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client']]);
+  const product = productOf(result);
+  assert.deepEqual(product.compactions, [{ entry: entry.hash, verified: true }]);
+  assert.equal(product.text, scene.text);
+  const without = foldEntries(sealed(base), scene.world.ctx());
+  assert.deepEqual(result.digests, without.digests);
+});
+
+test('WR-04: a held covered update is ignored the same way as a refused one when the vector and text hash match', () => {
+  const { scene, bad, base } = coveredRejectScene('held');
+  const entry = compaction(scene, coveringAll(scene, bad));
+  const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual(result.held.map((item) => [item.hash, item.reason]), [[bad.hash, 'unregistered-client']]);
+  assert.deepEqual(result.refused, []);
+  assert.deepEqual(productOf(result).compactions, [{ entry: entry.hash, verified: true }]);
+  assert.equal(productOf(result).text, scene.text);
+});
+
+test('WR-04: a compaction that leaves out an accepted covered update is still refused compact-mismatch next to a refused one', () => {
+  const { scene, bad, base } = coveredRejectScene('refused');
+  // The blob holds only A's text, but the covers name B's accepted update too.
+  const entry = compaction(scene, { ...coveringAll(scene, bad), ...stateOf(11, [[0, 'alpha ']]) });
+  const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client'], [entry.hash, 'compact-mismatch']].sort());
+  assert.deepEqual(productOf(result).compactions, []);
+  assert.equal(productOf(result).text, scene.text);
+});
+
+test('WR-04: with a refused update covered, a wrong text hash or a wrong state vector is still refused compact-mismatch', () => {
+  for (const wrong of [{ textHash: textHashOf('not the text') }, { stateVector: [[11, 6]] as Array<[number, number]> }]) {
+    const { scene, bad, base } = coveredRejectScene('refused');
+    const entry = compaction(scene, { ...coveringAll(scene, bad), ...wrong });
+    const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+    assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client'], [entry.hash, 'compact-mismatch']].sort());
+    assert.deepEqual(productOf(result).compactions, []);
+  }
 });
