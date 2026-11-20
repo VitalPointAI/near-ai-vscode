@@ -1,6 +1,8 @@
 // The reducer for the project family (D-07, D-09, DESIGN 7.1, 14). Hub-side in spirit (it never touches Yjs) but not on the hub list: it uses the
 // reducer contract. State is kept per stream, so an unrelated stream never changes another stream's output.
 //
+// Both kinds are governance acts: they come only from a person (WR-02, D-12). An agent or hub label is refused agent-cannot-decide before the role check,
+// so an agent running on the lead's own device cannot set the project's name, lead or hub pin.
 // project.genesis is accepted only from a member who holds staff_lead at the roster the entry cites. The first accepted genesis of a stream wins in fold
 // order; a later, different one is refused second-genesis whatever order the entries arrived in, because the fold order is the same everywhere.
 // project.import records one legacy ledger the lead brought in, and is listed once however often it is repeated.
@@ -9,6 +11,7 @@ import type { FamilyReducer, ReduceOutcome } from './reducers';
 import type { VerifiedEntry } from './verify';
 
 export const PROJECT_REFUSALS = {
+  'agent-cannot-decide': 'Only a person can set up the project or import its history; an agent or the hub cannot.',
   'not-staff-lead': 'Only the staff lead of the project may write this, and the member who wrote it was not the staff lead at the roster it cites.',
   'second-genesis': 'This stream already has a different project genesis, so this one is refused.',
   'unsupported-kind': 'This kind of project entry is not applied by this version.'
@@ -74,6 +77,7 @@ export const projectReducer: FamilyReducer<ProjectState, ProjectOutput> = {
   init: () => ({ streams: new Map() }),
   apply(state, entry: VerifiedEntry, view): ReduceOutcome {
     if (entry.body.kind !== 'project.genesis' && entry.body.kind !== 'project.import') return refused('unsupported-kind');
+    if (entry.body.actor.kind !== 'person') return refused('agent-cannot-decide');
     if (!view.ctx.roster.hasRole(entry.member, 'staff_lead', entry.body.roster)) return refused('not-staff-lead');
     if (entry.body.kind === 'project.genesis') {
       const data = entry.data as GenesisData;

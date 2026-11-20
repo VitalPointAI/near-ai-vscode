@@ -5,8 +5,11 @@ import test from 'node:test';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { REPLICA_KINDS, validateData } from '../domain/replica/kinds';
-import { projectReducer } from '../domain/replica/projectFold';
+import { PROJECT_REFUSALS, projectReducer } from '../domain/replica/projectFold';
 import type { ProjectOutput } from '../domain/replica/projectFold';
+import type { FoldView } from '../domain/replica/reducers';
+import { verifyEntry } from '../domain/replica/verify';
+import type { VerifiedEntry } from '../domain/replica/verify';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { textReducer } from '../domain/replica/textFold';
 import { createWorld, fixedSigner, streamId, updateData } from './helpers/replicaWorld';
@@ -256,6 +259,61 @@ test('project.import is applied and listed with ledger, legacy head and count, o
   assert.deepEqual(projectOf(result)[0].imports.map((item) => [item.ledger, item.legacyHead, item.count]), [['decisions', HASH('d'), 3], ['products', HASH('c'), 12]]);
   assert.deepEqual(result.refused, [{ hash: foreign.hash, reason: 'not-staff-lead', family: 'project' }]);
   assert.equal(result.applied.length, 4);
+});
+
+// WR-02 project part (D-12): an agent acts under a person's device and is never a roster member, so it cannot set the project's name, lead or hub pin.
+const AGENT = { kind: 'agent', member: 'j2-chief', run: 'r-1' } as const;
+
+test('WR-02: a project.genesis labelled as an agent on the staff lead\'s own device is refused agent-cannot-decide and leaves no project', () => {
+  const world = projectWorld();
+  const agentGenesis = world.write('L1', { kind: 'project.genesis', data: genesisData(world, { name: 'Renamed by an agent' }), actor: AGENT });
+  const result = foldEntries([agentGenesis.entry], world.ctx(), REDUCERS);
+  assert.deepEqual(result.refused, [{ hash: agentGenesis.hash, reason: 'agent-cannot-decide', family: 'project' }]);
+  assert.deepEqual(projectOf(result), []);
+  assert.deepEqual(result.applied, []);
+  assert.ok(PROJECT_REFUSALS['agent-cannot-decide'].length > 0);
+  // The person's own genesis next to it still wins, in either delivery order.
+  const real = world.write('L1', { kind: 'project.genesis', data: genesisData(world) });
+  for (const entries of [[agentGenesis.entry, real.entry], [real.entry, agentGenesis.entry]]) {
+    const both = foldEntries(entries, world.ctx(), REDUCERS);
+    assert.equal(projectOf(both)[0].genesis, real.hash);
+    assert.equal(projectOf(both)[0].name, 'Operation Example');
+    assert.deepEqual(both.refused.map((item) => item.reason), ['agent-cannot-decide']);
+  }
+});
+
+test('WR-02: a project.import labelled as an agent on the staff lead\'s device is refused agent-cannot-decide and is not listed', () => {
+  const world = projectWorld();
+  const genesis = world.write('L1', { kind: 'project.genesis', data: genesisData(world) });
+  const byAgent = world.write('L1', { kind: 'project.import', data: { ledger: 'products', legacyHead: HASH('c'), count: 12 }, actor: AGENT });
+  const result = foldEntries([genesis.entry, byAgent.entry], world.ctx(), REDUCERS);
+  assert.deepEqual(result.refused, [{ hash: byAgent.hash, reason: 'agent-cannot-decide', family: 'project' }]);
+  assert.deepEqual(projectOf(result)[0].imports, []);
+  assert.deepEqual(result.applied, [genesis.hash]);
+});
+
+test('WR-02: the project reducer itself refuses a hub actor for genesis and import before the role check, even when the fold did not keep it first', () => {
+  const world = projectWorld();
+  const ctx = world.ctx();
+  const hub = { kind: 'hub', watch: 'bridge-watch' } as const;
+  const asVerified = (written: { entry: unknown }): VerifiedEntry => {
+    const outcome = verifyEntry(written.entry, ctx);
+    assert.equal(outcome.status, 'verified');
+    return (outcome as { entry: VerifiedEntry }).entry;
+  };
+  // A view whose roster says yes to every role: the actor check alone must refuse.
+  const view = { ctx: { ...ctx, roster: { ...ctx.roster, hasRole: () => true } } } as unknown as FoldView;
+  for (const actor of [hub, AGENT]) {
+    const state = projectReducer.init();
+    const genesis = asVerified(world.write('L1', { kind: 'project.genesis', data: genesisData(world), actor }));
+    const imported = asVerified(world.write('L1', { kind: 'project.import', data: { ledger: 'products', legacyHead: HASH('c'), count: 12 }, actor }));
+    assert.deepEqual(projectReducer.apply(state, genesis, view), { status: 'refused', reason: 'agent-cannot-decide' });
+    assert.deepEqual(projectReducer.apply(state, imported, view), { status: 'refused', reason: 'agent-cannot-decide' });
+    assert.deepEqual(projectReducer.finish(state, view), []);
+  }
+  // A person on the same view is applied, so the refusal above is the actor check and not the view.
+  const state = projectReducer.init();
+  assert.deepEqual(projectReducer.apply(state, asVerified(world.write('L1', { kind: 'project.genesis', data: genesisData(world) })), view), { status: 'applied' });
 });
 
 test('roster entries are kept folded-in-later-phase and change no state, yet stay chain nodes: a doc.update written after one is still applied', () => {
