@@ -13,6 +13,7 @@ import type { SessionRegistry } from '../../src/http/session';
 import { generateKeyFile, readEncryptionKey, readSigningKey } from '../../src/keys';
 import type { RateLimitOptions } from '../../src/limits';
 import type { RosterCache } from '../../src/append/rosterCache';
+import type { Checkpointer } from '../../src/checkpoints';
 import type { EventHub, Scheduler } from '../../src/live/events';
 import type { PresenceHub } from '../../src/live/presence';
 import { composeHub, sweepBlobsOnce } from '../../src/main';
@@ -38,6 +39,13 @@ export interface StartOptions {
   limits?: RateLimitOptions;
   /** The scheduler of the event streams (32-21): keep-alive comments, stuck readers and presence; real timers when absent. */
   scheduler?: Scheduler;
+  /** Signed checkpoints (32-22); on unless false. */
+  checkpoints?: boolean;
+  /** A state directory to use and keep (32-22, a hub restarted on the same or a restored database); a fresh one removed on close when absent. */
+  dir?: string;
+  /** The hub's key lines and TLS pair to reuse (32-22, the same hub started again); fresh ones when absent. A given TLS pair is not cleaned up. */
+  keys?: { signing: string; encryption: string };
+  tls?: TlsFixture;
 }
 
 export interface OpenedSession {
@@ -60,6 +68,12 @@ export interface Hub {
   events: EventHub;
   /** Presence in memory (32-21). */
   presence: PresenceHub;
+  /** The checkpoint signer (32-22); undefined when turned off. */
+  checkpoints: Checkpointer | undefined;
+  /** Every checkpoint log line (32-22). */
+  checkpointLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
+  /** The key lines the hub runs with, to start the same hub again. */
+  keys: { signing: string; encryption: string };
   /** The injected clock, in milliseconds. */
   now(): number;
   advance(ms: number): void;
@@ -79,16 +93,18 @@ export interface Hub {
 }
 
 export async function startHub(options: StartOptions = {}): Promise<Hub> {
-  const tlsFixture = makeTlsFixture();
-  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-hub-api-'));
+  const tlsFixture = options.tls ?? makeTlsFixture();
+  const dir = options.dir ?? (await mkdtemp(path.join(tmpdir(), 'near-ai-hub-api-')));
   const store = await openHubStore(dir);
-  const signing = readSigningKey(generateKeyFile('signing'));
-  const encryption = readEncryptionKey(generateKeyFile('encryption'), signing);
+  const keys = options.keys ?? { signing: generateKeyFile('signing'), encryption: generateKeyFile('encryption') };
+  const signing = readSigningKey(keys.signing);
+  const encryption = readEncryptionKey(keys.encryption, signing);
   const identity = hubIdentityOf(signing, encryption, tlsFixture.certPem, HUB_ADDRESS);
   let clock = options.now ?? NOW_MS;
   let checks = 0;
   const accepted: Hub['accepted'] = [];
   const equivocations: Hub['equivocations'] = [];
+  const checkpointLogs: Hub['checkpointLogs'] = [];
   const readAnswer = (answer: unknown, expected: SessionExpectation): SessionRead => {
     checks += 1;
     return readSessionAnswer(answer, expected);
@@ -104,6 +120,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     ...(options.limits === undefined ? {} : { rateLimits: options.limits }),
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     readAnswer,
+    signCheckpoints: options.checkpoints !== false,
+    onCheckpointLog: (level, event, fields) => checkpointLogs.push({ level, event, fields }),
     onAccepted: (project, list, rosterChanged) => accepted.push({ project, accepted: list, rosterChanged }),
     onEquivocation: (project, proofs) => equivocations.push({ project, proofs }),
   });
@@ -121,6 +139,9 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     server: composed.server,
     events: composed.events,
     presence: composed.presence,
+    checkpoints: composed.checkpoints,
+    checkpointLogs,
+    keys,
     now: () => clock,
     advance: (ms) => {
       clock += ms;
@@ -162,6 +183,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     },
     sweep: () => sweepBlobsOnce(store, clock),
     async close() {
+      composed.checkpoints?.stop();
+      await composed.checkpoints?.settled();
       composed.events.closeAll();
       composed.presence.close();
       for (const connection of connections) connection.close();
@@ -169,8 +192,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
       composed.server.closeAllConnections();
       await new Promise<void>((resolve) => composed.server.close(() => resolve()));
       store.close();
-      await rm(dir, { recursive: true, force: true });
-      tlsFixture.cleanup();
+      if (options.dir === undefined) await rm(dir, { recursive: true, force: true });
+      if (options.tls === undefined) tlsFixture.cleanup();
     },
   };
   return hub;
