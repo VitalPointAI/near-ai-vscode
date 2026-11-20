@@ -223,7 +223,9 @@ test('the text check reads the command and never runs it', () => {
   assert.equal(namesCredentialStore(`cat ${HOME}/.ssh/id_rsa`), undefined);
   assert.ok(namesCredentialStore('cat ~/.ssh/id_rsa'));
   assert.ok(namesCredentialStore(`cat ${HOME.replace(/\//g, '\\')}\\.ssh\\id_rsa`, { home: HOME }), 'backslashes are read as slashes');
-  assert.ok(FLOOR_CANNOT_SEE_TEXT.includes('git credential fill'));
+  // Gate follow-up: git credential fill is now refused as a token printer, so the text no longer lists it as unseen.
+  assert.doesNotMatch(FLOOR_CANNOT_SEE_TEXT, /git credential fill/);
+  assert.match(FLOOR_CANNOT_SEE_TEXT, /a program that reads a store for you and is not one of the token printers the checks know/);
   assert.match(FLOOR_CANNOT_SEE_TEXT, /no operating-system sandbox/);
   assert.match(FLOOR_CANNOT_SEE_TEXT, /add-on server/);
   for (const command of KEYCHAIN_COMMANDS) assert.ok(namesCredentialStore(command), command);
