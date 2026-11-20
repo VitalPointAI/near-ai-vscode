@@ -129,6 +129,15 @@ export function prFiles(repo, number) {
 }
 
 /**
+ * Each changed file of a PR with its patch, through the paginated API. GitHub leaves `patch` out
+ * for binary files and for a single file whose diff is too large; those come back with patch null.
+ */
+export function prFilePatches(repo, number) {
+  return ghLines(`repos/${repo}/pulls/${number}/files?per_page=100`,
+    '.[] | {filename, previous_filename, status, patch} | tojson');
+}
+
+/**
  * Everything the merge and release gates need about one commit (see evaluateCommit in
  * workflow.mjs): every check run attempt with the app and check suite it came from, the workflow
  * runs on the commit, and every commit status with the account that set it.

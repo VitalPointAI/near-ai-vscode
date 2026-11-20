@@ -93,3 +93,42 @@ test('gather lists every changed file through the paginated API', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('gather builds the diff from the per-file API when GitHub refuses it as too large', () => {
+  const files = [
+    { path: 'src/a.ts', patch: '@@ -1 +1 @@\n-old\n+new' },
+    { path: 'src/b.ts', status: 'added', patch: '@@ -0,0 +1 @@\n+fresh\n' },
+    { path: 'media/tile.webp', status: 'added' },
+    { path: 'src/c.ts', previous: 'src/old-c.ts', status: 'renamed', patch: '@@ -1 +1 @@\n-x\n+y' },
+    { path: 'src/gone.ts', status: 'removed', patch: '@@ -1 +0,0 @@\n-bye' }
+  ];
+  const fake = fakeGitHub({ diffTooLarge: true, prs: { 7: openPr(7, 'fix/thing', HEAD, { files }) } });
+  setRunner(fake.runner);
+  const logged = [];
+  const dir = mkdtempSync(path.join(tmpdir(), 'gather-test-'));
+  try {
+    gatherReview(REPO, '7', dir, { log: (line) => logged.push(line) });
+    const diff = readFileSync(path.join(dir, 'diff.patch'), 'utf8');
+    assert.equal(diff, [
+      'diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1 +1 @@', '-old', '+new',
+      'diff --git a/src/b.ts b/src/b.ts', '--- /dev/null', '+++ b/src/b.ts', '@@ -0,0 +1 @@', '+fresh',
+      'diff --git a/media/tile.webp b/media/tile.webp', '(added: no text diff from GitHub, binary or too large to show)',
+      'diff --git a/src/old-c.ts b/src/c.ts', '--- a/src/old-c.ts', '+++ b/src/c.ts', '@@ -1 +1 @@', '-x', '+y',
+      'diff --git a/src/gone.ts b/src/gone.ts', '--- a/src/gone.ts', '+++ /dev/null', '@@ -1 +0,0 @@', '-bye', ''
+    ].join('\n'));
+    assert.ok(logged.some((line) => /too large.*5 files, 1 without a text patch/.test(line)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('gather still fails on any other diff error', () => {
+  const fake = fakeGitHub({ failOn: /^pr diff/, prs: { 7: openPr(7, 'fix/thing', HEAD) } });
+  setRunner(fake.runner);
+  const dir = mkdtempSync(path.join(tmpdir(), 'gather-test-'));
+  try {
+    assert.throws(() => gatherReview(REPO, '7', dir, quiet), /HTTP 500/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

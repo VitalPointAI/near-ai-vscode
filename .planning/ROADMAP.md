@@ -191,10 +191,32 @@ Plans:
   2. Invite and join work by file alone (signed invitation, signed join request with the one-time secret, six-word safety code, admission), and expired, reused or wrong-secret invitations are refused. (MUS-04)
   3. Each label cell has its own epoch key wrapped only to devices cleared for it; removing a member or device rekeys the affected cells, and the UI says that what they already received stays with them. (MUS-05)
   4. Turning a project multi-user verifies today's product, decision, calculator and wargame ledgers, imports each with its legacy head hash, keeps the legacy chains verifiable, rewrites `.planning/staff/**` as projections, and is idempotent; a project that never turns on multi-user behaves exactly as before. (MUS-06)
-**Plans:** 0 plans
+**Plans:** 23 plans in 10 waves (planned 2026-11-19; hardening of Phase 30 first, then WP-R1 and WP-R2 in parallel)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 31 to break down)
+- [ ] 31-01-PLAN.md: Wave 1. Shared hardening contracts: optional RosterView members, client id slots (slot * 2^20 + counter), agent seats default deny
+- [ ] 31-02-PLAN.md: Wave 2. Fold driver: re-delivered entries skipped by hash, reducer-stage holds retried with the same context (findings c, d; IN-03)
+- [ ] 31-03-PLAN.md: Wave 2. Update limits before decode (256 KiB / 2 MiB), pre-decode skim with the struct cap, heap ceiling probe, linear delete check (WR-07, IN-02)
+- [ ] 31-04-PLAN.md: Wave 2. Text reducer: compaction with a held or refused update in its past (finding a, WR-04), client ids bound to roster slots, caps and lazy documents (WR-02, WR-05, WR-08)
+- [ ] 31-05-PLAN.md: Wave 2. Decisions, causal graph and project reducer: WR-02 governance acts, WR-06, WR-09, IN-01
+- [ ] 31-06-PLAN.md: Wave 2. Forks with three or more branches resolvable by any chosen branch (finding b, WR-03)
+- [ ] 31-07-PLAN.md: Wave 3. Versions reducer: WR-01 gate verdicts only from allowed members, proposal and act caps, blob size checks
+- [ ] 31-08-PLAN.md: Wave 3. Checkpoint version 2 heads (seq, hash, lamport, roster) so a late joiner's log starts from a checkpoint; checkpointV2 vectors
+- [ ] 31-09-PLAN.md: Wave 4. Kind schema additions, invite.void and four signed-payload purposes (D-49)
+- [ ] 31-10-PLAN.md: Wave 4. Memory-capped decode worker, release content entry, SECURITY.md
+- [ ] 31-11-PLAN.md: Wave 4. Projection adapter: fold output to today's ledger views and files
+- [ ] 31-12-PLAN.md: Wave 5. WP-R1 tracer: genesis, invite file, join file, safety code, admit, grant opened, one doc.update through the real roster view
+- [ ] 31-13-PLAN.md: Wave 5. Replica store on disk, cross-window lock, signed high-water marks, rollback refused, SECURITY.md
+- [ ] 31-14-PLAN.md: Wave 6. Membership and device state machines (DESIGN 15.1, 15.2), slots, hub member
+- [ ] 31-15-PLAN.md: Wave 6. Cells, grants, rekey, label leak test, write-down rule, SECURITY.md
+- [ ] 31-16-PLAN.md: Wave 6. Invite, join and welcome files with every refusal (expired, reused, voided, wrong secret)
+- [ ] 31-17-PLAN.md: Wave 6. Deputy lead, handover, roster split and choose, roster-branch-not-chosen
+- [ ] 31-18-PLAN.md: Wave 7. X25519 device key and key ring in SecretStorage, ReplicaProject (roster folded first, genesis pin), SECURITY.md
+- [ ] 31-19-PLAN.md: Wave 8. Migration: verify first, import with legacy heads, reconstruct, projections, legacy files moved, idempotent
+- [ ] 31-20-PLAN.md: Wave 8. Host flows for the roster commands, rekey with the agreed sentence, SECURITY.md
+- [ ] 31-21-PLAN.md: Wave 9. Staff host reads a shared project from the fold; single-machine parity test
+- [ ] 31-22-PLAN.md: Wave 9. Make a Single-Machine Copy
+- [ ] 31-23-PLAN.md: Wave 10. Commands behind nearAi.staff.multiUserPreview, manifest tests, SECURITY.md, full suite and release check once
 
 ### Phase 32: Your organization's sync hub
 **Goal**: Your organization runs one small service that carries staff projects live between people, keeps ciphertext for cells it is not cleared for, and can do no worse than withhold, which clients detect.
@@ -1372,7 +1394,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 28. Secure development workflow setup step | 0/TBD | Not started | - |
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
 | 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
-| 31. Staff roster, cell keys and migration | 0/TBD | Not started (drop A) | - |
+| 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 0/TBD | Not started (drop A; may run beside Phase 31) | - |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
