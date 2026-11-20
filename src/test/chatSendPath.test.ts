@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, writeFile as writeFileAsync } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rename, writeFile as writeFileAsync } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { mock } from 'node:test';
@@ -165,11 +165,8 @@ test('an agent run through the sidebar reads, asks to edit with a diff, edits on
   try {
     const sidebar = await openSidebar(root, auth);
     const running = sidebar.send({ type: 'send', text: 'Use port 8080', model: 'z-ai/glm-5.3' });
-    let approval: Record<string, unknown> | undefined;
-    for (let attempt = 0; attempt < 200 && !approval; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      approval = sidebar.posted.find((message) => message.type === 'approval-request');
-    }
+    await waitUntil(() => sidebar.posted.some((message) => message.type === 'approval-request'), 'the approval-request is posted');
+    const approval = sidebar.posted.find((message) => message.type === 'approval-request');
     assert.ok(approval, 'the edit waits for approval');
     assert.match(String((approval.preview as { diff: string }).diff), /-export const port = 3000;\n\+export const port = 8080;/);
     assert.equal(await readFile(path.join(root, 'app.ts'), 'utf8'), 'export const port = 3000;\n', 'nothing changes before approval');
@@ -211,11 +208,8 @@ test('a waiting approval badges the view, is re-sent to a reloaded view, and cle
     assert.equal(sidebar.posted.some((message) => message.type === 'approval-request'), false, 'nothing to replay before a run');
     assert.equal(sidebar.view.badge, undefined);
     const running = sidebar.send({ type: 'send', text: 'Write notes', model: 'z-ai/glm-5.3' });
-    let approval: Record<string, unknown> | undefined;
-    for (let attempt = 0; attempt < 200 && !approval; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      approval = sidebar.posted.find((message) => message.type === 'approval-request');
-    }
+    await waitUntil(() => sidebar.posted.some((message) => message.type === 'approval-request'), 'the approval-request is posted');
+    const approval = sidebar.posted.find((message) => message.type === 'approval-request');
     assert.ok(approval, 'the write waits for approval');
     assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
     await sidebar.send({ type: 'chat-ready' });
@@ -340,11 +334,8 @@ test('a GSD slash command runs the installed skill on the runner: it asks a ques
   try {
     const sidebar = await openSidebar(root, auth);
     const running = sidebar.send({ type: 'open-command', command: 'progress', args: '--verbose', model: 'z-ai/glm-5.3' });
-    let questions: Record<string, unknown> | undefined;
-    for (let attempt = 0; attempt < 300 && !questions; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      questions = sidebar.posted.find((message) => message.type === 'questions-request');
-    }
+    await waitUntil(() => sidebar.posted.some((message) => message.type === 'questions-request'), 'the questions-request is posted');
+    const questions = sidebar.posted.find((message) => message.type === 'questions-request');
     assert.ok(questions, 'the workflow waits for the answer');
     await sidebar.send({ type: 'questions-reply', id: questions.id, answers: ['Phase 9'] });
     await running;
@@ -376,6 +367,18 @@ const OTHER_RUN = 'run-1793570629237-876b3a';
 const HOLD = 'This conversation is running in another editor right now. Wait for it to finish there, or start a new conversation here.';
 const MINUTE = 60_000;
 
+/**
+ * Waits until `ready()` holds. The bound is far above any machine's pace, so it only turns a real hang into a failure: these tests wait on what the
+ * code does, never on how fast it does it (CI flake: a 2 s polling budget ran out under full-suite load).
+ */
+async function waitUntil(ready: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (!(await ready())) {
+    assert.ok(Date.now() < deadline, `timed out waiting until ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 /** A conversation saved by one sidebar (its first run ended), and what another sidebar of the same editor needs to reopen it. */
 async function savedConversation(script?: (turn: number) => Record<string, unknown>) {
   const { root, auth } = await projectWithProfile();
@@ -396,7 +399,8 @@ async function savedConversation(script?: (turn: number) => Record<string, unkno
   const runs = stateHomeFor(root).paths.runs;
   const file = path.join(runs, `${id}.json`);
   // Its own run marker is written in the background; wait until it has ended before another editor takes over.
-  for (let attempt = 0; attempt < 300 && !JSON.parse(await readFile(file, 'utf8').catch(() => '{}')).endedAt; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+  // A fixed number of tries fell through silently on a slow machine, and the late "ended" write then landed over the other editor's marker.
+  await waitUntil(async () => Boolean((JSON.parse(await readFile(file, 'utf8').catch(() => '{}')) as { endedAt?: string }).endedAt), 'the first run\'s marker has ended');
   const others: RunMarkers[] = [];
   /** Another editor starts a run of the conversation, its last sign of life `ageMs` ago. */
   const otherEditorRuns = async (runId = OTHER_RUN, ageMs = 0): Promise<RunMarkers> => {
@@ -503,7 +507,7 @@ test('the view follows the other editor run and reloads the conversation once th
     const before = transcripts();
     await other.end(saved.id, OTHER_RUN, 'completed');
     await other.idle();
-    for (let attempt = 0; attempt < 200 && transcripts() === before; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => transcripts() > before, 'the conversation is reloaded');
     assert.ok(transcripts() > before, 'a transcript message is posted again');
     const last = second.posted.map((message) => message.type).lastIndexOf('conversation-show');
     assert.equal(second.posted.slice(last).some(elsewhereNotice), false, 'the running-elsewhere notice is gone');
@@ -523,9 +527,13 @@ test('the view follows the other editor run, and one that goes quiet is shown as
     const second = await saved.reopen();
     const marker = JSON.parse(await readFile(saved.file, 'utf8')) as Record<string, unknown>;
     marker.activeAt = new Date(Date.now() - FOREIGN_LIVE_MS - MINUTE).toISOString();
-    await writeFileAsync(saved.file, `${JSON.stringify(marker)}\n`);
+    // Written the way the product writes markers (a temporary file renamed over it): a plain write truncates the file first, and a follow check that
+    // read it torn saw no marker at all, stopped following and never showed the cut-off run.
+    const temporary = `${saved.file}.test.tmp`;
+    await writeFileAsync(temporary, `${JSON.stringify(marker)}\n`);
+    await rename(temporary, saved.file);
     second.posted.length = 0;
-    for (let attempt = 0; attempt < 200 && !second.posted.some((message) => message.type === 'run-interrupted'); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => second.posted.some((message) => message.type === 'run-interrupted'), 'the cut-off run is shown');
     const cut = second.posted.find((message) => message.type === 'run-interrupted');
     assert.ok(cut, 'the reloaded conversation shows the run-interrupted message');
     assert.equal(cut.resumable, true);

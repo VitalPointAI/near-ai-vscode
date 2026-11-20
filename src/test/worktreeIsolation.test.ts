@@ -181,3 +181,44 @@ test('with one agent slot and one worktree slot, a worktree agent that starts a 
   assert.match(String(posted.find((message) => message.type === 'tool-end' && message.callId === 'p1')?.output), /lead report: executor report/);
   assert.deepEqual(counters, { parent: 2, lead: 2, executor: 1 });
 });
+
+// Agents of one wave start together, and two `git worktree add` in one repository at once race on .git/worktrees ("fatal: failed to read
+// .git/worktrees/<agent>/commondir"), so the product runs one repository's worktree changes one at a time.
+test('worktrees for agents started together in one repository are created and removed one at a time, and every one succeeds', async () => {
+  const worktree = require('../agent/worktree') as typeof import('../agent/worktree');
+  const { root, storage } = await repository();
+  const original = worktree.worktreeGit.run;
+  let inFlight = 0;
+  let peak = 0;
+  const changes: string[] = [];
+  worktree.worktreeGit.run = async (cwd, args) => {
+    changes.push(`${args[0]} ${args[1]}`);
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    try {
+      // Give every other agent's change the chance to start while this one runs.
+      for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+      return await original(cwd, args);
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  try {
+    const ids = ['a1', 'b2', 'c3', 'd4', 'e5', 'f6'];
+    const made = await Promise.all(ids.map((id) => worktree.createAgentWorktree(root, path.join(storage, 'worktrees'), id)));
+    assert.equal(peak, 1, 'no two worktree changes of one repository ran at once');
+    assert.deepEqual(made.map((entry) => entry.branch), ids.map((id) => `worktree-agent-${id}`));
+    for (const entry of made) assert.ok(existsSync(path.join(entry.path, 'README.md')), `${entry.branch} has its checkout`);
+    peak = 0;
+    assert.deepEqual(await Promise.all(made.map((entry) => worktree.finishAgentWorktree(entry))), ids.map(() => 'removed'));
+    assert.equal(peak, 1, 'removals ran one at a time too');
+    assert.equal(changes.filter((change) => change === 'worktree add').length, ids.length);
+    assert.equal(await git(root, 'branch', '--list', 'worktree-agent-*'), '', 'every empty branch was removed');
+    // A failed change does not block the next one.
+    await assert.rejects(worktree.createAgentWorktree(root, path.join(storage, 'worktrees'), 'a1').then(() => worktree.createAgentWorktree(root, path.join(storage, 'worktrees'), 'a1')));
+    const after = await worktree.createAgentWorktree(root, path.join(storage, 'worktrees'), 'g7');
+    assert.equal(after.branch, 'worktree-agent-g7');
+  } finally {
+    worktree.worktreeGit.run = original;
+  }
+});

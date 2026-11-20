@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Agents that start together in their own git worktrees no longer fail at random.** When a team
+  started several members with worktree isolation in one repository, git could refuse one of the
+  worktrees ("failed to read .../commondir") because they were created at the same moment. They
+  are now created, and removed, one at a time per repository.
+
 ## 0.4.35
 
 The COP map now looks like the ground: photo-like imagery with 3D terrain by default, a
