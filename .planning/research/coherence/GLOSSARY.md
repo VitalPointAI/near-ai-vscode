@@ -26,7 +26,7 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 
 | Concept | User word | Never on main screens | Changes by mode |
 |---|---|---|---|
-| A group of agents | **Team** (agents only) | squad, roster (for agents), crew | no |
+| A group of agents | **Agent team** (every mode; never the bare word "team", owner 2026-11-20) | squad, roster (for agents), crew | no |
 | One agent in a team | **Agent**, with its **job** | member (for agents), seat, role (for agents) | no |
 | The agent that coordinates and merges | "coordinating agent" | lead (for agents), lead agent | no |
 | A person in a shared project | **Member** (Corporate and software), staff officer (Military), employee (Public service), project team member (Capital) | seat, writer, device | yes |
@@ -36,7 +36,7 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | What a person may approve | **Decides** ("J2 Chief decides intelligence estimates") | decision roles, `decision_for` | yes (approve, endorse, commander's decision) |
 | Signed list of people | **People** (Corporate, Public service, Capital), **Roster** (Military only) | genesis, `rosterPrev` | yes |
 | Who can see a piece of shared work | "Who can see this" | cell, epoch, wrap, grant, key group | no |
-| An organization unit | mode word: team, section, directorate, project office | node, cell (for units) | yes |
+| An organization unit | mode word: work team (Corporate), section, directorate, project office | node, cell (for units) | yes |
 | Kind of organization | "How your organization works": Military, Public service, Corporate and software, Capital projects | organization mode | it is the switch |
 | What you will do here (setup question 1) | "Kind of work" | role (for setup) | no |
 | How much agents may do without asking | **Autonomy**: Ask before edits, Edits auto, Auto, Full auto | action policy, approval mode, `approve-risky` | no |
@@ -64,7 +64,7 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | Word | Meanings today | Resolution |
 |---|---|---|
 | **Confidential** | `org/Confidential` (routes to attested cloud) and `ca-classified/Confidential` (local only); the guide's draft Q2 lists "Classified documents (Confidential, Secret, Top Secret)" | Checked on main: Set Label picks the scale first and shows keys like `org/Confidential` (`src/services/gateCommands.ts` `labelShown`), so a wrong pick needs two wrong steps today. Still medium: every display shows scale name plus level ("Organization: Confidential", "Canada, Classified: Confidential"), the Set Label list is grouped by scale, and the guide's copy names the scale. Owner question: rename the `org` level's display name to "Sensitive" while its id stays `Confidential` (ids never change in place, `labels.ts`). |
-| **Team** | agents (Team Studio, Team Live, `teams.ts`) and people (Team Mode, PORT 5.2 Corporate column); later Microsoft Teams | Agents only. People are members (mode word). The name "Team Mode" is retired from user copy; Microsoft Teams is always "Microsoft Teams". |
+| **Team** | agents (Team Studio, Team Live, `teams.ts`) and people (Team Mode, PORT 5.2 Corporate column); later Microsoft Teams | Never bare. Agents: **agent team**; people in Corporate mode: **work team**; other modes use their own word (staff, section, unit, project team). The copy lint flags a bare "team". The name "Team Mode" is retired from user copy; Microsoft Teams is always "Microsoft Teams". |
 | **Roster** | the agent list ("check the roster" in `staffSetupCommand.ts`) and the signed human roster (MUS 7.1) | People only, and only in Military mode. Staff setup says "check the team". |
 | **Lead** | section lead (`humanLead`, approves products), staff lead (writes the roster), lead agent | People: the mode word for "who decides membership", and "decides" for approvals. Agents: "coordinating agent". The team file names a position, never a person (REVIEW conflict K18). |
 | **Cell** | a label key group (MUS 8) and an organization unit (CAP 5.3 small-project cell, PORT 1.6 software cell) | Users never see the key meaning ("who can see this"). As a unit word it exists only where a mode table says so. Designs say "key group" for the first meaning in prose. |
