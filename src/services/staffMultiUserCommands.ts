@@ -55,6 +55,8 @@ export const SIX_WORDS_DIFFER = 'They do not match';
 
 export const MAKE_MULTI_USER_QUESTION = 'Make this staff project multi-user?';
 export const MAKE_MULTI_USER_ACTION = 'Make Multi-User';
+/** The title of the quick pick where the lead declares their own clearance, when Make Multi-User needs a label other than org/Public (D-19). */
+export const LEAD_CLEARANCE_TITLE = 'The clearance you declare for yourself';
 export const NO_FOLDER_TEXT = 'Open the folder of a staff project first. Nothing was changed.';
 export const NOT_SHARED_TEXT = 'This folder holds no shared staff project, so nothing was changed. To share this staff project, run Staff: Make This Staff Project Multi-User first.';
 export const WORDS_DIFFER_TEXT = 'Nobody was admitted, and nothing was changed. Do not admit a request whose words differ, because someone else may have made it. Ask the person to make a new join request from your invitation, or cancel the invitation with Staff: Remove from Staff Project.';
@@ -287,9 +289,9 @@ async function pickRoles(title: string, current: readonly string[] = ['member'])
 }
 
 /** A declared clearance (D-13): a scale and a level of the shipped scales. It is what the lead declares, not a verified clearance. */
-async function pickClearance(title: string): Promise<{ scale: string; level: string; compartments: string[]; releasability: string[] } | undefined> {
+async function pickClearance(title: string, placeHolder = 'The clearance you declare for them (self-declared, not verified)'): Promise<{ scale: string; level: string; compartments: string[]; releasability: string[] } | undefined> {
   const items = Object.entries(SCALE_PRESETS).flatMap(([scale, value]) => value.levels.map((level) => ({ label: level, description: value.name, scale })));
-  const picked = await vscode.window.showQuickPick(items, { title, placeHolder: 'The clearance you declare for them (self-declared, not verified)' });
+  const picked = await vscode.window.showQuickPick(items, { title, placeHolder });
   if (!picked) return undefined;
   return { scale: picked.scale, level: picked.label, compartments: [], releasability: [] };
 }
@@ -352,7 +354,12 @@ async function labelMapHashOf(root: string): Promise<string | undefined> {
 
 // ---- the commands ---------------------------------------------------------------------------------------------------------------------------------
 
-/** Make This Staff Project Multi-User (D-28 to D-34): verify the ledgers first, confirm in a modal dialog that says what happens, then convert. */
+/**
+ * Make This Staff Project Multi-User (D-28 to D-34): verify the ledgers first, confirm in a modal dialog that says what happens, then convert.
+ * A project that needs a label other than org/Public (a product labelled above it, or a calculator or wargame ledger kept at org/Internal) asks the
+ * lead to declare their own clearance first, and checks it before the confirmation: a clearance that does not cover every label is refused with the
+ * D-19 sentence and nothing more is asked or written (D-19). An all org/Public project is asked nothing new (D-68).
+ */
 async function makeMultiUserCommand(context: StaffCommandContext): Promise<void> {
   const root = projectRoot();
   if (!root) { warn(NO_FOLDER_TEXT); return; }
@@ -362,7 +369,16 @@ async function makeMultiUserCommand(context: StaffCommandContext): Promise<void>
   const dir = identityDir(context.globalStorageUri.fsPath);
   const staffKeyStatus = () => localKeyStatus(dir, context.secrets);
   // The four ledgers are checked before anything is asked, so a broken one is refused with today's sentence and its way out, and nothing is written.
-  const verified = await migrate.verifyLegacyLedgers(root, { secrets: context.secrets, staffKeyStatus });
+  const verifyDeps = { secrets: context.secrets, staffKeyStatus };
+  let verified = await migrate.verifyLegacyLedgers(root, verifyDeps);
+  // With no clearance declared only org/Public is covered, so a project needing any other label is refused not-cleared-for-label with those labels.
+  // The lead then declares their own clearance, and the ledgers are checked again with it before anything else is asked.
+  let leadClearance: Awaited<ReturnType<typeof pickClearance>>;
+  if (!('ok' in verified) && verified.refused === 'not-cleared-for-label' && (verified.labels?.length ?? 0) > 0) {
+    leadClearance = await pickClearance(LEAD_CLEARANCE_TITLE, 'The clearance you declare for yourself (self-declared, not verified)');
+    if (!leadClearance) return;
+    verified = await migrate.verifyLegacyLedgers(root, verifyDeps, { leadClearance });
+  }
   if (!('ok' in verified)) { warn(shownRefusal(verified.refused, verified.message)); return; }
   const checked = migrate.LEGACY_LEDGERS.map((ledger) => {
     const read = verified.ledgers.find((item) => item.ledger === ledger.ledger);
@@ -372,11 +388,15 @@ async function makeMultiUserCommand(context: StaffCommandContext): Promise<void>
   const go = await confirm(MAKE_MULTI_USER_QUESTION, [
     `The four ledgers were checked with today's checks: ${checked.join('; ')}.`,
     'The project becomes shared: its history moves into a signed shared record in .planning/staff/replica/, which git ignores. You become its staff lead, signed with this device\'s key, and people join only when you invite and admit them.',
-    'The original ledger files are kept in .planning/staff/legacy/ and never deleted, and the files you know stay where they are. Steps that work on one machine only are refused in a shared project. To work alone again, use Staff: Make a Single-Machine Copy.'
+    'The original ledger files are kept in .planning/staff/legacy/ and never deleted, and the files you know stay where they are. Steps that work on one machine only are refused in a shared project. To work alone again, use Staff: Make a Single-Machine Copy.',
+    ...(leadClearance === undefined ? [] : [`Each product goes into a part of the project for its label: ${verified.labels.join(', ')}. Only people whose declared clearance covers a label receive that part. You declare yourself cleared for ${leadClearance.level}.`])
   ], MAKE_MULTI_USER_ACTION);
   if (!go) return;
   const labelMapHash = await labelMapHashOf(root);
-  const result = await migrate.makeMultiUser(root, { ...(await replicaDeps(context)), staffKeyStatus }, labelMapHash === undefined ? {} : { labelMapHash });
+  const result = await migrate.makeMultiUser(root, { ...(await replicaDeps(context)), staffKeyStatus }, {
+    ...(labelMapHash === undefined ? {} : { labelMapHash }),
+    ...(leadClearance === undefined ? {} : { leadClearance })
+  });
   if (migrate.isMigrationRefused(result)) { warn(shownRefusal(result.refused, result.message)); return; }
   // The staff host reopens the project as shared on its next read.
   await staffHostFor(root)?.close();
