@@ -136,6 +136,16 @@ function bodyBytes(body: unknown, header: EntryHeader): Buffer | undefined {
   return bytes;
 }
 
+/** The header's JSON size in bytes as received, or undefined when it cannot be written as JSON. */
+function headerSize(header: unknown): number | undefined {
+  try {
+    const text = JSON.stringify(header);
+    return typeof text === 'string' ? Buffer.byteLength(text, 'utf8') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 interface OpenedBase {
   kind: string;
   roster: string;
@@ -251,6 +261,16 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
     };
     if (!isRecord(raw)) {
       refuse('malformed-header');
+      continue;
+    }
+    // The size first, on the header as received, so a huge object is never read field by field.
+    const rawSize = headerSize(raw.header);
+    if (rawSize === undefined) {
+      refuse('malformed-header');
+      continue;
+    }
+    if (rawSize > LIMITS.headerBytes) {
+      refuse('header-too-large');
       continue;
     }
     const shape = parseHeaderShape(raw.header);
