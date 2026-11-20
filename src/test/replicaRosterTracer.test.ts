@@ -262,10 +262,6 @@ test('a roster entry of a kind whose rule is not written yet is refused roster-k
   const reference = joinerRoster(joined);
   const keys = world.ringFor(joined.joiner);
   const pending: Array<[string, Record<string, unknown>]> = [
-    ['member.update', { member: JOINER_MEMBER, roles: ['member', 'observer'], agentSeats: ['release-guard'] }],
-    ['member.remove', { member: JOINER_MEMBER }],
-    ['device.revoke', { member: JOINER_MEMBER, writer: joined.joiner.writer }],
-    ['invite.void', { invite: INVITE_ID }],
     ['cell.create', { cell: 'c'.repeat(32), epoch: 1, grant: 'd'.repeat(64) }],
     ['deputy.name', { member: JOINER_MEMBER }],
     ['lead.handover', { to: JOINER_MEMBER, reason: 'planned' }]
@@ -277,8 +273,8 @@ test('a roster entry of a kind whose rule is not written yet is refused roster-k
     assert.deepEqual(state.positions, reference.positions, kind);
     for (const hash of [...reference.positions, written.hash]) assert.deepEqual(answersAt(state, joined, hash), answersAt(reference, joined, hash), `${kind} at ${hash}`);
   }
-  // The routing is what refuses them: the kinds sit in three different owner modules.
-  assert.deepEqual([...new Set(pending.map(([kind]) => ROSTER_KIND_OWNER[kind]))].sort(), ['cells', 'members', 'roster']);
+  // The routing is what refuses them: the kinds still pending sit in two owner modules (every members kind has its rule since 31-14).
+  assert.deepEqual([...new Set(pending.map(([kind]) => ROSTER_KIND_OWNER[kind]))].sort(), ['cells', 'roster']);
   // The refusal reason has its plain sentence.
   assert.ok(ROSTER_REFUSALS['roster-kind-pending'].length > 20);
 });
