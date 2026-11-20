@@ -63,7 +63,7 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-latest
-    timeout-minutes: 340  # a large PR is reviewed in up to 3 parts (MAX_REVIEW_PARTS), each up to 3 model attempts that stop after 2 quiet minutes or 45 minutes in all; under GitHub's 360-minute job limit
+    timeout-minutes: 340  # the model calls of every part share one budget (REVIEW_BUDGET_SECONDS, 300 minutes) and posts a failure status when it runs out; the rest is for gathering and posting; under GitHub's 360-minute job limit
     environment: agent-review
     outputs:
       pr: ${{ steps.target.outputs.pr }}

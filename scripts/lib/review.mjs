@@ -102,6 +102,19 @@ function setStatus(repo, sha, state, description, targetUrl) {
 }
 
 /**
+ * Sets REVIEW_ACCOUNT's `agent-review` to failure on `sha` when the review could not finish (the
+ * model failed, or the review's time budget ran out), so the PR shows why it is blocked instead of
+ * having no result. Refuses any other account, like submitReview. `targetUrl` (https only) links
+ * the workflow run whose log has the details.
+ */
+export function postReviewFailure(repo, sha, reason, { log = console.log, targetUrl } = {}) {
+  const login = currentLogin();
+  if (login.toLowerCase() !== REVIEW_ACCOUNT.toLowerCase()) throw new Error(`gh runs as ${login}, but only ${REVIEW_ACCOUNT}'s ${AGENT_REVIEW_CONTEXT} counts; no failure status was posted.`);
+  setStatus(repo, sha, 'failure', `FAIL: the review could not finish: ${reason}`, targetUrl);
+  log(`Set ${AGENT_REVIEW_CONTEXT}=failure on ${sha}: the review could not finish.`);
+}
+
+/**
  * Posts the review file as a PR comment and sets `agent-review` on the head commit. Throws when
  * the PR is not open, gh does not run as REVIEW_ACCOUNT (near-ai-reviewer), or posting fails.
  *
