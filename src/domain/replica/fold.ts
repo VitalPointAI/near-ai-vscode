@@ -14,8 +14,8 @@ import { buildCausalGraph } from './causal';
 import type { CausalGraph } from './causal';
 import { classifyChains } from './chain';
 import type { ChainResult, EquivocationProof, HeldEntry, QuarantineRecord, RejectedEntry } from './chain';
-import { checkpointCoverage, checkpointHash, readCheckpoint } from './checkpoint';
-import type { SignedCheckpoint } from './checkpoint';
+import { checkpointBases, checkpointCoverage, checkpointHash, readCheckpoint, verifyCheckpoint } from './checkpoint';
+import type { CheckpointBase, SignedCheckpoint } from './checkpoint';
 import { streamDigests } from './digest';
 import { entryHash, parseHeaderShape, sha256Hex } from './entry';
 import { waitAnswered, waitOf } from './holdWaits';
@@ -31,7 +31,8 @@ import type { KeepReason, VerifiedEntry, VerifyOutcome, VerifyRejection } from '
 
 export interface FoldOptions {
   reducers?: readonly AnyReducer[];
-  // Checkpoints the caller has already verified (verifyCheckpoint). The fold uses the longest nested chain of them and reports the rest.
+  // Checkpoints the caller has already verified (verifyCheckpoint). The fold uses the longest nested chain of them and reports the rest. The heads of
+  // the version 2 ones are also join bases (D-04, D-42): a writer's log may start right after one (classifyChains).
   checkpoints?: readonly SignedCheckpoint[];
 }
 // A checkpoint the fold did not use because it does not nest with the chain it used.
@@ -287,6 +288,29 @@ function planCheckpoints(checkpoints: readonly SignedCheckpoint[], graph: Causal
   return { used: last === undefined ? null : last.hash, sets: chosen.map((entry) => entry.covered), final: last === undefined ? new Set<string>() : last.covered, conflicts };
 }
 
+// The verdicts of version 2 checkpoints, per signed object and roster view, so a fold that runs again does not check a signature twice.
+const signerChecks = new WeakMap<object, WeakMap<object, boolean>>();
+
+// A base lets entries in without their predecessors, so only a checkpoint that verifies here gives bases, even though the caller is asked to pass
+// verified checkpoints only (T-31-19): one from a device the roster does not name as checkpoint signer gives none.
+function joinBases(checkpoints: readonly SignedCheckpoint[], ctx: ReplicaContext): Map<string, CheckpointBase> {
+  const usable = checkpoints.filter((signed) => {
+    if (readCheckpoint(signed?.payload)?.v !== 2) return false;
+    let byRoster = signerChecks.get(signed);
+    if (byRoster === undefined) {
+      byRoster = new WeakMap();
+      signerChecks.set(signed, byRoster);
+    }
+    let ok = byRoster.get(ctx.roster);
+    if (ok === undefined) {
+      ok = verifyCheckpoint(signed, ctx.roster).ok;
+      byRoster.set(ctx.roster, ok);
+    }
+    return ok;
+  });
+  return checkpointBases(usable);
+}
+
 function prepare(store: Store, ctx: ReplicaContext, options: FoldOptions): Prepared {
   const verified: VerifiedEntry[] = [];
   const verifyHeld: HeldEntry[] = [];
@@ -300,7 +324,7 @@ function prepare(store: Store, ctx: ReplicaContext, options: FoldOptions): Prepa
     const record = { ...(outcome.hash === undefined ? {} : { hash: outcome.hash }), ...place, stage: 'verify' as const, reason: outcome.reason };
     (outcome.status === 'held' ? verifyHeld : verifyRejected).push(record);
   }
-  const chains = classifyChains(verified, ctx, verifyRejected);
+  const chains = classifyChains(verified, ctx, verifyRejected, joinBases(options.checkpoints ?? [], ctx));
   const graph = buildCausalGraph(chains.admitted);
   const plan = planCheckpoints(options.checkpoints ?? [], graph);
   const ordered = checkpointOrder(chains.admitted, plan.sets);
