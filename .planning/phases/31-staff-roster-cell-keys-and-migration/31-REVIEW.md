@@ -221,3 +221,25 @@ or add a commitment (the invite commits to a hash of a lead nonce revealed only 
 _Reviewed: 2026-11-20T07:09:32Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+
+## Resolution (integration branch)
+
+Every CRITICAL and MAJOR finding is fixed, each with a regression test that fails on the code reviewed here:
+
+| Finding | Outcome | Where |
+|---|---|---|
+| CR-01 | Fixed. Only grants the roster fold placed (or this device's own key for a committed grant) put a key into the ring; the committed grant decides an epoch's key; the old cache format is ignored. | keyring.ts, replicaProject.ts (7ada24ea) |
+| CR-02 | Fixed. An own-writer line counts only with this device's valid signature; a forged one is damage, never the head. | store.ts (ec582812) |
+| MJ-01 | Fixed. Safety code v2 covers a fresh joiner nonce and the inviter's keys, so matching needs a second preimage. | safetyCode.ts, invite.ts (4d30e460) |
+| MJ-02 | Fixed. An admitted invitation's welcome can be made again without the join secret; an unreadable grant is skipped and reported. | membership.ts, commands (4d30e460, e5c23094) |
+| MJ-03 | Fixed. Unfinished rekeys are computed from the roster and finished by the next roster flow or by Remove. | membership.ts (4d30e460, e5c23094) |
+| MJ-04 | Fixed. Keys are kept per committed grant; a failed rekey's key is never used. | keyring.ts, membership.ts (7ada24ea) |
+| MJ-05 | Fixed. Invitations carry the anchor and a separate inviter; any lead or deputy device can invite, checked against the anchor's roster. | invite.ts, membership.ts (4d30e460) |
+| MJ-06 | Fixed. Compact signed mark (hash over the heads, lists beside it); 1,300 files tested. | marks.ts, store.ts (ec582812) |
+| MJ-07 | Fixed. Entries awaiting a key or blob wait outside the main fold and are rechecked; held and waiting lists live in the signed mark. The roster fold reads waiting entries (it applies only roster kinds), so a joiner can settle its keys. | store.ts, replicaProject.ts (ec582812, 9c946e02) |
+| MJ-08 | Fixed. Damaged lines are reported as damage; Staff: Start This Computer's Shared History Again sets the store aside (never deletes) and starts over. | store.ts, command (ec582812, 94c60c24) |
+| MJ-09 | Fixed. A re-run after a product file was edited stops with product-changed; an edited body is never written over. | migrate.ts, projection.ts (1f486240) |
+| MN-01, MN-02, MN-03, MN-04 | Fixed. | 4d30e460, e5c23094, e52ac25e |
+| MN-05, IN-01, IN-02 | Open (minor), left for a later phase. | |
+
+Verifier W-1 (labelled products sealed under the base cell) is closed by refusal: Make Multi-User refuses a project with a product labelled above org/Public until products can be sealed under a cell for their label (1f486240). That is an owner decision to revisit.
