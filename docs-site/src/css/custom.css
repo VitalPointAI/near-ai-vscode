@@ -1,0 +1,27 @@
+/* Site colours. System fonts only: the site loads nothing from the web. */
+:root {
+  --ifm-color-primary: #1f6f5c;
+  --ifm-color-primary-dark: #1c6453;
+  --ifm-color-primary-darker: #1a5e4e;
+  --ifm-color-primary-darkest: #154d40;
+  --ifm-color-primary-light: #227a65;
+  --ifm-color-primary-lighter: #24806a;
+  --ifm-color-primary-lightest: #2a917a;
+  --ifm-code-font-size: 92%;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #4fc3a1;
+  --ifm-color-primary-dark: #3cbb96;
+  --ifm-color-primary-darker: #38b18e;
+  --ifm-color-primary-darkest: #2e9275;
+  --ifm-color-primary-light: #65cbad;
+  --ifm-color-primary-lighter: #70cfb3;
+  --ifm-color-primary-lightest: #90dac4;
+}
+
+/* Wide tables from the repository's documents scroll inside the page. */
+.markdown table {
+  display: block;
+  overflow-x: auto;
+}

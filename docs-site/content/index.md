@@ -1,0 +1,32 @@
+---
+slug: /
+sidebar_label: Welcome
+sidebar_position: 1
+---
+
+# NEAR AI for VS Code documentation
+
+NEAR AI for VS Code puts an AI agent team inside your editor. This site has two kinds of pages:
+
+- **Using NEAR AI**: how to get started and how to do the work of your role, for people who use the
+  extension.
+- **Security, Architecture, Developing and Releases**: how it is built, what it trusts and why, and
+  how changes reach a release, for people who build, review or approve it.
+
+Most pages here are the repository's own documents (the README, SECURITY.md, the CHANGELOG, the
+development workflow and the design documents), rendered as they are at build time. Each of those
+pages says which file it comes from: edit that file, never the copy on this site.
+
+## Where to start
+
+| You want to | Read |
+| --- | --- |
+| Install it and get a first answer | [Getting started](./using/getting-started.md) |
+| See everything it does and every setting | [Features and settings](./using/features.synced.md) |
+| Know where your data goes and what the agent may do | [The trust model in plain words](./security/trust-model.md) |
+| Understand how it is put together | [Architecture overview](./architecture/overview.md) |
+| Make a change and get it released | [Development workflow](./developing/development-workflow.synced.md) |
+| See what changed in each version | [Changelog](./releases/changelog.synced.md) |
+
+The search box at the top works offline: the index is built with the site and nothing is sent
+anywhere when you search.

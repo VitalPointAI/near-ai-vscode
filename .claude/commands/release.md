@@ -50,12 +50,25 @@ the owner's approval in GitHub; never try to publish from this session.
    changes. Update README (features, settings, troubleshooting) and SECURITY.md where the release
    changes what they describe.
 
+   **Docs updated.** The documentation site renders README, SECURITY.md, the CHANGELOG, `docs/`
+   and the design documents, plus its own pages in `docs-site/content/`. Check that the user
+   guides and the technical pages describe what this release does, and fix them in this PR. For a
+   minor release (`x.y.0`), take the docs snapshot for the version and commit it:
+
+   ```bash
+   cd docs-site && npm ci --ignore-scripts && npm run version:snapshot -- <x.y.z>
+   git add versions.json versioned_docs versioned_sidebars
+   ```
+
+   Patch releases take no snapshot.
+
 5. **Verify locally:**
 
    ```bash
    node scripts/prepare-release.mjs check
    npm run lint && npm test
    npm run verify:release
+   npm run docs:build
    ```
 
 6. **Commit and open the PR:**

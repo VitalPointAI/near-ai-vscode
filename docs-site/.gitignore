@@ -1,0 +1,12 @@
+node_modules/
+# Build output and caches
+/build/
+/.docusaurus/
+# Copies of the repository's documents made by scripts/sync-docs.mjs at every build
+/content/**/*.synced.md
+/static/synced/
+# Folders the sync fills entirely (with their generated _category_.json files)
+/content/architecture/codebase/
+/content/architecture/design/
+/content/architecture/decisions/
+/content/using/reference/
