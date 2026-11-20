@@ -180,6 +180,8 @@ Region is a contractual fact recorded in your organization's policy. Attestation
 
 ### 6.2 The vault entry in the signed policy
 
+> **Coherence review (2026-11-20):** `routing.vaults` entries become entries of class `vendor-region` (Standard) or `vendor-tee` (Encrypted) in the one `endpoints[]` list; `acceptLevels` becomes `maxLabel`. Adding a vault in setup produces a policy proposal in the one policy editor instead of writing the policy. Proposed default for a Standard vault: `org/Public` only, with Internal as an unticked box ("This vault is not attested; Internal work normally needs attested hardware"), because the shipped table sends Internal only to attested hardware (owner question Q5, replacing D2's default). See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`.
+
 Vaults that may receive labelled content are named in the policy bundle under a new optional `routing.vaults` list, parsed with the strict key checks of `checkKeys` (an unknown key, a wrong type or a value out of range refuses the whole bundle). A bundle without the key keeps today's behaviour: vaults receive only `any-cloud` content.
 
 ```json
@@ -226,6 +228,8 @@ Vaults that may receive labelled content are named in the policy bundle under a 
 
 ### 6.3 Protected B authorization
 
+> **Coherence review (2026-11-20):** the authorization becomes one `authorizations[]` record of kind `protected-b`, keyed by endpoint id rather than a `vault` field, so the same record covers NEAR AI Cloud and your organization's attested hosting (guided setup R9). Its signer must be a named person listed in the organization layer; until that layer exists it shows "self-signed on this computer". See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`, section 4.
+
 The rule, as SECURITY.md will state it: confidential computing protects data from the operator and proves what code runs; it does not make a service acceptable for Protected B. Acceptance comes from the CCCS Medium cloud control profile and the CCCS assessment of the cloud service provider (ITSM.50.100), together with the consuming organization's own security assessment and authorization, and for a contractor the security requirements of its contract (the security requirements check list under the Contract Security Program). We found no public evidence that Cohere Model Vault holds a CCCS Medium assessment (question C9). So:
 
 ```json
@@ -258,9 +262,13 @@ The rule, as SECURITY.md will state it: confidential computing protects data fro
 
 ### 6.4 Residency
 
+> **Coherence review (2026-11-20):** residency becomes a gate rule (`residency` section, `route.residency`) checked on every request against the endpoint's `region`, not only expressed through `acceptLevels`. See `.planning/research/coherence/REVIEW.md`, conflict K10.
+
 The extension does not decide residency by itself. Your organization expresses it through `acceptLevels`: for example, a US Encrypted vault with only `org/Public` and `org/Internal` keeps Protected A in Canada even though the vault is attested. The setup shows the region beside every vault, and the badge names it on every answer.
 
 ### 6.5 Trust badge
+
+> **Coherence review (2026-11-20):** **the fourth badge state below is superseded.** Every answer carries one trust line: Runs on (the place, for example "Cohere vault in Canada (dedicated to your organization)"), Verified (the three shipped proof levels), Allowed (what let it go). A Standard vault reads "Not verified: this service cannot be checked" with a neutral icon, distinct from "Check failed", so no fourth state is needed (owner question Q4, replacing D1's default). See `.planning/research/coherence/REVIEW.md` and `EXPERIENCE.md`, section 3.
 
 Today's three states stay as they are for NEAR. For vaults:
 

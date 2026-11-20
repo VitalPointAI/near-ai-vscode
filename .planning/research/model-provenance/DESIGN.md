@@ -124,6 +124,8 @@ Provider kinds `near-ai`, `local` and `hybrid` take any OpenAI-compatible endpoi
 
 ### 5.1 Where it lives
 
+> **Coherence review (2026-11-20):** `ceiling.models` becomes the `models` section of policy bundle v2, named in `requires` as `models@1`, so an older client says "update" instead of failing as an unknown key. Its schema is built in Phase 41 (the organization policy foundation) in report mode; Phase 74.1 keeps enforcement, the T0 lane and the defaults. T1 acceptances (5.3) become `authorizations[]` records of kind `t1-risk`, carrying the named person's own signature and shown as "self-signed on this computer" until an organization issuer exists. See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`.
+
 In the signed policy bundle, as an optional `ceiling.models` object. It follows the `mcpLabelCeilings` precedent: an optional key in bundle v1, parsed with strict key checks (`checkKeys` in `src/domain/gate/shape.ts`), where an unknown key, a wrong type or an out-of-range value refuses the whole bundle. The bundle is the ceiling: a person's settings can only narrow inside it.
 
 ```json
@@ -259,6 +261,8 @@ No shipped passport claims T3, and none carries an `evaluation` reference: T3 ne
 
 ### 6.1 How it is worked out
 
+> **Coherence review (2026-11-20):** the exercise flag that lowers a staff project from T3 to T2 becomes a signed project-layer attribute, set only at genesis or by the lead with a reason, recorded like a label lowering and shown on every staff screen. See `.planning/research/coherence/REVIEW.md`, conflict K30.
+
 The tier is the **highest** of the rules below that apply. Every input is a local fact the extension already holds at request time. Like the chat's mark, a session's tier only rises.
 
 | Input | Fact the extension already has | Tier it raises to |
@@ -349,6 +353,8 @@ Exact model ids are pinned when NEAR or your organization's hosting publishes th
 "Nemotron" names several unrelated things. Nemotron 3 is trained from scratch by NVIDIA. Llama-Nemotron is a Llama base with DeepSeek-R1 reasoning data. OpenReasoning-Nemotron is a Qwen2.5 base, so its origin is PRC. Passports therefore match exact, anchored ids, and the resolver never infers origin or family from a name.
 
 ### 8.3 Hosting classes
+
+> **Coherence review (2026-11-20):** `routing.attestedHosts` is replaced by entries of class `org-tee` in the one `endpoints[]` list (exact host, TLS pin, region, `maxLabel`, attestation spec), and `routing.localHosts` entries become class `org-plain`. People see the class only as the "Runs on" part of the trust line. See `.planning/research/coherence/REVIEW.md` and `POLICY-SCHEMA.md`, section 5.
 
 | Class | Meaning | Satisfies `attested-cloud` |
 |---|---|---|
