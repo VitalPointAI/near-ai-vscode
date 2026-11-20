@@ -131,8 +131,11 @@ test('no built-in template or starting point gets the parallel-work notes, and n
   }
   for (const [label, draft] of drafts) {
     assert.deepEqual(parallelNotes(draft), [], label);
-    // A local research team has no web tools, which its research members already warn about; that is not this change.
-    if (!label.endsWith(':local')) assert.deepEqual(checkWarnings(checkTeam(draft)).map((issue) => issue.message), [], label);
+    // A local team has no web tools, which a member told to research already warns about (tool-missing, for the web); that is not this change, and
+    // it is the only warning a local team may have (PR #91 review: the local drafts were skipped, so any new warning on them went unnoticed).
+    const warnings = checkTeam(draft).filter((finding) => finding.severity !== 'advice');
+    if (label.endsWith(':local')) assert.ok(warnings.every((finding) => finding.id === 'tool-missing' && finding.tools?.some((tool) => tool === 'WebSearch' || tool === 'WebFetch')), `${label}: ${warnings.map((finding) => finding.id).join(', ')}`);
+    else assert.deepEqual(warnings.map((finding) => finding.message), [], label);
   }
 });
 
@@ -169,7 +172,8 @@ test('the local check gives advice, never a warning, when no member owns an area
 test('the studio shows the notes while editing, and they never stop a save', () => {
   const review = reviewDraft(plain, undefined, input, context);
   assert.deepEqual(review.errors, []);
-  assert.deepEqual(review.notes.map((note) => note.field), ['members', 'members']);
+  // The area note is about the members; the integration note about the team (its description or a member), so it points at neither alone.
+  assert.deepEqual(review.notes.map((note) => note.field), ['members', undefined]);
   assert.ok(review.notes.every((note) => !review.warnings.some((warning) => warning.message === note.message)));
   // A built-in has none.
   const builtIn = startingPointDraft({ id: 'type:software', goal: 'Ship', locality: 'cloud' }, context).draft;
@@ -194,4 +198,41 @@ test('an existing team without areas or an integration step still shows Ready on
   assert.equal(dashboard.cards['user:old']!.status, 'ready');
   assert.deepEqual(dashboard.cards['user:old']!.attention, []);
   assert.match(dashboard.cards['user:old']!.health.parts[0]!.detail, /suggestion/);
+});
+
+test('the area and integration phrases are named, never implied: bare "own", "owns", "worktree", "merge" or "combine" do not count (PR #91 review)', () => {
+  // Areas: named ownership counts.
+  for (const text of ['Your area is the API.', 'Work only in your own area.', 'It owns the billing module.', 'Keep to its own files.', 'You must not touch the UI.', 'The tests are owned by qa.', 'Leave the rest to its owner.', 'Your own report is the deliverable.']) assert.match(text, SEPARATE_AREA, text);
+  // A bare "own", "owns" or "worktree" names no area.
+  for (const text of ['Explain it in your own words.', 'Use your own judgement.', 'Work in a git worktree.', 'Use a worktree of your own.', 'Report what you own up to.']) assert.doesNotMatch(text, SEPARATE_AREA, text);
+  // Integration: parts brought together count.
+  for (const text of ['Merge the branches one at a time.', 'Report your branch for the lead to merge.', 'Resolve conflicts between the parts.', 'You check the whole once it is done.', 'Combine the findings into one summary.', 'The integrator merges the work.', 'Bring the parts together.', 'Sort out conflicts.']) assert.match(text, INTEGRATION_STEP, text);
+  // A bare merge, integration tests, or combining notes brings no members' parts together.
+  for (const text of ['It merges with the existing setup.', 'Run the integration tests.', 'Combine the notes.', 'Do not merge anything into main.', 'Assemble a list of sources.']) assert.doesNotMatch(text, INTEGRATION_STEP, text);
+  // So the notes fire for a team that only says those words.
+  const vague: TeamDraft = { name: 'Vague', description: 'Merges with the existing setup', members: [
+    member({ name: 'builder', role: 'implementer', tools: null, instructions: 'Make the changes in a git worktree, in your own words. Run the integration tests. Report what changed.' }),
+    member({ name: 'checker', instructions: 'Combine the notes. Review the change. Report findings with file:line.' })
+  ] };
+  assert.deepEqual(parallelNotes(vague), ['no-separate-areas', 'no-integration']);
+});
+
+test('the integration note names the description too, and points at no one field: the description can settle it (PR #91 review)', () => {
+  const finding = checkTeam(plain).find((entry) => entry.id === 'no-integration')!;
+  assert.equal(finding.field, undefined);
+  assert.match(finding.message, /^Neither the team's description nor any member's instructions say who brings the parts together/);
+  assert.deepEqual(parallelNotes({ ...plain, description: 'The lead merges the parts and checks the whole.' }).includes('no-integration'), false);
+});
+
+test('investigators run at the same time each write their own findings file, which the lead combines; none writes TEAM-FINDINGS.md alongside another (PR #91 review)', () => {
+  const research = PROJECT_TYPES.find((type) => type.id === 'research')!;
+  const investigator = research.members.find((entry) => entry.name === 'investigator')!.instructions;
+  assert.match(investigator, /Output: \.planning\/research\/TEAM-FINDINGS\.md when you are the only investigator/);
+  assert.match(investigator, /several investigators at the same time on separate research questions: then each one writes its own file, \.planning\/research\/findings\/<a short name for its questions>\.md, in the same form, and never TEAM-FINDINGS\.md/);
+  assert.match(investigator, /The lead combines those files into TEAM-FINDINGS\.md[^.]*before the source-verifier starts/);
+  assert.doesNotMatch(investigator, /each writing its own section of it/);
+  assert.match(research.guidance, /several investigators each write \.planning\/research\/findings\/<name>\.md, never one shared file/);
+  // Its area is still named, and the lead's combining is an integration step.
+  assert.match(investigator, SEPARATE_AREA);
+  assert.match(investigator, INTEGRATION_STEP);
 });

@@ -153,7 +153,9 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
  */
 export function teamHealth(check: CheckCounts | undefined, roleTest?: RoleTestRecord, error?: string): TeamHealth {
   const parts: HealthPart[] = [];
-  if (error || !check) parts.push({ id: 'check', label: 'Local check', detail: 'The team file needs fixing before it can be checked.' });
+  if (error) parts.push({ id: 'check', label: 'Local check', detail: 'The team file needs fixing before it can be checked.' });
+  // No count and no error (the check could not read it as a draft, or an older host sent none): not known, which says nothing about the file (PR 86 review).
+  else if (!check) parts.push({ id: 'check', label: 'Local check', detail: 'Not known: the local check has not been run on this team.' });
   else if (check.block) parts.push({ id: 'check', label: 'Local check', score: 0, detail: 'It holds something that looks like a key, token or password.' });
   else {
     const score = Math.max(0, 100 - 15 * check.warning - 5 * check.advice);

@@ -171,7 +171,7 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
   const historyTeam = async (title: string | undefined): Promise<TeamDefinition | undefined> => {
     const slug = title ? TEAM_COMMAND.exec(title)?.[1] : undefined;
     if (!slug) return undefined;
-    if (!teams.has(slug)) teams.set(slug, await new TeamLibrary(teamLibraryDir(homeFolder())).find(slug, root).catch(() => undefined));
+    if (!teams.has(slug)) teams.set(slug, await new TeamLibrary(teamLibraryDir(homeFolder())).findRunTeam(slug, root).catch(() => undefined));
     return teams.get(slug);
   };
   const send = async () => {

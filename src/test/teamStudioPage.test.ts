@@ -11,14 +11,14 @@ import test from 'node:test';
 import { decidePermission, DEFAULT_RULES, RunGrants } from '../agent/permissions';
 import { CORE_TOOLS } from '../agent/tools';
 import { webFetchTool, webSearchTool } from '../agent/webTools';
-import { checkDraft, draftFromMarkdown, lineDiff, teamMarkdown, type TeamDraft } from '../agent/teamMarkdown';
+import { checkDraft, draftFromMarkdown, lineDiff, teamMarkdown, type DraftMember, type TeamDraft } from '../agent/teamMarkdown';
 import { DEFAULT_TOOLS, parseTeam, renderTeam, slugify, TeamLibrary, teamKnowledgeKey } from '../agent/teams';
 import { addKnowledge } from '../services/teamKnowledgeStore';
 import type { ActionCapability, ActionPolicyMode } from '../domain/policy';
 import type { Suggestion } from '../agent/teamRefine';
-import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, savedTeamName, TEAM_NAME_MAX, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
+import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cloneNameProblem, savedTeamName, TEAM_NAME_MAX, KEPT_WIZARD_TEXT, takenTeamNames, teamNameClash, optimiseTarget, parseStudioMessage, reviewDraft, startingPointDraft, teamPicker, teamStudioHtml, type KeptWork, type SavedWizard, type StudioContext, type TeamStudioDeps } from '../services/teamStudioPage';
 import type { DirectoryInput } from '../services/toolsDirectory';
-import { JPEG, png, SVG, WEBP } from './iconFixtures';
+import { JPEG, jpegOfSize, png, SVG, WEBP, webpOfSize } from './iconFixtures';
 import { iconVariation, ICON_VARIATIONS, teamIconPrompt, withIconReference } from '../agent/teamIcon';
 import { buildDashboard, type DashboardTeam } from '../domain/teamDashboard';
 import type { ActivitySessionSummary } from '../domain/activity';
@@ -313,8 +313,21 @@ async function harness(): Promise<Harness> {
     watch: (listener) => { watcher = listener; return { dispose() {} }; }
   };
   attachTeamStudio({ webview: { postMessage: async (message) => { posted.push(message as Record<string, any>); return true; }, onDidReceiveMessage: (listener) => { receive = listener; return { dispose() {} }; } }, onDidDispose: (listener) => { disposed = listener; return { dispose() {} }; } }, deps);
-  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 20));
-  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!(), setRoot: (next, notify = true) => { openRoot = next; if (notify) folderChanged?.(); } };
+  // A folder change makes the studio list the library again on its own (no message to await): settle then waits for the listing it posts, not for a
+  // fixed time, which failed under a loaded full run. The deadline only turns a hang into a failure.
+  let listingAfter: number | undefined;
+  const states = () => posted.filter((message) => message.type === 'state').length;
+  const settle = async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    if (listingAfter === undefined) return;
+    const deadline = Date.now() + 10_000;
+    while (states() <= listingAfter) {
+      assert.ok(Date.now() < deadline, 'the studio lists the library again after the folder change');
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    listingAfter = undefined;
+  };
+  return { posted, send: async (message) => { await receive!(message); }, deps, storage, root, library, prefills, opened, applied, drafts, watch: (file) => watcher!(file), confirmAnswer, askAnswer, shareTarget, importSource, confirmed, settle, chooseAnswer, asked, kept, close: () => disposed!(), setRoot: (next, notify = true) => { openRoot = next; if (notify && folderChanged) { listingAfter ??= states(); folderChanged(); } } };
 }
 const last = (h: Harness, type: string) => [...h.posted].reverse().find((message) => message.type === type)!;
 
@@ -706,6 +719,15 @@ async function runPage(extra: Record<string, unknown> = {}, options: { state?: u
   return { doc, posts, webviewState, fireWindow: (type: string) => (windowEvents.get(type) ?? []).forEach((listener) => listener({ data: undefined })), dispatch: (data: unknown) => listeners.forEach((listener) => listener({ data })), byLabel, text: () => doc.getElementById('main')!.textContent, wait: () => new Promise((resolve) => setTimeout(resolve, 200)) };
 }
 
+/** The number of the page's last starting-point request, which the host's reply carries back (PR #75 review: replies are matched by it). */
+const startSeqOf = (page: { posts: Array<Record<string, any>> }): number | undefined => [...page.posts].reverse().find((post) => post.type === 'starting-point')?.seq;
+/** A numbered request without its number, which is checked to be one. */
+function unnumbered(post: Record<string, any> | undefined): Record<string, any> {
+  assert.ok(post && Number.isSafeInteger(post.seq), `numbered: ${JSON.stringify(post)}`);
+  const { seq: _seq, ...rest } = post;
+  return rest;
+}
+
 test('page: the library shows cards with actions, an empty state, and "Use in chat" posts the team id', async () => {
   const page = await runPage();
   assert.deepEqual(page.posts, [{ type: 'ready' }]);
@@ -747,8 +769,8 @@ test('page: the wizard walks five steps, asks the host to check the draft, and s
   const goal = page.doc.getElementById('f-goal')!;
   goal.value = 'Ships features'; goal.fire('input');
   page.byLabel('Clone Build & test team and modify it')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'gsd:build-test', goal: 'Ships features', locality: 'cloud' });
-  page.dispatch({ type: 'starting-point', id: 'gsd:build-test', draft: { name: '', description: '', members: [{ name: 'planner', role: 'gsd-planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.deepEqual(unnumbered(page.posts.at(-1)), { type: 'starting-point', id: 'gsd:build-test', goal: 'Ships features', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'gsd:build-test', draft: { name: '', description: '', members: [{ name: 'planner', role: 'gsd-planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   assert.match(page.text(), /1\. Purpose.*2\. Members.*5\. Instructions & review/);
   const name = page.doc.getElementById('f-name')!;
   name.value = 'Build crew'; name.fire('input');
@@ -1452,8 +1474,8 @@ test('page: the new-team picker filters All / My teams / Built-in, shows where e
   const mine = radios('starting-point').find((node) => node.value === 'lib:web')!;
   mine.checked = true; mine.fire('change');
   page.byLabel('Clone Web team and modify it')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
-  page.dispatch({ type: 'starting-point', id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.deepEqual(unnumbered(page.posts.at(-1)), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   page.byLabel('Next: Members')!.click();
   assert.equal(page.doc.getElementById('m-name-0')!.value, 'lead');
   page.byLabel('Back')!.click();
@@ -2037,8 +2059,15 @@ test('host path: the real panel follows a folder change: its project team watche
     assert.equal(projectName(), 'First project');
     assert.equal(projectWatch(first)?.disposed, false);
     workspace.workspaceFolders = [{ uri: { fsPath: second }, name: 'second' }];
+    const statesBefore = posted.filter((message) => message.type === 'state').length;
     for (const listener of [...folderListeners]) listener();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // The listing for the new folder is read from disk, so the test waits for the state it posts, not for a fixed time (it failed once under load
+    // with a 30 ms wait). The deadline only turns a hang into a failure.
+    const deadline = Date.now() + 10_000;
+    while (posted.filter((message) => message.type === 'state').length === statesBefore) {
+      assert.ok(Date.now() < deadline, 'the studio posts the listing for the new folder');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     assert.equal(projectName(), 'Second project', 'listed again for the new folder');
     assert.equal(projectWatch(first)?.disposed, true, 'the old folder is no longer watched');
     assert.equal(projectWatch(second)?.disposed, false, 'the new folder\'s team file is watched');
@@ -2155,7 +2184,7 @@ test('page: selecting an existing team offers Use as is and Clone and modify; Us
   page.type('f-goal', 'Ship it');
   // With unsaved work in the builder, Use as is says so, and the host asks before discarding it.
   page.byLabel('Clone Software development team and modify it')!.click();
-  page.dispatch({ type: 'starting-point', id: 'type:software', projectType: 'software', draft: { name: '', description: 'A team', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'type:software', projectType: 'software', draft: { name: '', description: 'A team', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
   page.type('f-name', 'My own');
   page.byLabel('Back')!.click();
   assert.equal(page.heading(), 'Use an existing team');
@@ -2203,8 +2232,9 @@ test('page: Clone and modify fills the Purpose step with "<name> copy" made uniq
   page.byLabel('Use an existing team')!.click();
   page.select('lib:web');
   page.byLabel('Clone Web team and modify it')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
-  page.dispatch({ type: 'starting-point', id: 'lib:web', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.deepEqual(unnumbered(page.posts.at(-1)), { type: 'starting-point', id: 'lib:web', goal: '', locality: 'cloud' });
+  // The host names the copy (cloneNameFor, made unique against the library); the page fills in exactly that.
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Web team copy 2', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   assert.equal(page.heading(), 'Purpose');
   assert.equal(page.doc.activeElement, page.doc.getElementById('step-heading'));
   assert.equal(page.doc.getElementById('f-name')!.value, 'Web team copy 2', 'unique among your teams');
@@ -2226,8 +2256,8 @@ test('page: Clone and modify fills the Purpose step with "<name> copy" made uniq
   assert.match(page.text(), /replaces the 1 member/i, 'says the members it would replace');
   page.type('f-goal', 'Ship billing');
   page.byLabel('Clone Software development team and modify it')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'type:software', goal: 'Ship billing', locality: 'cloud' });
-  page.dispatch({ type: 'starting-point', id: 'type:software', projectType: 'software', draft: { name: '', description: 'A software development team. Goal: Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
+  assert.deepEqual(unnumbered(page.posts.at(-1)), { type: 'starting-point', id: 'type:software', goal: 'Ship billing', locality: 'cloud' });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'type:software', projectType: 'software', cloneName: 'Software development team copy', draft: { name: '', description: 'A software development team. Goal: Ship billing', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
   assert.equal(page.doc.getElementById('f-name')!.value, 'Software development team copy', 'the name it filled in before is replaced, since it was not changed');
   assert.equal(page.doc.getElementById('f-desc')!.value, 'Ship billing');
   // Saved as the project's team, a project type still writes its AGENTS.md guidance.
@@ -2269,8 +2299,8 @@ test('page: drafts keep how the team was started, an old draft resumes straight 
   purpose.byLabel('Resume')!.click();
   assert.equal(purpose.heading(), 'Purpose');
   purpose.byLabel('Next: Members')!.click();
-  assert.deepEqual(purpose.posts.at(-1), { type: 'starting-point', id: 'recommend', goal: 'Ship', locality: 'cloud', workShape: 'feature', riskLevel: 'medium' });
-  purpose.dispatch({ type: 'starting-point', id: 'recommend', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
+  assert.deepEqual(unnumbered(purpose.posts.at(-1)), { type: 'starting-point', id: 'recommend', goal: 'Ship', locality: 'cloud', workShape: 'feature', riskLevel: 'medium' });
+  purpose.dispatch({ type: 'starting-point', seq: startSeqOf(purpose), id: 'recommend', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
   assert.equal(purpose.heading(), 'Members');
   assert.equal(purpose.doc.getElementById('m-name-0')!.value, 'planner');
   purpose.byLabel('Back')!.click();
@@ -2540,7 +2570,7 @@ test('page: the names it shows and fills in are the host\'s, not its own', async
   assert.match(page.text(), /saves it to My teams as "Review team 2"/, 'the preview the host resolved');
   page.select('lib:web');
   page.byLabel('Clone Web team and modify it')!.click();
-  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team 7', draft: { name: '', description: 'Builds pages', members: [] } });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Copy of Web team 7', draft: { name: '', description: 'Builds pages', members: [] } });
   assert.equal(page.doc.getElementById('f-name')!.value, 'Copy of Web team 7');
   assert.doesNotMatch(await readFile(SCRIPT, 'utf8'), /function uniqueName|'Recommended team'|' team'\)/, 'no naming rules of its own');
 });
@@ -2552,7 +2582,7 @@ test('page: the team keeps the entry point\'s Save it as on every path: from scr
     const start = () => { if (entry === 'project') page.dispatch({ type: 'start-wizard', target: 'project' }); else page.byLabel('New team')!.click(); };
     const target = () => page.radios('target').find((node) => node.checked)?.value;
     const leave = () => { page.byLabel('Back to all teams')!.click(); if (page.posts.at(-1)!.type === 'leave-wizard') page.dispatch({ type: 'left', choice: 'discard' }); };
-    const cloned = () => { page.select('lib:web'); page.byLabel('Clone Web team and modify it')!.click(); page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [] } }); };
+    const cloned = () => { page.select('lib:web'); page.byLabel('Clone Web team and modify it')!.click(); page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [] } }); };
     start(); page.byLabel('Create a new team')!.click(); page.byLabel('From scratch')!.click();
     assert.equal(target(), entry, `${entry}: from scratch`);
     leave();
@@ -2602,7 +2632,7 @@ test('page: a clone reply that comes after the person left the picker is dropped
   page.select('lib:web');
   page.byLabel('Clone Web team and modify it')!.click();
   page.byLabel('Back')!.click();
-  const reply = { type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: '', model: '', tools: null, instructions: 'Plan.' }] } };
+  const reply = { type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: '', model: '', tools: null, instructions: 'Plan.' }] } };
   page.dispatch(reply);
   assert.equal(page.heading(), 'How do you want to start?', 'the late reply does not move the builder');
   page.byLabel('Use an existing team')!.click();
@@ -2688,7 +2718,7 @@ test('page: Use as is and Clone and modify wait for the host\'s answer, so a dou
   // A reply dropped because the person left the picker frees them too.
   page.byLabel('Clone Web team and modify it')!.click();
   page.byLabel('Back')!.click();
-  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: '', members: [] } });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Copy of Web team', draft: { name: '', description: '', members: [] } });
   page.byLabel('Use an existing team')!.click();
   assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
 });
@@ -2802,8 +2832,8 @@ test('page: the first screen offers three choices, and Recommend a team for me a
   assert.equal(page.byLabel('Use Recommended team as is')!.disabled, false);
   // Clone and modify: the Purpose step with the host's name and the goal, and Back returns here with the team still shown.
   page.byLabel('Clone Recommended team and modify it')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
-  page.dispatch({ type: 'starting-point', id: 'recommend', cloneName: 'Recommended team', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
+  assert.deepEqual(unnumbered(page.posts.at(-1)), { type: 'starting-point', id: 'recommend', goal: 'Add billing', locality: 'cloud', workShape: 'feature', riskLevel: 'high' });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'recommend', cloneName: 'Recommended team', draft: { name: '', description: 'x', members: [{ name: 'planner', role: 'planner', model: 'standard', tools: null, instructions: 'Plan.' }] } });
   assert.equal(page.heading(), 'Purpose');
   assert.equal(page.doc.getElementById('f-name')!.value, 'Recommended team');
   assert.equal(page.doc.getElementById('f-desc')!.value, 'Add billing');
@@ -3007,7 +3037,7 @@ const openTeam = (overrides: Record<string, unknown> = {}) => ({ type: 'team', i
 
 test('page: a saved team\'s Purpose tab uploads an icon (cropped to a square and made a 128 x 128 PNG here), removes it, and History restores an earlier one', async () => {
   const page = await iconPage();
-  page.dispatch(openTeam({ iconHistory: HISTORY }));
+  page.dispatch(openTeam());
   const preview = page.doc.getElementById('icon-preview')!;
   assert.equal(preview.tagName, 'svg', 'the default until one is set');
   assert.equal(preview.getAttribute('role'), 'img');
@@ -3026,7 +3056,7 @@ test('page: a saved team\'s Purpose tab uploads an icon (cropped to a square and
   await page.wait();
   assert.deepEqual(page.drawn[0]!.slice(1), [50, 0, 200, 200, 0, 0, 128, 128], 'the centre square, scaled to 128 x 128');
   assert.deepEqual(page.posts.filter((message) => message.type === 'icon-set'), [{ type: 'icon-set', seq: 3, id: 'user:web', png: page.out.toString('base64') }]);
-  page.dispatch({ type: 'icon-updated', id: 'user:web', icon: ICON_URI, iconHistory: HISTORY, base: 'c'.repeat(64), text: 'The icon is saved. The one before it is in History.' });
+  page.dispatch({ type: 'icon-updated', id: 'user:web', icon: ICON_URI, base: 'c'.repeat(64), text: 'The icon is saved. The one before it is in History.' });
   const shown = page.doc.getElementById('icon-preview')!;
   assert.equal(shown.tagName, 'img');
   assert.equal((shown as unknown as { src: string }).src, ICON_URI);
@@ -3041,6 +3071,10 @@ test('page: a saved team\'s Purpose tab uploads an icon (cropped to a square and
   assert.deepEqual(page.posts.at(-1), { type: 'icon-remove', id: 'user:web' });
   page.dispatch({ type: 'icon-done', id: 'user:web' });
   page.byLabel('History')!.click();
+  // The earlier icons are asked for when History opens (PR #82 review), not sent with the team.
+  assert.deepEqual(page.posts.at(-1), { type: 'versions', id: 'user:web' });
+  assert.doesNotMatch(page.text(), /Earlier icons/);
+  page.dispatch({ type: 'versions', id: 'user:web', versions: [], iconHistory: HISTORY });
   assert.match(page.text(), /Earlier icons/);
   page.byLabel('Restore the icon from 2026-11-17 10:00:00 UTC')!.click();
   assert.deepEqual(page.posts.at(-1), { type: 'icon-restore', id: 'user:web', ref: HISTORY[0]!.ref });
@@ -3069,7 +3103,10 @@ test('host: Upload checks the file by its bytes and size before the page sees it
   await h.send({ type: 'ready' });
   await h.send({ type: 'open', id: 'user:web-team' });
   assert.equal(last(h, 'team').icon, undefined);
-  assert.deepEqual(last(h, 'team').iconHistory, []);
+  // The earlier icons are not sent with the team: History asks for them (PR #82 review).
+  assert.equal('iconHistory' in last(h, 'team'), false);
+  await h.send({ type: 'versions', id: 'user:web-team' });
+  assert.deepEqual(last(h, 'versions').iconHistory, []);
   const pick: { value?: string } = {};
   h.deps.pickIconSource = async () => pick.value;
   const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-source-'));
@@ -3138,17 +3175,20 @@ test('host: Remove returns to the default and keeps the icon in History; Restore
   const removed = last(h, 'icon-updated');
   assert.equal(removed.icon, undefined);
   assert.match(removed.text, /default icon/);
-  assert.equal(removed.iconHistory.length, 1);
-  assert.match(removed.iconHistory[0].ref, /^[\w.-]+\.png$/);
-  assert.match(removed.iconHistory[0].label, /UTC/);
-  assert.equal(removed.iconHistory[0].icon, `data:image/png;base64,${first.toString('base64')}`);
+  assert.equal('iconHistory' in removed, false, 'the earlier icons come with History, which asks for them');
+  await h.send({ type: 'versions', id: 'user:web-team' });
+  const earlier = last(h, 'versions').iconHistory;
+  assert.equal(earlier.length, 1);
+  assert.match(earlier[0].ref, /^[\w.-]+\.png$/);
+  assert.match(earlier[0].label, /UTC/);
+  assert.equal(earlier[0].icon, `data:image/png;base64,${first.toString('base64')}`);
   assert.equal(last(h, 'library').library.teams[0].icon, undefined);
   assert.doesNotMatch(await readFile(file, 'utf8'), /icon:/);
   const before = h.posted.length;
   await h.send({ type: 'icon-remove', id: 'user:web-team' });
   assert.deepEqual(h.posted.slice(before), [{ type: 'icon-done', id: 'user:web-team' }], 'nothing to remove');
-  await h.send({ type: 'icon-restore', id: 'user:web-team', ref: removed.iconHistory[0].ref });
-  assert.equal(last(h, 'icon-updated').icon, removed.iconHistory[0].icon);
+  await h.send({ type: 'icon-restore', id: 'user:web-team', ref: earlier[0].ref });
+  assert.equal(last(h, 'icon-updated').icon, earlier[0].icon);
   assert.deepEqual(await readFile(path.join(h.library.directory, 'web-team.icon.png')), first);
   await h.send({ type: 'icon-restore', id: 'user:web-team', ref: '2020-01-01T00-00-00-000Z.png' });
   assert.match(last(h, 'error').text, /no such icon/i);
@@ -3550,7 +3590,7 @@ test('page: an answer changed while a recommendation is on its way drops that re
   assert.deepEqual(page.posts.at(-1), { type: 'use-team', id: 'recommend', ...answersOf(fourth) });
   page.dispatch({ type: 'used', declined: true, text: 'Not changed.' });
   page.byLabel('Clone Recommended team and modify it')!.click();
-  assert.deepEqual(page.posts.at(-1), { type: 'starting-point', id: 'recommend', ...answersOf(fourth) });
+  assert.deepEqual(unnumbered(page.posts.at(-1)), { type: 'starting-point', id: 'recommend', ...answersOf(fourth) });
   page.dispatch({ type: 'error', text: 'Try again.' });
   // Changed after it is shown: the team and its buttons go until it is recommended again.
   page.type('f-locality', 'local', 'change');
@@ -4361,7 +4401,7 @@ test('page: a clone\'s name problem shows under the name field, Save stays off u
   page.byLabel('Use an existing team')!.click();
   page.select('lib:web');
   page.byLabel('Clone Web team and modify it')!.click();
-  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
   assert.match(page.text(), /starts with the default icon \(its initials on a colour\), not the icon of the team you copied\. After you save it, upload a picture or generate one on its Purpose tab\./);
   assert.match(page.text(), /A copy needs a name no other team has\./);
   page.type('f-name', 'web TEAM');
@@ -4407,7 +4447,7 @@ test('page: From scratch and an AI draft are not clones: no clone check, no icon
   page.byLabel('Clone an existing team')!.click();
   page.select('lib:web');
   page.byLabel('Clone Web team and modify it')!.click();
-  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [] } });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [] } });
   assert.match(page.text(), /not the icon of the team you copied/);
   page.byLabel('Back')!.click();
   page.byLabel('Back')!.click();
@@ -4429,7 +4469,7 @@ test('page: every new team shows its default icon on Purpose, its initials follo
   page.byLabel('Use an existing team')!.click();
   page.select('lib:web');
   page.byLabel('Clone Web team and modify it')!.click();
-  page.dispatch({ type: 'starting-point', id: 'lib:web', cloneName: 'Web team copy', icon: ICON_URI, draft: { name: '', description: 'Builds pages', members: [] } });
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Web team copy', icon: ICON_URI, draft: { name: '', description: 'Builds pages', members: [] } });
   assert.match(page.text(), /Team icon/);
   assert.equal(preview().tagName, 'svg');
   assert.ok(preview().classList.contains('team-icon-default') && preview().classList.contains('large'));
@@ -4690,4 +4730,249 @@ test('host: a From scratch, AI or open team started after a clone is not taken f
     assert.match(last(h, 'save-failed').errors[0].message, /already the name of one of your teams/);
     h.close();
   }
+});
+
+// ---------- follow-up after 0.4.35: review leftovers of PRs #75, #82, #90, #91 and #94 ----------
+
+test('host: a step after the project team file is written that fails says the team was written, never "Not used" or "Nothing was changed" (PR #75 review)', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  const projectFile = TeamLibrary.projectTeamFile(h.root);
+  // Use as is: the file is written, then recording where its members came from fails.
+  const realDerived = h.library.setProjectDerived.bind(h.library);
+  h.library.setProjectDerived = async () => { throw Object.assign(new Error(`EACCES: permission denied, open '${h.root}/x'`), { code: 'EACCES' }); };
+  const used = await answersTo(h, { type: 'use-team', id: 'lib:web-team' });
+  assert.equal(used.length, 1, 'one answer');
+  assert.equal(used[0]!.type, 'error');
+  assert.equal(used[0]!.written, 'project');
+  assert.match(used[0]!.text, /^This project's team was written, but recording which imported team its members came from failed \(permission was denied\)\. The new team is this project's team now/);
+  assert.doesNotMatch(used[0]!.text, /Nothing was changed|Not used|could not be written/);
+  assert.ok(!used[0]!.text.includes(h.root), 'no path');
+  assert.equal(parseTeam(await readFile(projectFile, 'utf8'), projectFile).name, 'Web team');
+  assert.ok(last(h, 'library').library.teams.some((team: any) => team.id === 'project'), 'the listing shows the new team');
+  h.library.setProjectDerived = realDerived;
+  // Save as the project team from a project type: written, then the AGENTS.md guidance fails.
+  h.deps.applyProjectType = async () => { throw new Error('AGENTS.md is read-only'); };
+  h.drafts.value = { draft: draft(), step: 4, target: 'project' };
+  const software = startingPointDraft({ id: 'type:software', goal: 'Ship', locality: 'cloud' }, buildStudioContext(input(), { hasProject: true, knowledgeBase: false })).draft;
+  const saved = await answersTo(h, { type: 'create', draft: { ...software, name: 'Software team' }, target: 'project', projectType: { id: 'software', goal: 'Ship' } });
+  assert.equal(saved.length, 1);
+  assert.match(saved[0]!.text, /^This project's team was written, but writing this project type's guidance to AGENTS\.md failed\./);
+  assert.doesNotMatch(saved[0]!.text, /Nothing was changed|Not saved/);
+  assert.equal(parseTeam(await readFile(projectFile, 'utf8'), projectFile).name, 'Software team');
+  assert.equal(h.drafts.value, undefined, 'the builder\'s draft is done with');
+  // Before the write nothing is changed, and it still says so.
+  h.deps.applyProjectType = async () => undefined;
+  const before = await readFile(projectFile, 'utf8');
+  h.library.snapshot = async () => { throw Object.assign(new Error('no space'), { code: 'ENOSPC' }); };
+  const refused = await answersTo(h, { type: 'use-team', id: 'lib:web-team' });
+  assert.match(refused[0]!.text, /^Not used: the team file could not be written \(the disk is full\)\.$/);
+  assert.equal(await readFile(projectFile, 'utf8'), before);
+  h.close();
+});
+
+test('page: an error saying the project team was written closes the builder, since its work is saved', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Use Web team as is')!.click();
+  page.dispatch({ type: 'error', written: 'project', text: 'This project\'s team was written, but keeping it in the team history failed.' });
+  assert.equal(page.doc.getElementById('step-heading'), null, 'the builder is closed');
+  assert.match(page.doc.getElementById('banner')!.textContent, /was written, but keeping it in the team history failed/);
+});
+
+test('page: a reply or error for a Clone the person left behind never frees Use as is while the host is still answering it (PR #75 review)', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  const cloneSeq = startSeqOf(page);
+  assert.ok(Number.isSafeInteger(cloneSeq), 'the request is numbered');
+  // The person goes back and uses the team as is instead.
+  page.byLabel('Back')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Use Web team as is')!.click();
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, true);
+  // The old Clone's reply, and its error, arrive now: Use as is still waits for its own answer.
+  page.dispatch({ type: 'starting-point', seq: cloneSeq, id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: '', members: [] } });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, true, 'a stale reply does not free it');
+  assert.equal(page.heading(), 'Use an existing team', 'nor does it move the builder');
+  page.dispatch({ type: 'error', seq: cloneSeq, text: 'That team is no longer in your teams. Pick another starting point.' });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, true, 'nor does its error');
+  assert.equal(page.posts.filter((post) => post.type === 'use-team').length, 1);
+  // Use as is's own answer frees it.
+  page.dispatch({ type: 'used', declined: true, text: 'Not changed.' });
+  assert.equal(page.byLabel('Use Web team as is')!.disabled, false);
+  // A reply carries its request's number back, from the host.
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud', seq: 41 });
+  assert.equal(last(h, 'starting-point').seq, 41);
+  await h.send({ type: 'starting-point', id: 'lib:gone', goal: '', locality: 'cloud', seq: 42 });
+  assert.equal(last(h, 'error').seq, 42);
+  h.close();
+});
+
+test('message parsing: a starting point must say where its models run; a missing or undefined locality is refused, never taken for the cloud (PR #75 review)', () => {
+  assert.equal(parseStudioMessage({ type: 'starting-point', id: 'type:research', goal: '', locality: undefined }), undefined);
+  assert.equal(parseStudioMessage({ type: 'starting-point', id: 'type:research', goal: '' }), undefined);
+  assert.equal(parseStudioMessage({ type: 'starting-point', id: 'type:research', goal: '', locality: 'local', seq: 'one' }), undefined);
+  assert.deepEqual(parseStudioMessage({ type: 'starting-point', id: 'type:research', goal: '', locality: 'local', seq: 3 }), { type: 'starting-point', id: 'type:research', goal: '', locality: 'local', seq: 3 });
+});
+
+test('page: a clone\'s name is only ever the host\'s: a reply without one leaves the name field as it is, and the page sends no name of its own (PR #75 review)', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('type:software');
+  page.byLabel('Clone Software development team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'type:software', draft: { name: '', description: 'A team', members: [{ name: 'architect', role: '', model: '', tools: null, instructions: 'Design.' }] } });
+  assert.equal(page.heading(), 'Purpose');
+  assert.equal(page.doc.getElementById('f-name')!.value, '', 'the builder\'s own (empty) name, not one made up here');
+  assert.ok(!page.posts.some((post) => 'cloneName' in post));
+});
+
+test('page: Use as is announces nothing until the host answers, then announces its answer (PR #75 review)', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  const announced = () => page.doc.getElementById('announce')!.textContent;
+  const before = announced();
+  page.byLabel('Use Web team as is')!.click();
+  assert.equal(announced(), before, 'nothing said while the host may still ask or refuse');
+  assert.doesNotMatch(announced(), /as it is/);
+  page.dispatch({ type: 'used', text: '/team:web is in the chat box. Type your task after it and send.', focus: 'user:web' });
+  assert.match(announced(), /in the chat box/);
+});
+
+test('host: a picture that states a huge size is refused before the page is sent it, uploaded or generated (PR #82 review)', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'open', id: 'user:web-team' });
+  const dir = await mkdtemp(path.join(tmpdir(), 'near-ai-icon-bomb-'));
+  const bomb = path.join(dir, 'bomb.webp');
+  await writeFile(bomb, webpOfSize(16_000, 16_000));
+  h.deps.pickIconSource = async () => bomb;
+  const before = h.posted.length;
+  await h.send({ type: 'icon-upload', id: 'user:web-team' });
+  const answers = h.posted.slice(before);
+  assert.deepEqual(answers.map((message) => message.type), ['error']);
+  assert.match(answers[0]!.text, /16000 x 16000 pixels, which is too large to make an icon from/);
+  // The image model's picture is checked the same way.
+  h.deps.teamAi = async () => fakeImageAi([IMAGE_MODEL], jpegOfSize(30_000, 30_000)).ai;
+  h.chooseAnswer.value = 'Generate icon';
+  const generated = h.posted.length;
+  await h.send({ type: 'icon-generate', id: 'user:web-team' });
+  const replies = h.posted.slice(generated);
+  assert.equal(replies.some((message) => message.type === 'icon-source'), false);
+  assert.match(last(h, 'error').text, /^The image model's picture was not used, so the icon was not changed: The image is 30000 x 30000 pixels/);
+  h.close();
+});
+
+test('host: Duplicate says the copy has the default icon when its icon could not be copied (PR #82 review)', async () => {
+  const h = await harness();
+  const file = await h.library.create('Web team', teamMarkdown(draft()));
+  await h.library.setIcon(file, png(128, 128, { seed: 51 }));
+  await h.send({ type: 'ready' });
+  h.askAnswer.value = 'Web copy';
+  const setIcon = h.library.setIcon.bind(h.library);
+  h.library.setIcon = async () => { throw new Error('disk full'); };
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  h.library.setIcon = setIcon;
+  assert.match(last(h, 'notice').text, /^Duplicated as "Web copy"\. It was copied with the default icon, because the icon could not be copied\./);
+  assert.equal(last(h, 'library').library.teams.find((team: any) => team.id === 'user:web-copy').icon, undefined);
+  h.askAnswer.value = 'Web copy two';
+  await h.send({ type: 'duplicate', id: 'user:web-team' });
+  assert.equal(last(h, 'notice').text, 'Duplicated as "Web copy two".');
+  h.close();
+});
+
+test('host: a clone stays a clone when every member\'s instructions are edited, and Use as is ends it (PR #90 review)', async () => {
+  const h = await harness();
+  await h.library.create('Web team', teamMarkdown(draft()));
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+  const rewritten = last(h, 'starting-point').draft.members.map((member: DraftMember) => ({ ...member, instructions: `${member.instructions} Reworded.` }));
+  await h.send({ type: 'review', seq: 1, draft: { name: 'Web team', description: 'Builds pages', members: rewritten } });
+  assert.match(last(h, 'review').errors[0]?.message ?? '', /already the name of one of your teams/, 'still checked as a clone');
+  await h.send({ type: 'create', draft: { name: 'WEB team', description: 'Builds pages', members: rewritten }, target: 'user' });
+  assert.match(last(h, 'save-failed').errors[0].message, /already the name of one of your teams/);
+  // The recommendation, cloned, is a clone too (its members come through the same starting point).
+  await h.send({ type: 'starting-point', id: 'recommend', goal: 'Ship', locality: 'cloud', workShape: 'feature', riskLevel: 'low' });
+  await h.send({ type: 'create', draft: { ...last(h, 'starting-point').draft, name: 'Recommended Team' }, target: 'user' });
+  assert.match(last(h, 'save-failed').errors[0].message, /a built-in team/);
+  // Use as is ends the clone: a team made afterwards with that name is checked as any new team.
+  await h.send({ type: 'starting-point', id: 'lib:web-team', goal: '', locality: 'cloud' });
+  h.setRoot(undefined, false);
+  await h.send({ type: 'use-team', id: 'lib:web-team' });
+  assert.equal(last(h, 'used').type, 'used');
+  await h.send({ type: 'create', draft: { name: 'Web team', description: 'Builds pages', members: rewritten }, target: 'user' });
+  assert.ok(existsSync(path.join(h.library.directory, 'web-team-2.md')), 'not taken for a clone');
+  h.close();
+});
+
+test('host: the review the page is sent carries the parallel-work notes (PR #91 review)', async () => {
+  const h = await harness();
+  await h.send({ type: 'ready' });
+  const plain = { name: 'Plain', description: 'Does work', members: [
+    { name: 'builder', role: 'implementer', model: '', tools: null, instructions: 'Make the changes. Report what changed.' },
+    { name: 'checker', role: 'reviewer', model: '', tools: ['Read', 'Grep'], instructions: 'Review the change. Report findings with file:line.' }
+  ] };
+  await h.send({ type: 'review', seq: 7, draft: plain });
+  const review = last(h, 'review');
+  assert.equal(review.seq, 7);
+  assert.equal(review.notes.length, 2);
+  assert.match(review.notes[0].message, /its own area/);
+  assert.match(review.notes[1].message, /brings the parts together/);
+  assert.deepEqual(review.errors, [], 'notes never stop a save');
+  h.close();
+});
+
+test('page: the builder\'s icon row is a group named by its "Team icon" heading (PR #94 review)', async () => {
+  const page = await builderPage();
+  page.byLabel('New team')!.click();
+  page.byLabel('Create a new team')!.click();
+  page.byLabel('From scratch')!.click();
+  const heading = page.doc.getElementById('icon-label')!;
+  assert.equal(heading.textContent, 'Team icon');
+  const group = page.doc.body.all().find((node) => node.getAttribute('aria-labelledby') === 'icon-label' && node.getAttribute('role') === 'group');
+  assert.ok(group, 'labelled by the heading');
+  assert.ok(group!.all().includes(page.doc.getElementById('icon-preview')!), 'the preview is in it');
+});
+
+test('page: the new team\'s icon preview stays the default across Back and Next, and an open team shows its own icon with Upload, never the builder\'s line (PR #94 review)', async () => {
+  const page = await builderPage({ teams: [{ ...WEB_CARD, icon: ICON_URI }] });
+  const preview = () => page.doc.getElementById('icon-preview');
+  const hint = () => page.doc.getElementById('icon-preview-hint')?.textContent ?? '';
+  page.byLabel('New team')!.click();
+  page.byLabel('Use an existing team')!.click();
+  page.select('lib:web');
+  page.byLabel('Clone Web team and modify it')!.click();
+  page.dispatch({ type: 'starting-point', seq: startSeqOf(page), id: 'lib:web', cloneName: 'Web team copy', draft: { name: '', description: 'Builds pages', members: [{ name: 'lead', role: 'planner', model: 'deep', tools: ['Read'], instructions: 'Plan.' }] } });
+  assert.equal(preview()!.tagName, 'svg');
+  // Forward to Members and back to Purpose: the same default preview and the clone's line.
+  page.byLabel('Next: Members')!.click();
+  assert.notEqual(page.heading(), 'Purpose');
+  assert.equal(preview(), null, 'only on Purpose');
+  page.byLabel('Back')!.click();
+  assert.equal(page.heading(), 'Purpose');
+  assert.equal(preview()!.tagName, 'svg');
+  assert.equal(preview()!.getAttribute('aria-label'), 'Default icon for Web team copy');
+  assert.match(hint(), /not the icon of the team you copied/);
+  assert.equal(page.doc.getElementById('main')!.all().filter((node) => node.tagName === 'img').length, 0);
+  // The editor: the saved team's own icon, with Upload and Remove, and none of the builder's lines.
+  page.dispatch(openTeam({ icon: ICON_URI }));
+  assert.equal(preview()!.tagName, 'img');
+  assert.equal((preview() as unknown as { src: string }).src, ICON_URI);
+  assert.equal(page.doc.getElementById('icon-preview-hint'), null);
+  assert.doesNotMatch(page.text(), /starts with the default icon/);
+  assert.ok(page.byLabel('Upload an icon for Web team (PNG, JPEG or WebP)'));
+  assert.ok(page.byLabel('Remove the icon of Web team and use the default'));
 });
