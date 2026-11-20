@@ -88,6 +88,17 @@ None in this plan's files. The people.organization composition is complete in co
 
 None beyond the plan's register. T-41-20 (walk plus source scan with planted keys; unknown and incomparable values count as wider), T-41-21 (endpoint and authorization admission tests), T-41-22 (clamp and list, wideningOf ignores old clamps, fallback is your organization's rules), T-41-23 (round-trip parse and scale clean-up tests), T-41-24 (regime union, removal refused, reserved compartments tier-stricter) each have tests. No package was installed.
 
+## Wave 2 merge fixes (branch feat/phase-41-02b-merge-fixes)
+
+After 41-05 and 41-06 landed, the source scan failed on 41-05's passport keys. Fixed in 2ca3c200 and 04498abc:
+
+- **models directions, each key declared (no subtree):** `mode` tier-stricter report to enforce (absent: report); `unknownMaxTier` tier-stricter over its one value T0; `tierByLevel.*` and `tierByProject.*` tier-stricter T0, T1, T2, T3 with absent weakest. This corrects the plan's order: useTierFor only raises a request's tier, and a higher tier needs a more trusted model, so the higher tier is the narrower one.
+- **Passports are your organization's.** A personal layer cannot add one, because a model with no passport is T0 and a passport replaces a shipped one by id. It cannot drop, raise or lower one either: without it, or with it lower, another matching passport can become the stricter one that applies, with wider hosting. Every field is organization-only except `hosting`, which may narrow to fewer classes, because which passport applies never depends on it. `localCatalogue` is a subset (fewer downloads), with organization-only entries. `defaults.*` and `order` are organization-only.
+- **people.organization:** the permissions (mayDecline, acting, temporary, dualHatting, guests) and enrolAtReport now carry `absent: 'default'`. Where your organization leaves one to the mode, a personal safe value stays and any other personal value goes unlisted (the mode decides), so a personal `true` can no longer make the effective block fail to parse.
+- **Fixture:** `fullDocumentFor` holds a full models section (`fixturePassport`, `fixtureModelsSection`) and a people.organization block (`fixtureOrganizationBlock`), so the walk and the source scan cover every key.
+- **Outside 41-02's files:** proposal.ts (41-08) words models changes plainly. With models in the full fixture, its generic sentence showed schema names (`tierByLevel`), which the editor's copy rule forbids.
+- **Tests:** 6 new in gateLayers (30 in all) (the models direction walk, both ways for each models direction, passports neither added nor dropped nor raised nor lowered, narrowingOf for models, and two people.organization compose tests) and 1 in gatePolicyProposal. The models and permission tests failed on the merged code first.
+
 ## Self-Check: PASSED
 
 - Files: src/domain/gate/layers.ts and src/test/gateLayers.test.ts exist in the worktree.
