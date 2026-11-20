@@ -134,7 +134,7 @@ completed: 2026-11-20
 
 **3. [Rule 1 - Bug] An em-dash literal in the new test**
 - **Issue:** the em-dash check in the first commit had a literal character instead of the escape the tracer uses.
-- **Fix:** written as `'—'`; folded into the Task 2 commit.
+- **Fix:** written as the escaped form (backslash u2014); folded into the Task 2 commit.
 - **Commit:** 6ecec863
 
 **Total deviations:** 3 auto-fixed (1 blocking, 1 missing functionality, 1 bug). **Impact:** one file outside `files_modified` was edited, in place and minimally; the merge with 31-15 and 31-17 needs a manual resolution of that one array.
