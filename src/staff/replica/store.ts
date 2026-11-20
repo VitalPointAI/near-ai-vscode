@@ -28,6 +28,9 @@
 //   entry the check refuses is still written, held with its reason in the signed mark, and left out of entries(); it is never silently dropped. An
 //   entry the check could not run on yet (its key or its blob is not here), and an entry found on disk that no check has passed (copied in by hand,
 //   or written by another install), waits out of the fold until recheck() passes it (31-REVIEW MJ-07).
+// - Refused entries are bounded (32-CONTEXT D-14), so one device cannot grow this device's mark until it can no longer be written: at most
+//   MAX_REFUSED_PER_WRITER held per writer per stream, the last of them held with FLOODED_REASON as that writer's one flooded line. From then on none
+//   of that writer's entries from outside in that stream is written or checked (counted in IngestResult.flooded); everyone else's still are.
 // - The store never deletes an entry or a blob and never rewrites a line (P-31-17). No private key or secret is ever written here (P-31-18).
 // - Starting again (startAgain, person-confirmed, 31-REVIEW MJ-08) moves the whole folder aside, never deletes it, and starts a new one with this
 //   device's own signed entries, the grants, the blobs and project.json carried over, under a new mark.
@@ -159,7 +162,24 @@ export interface IngestResult {
   blobsAdded: number;
   /** Blobs not written: over BLOB_MAX_BYTES, or bytes that do not match their name. */
   blobsRefused: number;
+  /**
+   * New entries not written because their writer is flooded in their stream (D-14): it sent MAX_REFUSED_PER_WRITER refused entries, the last held as
+   * its flooded line. A refused entry the held list has no room for is not written and counted here too.
+   */
+  flooded: number;
+  /** New entries not written this time, because the waiting list is full or no check ran on them: they are taken when delivered again. */
+  deferred: number;
 }
+
+/**
+ * The most refused entries from outside one writer that stay held in one stream (32-CONTEXT D-14). The last of them is held with FLOODED_REASON, the
+ * writer's one flooded line; from then on none of that writer's entries from outside in that stream is written.
+ */
+export const MAX_REFUSED_PER_WRITER = 1_000;
+/** The held reason of a writer's flooded line. A check's own reason that reads the same is stored with "check: " in front (T-32-20). */
+export const FLOODED_REASON = 'flooded: too many refused changes from this device in this part of the project; later ones are not kept';
+/** What the Staff Room says of a flooded writer (Phase 33). */
+export const FLOODED_TEXT = 'Too many refused changes arrived from one device. They were not kept.';
 
 export interface RecheckResult { ok: true; passed: number; held: number; waiting: number }
 
@@ -196,7 +216,9 @@ async function runCheck(check: ForeignCheck, entry: SealedEntry): Promise<{ kind
   }
   if (isRecord(verdict) && verdict.ok === true) return { kind: 'pass' };
   if (isRecord(verdict) && verdict.ok === false && (verdict.awaiting === 'key' || verdict.awaiting === 'blob')) return { kind: 'wait', reason: verdict.awaiting === 'key' ? 'awaiting-key' : 'awaiting-blob' };
-  return { kind: 'held', reason: heldReason(isRecord(verdict) ? verdict.reason : undefined) };
+  const reason = heldReason(isRecord(verdict) ? verdict.reason : undefined);
+  // Only the store writes a flooded line (T-32-20): a check's reason that reads the same is kept with a prefix, so it never floods a writer.
+  return { kind: 'held', reason: reason === FLOODED_REASON ? heldReason(`check: ${reason}`) : reason };
 }
 
 function refusal(reason: StoreRefusal): StoreRefused {
@@ -539,6 +561,11 @@ export class ReplicaStore {
   private readonly held = new Map<string, string>();
   /** Entries from outside no check has passed yet, with why. */
   private readonly waiting = new Map<string, WaitReason>();
+  /** How many held entries each (stream, writer) file has, and how many in all, counting stored entries only (indexHeld). */
+  private readonly heldBy = new Map<string, number>();
+  private heldCount = 0;
+  /** The files whose flooded line is held (D-14): none of their entries from outside is written again. */
+  private readonly floodedFiles = new Map<string, { stream: string; writer: string }>();
   private damaged = 0;
   private waitingAdded = 0;
   /** The mark last read or written, and its exact text, so a mark nobody changed is not compared again. */
@@ -836,6 +863,11 @@ export class ReplicaStore {
     return [...this.waiting].filter(([hash]) => this.byHash.has(hash)).map(([hash, reason]) => ({ hash, reason }));
   }
 
+  /** The (stream, writer) files whose flooded line is held (D-14), in stream then writer order. Their later entries from outside are not written. */
+  public flooded(): Array<{ stream: string; writer: string }> {
+    return [...this.floodedFiles.values()].sort((a, b) => (a.stream !== b.stream ? (a.stream < b.stream ? -1 : 1) : a.writer < b.writer ? -1 : a.writer > b.writer ? 1 : 0)).map((item) => ({ ...item }));
+  }
+
   /** Rises each time an entry nobody has checked is found on disk, so the host knows to run recheck() again. */
   public get waitingVersion(): number {
     return this.waitingAdded;
@@ -948,6 +980,9 @@ export class ReplicaStore {
    * needs no decode check. Each other new entry then passes `check`. Every new entry is written; one the check refuses is held, and one the check
    * cannot run on yet waits, both recorded in the signed mark with the lines, so neither reaches the fold. An entry already stored is neither written
    * nor checked again. A check that throws counts as a refusal.
+   *
+   * Refused entries are bounded (D-14), in input order: a writer's refused entries in one stream are held up to MAX_REFUSED_PER_WRITER, the last of
+   * them as its flooded line; from then on that writer's entries in that stream are not written (counted in `flooded`) and not checked.
    */
   public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
@@ -962,8 +997,19 @@ export class ReplicaStore {
       seen.add(hash);
       fresh.push({ entry, hash });
     }
+    // The check runs outside the locks. A writer already flooded, or that this batch would flood, is not checked again; the decision is made under
+    // the locks, where an entry left unchecked whose writer turns out not to be flooded is deferred, so it is checked when it comes again.
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
-    for (const { entry, hash } of fresh) verdicts.set(hash, entry.header.writer === this.own.writer ? { kind: 'pass' } : await runCheck(check, entry));
+    const refusedHere = new Map<string, number>();
+    for (const { entry, hash } of fresh) {
+      if (entry.header.writer === this.own.writer) { verdicts.set(hash, { kind: 'pass' }); continue; }
+      const id = fileId(entry.header.stream, entry.header.writer);
+      const refused = refusedHere.get(id) ?? 0;
+      if (this.floodedFiles.has(id) || (this.heldBy.get(id) ?? 0) + refused >= this.bounds().refusedPerWriter) continue;
+      const verdict = await runCheck(check, entry);
+      verdicts.set(hash, verdict);
+      if (verdict.kind === 'held') refusedHere.set(id, refused + 1);
+    }
     let blobsRefused = 0;
     const goodBlobs = new Map<string, Buffer>();
     for (const blob of blobs) {
@@ -976,15 +1022,26 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        // Another window may have stored some of these since the check ran: those are duplicates now.
-        const toWrite = fresh.filter(({ hash }) => !this.byHash.has(hash));
-        duplicates += fresh.length - toWrite.length;
+        const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
-        for (const { hash } of toWrite) {
+        let flooded = 0;
+        let deferred = 0;
+        for (const item of fresh) {
+          const { entry, hash } = item;
+          // Another window may have stored it since the check ran: a duplicate now.
+          if (this.byHash.has(hash)) { duplicates += 1; continue; }
+          const id = fileId(entry.header.stream, entry.header.writer);
+          if (this.floodedFiles.has(id)) { flooded += 1; continue; }
           const verdict = verdicts.get(hash);
-          if (verdict?.kind === 'held') { this.held.set(hash, verdict.reason); held.push({ hash, reason: verdict.reason }); }
-          if (verdict?.kind === 'wait') { this.waiting.set(hash, verdict.reason); waiting.push({ hash, reason: verdict.reason }); }
+          if (!verdict) { deferred += 1; continue; }
+          if (verdict.kind === 'held') {
+            const reason = this.refusedFate(id) === 'flood' ? FLOODED_REASON : verdict.reason;
+            this.hold(hash, entry, reason);
+            held.push({ hash, reason });
+          }
+          if (verdict.kind === 'wait') { this.waiting.set(hash, verdict.reason); waiting.push({ hash, reason: verdict.reason }); }
+          toWrite.push(item);
         }
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
@@ -992,7 +1049,7 @@ export class ReplicaStore {
           await this.appendLines(toWrite.map(({ entry }) => entry));
           await this.writeOwnMark();
         }
-        return { ok: true as const, added: toWrite.length, duplicates, held, waiting, dropped, blobsAdded, blobsRefused };
+        return { ok: true as const, added: toWrite.length, duplicates, held, waiting, dropped, blobsAdded, blobsRefused, flooded, deferred };
       });
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
@@ -1020,7 +1077,7 @@ export class ReplicaStore {
           const before = this.waiting.get(hash);
           if (before === undefined) continue;
           if (verdict.kind === 'pass') { this.waiting.delete(hash); passed += 1; changed = true; }
-          if (verdict.kind === 'held') { this.waiting.delete(hash); this.held.set(hash, verdict.reason); held += 1; changed = true; }
+          if (verdict.kind === 'held') { this.waiting.delete(hash); this.hold(hash, this.byHash.get(hash) as SealedEntry, verdict.reason); held += 1; changed = true; }
           if (verdict.kind === 'wait' && verdict.reason !== before) { this.waiting.set(hash, verdict.reason); changed = true; }
         }
         if (changed) await this.writeOwnMark();
@@ -1413,6 +1470,43 @@ export class ReplicaStore {
     return true;
   }
 
+  /** The bounds on refused and waiting entries (D-14). */
+  private bounds(): { refusedPerWriter: number } {
+    return { refusedPerWriter: MAX_REFUSED_PER_WRITER };
+  }
+
+  /** What becomes of one more refused entry of the file `id`: held, or held as the file's flooded line when it is the last its bound allows. */
+  private refusedFate(id: string): 'hold' | 'flood' {
+    return (this.heldBy.get(id) ?? 0) >= this.bounds().refusedPerWriter - 1 ? 'flood' : 'hold';
+  }
+
+  /** Holds one entry with its reason and counts it for its file; FLOODED_REASON floods the file. */
+  private hold(hash: string, entry: SealedEntry, reason: string): void {
+    if (this.held.has(hash)) return;
+    this.held.set(hash, reason);
+    const { stream, writer } = entry.header;
+    const id = fileId(stream, writer);
+    this.heldBy.set(id, (this.heldBy.get(id) ?? 0) + 1);
+    this.heldCount += 1;
+    if (reason === FLOODED_REASON) this.floodedFiles.set(id, { stream, writer });
+  }
+
+  /** Counts the held entries again from `held`, stored entries only: per file, in all, and the files whose flooded line is held. */
+  private indexHeld(): void {
+    this.heldBy.clear();
+    this.floodedFiles.clear();
+    this.heldCount = 0;
+    for (const [hash, reason] of this.held) {
+      const entry = this.byHash.get(hash);
+      if (!entry) continue;
+      const { stream, writer } = entry.header;
+      const id = fileId(stream, writer);
+      this.heldBy.set(id, (this.heldBy.get(id) ?? 0) + 1);
+      this.heldCount += 1;
+      if (reason === FLOODED_REASON) this.floodedFiles.set(id, { stream, writer });
+    }
+  }
+
   private fileStates(): MarkFileState[] {
     return [...this.files.values()].map((file) => ({
       stream: file.stream,
@@ -1435,6 +1529,15 @@ export class ReplicaStore {
    * lists file it names is not in the folder (an older copy of the folder, or part of it deleted).
    */
   private async syncMark(): Promise<void> {
+    try {
+      await this.syncMarkLists();
+    } finally {
+      // The held counts follow every change of the held list or of the stored entries, whatever the mark said (D-14).
+      this.indexHeld();
+    }
+  }
+
+  private async syncMarkLists(): Promise<void> {
     await this.checkMarkLists();
     const read = await readMark(this.deps.secrets, this.dir, await this.deps.keyStatus());
     if (read.kind === 'unverified') throw new Refusal('mark-unverified');

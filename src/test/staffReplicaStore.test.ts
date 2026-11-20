@@ -16,9 +16,9 @@ import type { SignedCheckpoint } from '../domain/replica/checkpoint';
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { SecretStorageLike } from '../services/auth';
-import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_LISTS_BYTES, REPLICA_MARK_SECRET_PREFIX, digestOf, markContentHash, markKey, markListsBytes, markListsFolder, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
+import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_LISTS_BYTES, REPLICA_MARK_SECRET_PREFIX, digestOf, heldReason, markContentHash, markKey, markListsBytes, markListsFolder, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
 import type { ReplicaMark } from '../staff/replica/marks';
-import { ReplicaStore, START_AGAIN_COMMAND_TITLE, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
+import { FLOODED_REASON, FLOODED_TEXT, MAX_REFUSED_PER_WRITER, ReplicaStore, START_AGAIN_COMMAND_TITLE, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
 import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
 import { FileSecrets } from './helpers/replicaStoreChild';
 import type { StoreChildMessage } from './helpers/replicaStoreChild';
@@ -522,7 +522,7 @@ test('ingestForeign keeps all three entries when the check refuses one, holds th
   const foreign = chain(colleague, 3);
   const { check, calls } = countingCheck(new Set([foreign[1].hash]));
   const result = await store.ingestForeign(foreign.map((item) => item.entry), [], check);
-  assert.deepEqual(result, { ok: true, added: 3, duplicates: 0, held: [{ hash: foreign[1].hash, reason: 'too-large: the update is over the size limit' }], waiting: [], dropped: 0, blobsAdded: 0, blobsRefused: 0 });
+  assert.deepEqual(result, { ok: true, added: 3, duplicates: 0, held: [{ hash: foreign[1].hash, reason: 'too-large: the update is over the size limit' }], waiting: [], dropped: 0, blobsAdded: 0, blobsRefused: 0, flooded: 0, deferred: 0 });
   assert.equal(calls.length, 3);
   assert.equal(readFileSync(streamFile(root, colleague.writer), 'utf8').split('\n').length, 4, 'all three lines are written, the held one too');
   assert.deepEqual(store.heldForCheck(), [{ hash: foreign[1].hash, reason: 'too-large: the update is over the size limit' }]);
@@ -935,6 +935,80 @@ test('MJ-07: lines copied into streams/ by hand wait unchecked until a check pas
   assert.ok('ok' in await open.refresh());
   assert.deepEqual(open.entries(), [foreign[0].entry], 'the store that was open when they were copied in takes the verdicts from the mark');
   assert.deepEqual(open.heldForCheck().map((item) => item.hash), [foreign[1].hash]);
+});
+
+// ---- 32-07 (D-14): a bound on refused entries, so one device cannot grow this device's mark until it can no longer be written --------------
+
+const REFUSED = 'too-large: the update is over the size limit';
+const refuseAll: ForeignCheck = () => Promise.resolve({ ok: false, reason: REFUSED });
+
+function linesOf(root: string, writer: string, stream = STREAM): number {
+  const file = streamFile(root, writer, stream);
+  return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).length : 0;
+}
+
+test('D-14 flooded: a colleague\'s 1,200 refused entries keep 1,000 with one flooded line; the mark still advances for everyone else, across a reopen', async () => {
+  assert.equal(MAX_REFUSED_PER_WRITER, 1_000);
+  assert.equal(heldReason(FLOODED_REASON), FLOODED_REASON, 'the flooded line is a held reason as this version stores it');
+  assert.equal(FLOODED_TEXT, 'Too many refused changes arrived from one device. They were not kept.');
+  const root = project();
+  const lead = fixedSigner('lead');
+  const colleague = fixedSigner('colleague');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const flood = chain(colleague, 1205);
+  const result = await store.ingestForeign(flood.slice(0, 1200).map((item) => item.entry), [], refuseAll);
+  assert.ok('ok' in result);
+  assert.equal(result.added, 1000, 'only the first 1,000 are written');
+  assert.equal(result.held.length, 1000);
+  assert.ok(result.held.slice(0, 999).every((item) => item.reason === REFUSED));
+  assert.deepEqual(result.held[999], { hash: flood[999].hash, reason: FLOODED_REASON }, 'the 1,000th is the writer\'s one flooded line');
+  assert.equal(result.flooded, 200);
+  assert.equal(result.deferred, 0);
+  assert.equal(linesOf(root, colleague.writer), 1000);
+  assert.deepEqual(store.flooded(), [{ stream: STREAM, writer: colleague.writer }]);
+  const dir = path.join(root, REPLICA_DIR);
+  const read = await readMark(secrets, dir, ACTIVE);
+  assert.equal(read.kind === 'mark' && read.mark.held.length, 1000, 'the mark verifies and holds 1,000');
+  // Everyone else's changes are still recorded.
+  const other = fixedSigner('second colleague');
+  const passing = chain(other, 3);
+  const taken = await store.ingestForeign(passing.map((item) => item.entry), [], countingCheck(new Set()).check);
+  assert.ok('ok' in taken);
+  assert.equal(taken.added, 3);
+  assert.equal(taken.flooded, 0);
+  assert.deepEqual(store.entries(), passing.map((item) => item.entry));
+  const after = await readMark(secrets, dir, ACTIVE);
+  assert.deepEqual(after.kind === 'mark' && after.mark.heads.filter((head) => head.writer === other.writer).map((head) => [head.seq, head.hash, head.count]), [[2, passing[2].hash, 3]]);
+  // The flooded writer's later entries are not written, even ones the check would pass, and the check is not called for them.
+  const { check, calls } = countingCheck(new Set());
+  const later = await store.ingestForeign(flood.slice(1200).map((item) => item.entry), [], check);
+  assert.ok('ok' in later);
+  assert.equal(later.added, 0);
+  assert.equal(later.flooded, 5);
+  assert.deepEqual(later.held, []);
+  assert.deepEqual(calls, [], 'a flooded writer costs no more checks');
+  assert.equal(linesOf(root, colleague.writer), 1000);
+  const again = await opened(root, depsFor(lead, secrets));
+  assert.deepEqual(again.flooded(), [{ stream: STREAM, writer: colleague.writer }], 'the flooded line is read back from the mark');
+  assert.equal(again.heldForCheck().length, 1000);
+  const retry = await again.ingestForeign(flood.slice(1200).map((item) => item.entry), [], check);
+  assert.equal('ok' in retry && retry.flooded, 5);
+  assert.deepEqual(calls, []);
+});
+
+test('D-14 flooded: a check reason that equals the flooded line is stored with "check: " in front and never floods a writer', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const store = await opened(root, depsFor(lead));
+  const foreign = chain(fixedSigner('colleague'), 2);
+  const imitating: ForeignCheck = () => Promise.resolve({ ok: false, reason: ` ${FLOODED_REASON}\n` });
+  const result = await store.ingestForeign(foreign.map((item) => item.entry), [], imitating);
+  assert.ok('ok' in result);
+  assert.equal(result.added, 2);
+  assert.deepEqual(result.held.map((item) => item.reason), [`check: ${FLOODED_REASON}`, `check: ${FLOODED_REASON}`]);
+  assert.deepEqual(store.flooded(), []);
+  assert.deepEqual((await opened(root, depsFor(lead))).flooded(), []);
 });
 
 /** Every file under a folder by relative path with the hash of its bytes, leaving out the lock file. */
