@@ -50,6 +50,10 @@
   by the staff lead, not verified, and that labels are not accreditation.
 - In a shared project, Set Aside the Product Ledger, the product decisions and Decide a PIR now say
   at once that the step is not available there, instead of after their dialogs.
+- **An invitation that could not be saved can be saved again.** If saving an invitation file fails,
+  **Staff: Remove from Staff Project** on the computer that made it offers to save that invitation
+  again; nothing in the project changes. A project folder whose shared-project file cannot be read
+  now says which error stopped the step, instead of calling the project shared.
 
 ## 0.4.34
 
