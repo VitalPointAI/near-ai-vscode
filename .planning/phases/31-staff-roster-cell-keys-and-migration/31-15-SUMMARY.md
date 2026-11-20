@@ -160,7 +160,7 @@ No checkpoint in this plan. The tracer gate was run automatically: Task 1's veri
 - **Commit:** a899a14f
 
 **3. [Rule 1 - Bug] Em-dash character in a new test file**
-- **Issue:** the refusal-text check in replicaCellKeys.test.ts held a literal em-dash character instead of the `—` escape.
+- **Issue:** the refusal-text check in replicaCellKeys.test.ts held a literal em-dash character instead of the `\u2014` escape.
 - **Fix:** replaced with the escape. **Commit:** cbf8ded5
 
 ### Notes
