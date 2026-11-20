@@ -21,16 +21,31 @@ export interface CausalGraph {
   concurrent(a: string, b: string): boolean;
   // The heads that are in the graph plus all their ancestors.
   closure(heads: readonly string[]): ReadonlySet<string>;
+  // How much work the graph has done, for tests: pastsBuilt counts the ancestor sets computed so far.
+  stats(): { pastsBuilt: number };
 }
 
 export function buildCausalGraph(entries: readonly GraphEntry[]): CausalGraph {
   const direct = new Map<string, readonly string[]>();
+  const lamports = new Map<string, unknown>();
   for (const entry of entries) {
     const preds = new Set<string>();
     if (entry.header.prev !== GENESIS_PREV) preds.add(entry.header.prev);
     for (const dep of entry.body.deps) preds.add(dep.hash);
     direct.set(entry.hash, [...preds].sort());
+    lamports.set(entry.hash, entry.body.lamport);
   }
+  // The lamport bound (WR-06): a strict ancestor has a smaller lamport, so a is before b only when lamport(a) < lamport(b). The chain admits an entry
+  // only when its lamport is one more than the largest of its predecessors, so this holds for every graph the fold builds. It is checked here on
+  // every edge anyway, and a graph where it fails (hand-built, or not yet chain-checked) answers from the ancestor sets alone.
+  const lamportOf = (hash: string): number => lamports.get(hash) as number;
+  let rising = true;
+  for (const [hash, preds] of direct) {
+    const own = lamports.get(hash);
+    if (typeof own !== 'number' || !Number.isFinite(own)) { rising = false; break; }
+    if (preds.some((pred) => direct.has(pred) && !((lamports.get(pred) as number) < own))) { rising = false; break; }
+  }
+  let pastsBuilt = 0;
   // Every entry reachable from the starts through predecessors that are in the graph, starts included when they are in the graph.
   const reach = (starts: readonly string[]): Set<string> => {
     const seen = new Set<string>();
@@ -49,10 +64,16 @@ export function buildCausalGraph(entries: readonly GraphEntry[]): CausalGraph {
     const known = pasts.get(hash);
     if (known !== undefined) return known;
     const found = reach(direct.get(hash) ?? []);
+    pastsBuilt += 1;
     pasts.set(hash, found);
     return found;
   };
-  const isBefore = (a: string, b: string): boolean => a !== b && past(b).has(a);
+  // An ancestor set only ever holds entries of the graph, so a or b outside it, or a lamport not below b's, answers false without building one.
+  const isBefore = (a: string, b: string): boolean => {
+    if (a === b || !direct.has(a) || !direct.has(b)) return false;
+    if (rising && !(lamportOf(a) < lamportOf(b))) return false;
+    return past(b).has(a);
+  };
   return {
     has: (hash) => direct.has(hash),
     preds: (hash) => direct.get(hash) ?? [],
@@ -60,6 +81,7 @@ export function buildCausalGraph(entries: readonly GraphEntry[]): CausalGraph {
     past,
     isBefore,
     concurrent: (a, b) => a !== b && direct.has(a) && direct.has(b) && !isBefore(a, b) && !isBefore(b, a),
-    closure: (heads) => reach(heads)
+    closure: (heads) => reach(heads),
+    stats: () => ({ pastsBuilt })
   };
 }
