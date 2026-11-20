@@ -199,7 +199,7 @@ test('every hub file refusal is a plain sentence that says what to do, with no e
   const signed = fileOf(world);
   assert.deepEqual(Object.keys(HUB_FILE_REFUSALS).sort(), ['bad-binding', 'bad-signature', 'expired', 'malformed', 'too-large']);
   for (const [reason, message] of Object.entries(HUB_FILE_REFUSALS)) {
-    assert.match(message, /^[A-Z][^—]*\.$/, reason);
+    assert.match(message, /^[A-Z][^\u2014]*\.$/, reason);
     assert.match(message, /hub file/, reason);
   }
   const changed = copyOf(signed);
@@ -247,7 +247,7 @@ test('buildHubFile refuses a bad address, pin, enrolment id or secret, an expiry
     assert.throws(() => buildHubFile(world.hub.signer, { ...world.input, ...change }), (error: unknown) => {
       assert.ok(error instanceof Error, what);
       assert.match(error.message, /^The hub file was not made: /, what);
-      assert.equal(error.message.includes('—'), false);
+      assert.equal(error.message.includes('\u2014'), false);
       assert.equal(error.message.includes(world.enrolmentSecret), false);
       return true;
     }, what);
@@ -280,7 +280,7 @@ test('certPinOf refuses text or bytes that are not a certificate with a plain er
     assert.throws(() => certPinOf(input), (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /^This is not a certificate/);
-      assert.equal(error.message.includes('—'), false);
+      assert.equal(error.message.includes('\u2014'), false);
       return true;
     });
   }
@@ -380,7 +380,7 @@ test('malformed: an answer of the wrong shape, another purpose, text that is not
 test('every session refusal is one plain sentence that says what to do, with no em-dash, and no refusal carries the challenge or the keying material', () => {
   assert.deepEqual(Object.keys(SESSION_REFUSALS).sort(), ['bad-signature', 'malformed', 'wrong-challenge', 'wrong-connection', 'wrong-hub', 'wrong-project']);
   for (const [reason, message] of Object.entries(SESSION_REFUSALS)) {
-    assert.match(message, /^[A-Z][^—]*\.$/, reason);
+    assert.match(message, /^[A-Z][^\u2014]*\.$/, reason);
     assert.match(message, /new session/, reason);
   }
   const world = sessionWorld();
