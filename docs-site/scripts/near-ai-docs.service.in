@@ -1,0 +1,22 @@
+# systemd user unit for the local documentation site. A template: scripts/install-service.sh fills
+# in the @...@ values for this computer and installs it as ~/.config/systemd/user/near-ai-docs.service.
+# It serves the last build (docs-site/build) on 127.0.0.1 only; scripts/serve.mjs refuses any other
+# address.
+[Unit]
+Description=NEAR AI for VS Code documentation site (127.0.0.1:@PORT@)
+Documentation=file://@SITE_DIR@/README.md
+
+[Service]
+Type=simple
+WorkingDirectory=@SITE_DIR@
+Environment=NODE_ENV=production
+ExecStart=@NODE@ @SITE_DIR@/scripts/serve.mjs --host 127.0.0.1 --port @PORT@
+Restart=on-failure
+RestartSec=5
+# A static file server needs little: keep it small and unprivileged.
+MemoryMax=256M
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

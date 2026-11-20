@@ -32,3 +32,6 @@ docs/development-workflow.md
 # The messaging relay is its own service with its own lockfile and never ships in the extension.
 relay/**
 .dockerignore
+# The documentation site is its own workspace with its own lockfile and never ships in the extension.
+docs-site/**
+docs/testing.md
