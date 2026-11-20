@@ -695,7 +695,9 @@ Because publications are self-contained (signed, sealed, labelled, sequenced), f
 
 ---
 
-## 9. Open decisions, with defaults
+## 9. Decisions, with defaults
+
+**Decided (owner, 2026-11-20):** all twelve, as recommended (the bold default in each row).
 
 | # | Decision | Options | Default (recommended) |
 |---|---|---|---|

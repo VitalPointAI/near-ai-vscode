@@ -25,7 +25,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (integer numbering: Phases 26 to 40 so far) when 0.4.x work is planned with GSD.
+Next phases are added here (Phases 26 to 40 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -280,15 +280,15 @@ Plans:
 **Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
 **Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 32.1 (mode table and `term()`).
-**Inserted**: 2026-11-20 at the owner's request.
+**Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
 **Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08
 **Success Criteria** (what must be TRUE):
   1. A J1 delegate posts a person to "Watch Officer, night" from 1 December; the person proves their computer by safety code, sees no Decline, and reports for duty on 1 December; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
-  2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after the policy's days with the tasker's actions. (POST-04, POST-08)
+  2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
   3. In a handover, a decision the outgoing holder signs after the incoming's report is refused, the incoming reads new entries and the outgoing cannot, and a membership change between order and report forces a restage, in random fold orders and through an offline split. (POST-06)
   4. Acting postings move decision roles and back on return; a dual-hatted person cannot approve a product they own; a client without the positions feature refuses the project with the update sentence. (POST-01, POST-07)
   5. An existing multi-user project switched to Military mode gives the same decisions and grants after migration from seats; invitation-mode projects are unchanged. (POST-08)
-**Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register. (2) Open owner decisions D2 to D4 and D11 in the design.
+**Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
 **Plans:** 0 plans
 **UI hint**: yes
@@ -333,7 +333,7 @@ Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agre
 **Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
 **Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records). Phase 74.1 not required: the guide reads the shipped passport rows as data until it lands.
 **Inserted**: 2026-11-20 at the owner's request.
-**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, ORG-01, ORG-02, ORG-03, ORG-04 (organization modes added 2026-11-20, `.planning/research/portfolio-and-assignment/DESIGN.md` section 5)
+**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, ORG-01, ORG-02, ORG-03, ORG-04 (organization modes added 2026-11-20, `.planning/research/portfolio-and-assignment/DESIGN.md` section 5; the ids are defined in that design's requirements table and added to REQUIREMENTS.md when Phase 32.1 is planned)
 **Success Criteria** (what must be TRUE):
   1. On a laptop with no local AI and a NEAR AI key, a developer answering "internal work, Canada No" is recommended NEAR AI private hardware with its reason, and local appears only under "Not available here" with the hardware reason. (GUIDE-01, GUIDE-03, GUIDE-04)
   2. With a local server serving a passported model, an analyst answering "sensitive personal information" gets the project labelled Protected B and is recommended this computer; NEAR AI is greyed with the routing sentence; a hosted option appears for Protected B only when the policy records an authorization for it. (GUIDE-02, GUIDE-04, GUIDE-05)
