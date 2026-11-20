@@ -503,6 +503,7 @@ test('MJ-08: startHistoryAgain sets a rolled-back store aside, keeps project.jso
   const started = await ReplicaProject.startHistoryAgain(lead.root, lead.deps);
   assert.ok(started !== undefined && !isProjectRefused(started));
   assert.equal(started.carried, 1, 'the genesis line that is still there');
+  assert.ok(started.setAside !== null, 'the store folder was there, so it was set aside');
   assert.ok(existsSync(path.join(lead.root, started.setAside, 'project.json')), 'the old folder is set aside whole');
   assert.ok(existsSync(path.join(lead.root, ...REPLICA_PROJECT_FILE.split('/'))), 'the folder is still a shared project');
   const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
