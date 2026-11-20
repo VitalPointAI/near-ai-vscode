@@ -482,3 +482,149 @@ test('only the lead or the deputy writes the roster: a member\'s invite, void, r
   }
   assert.equal((await head(t.m.p)).hash, before.hash);
 });
+
+// ---- Task 3: remove, revoke, change clearance: rekey ----------------------------------------------------------------------------------------------
+
+test('removing a member writes member.remove and one cell.rekey for each cell it held, each wrapped only to the devices still cleared; it keeps epoch 1 of X and never opens epoch 2', async () => {
+  const t = await team();
+  const base = t.lead.p.projectId;
+  const removed = ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove');
+  assert.ok(removed.message.includes(REKEY_KEEP_TEXT));
+  assert.ok(removed.message.includes('They keep what they already received. They will not receive anything new.'));
+  assert.deepEqual([...(removed.rekeyed ?? [])].sort(), [base, t.x].sort());
+  assert.deepEqual(removed.notices, multiUserNoticeLines());
+  const { roster, hash, position } = await head(t.lead.p);
+  assert.equal(memberAt(roster.members, t.m.member, position), undefined);
+  assert.equal(epochAt(roster.cells, base, position), 2);
+  assert.equal(epochAt(roster.cells, t.x, position), 2);
+  assert.equal(epochAt(roster.cells, t.z, position), 1, 'Z was never M\'s');
+  const view = rosterView(roster);
+  assert.deepEqual(view.cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter]);
+  assert.deepEqual(view.cellGrantees?.(base, hash), [t.lead.p.deviceWriter, t.n.writer].sort());
+  // Every grant reaches M's computer and N's: M opens nothing new, N opens the new base key and nothing of X.
+  assert.ok(!isProjectRefused(await t.m.p.putGrants(grantsOn(t.lead.at))));
+  assert.ok(!isProjectRefused(await t.n.p.putGrants(grantsOn(t.lead.at))));
+  assert.ok(t.m.p.keys.epochKey(t.x, 1) !== undefined);
+  assert.equal(t.m.p.keys.epochKey(t.x, 2), undefined);
+  assert.equal(t.m.p.keys.epochKey(base, 2), undefined);
+  assert.deepEqual(t.n.p.keys.epochKey(base, 2), t.lead.p.keys.epochKey(base, 2));
+  assert.equal(t.n.p.keys.epochKey(t.x, 2), undefined);
+  // The roster refused nothing.
+  assert.deepEqual(roster.refused, []);
+});
+
+test('revoking one device rekeys only that device\'s cells; the member\'s other device keeps access through the new grants', async () => {
+  const t = await team();
+  const second = await addMachine(t.lead, t.m.member, 'm2', 'Mo Analyst');
+  const base = t.lead.p.projectId;
+  const revoked = ok(await removeFromProject(t.lead.host, { member: t.m.member, writer: second.writer }), 'revoke');
+  assert.deepEqual([...(revoked.rekeyed ?? [])].sort(), [base, t.x].sort());
+  assert.ok(revoked.message.includes(REKEY_KEEP_TEXT));
+  const { roster, hash, position } = await head(t.lead.p);
+  assert.ok(memberAt(roster.members, t.m.member, position) !== undefined, 'M stays a member');
+  assert.equal(rosterView(roster).isAdmitted(second.writer, hash), false);
+  assert.equal(rosterView(roster).isAdmitted(t.m.writer, hash), true);
+  assert.equal(epochAt(roster.cells, t.z, position), 1, 'Z not rekeyed');
+  assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.m.writer].sort());
+  for (const at of [t.m, second]) assert.ok(!isProjectRefused(await at.p.putGrants(grantsOn(t.lead.at))));
+  assert.ok(t.m.p.keys.epochKey(t.x, 2) !== undefined, 'M\'s first device opens the new key');
+  assert.equal(second.p.keys.epochKey(t.x, 2), undefined, 'the revoked device does not');
+  assert.equal(second.p.keys.epochKey(base, 2), undefined);
+  // A device the member does not have is refused.
+  assert.equal((await removeFromProject(t.lead.host, { member: t.n.member, writer: t.m.writer })).reason, 'device-unknown');
+});
+
+test('lowering N\'s clearance below X\'s label rekeys X without N, and leaves the base cell alone', async () => {
+  const t = await team({ nClearance: CLEARED_X });
+  const base = t.lead.p.projectId;
+  assert.ok(t.n.p.keys.epochKey(t.x, 1) !== undefined, 'N had been granted X');
+  const lowered = ok(await updateMember(t.lead.host, { member: t.n.member, clearance: OFFICIAL }), 'lower');
+  assert.deepEqual(lowered.rekeyed, [t.x]);
+  assert.ok(lowered.message.includes(REKEY_KEEP_TEXT));
+  const { roster, hash, position } = await head(t.lead.p);
+  assert.deepEqual(memberAt(roster.members, t.n.member, position)?.clearance, OFFICIAL);
+  assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.m.writer].sort());
+  assert.equal(epochAt(roster.cells, base, position), 1);
+  assert.ok(!isProjectRefused(await t.n.p.putGrants(grantsOn(t.lead.at))));
+  assert.equal(t.n.p.keys.epochKey(t.x, 2), undefined);
+  // A change that is not about clearance rekeys nothing, and a change of nothing is refused.
+  const renamed = ok(await updateMember(t.lead.host, { member: t.n.member, name: 'Nell P' }), 'rename');
+  assert.deepEqual(renamed.rekeyed, []);
+  assert.ok(!renamed.message.includes(REKEY_KEEP_TEXT));
+  assert.equal((await updateMember(t.lead.host, { member: t.n.member })).reason, 'nothing-to-change');
+  assert.equal((await updateMember(t.lead.host, { member: 'mbr-nobody', name: 'X' })).reason, 'member-unknown');
+});
+
+test('raising a clearance writes grants for the newly cleared cells with every earlier epoch', async () => {
+  const t = await team();
+  // X gets a second epoch first: M is removed.
+  ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove M');
+  const raised = ok(await updateMember(t.lead.host, { member: t.n.member, clearance: CLEARED_X }), 'raise');
+  assert.deepEqual(raised.granted, [t.x]);
+  assert.deepEqual(raised.rekeyed, []);
+  const { roster, hash } = await head(t.lead.p);
+  assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.n.writer].sort());
+  assert.ok(!isProjectRefused(await t.n.p.putGrants(grantsOn(t.lead.at))));
+  assert.deepEqual(t.n.p.keys.epochKey(t.x, 1), t.lead.p.keys.epochKey(t.x, 1));
+  assert.deepEqual(t.n.p.keys.epochKey(t.x, 2), t.lead.p.keys.epochKey(t.x, 2));
+  assert.equal(t.n.p.keys.epochKey(t.z, 1), undefined, 'Z stays out of reach');
+  assert.deepEqual(roster.refused, []);
+});
+
+test('the lead cannot be removed, and the lead\'s last device cannot be revoked by the lead: both refused with the roster\'s sentence; the lead\'s second device can be revoked', async () => {
+  const lead = await founded();
+  const before = await head(lead.p);
+  const removed = await removeFromProject(lead.host, { member: 'mbr-lead' });
+  assert.equal(removed.reason, 'lead-not-removable');
+  assert.equal(removed.message, MEMBER_REFUSALS['lead-not-removable']);
+  const last = await removeFromProject(lead.host, { member: 'mbr-lead', writer: lead.p.deviceWriter });
+  assert.equal(last.reason, 'last-lead-device');
+  assert.equal(last.message, MEMBER_REFUSALS['last-lead-device']);
+  assert.equal((await head(lead.p)).hash, before.hash);
+  // With a second device, the lead revokes it; the remaining one is the last again.
+  const second = await addMachine(lead, 'mbr-lead', 'a2', 'Lee Lead');
+  ok(await removeFromProject(lead.host, { member: 'mbr-lead', writer: second.writer }), 'revoke the second lead device');
+  assert.equal((await removeFromProject(lead.host, { member: 'mbr-lead', writer: lead.p.deviceWriter })).reason, 'last-lead-device');
+});
+
+/** The lead makes a cell with no label it can read (labelSealed empty), founded with wraps to the given devices only. */
+async function unlabelledCell(lead: Lead, to: readonly string[]): Promise<string> {
+  const at = await head(lead.p);
+  const cell = randomBytes(16).toString('hex');
+  const key = newEpochKey();
+  const wraps = to.map((writer) => ({ writer, wrap: wrapEpochKey({ cell, epoch: 1, writer, recipient: x25519At(at.roster.members, writer, at.position) as string, epochKey: key }) }));
+  const founding = buildGrant(lead.p.signer, { cell, epoch: 1, roster: at.hash, labelSealed: '', wraps });
+  assert.ok(!isProjectRefused(await lead.p.putGrants([founding])));
+  assert.ok('ok' in await lead.p.appendOwn('cell.create', { cell, epoch: 1, grant: grantHash(founding) }, { roster: at.hash }));
+  return cell;
+}
+
+test('a cell nobody else is left on gets no rekey: the plan with no recipients is not written, and the result says so', async () => {
+  const t = await team();
+  // Y is held by M alone: the lead wraps it only to M and keeps no key for it.
+  const y = await unlabelledCell(t.lead, [t.m.writer]);
+  const removed = ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove');
+  assert.ok(!(removed.rekeyed ?? []).includes(y));
+  assert.deepEqual([...(removed.rekeyed ?? [])].sort(), [t.lead.p.projectId, t.x].sort());
+  assert.ok(removed.message.includes('Nobody else is on one part of the project, so no new key was made for it.'));
+  assert.ok(removed.message.includes(REKEY_KEEP_TEXT));
+  const { roster, position } = await head(t.lead.p);
+  assert.equal(epochAt(roster.cells, y, position), 1, 'no cell.rekey was written for Y');
+  assert.deepEqual(roster.refused, []);
+});
+
+test('no-grant-key: changing the clearance of a member who holds a cell whose label this computer cannot read is refused before anything is written', async () => {
+  const t = await team();
+  const y = await unlabelledCell(t.lead, [t.lead.p.deviceWriter, t.n.writer]);
+  const before = await head(t.lead.p);
+  assert.ok(epochAt(before.roster.cells, y, before.position) === 1);
+  const blocked = await updateMember(t.lead.host, { member: t.n.member, clearance: CLEARED_X });
+  assert.equal(blocked.reason, 'no-grant-key');
+  assert.equal(blocked.message, MEMBERSHIP_REFUSALS['no-grant-key']);
+  assert.equal((await head(t.lead.p)).hash, before.hash);
+  // Removing N is still possible: Y keeps the devices that were granted it, without N.
+  const removed = ok(await removeFromProject(t.lead.host, { member: t.n.member }), 'remove N');
+  assert.ok((removed.rekeyed ?? []).includes(y));
+  const { roster, hash } = await head(t.lead.p);
+  assert.deepEqual(rosterView(roster).cellGrantees?.(y, hash), [t.lead.p.deviceWriter]);
+});
