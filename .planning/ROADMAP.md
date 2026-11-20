@@ -230,34 +230,34 @@ Plans:
 **Plans:** 28 plans in 14 waves (planned 2026-11-20; Part A, the PR #130 review findings, and Part B, products in label cells, first; then the hub)
 
 Plans:
-- [ ] 32-01-PLAN.md: Wave 1. Start Again resumable, recovers from the set-aside folder
-- [ ] 32-02-PLAN.md: Wave 2. Remove by member id, Join refuses no file, secret file folder sync
-- [ ] 32-03-PLAN.md: Wave 1. Single-machine copy: head mark before rename, recovery
-- [ ] 32-04-PLAN.md: Wave 1. Membership: lead-role removal test, lean roster branches, no-secret texts
-- [ ] 32-05-PLAN.md: Wave 1. Staff host reopens a shared project after Start Again
-- [ ] 32-06-PLAN.md: Wave 1. Test hygiene: parity in a child, real token shape, key-phrase assertions, D-05 record
-- [ ] 32-07-PLAN.md: Wave 2. Mark durability and a bound on refused entries
-- [ ] 32-08-PLAN.md: Wave 1. Pure product-cell rules: base cell roster only, pin-above-cell, import scope, baseCellHeldProducts
-- [ ] 32-09-PLAN.md: Wave 3. Label cells on the host: create on demand, grant by clearance, write products there
-- [ ] 32-10-PLAN.md: Wave 4. Make Multi-User converts labelled projects into label cells
-- [ ] 32-11-PLAN.md: Wave 5. Host and single-machine copy read every held cell
-- [ ] 32-12-PLAN.md: Wave 5. Make Multi-User asks the lead's clearance, the copy shows its notice, preview projects told the way forward
-- [ ] 32-13-PLAN.md: Wave 5. Label leak test and Part B docs
-- [ ] 32-14-PLAN.md: Wave 6. hub/ workspace: guard, config, secrets, state dir, logger, health, TLS server, key generation, boundary test
-- [ ] 32-15-PLAN.md: Wave 6. Hub file, invitation hub field, new signed purposes (pure)
-- [ ] 32-16-PLAN.md: Wave 6. Hub witness: the client's malicious-hub findings (pure)
-- [ ] 32-17-PLAN.md: Wave 7. Hub image, Compose service and profile, CI job, release exclusions
-- [ ] 32-18-PLAN.md: Wave 7. Hub store: SQLite schema, entries, blobs, checkpoints, equivocations, invites, enrolments; kill -9 drill
-- [ ] 32-19-PLAN.md: Wave 8. Append checks, roster cache, enrolment, equivocation, limits
-- [ ] 32-20-PLAN.md: Wave 9. Sessions bound to TLS and the HTTP API (heads, append, entries, blobs, enrol)
-- [ ] 32-21-PLAN.md: Wave 10. Server-sent events and presence
-- [ ] 32-22-PLAN.md: Wave 11. Signed checkpoints
-- [ ] 32-23-PLAN.md: Wave 11. Client hub transport and one-shot sync
-- [ ] 32-24-PLAN.md: Wave 11. Hub in the roster: admit with base grant, grant cells with the trade-off sentence, revoke
-- [ ] 32-25-PLAN.md: Wave 12. Join requests through the hub
-- [ ] 32-26-PLAN.md: Wave 13. Malicious-hub harness and restore drill
-- [ ] 32-27-PLAN.md: Wave 13. Ciphertext-only byte capture and no outbound calls
-- [ ] 32-28-PLAN.md: Wave 14. Operator section, SECURITY.md, CHANGELOG, requirements, close-out
+- [x] 32-01-PLAN.md: Wave 1. Start Again resumable, recovers from the set-aside folder
+- [x] 32-02-PLAN.md: Wave 2. Remove by member id, Join refuses no file, secret file folder sync
+- [x] 32-03-PLAN.md: Wave 1. Single-machine copy: head mark before rename, recovery
+- [x] 32-04-PLAN.md: Wave 1. Membership: lead-role removal test, lean roster branches, no-secret texts
+- [x] 32-05-PLAN.md: Wave 1. Staff host reopens a shared project after Start Again
+- [x] 32-06-PLAN.md: Wave 1. Test hygiene: parity in a child, real token shape, key-phrase assertions, D-05 record
+- [x] 32-07-PLAN.md: Wave 2. Mark durability and a bound on refused entries
+- [x] 32-08-PLAN.md: Wave 1. Pure product-cell rules: base cell roster only, pin-above-cell, import scope, baseCellHeldProducts
+- [x] 32-09-PLAN.md: Wave 3. Label cells on the host: create on demand, grant by clearance, write products there
+- [x] 32-10-PLAN.md: Wave 4. Make Multi-User converts labelled projects into label cells
+- [x] 32-11-PLAN.md: Wave 5. Host and single-machine copy read every held cell
+- [x] 32-12-PLAN.md: Wave 5. Make Multi-User asks the lead's clearance, the copy shows its notice, preview projects told the way forward
+- [x] 32-13-PLAN.md: Wave 5. Label leak test and Part B docs
+- [x] 32-14-PLAN.md: Wave 6. hub/ workspace: guard, config, secrets, state dir, logger, health, TLS server, key generation, boundary test
+- [x] 32-15-PLAN.md: Wave 6. Hub file, invitation hub field, new signed purposes (pure)
+- [x] 32-16-PLAN.md: Wave 6. Hub witness: the client's malicious-hub findings (pure)
+- [x] 32-17-PLAN.md: Wave 7. Hub image, Compose service and profile, CI job, release exclusions
+- [x] 32-18-PLAN.md: Wave 7. Hub store: SQLite schema, entries, blobs, checkpoints, equivocations, invites, enrolments; kill -9 drill
+- [x] 32-19-PLAN.md: Wave 8. Append checks, roster cache, enrolment, equivocation, limits
+- [x] 32-20-PLAN.md: Wave 9. Sessions bound to TLS and the HTTP API (heads, append, entries, blobs, enrol)
+- [x] 32-21-PLAN.md: Wave 10. Server-sent events and presence
+- [x] 32-22-PLAN.md: Wave 11. Signed checkpoints
+- [x] 32-23-PLAN.md: Wave 11. Client hub transport and one-shot sync
+- [x] 32-24-PLAN.md: Wave 11. Hub in the roster: admit with base grant, grant cells with the trade-off sentence, revoke
+- [x] 32-25-PLAN.md: Wave 12. Join requests through the hub
+- [x] 32-26-PLAN.md: Wave 13. Malicious-hub harness and restore drill
+- [x] 32-27-PLAN.md: Wave 13. Ciphertext-only byte capture and no outbound calls
+- [x] 32-28-PLAN.md: Wave 14. Operator section, SECURITY.md, CHANGELOG, requirements, close-out
 
 ### Phase 33: Live multi-user staff projects
 **Goal**: Several people work one staff project at the same time from their own machines, see each other and each other's edits live, and decide products with signed, verifiable decisions.
@@ -1422,7 +1422,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 29. A cleanup member with a safe CleanUp tool | 0/TBD | Not started (after Phase 70) | - |
 | 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
-| 32. Your organization's sync hub | 0/28 | Planned (drop A; Parts A and B first, then the hub) | - |
+| 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
