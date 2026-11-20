@@ -4,10 +4,14 @@
 // Builders beyond the shared roster world live in this file (the helper is not edited in wave 6).
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { REKEY_KEEP_TEXT, buildGrant, grantHash, openLabel, planRekey, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, buildGrant, earlierEpochGrants, grantHash, openLabel, planRekey, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
+import type { RekeyReason } from '../domain/replica/cellKeys';
 import type { CellGrant } from '../domain/replica/cellKeys';
-import { CELL_REFUSALS } from '../domain/replica/rosterCells';
+import { CELL_REFUSALS, epochsAt, granteesAt } from '../domain/replica/rosterCells';
+import { deviceAt } from '../domain/replica/rosterMembers';
+import type { MembersState } from '../domain/replica/rosterMembers';
 import { rosterView } from '../domain/replica/roster';
+import { CELL_REKEY_REASONS } from '../domain/replica/kindSchemas/roster';
 import type { RosterState } from '../domain/replica/roster';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld } from './helpers/replicaRosterWorld';
@@ -193,4 +197,171 @@ test('cell.create and cell.rekey refusals: cell-exists, cell-unknown, epoch-not-
     const text = CELL_REFUSALS[reason];
     assert.ok(text.length > 20 && text.endsWith('.') && !text.includes('—'), reason);
   }
+});
+
+// ---- every rekey reason (D-23) ----
+
+// Writer ids for the planning tests: planRekey reads only ids, never keys.
+const W = (letter: string): string => letter.repeat(64);
+const [LEAD_W, M1, M2, D1, D2, HUB] = ['a', 'b', 'c', 'd', 'e', 'f'].map(W);
+
+test('planRekey for device-revoked drops only the revoked device, plans each cell it was on, and leaves the other cells alone', () => {
+  const plans = planRekey({
+    change: { kind: 'device-revoked', writers: [M2] },
+    cells: [
+      // The host's cleared list may still name the revoked device: a revocation drops it anyway.
+      { cell: CELL_X, grantees: [LEAD_W, M1, M2], clearedNow: [LEAD_W, M1, M2] },
+      { cell: CELL_Y, grantees: [M2, LEAD_W], clearedNow: [LEAD_W] },
+      { cell: streamId('cell-z'), grantees: [LEAD_W, M1], clearedNow: [LEAD_W, M1] }
+    ]
+  });
+  assert.deepEqual(plans, [
+    { cell: CELL_X, reason: 'device-revoked', recipients: [LEAD_W, M1], dropped: [M2], text: REKEY_KEEP_TEXT },
+    { cell: CELL_Y, reason: 'device-revoked', recipients: [LEAD_W], dropped: [M2], text: REKEY_KEEP_TEXT }
+  ].sort((a, b) => (a.cell < b.cell ? -1 : 1)));
+});
+
+test('planRekey for clearance-lowered drops the member\'s devices only from the cells their clearance no longer covers and keeps the others', () => {
+  const cellZ = streamId('cell-z');
+  const plans = planRekey({
+    change: { kind: 'clearance-lowered', writers: [D1, D2] },
+    cells: [
+      // X is above the lowered clearance: neither device is cleared now.
+      { cell: CELL_X, grantees: [LEAD_W, D1, D2, M1], clearedNow: [LEAD_W, M1] },
+      // Y is still covered: both devices stay, so no rekey.
+      { cell: CELL_Y, grantees: [LEAD_W, D1, D2], clearedNow: [LEAD_W, D1, D2] },
+      // Z never had the member: no rekey, even though another grantee is not cleared now (that is another change's rekey).
+      { cell: cellZ, grantees: [LEAD_W, M2], clearedNow: [LEAD_W] }
+    ]
+  });
+  assert.deepEqual(plans, [{ cell: CELL_X, reason: 'clearance-lowered', recipients: [LEAD_W, M1], dropped: [D1, D2], text: REKEY_KEEP_TEXT }]);
+});
+
+test('planRekey for hub-revoked plans the hub device\'s cells; scheduled is a new epoch for every cell to the same cleared recipients; recipients are never uncleared', () => {
+  const cells = [
+    { cell: CELL_X, grantees: [LEAD_W, M1, HUB], clearedNow: [LEAD_W, M1, HUB] },
+    { cell: CELL_Y, grantees: [LEAD_W, M1], clearedNow: [LEAD_W, M1] }
+  ];
+  assert.deepEqual(planRekey({ change: { kind: 'hub-revoked', writers: [HUB] }, cells }), [
+    { cell: CELL_X, reason: 'hub-revoked', recipients: [LEAD_W, M1], dropped: [HUB], text: REKEY_KEEP_TEXT }
+  ]);
+  const scheduled = planRekey({ change: { kind: 'scheduled', writers: [] }, cells });
+  assert.deepEqual(scheduled.map((plan) => [plan.cell, plan.recipients, plan.dropped]).sort(), [
+    [CELL_X, [LEAD_W, M1, HUB].sort(), []],
+    [CELL_Y, [LEAD_W, M1], []]
+  ].sort());
+  // P-31-20: a grantee the host no longer counts as cleared is never a recipient of the new key, whatever the reason.
+  const stale = planRekey({ change: { kind: 'scheduled', writers: [] }, cells: [{ cell: CELL_X, grantees: [LEAD_W, M1], clearedNow: [LEAD_W] }] });
+  assert.deepEqual([stale[0].recipients, stale[0].dropped], [[LEAD_W], [M1]]);
+  for (const reason of CELL_REKEY_REASONS) {
+    const plans = planRekey({ change: { kind: reason, writers: [M1] }, cells: [{ cell: CELL_X, grantees: [LEAD_W, M1], clearedNow: [LEAD_W] }] });
+    assert.ok(plans.every((plan) => !plan.recipients.includes(M1) && plan.text === REKEY_KEEP_TEXT), reason);
+  }
+  assert.throws(() => planRekey({ change: { kind: 'tidy-up' as RekeyReason, writers: [] }, cells }));
+});
+
+test('after a device-revoked rekey the grantees at the rekey roster are the new grant\'s recipients, and a device the members module no longer admits is never listed', () => {
+  const scene = createdX();
+  const { world, lead, member, create, founding } = scene;
+  const plans = planRekey({ change: { kind: 'device-revoked', writers: [member.writer] }, cells: [{ cell: CELL_X, grantees: [lead.writer, member.writer], clearedNow: [lead.writer, member.writer] }] });
+  assert.deepEqual(plans.map((plan) => plan.recipients), [[lead.writer]]);
+  const next = cellGrant(world, lead, { cell: CELL_X, epoch: 2, roster: create.hash, to: [lead] });
+  const rekey = world.rosterEntry(lead, 'cell.rekey', { cell: CELL_X, epoch: 2, reason: 'device-revoked', grant: grantHash(next) }, create.hash);
+  const state = fold(world, [...scene.base, create, rekey], [...scene.baseGrants, founding, next]);
+  assert.deepEqual(state.refused, []);
+  assert.deepEqual(rosterView(state).cellGrantees?.(CELL_X, rekey.hash), [lead.writer]);
+  // device.revoke itself is 31-14's: a members state where M's device ends at the cell.create position stands in for it.
+  const createAt = state.positionOf.get(create.hash) as number;
+  const members = structuredClone(state.members) as MembersState;
+  const versions = members.devices.get(member.writer) ?? [];
+  for (const version of versions) version.until = createAt;
+  const admittedIn = (source: MembersState) => (writer: string): boolean => deviceAt(source, writer, createAt) !== undefined;
+  assert.deepEqual(granteesAt(state.cells, CELL_X, createAt, admittedIn(state.members)), [lead.writer, member.writer].sort());
+  assert.deepEqual(granteesAt(state.cells, CELL_X, createAt, admittedIn(members)), [lead.writer]);
+});
+
+// ---- earlier epochs for a device admitted later (D-45) ----
+
+test('a device admitted at epoch 3 receives one grant per epoch 1, 2 and 3, each valid at the admission roster and each opening with its own key', () => {
+  const scene = createdX();
+  const { world, lead, member, create, founding } = scene;
+  const second = cellGrant(world, lead, { cell: CELL_X, epoch: 2, roster: create.hash, to: [lead], label: LABEL_X });
+  const rekey2 = world.rosterEntry(lead, 'cell.rekey', { cell: CELL_X, epoch: 2, reason: 'member-removed', grant: grantHash(second) }, create.hash);
+  const third = cellGrant(world, lead, { cell: CELL_X, epoch: 3, roster: rekey2.hash, to: [lead], label: LABEL_X });
+  const rekey3 = world.rosterEntry(lead, 'cell.rekey', { cell: CELL_X, epoch: 3, reason: 'scheduled', grant: grantHash(third) }, rekey2.hash);
+  const newcomer = world.device('NU', 'mbr-nu');
+  const invite = world.rosterEntry(lead, 'member.invite', {
+    invite: 'inv-nu', name: 'Nu Planner', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(newJoinSecret())
+  }, rekey3.hash);
+  const admitNu = world.rosterEntry(lead, 'member.admit', {
+    member: newcomer.member, invite: 'inv-nu', name: 'Nu Planner', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, device: newcomer.descriptor(3), agentSeats: []
+  }, invite.hash);
+  const entries = [...scene.base, create, rekey2, rekey3, invite, admitNu];
+  const before = fold(world, entries, [...scene.baseGrants, founding, second, third]);
+  const epochs = epochsAt(before.cells, CELL_X, before.positionOf.get(admitNu.hash) as number).map((item) => ({ epoch: item.epoch, key: world.epochKeyOf(CELL_X, item.epoch) }));
+  assert.deepEqual(epochs.map((item) => item.epoch), [1, 2, 3]);
+  const history = earlierEpochGrants(lead.signer, { cell: CELL_X, epochs, roster: admitNu.hash, writer: newcomer.writer, recipient: newcomer.x25519, label: LABEL_X });
+  assert.equal(history.length, 3);
+  const state = fold(world, entries, [...scene.baseGrants, founding, second, third, ...history]);
+  assert.deepEqual(state.refused, []);
+  const ring = world.ringFor(newcomer, history);
+  for (const epoch of [1, 2, 3]) {
+    const key = ring(CELL_X, epoch);
+    assert.deepEqual(key, world.epochKeyOf(CELL_X, epoch), `epoch ${epoch}`);
+    assert.deepEqual(openLabel(key as Buffer, CELL_X, epoch, history[epoch - 1].payload.labelSealed), LABEL_X);
+  }
+  const view = rosterView(state);
+  assert.deepEqual(view.cellGrantees?.(CELL_X, admitNu.hash), [lead.writer, newcomer.writer].sort());
+  assert.deepEqual(view.cellGrantees?.(CELL_X, rekey3.hash), [lead.writer]);
+  // M, removed from X at epoch 2, still holds only epoch 1.
+  const memberRing = world.ringFor(member, [founding, second, third, ...history]);
+  assert.deepEqual([1, 2, 3].map((epoch) => memberRing(CELL_X, epoch) !== undefined), [true, false, false]);
+  // The same grants named at a roster before the device was admitted, or signed by a member device, are refused.
+  const early = earlierEpochGrants(lead.signer, { cell: CELL_X, epochs: epochs.slice(2), roster: rekey3.hash, writer: newcomer.writer, recipient: newcomer.x25519 });
+  const byMember = earlierEpochGrants(member.signer, { cell: CELL_X, epochs: epochs.slice(2), roster: admitNu.hash, writer: newcomer.writer, recipient: newcomer.x25519 });
+  const refused = fold(world, entries, [...scene.baseGrants, founding, second, third, ...early, ...byMember]);
+  assert.deepEqual(grantRefusals(refused).sort(), [[grantHash(early[0]), 'grant-recipient'], [grantHash(byMember[0]), 'grant-signer']].sort());
+  assert.throws(() => earlierEpochGrants(lead.signer, { cell: CELL_X, epochs: [], roster: admitNu.hash, writer: newcomer.writer, recipient: newcomer.x25519 }));
+});
+
+test('a wrap copied from one grant into another cell\'s or another epoch\'s grant fails to open', () => {
+  const scene = createdX();
+  const { world, lead, member, admit, founding } = scene;
+  const mine = founding.payload.wraps.find((wrap) => wrap.writer === member.writer);
+  assert.ok(mine !== undefined);
+  const copiedToY = buildGrant(lead.signer, { cell: CELL_Y, epoch: 1, roster: admit.hash, labelSealed: '', wraps: [mine] });
+  const copiedToEpoch2 = buildGrant(lead.signer, { cell: CELL_X, epoch: 2, roster: admit.hash, labelSealed: '', wraps: [mine] });
+  const ring = world.ringFor(member, [copiedToY, copiedToEpoch2]);
+  assert.equal(ring(CELL_Y, 1), undefined);
+  assert.equal(ring(CELL_X, 2), undefined);
+  assert.equal(unwrapEpochKey({ cell: CELL_Y, epoch: 1, writer: member.writer, privateKey: member.x25519Private, wrap: mine.wrap }), undefined);
+  assert.equal(unwrapEpochKey({ cell: CELL_X, epoch: 2, writer: member.writer, privateKey: member.x25519Private, wrap: mine.wrap }), undefined);
+  // The original still opens.
+  assert.deepEqual(world.ringFor(member, [founding])(CELL_X, 1), world.epochKeyOf(CELL_X, 1));
+});
+
+test('a machine without the founding grant of the current epoch does not know who holds the cell, and a sealed label opens only under its own key, cell and epoch', () => {
+  const scene = createdX();
+  const { world, lead, member, create, founding } = scene;
+  // The roster says the cell exists (its roster entry is in the base cell), but the grantees are unknown without the grant.
+  const withoutGrant = fold(world, [...scene.base, create], scene.baseGrants);
+  assert.deepEqual(withoutGrant.refused, []);
+  assert.equal(rosterView(withoutGrant).cellGrantees?.(CELL_X, create.hash), undefined);
+  assert.deepEqual(epochsAt(withoutGrant.cells, CELL_X, withoutGrant.positionOf.get(create.hash) as number).map((item) => item.grant), [grantHash(founding)]);
+  // An additional grant without the founding one does not make the grantees known either.
+  const extra = cellGrant(world, lead, { cell: CELL_X, epoch: 1, roster: create.hash, to: [member] });
+  assert.equal(rosterView(fold(world, [...scene.base, create], [...scene.baseGrants, extra])).cellGrantees?.(CELL_X, create.hash), undefined);
+  const key = world.epochKeyOf(CELL_X, 1);
+  const sealed = founding.payload.labelSealed;
+  assert.deepEqual(openLabel(key, CELL_X, 1, sealed), LABEL_X);
+  assert.equal(openLabel(world.epochKeyOf(CELL_X, 2), CELL_X, 1, sealed), undefined);
+  assert.equal(openLabel(key, CELL_Y, 1, sealed), undefined);
+  assert.equal(openLabel(key, CELL_X, 2, sealed), undefined);
+  assert.equal(openLabel(key, CELL_X, 1, ''), undefined);
+  assert.equal(openLabel(key, CELL_X, 1, `${sealed.slice(0, -2)}AA`), undefined);
+  assert.equal(openLabel(key, CELL_X, 1, 'not base64url!'), undefined);
+  // The sealed form is not the label in clear, and two seals of one label differ (a fresh iv each time).
+  assert.ok(!Buffer.from(sealed, 'base64url').toString('utf8').includes('KESTREL'));
+  assert.notEqual(sealLabel(key, CELL_X, 1, LABEL_X), sealLabel(key, CELL_X, 1, LABEL_X));
+  assert.throws(() => sealLabel(key, CELL_X, 1, { text: 'x'.repeat(7000) }));
 });
