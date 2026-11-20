@@ -8,6 +8,7 @@ import tls, { type TLSSocket } from 'node:tls';
 import { HealthRegistry } from '../src/health';
 import { createHubServer, listen, MAX_HEADER_BYTES, SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, sessionKeying, type HubServerOptions } from '../src/http/server';
 import { hubRoot, startHubProcess, within, type StartedHub } from './helpers/hubProcess';
+import { slowUpload } from './helpers/slowUpload';
 import { makeTlsFixture, tlsGet } from './helpers/tlsFixture';
 
 // Phase 32, plan 14 (D-26, D-29, D-30, D-35): the hub serves HTTPS itself, TLS 1.3 only, with the operator's certificate and key from secret files.
@@ -174,4 +175,72 @@ test('exportKeyingMaterial(32, near-ai-hub-session/v1) is the same 32 bytes on b
       assert.deepEqual(hookRanFirst, [true, true], 'onSecureConnection saw each connection before its request');
     },
   );
+});
+
+// ---- Uploads on slow links (WR-03): a minimum rate, not one whole-request time ----
+
+/** A handler that reads the whole body, the way the /v1 routes do, and answers how many bytes arrived. */
+const countingHandler: HubServerOptions['handler'] = (req, res) => {
+  let bytes = 0;
+  req.on('data', (chunk: Buffer) => {
+    bytes += chunk.length;
+  });
+  req.on('end', () => {
+    const body = JSON.stringify({ bytes });
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
+    res.end(body);
+  });
+};
+
+test('a slow link: 512 KiB sent at about 40 KiB a second (about 13 s, past ten seconds) is received whole with the hub\'s own limits', { timeout: 40_000 }, async () => {
+  await withServer({ handler: countingHandler }, async (port) => {
+    const body = Buffer.alloc(512 * 1024, 7);
+    const result = await slowUpload(port, { method: 'PUT', path: '/v1/blobs/test', body, chunkBytes: 4 * 1024, everyMs: 100 });
+    assert.equal(result.status, 200, `answered ${String(result.status)} after ${result.elapsedMs} ms having sent ${result.sent} bytes`);
+    assert.deepEqual(JSON.parse(result.text), { bytes: body.length });
+    assert.ok(result.elapsedMs > 10_000, `the upload took ${result.elapsedMs} ms, so it did not test past ten seconds`);
+  });
+});
+
+test('slowloris: a body that trickles below the minimum rate, or stops, is cut off soon after the grace time, and a fast enough one is not', { timeout: 30_000 }, async () => {
+  const timing = { graceMs: 300, minBytesPerSecond: 64 * 1024 };
+  const rejections: string[] = [];
+  await withServer({ handler: countingHandler, timing, onRejected: (route, _method, status) => rejections.push(`${route} ${status}`) }, async (port) => {
+    const trickle = await slowUpload(port, { method: 'PUT', path: '/v1/blobs/test', body: Buffer.alloc(1024 * 1024, 1), chunkBytes: 1024, everyMs: 100 });
+    assert.ok(trickle.elapsedMs < 3000, `a 10 KiB a second trickle was held ${trickle.elapsedMs} ms`);
+    assert.ok(trickle.status === 408 || trickle.status === undefined, `the trickle got ${String(trickle.status)}`);
+    if (trickle.status === 408) assert.equal(JSON.parse(trickle.text).error, 'too-slow');
+    assert.equal(await trickle.closesWithin(2000), true, 'the trickling connection stayed open');
+
+    const stalled = await slowUpload(port, { method: 'POST', path: '/v1/session', body: Buffer.alloc(100, 32), chunkBytes: 10, everyMs: 50, stopAfterBytes: 20 });
+    assert.ok(stalled.elapsedMs < 3000, `a stalled small body was held ${stalled.elapsedMs} ms`);
+    assert.equal(await stalled.closesWithin(2000), true, 'the stalled connection stayed open');
+    assert.ok(rejections.includes('slow-upload 408'), `rejections: ${rejections.join(', ')}`);
+
+    // 256 KiB at 128 KiB a second, twice the minimum: answered whole.
+    const fast = await slowUpload(port, { method: 'PUT', path: '/v1/blobs/test', body: Buffer.alloc(256 * 1024, 2), chunkBytes: 8 * 1024, everyMs: 62 });
+    assert.equal(fast.status, 200, `a fast enough upload got ${String(fast.status)} after ${fast.elapsedMs} ms`);
+    assert.deepEqual(JSON.parse(fast.text), { bytes: 256 * 1024 });
+  });
+});
+
+test('stopping: SIGTERM while a slow upload is under way ends that upload and stops the hub with exit 0, not at its 5 s grace with exit 1', { timeout: 40_000 }, async () => {
+  const hub = await startHubProcess();
+  try {
+    // About 25 s of upload at 40 KiB a second: well inside the minimum rate, far past the hub's 5 s stopping grace.
+    const uploading = slowUpload(hub.port, { method: 'POST', path: '/v1/enrol', body: Buffer.alloc(1024 * 1024, 32), chunkBytes: 4 * 1024, everyMs: 100, headers: { 'content-type': 'application/json' } });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const started = Date.now();
+    const exit = await within(hub.kill('SIGTERM'), 15_000, 'the hub stopping');
+    assert.deepEqual(exit, { code: 0, signal: null }, `stdout was: ${hub.stdout()}`);
+    assert.ok(Date.now() - started < 5000, `stopping took ${Date.now() - started} ms`);
+    const events = hub.events();
+    assert.ok(events.includes('hub.stopped'), 'no hub.stopped line');
+    assert.ok(!events.includes('hub.stop_timeout'), 'the hub stopped on its grace timeout');
+    const upload = await uploading;
+    assert.notEqual(upload.status, 201, 'the upload was taken although the hub was stopping');
+  } finally {
+    await within(hub.kill('SIGKILL'), 10_000, 'the hub ending');
+    hub.cleanup();
+  }
 });

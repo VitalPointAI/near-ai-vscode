@@ -4,6 +4,7 @@ import { setImmediate as tick } from 'node:timers/promises';
 import { checkpointHash, signCheckpoint } from '@ext/domain/replica/checkpoint';
 import type { Checkpoint, SignedCheckpoint } from '@ext/domain/replica/checkpoint';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
+import { canonicalize } from '@ext/domain/team/canonical';
 import { TOKEN_TTL_MS } from '../src/http/session';
 import { EVENT_BUDGET_BYTES, EVENT_TIMING } from '../src/live/events';
 import { LIMITS } from '../src/limits';
@@ -204,28 +205,50 @@ test('429: a fifth stream of one device across projects is refused with Retry-Af
     assert.equal(hub.events.size, 4);
   }));
 
-test('429: a 33rd stream from one address is refused with Retry-After', () =>
-  withLive({}, async (hub) => {
+// The cap per address is 300 (LIMITS); this test sets it to D-37's 32 so a whole cap of streams stays cheap to open.
+const ADDRESS_CAP = 32;
+
+test('429: a stream past the address\'s cap (32 here) is refused with Retry-After', () =>
+  withLive({ eventStreamsPerAddress: ADDRESS_CAP }, async (hub) => {
     const world = createHubWorld();
     world.admitHub(hub.identity);
     const members: WorldDevice[] = [];
-    for (let index = 0; index < LIMITS.eventStreamsPerAddress; index += 1) {
+    for (let index = 0; index < ADDRESS_CAP; index += 1) {
       const member = world.device(`MEMBER-${index}`, `mbr-member-${index}`);
       world.admitMember(member);
       members.push(member);
     }
     assert.equal((await hub.enrolProject(world))?.status, 201);
     const devices = [world.lead, ...members];
-    for (const device of devices.slice(0, LIMITS.eventStreamsPerAddress)) {
+    for (const device of devices.slice(0, ADDRESS_CAP)) {
       const stream = await (await EventClient.open(hub, device, world.project)).events();
       assert.equal(stream.status, 200);
     }
-    assert.equal(hub.events.size, LIMITS.eventStreamsPerAddress);
-    const last = devices[LIMITS.eventStreamsPerAddress] as WorldDevice;
+    assert.equal(hub.events.size, ADDRESS_CAP);
+    const last = devices[ADDRESS_CAP] as WorldDevice;
     const refused = await (await EventClient.open(hub, last, world.project)).events();
     assert.equal(refused.status, 429);
     assert.equal(refused.headers['retry-after'], String(EVENT_TIMING.retryAfterSeconds));
-    assert.equal(hub.events.size, LIMITS.eventStreamsPerAddress);
+    assert.equal(hub.events.size, ADDRESS_CAP);
+  }));
+
+test('a site behind one address: 40 devices each hold a stream with the hub\'s own limits, past the 32 of D-37 (DESIGN 10.9 targets 300)', () =>
+  withLive({}, async (hub) => {
+    assert.equal(LIMITS.eventStreamsPerAddress, 300);
+    const world = createHubWorld();
+    world.admitHub(hub.identity);
+    const members: WorldDevice[] = [];
+    for (let index = 0; index < 39; index += 1) {
+      const member = world.device(`SITE-${index}`, `mbr-site-${index}`);
+      world.admitMember(member);
+      members.push(member);
+    }
+    assert.equal((await hub.enrolProject(world))?.status, 201);
+    for (const device of [world.lead, ...members]) {
+      const stream = await (await EventClient.open(hub, device, world.project)).events();
+      assert.equal(stream.status, 200, `stream ${hub.events.size + 1} from the one address was refused`);
+    }
+    assert.equal(hub.events.size, 40);
   }));
 
 /** A refused stream request: 204, no body, nothing in the registry. */
@@ -356,6 +379,35 @@ test('keep-alive: a stream whose session token has expired ends at the next keep
     scheduler.advance(EVENT_TIMING.keepAliveMs);
     await stream.end();
     assert.equal(hub.events.size, 0);
+  }));
+
+test('keep-alive: a stream whose roster is not held in memory checks the stored roster at the next tick and ends when the device was revoked', () =>
+  withLive({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    const stream = await (await EventClient.open(hub, analyst, world.project)).events();
+    assert.equal(stream.status, 200);
+    await stream.until((item) => item.retries.length === 1, 'the retry line');
+    // The revoke reaches the store without the append route (which ends the stream itself), and the roster cache is dropped, as the append
+    // checks do when a batch was checked against a roster that is no longer the cached one.
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: analyst.member, writer: analyst.writer });
+    hub.store.commitAppend(world.project, { entries: [{ header: canonicalize(revoke.entry.header), body: revoke.entry.body, receivedAt: hub.now() }], at: hub.now() });
+    hub.cache.invalidate(world.project);
+    assert.equal(hub.cache.peek(world.project), undefined);
+    scheduler.advance(EVENT_TIMING.keepAliveMs);
+    await stream.end(2000);
+    assert.equal(hub.events.size, 0);
+  }));
+
+test('keep-alive: a stream whose roster is not held in memory stays open at the next tick when the device is still admitted', () =>
+  withLive({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    const stream = await (await EventClient.open(hub, analyst, world.project)).events();
+    await stream.until((item) => item.retries.length === 1, 'the retry line');
+    hub.cache.invalidate(world.project);
+    scheduler.advance(EVENT_TIMING.keepAliveMs);
+    await stream.until((item) => item.comments.length === 1, 'a keep-alive comment', 2000);
+    assert.equal(stream.ended, false);
+    assert.equal(hub.events.size, 1);
   }));
 
 test('audience: a device off a label cell hears nothing of that cell\'s stream while a device on it does', () =>

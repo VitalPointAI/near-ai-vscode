@@ -6,8 +6,8 @@
 // reconnect the client runs heads catch-up, so no event decides correctness. Frame data is built by the hub from what it stored, never from
 // request text. A comment line every 15 seconds keeps proxies from closing a quiet stream.
 //
-// States (D-58): open; replaced (a second stream for the same device and project ends the first); refused 429 past 4 streams per device or 32 per
-// address (the route answers 204 before this file for a token or standing that does not pass); ended by the client; ended by the hub when the
+// States (D-58): open; replaced (a second stream for the same device and project ends the first); refused 429 past 4 streams per device or 300 per
+// address (LIMITS, WR-04) (the route answers 204 before this file for a token or standing that does not pass); ended by the client; ended by the hub when the
 // roster revokes or quarantines the device (routes.ts calls end), when the session's token expires (seen at the next keep-alive tick), when the
 // unsent budget runs out (resync, then the end), or at shutdown (closeAll).
 //
@@ -85,8 +85,11 @@ export interface StreamSession extends StreamOwner {
   address: string;
   /** When the session's token expires, in milliseconds. */
   expiresAt: number;
-  /** Asked at every keep-alive tick: false ends the stream (the device is no longer admitted at the roster head). */
-  allowed: () => boolean;
+  /**
+   * Asked at every keep-alive tick: false ends the stream (the device is no longer admitted at the roster head). A promise is waited for (the
+   * roster is not in memory and is loaded again); one that fails ends the stream, so a check that cannot be made never keeps a stream open (IN-07).
+   */
+  allowed: () => boolean | Promise<boolean>;
 }
 
 export type OpenResult = { ok: true } | { ok: false; status: 429; reason: 'device' | 'address'; retryAfterSeconds: number };
@@ -135,6 +138,8 @@ export interface EventHubOptions {
   /** Milliseconds; the clock token expiry is checked against. */
   now?: () => number;
   budgetBytes?: number;
+  /** Streams one address may hold; LIMITS.eventStreamsPerAddress unless a test lowers it. */
+  streamsPerAddress?: number;
 }
 
 interface OpenStream extends StreamSession {
@@ -152,6 +157,8 @@ interface OpenStream extends StreamSession {
   queuedAtOverflow: number;
   keepAlive: Timer;
   stuck: Timer | undefined;
+  /** A standing check that had to load the roster is still running. */
+  checking: boolean;
 }
 
 const STREAM_HEADERS = {
@@ -167,6 +174,7 @@ export class EventHub {
   private readonly random: () => number;
   private readonly now: () => number;
   private readonly budget: number;
+  private readonly perAddress: number;
   private peak = 0;
 
   constructor(options: EventHubOptions = {}) {
@@ -174,11 +182,12 @@ export class EventHub {
     this.random = options.random ?? Math.random;
     this.now = options.now ?? Date.now;
     this.budget = options.budgetBytes ?? EVENT_BUDGET_BYTES;
+    this.perAddress = options.streamsPerAddress ?? LIMITS.eventStreamsPerAddress;
   }
 
   /**
    * Opens a stream on this response for a device that has passed the session check. A stream the device already has for this project is ended
-   * first; past 4 streams of the device (across projects) or 32 from the address nothing is written and the caller answers 429.
+   * first; past 4 streams of the device (across projects) or 300 from the address nothing is written and the caller answers 429.
    */
   open(res: http.ServerResponse, session: StreamSession): OpenResult {
     const replaced = [...this.streams].filter((stream) => stream.writer === session.writer && stream.project === session.project);
@@ -186,7 +195,7 @@ export class EventHub {
     if (others.filter((stream) => stream.writer === session.writer).length >= LIMITS.eventStreamsPerDevice) {
       return { ok: false, status: 429, reason: 'device', retryAfterSeconds: EVENT_TIMING.retryAfterSeconds };
     }
-    if (others.filter((stream) => stream.address === session.address).length >= LIMITS.eventStreamsPerAddress) {
+    if (others.filter((stream) => stream.address === session.address).length >= this.perAddress) {
       return { ok: false, status: 429, reason: 'address', retryAfterSeconds: EVENT_TIMING.retryAfterSeconds };
     }
     for (const stream of replaced) this.finish(stream);
@@ -206,6 +215,7 @@ export class EventHub {
       queuedAtOverflow: 0,
       keepAlive: undefined,
       stuck: undefined,
+      checking: false,
     };
     this.streams.add(stream);
     res.on('close', () => this.forget(stream));
@@ -283,12 +293,40 @@ export class EventHub {
   }
 
   private keepAlive(stream: OpenStream): void {
-    if (stream.ending) return;
-    if (this.now() >= stream.expiresAt || !stream.allowed()) {
+    if (stream.ending || stream.checking) return;
+    if (this.now() >= stream.expiresAt) {
       this.finish(stream);
       return;
     }
-    this.send(stream, KEEP_ALIVE);
+    let verdict: boolean | Promise<boolean>;
+    try {
+      verdict = stream.allowed();
+    } catch {
+      this.finish(stream);
+      return;
+    }
+    if (typeof verdict === 'boolean') {
+      this.afterCheck(stream, verdict);
+      return;
+    }
+    stream.checking = true;
+    verdict.then(
+      (allowed) => {
+        stream.checking = false;
+        this.afterCheck(stream, allowed === true);
+      },
+      () => {
+        stream.checking = false;
+        this.afterCheck(stream, false);
+      },
+    );
+  }
+
+  /** The keep-alive comment for a device still admitted; the end of the stream otherwise. */
+  private afterCheck(stream: OpenStream, allowed: boolean): void {
+    if (stream.ending || stream.closed) return;
+    if (allowed) this.send(stream, KEEP_ALIVE);
+    else this.finish(stream);
   }
 
   /** One numbered frame, or resync and the end when it would take the stream past its budget. Returns whether the frame was taken. */

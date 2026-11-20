@@ -8,7 +8,9 @@ import { buildSessionAnswer, certPinOf } from '@ext/domain/replica/hubFile';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
 import { AUTH_REFUSALS, SESSION_REFUSALS, TOKENS_PER_DEVICE } from '../src/http/session';
 import type { HubConnection, HubResponse } from './helpers/hubClient';
+import { issueHubFile } from '../src/enrol';
 import { withHub } from './helpers/hubHarness';
+import { slowUpload } from './helpers/slowUpload';
 import type { Hub } from './helpers/hubHarness';
 import { createHubWorld, streamOf } from './helpers/hubWorld';
 import type { HubWorld, WorldDevice } from './helpers/hubWorld';
@@ -300,6 +302,45 @@ test('a device holds at most 8 tokens: the ninth session drops the oldest token'
     assert.equal((await connection.get(headsOf(world.project), tokens[1])).status, 200);
   }));
 
+/** A second project on the same hub with the same analyst device (device keys follow their label) as a member. */
+async function secondProject(hub: Hub, analyst: WorldDevice): Promise<HubWorld> {
+  const world = createHubWorld({ projectLabel: 'eastwind' });
+  world.admitHub(hub.identity);
+  const same = world.device('ANALYST', 'mbr-analyst');
+  assert.equal(same.writer, analyst.writer, 'the analyst is one device in both projects');
+  world.admitMember(same);
+  await hub.enrolProject(world, { direct: true });
+  return world;
+}
+
+test('revoked in one project: the device\'s token for another project it still belongs to keeps working', () =>
+  withHub({}, async (hub) => {
+    const { world, analyst } = await enrolled(hub);
+    const other = await secondProject(hub, analyst);
+    const inOther = await hub.openSession(analyst, other.project);
+    const inFirst = await hub.openSession(analyst, world.project);
+    const lead = await hub.openSession(world.lead, world.project);
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: analyst.member, writer: analyst.writer });
+    const appended = await lead.connection.post(`/v1/projects/${world.project}/append`, { entries: [revoke.entry] }, lead.token);
+    assert.deepEqual(appended.json().accepted, [revoke.hash]);
+    unauthorised(await inFirst.connection.get(headsOf(world.project), inFirst.token), 'revoked');
+    const stillThere = await inOther.connection.get(headsOf(other.project), inOther.token);
+    assert.equal(stillThere.status, 200, stillThere.text);
+  }));
+
+test('the 8 tokens a device holds are counted per project: a session in one project never drops a token of another', () =>
+  withHub({}, async (hub) => {
+    const { world, analyst } = await enrolled(hub);
+    const other = await secondProject(hub, analyst);
+    const connection = await hub.connect();
+    const tokens: string[] = [];
+    for (let index = 0; index < TOKENS_PER_DEVICE; index += 1) tokens.push((await hub.openSession(analyst, other.project, connection)).token);
+    await hub.openSession(analyst, world.project);
+    assert.equal(hub.sessions.size, TOKENS_PER_DEVICE + 1);
+    const oldest = await connection.get(headsOf(other.project), tokens[0]);
+    assert.equal(oldest.status, 200, oldest.text);
+  }));
+
 // ---- The authentication deadline (D-35) ----
 
 test('deadline: a connection that sends nothing is closed when the deadline passes', () =>
@@ -326,10 +367,34 @@ test('deadline: GET /healthz answers on a connection that has not authenticated,
     assert.equal(await connection.closesWithin(2000), true);
   }));
 
+test('deadline: an enrolment still uploading when the deadline passes is answered, and the connection closes after the answer', () =>
+  withHub({ deadlineMs: 200 }, async (hub) => {
+    const world = createHubWorld();
+    world.admitHub(hub.identity);
+    const issued = issueHubFile(hub.store, hub.identity, { days: 7, now: new Date(hub.now()) });
+    assert.ok(issued.ok, issued.ok ? '' : issued.message);
+    const body = Buffer.from(JSON.stringify(world.enrolRequest(issued.file.payload)), 'utf8');
+    // About a second of upload on a connection that never opens a session: the deadline passes while the body is still arriving.
+    const upload = await slowUpload(hub.port, { method: 'POST', path: '/v1/enrol', body, chunkBytes: Math.ceil(body.length / 10), everyMs: 100, headers: { 'content-type': 'application/json' } });
+    assert.equal(upload.status, 201, `answered ${String(upload.status)} after ${upload.elapsedMs} ms having sent ${upload.sent} of ${body.length} bytes`);
+    assert.ok(upload.elapsedMs > 200, 'the upload finished inside the deadline, so it did not test the deadline');
+    assert.equal(await upload.closesWithin(2000), true, 'a connection without a session stayed open after its deadline');
+  }));
+
+test('keep-alive: a session\'s connection idle for 6 seconds is still open and its token still works, so a device does not open a session per exchange', { timeout: 20_000 }, () =>
+  withHub({}, async (hub) => {
+    const { world } = await enrolled(hub);
+    const session = await hub.openSession(world.lead, world.project);
+    assert.equal((await session.connection.get(headsOf(world.project), session.token)).status, 200);
+    assert.equal(await session.connection.closesWithin(6000), false, 'the hub closed an idle authenticated connection within 6 seconds');
+    assert.equal((await session.connection.get(headsOf(world.project), session.token)).status, 200);
+  }));
+
 // ---- Limits before signatures (D-39, Pitfall 7) ----
 
 test('429: the eleventh session call from one address inside a minute is refused with Retry-After before the answer is checked', () =>
-  withHub({ limits: { sessionPerMinute: 10 } }, async (hub) => {
+  // Five sessions a minute: ten calls, two for each session.
+  withHub({ limits: { sessionPerMinute: 5 } }, async (hub) => {
     const { world } = await enrolled(hub);
     const connection = await hub.connect();
     let challenge = '';

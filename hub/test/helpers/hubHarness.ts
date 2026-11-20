@@ -38,6 +38,8 @@ export interface StartOptions {
   now?: number;
   deadlineMs?: number;
   limits?: RateLimitOptions;
+  /** Event streams one address may hold (WR-04); the hub's own limit when absent. */
+  eventStreamsPerAddress?: number;
   /** The scheduler of the event streams (32-21): keep-alive comments, stuck readers and presence; real timers when absent. */
   scheduler?: Scheduler;
   /** Signed checkpoints (32-22); on unless false. */
@@ -126,6 +128,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     now: () => clock,
     ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
     ...(options.limits === undefined ? {} : { rateLimits: options.limits }),
+    ...(options.eventStreamsPerAddress === undefined ? {} : { eventStreamsPerAddress: options.eventStreamsPerAddress }),
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     readAnswer,
     signCheckpoints: options.checkpoints !== false,
