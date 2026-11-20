@@ -532,7 +532,7 @@ test('PR #143 review: a policy that routes a this-computer-only level to a cloud
   assert.equal(decideRoute(markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, NEAR_TEE).rule, 'route.no-local-model');
 });
 
-// ---- Phase 41 FND-02: the default policy read as v2 routes exactly as v1 does; D-62, D-63: export-controlled content stays on this computer ----
+// ---- Phase 41 FND-02: the starting rules as a v2 document route exactly as v1 does; D-62, D-63: export-controlled content stays on this computer ----
 
 /** The RoutePolicy of the starting rules read as a v2 document (documentFromBundle): its places, the people section's clearances, no residency, no models. */
 function defaultRoutePolicy(): { policy: RoutePolicy; defaultLabel: Label } {
