@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -16,7 +16,7 @@ import type { SignedCheckpoint } from '../domain/replica/checkpoint';
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { SecretStorageLike } from '../services/auth';
-import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_LISTS_BYTES, REPLICA_MARK_SECRET_PREFIX, digestOf, heldReason, markContentHash, markKey, markListsBytes, markListsFolder, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
+import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_WAITING, REPLICA_MARK_SECRET_PREFIX, digestOf, heldReason, markContentHash, markKey, markListsBytes, markListsFolder, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
 import type { ReplicaMark } from '../staff/replica/marks';
 import { FLOODED_REASON, FLOODED_TEXT, MAX_REFUSED_PER_WRITER, ReplicaStore, START_AGAIN_COMMAND_TITLE, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
 import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
@@ -832,56 +832,7 @@ test('PR #130 review: a crash between the lists file and the secret leaves the o
   assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'mark');
 });
 
-test('PR #130 review: a lists file over the size limit, a symbolic link, or a file naming more than MAX_MARK_LISTED entries is unverified, never read as empty', async () => {
-  assert.equal(MAX_MARK_LISTED, 100_000);
-  assert.equal(MAX_MARK_LISTS_BYTES, 64 * 1024 * 1024);
-  const { root, lead, secrets } = await threeAppended();
-  const dir = path.join(root, REPLICA_DIR);
-  const { file, bytes } = onlyListsFile(root, lead.writer);
-  // Over the limit (a sparse file, so the test stays cheap): refused before it is read or hashed.
-  truncateSync(file, MAX_MARK_LISTS_BYTES + 1);
-  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
-  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
-  // A symbolic link in place of the lists file is not followed, even to the right bytes.
-  rmSync(file);
-  const elsewhere = path.join(project(), 'lists.json');
-  writeFileSync(elsewhere, bytes);
-  symlinkSync(elsewhere, file);
-  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
-  rmSync(file);
-  writeFileSync(file, bytes);
-  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'mark');
-  // A symbolic link in place of the marks folder is refused like every other store path.
-  const marks = path.join(dir, MARK_LISTS_DIR);
-  const moved = path.join(project(), 'marks');
-  cpSync(marks, moved, { recursive: true });
-  rmSync(marks, { recursive: true });
-  symlinkSync(moved, marks);
-  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
-  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'symlink');
-  rmSync(marks);
-  cpSync(moved, marks, { recursive: true });
-  assert.ok(await ReplicaStore.open(root, depsFor(lead, secrets)) instanceof ReplicaStore);
-  // A record signed by this device naming a lists file of MAX_MARK_LISTED + 1 waiting entries, its hash and sizes matching: unverified.
-  const waiting = Array.from({ length: MAX_MARK_LISTED + 1 }, (_, index) => ({ hash: sha256Hex(Buffer.from(`w/${index}`)), reason: 'unchecked' })).sort((a, b) => (a.hash < b.hash ? -1 : 1));
-  const over = Buffer.from(`${JSON.stringify({ v: MARK_VERSION, heads: [], held: [], waiting })}\n`);
-  const plant = (lists: Buffer, count: number): void => {
-    const content = sha256Hex(lists);
-    writeFileSync(path.join(markListsFolder(dir, lead.writer), `${content}.json`), lists);
-    const signed = signPayload(lead.signer, 'staff-replica-mark', { v: MARK_VERSION, rosterHead: null, heads: 0, held: 0, waiting: count, content }, { now: () => new Date(AT) });
-    secrets.values.set(markKey(dir), JSON.stringify({ v: MARK_VERSION, signed }));
-  };
-  plant(over, MAX_MARK_LISTED + 1);
-  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
-  plant(over, MAX_MARK_LISTED);
-  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified', 'sizes that do not match the file');
-  // At the limit, the same planted record verifies, so the bound is the list length and not something else.
-  const at = Buffer.from(`${JSON.stringify({ v: MARK_VERSION, heads: [], held: [], waiting: waiting.slice(0, MAX_MARK_LISTED) })}\n`);
-  plant(at, MAX_MARK_LISTED);
-  const read = await readMark(secrets, dir, ACTIVE);
-  assert.equal(read.kind === 'mark' && read.mark.waiting.length, MAX_MARK_LISTED);
-  await assert.rejects(() => writeMark(secrets, dir, lead.signer, { rosterHead: null, heads: [], held: [], waiting: waiting as ReplicaMark['waiting'] }), /not in the shape/);
-});
+// The parse-limit test of the lists file moved to staffReplicaMarks.test.ts (32-07), with its figures set to the D-14 bounds.
 
 test('MJ-07: an entry the check cannot run on yet waits out of the fold, across a reopen, until recheck passes or holds it; a held entry is never let in', async () => {
   const root = project();
@@ -1009,6 +960,144 @@ test('D-14 flooded: a check reason that equals the flooded line is stored with "
   assert.deepEqual(result.held.map((item) => item.reason), [`check: ${FLOODED_REASON}`, `check: ${FLOODED_REASON}`]);
   assert.deepEqual(store.flooded(), []);
   assert.deepEqual((await opened(root, depsFor(lead))).flooded(), []);
+});
+
+test('D-14 store bound: the held list stops at MAX_MARK_LISTED with a flooded line, a later writer\'s refused entry is not kept, and its passing one is written', async () => {
+  assert.equal(MAX_MARK_LISTED, 10_000);
+  const root = project();
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const dir = path.join(root, REPLICA_DIR);
+  const verifies = async (held: number): Promise<void> => {
+    const read = await readMark(secrets, dir, ACTIVE);
+    assert.equal(read.kind, 'mark', 'the mark can always be written and read');
+    assert.equal(read.kind === 'mark' && read.mark.held.length, held);
+  };
+  for (let index = 0; index < 10; index += 1) {
+    const result = await store.ingestForeign(chain(fixedSigner(`flooding writer ${index}`), 999).map((item) => item.entry), [], refuseAll);
+    assert.ok('ok' in result);
+    assert.equal(result.held.length, 999);
+    assert.equal(result.flooded, 0, 'one short of a writer\'s bound floods nothing');
+    await verifies(999 * (index + 1));
+  }
+  assert.deepEqual(store.flooded(), []);
+  const eleventh = fixedSigner('eleventh writer');
+  const filling = chain(eleventh, 20);
+  const full = await store.ingestForeign(filling.map((item) => item.entry), [], refuseAll);
+  assert.ok('ok' in full);
+  assert.equal(full.added, 10);
+  assert.equal(full.held.length, 10);
+  assert.ok(full.held.slice(0, 9).every((item) => item.reason === REFUSED));
+  assert.deepEqual(full.held[9], { hash: filling[9].hash, reason: FLOODED_REASON }, 'the entry that fills the held list is its writer\'s flooded line');
+  assert.equal(full.flooded, 10);
+  assert.equal(store.heldForCheck().length, MAX_MARK_LISTED);
+  assert.equal(linesOf(root, eleventh.writer), 10);
+  await verifies(MAX_MARK_LISTED);
+  const twelfth = fixedSigner('twelfth writer');
+  const late = chain(twelfth, 2);
+  const result = await store.ingestForeign(late.map((item) => item.entry), [], countingCheck(new Set([late[0].hash])).check);
+  assert.ok('ok' in result);
+  assert.equal(result.added, 1);
+  assert.equal(result.flooded, 1, 'a refused entry the held list has no room for is not kept');
+  assert.deepEqual(result.held, []);
+  assert.deepEqual(store.flooded(), [{ stream: STREAM, writer: eleventh.writer }], 'the twelfth writer is not flooded');
+  assert.equal(store.has(late[0].hash), false);
+  assert.deepEqual(store.entries(), [late[1].entry], 'its passing entry is written and reaches the fold');
+  assert.equal(linesOf(root, twelfth.writer), 1);
+  await verifies(MAX_MARK_LISTED);
+  const again = await opened(root, depsFor(lead, secrets));
+  assert.equal(again.heldForCheck().length, MAX_MARK_LISTED);
+  assert.deepEqual(again.flooded(), [{ stream: STREAM, writer: eleventh.writer }]);
+});
+
+test('D-14 recheck: a refusal that reaches a writer\'s bound becomes its flooded line; the flooded writer\'s waiting entries stay out and are not checked again', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const colleague = fixedSigner('colleague');
+  const foreign = chain(colleague, 1002);
+  const first = await store.ingestForeign(foreign.slice(0, 999).map((item) => item.entry), [], refuseAll);
+  assert.equal('ok' in first && first.held.length, 999);
+  const awaiting: ForeignCheck = () => Promise.resolve({ ok: false, awaiting: 'key' });
+  const waiting = await store.ingestForeign(foreign.slice(999).map((item) => item.entry), [], awaiting);
+  assert.equal('ok' in waiting && waiting.waiting.length, 3);
+  const calls: string[] = [];
+  const refusing: ForeignCheck = (entry) => { calls.push(entryHash(entry.header)); return Promise.resolve({ ok: false, reason: REFUSED }); };
+  assert.deepEqual(await store.recheck(refusing), { ok: true, passed: 0, held: 1, waiting: 2 });
+  assert.deepEqual(store.heldForCheck().find((item) => item.hash === foreign[999].hash), { hash: foreign[999].hash, reason: FLOODED_REASON });
+  assert.equal(store.heldForCheck().length, 1000);
+  assert.deepEqual(store.flooded(), [{ stream: STREAM, writer: colleague.writer }]);
+  assert.deepEqual(store.waitingForCheck().map((item) => item.hash), [foreign[1000].hash, foreign[1001].hash], 'the other two stay waiting, out of the fold');
+  assert.deepEqual(store.entries(), []);
+  calls.length = 0;
+  const passing = countingCheck(new Set());
+  assert.deepEqual(await store.recheck(passing.check), { ok: true, passed: 0, held: 0, waiting: 2 });
+  assert.deepEqual(passing.calls, [], 'a flooded writer\'s waiting entries are not checked again');
+  assert.deepEqual(store.entries(), [], 'and never reach the fold');
+  const again = await opened(root, depsFor(lead, secrets));
+  assert.deepEqual(await again.recheck(passing.check), { ok: true, passed: 0, held: 0, waiting: 2 });
+  assert.deepEqual(passing.calls, []);
+  assert.equal((await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE)).kind, 'mark');
+});
+
+test('D-14 recheck: with the held list full, a waiting entry the check refuses stays waiting and its writer is not flooded', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const deps: ReplicaStoreDeps = { ...depsFor(lead), limits: { heldPerStore: 2 } };
+  const store = await opened(root, deps);
+  const flooding = fixedSigner('colleague');
+  const filled = await store.ingestForeign(chain(flooding, 3).map((item) => item.entry), [], refuseAll);
+  assert.ok('ok' in filled);
+  assert.deepEqual(filled.held.map((item) => item.reason), [REFUSED, FLOODED_REASON], 'the entry that fills the held list is the flooded line');
+  assert.equal(filled.flooded, 1);
+  const other = fixedSigner('second colleague');
+  const later = chain(other, 1);
+  await store.ingestForeign(later.map((item) => item.entry), [], () => Promise.resolve({ ok: false, awaiting: 'blob' }));
+  const { check, calls } = countingCheck(new Set([later[0].hash]));
+  assert.deepEqual(await store.recheck(check), { ok: true, passed: 0, held: 0, waiting: 1 });
+  assert.deepEqual(calls, [later[0].hash]);
+  assert.deepEqual(store.waitingForCheck(), [{ hash: later[0].hash, reason: 'awaiting-blob' }]);
+  assert.equal(store.heldForCheck().length, 2);
+  assert.deepEqual(store.flooded(), [{ stream: STREAM, writer: flooding.writer }]);
+  // When the check passes it later, it reaches the fold.
+  assert.deepEqual(await store.recheck(countingCheck(new Set()).check), { ok: true, passed: 1, held: 0, waiting: 0 });
+  assert.deepEqual(store.entries(), [later[0].entry]);
+});
+
+test('D-14 waiting bound: past it a new entry that would wait is not written and is deferred, and it is taken when delivered again', async () => {
+  assert.equal(MAX_MARK_WAITING, 100_000);
+  const root = project();
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const deps: ReplicaStoreDeps = { ...depsFor(lead, secrets), limits: { waiting: 5 } };
+  const store = await opened(root, deps);
+  const colleague = fixedSigner('colleague');
+  const foreign = chain(colleague, 8);
+  const awaiting: ForeignCheck = () => Promise.resolve({ ok: false, awaiting: 'key' });
+  const result = await store.ingestForeign(foreign.map((item) => item.entry), [], awaiting);
+  assert.ok('ok' in result);
+  assert.equal(result.added, 5);
+  assert.equal(result.waiting.length, 5);
+  assert.equal(result.deferred, 3);
+  assert.equal(result.flooded, 0);
+  assert.equal(linesOf(root, colleague.writer), 5);
+  for (const item of foreign.slice(5)) assert.equal(store.has(item.hash), false, 'a deferred entry is not in the files');
+  assert.equal((await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE)).kind, 'mark');
+  assert.deepEqual(await store.recheck(countingCheck(new Set()).check), { ok: true, passed: 5, held: 0, waiting: 0 });
+  const again = await store.ingestForeign(foreign.map((item) => item.entry), [], countingCheck(new Set()).check);
+  assert.ok('ok' in again);
+  assert.equal(again.duplicates, 5);
+  assert.equal(again.added, 3);
+  assert.equal(again.deferred, 0);
+  assert.deepEqual(store.entries(), foreign.map((item) => item.entry));
+  // Without the override the bound is MAX_MARK_WAITING, so eight waiting entries are all taken.
+  const plain = await opened(project(), depsFor(lead));
+  const taken = await plain.ingestForeign(foreign.map((item) => item.entry), [], awaiting);
+  assert.ok('ok' in taken);
+  assert.equal(taken.waiting.length, 8);
+  assert.equal(taken.deferred, 0);
 });
 
 /** Every file under a folder by relative path with the hash of its bytes, leaving out the lock file. */

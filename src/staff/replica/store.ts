@@ -30,7 +30,9 @@
 //   or written by another install), waits out of the fold until recheck() passes it (31-REVIEW MJ-07).
 // - Refused entries are bounded (32-CONTEXT D-14), so one device cannot grow this device's mark until it can no longer be written: at most
 //   MAX_REFUSED_PER_WRITER held per writer per stream, the last of them held with FLOODED_REASON as that writer's one flooded line. From then on none
-//   of that writer's entries from outside in that stream is written or checked (counted in IngestResult.flooded); everyone else's still are.
+//   of that writer's entries from outside in that stream is written or checked (counted in IngestResult.flooded); everyone else's still are. The
+//   held list never names more than MAX_MARK_LISTED: the entry that fills it is its writer's flooded line, and past that a refused entry is not
+//   kept. A new entry that would wait past MAX_MARK_WAITING is not written (IngestResult.deferred) and is taken when it comes again.
 // - The store never deletes an entry or a blob and never rewrites a line (P-31-17). No private key or secret is ever written here (P-31-18).
 // - Starting again (startAgain, person-confirmed, 31-REVIEW MJ-08) moves the whole folder aside, never deletes it, and starts a new one with this
 //   device's own signed entries, the grants, the blobs and project.json carried over, under a new mark.
@@ -66,7 +68,7 @@ import { MAX_PAYLOAD_BYTES } from '../../domain/team/signedPayload';
 import { GRANT_MAX_BYTES } from '../../domain/replica/cellKeys';
 import { isRecord } from '../../domain/team/validate';
 import { readWhole, syncFolder } from '../staffFiles';
-import { MARK_LISTS_DIR, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
+import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 
 /** The cross-window lock file inside the store folder. */
@@ -134,6 +136,11 @@ export interface ReplicaStoreDeps {
   signer: () => Promise<PayloadSigner>;
   keyStatus: () => Promise<KeyStatusLookup>;
   now?: () => Date;
+  /**
+   * For tests only: smaller bounds than MAX_REFUSED_PER_WRITER, MAX_MARK_LISTED and MAX_MARK_WAITING, so a test need not build tens of thousands of
+   * entries. Production passes none. A value above its constant is ignored, so the mark this store writes always reads back.
+   */
+  limits?: Partial<{ refusedPerWriter: number; heldPerStore: number; waiting: number }>;
 }
 
 export type AppendResult = { ok: true; written: number } | StoreRefused;
@@ -982,7 +989,9 @@ export class ReplicaStore {
    * nor checked again. A check that throws counts as a refusal.
    *
    * Refused entries are bounded (D-14), in input order: a writer's refused entries in one stream are held up to MAX_REFUSED_PER_WRITER, the last of
-   * them as its flooded line; from then on that writer's entries in that stream are not written (counted in `flooded`) and not checked.
+   * them as its flooded line; from then on that writer's entries in that stream are not written (counted in `flooded`) and not checked. The entry
+   * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
+   * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
    */
   public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
@@ -1036,11 +1045,17 @@ export class ReplicaStore {
           const verdict = verdicts.get(hash);
           if (!verdict) { deferred += 1; continue; }
           if (verdict.kind === 'held') {
-            const reason = this.refusedFate(id) === 'flood' ? FLOODED_REASON : verdict.reason;
+            const fate = this.refusedFate(id);
+            if (fate === 'drop') { flooded += 1; continue; }
+            const reason = fate === 'flood' ? FLOODED_REASON : verdict.reason;
             this.hold(hash, entry, reason);
             held.push({ hash, reason });
           }
-          if (verdict.kind === 'wait') { this.waiting.set(hash, verdict.reason); waiting.push({ hash, reason: verdict.reason }); }
+          if (verdict.kind === 'wait') {
+            if (this.waiting.size >= this.bounds().waiting) { deferred += 1; continue; }
+            this.waiting.set(hash, verdict.reason);
+            waiting.push({ hash, reason: verdict.reason });
+          }
           toWrite.push(item);
         }
         let blobsAdded = 0;
@@ -1061,11 +1076,23 @@ export class ReplicaStore {
    * Runs `check` again on every entry still waiting (never checked, or waiting for its key or blob). One that passes reaches entries(); one that is
    * refused is held; one that still cannot be checked keeps waiting. The outcome is recorded in the signed mark. An entry another window decided in
    * the meantime keeps that window's verdict.
+   *
+   * The bounds of ingestForeign hold here too (D-14): a refusal that reaches its writer's bound, or fills the held list, is held as the writer's
+   * flooded line; a refused entry the held list has no room for keeps waiting. A flooded writer's waiting entries stay out of the fold and are not
+   * checked again.
    */
   public async recheck(check: ForeignCheck): Promise<RecheckResult | StoreRefused> {
-    const targets = [...this.waiting.keys()].filter((hash) => this.byHash.has(hash));
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
-    for (const hash of targets) verdicts.set(hash, await runCheck(check, this.byHash.get(hash) as SealedEntry));
+    const refusedHere = new Map<string, number>();
+    for (const hash of [...this.waiting.keys()]) {
+      const id = this.fileOf(hash);
+      if (id === undefined) continue;
+      const refused = refusedHere.get(id) ?? 0;
+      if (this.floodedFiles.has(id) || (this.heldBy.get(id) ?? 0) + refused >= this.bounds().refusedPerWriter) continue;
+      const verdict = await runCheck(check, this.byHash.get(hash) as SealedEntry);
+      verdicts.set(hash, verdict);
+      if (verdict.kind === 'held') refusedHere.set(id, refused + 1);
+    }
     try {
       return await this.locked(async () => {
         await this.catchUp();
@@ -1075,9 +1102,17 @@ export class ReplicaStore {
         let changed = false;
         for (const [hash, verdict] of verdicts) {
           const before = this.waiting.get(hash);
-          if (before === undefined) continue;
+          const id = this.fileOf(hash);
+          if (before === undefined || id === undefined || this.floodedFiles.has(id)) continue;
           if (verdict.kind === 'pass') { this.waiting.delete(hash); passed += 1; changed = true; }
-          if (verdict.kind === 'held') { this.waiting.delete(hash); this.hold(hash, this.byHash.get(hash) as SealedEntry, verdict.reason); held += 1; changed = true; }
+          if (verdict.kind === 'held') {
+            const fate = this.refusedFate(id);
+            if (fate === 'drop') continue;
+            this.waiting.delete(hash);
+            this.hold(hash, this.byHash.get(hash) as SealedEntry, fate === 'flood' ? FLOODED_REASON : verdict.reason);
+            held += 1;
+            changed = true;
+          }
           if (verdict.kind === 'wait' && verdict.reason !== before) { this.waiting.set(hash, verdict.reason); changed = true; }
         }
         if (changed) await this.writeOwnMark();
@@ -1470,14 +1505,31 @@ export class ReplicaStore {
     return true;
   }
 
-  /** The bounds on refused and waiting entries (D-14). */
-  private bounds(): { refusedPerWriter: number } {
-    return { refusedPerWriter: MAX_REFUSED_PER_WRITER };
+  /** The bounds on refused and waiting entries (D-14): the constants, or the smaller test-only limits in the deps. */
+  private bounds(): { refusedPerWriter: number; heldPerStore: number; waiting: number } {
+    const bound = (value: number | undefined, most: number): number => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= most ? value : most);
+    const limits = this.deps.limits ?? {};
+    return {
+      refusedPerWriter: bound(limits.refusedPerWriter, MAX_REFUSED_PER_WRITER),
+      heldPerStore: bound(limits.heldPerStore, MAX_MARK_LISTED),
+      waiting: bound(limits.waiting, MAX_MARK_WAITING)
+    };
   }
 
-  /** What becomes of one more refused entry of the file `id`: held, or held as the file's flooded line when it is the last its bound allows. */
-  private refusedFate(id: string): 'hold' | 'flood' {
-    return (this.heldBy.get(id) ?? 0) >= this.bounds().refusedPerWriter - 1 ? 'flood' : 'hold';
+  /**
+   * What becomes of one more refused entry of the file `id`: held; held as the file's flooded line when it is the last the writer's bound or the held
+   * list allows; or not kept when the held list is full.
+   */
+  private refusedFate(id: string): 'hold' | 'flood' | 'drop' {
+    const { refusedPerWriter, heldPerStore } = this.bounds();
+    if (this.heldCount >= heldPerStore) return 'drop';
+    return (this.heldBy.get(id) ?? 0) >= refusedPerWriter - 1 || this.heldCount >= heldPerStore - 1 ? 'flood' : 'hold';
+  }
+
+  /** The (stream, writer) file of a stored entry. */
+  private fileOf(hash: string): string | undefined {
+    const entry = this.byHash.get(hash);
+    return entry ? fileId(entry.header.stream, entry.header.writer) : undefined;
   }
 
   /** Holds one entry with its reason and counts it for its file; FLOODED_REASON floods the file. */

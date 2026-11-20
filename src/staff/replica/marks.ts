@@ -56,8 +56,14 @@ export const MAX_MARK_LISTS_BYTES = 64 * 1024 * 1024;
 /** The most heads one mark may name; far above any real project, so a hostile value cannot make a huge mark. */
 export const MAX_MARK_HEADS = 100_000;
 
-/** The most entries the held and the waiting lists may each name. */
-export const MAX_MARK_LISTED = 100_000;
+/**
+ * The most entries the held list may name (32-CONTEXT D-14). The store keeps its held list within it (MAX_REFUSED_PER_WRITER in store.ts), so the
+ * mark can always be written however many refused entries arrive.
+ */
+export const MAX_MARK_LISTED = 10_000;
+
+/** The most entries the waiting list may name. The store writes no new entry that would wait past it (IngestResult.deferred), so it comes again. */
+export const MAX_MARK_WAITING = 100_000;
 
 /** The longest reason kept for one held entry. */
 export const MAX_HELD_REASON = 200;
@@ -169,7 +175,7 @@ export function parseReplicaMark(value: unknown): ReplicaMark | undefined {
     if (rosterHead !== null && (typeof rosterHead !== 'string' || !HASH_PATTERN.test(rosterHead))) return undefined;
     if (!Array.isArray(value.heads) || value.heads.length > MAX_MARK_HEADS) return undefined;
     if (!Array.isArray(value.held) || value.held.length > MAX_MARK_LISTED) return undefined;
-    if (!Array.isArray(value.waiting) || value.waiting.length > MAX_MARK_LISTED) return undefined;
+    if (!Array.isArray(value.waiting) || value.waiting.length > MAX_MARK_WAITING) return undefined;
     const heads: MarkHead[] = [];
     const seen = new Set<string>();
     for (const item of value.heads) {
@@ -217,7 +223,7 @@ function signedPayloadOf(value: unknown): SignedMarkPayload | undefined {
   if (!isRecord(value) || !exactKeys(value, ['v', 'rosterHead', 'heads', 'held', 'waiting', 'content']) || value.v !== MARK_VERSION) return undefined;
   const { rosterHead, heads, held, waiting, content } = value;
   if (rosterHead !== null && (typeof rosterHead !== 'string' || !HASH_PATTERN.test(rosterHead))) return undefined;
-  if (!isSafeIntegerInRange(heads, 0, MAX_MARK_HEADS) || !isSafeIntegerInRange(held, 0, MAX_MARK_LISTED) || !isSafeIntegerInRange(waiting, 0, MAX_MARK_LISTED)) return undefined;
+  if (!isSafeIntegerInRange(heads, 0, MAX_MARK_HEADS) || !isSafeIntegerInRange(held, 0, MAX_MARK_LISTED) || !isSafeIntegerInRange(waiting, 0, MAX_MARK_WAITING)) return undefined;
   if (typeof content !== 'string' || !HASH_PATTERN.test(content)) return undefined;
   return { v: MARK_VERSION, rosterHead, heads, held, waiting, content };
 }
