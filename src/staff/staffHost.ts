@@ -619,7 +619,7 @@ export class StaffHost {
 
   /** Events other parts of the extension observe (lanes, merges, nested teams, COP layers) enter the same log through here. */
   public async record(event: StaffEvent): Promise<void> {
-    const allowed: readonly string[] = ['staff.lane.started', 'staff.lane.finished', 'staff.merge.started', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.team.nested', 'staff.cop.updated'];
+    const allowed: readonly string[] = ['staff.lane.started', 'staff.lane.finished', 'staff.lane.switched', 'staff.merge.started', 'staff.merge.conflict', 'staff.merge.resolved', 'staff.team.nested', 'staff.cop.updated'];
     if (!allowed.includes(event.type)) throw new Error(`${event.type} is written by the staff-products host itself.`);
     await this.emit([event]);
   }

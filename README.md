@@ -1582,6 +1582,23 @@ Read the full [security and trust report](SECURITY.md).
   shows the run failed, and the work so far is kept: send a message to continue
   or switch models. The cut-off requests are recorded with NEAR's request ID and
   settled with what NEAR bills.
+- **NEAR AI is overloaded (HTTP 429 "service_overloaded"):** NEAR AI asks the
+  extension to wait, and it does: every agent of the run waits together, then
+  one request goes to that model to test it, and while NEAR keeps refusing the
+  model only two requests at a time go to it, with longer waits each time it
+  refuses again. A team member that keeps getting "overloaded" for about a
+  minute, or whose model sends nothing twice in a row, moves to the next model
+  and carries on, and Team Live, the Staff Room and the chat say so, for
+  example "threat-analyst switched from Kimi K3 to Qwen 3.6: Kimi K3 is
+  overloaded at NEAR AI". The next model is your backup model
+  (`nearAi.agent.backupModel`), then the standard, deep and fast tier models,
+  then the chat's own model, skipping any that is busy too, and only ones at
+  least as private (a TEE model stays in the TEE; a `privacy: private` member
+  stays private; TEE-only mode is respected). A member whose team file names
+  its model moves too, and the notice says so. If no model is left, the member
+  stops and says why in words ("GLM 5.3 is overloaded at NEAR AI", "Kimi K3
+  gave no answer for 90 s", "refused by policy"), and the lead is told the
+  same.
 - **Runs pause or stop in code-server (VS Code in a browser):** two things
   in code-server affect long runs. First, VS Code's proxy support asks the
   browser tab which proxy to use for every new connection; when the browser

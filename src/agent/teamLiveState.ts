@@ -25,7 +25,7 @@ const PRIORITY: LiveState[] = ['needs-you', 'failed', 'working', 'waiting-agents
 
 /** What the view needs from one agent's statistics (AgentStats, or the same rebuilt from the project's history after a reload). */
 export type LiveAgentStat = Pick<AgentStats, 'agentId' | 'agent' | 'runId' | 'model' | 'status' | 'phase' | 'startedAt' | 'turns' | 'toolCalls' | 'costUsd'> &
-  Partial<Pick<AgentStats, 'parentId' | 'endedAt' | 'boundary' | 'tool' | 'task' | 'member' | 'background' | 'team' | 'waitingKind' | 'coolUntil' | 'coolReason' | 'reportsDelivered' | 'approvals' | 'phaseSince'>> &
+  Partial<Pick<AgentStats, 'parentId' | 'endedAt' | 'boundary' | 'tool' | 'task' | 'member' | 'background' | 'team' | 'waitingKind' | 'coolUntil' | 'coolReason' | 'reportsDelivered' | 'approvals' | 'phaseSince' | 'modelNote' | 'failReason'>> &
   { interrupted?: boolean };
 
 /**
@@ -310,7 +310,8 @@ function describe(stats: LiveAgentStat[], stateOf: (stat: LiveAgentStat) => Live
     ...(state === 'working' && lead.tool ? { tool: lead.tool } : {}), ...(icon ? { icon } : {}),
     ...(state === 'needs-you' && lead.waitingKind ? { waitingKind: lead.waitingKind } : {}),
     ...(state === 'retrying' && lead.coolUntil ? { coolUntil: lead.coolUntil } : {}),
-    activity: activityOf(lead, state)
+    // A member that moved to another model says so beside what it is doing, until it ends ("Thinking · switched from Kimi K3 to Qwen 3.6: ...").
+    activity: lead.modelNote && !isTerminal(state) ? `${activityOf(lead, state)} · ${lead.modelNote.replace(/^\S+ switched/, 'switched')}` : activityOf(lead, state)
   };
 }
 
@@ -330,7 +331,7 @@ function activityOf(stat: LiveAgentStat, state: LiveState): string {
   if (state === 'waiting-agents') return 'Waiting for its helpers';
   if (state === 'retrying') return stat.coolReason === 'rate-limited' ? 'NEAR is busy; trying again' : 'Trying again';
   if (state === 'done') return `${stat.toolCalls} tool call${stat.toolCalls === 1 ? '' : 's'}`;
-  if (state === 'failed') return 'Did not finish';
+  if (state === 'failed') return stat.failReason ? `Did not finish: ${stat.failReason.replace(/^\S+ failed: /, '')}` : 'Did not finish';
   if (state === 'stopped' || state === 'interrupted') return 'Not running';
   if (stat.phase === 'tool') return stat.tool ? `Running ${stat.tool}` : 'Running a tool';
   if (stat.phase === 'generating') return 'Writing';

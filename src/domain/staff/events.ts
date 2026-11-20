@@ -8,7 +8,7 @@ import type { PersonActor, ReleaseState, StaffActor, StaffGate, TransitionRecord
 
 export const STAFF_EVENT_TYPES = [
   'staff.step.entered',
-  'staff.lane.started', 'staff.lane.finished',
+  'staff.lane.started', 'staff.lane.finished', 'staff.lane.switched',
   'staff.merge.started', 'staff.merge.conflict', 'staff.merge.resolved',
   'staff.product.state',
   'staff.gate.verdict',
@@ -43,7 +43,10 @@ interface EventBase<T extends StaffEventType> {
 
 export interface StepEnteredEvent extends EventBase<'staff.step.entered'> { readonly section: StaffSectionId; readonly step: CrosswalkStep; readonly stepName: string | null }
 export interface LaneStartedEvent extends EventBase<'staff.lane.started'> { readonly section: StaffSectionId; readonly member: string; readonly product?: string }
-export interface LaneFinishedEvent extends EventBase<'staff.lane.finished'> { readonly section: StaffSectionId; readonly member: string; readonly product?: string; readonly outcome: LaneOutcome }
+/** `reason`: why a lane failed, in words ("GLM 5.3 is overloaded at NEAR AI"), when it failed and the reason is known. */
+export interface LaneFinishedEvent extends EventBase<'staff.lane.finished'> { readonly section: StaffSectionId; readonly member: string; readonly product?: string; readonly outcome: LaneOutcome; readonly reason?: string }
+/** A member moved to its next model, overloaded or silent at NEAR AI (owner's D-48 run); `from` and `to` are the models' names in words. */
+export interface LaneSwitchedEvent extends EventBase<'staff.lane.switched'> { readonly section: StaffSectionId; readonly member: string; readonly from: string; readonly to: string; readonly reason: string }
 interface MergeFields { readonly section: StaffSectionId; readonly branches: readonly string[]; readonly files: readonly string[] }
 export interface MergeStartedEvent extends EventBase<'staff.merge.started'>, MergeFields {}
 export interface MergeConflictEvent extends EventBase<'staff.merge.conflict'>, MergeFields {}
@@ -84,7 +87,7 @@ export interface WargameTurnEvent extends EventBase<'staff.wargame.turn'> {
 }
 
 export type StaffEvent =
-  | StepEnteredEvent | LaneStartedEvent | LaneFinishedEvent
+  | StepEnteredEvent | LaneStartedEvent | LaneFinishedEvent | LaneSwitchedEvent
   | MergeStartedEvent | MergeConflictEvent | MergeResolvedEvent
   | ProductStateEvent | GateVerdictEvent
   | DecisionRequestedEvent | DecisionRecordedEvent

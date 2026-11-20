@@ -71,6 +71,24 @@
   map, the feeds, the workbenches), tried one and was refused. Each agent is now offered only the
   tools it may use: the lead coordinates, marks the step and starts the members at once, and each
   member gets what its tools line grants.
+- **A member carries on when NEAR AI is overloaded.** In a J2 staff run, five of twelve members
+  failed: the ones on GLM 5.3 got "service overloaded" for four minutes, and the ones on Kimi K3
+  sent nothing for 90 seconds again and again. A member whose model is overloaded for about a
+  minute, or sends nothing twice, now moves to the next model and continues the same task, for
+  example "threat-analyst switched from Kimi K3 to Qwen 3.6: Kimi K3 is overloaded at NEAR AI".
+  Team Live, the Staff Room activity and the chat show the switch, and spend and the activity
+  record name the model that did the work. The next model is the backup model, then the standard,
+  deep and fast tiers, then the chat's model, skipping one that is busy; it is always at least as
+  private (TEE stays TEE, a private member stays private, TEE-only mode holds). A member whose
+  team file names its model moves too, with the notice.
+- **Members no longer crowd one busy model.** While NEAR AI refuses a model, the extension sends
+  it at most two requests at a time and waits longer each time it refuses again, instead of every
+  member trying at once.
+- **A member that fails says why.** Its activity, the Staff Room and the lead's report now say
+  "overloaded at NEAR AI", "no answer for 90 s" or "refused by policy" instead of only
+  "AgentRunError".
+- Fixed: a `privacy: private` member whose reply stalled could be retried on the chat's own model
+  even when that model is forwarded. The retry now uses only a model at least as private.
 
 ## 0.4.34
 

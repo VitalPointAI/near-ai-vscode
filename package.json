@@ -877,7 +877,7 @@
         "nearAi.agent.backupModel": {
           "type": "string",
           "default": "",
-          "description": "The model a stalled reply (nearAi.agent.modelStallSeconds) is retried on. Empty uses the standard tier, then the deep tier. Only a model at least as private as the chat's model is used."
+          "description": "The model a stalled reply (nearAi.agent.modelStallSeconds) is retried on, and the first model a team member moves to when its own model is overloaded at NEAR AI or keeps sending nothing. Empty uses the standard tier, then the deep tier. Only a model at least as private as the chat's model (and, for a team member, as its own model) is used."
         },
         "nearAi.agent.maxOutputTokens": {
           "type": "number",

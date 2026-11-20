@@ -695,6 +695,18 @@ forwarded model instead. New
 research teams set this on every member, and new presales teams on their
 reviewer; `privacy: any` turns it off for a member.
 
+When a team member's model is overloaded at NEAR AI or keeps sending nothing,
+the member moves to another model by itself, under the same rules: only a
+model at least as private as the one it leaves (a TEE model moves only to
+another TEE model, a local one only to another local one, and a forwarded one
+never to a local one), only a private model its route can carry for a
+`privacy: private` member, and only a TEE or local model in TEE-only mode. The
+model it moves to goes through the same route check as every request, so the
+chat's label still decides; a refused model is skipped, and if none is left the
+member stops and says it was refused by policy. The same rules now also choose
+the model a stalled reply is retried on (`nearAi.agent.modelStallSeconds`), so
+a private member is never retried on the chat's forwarded model.
+
 With `nearAi.agent.imageReview` set to `ask` (the default), a generated image
 is first saved as a draft in the project's `.near-ai/drafts/images/` folder,
 which is ignored by git (by the project's `.gitignore` and by the folder's own

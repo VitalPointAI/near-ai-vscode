@@ -131,6 +131,10 @@ export interface AgentStats {
   neverStarted?: boolean;
   /** 0.4.28: reports of its background agents it has read (the main agent reads them at its next turn, not when they finish). */
   reportsDelivered?: number;
+  /** It moved to another model (overloaded or silent at NEAR AI): the line the person reads, e.g. "switched from Kimi K3 to Qwen 3.6: ...". */
+  modelNote?: string;
+  /** Why it failed, in words, when it failed ("threat-analyst failed: GLM 5.3 is overloaded at NEAR AI."). */
+  failReason?: string;
 }
 
 /**
@@ -322,6 +326,7 @@ export class ActivityFeed {
     if (!stat) return;
     if (stat.phase !== 'queued') this.enter(stat, 'thinking');
     stat.status = status;
+    if (status === 'failed' && summary) stat.failReason = summary.slice(0, 300);
     stat.endedAt = this.now();
     stat.coolUntil = undefined;
     stat.tool = undefined;
@@ -571,6 +576,17 @@ export class ActivityFeed {
       const label = { injection: 'Possible prompt injection', 'hidden-content': 'Hidden content removed', held: 'Held for approval', blocked: 'Blocked' }[event.kind];
       this.closeText(agentId);
       this.add({ ...base, kind: 'security', title: `${label} · ${event.source}`, text: event.detail });
+    });
+  }
+
+  /** The agent moved to `model` (its fallback): its card shows the model it uses now and why it moved, and the feed has the line. */
+  public modelSwitched(agentId: string, model: string, text: string): void {
+    this.withAgent(agentId, (base, stat) => {
+      stat.model = model;
+      stat.modelNote = text.slice(0, 300);
+      this.lifecycle += 1;
+      this.closeText(agentId);
+      this.add({ ...base, kind: 'notice', title: 'Switched model', text });
     });
   }
 

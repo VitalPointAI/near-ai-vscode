@@ -143,8 +143,15 @@ export interface NearAiClientOptions {
   /** Quick retries of one request after a dropped connection, a timeout, or a 500/502/504 (0 or 1; default 1). Never for 429 or 503. */
   maxRetries?: number;
   retryBaseDelayMs?: number;
-  /** A model's cooldown after a 429 or 503 that carries no Retry-After; it doubles while the model keeps refusing (default 5 s, at most 60 s). */
+  /**
+   * A model's cooldown after a 429 or 503: Retry-After (or this base, when there is none) the first time, then doubling while the probe after each cooldown
+   * is refused again, never shorter than Retry-After (default 5 s, at most 60 s).
+   */
   cooldownBaseMs?: number;
+  /** Requests to one model in flight at once while it is paced, that is, within pacedWindowMs of its last 429 or 503 (default PACED_CONCURRENCY). */
+  pacedConcurrency?: number;
+  /** How long after a model's last 429 or 503 its requests stay paced (default PACED_WINDOW_MS). */
+  pacedWindowMs?: number;
   /** Jitter source in [0, 1) for the quick retry (Math.random by default). */
   random?: () => number;
   /** Milliseconds clock for model cooldowns (Date.now by default). */
@@ -286,6 +293,12 @@ export function createNearAiClient(options: NearAiClientOptions): NearAiClient {
 /** Longest Retry-After the client honours; a larger value is treated as this. */
 export const MAX_RETRY_AFTER_MS = 60_000;
 export const DEFAULT_COOLDOWN_BASE_MS = 5_000;
+/** Requests to one model in flight at once while NEAR has recently answered it with 429 or 503 (owner's D-48 run: six members at once on one model). */
+export const PACED_CONCURRENCY = 2;
+/** A model stays paced this long after its last 429 or 503. */
+export const PACED_WINDOW_MS = 30_000;
+/** A request let through after waiting for a paced slot first waits up to this long more, at random, so the waiters do not start together. */
+export const PACED_GAP_MS = 250;
 /** How much of an error body is read for NEAR's message; the rest is discarded. */
 const MAX_ERROR_BODY_BYTES = 16_384;
 const MAX_ERROR_DETAIL_CHARS = 300;
@@ -428,6 +441,11 @@ export class NearAiClient {
    * after it, one probe goes out while the others wait for its answer.
    */
   private readonly cooling = new Map<string, { until: number; strikes: number; probe?: Promise<void> }>();
+  /**
+   * Models NEAR answered with a 429 or 503 within the last pacedWindowMs: while paced, at most pacedConcurrency requests to the model are in flight at once
+   * (a stream holds its slot until it ends), so the members of a run waiting on one model go one or two at a time rather than all together.
+   */
+  private readonly paced = new Map<string, { until: number; active: number; waiters: Array<() => void> }>();
   /** The spend ledger entry of each billable response still being read. */
   private readonly charges = new WeakMap<Response, { finish: (result: Parameters<ReturnType<SpendSink['begin']>>[0]) => void; inputTokens: number; model?: string }>();
   /** Each streamed response's connection: `abort` closes it, `release` unhooks the caller's signal once the body is done. */
@@ -1107,7 +1125,9 @@ export class NearAiClient {
     const existing = this.cooling.get(model);
     const strikes = !existing ? 1 : wasProbe ? existing.strikes + 1 : existing.strikes;
     const base = Math.max(1, this.options.cooldownBaseMs ?? DEFAULT_COOLDOWN_BASE_MS);
-    const durationMs = retryAfterMs ?? Math.min(MAX_RETRY_AFTER_MS, base * (2 ** (strikes - 1)));
+    const backoffMs = Math.min(MAX_RETRY_AFTER_MS, base * (2 ** (strikes - 1)));
+    // The first refusal waits what NEAR asked; a probe refused again backs off exponentially, never for less than NEAR asked.
+    const durationMs = strikes <= 1 ? retryAfterMs ?? backoffMs : Math.max(retryAfterMs ?? 0, backoffMs);
     const until = Math.max(existing?.until ?? 0, this.now() + durationMs);
     if (existing) { existing.until = until; existing.strikes = strikes; } else this.cooling.set(model, { until, strikes });
     return until - this.now();
@@ -1115,6 +1135,73 @@ export class NearAiClient {
 
   private now(): number {
     return (this.options.now ?? Date.now)();
+  }
+
+  /** True while `model` is paced after a recent 429 or 503 (its requests go at most pacedConcurrency at a time). */
+  public isPaced(model: string): boolean {
+    const state = this.paced.get(model);
+    return state !== undefined && state.until > this.now();
+  }
+
+  /** After a 429 or 503: the model is paced until pacedWindowMs from now. */
+  private startPacing(model: string): void {
+    const until = this.now() + Math.max(0, this.options.pacedWindowMs ?? PACED_WINDOW_MS);
+    const state = this.paced.get(model);
+    if (state) state.until = Math.max(state.until, until); else this.paced.set(model, { until, active: 0, waiters: [] });
+  }
+
+  /**
+   * A slot for one request to `model` while it is paced: a release function, or undefined when the model is not paced (nothing to release). Waits while
+   * pacedConcurrency requests are in flight, until one ends or the pacing window does; a request that waited then waits a short random gap more.
+   * `failFast` (the safety check) throws the local 429 at once instead of waiting.
+   */
+  private async paceSlot(model: string | undefined, signal: AbortSignal | undefined, failFast = false): Promise<(() => void) | undefined> {
+    if (!model) return undefined;
+    const cap = Math.max(1, this.options.pacedConcurrency ?? PACED_CONCURRENCY);
+    let waited = false;
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+      const state = this.paced.get(model);
+      if (!state) return undefined;
+      const remaining = state.until - this.now();
+      if (remaining <= 0) {
+        // The window is over: everyone waiting goes, and the entry goes once nothing it counts is in flight.
+        for (const wake of state.waiters.splice(0)) wake();
+        if (state.active === 0) this.paced.delete(model);
+        return undefined;
+      }
+      if (state.active < cap) {
+        if (waited) {
+          await sleepFor(Math.round((this.options.random ?? Math.random)() * PACED_GAP_MS), signal);
+          waited = false;
+          continue;
+        }
+        state.active += 1;
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          state.active -= 1;
+          state.waiters.shift()?.();
+          if (state.active === 0 && !state.waiters.length && state.until <= this.now() && this.paced.get(model) === state) this.paced.delete(model);
+        };
+      }
+      if (failFast) throw coolingError(model, remaining);
+      await new Promise<void>((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const done = () => {
+          if (timer) clearTimeout(timer);
+          signal?.removeEventListener('abort', done);
+          const index = state.waiters.indexOf(done);
+          if (index >= 0) state.waiters.splice(index, 1);
+          resolve();
+        };
+        state.waiters.push(done);
+        timer = setTimeout(done, remaining);
+        signal?.addEventListener('abort', done, { once: true });
+      });
+      waited = true;
+    }
   }
 
   /**
@@ -1295,6 +1382,9 @@ export class NearAiClient {
       if (reached) throw new SpendLimitError(reached.spentUsd, reached.limitUsd, reached.source);
     }
     const release = await this.admit(model, init.signal ?? undefined, overrides.failFast === true);
+    // Paced after a recent 429/503: a slot, held by a stream until it ends (its reader releases it) and by anything else until this request returns.
+    let pace: (() => void) | undefined;
+    try { pace = await this.paceSlot(model, init.signal ?? undefined, overrides.failFast === true); } catch (error) { release?.(); throw error; }
     const quickRetry = () => waitForRetry(Math.round(retryBaseDelayMs * (0.5 + random())), 0, init.signal ?? undefined);
     try {
       for (let attempt = 0; ; attempt += 1) {
@@ -1358,8 +1448,11 @@ export class NearAiClient {
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
           // A stream keeps the caller's stop wired to the connection while its body is read, and its
           // reader can close the connection itself when the stream stalls; the reader releases it.
-          if (overrides.stream) this.streams.set(response, { abort: () => attemptAbort.abort(), release: unhook });
-          else unhook();
+          if (overrides.stream) {
+            const slot = pace;
+            pace = undefined;
+            this.streams.set(response, { abort: () => attemptAbort.abort(), release: () => { unhook(); slot?.(); } });
+          } else unhook();
           return response;
         }
         unhook();
@@ -1372,6 +1465,7 @@ export class NearAiClient {
       }
     } finally {
       release?.();
+      pace?.();
     }
   }
 
@@ -1386,7 +1480,7 @@ export class NearAiClient {
     path = path.replace(/\?.*$/, '');
     const retryable = classifyRetryableFailure(status);
     let cooldownMs: number | undefined;
-    if (model && (status === 429 || status === 503)) cooldownMs = this.startCooling(model, retryAfterMs, wasProbe);
+    if (model && (status === 429 || status === 503)) { cooldownMs = this.startCooling(model, retryAfterMs, wasProbe); this.startPacing(model); }
     const limits: string[] = [];
     headers.forEach((value, name) => { if (/^(x-)?ratelimit|^retry-after/i.test(name)) limits.push(`${name}=${value.slice(0, 80)}`); });
     diagnose(`HTTP ${status} ${method} ${path}${model ? ` model=${model}` : ''}${requestId ? ` request=${requestId}` : ''}${limits.length ? ` ${limits.join(' ')}` : ''}${body.errorType ? ` type=${body.errorType}` : ''}${body.errorCode ? ` code=${body.errorCode}` : ''}${body.detail ? ` message="${body.detail}"` : ''}${cooldownMs !== undefined ? ` cooldown=${Math.round(cooldownMs / 1000)}s` : ''}`);
