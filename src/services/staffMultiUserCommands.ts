@@ -28,7 +28,7 @@ import { REPLICA_PROJECT_FILE, multiUserNoticeLines } from '../domain/staff/mult
 import { canonicalBytes } from '../domain/team/canonical';
 import { identityDir } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
-import { readWhole } from '../staff/staffFiles';
+import { readWhole, syncFolder } from '../staff/staffFiles';
 import { staffHostFor } from '../staff/staffHost';
 import { askPerson } from './staffCommands';
 import type { StaffCommandArgs, StaffCommandContext } from './staffCommands';
@@ -66,6 +66,8 @@ export const WORDS_NOT_CONFIRMED_TEXT = 'Nobody was admitted, because the six wo
  * request with new six words, and only the new one is sent.
  */
 export const JOIN_NOT_SAVED_TEXT = 'Nothing was sent and the project was not changed, so it is safe to run Staff: Join Staff Project again with the same invitation and choose another place. It makes a new join request with new six words; send only the new one.';
+/** When the join flow answers ok but gives no join request to save (D-05): nothing is saved, so no empty request is ever sent. */
+export const JOIN_NO_FILE_TEXT = 'The join request was not made. Nothing was saved. Run Join Staff Project again.';
 export const INVITE_NOT_SAVED_TEXT = 'To save it again, run Staff: Remove from Staff Project on this computer and pick Save the invitation again; nothing in the project changes. Or cancel it there and invite them again.';
 export const INVITE_SAVE_AGAIN_PREFIX = 'Save the invitation for ';
 export const INVITE_INSIDE_PROJECT_TEXT = 'The invitation holds a one-time secret, so it is not saved inside the project folder, where git could commit it. Nothing was changed. Choose a folder outside the project.';
@@ -215,8 +217,9 @@ async function inside(folder: string, file: string): Promise<boolean> {
 /**
  * Saves a file readable by this user account only: an invitation holds a one-time secret. The bytes go to a new file beside the target, created
  * exclusively with mode 0600 at open time (so it is never readable by others, not even for a moment), synced, then renamed over the target; an
- * existing file chosen in the dialog is replaced, not rewritten in place. On any failure after the new file exists it is removed before the error
- * is reported, so no copy of the secret is left behind; if even that removal fails, the error says where the file is.
+ * existing file chosen in the dialog is replaced, not rewritten in place. The folder is then synced, so a power cut cannot lose the saved file
+ * (D-06). On any failure after the new file exists it is removed before the error is reported, so no copy of the secret is left behind; if even
+ * that removal fails, the error says where the file is. A failed folder sync is reported like any other save error; the file is in place by then.
  */
 export async function saveSecretFile(target: string, text: string): Promise<void> {
   const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomBytes(6).toString('hex')}.tmp`);
@@ -229,6 +232,7 @@ export async function saveSecretFile(target: string, text: string): Promise<void
       await handle.close();
     }
     await rename(temporary, target);
+    await syncFolder(path.dirname(target));
   } catch (error) {
     try {
       await unlink(temporary);
@@ -319,12 +323,19 @@ async function readRoster(shared: SharedProjectHost): Promise<RosterRead> {
   return { members, invites, ...(lead === undefined ? {} : { lead }), ...(self === undefined ? {} : { self }), pending: roster.pending.map((item) => ({ at: item.at, branches: [...item.branches], text: item.text })) };
 }
 
-/** A member picked from a list; names that repeat show their member id so every choice is distinct. */
+/**
+ * How a member is named in a list (D-04): the declared name, with the member id after it when another member in the list was declared with the same
+ * name, so every choice reads differently. Declared names are free text the lead typed; only the member id says who someone is.
+ */
+function memberLabel(members: readonly MemberView[], member: MemberView): string {
+  return members.filter((other) => other.name === member.name).length > 1 ? `${member.name} (${member.member})` : member.name;
+}
+
+/** A member picked from a list. Each item carries its member, and the item picked is used as it is, never matched back by its label (D-04). */
 async function pickMember(members: readonly MemberView[], title: string): Promise<MemberView | undefined> {
   if (members.length === 0) { warn('Nobody in this project can be picked for that, so nothing was changed. Invite someone first with Staff: Invite to Staff Project.'); return undefined; }
-  const label = (member: MemberView): string => (members.filter((other) => other.name === member.name).length > 1 ? `${member.name} (${member.member})` : member.name);
-  const picked = await vscode.window.showQuickPick(members.map((member) => ({ label: label(member), description: member.seat ?? '', detail: member.roles.join(', ') })), { title, placeHolder: 'Pick the member' });
-  return picked === undefined ? undefined : members.find((member) => label(member) === picked.label);
+  const picked = await vscode.window.showQuickPick(members.map((member) => ({ label: memberLabel(members, member), description: member.seat ?? '', detail: member.roles.join(', '), member })), { title, placeHolder: 'Pick the member' });
+  return picked?.member;
 }
 
 /** The sha256 of the project's signed label map (D-07), as the gate's marker records it: of its canonical JSON. Undefined when there is none. */
@@ -430,8 +441,10 @@ async function joinCommand(context: StaffCommandContext): Promise<void> {
   if (!target) return;
   const result = await membership.joinFromInvite(root, deps, read.text, { name });
   if (!result.ok) { show(result); return; }
+  // An ok answer with no request in it is refused, so an empty join request is never saved or sent (D-05).
+  if (result.file === undefined) { warn(JOIN_NO_FILE_TEXT); return; }
   try {
-    await saveFile(target, result.file?.text ?? '');
+    await saveFile(target, result.file.text);
   } catch (error) {
     warn(`The join request could not be saved at ${target} (${error instanceof Error ? error.message : String(error)}). ${JOIN_NOT_SAVED_TEXT}`);
     return;
@@ -501,8 +514,10 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       choices.push({ label: FINISH_UNFINISHED_LABEL, description: `${parts} still on a key a removed device or a member no longer cleared holds`, choice: { kind: 'finish', count: unfinished } });
     }
     for (const member of view.members) {
-      choices.push({ label: member.name, description: `Remove ${member.name} and every device of theirs`, choice: { kind: 'member', member } });
-      for (const device of member.devices) choices.push({ label: `${member.name}, device in slot ${device.slot ?? '?'}`, description: 'Remove this one device', choice: { kind: 'device', member, writer: device.writer, ...(device.slot === undefined ? {} : { slot: device.slot }) } });
+      // A name two members share is shown with the member id, in the member's item and in their devices' items alike (D-04).
+      const name = memberLabel(view.members, member);
+      choices.push({ label: name, description: `Remove ${name} and every device of theirs`, choice: { kind: 'member', member } });
+      for (const device of member.devices) choices.push({ label: `${name}, device in slot ${device.slot ?? '?'}`, description: 'Remove this one device', choice: { kind: 'device', member, writer: device.writer, ...(device.slot === undefined ? {} : { slot: device.slot }) } });
     }
     for (const invite of view.invites) {
       choices.push(invite.expired
@@ -514,8 +529,8 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       const who = open.forMember === undefined ? open.name : `${open.name}'s other computer`;
       choices.push({ label: `${INVITE_SAVE_AGAIN_PREFIX}${who} again`, description: `Save invitation ${open.invite} again; nothing in the project changes`, choice: { kind: 'reinvite', invite: open.invite, name: who } });
     }
-    const picked = await vscode.window.showQuickPick(choices.map(({ label, description }) => ({ label, description })), { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' });
-    const choice = picked === undefined ? undefined : choices.find((item) => item.label === picked.label && item.description === picked.description)?.choice;
+    // Each item carries what it removes (the member id, and the device writer for a device), and the item picked is used as it is (D-04).
+    const choice = (await vscode.window.showQuickPick(choices, { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' }))?.choice;
     if (!choice) return;
     const { REKEY_KEEP_TEXT } = await import('../domain/replica/cellKeys');
     if (choice.kind === 'finish') {
@@ -537,7 +552,8 @@ async function removeCommand(context: StaffCommandContext): Promise<void> {
       show(await membership.voidInvite(shared, choice.invite));
       return;
     }
-    const question = choice.kind === 'member' ? `Remove ${choice.member.name} from the project?` : `Remove this device of ${choice.member.name} from the project?`;
+    const who = memberLabel(view.members, choice.member);
+    const question = choice.kind === 'member' ? `Remove ${who} from the project?` : `Remove this device of ${who} from the project?`;
     const what = choice.kind === 'member' ? 'Their devices receive nothing new from the project.' : 'That device receives nothing new from the project.';
     if (!(await confirm(question, [`${what} Every part of the project it was on moves to a new key for the people still on it.`, REKEY_KEEP_TEXT], choice.kind === 'member' ? 'Remove' : 'Remove Device'))) return;
     show(await membership.removeFromProject(shared, choice.kind === 'member' ? { member: choice.member.member } : { member: choice.member.member, writer: choice.writer }));
@@ -550,10 +566,9 @@ async function addMachineCommand(context: StaffCommandContext): Promise<void> {
     const view = await readRoster(shared);
     const own = view.members.filter((member) => member.member === view.self);
     const others = view.members.filter((member) => member.member !== view.self);
-    const items = [...own.map((member) => ({ label: 'My other computer', description: member.name, member })), ...others.map((member) => ({ label: `Another computer of ${member.name}`, description: member.seat ?? '', member }))];
+    const items = [...own.map((member) => ({ label: 'My other computer', description: member.name, member })), ...others.map((member) => ({ label: `Another computer of ${memberLabel(view.members, member)}`, description: member.seat ?? '', member }))];
     if (items.length === 0) { warn('Nobody in this project can be picked for that, so nothing was changed. Ask your staff lead for help.'); return; }
-    const picked = await vscode.window.showQuickPick(items.map(({ label, description }) => ({ label, description })), { title: 'Add another computer', placeHolder: 'Whose other computer?' });
-    const member = picked === undefined ? undefined : items.find((item) => item.label === picked.label && item.description === picked.description)?.member;
+    const member = (await vscode.window.showQuickPick(items, { title: 'Add another computer', placeHolder: 'Whose other computer?' }))?.member;
     if (!member) return;
     const { INVITE_FILE_EXTENSION } = await import('../domain/replica/invite');
     const target = await saveTarget(`other-computer-${fileSlug(member.name)}${INVITE_FILE_EXTENSION}`, INVITE_FILE_EXTENSION, `Save the invitation for ${member.name}'s other computer`, 'Staff invitation');
@@ -579,8 +594,7 @@ async function chooseBranchCommand(context: StaffCommandContext): Promise<void> 
       const when = view?.at === undefined ? '' : `, ${view.at.slice(0, 16).replace('T', ' ')} UTC`;
       return { short: `change ${index + 1} of ${split.branches.length}`, label: `Change ${index + 1} of ${split.branches.length}: ${summary}`, description: `${view?.by === undefined ? '' : `by ${view.by}${when}, `}entry ${branch.slice(0, 12)}`, detail: split.text, summary, branch };
     });
-    const picked = await vscode.window.showQuickPick(items.map(({ label, description, detail }) => ({ label, description, detail })), { title: 'Choose a roster branch', placeHolder: split.text });
-    const chosen = picked === undefined ? undefined : items.find((item) => item.label === picked.label && item.description === picked.description);
+    const chosen = await vscode.window.showQuickPick(items, { title: 'Choose a roster branch', placeHolder: split.text });
     const branch = chosen?.branch;
     if (!branch) return;
     if (!(await confirm(`Use ${chosen?.short ?? 'this change'}?`, [`${chosen?.summary ?? ''}.`, split.text, 'The other change at the same point stays unapplied and is kept in the record.'], 'Use This Change'))) return;
@@ -609,8 +623,8 @@ async function handOverCommand(context: StaffCommandContext): Promise<void> {
       { label: 'Planned handover', description: 'The staff lead hands over the lead.', reason: 'planned' as const },
       { label: 'The staff lead is lost', description: 'The lead\'s computers are lost or the lead cannot act. Only then may the deputy hand over.', reason: 'lead-lost' as const }
     ];
-    const picked = await vscode.window.showQuickPick(reasons.map(({ label, description }) => ({ label, description })), { title: 'Why is the lead handed over?' });
-    const reason = picked === undefined ? undefined : reasons.find((item) => item.label === picked.label)?.reason;
+    const picked = await vscode.window.showQuickPick(reasons, { title: 'Why is the lead handed over?' });
+    const reason = picked?.reason;
     if (!reason) return;
     if (!(await confirm(`Hand the staff lead over to ${member.name}?`, [`${member.name} becomes the staff lead and decides who is in the project. Reason recorded: ${picked?.label ?? reason}.`], 'Hand Over'))) return;
     show(await membership.handOverLead(shared, { to: member.member, reason }));
@@ -695,6 +709,8 @@ async function singleCopyCommand(context: StaffCommandContext, identity: () => P
   if (result.differs.length > 0) parts.push(`Carried only up to the step today's ledger can show: ${result.differs.map((item) => `${item.product} (${item.reason})`).join('; ')}.`);
   if (result.left.length > 0) parts.push(`Not carried, because their shared copy does not verify: ${result.left.map((item) => `${item.ledger} (${item.reason})`).join('; ')}.`);
   parts.push(NOT_COPIED_TEXT);
+  // The staff host of the shared project forgets the project it opened, so it never keeps one whose store was replaced (D-09).
+  await staffHostFor(root)?.invalidateShared();
   tell(parts.join(' '));
 }
 
@@ -710,12 +726,15 @@ export const START_AGAIN_HOW_BACK_TEXT = 'To bring the rest of the shared histor
  * Start This Computer's Shared History Again: for a shared project whose history on this computer is refused rolled back, damaged or unverified.
  * Says what happened and what will happen, and only on the action button moves the store folder aside (never deleting it), carries this device's
  * own signed entries, the grants, the attachments and the project record into a new one, and starts a new record of how far this device has seen.
- * A project that opens is left alone, and any other refusal is shown with its own way out.
+ * A project that opens is left alone, and any other refusal is shown with its own way out. A project whose history folder on this computer is gone
+ * while a folder set aside beside it holds the project is refused rolled back too, so it is reached here (D-03): the new folder is then made from
+ * the newest folder set aside, and the result says nothing was set aside and which folder it was made from.
  */
 async function startHistoryAgainCommand(context: StaffCommandContext): Promise<void> {
   const root = projectRoot();
   if (!root) { warn(NO_FOLDER_TEXT); return; }
-  if (!(await exists(path.join(root, ...REPLICA_PROJECT_FILE.split('/'))))) { warn(NOT_SHARED_TEXT); return; }
+  // ReplicaProject.open answers for a folder with no project.json too: undefined when nothing shared is there, refused rolled back when the history
+  // folder is gone but was set aside (32-01), so that case reaches the dialog below.
   const { ReplicaProject, isProjectRefused } = await import('../staff/replica/replicaProject');
   const { STORE_REFUSALS } = await import('../staff/replica/store');
   const deps = await replicaDeps(context);
@@ -725,16 +744,21 @@ async function startHistoryAgainCommand(context: StaffCommandContext): Promise<v
   if (opened.store === undefined || !START_AGAIN_STORE_REASONS.includes(opened.store)) { warn(shownRefusal(opened.refused, opened.message)); return; }
   if (!(await confirm(START_AGAIN_QUESTION, [
     `Why: ${opened.message.split('. ')[0]}.`,
-    'What happens: the shared history folder on this computer, .planning/staff/replica/, is moved aside to a folder beside it and nothing is deleted. A new one is started with this computer\'s own signed changes, the access grants, the attachments and the project record, and this device starts a new record of how far it has seen. Changes from other people are not carried over.',
+    'What happens: the shared history folder on this computer, .planning/staff/replica/, is moved aside to a folder beside it, when it is there, and nothing is deleted. A new one is started with this computer\'s own signed changes, the access grants, the attachments and the project record, and this device starts a new record of how far it has seen. Changes from other people are not carried over.',
     START_AGAIN_HOW_BACK_TEXT
   ], START_AGAIN_ACTION))) return;
   const result = await ReplicaProject.startHistoryAgain(root, deps);
   if (result === undefined) { warn(NOT_SHARED_TEXT); return; }
   if (isProjectRefused(result)) { warn(shownRefusal(result.refused, result.message)); return; }
-  // The staff host opens the new store on its next read.
-  await staffHostFor(root)?.close();
+  // The staff host forgets the project it opened and opens the new store on its next read (D-09).
+  await staffHostFor(root)?.invalidateShared();
   const carried = result.carried === 1 ? 'One change this computer made was' : `${result.carried} changes this computer made were`;
-  tell(`This computer's shared history was set aside in ${result.setAside}/ and nothing was deleted. ${carried} carried into the new one. ${START_AGAIN_HOW_BACK_TEXT}`);
+  const parts = [result.setAside === null
+    ? 'Nothing was set aside, because this computer\'s shared history folder was not there. Nothing was deleted.'
+    : `This computer's shared history was set aside in ${result.setAside}/ and nothing was deleted.`];
+  if (result.carriedFrom !== undefined) parts.push(`The new one was made from ${result.carriedFrom}/.`);
+  parts.push(`${carried} carried into the new one.`, START_AGAIN_HOW_BACK_TEXT);
+  tell(parts.join(' '));
 }
 
 /**

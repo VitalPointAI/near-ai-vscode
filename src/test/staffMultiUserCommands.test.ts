@@ -6,10 +6,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { appendFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import test, { after } from 'node:test';
+import test, { after, beforeEach, mock } from 'node:test';
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT } from '../domain/replica/cellKeys';
 import { INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION } from '../domain/replica/invite';
@@ -27,6 +27,7 @@ import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { COPY_REFUSALS } from '../staff/replica/singleCopy';
 import { START_AGAIN_COMMAND_TITLE, STORE_REFUSALS } from '../staff/replica/store';
 import { LEDGER_DIR, LEDGER_FILE } from '../staff/staffHost';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { MemorySecrets } from './helpers/teamHarness';
 import { CLEAN_BODY, J5_TEAM, callTool, writeBody } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
@@ -37,6 +38,8 @@ const uninstall = installVscodeStub(stub);
 const staffCommands = require('../services/staffCommands') as typeof import('../services/staffCommands');
 const multi = require('../services/staffMultiUserCommands') as typeof import('../services/staffMultiUserCommands');
 const hosts = require('../staff/staffHost') as typeof import('../staff/staffHost');
+// The module object the commands load the flows from, so a test can replace one flow with node:test's mock.method.
+const membershipModule = require('../staff/replica/membership') as typeof import('../staff/replica/membership');
 
 const opened: ReplicaProject[] = [];
 after(async () => {
@@ -44,6 +47,11 @@ after(async () => {
   for (const subscription of current?.context.subscriptions ?? []) subscription.dispose();
   hosts.configureStaffHosts(undefined);
   uninstall();
+});
+
+// Every test starts with no answer queued, so answers a failed test left unused are never taken by the next test's dialogs.
+beforeEach(() => {
+  for (const queue of [stub.quickPickAnswers, stub.openDialogAnswers, stub.saveDialogAnswers, stub.inputAnswers, stub.messageAnswers]) queue.length = 0;
 });
 
 const C = STAFF_MULTI_USER_COMMANDS;
@@ -226,6 +234,41 @@ async function pair(label: string): Promise<{ lead: Install; joiner: Install; me
   return { lead: first, joiner, member };
 }
 
+/**
+ * A lead and two admitted people the lead declared with one name and one seat ('B. Example', j2-analyst), brought in through the commands. The two
+ * member ids come back in the order the roster lists them, which is the order the pickers list them.
+ */
+async function twins(label: string): Promise<{ lead: Install; members: [string, string] }> {
+  const first = await lead(`${label}-lead`);
+  for (const which of ['one', 'two']) {
+    const joiner = install(`${label}-${which}`);
+    const invitation = await inviteBy(first, 'B. Example');
+    const { request } = await joinBy(joiner, invitation, 'B. Example');
+    const welcome = path.join(first.out, `welcome-${which}${WELCOME_FILE_EXTENSION}`);
+    await admitBy(first, request, multi.SIX_WORDS_MATCH, welcome);
+    use(joiner);
+    stub.openDialogAnswers.push([welcome]);
+    await run(C.join);
+    assert.match(lastNotification().message, /You joined the shared staff project/);
+  }
+  const roster = await rosterOf(first);
+  const named = [...roster.members.members.keys()].filter((id) => memberAt(roster.members, id, headOf(roster))?.name === 'B. Example');
+  assert.equal(named.length, 2, 'two members share the declared name');
+  use(first);
+  return { lead: first, members: [named[0], named[1]] };
+}
+
+/**
+ * D-12: a sentence a command shows is checked by its level and by the two or three phrases that carry its meaning, not word for word, so wording
+ * can be polished without breaking a test that pins behaviour. A refusal is still compared with its constant exactly, where the test has one.
+ */
+function says(text: string, phrases: ReadonlyArray<string | RegExp>, what: string): void {
+  for (const phrase of phrases) {
+    if (typeof phrase === 'string') assert.ok(text.includes(phrase), `${what} says "${phrase}": ${text}`);
+    else assert.match(text, phrase, what);
+  }
+}
+
 // ---- a single-machine staff project ----------------------------------------------------------------------------------------------------------------
 
 /** A single-machine staff project made by today's host in this window (signed by this install's device), with one proposed product. */
@@ -276,7 +319,7 @@ test('with the setting on, the modal says what happens; dismissing writes nothin
   await run(C.makeMultiUser);
   const result = lastNotification();
   assert.equal(result.level, 'info', result.message);
-  assert.match(result.message, /now multi-user, and you are its staff lead\. One ledger was brought into the shared record/);
+  says(result.message, ['now multi-user', 'you are its staff lead', 'One ledger was brought into the shared record'], 'the result');
   hasNotices(result.message, 'the result');
   assert.ok(existsSync(path.join(at.root, ...REPLICA_PROJECT_FILE.split('/'))));
   assert.ok(existsSync(path.join(at.root, ...LEGACY_DIR.split('/'), 'ledger', LEDGER_FILE)), 'the original ledger is kept in the legacy folder');
@@ -312,7 +355,7 @@ test('invite, join, admit with the six words matching, and the welcome: each thr
   const invitation = await inviteBy(first, 'B. Example');
   const invited = lastNotification();
   assert.equal(invited.level, 'info');
-  assert.match(invited.message, /Send the file to them any way you like\. It works once and expires on (\d{4}-\d{2}-\d{2})/);
+  says(invited.message, ['Send the file to them', 'It works once', /expires on \d{4}-\d{2}-\d{2}/], 'the invitation result');
   const expires = /expires on (\d{4}-\d{2}-\d{2})/.exec(invited.message)?.[1];
   assert.equal(expires, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), 'open 7 days');
   hasNotices(invited.message, 'the invitation result');
@@ -332,7 +375,8 @@ test('invite, join, admit with the six words matching, and the welcome: each thr
   hasNotices(asked.detail ?? '', 'the admit dialog');
   assert.deepEqual(stub.notificationActions[stub.notifications.findIndex((entry) => entry.message === asked.message)].slice(1), [multi.SIX_WORDS_MATCH, multi.SIX_WORDS_DIFFER]);
   const admitted = lastNotification();
-  assert.match(admitted.message, /B\. Example was admitted\. Send them the welcome file/);
+  assert.equal(admitted.level, 'info', admitted.message);
+  says(admitted.message, ['B. Example was admitted', 'Send them the welcome file'], 'the admit result');
   hasNotices(admitted.message, 'the admit result');
   assert.ok(existsSync(`${welcome}${WELCOME_FILE_EXTENSION}`));
 
@@ -410,7 +454,7 @@ test('remove a member: the confirmation and the result say they keep what they r
   const before = state(first);
   await run(C.remove);
   const dialog = lastModal();
-  assert.equal(dialog.message, 'Remove B. Example from the project?');
+  says(dialog.message, ['Remove B. Example', 'from the project?'], 'the remove question');
   assert.ok((dialog.detail ?? '').includes(REKEY_KEEP_TEXT));
   hasNotices(dialog.detail ?? '', 'the remove confirmation');
   assert.deepEqual(state(first), before, 'dismissed: nothing written');
@@ -422,7 +466,7 @@ test('remove a member: the confirmation and the result say they keep what they r
   await run(C.remove);
   const result = lastNotification();
   assert.equal(result.level, 'info', result.message);
-  assert.match(result.message, /B\. Example was removed from the project\./);
+  says(result.message, ['B. Example', 'removed from the project'], 'the remove result');
   assert.ok(result.message.includes(REKEY_KEEP_TEXT));
   hasNotices(result.message, 'the remove result');
   const roster = await rosterOf(first);
@@ -437,18 +481,57 @@ test('remove: cancelling an open invitation writes invite.void; removing one dev
   stub.quickPickAnswers.push('Invitation for F. Example');
   stub.messageAnswers.push('Cancel Invitation');
   await run(C.remove);
-  assert.match(lastNotification().message, /The invitation was cancelled\. Nobody can join with it now\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['invitation was cancelled', 'Nobody can join with it'], 'the cancel result');
   let roster = await rosterOf(first);
   assert.equal(inviteAt(roster.members, invite, headOf(roster))?.state, 'voided');
 
   stub.quickPickAnswers.push('B. Example, device in slot 2');
   stub.messageAnswers.push('Remove Device');
   await run(C.remove);
-  assert.equal(lastModal().message, 'Remove this device of B. Example from the project?');
+  says(lastModal().message, ['Remove this device', 'B. Example'], 'the device question');
   assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
-  assert.match(lastNotification().message, /That device of B\. Example was removed from the project\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['device of B. Example', 'removed from the project'], 'the device result');
   roster = await rosterOf(first);
   assert.ok(memberAt(roster.members, member, headOf(roster)), 'the member stays');
+});
+
+test('D-04: two members with the same declared name are listed by Remove with their member ids, and picking the second removes the second', async () => {
+  const { lead: first, members: [one, two] } = await twins('remove-twins');
+  stub.quickPickAnswers.push(undefined);
+  await run(C.remove);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items.map((item) => item.label);
+  assert.ok(listed.includes(`B. Example (${one})`) && listed.includes(`B. Example (${two})`), `each is listed with their member id: ${listed.join(' | ')}`);
+  assert.equal(listed.includes('B. Example'), false, 'a repeated name is never listed bare');
+  for (const id of [one, two]) assert.ok(listed.some((label) => label.startsWith(`B. Example (${id}), device in slot`)), `the device of ${id} names the member id: ${listed.join(' | ')}`);
+  assert.equal(new Set(listed).size, listed.length, 'every item is distinct');
+
+  stub.quickPickAnswers.push(`B. Example (${two})`);
+  stub.messageAnswers.push('Remove');
+  await run(C.remove);
+  says(lastModal().message, [`B. Example (${two})`], 'the remove confirmation names the member id of a repeated name');
+  const result = lastNotification();
+  assert.equal(result.level, 'info', result.message);
+  says(result.message, ['B. Example', 'removed from the project'], 'the remove result');
+  const roster = await rosterOf(first);
+  assert.equal(memberAt(roster.members, two, headOf(roster)), undefined, 'the member picked is removed');
+  assert.ok(memberAt(roster.members, one, headOf(roster)), 'the other member of the same name stays');
+});
+
+test('D-04: Add My Other Machine with two members of the same declared name and seat offers two distinct items, and the invitation is for the member picked', async () => {
+  const { lead: first, members: [one, two] } = await twins('machine-twins');
+  stub.quickPickAnswers.push(`Another computer of B. Example (${two})`);
+  stub.saveDialogAnswers.push(path.join(first.out, 'twin-second'));
+  await run(C.addMachine);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items.map((item) => `${item.label} / ${item.description ?? ''}`);
+  assert.equal(new Set(listed).size, listed.length, `every item is distinct: ${listed.join(' | ')}`);
+  assert.ok(listed.some((item) => item.startsWith(`Another computer of B. Example (${one})`)), listed.join(' | '));
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  assert.ok(existsSync(path.join(first.out, `twin-second${INVITE_FILE_EXTENSION}`)));
+  const roster = await rosterOf(first);
+  const forMembers = [...roster.members.invites.values()].map((record) => record.forMember).filter((value) => value !== undefined);
+  assert.deepEqual(forMembers, [two], 'the invitation is for the member picked');
 });
 
 test('MJ-02: a welcome file that could not be saved is made again through Admit with the same join request, writing nothing, and it opens', async () => {
@@ -465,9 +548,10 @@ test('MJ-02: a welcome file that could not be saved is made again through Admit 
   const welcome = path.join(first.out, 'welcome-again');
   await admitBy(first, request, multi.MAKE_WELCOME_AGAIN, welcome);
   const asked = lastModal();
-  assert.equal(asked.message, 'Make the welcome file for B. Example again?');
+  says(asked.message, ['welcome file for B. Example', 'again?'], 'the make-again question');
   hasNotices(asked.detail ?? '', 'the make-again question');
-  assert.match(lastNotification().message, /The welcome file for B\. Example was made again\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['welcome file for B. Example', 'made again'], 'the make-again result');
   assert.ok(existsSync(`${welcome}${WELCOME_FILE_EXTENSION}`));
   const after = state(first);
   assert.deepEqual(after.files[path.join('project', REPLICA_PROJECT_FILE)], before.files[path.join('project', REPLICA_PROJECT_FILE)]);
@@ -516,11 +600,11 @@ test('MJ-03: Remove offers to finish a removal left unfinished, first in its lis
   stub.quickPickAnswers.push(multi.FINISH_UNFINISHED_LABEL);
   stub.messageAnswers.push('Finish');
   await run(C.remove);
-  assert.equal(lastModal().message, 'Finish the removal or clearance change left unfinished?');
+  says(lastModal().message, ['Finish', 'left unfinished?'], 'the finish question');
   assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
   const result = lastNotification();
   assert.equal(result.level, 'info', result.message);
-  assert.match(result.message, /The removal or clearance change left unfinished is now finished\. One part of the project was moved to a new key\./);
+  says(result.message, ['left unfinished is now finished', 'One part of the project', 'moved to a new key'], 'the finish result');
   hasNotices(result.message, 'the finish result');
   stub.quickPickAnswers.push(undefined);
   await run(C.remove);
@@ -532,7 +616,8 @@ test('add my other machine: the lead\'s own computer is offered first and the in
   stub.quickPickAnswers.push('My other computer');
   stub.saveDialogAnswers.push(path.join(first.out, 'second'));
   await run(C.addMachine);
-  assert.match(lastNotification().message, /The invitation for .*'s other computer is ready\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, [/invitation for .*'s other computer/, 'is ready'], 'the add-machine result');
   hasNotices(lastNotification().message, 'the result');
   assert.ok(existsSync(path.join(first.out, `second${INVITE_FILE_EXTENSION}`)));
 });
@@ -565,14 +650,14 @@ test('choose roster branch: two lead computers change the roster offline; the co
   stub.inputAnswers.push('Nell Two');
   stub.messageAnswers.push('Change');
   await run(C.updateMember);
-  assert.match(lastNotification().message, /^Nell Two was changed\./);
+  says(lastNotification().message, ['Nell Two', 'was changed'], 'the change result');
   const branchTwo = (await rosterOf(second)).positions.at(-1) as string;
   use(first);
   stub.quickPickAnswers.push('B. Example', 'Name');
   stub.inputAnswers.push('Nell One');
   stub.messageAnswers.push('Change');
   await run(C.updateMember);
-  assert.match(lastNotification().message, /^Nell One was changed\./);
+  says(lastNotification().message, ['Nell One', 'was changed'], 'the change result');
   // What a transport would carry: the second computer's roster entries and grants, into the lead's first computer.
   const from = await ReplicaProject.open(second.root, second.deps);
   const to = await ReplicaProject.open(first.root, first.deps);
@@ -601,9 +686,10 @@ test('choose roster branch: two lead computers change the roster offline; the co
   stub.messageAnswers.push('Use This Change');
   await run(C.chooseBranch);
   assert.ok((lastModal().detail ?? '').startsWith(`Changes the details of B. Example.\n\n${ROSTER_SPLIT_TEXT}`));
-  assert.match(lastModal().message, /^Use change [12] of 2\?$/);
+  says(lastModal().message, [/Use change [12] of 2/], 'the choose question');
   hasNotices(lastModal().detail ?? '', 'the choose confirmation');
-  assert.match(lastNotification().message, /^The roster branch was chosen\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['roster branch was chosen'], 'the choose result');
   const roster = await rosterOf(first);
   assert.deepEqual(roster.pending, []);
   assert.equal([...roster.members.members.keys()].map((id) => memberAt(roster.members, id, headOf(roster))?.name).includes('Nell Two'), true);
@@ -614,8 +700,9 @@ test('name deputy lead: confirmed, the result names the deputy; a refusal from a
   stub.quickPickAnswers.push('B. Example');
   stub.messageAnswers.push('Name Deputy Lead');
   await run(C.nameDeputy);
-  assert.equal(lastModal().message, 'Name B. Example deputy lead?');
-  assert.match(lastNotification().message, /B\. Example is now the deputy lead\./);
+  says(lastModal().message, ['Name B. Example', 'deputy lead?'], 'the deputy question');
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['B. Example', 'is now the deputy lead'], 'the deputy result');
   hasNotices(lastNotification().message, 'the result');
   // On the joiner's computer (not the lead's), the flow refuses and nothing is written.
   use(joiner);
@@ -635,9 +722,10 @@ test('hand over staff lead: asks planned or lead lost, confirms, and the result 
   stub.quickPickAnswers.push('B. Example', 'Planned handover');
   stub.messageAnswers.push('Hand Over');
   await run(C.handOver);
-  assert.equal(lastModal().message, 'Hand the staff lead over to B. Example?');
+  says(lastModal().message, ['Hand the staff lead over', 'B. Example'], 'the handover question');
   assert.match(lastModal().detail ?? '', /Reason recorded: Planned handover/);
-  assert.match(lastNotification().message, /B\. Example is now the staff lead\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['B. Example', 'is now the staff lead'], 'the handover result');
   const { leadAt } = await import('../domain/replica/roster');
   const roster = await rosterOf(first);
   assert.equal(leadAt(roster, headOf(roster)), member);
@@ -648,10 +736,11 @@ test('change a member\'s clearance: the confirmation carries the rekey sentence 
   stub.quickPickAnswers.push('B. Example', 'Clearance', 'Public');
   stub.messageAnswers.push('Change');
   await run(C.updateMember);
-  assert.equal(lastModal().message, 'Change B. Example?');
+  says(lastModal().message, ['Change B. Example'], 'the change question');
   assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
   hasNotices(lastModal().detail ?? '', 'the change confirmation');
-  assert.match(lastNotification().message, /^B\. Example was changed\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['B. Example', 'was changed'], 'the change result');
   const roster = await rosterOf(first);
   assert.deepEqual(memberAt(roster.members, member, headOf(roster))?.clearance, { scale: 'org', level: 'Public', compartments: [], releasability: [] });
   // Agent seats that are not slugs are refused before anything is written.
@@ -685,7 +774,16 @@ test('make a single-machine copy: refuses a folder inside the shared project or 
   stub.openDialogAnswers.push([destination]);
   stub.inputAnswers.push('A. Demo', 'J-5 director');
   stub.messageAnswers.push('Make Copy');
-  await run(C.singleCopy);
+  // D-09: the staff host of the shared project forgets the project it opened, so it never keeps one whose store was replaced.
+  const host = hosts.staffHostFor(at.root);
+  assert.ok(host);
+  const invalidated = mock.method(host, 'invalidateShared');
+  try {
+    await run(C.singleCopy);
+  } finally {
+    invalidated.mock.restore();
+  }
+  assert.equal(invalidated.mock.callCount(), 1, 'the copy invalidates the staff host\'s shared project once');
   assert.match(lastModal().detail ?? '', /A\. Person \(approved in the shared project, carried by A\. Demo\)/);
   hasNotices(lastModal().detail ?? '', 'the copy confirmation');
   const result = lastNotification();
@@ -739,7 +837,7 @@ test('every text a command can show has no em-dash, calls an organization only "
   const own = [
     multi.MULTI_USER_PREVIEW_OFF_TEXT, multi.MAKE_MULTI_USER_QUESTION, multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT,
     multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.NOT_COPIED_TEXT, multi.SIX_WORDS_MATCH, multi.SIX_WORDS_DIFFER, ...Object.values(multi.REFUSAL_NEXT_STEPS),
-    multi.MAKE_WELCOME_AGAIN, multi.WELCOME_NOT_SAVED_TEXT, multi.FINISH_UNFINISHED_LABEL
+    multi.MAKE_WELCOME_AGAIN, multi.WELCOME_NOT_SAVED_TEXT, multi.FINISH_UNFINISHED_LABEL, multi.JOIN_NO_FILE_TEXT
   ];
   const refusals: Array<[string, string]> = [
     ...Object.entries(MEMBERSHIP_REFUSALS), ...Object.entries(MIGRATION_REFUSALS), ...Object.entries(COPY_REFUSALS), ...Object.entries(PROJECT_REFUSALS_HOST),
@@ -752,7 +850,7 @@ test('every text a command can show has no em-dash, calls an organization only "
   }
   const NEXT = /\b(ask|use|choose|open|try|run|check|make|send|compare|put|look|admit|turn on|cancel|move|fix|copy|pick|hand|add|invite|close|set it aside|remove)\b/i;
   for (const text of shown) assert.match(text, NEXT, 'a refusal says what to do next');
-  for (const text of [multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT, multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.MULTI_USER_PREVIEW_OFF_TEXT]) assert.match(text, NEXT, text);
+  for (const text of [multi.JOIN_NO_FILE_TEXT, multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT, multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.MULTI_USER_PREVIEW_OFF_TEXT]) assert.match(text, NEXT, text);
   assert.deepEqual(NOTICES, [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, 'People and clearances in this project are declared by the staff lead, not verified.']);
   // None of the commands is a person decision the Staff Room may run (D-37).
   for (const id of Object.values(C)) assert.equal(PERSON_DECISION_COMMANDS.includes(id), false, id);
@@ -794,8 +892,7 @@ test('start this computer\'s shared history again: a project that opens is left 
   assert.equal(result.level, 'info');
   const aside = /set aside in (\.planning\/staff\/replica\.set-aside-\d{8}-\d{6})\//.exec(result.message)?.[1];
   assert.ok(aside, result.message);
-  assert.match(result.message, /nothing was deleted/);
-  assert.match(result.message, /One change this computer made was carried into the new one/);
+  says(result.message, ['nothing was deleted', 'One change this computer made was carried'], 'the Start Again result');
   assert.ok(result.message.includes(multi.START_AGAIN_HOW_BACK_TEXT));
   hasNotices(result.message, 'the Start Again result');
   assert.equal(readFileSync(path.join(first.root, aside, 'streams', project, ownFile), 'utf8'), `${lines[0]}\n`, 'the old folder is kept as it was');
@@ -835,7 +932,8 @@ test('an invitation whose file could not be saved is saved again from Remove on 
   stub.quickPickAnswers.push(`${multi.INVITE_SAVE_AGAIN_PREFIX}B. Example again`);
   stub.saveDialogAnswers.push(again);
   await run(C.remove);
-  assert.match(lastNotification().message, /The invitation for B\. Example is ready again\. Nothing was changed in the project\./);
+  assert.equal(lastNotification().level, 'info', lastNotification().message);
+  says(lastNotification().message, ['invitation for B. Example is ready again', 'Nothing was changed in the project'], 'the save-again result');
   const file = `${again}${INVITE_FILE_EXTENSION}`;
   assert.ok(existsSync(file));
   const after = state(first);
@@ -944,4 +1042,93 @@ test('a join request that could not be saved says running Join again is safe, an
   await admitBy(first, request, multi.SIX_WORDS_MATCH, path.join(first.out, 'welcome-j'));
   assert.match(lastNotification().message, /J\. Example/);
   assert.equal(multi.JOIN_NOT_SAVED_TEXT.includes('—'), false);
+});
+
+test('D-05: Join refuses a flow result that is ok but carries no file: it says so, saves nothing at the chosen place and shows no six words', async () => {
+  const first = await lead('join-no-file-lead');
+  const invitation = await inviteBy(first, 'K. Example');
+  const joiner = install('join-no-file');
+  use(joiner);
+  const target = path.join(joiner.out, 'join-empty');
+  stub.openDialogAnswers.push([invitation]);
+  stub.inputAnswers.push('K. Example');
+  stub.saveDialogAnswers.push(target);
+  const dialogs = stub.messageOptions.length;
+  const joined = mock.method(membershipModule, 'joinFromInvite', async () => ({ ok: true, message: 'Your join request is ready.', notices: [] }));
+  try {
+    await run(C.join);
+  } finally {
+    joined.mock.restore();
+  }
+  assert.equal(joined.mock.callCount(), 1, 'the flow ran');
+  const shown = lastNotification();
+  assert.equal(shown.level, 'warn', shown.message);
+  assert.ok(shown.message.startsWith(multi.JOIN_NO_FILE_TEXT), shown.message);
+  assert.equal(multi.JOIN_NO_FILE_TEXT, 'The join request was not made. Nothing was saved. Run Join Staff Project again.');
+  hasNotices(shown.message, 'the refusal');
+  assert.equal(existsSync(`${target}${JOIN_REQUEST_FILE_EXTENSION}`), false, 'nothing is written at the chosen place');
+  assert.deepEqual(readdirSync(joiner.out), [], 'nothing is written in the folder chosen either');
+  assert.equal(stub.messageOptions.slice(dialogs).some((entry) => entry.message.startsWith('Read these six words')), false, 'no six-word dialog');
+});
+
+test('D-06: saveSecretFile syncs the target\'s folder after the rename, when the target holds the text and no temporary copy is left beside it', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-secret-sync-'));
+  const target = path.join(dir, `invitation${INVITE_FILE_EXTENSION}`);
+  const secret = `secret-${'y'.repeat(40)}`;
+  const seen: Array<{ dir: string; text: string | undefined; others: string[] }> = [];
+  setFolderSyncProbe((synced) => {
+    seen.push({ dir: synced, text: existsSync(target) ? readFileSync(target, 'utf8') : undefined, others: readdirSync(dir).filter((name) => name !== path.basename(target)) });
+  });
+  try {
+    await multi.saveSecretFile(target, secret);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  const synced = seen.filter((item) => item.dir === dir);
+  assert.equal(synced.length, 1, `the target's folder is synced once: ${JSON.stringify(seen.map((item) => item.dir))}`);
+  assert.equal(synced[0].text, secret, 'the folder is synced after the rename, with the secret in place');
+  assert.deepEqual(synced[0].others, [], 'no temporary copy is left beside it when the folder is synced');
+  assert.equal(readFileSync(target, 'utf8'), secret);
+});
+
+test('D-03: Start Again reaches a project whose shared history folder is gone but was set aside before, says nothing was set aside and which folder it carried from, and the host forgets its project', async () => {
+  const first = await lead('start-again-gone');
+  await inviteBy(first, 'F. Example');
+  use(first);
+  // A first Start Again, as in the test above: the lead's base cell file loses its last line, so the store is refused rolled back.
+  const project = (JSON.parse(readFileSync(path.join(first.root, ...REPLICA_PROJECT_FILE.split('/')), 'utf8')) as { anchor: { project: string } }).anchor.project;
+  const streamDir = path.join(first.root, '.planning', 'staff', 'replica', 'streams', project);
+  const [ownFile] = readdirSync(streamDir);
+  const lines = readFileSync(path.join(streamDir, ownFile), 'utf8').split('\n');
+  await writeFile(path.join(streamDir, ownFile), `${lines[0]}\n`);
+  stub.messageAnswers.push(multi.START_AGAIN_ACTION);
+  await run(C.startHistoryAgain);
+  const aside = /set aside in (\.planning\/staff\/replica\.set-aside-\d{8}-\d{6}(?:-\d+)?)\//.exec(lastNotification().message)?.[1];
+  assert.ok(aside, lastNotification().message);
+  // Then the shared history folder on this computer is lost, project.json with it (moved out of the project, as a lost folder would be).
+  await rename(path.join(first.root, '.planning', 'staff', 'replica'), path.join(first.base, 'lost-replica'));
+  const dialogs = stub.messageOptions.length;
+  stub.messageAnswers.push(undefined);
+  await run(C.startHistoryAgain);
+  assert.equal(stub.messageOptions.length, dialogs + 1, `the command reaches the dialog instead of saying the folder holds no shared project: ${lastNotification().message}`);
+  const dialog = lastModal();
+  assert.equal(dialog.message, multi.START_AGAIN_QUESTION);
+  says(dialog.detail ?? '', ['is moved aside', 'when it is there', 'nothing is deleted'], 'the Start Again dialog');
+  const host = hosts.staffHostFor(first.root);
+  assert.ok(host);
+  const invalidated = mock.method(host, 'invalidateShared');
+  stub.messageAnswers.push(multi.START_AGAIN_ACTION);
+  try {
+    await run(C.startHistoryAgain);
+  } finally {
+    invalidated.mock.restore();
+  }
+  const result = lastNotification();
+  assert.equal(result.level, 'info', result.message);
+  says(result.message, ['Nothing was set aside', 'shared history folder was not there', 'Nothing was deleted', `The new one was made from ${aside}/.`, multi.START_AGAIN_HOW_BACK_TEXT], 'the Start Again result');
+  assert.equal(/set aside in /.test(result.message), false, result.message);
+  hasNotices(result.message, 'the Start Again result');
+  assert.equal(invalidated.mock.callCount(), 1, 'Start Again invalidates the staff host\'s shared project once (D-09)');
+  assert.ok(existsSync(path.join(first.root, ...REPLICA_PROJECT_FILE.split('/'))), 'the project record is back');
+  assert.ok((await rosterOf(first)).positions.length > 0, 'the project opens again');
 });
