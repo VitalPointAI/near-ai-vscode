@@ -637,13 +637,27 @@ function globTowardKeys(absolute: string): string {
 }
 
 /**
+ * Programs that walk a folder and read, pack or copy the files under it. `ls`, `du` and `tree` are not here: they show names and sizes, never a key.
+ * A walk from the project root or any folder above `.near-ai` is still not seen (it would refuse every `grep -r` of the project); SECURITY.md says so.
+ */
+const FOLDER_WALKERS: ReadonlySet<string> = new Set(['grep', 'egrep', 'fgrep', 'zgrep', 'rg', 'ag', 'ack', 'find', 'fd', 'fdfind', 'tar', 'zip', '7z', 'cpio', 'cp', 'rsync', 'scp']);
+
+/**
+ * Whether an absolute path is `.near-ai` or one of its state folders (`state`, `state.previous-*`, `state.adopt-*`): a folder that holds a key folder.
+ * The project settings folder `.planning/.near-ai` holds none, so it is not one.
+ */
+function holdsKeyFolder(absolute: string): boolean {
+  return /(?:^|\/)(?<!\/\.planning\/)\.near-ai(?:\/state(?:\.(?:previous|adopt)-[^/]*)?)?$/i.test(path.posix.normalize(absolute.replace(/\\/g, '/')).replace(/\/+$/, ''));
+}
+
+/**
  * Why a command line may not run because of the folder the shell is in, or a word that resolves into the key folder from there; undefined when
  * neither. This closes what a text check of the line alone misses: the persistent shell keeps its folder between commands, so `cd .near-ai/state`
  * then `cat keys/local.key` names no `.near-ai` in the second line. Every word is resolved against the shell's current folder and against each
  * folder a `cd` or `pushd` earlier in the same line moves to, with `{a,b}` braces expanded and globs read as reaching the key folder when they
  * could; the first SHELL_LINK_CHECKS of those are also resolved through links. A shell already inside the key folder runs nothing but a lone `cd`
- * out of it. Still a text check: a path built at run time (a variable, `$(...)`, string arithmetic, base64) or a recursive walk (`grep -r`, `find`,
- * `**`) from a folder above the key folder is not seen; see namesStateKeys.
+ * out of it. A program that walks folders (FOLDER_WALKERS) run on, or inside, `.near-ai` or a state folder is refused too. Still a text check: a path
+ * built at run time (a variable, `$(...)`, string arithmetic, base64) or a recursive walk from the project root or above is not seen; see namesStateKeys.
  */
 export async function shellReachesStateKeys(command: string, context: ToolContext): Promise<string | undefined> {
   const start = context.shell?.workingDirectory ?? context.root;
@@ -659,6 +673,10 @@ export async function shellReachesStateKeys(command: string, context: ToolContex
     return `The shell's current folder, ${displayPath(context.root, start)}, is inside the project's key folder (.near-ai/state/keys), which holds the key that encrypts this project's saved chats. Agents may not run anything there, in any approval mode. Leave it first with a command that is only a cd to another folder, such as cd "${context.root}".`;
   }
   const words = command.split(/[\s'"`;&|()<>=]+/).filter((word) => word && !word.startsWith('-') && !word.includes('$'));
+  // A program that walks a folder and reads or copies what is under it (gate follow-up): run on `.near-ai` or a state folder, the folders that hold the
+  // key folder, it reaches the key without naming it (`grep -r x .near-ai`, `tar c .near-ai/state`), and so does one started inside such a folder.
+  const walks = words.some((word) => FOLDER_WALKERS.has(path.basename(word)));
+  if (walks && holdsKeyFolder(start)) return stateKeysReason(`${command.split('\n')[0]} (run in ${displayPath(context.root, start) || '.'}, a search or copy through the folder that holds the key folder)`);
   const bases = [start];
   let linkChecks = 0;
   for (let index = 0; index < words.length; index += 1) {
@@ -670,6 +688,7 @@ export async function shellReachesStateKeys(command: string, context: ToolContex
           const from = base === context.root ? '' : ` (from ${displayPath(context.root, base) || '.'})`;
           return stateKeysReason(`${words[index]}${from}`);
         }
+        if (walks && holdsKeyFolder(globTowardKeys(absolute))) return stateKeysReason(`${words[index]} (a search or copy through the folder that holds the key folder)`);
       }
     }
     // A `cd` or `pushd` earlier in the line moves later words: they are read from that folder too.

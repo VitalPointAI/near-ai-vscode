@@ -398,3 +398,28 @@ test('fully-autonomous reads credential files without asking but asks before wri
     }
   }
 });
+
+// Gate follow-up: a program that walks a folder (grep -r, rg, find, tar, cp -r) run on `.near-ai` or a state folder reached the key without naming it.
+test('a search or copy through .near-ai or a state folder is refused, from the root and from inside; the same programs elsewhere, and ls, are not', async () => {
+  const context = await project();
+  const keys = path.join(context.root, '.near-ai', 'state', 'keys');
+  await mkdir(keys, { recursive: true });
+  await writeFile(path.join(keys, 'local.key'), 'secret-key-bytes');
+  await mkdir(path.join(context.root, '.planning', '.near-ai'), { recursive: true });
+  const forbidden = (command: string) => bashTool.forbidden?.(bashTool.parse({ command }), context);
+  try {
+    for (const command of ['grep -r secret .near-ai', 'grep -R secret .near-ai/state/', 'rg secret .near-ai', 'find .near-ai -type f -exec cat {} +', 'tar czf /tmp/x.tgz .near-ai/state',
+      'cp -r .near-ai/state backup', 'rsync -a ./.near-ai/ out/', 'zip -r x.zip .near-ai', 'grep -r secret .near-ai/state.previous-1', 'cd .near-ai && grep -r secret state', 'grep -r secret .near-ai/s*']) {
+      assert.match(String(await forbidden(command)), /names the project's key folder/, `${command} is refused`);
+    }
+    for (const command of ['grep -r secret src', 'rg secret', 'find . -name "*.ts"', 'ls -R .near-ai', 'ls .near-ai/state', 'grep -r name .planning/.near-ai', 'cat .near-ai/state/meta.json', 'tar czf x.tgz src']) {
+      assert.equal(await forbidden(command), undefined, `${command} is allowed`);
+    }
+    // A walker started inside the state folder walks it by default.
+    await context.shell.run('cd .near-ai/state', 5_000);
+    for (const command of ['grep -r secret', 'rg secret', 'find . -type f', 'grep -r secret .']) assert.match(String(await forbidden(command)), /names the project's key folder/, `${command} from .near-ai/state is refused`);
+    for (const command of ['cat meta.json', 'ls', 'ls threads']) assert.equal(await forbidden(command), undefined, `${command} from .near-ai/state is allowed`);
+  } finally {
+    context.shell.dispose();
+  }
+});

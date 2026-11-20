@@ -326,8 +326,10 @@ could, and links followed. So `cd .near-ai/state` followed by `cat keys/local.ke
 and a shell that ends up inside the key folder runs nothing but a `cd` out of it. The shell
 checks still read text, so they are a heuristic: a path built at run time from pieces that do
 not look like it (a variable, `$(...)`, string arithmetic, base64), a script that another
-script or `npm run` starts, or a directory walk (`grep -r`, `find`, `**`) from a folder above
-the key folder is not caught. There is no OS-level sandbox around the agent's
+script or `npm run` starts, or a directory walk (`grep -r`, `find`, `**`) from the project
+root or a folder above it is not caught. A walk that searches, packs or copies `.near-ai` or a
+state folder itself (`grep -r`, `rg`, `find`, `tar`, `zip`, `cp`, `rsync`, `scp`, named there or
+started inside it) is refused like a path into the key folder. There is no OS-level sandbox around the agent's
 shell.
 
 ### Your policy file and decision records
