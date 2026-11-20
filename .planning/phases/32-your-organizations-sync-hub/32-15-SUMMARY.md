@@ -78,7 +78,7 @@ Acceptance greps: `'staff-hub-file'` in signedPayload.ts = 2 (needed at least 1)
 **1. [Rule 1 - Bug] Literal em-dash characters in test assertions**
 - **Found during:** final checks after Task 3
 - **Issue:** The "no em-dash" checks in replicaHubFile.test.ts had the character written literally, which breaks the no-em-dash rule for repo files.
-- **Fix:** Wrote them as `—` escapes. The behaviour is the same.
+- **Fix:** Wrote them as `\u2014` escapes. The behaviour is the same.
 - **Commit:** e1d5e91c
 
 **2. [Rule 3 - Blocking] Acceptance grep counts**
