@@ -171,7 +171,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.deadlineMs === undefined ? {} : { deadlineMs: parts.deadlineMs }),
     ...(parts.readAnswer === undefined ? {} : { readAnswer: parts.readAnswer }),
   });
-  const events = new EventHub(parts.scheduler === undefined ? {} : { scheduler: parts.scheduler });
+  const events = new EventHub({ now, ...(parts.scheduler === undefined ? {} : { scheduler: parts.scheduler }) });
   const routes = createRoutes({
     store,
     cache,
