@@ -6,12 +6,20 @@
 //   products.jsonl    today's product ledger: for each product the steps that brought it where the shared projection shows it, chained from
 //                     LEDGER_GENESIS with entryDigest and signed by this device (purpose staff-ledger), and the signed head mark (staff-ledger-head)
 //                     in SecretStorage under the key today's host computes for the copy's folder. A product shown from the imported ledger (31-19) is
-//                     carried from that ledger's own entries; a product the shared project made is carried from the fold's versions family, in the
-//                     fold's total order, as the projection (31-11) reads it.
+//                     carried from that ledger's own entries: the whole ledger when this device holds it (the lead, in the legacy cell), otherwise
+//                     each cell import it holds (D-20), each product's lines in their original order. A product the shared project made is carried
+//                     from the fold's versions family, in the fold's total order, as the projection (31-11) reads it.
 //   decisions.jsonl   the imported decision log, each decision chained again and signed by this device (purpose staff-decision).
 //   calculator.jsonl  the imported calculator ledger, chained again and signed by this device (purpose staff-ledger).
 //   the wargame       the imported wargame ledger, byte for byte (it is unsigned and unchained).
 //   product files     each product's header as the copy's own ledger projects it, then its live text from the shared project.
+// The decision log, the calculator ledger and the wargame ledger are each carried only when this device holds its whole import, in the cell it was
+// sealed into (D-20); one in a cell this device does not hold is simply absent, never reported as broken.
+//
+// Only what this device holds (D-23): the copy is made from the streams this device folds, so a part of the project it holds no key for (a label cell
+// above its declared clearance, the lead-only legacy cell) leaves nothing in the copy, not even a name. When the roster names such a part, the
+// result's notices end with NOT_CLEARED_PARTS_TEXT, one fixed sentence that says neither which parts nor how many. A 0.4.35 preview project keeps its
+// products in the base cell, which every member holds, and is copied as before.
 //
 // Honest about who decided what (D-47; P-31-30):
 // - Today's ledger refuses a person whose device is not the signer (person-key), so a step a person took on another device is carried under this
@@ -44,6 +52,7 @@ import { apply, entryDigest, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_
 import type { LedgerEntry, LedgerHeadMark, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
 import { STAFF_SECTION_IDS } from '../../domain/staff/doctrine';
 import { CALC_LEDGER_FILE, parseCalcLedgerEntry, replayCalcLedger } from '../../domain/staff/logistics';
+import { epochAt } from '../../domain/replica/rosterCells';
 import { multiUserNoticeLines, REPLICA_DIR } from '../../domain/staff/multiUser';
 import { DECISION_LOG_FILE, DECISION_LOG_GENESIS, decisionDigest, parsePersonDecision, replayPersonDecisions } from '../../domain/staff/personDecisions';
 import type { PersonDecisionEntry } from '../../domain/staff/personDecisions';
@@ -53,8 +62,8 @@ import { staffProductPath } from '../../domain/staff/writeLimits';
 import { readWhole, writeIfUnchanged } from '../staffFiles';
 import { LEDGER_DIR, LEDGER_FILE, WARGAME_DIR, WARGAME_FILE } from '../staffHost';
 import { ledgerHeadKey, projectionInputOf } from './migrate';
-import { foldTexts, IMPORTED_PRODUCTS_LEDGER, importedFile, importOf, ledgerLinesOf, projectImportedLedger, projectProductFile, projectProductStates } from './projection';
-import type { ProjectionInput } from './projection';
+import { foldTexts, IMPORTED_PRODUCTS_LEDGER, importedFile, importOf, ledgerLinesOf, projectImportedLedger, projectProductFile, projectProductStates, replayScopedImport, scopedImportsOf } from './projection';
+import type { ProjectedProductState, ProjectionInput } from './projection';
 import { ReplicaProject, isProjectRefused } from './replicaProject';
 import type { ReplicaProjectDeps } from './replicaProject';
 
@@ -69,6 +78,20 @@ export const COPY_REFUSALS = {
   'project-refused': 'The copy was not made, because the shared project could not be opened on this computer. Nothing was written. Make the copy again once it opens; the reason it did not open follows.'
 } as const;
 export type CopyRefusal = keyof typeof COPY_REFUSALS;
+
+/**
+ * The notice a copy made on a device that does not hold every part of the project ends with (D-23): one fixed sentence, naming no part and no count,
+ * so the copy never tells a person below a cell that the cell exists or how many there are.
+ */
+export const NOT_CLEARED_PARTS_TEXT = 'Parts of this project you are not cleared for were not copied.';
+
+/** Why an imported ledger was not carried, in the words of the result's `left` list. */
+const LEFT_REASONS = {
+  'file-hash': 'its imported file does not match the hash the shared history records, so it was not carried',
+  unverified: 'its imported entries do not verify, so it was not carried',
+  'wargame-head': 'its imported file does not match the head the shared history records, so it was not carried',
+  'not-text': 'its imported bytes are not plain text, so it was not carried'
+} as const;
 
 /** The note a version whose decision is contested in the shared project carries in the copy (D-35). */
 export const CONTESTED_AT_COPY_TEXT = 'contested at copy time';
@@ -397,26 +420,47 @@ function chainProducts(drafts: readonly Draft[], signer: PayloadSigner, copier: 
 // own key, and the replay must end at the import's head and count (as projection.ts does for the product ledger).
 const AS_VERIFIED_AT_IMPORT: KeyStatusLookup = () => ({ state: 'active' });
 
-/** The product ledger drafts of every product: the imported ones from the import's own entries, then the rest from the fold, in the fold's order. */
-function productDrafts(input: ProjectionInput, contested: string[], differs: CopyDifference[]): Draft[] {
-  const shown = projectProductStates(input);
-  const imported = new Set([...shown].filter(([, state]) => state.imported !== undefined).map(([name]) => name));
-  const drafts: Draft[] = [];
-  if (imported.size > 0) {
-    const record = importOf(input.fold, IMPORTED_PRODUCTS_LEDGER);
-    const bytes = record === undefined ? undefined : importedFile(record, input.entries);
-    // projectProductStates shows a product as imported only when this replay holds; read again here for its entries.
-    const replay = record === undefined || bytes === undefined ? undefined : projectImportedLedger(record, bytes);
-    if (bytes !== undefined && replay !== undefined) {
-      for (const line of ledgerLinesOf(bytes)) {
-        const payload = isRecord(line) ? line.payload : undefined;
-        const entry = parseLedgerEntry(payload);
-        if (entry === undefined || !imported.has(entry.product)) continue;
-        const { v: _v, seq: _seq, prev: _prev, ...draft } = entry;
-        drafts.push(draft);
-      }
+/**
+ * The imported products' ledger lines this device holds (31-19, D-20), each taken only for the product the projection shows from that very import, in
+ * the ledger's own seq order: from the whole import when this device holds it (the lead, in the legacy cell; a Phase 31 import), otherwise from each
+ * cell import it holds. A cell import that does not verify is listed in `left` and nothing of it is carried; its products, which the projection then
+ * shows from the fold, are carried from the fold.
+ */
+function importedDrafts(input: ProjectionInput, shown: ReadonlyMap<string, ProjectedProductState>, left: Array<{ ledger: string; reason: string }>): Draft[] {
+  const importedBy = new Map<string, string>();
+  for (const [name, state] of shown) if (state.imported !== undefined) importedBy.set(name, state.imported.entry);
+  if (importedBy.size === 0) return [];
+  const lines: Array<{ seq: number; draft: Draft }> = [];
+  const take = (entryHash: string, bytes: Buffer): void => {
+    for (const line of ledgerLinesOf(bytes)) {
+      const entry = parseLedgerEntry(isRecord(line) ? line.payload : undefined);
+      if (entry === undefined || importedBy.get(entry.product) !== entryHash) continue;
+      const { v: _v, seq, prev: _prev, ...draft } = entry;
+      lines.push({ seq, draft });
+    }
+  };
+  const whole = importOf(input.fold, IMPORTED_PRODUCTS_LEDGER);
+  if (whole !== undefined) {
+    const bytes = importedFile(whole, input.entries);
+    // projectProductStates shows a product from the whole import only when this replay holds; read again here for its entries.
+    if (bytes !== undefined && projectImportedLedger(whole, bytes) !== undefined) take(whole.entry, bytes);
+  } else {
+    for (const scoped of scopedImportsOf(input.fold, IMPORTED_PRODUCTS_LEDGER)) {
+      const bytes = importedFile(scoped.record, input.entries);
+      if (bytes === undefined) { left.push({ ledger: IMPORTED_PRODUCTS_LEDGER, reason: LEFT_REASONS['file-hash'] }); continue; }
+      if (replayScopedImport(scoped.record, bytes) === undefined) { left.push({ ledger: IMPORTED_PRODUCTS_LEDGER, reason: LEFT_REASONS.unverified }); continue; }
+      take(scoped.record.entry, bytes);
     }
   }
+  // Each product lives in one import, its lines rising there; sorting on the seq keeps the order the original ledger had across imports too.
+  return lines.sort((a, b) => a.seq - b.seq).map((item) => item.draft);
+}
+
+/** The product ledger drafts of every product: the imported ones from their import's own entries, then the rest from the fold, in the fold's order. */
+function productDrafts(input: ProjectionInput, contested: string[], differs: CopyDifference[], left: Array<{ ledger: string; reason: string }>): Draft[] {
+  const shown = projectProductStates(input);
+  const imported = new Set([...shown].filter(([, state]) => state.imported !== undefined).map(([name]) => name));
+  const drafts = importedDrafts(input, shown, left);
   const products = ((input.fold.families.versions as ProductVersions[] | undefined) ?? []);
   const order = new Map<string, number>(input.fold.order.map((hash, index) => [hash, index]));
   const numbers = new Map<string, number>();
@@ -435,23 +479,34 @@ function productDrafts(input: ProjectionInput, contested: string[], differs: Cop
   return [...drafts, ...steps.map((step) => step.draft)];
 }
 
+/** Does the roster at its head name a part of the project (a cell) this device holds no key of (D-23)? Says nothing of which or how many. */
+async function lacksACell(project: ReplicaProject): Promise<boolean> {
+  const { roster } = await project.state();
+  const position = roster.positions.length - 1;
+  const held = new Set((await project.heldCells()).map((cell) => cell.cell));
+  return [...roster.cells.cells.keys()].some((cell) => epochAt(roster.cells, cell, position) !== undefined && !held.has(cell));
+}
+
 // ---- the other ledgers -----------------------------------------------------------------------------------------------------------------------------
 
-/** The bytes of an imported ledger when its import verifies with today's verifier and ends at the import's head and count, or why not. */
+/**
+ * The bytes of an imported ledger when its import verifies with today's verifier and ends at the import's head and count, or why not. Only a whole
+ * import is read (importOf): undefined when this device holds none, as when it sits in a cell this device does not hold.
+ */
 function verifiedImport(input: ProjectionInput, ledger: 'decisions' | 'calculator' | 'wargame'): { bytes: Buffer } | { reason: string } | undefined {
   const record = importOf(input.fold, ledger);
   if (record === undefined) return undefined;
   const bytes = importedFile(record, input.entries);
-  if (bytes === undefined) return { reason: 'its imported file does not match the hash the shared history records, so it was not carried' };
+  if (bytes === undefined) return { reason: LEFT_REASONS['file-hash'] };
   const lines = ledgerLinesOf(bytes);
   if (ledger === 'decisions') {
     const replay = replayPersonDecisions(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-decision', status: AS_VERIFIED_AT_IMPORT }));
-    if (replay.broken !== undefined || replay.head !== record.legacyHead || replay.entries !== record.count) return { reason: 'its imported entries do not verify, so it was not carried' };
+    if (replay.broken !== undefined || replay.head !== record.legacyHead || replay.entries !== record.count) return { reason: LEFT_REASONS.unverified };
   } else if (ledger === 'calculator') {
     const replay = replayCalcLedger(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status: AS_VERIFIED_AT_IMPORT }));
-    if (replay.broken !== undefined || replay.head !== record.legacyHead || replay.entries !== record.count) return { reason: 'its imported entries do not verify, so it was not carried' };
+    if (replay.broken !== undefined || replay.head !== record.legacyHead || replay.entries !== record.count) return { reason: LEFT_REASONS.unverified };
   } else if (createHash('sha256').update(bytes).digest('hex') !== record.legacyHead) {
-    return { reason: 'its imported file does not match the head the shared history records, so it was not carried' };
+    return { reason: LEFT_REASONS['wargame-head'] };
   }
   return { bytes };
 }
@@ -556,7 +611,7 @@ export async function makeSingleMachineCopy(sharedRoot: string, destination: str
     const files = new Map<string, string>();
 
     // The product ledger and the product files.
-    const ledger = chainProducts(productDrafts(input, contested, differs), signer, deps.copier, signedAt, differs);
+    const ledger = chainProducts(productDrafts(input, contested, differs, left), signer, deps.copier, signedAt, differs);
     let carried = ledger.carried;
     if (ledger.count > 0) files.set(`${LEDGER_DIR}/${LEDGER_FILE}`, `${ledger.lines.join('\n')}\n`);
     // The live texts as the projection reads them: a product whose text is known to be incomplete here is not copied with part of its text.
@@ -595,10 +650,13 @@ export async function makeSingleMachineCopy(sharedRoot: string, destination: str
       } else {
         const text = read.bytes.toString('utf8');
         // The unsigned wargame ledger comes across byte for byte, or not at all.
-        if (!Buffer.from(text, 'utf8').equals(read.bytes)) { left.push({ ledger: name, reason: 'its imported bytes are not plain text, so it was not carried' }); continue; }
+        if (!Buffer.from(text, 'utf8').equals(read.bytes)) { left.push({ ledger: name, reason: LEFT_REASONS['not-text'] }); continue; }
         files.set(`${WARGAME_DIR}/${WARGAME_FILE}`, text);
       }
     }
+
+    // The D-13 lines, then one fixed sentence when the roster names a part of the project this device holds no key of (D-23).
+    const notices = [...multiUserNoticeLines(), ...((await lacksACell(project)) ? [NOT_CLEARED_PARTS_TEXT] : [])];
 
     // The copy checks itself with today's verifier before anything is written: a ledger it cannot verify is never left behind.
     const trusted: KeyStatusLookup = (key) => (key.fingerprint === signer.fingerprint ? { state: 'active' } : { state: 'unknown' });
@@ -625,7 +683,7 @@ export async function makeSingleMachineCopy(sharedRoot: string, destination: str
       if (stored !== undefined) await takeBackMark(deps, key, stored);
       throw error;
     }
-    return { ok: true, destination: path.join(target, '.planning', 'staff'), written, carried, contested: contested.sort(), differs, left, notices: multiUserNoticeLines() };
+    return { ok: true, destination: path.join(target, '.planning', 'staff'), written, carried, contested: contested.sort(), differs, left, notices };
   } finally {
     await project.close();
   }
