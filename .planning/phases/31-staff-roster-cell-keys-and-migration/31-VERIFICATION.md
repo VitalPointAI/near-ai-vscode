@@ -165,7 +165,7 @@ human_verification:
     expected: "Staff Room, registry, product status and decision queues read as before; originals are in .planning/staff/legacy/; .planning/staff/replica/ is git-ignored; the second run says the project is already shared and changes nothing; Set Aside and the decision commands refuse with the Single-Machine Copy sentence."
     why_human: "Visual parity of the Staff Room against real data; tests compare data, not rendered views."
   - test: "With the setting off, reload, open the Command Palette and type 'Staff:'; then turn the setting on without reloading."
-    expected: "No multi-user command shows while off, no .planning/staff/replica folder or new secret appears; the eleven commands appear once the setting is on."
+    expected: "No multi-user command shows while off, no .planning/staff/replica folder or new secret appears; the twelve commands appear once the setting is on."
     why_human: "Command Palette when-clause rendering in the real host."
   - test: "Make a Single-Machine Copy of the shared project into an empty folder; open that folder and use the staff commands there."
     expected: "The copy's ledgers verify (no tamper warning), approvals by others read 'approved in the shared project by <name>, carried by <copier>', the shared project is unchanged, and the result names what was not copied (registers, calculator records, gate reports, proposals, settings, observations, events)."
@@ -264,7 +264,7 @@ Branch `feat/phase-31-staff-roster` at `72f5370e` (23 plans merged plus one inte
 | `src/staff/replica/migrate.ts`, `projection.ts` | migration and projections | VERIFIED | called by `makeMultiUserCommand`; projection read by `staffHost.ts` |
 | `src/staff/replica/membership.ts` | host roster flows | VERIFIED | called by every roster command |
 | `src/staff/replica/singleCopy.ts` | Make a Single-Machine Copy | VERIFIED | called by `singleCopyCommand` |
-| `src/services/staffMultiUserCommands.ts` | eleven gated commands | VERIFIED | registered from `registerStaffCommands` (staffCommands.ts line 69); package.json contributes the 11 commands with `config.nearAi.staff.multiUserPreview` when clauses; setting boolean, default false, application scope |
+| `src/services/staffMultiUserCommands.ts` | twelve gated commands | VERIFIED | registered from `registerStaffCommands` (staffCommands.ts line 69); package.json contributes the 11 commands with `config.nearAi.staff.multiUserPreview` when clauses; setting boolean, default false, application scope |
 
 ### Key Link Verification
 

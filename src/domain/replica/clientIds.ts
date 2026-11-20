@@ -33,10 +33,45 @@ export function slotOfClientId(clientId: number): number {
 }
 
 // The lowest client id of the slot that is not in `used`, or undefined when every counter of the slot is used. Throws on a slot out of range.
+// The lowest free counter is at most the number of the slot's ids in `used`, so the walk stops after used.size + 1 counters, never 2^20.
 export function nextClientId(slot: number, used: ReadonlySet<number>): number | undefined {
   const base = clientIdOf(slot, 0);
-  for (let counter = 0; counter < CLIENT_COUNTER_SPAN; counter += 1) {
+  const last = Math.min(CLIENT_COUNTER_SPAN - 1, used.size);
+  for (let counter = 0; counter <= last; counter += 1) {
     if (!used.has(base + counter)) return base + counter;
   }
   return undefined;
+}
+
+// Hands out client ids for many registrations without walking the slot each time: it keeps the ids seen as used and, per slot, the lowest counter
+// that may still be free. Ids are never given back, so that counter only moves up and each registration costs amortised constant time. The ids it
+// gives are exactly those nextClientId would give for the same used set.
+export class ClientIdAllocator {
+  private readonly used = new Set<number>();
+  private readonly lowest = new Map<number, number>();
+
+  public constructor(used: Iterable<number> = []) {
+    for (const id of used) this.used.add(id);
+  }
+
+  /** Records an id as used (one this device registered, or one read from the log). */
+  public markUsed(clientId: number): void {
+    this.used.add(clientId);
+  }
+
+  /** The lowest unused id of the slot, or undefined when the slot is full. Throws on a slot out of range. */
+  public next(slot: number): number | undefined {
+    const base = clientIdOf(slot, 0);
+    let counter = this.lowest.get(slot) ?? 0;
+    while (counter < CLIENT_COUNTER_SPAN && this.used.has(base + counter)) counter += 1;
+    this.lowest.set(slot, counter);
+    return counter < CLIENT_COUNTER_SPAN ? base + counter : undefined;
+  }
+
+  /** next(slot), recorded as used. */
+  public take(slot: number): number | undefined {
+    const id = this.next(slot);
+    if (id !== undefined) this.used.add(id);
+    return id;
+  }
 }

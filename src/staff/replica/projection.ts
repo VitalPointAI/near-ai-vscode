@@ -494,11 +494,20 @@ export interface ProjectionWrite {
   readonly left: Array<{ path: string; reason: string }>;
 }
 
-/** The live text of each product in the fold's doc family, by product name (the first stream holding the name, as for the products). */
-function foldTexts(fold: FoldResult): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const item of (fold.families.doc as ProductTextOutput[] | undefined) ?? []) if (!out.has(item.product)) out.set(item.product, item.text);
-  return out;
+/**
+ * The live text of each product in the fold's doc family, by product name (the first stream holding the name, as for the products). A product whose
+ * output is known not to be its whole text (`problem`) has no live text here: it is named in `incomplete` so its file is left alone, never written
+ * over with part of its text.
+ */
+export function foldTexts(fold: FoldResult): { texts: Map<string, string>; incomplete: Map<string, string> } {
+  const texts = new Map<string, string>();
+  const incomplete = new Map<string, string>();
+  for (const item of (fold.families.doc as ProductTextOutput[] | undefined) ?? []) {
+    if (texts.has(item.product) || incomplete.has(item.product)) continue;
+    if (item.problem !== undefined) incomplete.set(item.product, item.problem);
+    else texts.set(item.product, item.text);
+  }
+  return { texts, incomplete };
 }
 
 /** Why writeProjections left a file as it was, in the words a person reads (the `reason` of a `left` item). */
@@ -506,7 +515,8 @@ export const PROJECTION_LEFT_REASONS = {
   unreadable: 'it cannot be read',
   'not-imported': 'it holds something other than the imported ledger, so it was left as it is',
   'text-changed': 'its text is not the text in the shared history (it was edited), so it was left as it is with the edit in it',
-  raced: 'it changed while it was being written, so the change there stands'
+  raced: 'it changed while it was being written, so the change there stands',
+  'text-incomplete': 'its text in the shared history could not be read whole on this computer, so it was left as it is rather than written with part of its text'
 } as const;
 
 /**
@@ -543,8 +553,9 @@ function productBodyOf(text: string): string {
  */
 export async function writeProjections(root: string, input: ProjectionInput, passthrough: readonly PassthroughLedger[] = []): Promise<ProjectionWrite> {
   const out: ProjectionWrite = { written: [], unchanged: [], left: [] };
-  const texts = foldTexts(input.fold);
+  const { texts, incomplete } = foldTexts(input.fold);
   for (const [product, item] of projectAll(input)) {
+    if (incomplete.has(product)) { out.left.push({ path: staffProductPath(item.state.record.section, product), reason: PROJECTION_LEFT_REASONS['text-incomplete'] }); continue; }
     const body = texts.get(product);
     if (body === undefined) continue;
     // A product with no text in the fold and no file on disk stays without one, as today's host leaves a product file that is gone.

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { UNATTRIBUTED_WRITER, summariseAuthors } from '../domain/replica/attribution';
-import { applyRemote, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
+import { applyRemote, applyState, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
 import type { Actor, Dep, SealedBlob } from '../domain/replica/entry';
 import * as stateKeys from '../domain/state/keys';
@@ -12,7 +12,9 @@ import { MAX_STATE_BYTES, MAX_UPDATE_BYTES, validateDocData } from '../domain/re
 import { DEFAULT_REDUCERS } from '../domain/replica/reducers';
 import type { AnyReducer } from '../domain/replica/reducers';
 import type { ReplicaContext } from '../domain/replica/rosterView';
-import { COMPACTION_WINDOW, MAX_PRODUCTS_PER_STREAM, MAX_REGISTRATIONS_PER_WRITER_PRODUCT, textReducer } from '../domain/replica/textFold';
+import { COMPACTION_WINDOW, MAX_PRODUCTS_PER_STREAM, MAX_REGISTRATIONS_PER_WRITER_PRODUCT, TEXT_OUTPUT_PROBLEMS, textReducer } from '../domain/replica/textFold';
+import { foldTexts } from '../staff/replica/projection';
+import type { FoldResult } from '../domain/replica/fold';
 import type { ProductTextOutput, TextState } from '../domain/replica/textFold';
 import { createWorld, permutations, rng, updateData } from './helpers/replicaWorld';
 import type { Written, World } from './helpers/replicaWorld';
@@ -721,7 +723,7 @@ const ivOf = (blob: SealedBlob): string => Buffer.from(blob.bytes, 'base64url').
 
 // One writer types three pieces of 120 000 characters (each update under the update limit), and C compacts them with blob plaintext `state`
 // (the honest full state when absent). Returns the entries, the blob and the honest state.
-function bigScene(state?: Uint8Array): { world: World; items: Written[]; entry: Written; blob: SealedBlob; honest: Uint8Array } {
+function bigScene(state?: Uint8Array, withDeps = true): { world: World; items: Written[]; entry: Written; blob: SealedBlob; honest: Uint8Array } {
   const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-cccc', devices: ['C'] }] });
   const a = world.editor('A', PRODUCT, 11);
   const reg = a.register();
@@ -732,7 +734,7 @@ function bigScene(state?: Uint8Array): { world: World; items: Written[]; entry: 
   const honest = encodeFullState(fold);
   const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(state ?? honest));
   world.blobs.set(blob.hash, blob);
-  const entry = world.write('C', { kind: 'doc.compact', deps: pieces, data: { product: PRODUCT, covers: pieces.map(dep), stateVector: stateVectorOf(fold), textHash: textHashOf(docText(fold)), stateBlob: blob.hash } });
+  const entry = world.write('C', { kind: 'doc.compact', deps: withDeps ? pieces : [], data: { product: PRODUCT, covers: pieces.map(dep), stateVector: stateVectorOf(fold), textHash: textHashOf(docText(fold)), stateBlob: blob.hash } });
   return { world, items: [reg, ...pieces, entry], entry, blob, honest };
 }
 
@@ -759,6 +761,43 @@ test('31-03 handoff: an honest compaction state over the 256 KiB update limit an
   // The spy sees this blob looked up and opened, so the refusals below that show no open are meaningful.
   assert.ok(looked.includes(scene.blob.hash));
   assert.ok(opened.includes(ivOf(scene.blob)));
+});
+
+test('a provisional compaction state over the 256 KiB update limit and under the 2 MiB state limit renders its whole text: the fold output, its attribution and the projection reader', () => {
+  const scene = bigScene(undefined, false);
+  assert.ok(scene.honest.length > MAX_UPDATE_BYTES && scene.honest.length < MAX_STATE_BYTES, `state of ${scene.honest.length} bytes`);
+  // The joiner holds the registration and the compaction but none of the updates it covers: the state is loaded provisionally.
+  const [reg] = scene.items;
+  const joiner = foldEntries(sealed([reg, scene.entry]), scene.world.ctx());
+  assert.deepEqual([joiner.refused, joiner.held], [[], []]);
+  const product = productOf(joiner);
+  assert.deepEqual(product.compactions, [{ entry: scene.entry.hash, verified: false }]);
+  // Before the fix the provisional state went through the per-update cap and the text came out empty with no refusal.
+  assert.equal(product.text.length, 360_000);
+  assert.equal(product.textHash, textHashOf(product.text));
+  assert.equal(product.problem, undefined);
+  assert.equal(product.incomplete, false);
+  assert.equal(product.attribution.reduce((sum, span) => sum + span.length, 0), 360_000);
+  // The projection and the single-machine copy read the same text.
+  const { texts, incomplete } = foldTexts(joiner);
+  assert.equal(texts.get(PRODUCT)?.length, 360_000);
+  assert.equal(incomplete.size, 0);
+  // The two apply paths keep their own limits: the whole state applies as a state and is refused as one incoming update.
+  assert.equal(applyUpdate(createFoldDoc(), scene.honest), false);
+  const doc = createFoldDoc();
+  assert.equal(applyState(doc, scene.honest), true);
+  assert.equal(docText(doc).length, 360_000);
+});
+
+test('a product whose output is known to be incomplete is never handed to a reader as its text: foldTexts names it with its reason instead', () => {
+  const fold = { families: { doc: [
+    { product: 'whole', text: 'all of it' },
+    { product: 'partial', text: 'part of', problem: TEXT_OUTPUT_PROBLEMS['compaction-not-applied'] }
+  ] } } as unknown as FoldResult;
+  const { texts, incomplete } = foldTexts(fold);
+  assert.deepEqual([...texts], [['whole', 'all of it']]);
+  assert.deepEqual([...incomplete], [['partial', TEXT_OUTPUT_PROBLEMS['compaction-not-applied']]]);
+  for (const text of Object.values(TEXT_OUTPUT_PROBLEMS)) assert.ok(text.endsWith('.') && !text.includes('\u2014'));
 });
 
 test('new defect 1: a compaction state blob over MAX_STATE_BYTES is refused too-large from its length, looked up but never decrypted', () => {

@@ -9,7 +9,7 @@ import { attributeText } from './attribution';
 import type { AttributionProof, AuthorSpan } from './attribution';
 import { blobBytesHash, openBlob } from './entry';
 import type { Actor, Dep } from './entry';
-import { applyUpdate, attributionRuns, buildFromCompaction, cloneDoc, createFoldDoc, docText, inspectState, inspectUpdate, pendingState, stateVectorOf, textHashOf } from './doc';
+import { applyState, applyUpdate, attributionRuns, buildFromCompaction, cloneDoc, createFoldDoc, docText, inspectState, inspectUpdate, pendingState, stateVectorOf, textHashOf } from './doc';
 import { MAX_STATE_BYTES } from './kindSchemas/doc';
 import { sealedBlobWithin } from './updateGuard';
 import type { CrdtDoc, InspectError } from './doc';
@@ -69,6 +69,8 @@ export interface ProductTextOutput {
   // True while the text lacks something: an update that starts above the next expected clock, or structs the document cannot place yet.
   incomplete: boolean;
   compactions: CompactionRecord[];
+  // Set only when the output is known not to be the whole text (TEXT_OUTPUT_PROBLEMS), so a reader can say why instead of showing less in silence.
+  problem?: string;
 }
 
 export const TEXT_REFUSALS = {
@@ -182,10 +184,13 @@ function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData, v
   return { status: 'applied' };
 }
 
-// The document rebuilt from the accepted updates, used when applying one left it in an unknown state.
+// The document rebuilt from the accepted updates, used when applying one left it in an unknown state. Every one of them was applied once already
+// under the same per-update limit, so a failure here is a broken invariant: it throws with the reason instead of leaving text out silently.
 function rebuilt(accepted: readonly AcceptedUpdate[]): CrdtDoc {
   const doc = createFoldDoc();
-  for (const item of accepted) applyUpdate(doc, item.update);
+  for (const item of accepted) {
+    if (!applyUpdate(doc, item.update)) throw new Error(`An accepted text update (${item.hash}) could not be applied again, so the product text cannot be rebuilt.`);
+  }
   return doc;
 }
 
@@ -312,14 +317,21 @@ function applyCompaction(state: TextState, entry: VerifiedEntry, data: CompactDa
 }
 
 // The document a product's output is read from: the fold document, with the newest unverified compaction merged in. Updates the log holds come
-// first, so where a compaction and the log disagree about a position the log wins.
-function outputDoc(product: ProductText): CrdtDoc {
+// first, so where a compaction and the log disagree about a position the log wins. The compaction is a whole state admitted under the state
+// limit (applyCompaction built it with buildFromCompaction), so it is applied under that limit too, never the per-update cap. If it still cannot be
+// applied, the output says so (problem, and incomplete) instead of showing the log's text as if it were the whole product.
+function outputDoc(product: ProductText): { doc: CrdtDoc; problem?: string } {
   const newest = product.provisional[product.provisional.length - 1];
-  if (newest === undefined) return product.doc ?? empty();
+  if (newest === undefined) return { doc: product.doc ?? empty() };
   const merged = product.doc === undefined ? createFoldDoc() : cloneDoc(product.doc);
-  applyUpdate(merged, newest.update);
-  return merged;
+  if (applyState(merged, newest.update)) return { doc: merged };
+  return { doc: product.doc ?? empty(), problem: TEXT_OUTPUT_PROBLEMS['compaction-not-applied'] };
 }
+
+// Why a product's output text is not the whole text it should be. Plain sentences, no dash.
+export const TEXT_OUTPUT_PROBLEMS = {
+  'compaction-not-applied': 'The newest compaction of this product was accepted but could not be applied, so only the text from its updates is shown and the product is marked incomplete.'
+} as const;
 
 // Who may be named as the author of text that only an unverified compaction holds (CR-01): the compaction's writer, for client ids registered to
 // it, and nobody else. The proof is how far the accepted updates reach for each client; everything above that is the compaction's word alone.
@@ -350,7 +362,7 @@ export const textReducer: FamilyReducer<TextState, ProductTextOutput[]> = {
     return [...state.products.values()]
       .sort((a, b) => (a.stream === b.stream ? (a.product < b.product ? -1 : a.product > b.product ? 1 : 0) : a.stream < b.stream ? -1 : 1))
       .map((product) => {
-        const doc = outputDoc(product);
+        const { doc, problem } = outputDoc(product);
         const text = docText(doc);
         const stateVector = stateVectorOf(doc);
         const reached = new Map(stateVector);
@@ -364,8 +376,9 @@ export const textReducer: FamilyReducer<TextState, ProductTextOutput[]> = {
           accepted: product.accepted.map((update) => update.hash),
           attribution: attributeText(attributionRuns(doc), product.registrations, attributionProof(product)),
           deletions: [...product.deletions],
-          incomplete: pendingState(doc) || product.gaps.some((gap) => (reached.get(gap.client) ?? 0) < gap.clock),
-          compactions: [...product.compactions]
+          incomplete: problem !== undefined || pendingState(doc) || product.gaps.some((gap) => (reached.get(gap.client) ?? 0) < gap.clock),
+          compactions: [...product.compactions],
+          ...(problem === undefined ? {} : { problem })
         };
       });
   },

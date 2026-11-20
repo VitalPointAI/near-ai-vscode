@@ -62,6 +62,13 @@ export function applyUpdate(doc: CrdtDoc, bytes: Uint8Array): boolean {
   return applyWithin(doc, bytes, MAX_UPDATE_BYTES);
 }
 
+// Applies a whole state already admitted under its own limit (a compaction or snapshot state checked by inspectState or buildFromCompaction):
+// MAX_STATE_BYTES and the skim, never the per-update cap, which is only for incoming writer updates. False on any failure; callers that hold an
+// admitted state treat false as a broken invariant and say so, never as empty text.
+export function applyState(doc: CrdtDoc, bytes: Uint8Array): boolean {
+  return applyWithin(doc, bytes, MAX_STATE_BYTES);
+}
+
 export function docText(doc: CrdtDoc): string {
   return doc.getText(TEXT_NAME).toString();
 }

@@ -2,7 +2,7 @@
 // agent seat (WR-01, D-12, default deny).
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLIENT_COUNTER_BITS, CLIENT_COUNTER_SPAN, MAX_SLOT, clientIdOf, isSlot, nextClientId, slotOfClientId } from '../domain/replica/clientIds';
+import { CLIENT_COUNTER_BITS, CLIENT_COUNTER_SPAN, ClientIdAllocator, MAX_SLOT, clientIdOf, isSlot, nextClientId, slotOfClientId } from '../domain/replica/clientIds';
 import { MAX_CLIENT_ID } from '../domain/replica/kindSchemas/doc';
 import { ROSTER_ROLE_PATTERNS, staticRosterView } from '../domain/replica/rosterView';
 import type { StaticRosterSpec } from '../domain/replica/rosterView';
@@ -294,4 +294,53 @@ test('invariant: in every fold whose roster names client id owners, every accept
       for (const registration of product.registrations) assert.equal(slotOfClientId(registration.clientId), slotOf.get(registration.writer), `seed ${seed}: registration`);
     }
   }
+});
+
+// The walk nextClientId made before: every counter of the slot from 0.
+function naiveNext(slot: number, used: ReadonlySet<number>): number | undefined {
+  const base = clientIdOf(slot, 0);
+  for (let counter = 0; counter < CLIENT_COUNTER_SPAN; counter += 1) if (!used.has(base + counter)) return base + counter;
+  return undefined;
+}
+
+test('nextClientId and ClientIdAllocator give exactly the ids the full walk gave, for random used sets that mix slots, gaps and other ids', () => {
+  let seed = 7;
+  const random = (): number => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for (let round = 0; round < 200; round += 1) {
+    const used = new Set<number>();
+    const size = Math.floor(random() * 60);
+    for (let index = 0; index < size; index += 1) {
+      const slot = 1 + Math.floor(random() * 3);
+      used.add(random() < 0.7 ? clientIdOf(slot, Math.floor(random() * 40)) : Math.floor(random() * 5000));
+    }
+    for (const slot of [1, 2, 3]) {
+      const expected = naiveNext(slot, used);
+      assert.equal(nextClientId(slot, used), expected, `round ${round} slot ${slot}`);
+      assert.equal(new ClientIdAllocator(used).next(slot), expected, `allocator round ${round} slot ${slot}`);
+    }
+  }
+  // A full slot gives undefined both ways; a slot out of range throws both ways.
+  const full = new Set(Array.from({ length: CLIENT_COUNTER_SPAN }, (_, counter) => clientIdOf(9, counter)));
+  assert.equal(nextClientId(9, full), undefined);
+  assert.equal(new ClientIdAllocator(full).next(9), undefined);
+  assert.throws(() => new ClientIdAllocator().next(0), /slot/);
+});
+
+test('many registrations stay fast: 200 000 ids taken one after another in one slot, each the lowest free one, with ids marked used out of order', () => {
+  const allocator = new ClientIdAllocator();
+  // Ids used by the log ahead of time, out of order: the allocator skips them.
+  for (const counter of [5, 3, 4]) allocator.markUsed(clientIdOf(2, counter));
+  const started = Date.now();
+  const taken: number[] = [];
+  for (let index = 0; index < 200_000; index += 1) taken.push(allocator.take(2) as number);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 2000, `200 000 registrations took ${elapsed} ms`);
+  assert.deepEqual(taken.slice(0, 6), [0, 1, 2, 6, 7, 8].map((counter) => clientIdOf(2, counter)));
+  assert.equal(new Set(taken).size, taken.length, 'no id is given twice');
+  assert.equal(taken[taken.length - 1], clientIdOf(2, 200_002));
+  // The same answer the bounded walk gives for the same used set.
+  const used = new Set([...taken, clientIdOf(2, 3), clientIdOf(2, 4), clientIdOf(2, 5)]);
+  assert.equal(allocator.next(2), nextClientId(2, used));
+  // Another slot starts at its own counter 0.
+  assert.equal(allocator.take(3), clientIdOf(3, 0));
 });

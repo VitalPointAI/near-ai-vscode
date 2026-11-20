@@ -37,7 +37,6 @@ import { signPayload, verifyPayload } from '../../domain/team/signedPayload';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
 import { isRecord } from '../../domain/team/validate';
 import type { RosterView } from '../../domain/replica/rosterView';
-import type { ProductTextOutput } from '../../domain/replica/textFold';
 import { actorForTransition, personForTransition } from '../../domain/replica/versions';
 import type { ProductVersions, VersionAct, VersionView } from '../../domain/replica/versions';
 import { apply, entryDigest, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash, replayLedger } from '../../domain/staff/ledger';
@@ -53,7 +52,7 @@ import { staffProductPath } from '../../domain/staff/writeLimits';
 import { readWhole, writeIfUnchanged } from '../staffFiles';
 import { LEDGER_DIR, LEDGER_FILE, WARGAME_DIR, WARGAME_FILE } from '../staffHost';
 import { ledgerHeadKey, projectionInputOf } from './migrate';
-import { IMPORTED_PRODUCTS_LEDGER, importedFile, importOf, ledgerLinesOf, projectImportedLedger, projectProductFile, projectProductStates } from './projection';
+import { foldTexts, IMPORTED_PRODUCTS_LEDGER, importedFile, importOf, ledgerLinesOf, projectImportedLedger, projectProductFile, projectProductStates } from './projection';
 import type { ProjectionInput } from './projection';
 import { ReplicaProject, isProjectRefused } from './replicaProject';
 import type { ReplicaProjectDeps } from './replicaProject';
@@ -343,13 +342,6 @@ function foldSteps(product: ProductVersions, input: ProjectionInput, order: Read
   return steps;
 }
 
-/** The live text of each product in the fold's doc family, by product name (the first stream holding the name, as the projection does). */
-function foldTexts(input: ProjectionInput): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const item of (input.fold.families.doc as ProductTextOutput[] | undefined) ?? []) if (!out.has(item.product)) out.set(item.product, item.text);
-  return out;
-}
-
 interface ProductLedger {
   readonly lines: string[];
   readonly products: ReadonlyMap<string, ProductState>;
@@ -540,7 +532,9 @@ export async function makeSingleMachineCopy(sharedRoot: string, destination: str
     const ledger = chainProducts(productDrafts(input, contested, differs), signer, deps.copier, signedAt, differs);
     let carried = ledger.carried;
     if (ledger.count > 0) files.set(`${LEDGER_DIR}/${LEDGER_FILE}`, `${ledger.lines.join('\n')}\n`);
-    const texts = foldTexts(input);
+    // The live texts as the projection reads them: a product whose text is known to be incomplete here is not copied with part of its text.
+    const { texts, incomplete } = foldTexts(input.fold);
+    for (const product of incomplete.keys()) differs.push({ product, reason: 'Its text in the shared project could not be read whole on this computer, so its file was not copied.' });
     for (const [product, state] of ledger.products) {
       const body = texts.get(product);
       if (body === undefined) continue;

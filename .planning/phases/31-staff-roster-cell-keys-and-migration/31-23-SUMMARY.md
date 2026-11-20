@@ -16,8 +16,8 @@ requires:
     provides: makeSingleMachineCopy, COPY_REFUSALS, CONTESTED_AT_COPY_TEXT, carriedApprovalName
 provides:
   - "src/services/staffMultiUserCommands.ts: registerStaffMultiUserCommands, MULTI_USER_PREVIEW_SETTING, MULTI_USER_PREVIEW_OFF_TEXT, multiUserPreviewOn, shownRefusal, REFUSAL_NEXT_STEPS, SIX_WORDS_MATCH, SIX_WORDS_DIFFER, the texts each handler shows, one handler per command"
-  - "src/domain/staff/commands.ts: STAFF_MULTI_USER_COMMANDS (eleven ids); PERSON_DECISION_COMMANDS unchanged"
-  - "package.json: nearAi.staff.multiUserPreview (boolean, default false, application scope), eleven Staff: commands under NEAR AI, eleven commandPalette entries behind config.nearAi.staff.multiUserPreview"
+  - "src/domain/staff/commands.ts: STAFF_MULTI_USER_COMMANDS (twelve ids: eleven from this plan, plus startHistoryAgain added by review fix MJ-08); PERSON_DECISION_COMMANDS unchanged"
+  - "package.json: nearAi.staff.multiUserPreview (boolean, default false, application scope), twelve Staff: commands under NEAR AI (eleven from this plan, plus Start This Computer's Shared History Again from review fix MJ-08), twelve commandPalette entries behind config.nearAi.staff.multiUserPreview"
   - "src/services/staffCommands.ts: registers the multi-user commands, passes { globalStorageDir, identityDir } as the staff hosts' replica options, and refuses decide, Decide a PIR and Set Aside in a shared project before any dialog"
   - "src/staff/watchHost.ts: every standing watch change refused with SHARED_PROJECT_REFUSAL in a shared project before the register is written"
   - "src/test/helpers/vscodeStub.ts: showSaveDialog with saveDialogAnswers and saveDialogRequests"
@@ -83,11 +83,11 @@ completed: 2026-11-20
 
 # Phase 31 Plan 23: Multi-user staff commands behind the preview setting Summary
 
-**Eleven Staff: commands now run every Phase 31 flow, behind `nearAi.staff.multiUserPreview` (off by default). They are hidden and inert until a person turns the setting on, and they load no replica module until one is run. A person is admitted only when the lead picks "The six words match". Every confirmation and result shows the three declared-not-verified notices, and every refusal says what to do next.**
+**Twelve Staff: commands now run every Phase 31 flow (eleven from this plan; the twelfth, Start This Computer's Shared History Again, came with review fix MJ-08), behind `nearAi.staff.multiUserPreview` (off by default). They are hidden and inert until a person turns the setting on, and they load no replica module until one is run. A person is admitted only when the lead picks "The six words match". Every confirmation and result shows the three declared-not-verified notices, and every refusal says what to do next.**
 
 ## Accomplishments
 
-- **The gate (D-36).** `nearAi.staff.multiUserPreview` is a boolean, default false, application scope, with a plain description. All eleven commands are registered always and hidden from the Command Palette with `when: config.nearAi.staff.multiUserPreview`. Each handler checks the setting at run time. While it is off, a handler shows `MULTI_USER_PREVIEW_OFF_TEXT` once and does nothing else. The test shows no replica module is loaded, and no file, folder or secret is made, global storage included.
+- **The gate (D-36).** `nearAi.staff.multiUserPreview` is a boolean, default false, application scope, with a plain description. All twelve commands are registered always and hidden from the Command Palette with `when: config.nearAi.staff.multiUserPreview`. Each handler checks the setting at run time. While it is off, a handler shows `MULTI_USER_PREVIEW_OFF_TEXT` once and does nothing else. The test shows no replica module is loaded, and no file, folder or secret is made, global storage included.
 - **Make This Staff Project Multi-User.** The command verifies the four ledgers with today's checks before it asks anything. A broken ledger is refused with today's wording and the Set Aside way out. The modal lists each ledger and its count, says where the history goes and that the originals are kept in `.planning/staff/legacy/`, and shows the notices. The command passes the project's real label map hash. The result names the next step.
 - **Membership.**
   - Invite asks name, seat (slug), roles and declared clearance, then where to save the `.near-staff-invite` file. The file is saved outside the project and owner-only. The result says the invitation works once and gives its 7-day expiry.
@@ -151,7 +151,7 @@ The single failure is a pre-existing flaky test (see Deferred Issues). It passed
 
 | Check | Result | Required |
 |-------|--------|----------|
-| `nearAi.staff.multiUserPreview` in package.json | 12 | at least 12 |
+| `nearAi.staff.multiUserPreview` in package.json | 13 (the setting itself and one `when` clause for each of the twelve commands) | at least 13 |
 | `^import .*staff/replica/` in staffMultiUserCommands.ts | 0 | 0 |
 | `The six words match` in staffMultiUserCommands.ts | 3 | at least 1 |
 | `### People and clearances are declared by the staff lead` in SECURITY.md | 1 | 1 |
@@ -171,7 +171,7 @@ staffMultiUserCommands has 19 tests (at least 3, then 14, required). staffMultiU
 - **Diff scope against c1dba334.**
   - `git diff --name-only c1dba334 -- src`: 91 files. Every one is named in a phase plan except `src/staff/watchHost.ts` and `src/test/staffWatches.test.ts`, which are this plan's documented carry-over fix.
   - Under `src/domain/staff/`, only `commands.ts` and `multiUser.ts` changed.
-  - `git diff c1dba334 -- package.json`: 105 added lines and 0 removed. They are only the setting, the eleven commands and their eleven palette entries.
+  - `git diff c1dba334 -- package.json`: 114 added lines and 0 removed (105 from this plan, 9 from review fix MJ-08). They are only the setting, the twelve commands and their twelve palette entries.
 
 ## TDD Gate Compliance
 
