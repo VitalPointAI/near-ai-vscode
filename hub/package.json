@@ -1,0 +1,26 @@
+{
+  "name": "near-ai-hub",
+  "version": "0.1.0-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Your organization's sync hub for shared staff projects. Not the extension and not the messaging relay.",
+  "engines": {
+    "node": ">=26.13.1 <27"
+  },
+  "scripts": {
+    "build": "node scripts/check-node.mjs && node scripts/build.mjs",
+    "lint": "node scripts/check-node.mjs && tsc -p tsconfig.json",
+    "test": "node scripts/check-node.mjs && node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/*.test.js",
+    "start": "node dist/bin.mjs",
+    "test:container": "node scripts/check-node.mjs && node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/container/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  },
+  "allowScripts": {
+    "esbuild": false
+  }
+}
