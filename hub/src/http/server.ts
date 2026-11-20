@@ -47,12 +47,19 @@ export interface RequestTiming {
   graceMs: number;
   /** The slowest upload the hub waits for: 16 KiB a second (128 kbit/s), so an 8 MiB blob may take about eight and a half minutes. */
   minBytesPerSecond: number;
+  /**
+   * How long an idle connection stays open between requests (WR-04). A session belongs to its connection, so this is how long a device keeps its
+   * session between exchanges: 2 minutes, well inside the 15 minute token, so a site behind one address does not spend its session bucket (D-39)
+   * on a new session per exchange. A connection that never opened a session is still closed at the authentication deadline.
+   */
+  keepAliveMs: number;
 }
 
 export const REQUEST_TIMING: Readonly<RequestTiming> = Object.freeze({
   headersMs: 5000,
   graceMs: 10_000,
   minBytesPerSecond: 16 * 1024,
+  keepAliveMs: 120_000,
 });
 
 /** The largest body any route takes. */
@@ -233,7 +240,7 @@ export function createHubServer(options: HubServerOptions): https.Server {
 
   server.headersTimeout = timing.headersMs;
   server.requestTimeout = requestBackstopMs(timing);
-  server.keepAliveTimeout = 5000;
+  server.keepAliveTimeout = timing.keepAliveMs;
   server.maxHeadersCount = 50;
   return server;
 }

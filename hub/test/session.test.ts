@@ -342,10 +342,20 @@ test('deadline: an enrolment still uploading when the deadline passes is answere
     assert.equal(await upload.closesWithin(2000), true, 'a connection without a session stayed open after its deadline');
   }));
 
+test('keep-alive: a session\'s connection idle for 6 seconds is still open and its token still works, so a device does not open a session per exchange', { timeout: 20_000 }, () =>
+  withHub({}, async (hub) => {
+    const { world } = await enrolled(hub);
+    const session = await hub.openSession(world.lead, world.project);
+    assert.equal((await session.connection.get(headsOf(world.project), session.token)).status, 200);
+    assert.equal(await session.connection.closesWithin(6000), false, 'the hub closed an idle authenticated connection within 6 seconds');
+    assert.equal((await session.connection.get(headsOf(world.project), session.token)).status, 200);
+  }));
+
 // ---- Limits before signatures (D-39, Pitfall 7) ----
 
 test('429: the eleventh session call from one address inside a minute is refused with Retry-After before the answer is checked', () =>
-  withHub({ limits: { sessionPerMinute: 10 } }, async (hub) => {
+  // Five sessions a minute: ten calls, two for each session.
+  withHub({ limits: { sessionPerMinute: 5 } }, async (hub) => {
     const { world } = await enrolled(hub);
     const connection = await hub.connect();
     let challenge = '';

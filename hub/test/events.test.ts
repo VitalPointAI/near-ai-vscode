@@ -204,28 +204,50 @@ test('429: a fifth stream of one device across projects is refused with Retry-Af
     assert.equal(hub.events.size, 4);
   }));
 
-test('429: a 33rd stream from one address is refused with Retry-After', () =>
-  withLive({}, async (hub) => {
+// The cap per address is 300 (LIMITS); this test sets it to D-37's 32 so a whole cap of streams stays cheap to open.
+const ADDRESS_CAP = 32;
+
+test('429: a stream past the address\'s cap (32 here) is refused with Retry-After', () =>
+  withLive({ eventStreamsPerAddress: ADDRESS_CAP }, async (hub) => {
     const world = createHubWorld();
     world.admitHub(hub.identity);
     const members: WorldDevice[] = [];
-    for (let index = 0; index < LIMITS.eventStreamsPerAddress; index += 1) {
+    for (let index = 0; index < ADDRESS_CAP; index += 1) {
       const member = world.device(`MEMBER-${index}`, `mbr-member-${index}`);
       world.admitMember(member);
       members.push(member);
     }
     assert.equal((await hub.enrolProject(world))?.status, 201);
     const devices = [world.lead, ...members];
-    for (const device of devices.slice(0, LIMITS.eventStreamsPerAddress)) {
+    for (const device of devices.slice(0, ADDRESS_CAP)) {
       const stream = await (await EventClient.open(hub, device, world.project)).events();
       assert.equal(stream.status, 200);
     }
-    assert.equal(hub.events.size, LIMITS.eventStreamsPerAddress);
-    const last = devices[LIMITS.eventStreamsPerAddress] as WorldDevice;
+    assert.equal(hub.events.size, ADDRESS_CAP);
+    const last = devices[ADDRESS_CAP] as WorldDevice;
     const refused = await (await EventClient.open(hub, last, world.project)).events();
     assert.equal(refused.status, 429);
     assert.equal(refused.headers['retry-after'], String(EVENT_TIMING.retryAfterSeconds));
-    assert.equal(hub.events.size, LIMITS.eventStreamsPerAddress);
+    assert.equal(hub.events.size, ADDRESS_CAP);
+  }));
+
+test('a site behind one address: 40 devices each hold a stream with the hub\'s own limits, past the 32 of D-37 (DESIGN 10.9 targets 300)', () =>
+  withLive({}, async (hub) => {
+    assert.equal(LIMITS.eventStreamsPerAddress, 300);
+    const world = createHubWorld();
+    world.admitHub(hub.identity);
+    const members: WorldDevice[] = [];
+    for (let index = 0; index < 39; index += 1) {
+      const member = world.device(`SITE-${index}`, `mbr-site-${index}`);
+      world.admitMember(member);
+      members.push(member);
+    }
+    assert.equal((await hub.enrolProject(world))?.status, 201);
+    for (const device of [world.lead, ...members]) {
+      const stream = await (await EventClient.open(hub, device, world.project)).events();
+      assert.equal(stream.status, 200, `stream ${hub.events.size + 1} from the one address was refused`);
+    }
+    assert.equal(hub.events.size, 40);
   }));
 
 /** A refused stream request: 204, no body, nothing in the registry. */

@@ -144,6 +144,8 @@ export interface HubParts {
   /** The authentication deadline (10 seconds unless a test shortens it). */
   deadlineMs?: number;
   rateLimits?: RateLimitOptions;
+  /** Event streams one address may hold; LIMITS.eventStreamsPerAddress unless a test lowers it. */
+  eventStreamsPerAddress?: number;
   readAnswer?: (answer: unknown, expected: SessionExpectation) => SessionRead;
   /** The timers of the event streams; real timers unless a test moves time by hand. */
   scheduler?: Scheduler;
@@ -189,7 +191,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.readAnswer === undefined ? {} : { readAnswer: parts.readAnswer }),
   });
   const scheduler = parts.scheduler === undefined ? {} : { scheduler: parts.scheduler };
-  const events = new EventHub({ now, ...scheduler });
+  const events = new EventHub({ now, ...scheduler, ...(parts.eventStreamsPerAddress === undefined ? {} : { streamsPerAddress: parts.eventStreamsPerAddress }) });
   const presence = new PresenceHub(events, { now, ...scheduler, accessList: async (project, cell) => (await cache.get(project)).accessList(cell) });
   const join = new JoinDesk({
     store,

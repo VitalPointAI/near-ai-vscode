@@ -34,7 +34,8 @@ test('LIMITS holds the D-37, D-38 and D-39 sizes and rates', () => {
   assert.equal(LIMITS.enrolBodyBytes, 4 * 1024 * 1024);
   assert.equal(LIMITS.pendingBlobBytesPerUploader, 256 * 1024 * 1024);
   assert.equal(LIMITS.eventStreamsPerDevice, 4);
-  assert.equal(LIMITS.eventStreamsPerAddress, 32);
+  assert.equal(LIMITS.eventStreamsPerAddress, 300);
+  assert.equal(LIMITS.sessionCallsPerSession, 2);
   assert.equal(LIMITS.presenceBytes, 2 * 1024);
   assert.deepEqual([LIMITS.writerPerSecond, LIMITS.writerBurst, LIMITS.sessionPerMinute, LIMITS.joinPerMinute, LIMITS.enrolPerMinute], [50, 200, 120, 10, 10]);
   assert.equal(Object.isFrozen(LIMITS), true);
@@ -68,13 +69,24 @@ test('join and enrol: 10 calls a minute per address pass, the 11th waits at most
   }
 });
 
-test('session: 120 calls a minute per address pass and the 121st is refused, because a whole site may sit behind one address', () => {
+test('session: 240 calls (120 sessions of two calls) a minute per address pass and the 241st is refused, because a whole site may sit behind one address', () => {
   const limits = new RateLimits();
-  for (let index = 0; index < 120; index += 1) assert.equal(limits.takeAddress('session', '203.0.113.7', T0).ok, true, `call ${index + 1}`);
+  for (let index = 0; index < 240; index += 1) assert.equal(limits.takeAddress('session', '203.0.113.7', T0).ok, true, `call ${index + 1}`);
   const refused = limits.takeAddress('session', '203.0.113.7', T0);
   assert.equal(refused.ok, false);
   if (!refused.ok) assert.equal(refused.retryAfterSeconds, 1);
   assert.equal(limits.takeAddress('session', '203.0.113.7', T0 + MINUTE).ok, true);
+});
+
+test('a site behind one address opens 120 sessions a minute: both calls of a session (challenge and answer) fit in the bucket', () => {
+  const limits = new RateLimits();
+  for (let session = 0; session < 120; session += 1) {
+    assert.equal(limits.takeAddress('session', '203.0.113.7', T0).ok, true, `challenge of session ${session + 1}`);
+    assert.equal(limits.takeAddress('session', '203.0.113.7', T0).ok, true, `answer of session ${session + 1}`);
+  }
+  const refused = limits.takeAddress('session', '203.0.113.7', T0);
+  assert.equal(refused.ok, false, 'the 121st session in a minute was not refused');
+  assert.equal(limits.takeAddress('session', '198.51.100.20', T0).ok, true);
 });
 
 test('bucket maps never pass their cap: a flood of addresses and writers keeps at most maxTracked buckets', () => {

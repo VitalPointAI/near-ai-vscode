@@ -139,6 +139,8 @@ test('paths outside the route table go to the handler, and /healthz with a query
 test('the server closes slow clients: headers within 5 s, bodies at 16 KiB a second after a 10 s grace, Node\'s whole-request limit only as a backstop', async () => {
   await withServer(registry(), async (_port, server) => {
     assert.equal(server.headersTimeout, 5000);
+    // An idle connection, and so its session, stays for 2 minutes between requests (WR-04).
+    assert.equal(server.keepAliveTimeout, 120_000);
     assert.deepEqual({ graceMs: REQUEST_TIMING.graceMs, minBytesPerSecond: REQUEST_TIMING.minBytesPerSecond }, { graceMs: 10_000, minBytesPerSecond: 16 * 1024 });
     // The backstop leaves room for the largest body (an 8 MiB blob) at the minimum rate, after the grace (WR-03).
     assert.equal(server.requestTimeout, requestBackstopMs(REQUEST_TIMING));

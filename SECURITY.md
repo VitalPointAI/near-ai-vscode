@@ -2150,7 +2150,9 @@ health check connects only to itself; and no hub source file names a client netw
 - **Size and rate limits.** At most 200 entries and 4 MiB per append, 8 MiB per attachment, 256 MiB
   of attachments not yet used per device, 50 entries a second per device (a burst of 200), and per
   address 120 session openings, 10 join requests and 10 enrolments a minute; 4 event streams per
-  device and 32 per address, and an event stream that falls 1 MiB behind is ended
+  device and 300 per address (a whole site may sit behind one address), and an event stream that
+  falls 1 MiB behind is ended. A connection with a session stays open for 2 minutes between
+  requests, so a member keeps one session through an exchange
   (`hub/test/limits.test.ts`, `hub/test/api.test.ts`, `hub/test/events.test.ts`).
 - **Slow uploads, not slow clients.** Headers must arrive within 5 seconds. A body gets 10 seconds
   and must then keep arriving at 16 KiB a second or faster, so a slow site link can still send an

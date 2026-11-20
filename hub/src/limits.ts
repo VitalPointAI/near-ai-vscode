@@ -29,16 +29,23 @@ export const LIMITS = Object.freeze({
   enrolBodyBytes: 4 * MIB,
   /** Bytes of blobs one uploader has put that no entry references yet. */
   pendingBlobBytesPerUploader: 256 * MIB,
-  /** Event streams (D-37). */
+  /**
+   * Event streams (D-37). Per address the cap is DESIGN 10.9's 300 concurrent streams, not D-37's 32 (WR-04): D-39 expects a whole site behind
+   * one address, and at 32 only 32 of its devices would hear live events. The per-device cap of 4 keeps any one device from taking the rest.
+   */
   eventStreamsPerDevice: 4,
-  eventStreamsPerAddress: 32,
+  eventStreamsPerAddress: 300,
   /** One presence heartbeat (D-38). */
   presenceBytes: 2 * KIB,
   /** Per pushing device: 50 entries a second, a burst of 200 (D-39). */
   writerPerSecond: 50,
   writerBurst: 200,
-  /** Per address for calls made before a session: a whole site may sit behind one address, so session gets more (D-39). */
+  /**
+   * Per address for calls made before a session: a whole site may sit behind one address, so session gets more (D-39). sessionPerMinute counts
+   * sessions; opening one takes two calls (the challenge and the answer), so the bucket holds sessionCallsPerSession calls for each (WR-04).
+   */
   sessionPerMinute: 120,
+  sessionCallsPerSession: 2,
   joinPerMinute: 10,
   enrolPerMinute: 10,
   /** The most buckets one map keeps. */
@@ -138,6 +145,7 @@ export type AddressCall = 'session' | 'join' | 'enrol';
 export interface RateLimitOptions {
   writerPerSecond?: number;
   writerBurst?: number;
+  /** Sessions a minute per address; the bucket holds two calls for each. */
   sessionPerMinute?: number;
   joinPerMinute?: number;
   enrolPerMinute?: number;
@@ -154,7 +162,7 @@ export class RateLimits {
     this.writers = new BucketMap(options.writerBurst ?? LIMITS.writerBurst, options.writerPerSecond ?? LIMITS.writerPerSecond, maxTracked);
     const perMinute = (count: number): BucketMap => new BucketMap(count, count / 60, maxTracked);
     this.addresses = {
-      session: perMinute(options.sessionPerMinute ?? LIMITS.sessionPerMinute),
+      session: perMinute((options.sessionPerMinute ?? LIMITS.sessionPerMinute) * LIMITS.sessionCallsPerSession),
       join: perMinute(options.joinPerMinute ?? LIMITS.joinPerMinute),
       enrol: perMinute(options.enrolPerMinute ?? LIMITS.enrolPerMinute),
     };
