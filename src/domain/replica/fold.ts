@@ -17,7 +17,8 @@ import type { ChainResult, EquivocationProof, HeldEntry, QuarantineRecord, Rejec
 import { checkpointCoverage, checkpointHash, readCheckpoint } from './checkpoint';
 import type { SignedCheckpoint } from './checkpoint';
 import { streamDigests } from './digest';
-import { entryHash, parseHeaderShape } from './entry';
+import { entryHash, parseHeaderShape, sha256Hex } from './entry';
+import type { EntryHeader } from './entry';
 import { kindFamily } from './kinds';
 import type { KindFamily } from './kinds';
 import { checkpointOrder } from './order';
@@ -64,12 +65,21 @@ export interface FoldResult {
 
 const byHash = (a: { hash?: string }, b: { hash?: string }): number => ((a.hash ?? '') < (b.hash ?? '') ? -1 : (a.hash ?? '') > (b.hash ?? '') ? 1 : 0);
 
-function rank(outcome: VerifyOutcome): string {
-  return outcome.status === 'verified' ? '0' : `1:${outcome.status}:${outcome.reason}`;
+// Which copy of an entry the fold uses when copies differ (IN-03). A held copy beats a rejected one on purpose: a rejection is permanent, but a held
+// copy says a good copy may still come (a corrupt body next to a good copy that cannot be opened is reported held, whichever arrives first).
+export const OUTCOME_RANK: Readonly<Record<VerifyOutcome['status'], number>> = { verified: 0, held: 1, rejected: 2 };
+
+// Negative when a is the better outcome. Ties between two held or two rejected copies go to the smaller reason, never to arrival order.
+function compareOutcomes(a: VerifyOutcome, b: VerifyOutcome): number {
+  const byRank = OUTCOME_RANK[a.status] - OUTCOME_RANK[b.status];
+  if (byRank !== 0 || a.status === 'verified' || b.status === 'verified') return byRank;
+  return a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0;
 }
 
 // What the caller keeps from one delivery to the next. An earlier FoldState is never changed by addEntries.
-interface Chosen { outcome: VerifyOutcome; retry: unknown[] }
+// outcome is the best outcome of any copy. retry holds at most one held copy per hold reason, to be judged again when the context may answer
+// (WR-08: never one per delivery). rejected is the best permanent rejection, kept so the copies judged again are still compared with it.
+interface Chosen { outcome: VerifyOutcome; retry: Map<string, unknown>; rejected: VerifyOutcome | undefined }
 // chosen is keyed by entry hash, so it is also the record of what has been seen: a copy is recognised by its header, never by object identity.
 interface Store {
   chosen: Map<string, Chosen>;
@@ -128,11 +138,11 @@ function emptyStore(): Store {
 
 function copyStore(store: Store): Store {
   const chosen = new Map<string, Chosen>();
-  for (const [hash, entry] of store.chosen) chosen.set(hash, { outcome: entry.outcome, retry: [...entry.retry] });
+  for (const [hash, entry] of store.chosen) chosen.set(hash, { outcome: entry.outcome, retry: new Map(entry.retry), rejected: entry.rejected });
   return { chosen, unreadable: new Map(store.unreadable), dropped: store.dropped };
 }
 
-type Copy = { status: 'known' } | { status: 'new'; hash: string } | { status: 'unreadable'; outcome: VerifyOutcome & { status: 'rejected' } };
+type Copy = { status: 'known' } | { status: 'new'; hash: string; header: EntryHeader } | { status: 'unreadable'; outcome: VerifyOutcome & { status: 'rejected' } };
 
 // What the store already knows of one input, found with a header-shape check and a hash only: no signature check and no decryption (WR-08). A copy
 // whose entry is already verified is known, whatever its body holds, because the verified copy is the one the fold uses. An input that is not an
@@ -141,15 +151,26 @@ function knownCopy(store: Store, input: unknown): Copy {
   const unreadable = (reason: VerifyRejection): Copy => ({ status: 'unreadable', outcome: { status: 'rejected', reason } });
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return unreadable('malformed-header');
   let hash: string;
+  let header: EntryHeader;
   try {
     const shape = parseHeaderShape((input as { header?: unknown }).header);
     if (!shape.ok) return unreadable(shape.reason);
-    hash = entryHash(shape.header);
+    header = shape.header;
+    hash = entryHash(header);
   } catch {
     // A header that cannot be read is refused as verifyEntry refuses it.
     return unreadable('malformed-header');
   }
-  return store.chosen.get(hash)?.outcome.status === 'verified' ? { status: 'known' } : { status: 'new', hash };
+  return store.chosen.get(hash)?.outcome.status === 'verified' ? { status: 'known' } : { status: 'new', hash, header };
+}
+
+// Does the copy carry the body its header names? Copies of one header that pass this carry the same bytes, so keeping one of them loses nothing. It
+// matters only for a hold reached before the body is checked (unknown-writer), where an intact copy and a corrupt one share the reason.
+function bodyIntact(input: unknown, header: EntryHeader): boolean {
+  const body = (input as { body?: unknown }).body;
+  if (typeof body !== 'string' || body.length > Math.ceil((header.body.size * 4) / 3) + 4) return false;
+  const bytes = Buffer.from(body, 'base64url');
+  return bytes.length === header.body.size && bytes.toString('base64url') === body && sha256Hex(bytes) === header.body.hash;
 }
 
 // Verifies one input and records it. Returns true when it changed what the store knows. When copies of one entry differ (a damaged body next to a
@@ -165,26 +186,58 @@ function ingest(store: Store, item: unknown, ctx: ReplicaContext): boolean {
     return true;
   }
   const outcome = verifyEntry(item, ctx);
-  const hash = copy.hash;
-  const current = store.chosen.get(hash);
-  if (current === undefined || rank(outcome) < rank(current.outcome)) {
-    store.chosen.set(hash, { outcome, retry: outcome.status === 'held' ? [item] : [] });
+  const current = store.chosen.get(copy.hash);
+  if (current === undefined) {
+    store.chosen.set(copy.hash, {
+      outcome,
+      retry: outcome.status === 'held' ? new Map([[outcome.reason, item]]) : new Map(),
+      rejected: outcome.status === 'rejected' ? outcome : undefined
+    });
     return true;
   }
-  if (outcome.status === 'held' && rank(outcome) === rank(current.outcome)) current.retry.push(item);
-  return false;
+  if (outcome.status === 'verified') {
+    store.chosen.set(copy.hash, { outcome, retry: new Map(), rejected: current.rejected });
+    return true;
+  }
+  // A copy that changes nothing the fold shows may still change what is kept: a hold reason not kept yet, an intact copy in place of a corrupt one,
+  // or a better rejection. Each of those can happen only a few times per entry, so reporting it as a change stays cheap.
+  let kept = false;
+  if (outcome.status === 'held') {
+    const known = current.retry.get(outcome.reason);
+    if (known === undefined || (!bodyIntact(known, copy.header) && bodyIntact(item, copy.header))) {
+      current.retry.set(outcome.reason, item);
+      kept = true;
+    }
+  } else if (current.rejected === undefined || compareOutcomes(outcome, current.rejected) < 0) {
+    current.rejected = outcome;
+    kept = true;
+  }
+  if (compareOutcomes(outcome, current.outcome) < 0) {
+    current.outcome = outcome;
+    return true;
+  }
+  return kept;
 }
 
-// Held entries wait for a piece the context may have gained since (a key, a blob), so they are looked at again; verified and rejected ones never are.
+// Held entries wait for a piece the context may have gained since (a key, a blob, a device), so the kept copies are judged again from the best
+// rejection alone, as a fold from scratch would judge them; verified and rejected entries never are. Returns true when the choice changed.
 function retryHeld(store: Store, ctx: ReplicaContext): boolean {
   let changed = false;
-  for (const entry of [...store.chosen.values()]) {
+  for (const [hash, entry] of [...store.chosen]) {
     if (entry.outcome.status !== 'held') continue;
-    const items = entry.retry;
-    entry.retry = [];
-    for (const item of items) if (ingest(store, item, ctx)) changed = true;
+    if (entry.rejected === undefined) store.chosen.delete(hash);
+    else store.chosen.set(hash, { outcome: entry.rejected, retry: new Map(), rejected: entry.rejected });
+    for (const item of entry.retry.values()) ingest(store, item, ctx);
+    const now = store.chosen.get(hash);
+    if (now === undefined || !sameChoice(entry, now)) changed = true;
   }
   return changed;
+}
+
+function sameChoice(a: Chosen, b: Chosen): boolean {
+  if (a.outcome.status !== b.outcome.status || compareOutcomes(a.outcome, b.outcome) !== 0 || a.retry.size !== b.retry.size) return false;
+  for (const [reason, item] of a.retry) if (b.retry.get(reason) !== item) return false;
+  return true;
 }
 
 const isSubset = (small: ReadonlySet<string>, large: ReadonlySet<string>): boolean => {

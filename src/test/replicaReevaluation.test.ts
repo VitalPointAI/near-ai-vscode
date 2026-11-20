@@ -358,3 +358,87 @@ test('(c) inputs that are not objects or have no readable header are counted in 
   sameResult(counted.result, foldEntries([...s.entries, ...junk], ctx), 'junk delivered after the entries');
   sameResult(addEntries(addEntries(createFoldState(ctx), junk), s.entries).result, foldEntries([...junk, ...s.entries], ctx), 'junk delivered first');
 });
+
+// ---- (c) and IN-03: held copies are bounded per hash and reason, and a held copy outranks a rejected one ------------------------------------------
+
+const corruptCopy = (entry: SealedEntry, label: string): SealedEntry => ({ header: { ...entry.header }, body: Buffer.from(`corrupt ${label}`).toString('base64url') });
+
+test('(c) 500 distinct held copies with one header hash and one hold reason leave one copy to look at again', () => {
+  const s = coEditScene();
+  const counting = countingCtx(s.world);
+  const copies = Array.from({ length: 500 }, (_, index) => corruptCopy(s.update.entry, String(index)));
+  const others = s.entries.filter((entry) => entry !== s.update.entry);
+  const state = addEntries(createFoldState(counting.ctx), [...others, ...copies]);
+  assert.deepEqual(state.result.held.filter((item) => item.hash === s.update.hash).map((item) => item.reason), ['body-missing-or-corrupt']);
+  // Each delivery looks at the kept copies again: one signature check for the one copy kept for this hash and reason.
+  const before = counting.counts.deviceKey;
+  assert.equal(addEntries(state, [], counting.ctx), state);
+  assert.equal(counting.counts.deviceKey - before, 1);
+  sameResult(state.result, foldEntries([...others, ...copies], counting.ctx), 'from scratch');
+  // The good copy still releases the entry.
+  sameResult(addEntries(state, [s.update.entry]).result, foldEntries(s.entries, counting.ctx), 'good copy delivered last');
+});
+
+test('(c) a copy held for a different reason is kept as a second copy, and verifies when its key arrives behind the same context', () => {
+  const s = coEditScene();
+  const ring = new Map<string, Buffer>();
+  for (const entry of s.entries) if (entry !== s.update.entry) ring.set(`${entry.header.stream}/${entry.header.epoch}`, s.world.keyFor(entry.header.stream, entry.header.epoch));
+  const keyId = `${s.update.entry.header.stream}/${s.update.entry.header.epoch}`;
+  const keyOfUpdate = s.world.keyFor(s.update.entry.header.stream, s.update.entry.header.epoch);
+  // The update shares its stream and epoch with the other entries, so the update's own key is the stream key: take it out and give it back.
+  ring.delete(keyId);
+  const ctx = s.world.ctx({ keys: (stream, epoch) => ring.get(`${stream}/${epoch}`) });
+  const counting = countingCtx(s.world, { keys: ctx.keys });
+  const corrupt = corruptCopy(s.update.entry, 'one');
+  for (const order of [[corrupt, s.update.entry], [s.update.entry, corrupt]]) {
+    ring.delete(keyId);
+    const waiting = addEntries(createFoldState(counting.ctx), [...s.entries.filter((entry) => entry !== s.update.entry), ...order]);
+    assert.equal(waiting.result.order.length, 0, 'without the stream key nothing is admitted');
+    const before = counting.counts.deviceKey;
+    addEntries(waiting, [], counting.ctx);
+    assert.equal(counting.counts.deviceKey - before, 5, 'one copy per entry and reason is looked at again: three entries, and two copies of the update');
+    ring.set(keyId, keyOfUpdate);
+    const released = addEntries(waiting, [], counting.ctx);
+    sameResult(released.result, foldEntries(s.entries, counting.ctx), `key arrived, ${order[0] === corrupt ? 'corrupt' : 'good'} copy first`);
+    assert.ok(released.result.applied.includes(s.update.hash));
+  }
+});
+
+test('(c) while the writer is unknown, an intact copy is kept in place of a corrupt one held for the same reason, so the entry verifies when the writer is known', () => {
+  const s = coEditScene();
+  const base = s.world.ctx();
+  const writerA = s.world.writerOf('A');
+  let knowsA = false;
+  const roster: RosterView = { ...base.roster, deviceKey: (writer) => (writer === writerA && !knowsA ? undefined : base.roster.deviceKey(writer)) };
+  const ctx: ReplicaContext = { ...base, roster };
+  const corrupt = corruptCopy(s.update.entry, 'two');
+  for (const order of [[corrupt, s.update.entry], [s.update.entry, corrupt]]) {
+    knowsA = false;
+    const waiting = addEntries(createFoldState(ctx), [...s.entries.filter((entry) => entry !== s.update.entry), ...order]);
+    assert.ok(waiting.result.held.some((item) => item.hash === s.update.hash && item.reason === 'unknown-writer'));
+    knowsA = true;
+    const released = addEntries(waiting, [], ctx);
+    sameResult(released.result, foldEntries(s.entries, ctx), `writer known, ${order[0] === corrupt ? 'corrupt' : 'good'} copy first`);
+  }
+});
+
+test('IN-03: a good copy that is permanently rejected and a corrupt copy that is only held report the entry held, whichever arrives first', () => {
+  const s = coEditScene();
+  // A key ring holding the wrong key for the stream: the good copy opens to nothing (rejected body-unreadable), the corrupt copy never gets that far.
+  const wrong = Buffer.alloc(32, 7);
+  const ctx = s.world.ctx({ keys: () => wrong });
+  const corrupt = corruptCopy(s.update.entry, 'three');
+  assert.equal(verifyEntry(s.update.entry, ctx).status, 'rejected');
+  assert.equal(verifyEntry(corrupt, ctx).status, 'held');
+  const results = [
+    foldEntries([s.update.entry, corrupt], ctx),
+    foldEntries([corrupt, s.update.entry], ctx),
+    addEntries(addEntries(createFoldState(ctx), [s.update.entry]), [corrupt]).result,
+    addEntries(addEntries(createFoldState(ctx), [corrupt]), [s.update.entry]).result
+  ];
+  for (const result of results) {
+    assert.deepEqual(result.held.map((item) => [item.hash, item.reason]), [[s.update.hash, 'body-missing-or-corrupt']]);
+    assert.deepEqual(result.rejected, []);
+    sameResult(result, results[0], 'every arrival order');
+  }
+});
