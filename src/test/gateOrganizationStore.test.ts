@@ -6,12 +6,17 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { BUNDLE_FAILURES, bundleHash } from '../domain/gate/bundle';
+import { BUNDLE_FAILURES, bundleHash, defaultBundlePayload } from '../domain/gate/bundle';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
+import { signPayload } from '../domain/team/signedPayload';
+import { writeLastValid } from '../gate/clockMarker';
 import { buildOrganizationLayer, contactShown, fileTextOf, organizationEndedText } from '../domain/gate/enrolment';
 import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
-import { ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, setOrganizationWriteProbe } from '../gate/organizationStore';
+import {
+  ENROLMENT_RECORD_FILE, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, migrationNoticeText, setOrganizationWriteProbe
+} from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
 import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rotationTextFor, rulesTextFor } from './helpers/enrolmentFixtures';
 import { DAY_MS, FIXED_NOW, issuerKey } from './helpers/policyFixtures';
@@ -219,6 +224,8 @@ test('D-13: a pending pin with no layer file is not enrolled; a layer file with 
     assert.notEqual(levelOf(host, 'org/Internal'), 'local-only');
   });
   await withWorld(async (world) => {
+    // This computer has its own policy; then a rules file appears with no pin (a disk writer, or a first enrolment that never committed).
+    assert.equal((await hostOf(world).start()).state, 'valid');
     await mkdir(organizationFolder(world), { recursive: true });
     const text = rulesTextFor(issuerKey(), sectionsWith('org/Public', 'local-only'));
     await writeFile(layerFile(world), text);
@@ -435,5 +442,137 @@ test('D-57: a crash during a key handover, after its files and before the pin, f
     assert.ok((await installOperations(next, world)).includes('policy.organization-updated'));
     const view = next.policyLayers().organization;
     assert.equal(view.state === 'valid' ? view.name : undefined, EXAMPLE_ORGANIZATION.name, 'the name is read from the record the new key signed');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Task 3: v2 Apply under your organization's rules, Reset of the personal layer only, the migration changes
+
+function personalStoredOf(host: GateHost): Record<string, unknown> {
+  const personal = host.policyLayers().personal;
+  assert.ok(personal, 'the personal layer was read');
+  return JSON.parse(JSON.stringify(personal.stored)) as Record<string, unknown>;
+}
+
+function withLevel(payload: Record<string, unknown>, level: string, tier: string): Record<string, unknown> {
+  const routing = payload['routing'] as { levels: Record<string, string> };
+  return { ...payload, routing: { ...routing, levels: { ...routing.levels, [level]: tier } } };
+}
+
+function composedHash(host: GateHost): string {
+  const state = host.bundleState();
+  assert.equal(state.state, 'valid');
+  return state.state === 'valid' ? state.hash : '';
+}
+
+test('D-20: under your organization\'s rules an Apply that widens is refused with the key named, one that narrows is applied, and a value already clamped does not block an unrelated edit', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    const file = path.join(gateDir(world.storage), POLICY_BUNDLE_FILE);
+    const bytes = await readFile(file, 'utf8');
+    const stored = personalStoredOf(host);
+    assert.equal((stored['routing'] as { levels: Record<string, string> }).levels['org/Internal'], 'attested-cloud', 'the personal value is wider and was clamped at load');
+
+    await assert.rejects(host.applyPolicyDraft(JSON.stringify(withLevel(stored, 'org/Internal', 'any-cloud')), composedHash(host)), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /^Nothing was changed\. Your organization's rules do not allow \S*org\/Internal\S* to be wider than /);
+      return true;
+    });
+    assert.equal(await readFile(file, 'utf8'), bytes, 'the stored bytes are unchanged');
+    assert.equal(levelOf(host, 'org/Internal'), 'local-only');
+
+    // An unrelated narrowing edit is applied, with the clamped org/Internal value left as it was in the personal layer.
+    const result = await host.applyPolicyDraft(JSON.stringify(withLevel(stored, 'org/Public', 'attested-cloud')), composedHash(host));
+    assert.equal(result.state.state, 'valid');
+    assert.equal(levelOf(host, 'org/Public'), 'attested-cloud');
+    assert.equal(levelOf(host, 'org/Internal'), 'local-only');
+    const written = (JSON.parse(await readFile(file, 'utf8')) as { payload: Record<string, unknown> }).payload;
+    assert.equal(written['bundleVersion'], 2);
+    const organization = host.policyLayers().organization;
+    assert.equal(organization.state, 'valid');
+    if (organization.state === 'valid') assert.deepEqual(written['parent'], { hash: organization.hash, issuer: organization.document.issuer.fingerprint });
+    assert.ok((await installOperations(host, world)).includes('policy.edit'));
+  });
+});
+
+test('D-21: Reset under your organization\'s rules re-signs only the personal layer', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    const layerBytes = await readFile(layerFile(world), 'utf8');
+    const recordBytes = await readFile(path.join(organizationFolder(world), ENROLMENT_RECORD_FILE), 'utf8');
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    const personalBefore = await personalHash(world);
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const result = await host.reset();
+    assert.equal(result.state.state, 'valid');
+    const operations = await installOperations(host, world);
+    assert.ok(operations.includes('policy.reset-personal'));
+    assert.equal(operations.includes('policy.reset'), false);
+    assert.equal(await readFile(layerFile(world), 'utf8'), layerBytes, 'your organization\'s layer is byte for byte the same');
+    assert.equal(await readFile(path.join(organizationFolder(world), ENROLMENT_RECORD_FILE), 'utf8'), recordBytes);
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin, 'the pin is unchanged');
+    assert.notEqual(await personalHash(world), personalBefore, 'the personal layer was re-signed');
+    assert.equal(levelOf(host, 'org/Internal'), 'local-only', 'still narrowed');
+  });
+  await withWorld(async (world) => {
+    // Without your organization's rules, Reset is recorded as before (allowed side).
+    const host = hostOf(world);
+    await host.start();
+    await host.reset();
+    const operations = await installOperations(host, world);
+    assert.ok(operations.includes('policy.reset'));
+    assert.equal(operations.includes('policy.reset-personal'), false);
+  });
+});
+
+test('D-21: Apply is refused while your organization\'s layer fails, with its sentence, and nothing is written', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    const stored = personalStoredOf(host);
+    const base = composedHash(host);
+    await writeFile(layerFile(world), '{ "not": "a layer" }\n');
+    const next = hostOf(world);
+    assert.equal((await next.start()).state, 'failed-closed');
+    const file = path.join(gateDir(world.storage), POLICY_BUNDLE_FILE);
+    const bytes = await readFile(file, 'utf8');
+    await assert.rejects(next.applyPolicyDraft(JSON.stringify(withLevel(stored, 'org/Public', 'attested-cloud')), base), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /^Nothing was changed: your policy cannot be trusted right now, so it cannot be edited\. Your organization's rules/);
+      assert.equal(error.message.match(/\bAsk\b/g)?.length, 1, 'one person to ask, named once');
+      return true;
+    });
+    assert.equal(await readFile(file, 'utf8'), bytes);
+  });
+});
+
+test('D-27: a v1 personal layer with local hosts reports its migration changes; a v2 one reports none', async () => {
+  await withWorld(async (world) => {
+    const first = hostOf(world);
+    await first.start();
+    const identity = await loadDeviceIdentity(world.secrets);
+    assert.ok(identity);
+    const payload = JSON.parse(JSON.stringify(defaultBundlePayload({ issuer: { fingerprint: identity.fingerprint, publicKey: identity.publicKey }, now: FIXED_NOW }))) as Record<string, unknown>;
+    payload['routing'] = { ...(payload['routing'] as Record<string, unknown>), localHosts: ['*.lab.example.org', 'models.example.org'] };
+    const envelope = signPayload(identity, 'policy-bundle', payload, { now: () => new Date(FIXED_NOW) });
+    await writeFile(path.join(gateDir(world.storage), POLICY_BUNDLE_FILE), `${JSON.stringify(envelope, null, 2)}\n`);
+    await writeLastValid(world.secrets, { at: FIXED_NOW, hash: bundleHash(payload) });
+
+    const host = hostOf(world);
+    const state = await host.start();
+    assert.equal(state.state, 'valid', state.state === 'failed-closed' ? state.sentence : '');
+    const migration = host.policyLayers().migration;
+    assert.deepEqual(migration.map((change) => change.host), ['*.lab.example.org', 'models.example.org'], 'one change per entry');
+    const text = migrationNoticeText(migration);
+    assert.ok(text !== undefined);
+    assert.ok(text.includes('models.example.org'), text);
+    assert.ok(text.includes(labelKeyShown('ca-protected/Protected B')), text);
+    assert.ok(text.includes(labelKeyShown('nato/NATO Restricted')), text);
+    assert.equal(text.includes('lab.example.org'), false, 'the pattern host lost nothing and is not named');
+    assert.equal(text.includes('\u2014'), false, 'no em-dash');
+    assert.equal(migrationNoticeText([]), undefined);
+
+    const applied = await host.applyPolicyDraft(JSON.stringify(payload), composedHash(host));
+    assert.equal(applied.state.state, 'valid');
+    assert.deepEqual(host.policyLayers().migration, [], 'a v2 layer reports none');
   });
 });

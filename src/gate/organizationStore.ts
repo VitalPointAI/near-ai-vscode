@@ -69,6 +69,12 @@ function askFor(contact: string): string {
   return `Ask ${contact} for the rules file, then run ${ADD_RULES_COMMAND}.`;
 }
 
+/** A refusal sentence with its general "Ask your organization's security contact ..." ending removed, so the named contact is asked once. */
+function withoutGeneralAsk(sentence: string): string {
+  const at = sentence.indexOf(' Ask your organization\'s security contact');
+  return at === -1 ? sentence : sentence.slice(0, at);
+}
+
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
 }
@@ -460,7 +466,7 @@ function failedFromRead(read: Extract<OrganizationLayerRead, { ok: false }>, raw
     return { ...failedOrganization('expired', 'expired', ended.sentence, false, { ...facts, ...(contacts === undefined ? {} : { contacts }) }) };
   }
   if (read.reason === 'needs-update' || read.reason === 'clock-behind') return failedOrganization(read.reason, read.failure, read.message, false, facts);
-  return failedOrganization(read.reason, read.failure, `${read.message} ${askFor(contactShown(record?.contacts))}`, true, facts);
+  return failedOrganization(read.reason, read.failure, `${withoutGeneralAsk(read.message)} ${askFor(contactShown(record?.contacts))}`, true, facts);
 }
 
 /**
@@ -506,8 +512,8 @@ export class OrganizationStore {
     const facts = record === undefined ? {} : { name: record.name, contacts: record.contacts };
     const raw = await this.readLayer();
     if (raw.state === 'missing') return failedOrganization('missing', 'missing', `${MISSING_LAYER_TEXT} ${askFor(contactShown(record?.contacts))}`, false, facts);
-    if (raw.state === 'too-large') return failedOrganization('too-large', 'too-large', `${ORGANIZATION_LAYER_REFUSALS['too-large']}`, true, facts);
-    if (raw.state !== 'ok') return failedOrganization('malformed', 'unparseable', `${ORGANIZATION_LAYER_REFUSALS.malformed} ${askFor(contactShown(record?.contacts))}`, true, facts);
+    if (raw.state === 'too-large') return failedOrganization('too-large', 'too-large', `${withoutGeneralAsk(ORGANIZATION_LAYER_REFUSALS['too-large'])} ${askFor(contactShown(record?.contacts))}`, true, facts);
+    if (raw.state !== 'ok') return failedOrganization('malformed', 'unparseable', `${withoutGeneralAsk(ORGANIZATION_LAYER_REFUSALS.malformed)} ${askFor(contactShown(record?.contacts))}`, true, facts);
     // A change whose files were written before a crash finishes now (D-57): the words were confirmed, or the pin signed it, before pending was written.
     const pending = pin.pending;
     if (pending !== undefined) {

@@ -12,7 +12,7 @@ import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
-import { applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
+import { BundleStoreError, applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
 import { OrganizationStore, OrganizationStoreError, loadLayeredPolicy, recompose } from './organizationStore';
 import type { LayeredPolicy, OrganizationEvent, PolicyLayersView } from './organizationStore';
@@ -628,8 +628,11 @@ export class GateHost {
     const result = await resetPolicyToDefaults(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
     await this.seedFromMarker();
     const layered = await recompose(this.options.globalStorageDir, this.options.secrets, result, this.storeOptions());
-    this.settle(layered, [], { event: result.event ?? 'policy.reset' });
-    return { ...result, state: layered.state };
+    // Under your organization's layer only the personal layer was re-signed, and the record says so (D-21); the organization files are never touched.
+    const underOrganization = layered.layers.organization.state !== 'none';
+    const event: BundleEvent = (result.event ?? 'policy.reset') === 'policy.reset' && underOrganization ? 'policy.reset-personal' : result.event ?? 'policy.reset';
+    this.settle(layered, [], { event });
+    return { ...result, state: layered.state, ...(result.event === undefined ? {} : { event }) };
   }
 
   /**
@@ -639,7 +642,16 @@ export class GateHost {
    */
   public async applyPolicyDraft(draftText: string, baseHash: string): Promise<PolicyEditResult> {
     await this.start();
-    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, { baseHash }, this.storeOptions());
+    // The draft is checked against your organization's layer in force (D-20); while that layer fails, nothing can be edited (D-21). A draft made from the
+    // composed policy names the composed hash, which stands for the personal layer it was composed from.
+    const organization = this.layers.organization;
+    if (organization.state === 'failed') throw new BundleStoreError(`Nothing was changed: your policy cannot be trusted right now, so it cannot be edited. ${organization.sentence}`);
+    const personal = this.layers.personal;
+    const base = organization.state === 'valid' && personal !== undefined && this.current.state === 'valid' && baseHash === this.current.hash ? personal.hash : baseHash;
+    const input = organization.state === 'valid'
+      ? { baseHash: base, organization: { document: organization.document, hash: organization.hash, issuerFingerprint: organization.document.issuer.fingerprint } }
+      : { baseHash: base };
+    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, input, this.storeOptions());
     await this.seedFromMarker();
     const layered = await recompose(this.options.globalStorageDir, this.options.secrets, result, this.storeOptions());
     this.settle(layered, [], { event: result.event ?? 'policy.edit', detail: `The policy changed from ${result.oldHash} to ${result.newHash}.` });

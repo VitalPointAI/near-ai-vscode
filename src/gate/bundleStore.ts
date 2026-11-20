@@ -22,9 +22,15 @@ import { mkdir, readFile, rename, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
-import { SELF_SIGNED_LIFETIME_DAYS, defaultBundlePayload, effectiveNow, failedClosed, inBundleOrder, parseBundle, renewalPayload, verifyBundleEnvelope } from '../domain/gate/bundle';
+import {
+  BUNDLE_FAILURES, SELF_SIGNED_LIFETIME_DAYS, UPDATE_REASONS, bundleHash, defaultBundlePayload, effectiveNow, failedClosed, inBundleOrder, parseBundle, renewalPayload, shapeReason,
+  verifyBundleEnvelope
+} from '../domain/gate/bundle';
 import type { BundleState, PolicyBundle, PolicyEventId } from '../domain/gate/bundle';
-import { bundleViewOf, verifyPolicyLayer } from '../domain/gate/policyDocument';
+import { ALWAYS_REQUIRED_FEATURES, POLICY_SECTIONS, featureForSection } from '../domain/gate/features';
+import { wideningOf, widerThanOrganizationText } from '../domain/gate/layers';
+import { bundleViewOf, documentFromBundle, parsePolicyDocument, verifyPolicyLayer } from '../domain/gate/policyDocument';
+import type { PolicyDocument } from '../domain/gate/policyDocument';
 import { MAX_PAYLOAD_BYTES, PayloadError, signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -438,14 +444,99 @@ export interface PolicyEditResult extends BundleResult {
   readonly newHash: string;
 }
 
+/** The extension's own fields of a draft: this install's key and fresh dates (D-12). A draft never sets them. */
+export interface OwnedDraftFields {
+  readonly issuer: { readonly fingerprint: string; readonly publicKey: string };
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+}
+
+/** Added to a v2 draft refusal whose cause is a newer format (an unknown section or feature), so the person updates instead of guessing (D-07). */
+export const DRAFT_UPDATE_TEXT = 'If a newer version of NEAR AI wrote this draft, update the extension first.';
+
 /**
- * NEAR AI: Apply Policy Draft (D-41, D-53). Under bundle.lock: the policy stored now must be valid and its hash must equal `baseHash` (the hash of the policy
- * the draft was made from), so an old draft never undoes another window's edit or a reset; the draft is parsed as JSON and by parseBundle, with this
- * extension setting the issuer (this install's key) and the dates itself, so a draft cannot sign a policy in another device's name or with a past or
- * far-future date (D-12); then it is signed with the one signer, written, read back, verified and remembered. Every refusal is a BundleStoreError with a plain
- * message, and nothing is written then. Returns policy.edit with the old and new hashes.
+ * Reads a draft as a personal layer document (FND-02, D-04). JSON and object checks with today's messages; a draft with `bundleVersion` 1 or none takes
+ * today's path word for word (inBundleOrder, the extension's issuer and dates, parseBundle) and is then read as v2 with documentFromBundle; a draft with
+ * `bundleVersion` 2 goes through parsePolicyDocument with the same owned fields and layer `personal` (a `parent` in the draft is never trusted). Throws
+ * BundleStoreError with a plain message; never signs anything.
  */
-export async function applyPolicyDraft(globalStorageDir: string, secrets: SecretStorageLike, draftText: string, input: { readonly baseHash: string }, options: BundleStoreOptions = {}): Promise<PolicyEditResult> {
+export function parsePolicyDraft(draftText: string, owned: OwnedDraftFields): PolicyDocument {
+  let draft: unknown;
+  try {
+    draft = JSON.parse(draftText);
+  } catch (error) {
+    throw new BundleStoreError(`Nothing was changed: the draft is not valid JSON (${error instanceof Error ? error.message.slice(0, 160) : 'parse error'}).`);
+  }
+  if (typeof draft !== 'object' || draft === null || Array.isArray(draft)) throw new BundleStoreError('Nothing was changed: the draft must be one JSON object, the policy as Edit Policy wrote it.');
+  const record = draft as Record<string, unknown>;
+  const version = Object.prototype.hasOwnProperty.call(record, 'bundleVersion') ? record['bundleVersion'] : undefined;
+  if (version !== 2) {
+    const parsed = parseBundle({ ...(inBundleOrder(draft) as Record<string, unknown>), ...owned });
+    if (!parsed.ok) throw new BundleStoreError(`Nothing was changed: the draft is not a policy this version can use. ${parsed.message}`);
+    return documentFromBundle(parsed.value);
+  }
+  const candidate: Record<string, unknown> = { ...record, ...owned, layer: 'personal' };
+  delete candidate['parent'];
+  candidate['requires'] = requiresFor(candidate, Array.isArray(record['requires']) ? record['requires'] : []);
+  const parsed = parsePolicyDocument(candidate);
+  if (!parsed.ok) {
+    const newer = UPDATE_REASONS.has(shapeReason(parsed)) || shapeReason(parsed) === 'unknown-field';
+    throw new BundleStoreError(`Nothing was changed: the draft is not a policy this version can use. ${parsed.message}${newer ? ` ${DRAFT_UPDATE_TEXT}` : ''}`);
+  }
+  return parsed.value;
+}
+
+// The features a personal layer names: the ones it already names, layers@1, labels@1, agents@1 and the feature of each section present, sorted and unique.
+function requiresFor(document: Record<string, unknown>, named: readonly unknown[]): string[] {
+  const features = new Set<string>([...named.filter((item): item is string => typeof item === 'string'), ...ALWAYS_REQUIRED_FEATURES]);
+  for (const section of POLICY_SECTIONS) {
+    const feature = featureForSection(section);
+    if (feature !== undefined && Object.prototype.hasOwnProperty.call(document, section) && document[section] !== undefined) features.add(feature);
+  }
+  return [...features].sort();
+}
+
+/** Your organization's layer an Apply is checked against (D-20): its document, its hash and its issuer's fingerprint, for the personal layer's parent. */
+export interface ApplyOrganizationLayer {
+  readonly document: PolicyDocument;
+  readonly hash: string;
+  readonly issuerFingerprint: string;
+}
+
+// The personal layer that is signed: the draft's document with layer personal, the parent when your organization's layer is in force, and `requires`
+// complete. Refused when parsePolicyDocument does not accept that exact payload or when its view differs from the draft's: the rewrite never changes the
+// effect.
+function personalLayerPayload(document: PolicyDocument, organization: ApplyOrganizationLayer | undefined): PolicyDocument {
+  const payload = JSON.parse(JSON.stringify(document)) as Record<string, unknown>;
+  payload['layer'] = 'personal';
+  delete payload['parent'];
+  if (organization !== undefined) payload['parent'] = { hash: organization.hash, issuer: organization.issuerFingerprint };
+  payload['requires'] = requiresFor(payload, document.requires);
+  const parsed = parsePolicyDocument(payload);
+  if (!parsed.ok) throw new BundleStoreError(`Nothing was changed: the draft could not be written as a policy this version can read. ${parsed.message}`);
+  if (bundleHash(bundleViewOf(parsed.value)) !== bundleHash(bundleViewOf(document))) {
+    throw new BundleStoreError('Nothing was changed: the draft could not be written without changing what it does.');
+  }
+  return parsed.value;
+}
+
+export interface ApplyPolicyDraftInput {
+  /** The hash of the personal layer the draft was made from. */
+  readonly baseHash: string;
+  /** Your organization's layer in force, when there is one: a draft that widens past it is refused before signing (D-20). */
+  readonly organization?: ApplyOrganizationLayer;
+}
+
+/**
+ * NEAR AI: Apply Policy Draft (D-41, D-53, FND-02). Under bundle.lock: the personal layer stored now must be valid and its hash must equal `baseHash` (the
+ * hash of the layer the draft was made from), so an old draft never undoes another window's edit or a reset; the draft is read by parsePolicyDraft, with
+ * this extension setting the issuer (this install's key) and the dates itself, so a draft cannot sign a policy in another device's name or with a past or
+ * far-future date (D-12). Under your organization's layer, an edit that widens past it is refused with the key named (D-20), and a value already clamped
+ * at load never blocks an unrelated edit. The draft is then signed as a v2 personal layer (only Edit or Apply writes v2, D-04), written, read back,
+ * verified and remembered. Every refusal is a BundleStoreError with a plain message, and nothing is written then. Returns policy.edit with the old and
+ * new hashes.
+ */
+export async function applyPolicyDraft(globalStorageDir: string, secrets: SecretStorageLike, draftText: string, input: ApplyPolicyDraftInput, options: BundleStoreOptions = {}): Promise<PolicyEditResult> {
   const nowMs = clockOf(options)().getTime();
   if (Number.isNaN(nowMs)) throw new BundleStoreError('Nothing was changed: the clock gave no valid time.');
   const dir = gateDir(globalStorageDir);
@@ -457,16 +548,10 @@ export async function applyPolicyDraft(globalStorageDir: string, secrets: Secret
     } catch (error) {
       throw new BundleStoreError('Nothing was changed: NEAR AI could not read its record of your policy in this computer\'s secret storage.', { cause: error });
     }
-    const stored = (await verifyDisk(globalStorageDir, secrets, nowMs, marker)).state;
+    const disk = await verifyDisk(globalStorageDir, secrets, nowMs, marker);
+    const stored = disk.state;
     if (stored.state !== 'valid') throw new BundleStoreError(`Nothing was changed: your policy cannot be trusted right now, so it cannot be edited. ${stored.sentence}`);
     if (stored.hash !== input.baseHash) throw new BundleStoreError(`Nothing was changed. ${STALE_DRAFT_TEXT}`);
-    let draft: unknown;
-    try {
-      draft = JSON.parse(draftText);
-    } catch (error) {
-      throw new BundleStoreError(`Nothing was changed: the draft is not valid JSON (${error instanceof Error ? error.message.slice(0, 160) : 'parse error'}).`);
-    }
-    if (typeof draft !== 'object' || draft === null || Array.isArray(draft)) throw new BundleStoreError('Nothing was changed: the draft must be one JSON object, the policy as Edit Policy wrote it.');
     let identity: DeviceIdentity;
     try {
       identity = await identityFor(globalStorageDir, secrets, options);
@@ -474,15 +559,18 @@ export async function applyPolicyDraft(globalStorageDir: string, secrets: Secret
       throw new BundleStoreError('Nothing was changed: NEAR AI could not use its signing key on this computer.', { cause: error });
     }
     const effective = effectiveNow(nowMs, lastValidAtOf(marker));
-    const owned = {
-      ...(inBundleOrder(draft) as Record<string, unknown>),
+    const next = parsePolicyDraft(draftText, {
       issuer: { fingerprint: identity.fingerprint, publicKey: identity.publicKey },
       issuedAt: new Date(effective).toISOString(),
       expiresAt: new Date(effective + SELF_SIGNED_LIFETIME_DAYS * DAY_MS).toISOString()
-    };
-    const parsed = parseBundle(owned);
-    if (!parsed.ok) throw new BundleStoreError(`Nothing was changed: the draft is not a policy this version can use. ${parsed.message}`);
-    const written = await install(globalStorageDir, secrets, sign(identity, parsed.value, new Date(effective)), nowMs, marker);
+    });
+    if (input.organization !== undefined) {
+      const base = parsePolicyDocument(disk.stored);
+      if (!base.ok) throw new BundleStoreError(`Nothing was changed: your policy cannot be trusted right now, so it cannot be edited. ${BUNDLE_FAILURES.malformed}`);
+      const wider = wideningOf(input.organization.document, base.value, next);
+      if (wider !== undefined) throw new BundleStoreError(`Nothing was changed. ${widerThanOrganizationText(wider)}`);
+    }
+    const written = await install(globalStorageDir, secrets, sign(identity, personalLayerPayload(next, input.organization), new Date(effective)), nowMs, marker);
     const state = written.state;
     if (state.state !== 'valid') throw new BundleStoreError(`Nothing was changed: the new policy did not verify. ${state.sentence}`);
     const kept = await remember(secrets, state, effective);
