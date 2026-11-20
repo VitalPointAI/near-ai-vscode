@@ -856,6 +856,43 @@ test('WR-06: HubTransport.push names the blob each entry uses (from its blobsCit
   }
 });
 
+test('WR-07: an entry whose blob neither this computer nor the hub holds waits with the rest of its log; everything else is pushed and the exchange ends synced', async () => {
+  const world = await syncWorld('blob-held-back');
+  try {
+    const before = await world.held();
+    // The member's long note and the entry after it reached this computer without the long note's blob; the hub has neither.
+    const big = world.memberWrite({ text: 'Fictional long observation '.repeat(1200) });
+    const next = world.memberWrite();
+    const blob = big.blobs[0] as SealedBlob;
+    assert.ok('ok' in (await world.a.ingestForeign([big.entry, next.entry], [])));
+    assert.equal(await world.a.blob(blob.hash), undefined, 'this computer does not hold the blob');
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional short report' });
+    assert.ok('ok' in own);
+    const { fake, state } = await hubFor(world, { entries: before });
+    try {
+      const report = await syncA(world, fake.address);
+      assert.equal(report.outcome, 'synced', JSON.stringify(report));
+      assert.equal(report.pushed, 1);
+      assert.equal(report.heldBack, 2, 'the big update and the entry after it wait');
+      assert.deepEqual(state.appends.flatMap((item) => item.entries.map((entry) => entryHash(entry.header))), [own.hash], 'only what can go with its blobs');
+      assert.ok(state.appends.every((item) => item.blobRefs.every((ref) => state.blobs.has(ref.blob))), 'no reference to a blob this computer could not put');
+      assert.deepEqual(report.refusedByHub, []);
+      // Once the blob reaches this computer, the next exchange pushes the waiting log with it: named, put when the hub asks, then accepted.
+      assert.ok('ok' in (await world.a.ingestForeign([], [blob])));
+      const healed = await syncA(world, fake.address);
+      assert.equal(healed.outcome, 'synced', JSON.stringify(healed));
+      assert.equal(healed.pushed, 2);
+      assert.deepEqual(state.blobs.get(blob.hash), Buffer.from(blob.bytes, 'base64url'));
+      assert.equal(healed.heldBack, 0);
+      assert.deepEqual(state.appends.at(-1)?.blobRefs, [{ entry: big.hash, blob: blob.hash }]);
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
 test('checkpoints: a valid newer checkpoint replaces the kept newest and each is stored as evidence', async () => {
   await withSync('checkpoint', async (world, fake, state) => {
     const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };

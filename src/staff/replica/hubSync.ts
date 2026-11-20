@@ -26,7 +26,7 @@ import { createWitness, findingSentence, readWitness, serializeWitness, witnessB
 import type { HubFinding, HubFindingKind, WitnessResult, WitnessState } from '../../domain/replica/hubWitness';
 import type { RosterView } from '../../domain/replica/rosterView';
 import type { HeadSet } from '../../domain/replica/transport';
-import { CHECKPOINTS_PER_ASK, HUB_TRANSPORT_FAILURES, HubTransportError, appendBatches } from './hubTransport';
+import { CHECKPOINTS_PER_ASK, HUB_TRANSPORT_FAILURES, HubTransportError, appendBatches, pushPlan } from './hubTransport';
 import type { HubTransport, HubTransportFailure } from './hubTransport';
 
 /** What one exchange needs of this computer's replica. ReplicaProject provides it through syncLocalOf; the hub's tests use a memory replica. */
@@ -123,6 +123,11 @@ export interface SyncReport {
   notStored: number;
   /** Entries the hub refused, with its reason id. */
   refusedByHub: Array<{ hash: string; reason: string }>;
+  /**
+   * Entries not pushed because this computer does not hold a blob they use (the hub has not got it either, or the blob step would have fetched it),
+   * with the rest of their writer's log. They go in a later exchange once the blob is here; the blob's author pushes them meanwhile.
+   */
+  heldBack: number;
   /** The transport failure or refusal reason id, when the exchange ended on one. */
   reason?: string;
   /** One plain sentence for the outcome when it was not synced. */
@@ -184,7 +189,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
   const now = options.now ?? ((): Date => new Date());
   const hub = transport.hub;
   const project = transport.project;
-  const report: SyncReport = { outcome: 'synced', pulled: 0, pushed: 0, blobs: 0, grants: 0, findings: [], repushed: false, handedBack: 0, notStored: 0, refusedByHub: [] };
+  const report: SyncReport = { outcome: 'synced', pulled: 0, pushed: 0, blobs: 0, grants: 0, findings: [], repushed: false, handedBack: 0, notStored: 0, refusedByHub: [], heldBack: 0 };
   const noted: HubFinding[] = [];
   let state = await memory.load(hub, project);
   let rolledBack = false;
@@ -414,7 +419,11 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
 
   // ---- the push --------------------------------------------------------------------------------------------------------------------------------
 
-  /** Every entry above the hub's head per writer (all of a log the hub lacks), and every grant the hub does not list, in batches the hub takes. */
+  /**
+   * Every entry above the hub's head per writer (all of a log the hub lacks), and every grant the hub does not list, in batches the hub takes. Only
+   * blobs this computer holds are named, and an entry using a blob it lacks waits with the rest of its log (pushPlan, WR-07), so one missing blob
+   * never refuses the whole push.
+   */
   async function push(hubStreams: HeadSet['streams'], hubGrants: ReadonlySet<string>): Promise<void> {
     const hubSeq = new Map<string, number>();
     for (const stream of hubStreams) for (const head of stream.heads) hubSeq.set(`${stream.stream}/${head.writer}`, head.seq);
@@ -428,15 +437,20 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     }
     let grants = (await local.grants()).filter((grant) => !hubGrants.has(grant.hash)).map((grant) => grant.signed);
     const hashOf = new Map(entries.map((entry) => [entry, entryHash(entry.header)] as const));
-    const wanted = new Set(hashOf.values());
+    const cited = entries.length === 0 ? [] : await local.blobsCitedBy([...hashOf.values()]);
+    const heldBlobs = new Set<string>();
+    for (const blob of new Set(cited.map((ref) => ref.blob))) if ((await local.blob(blob)) !== undefined) heldBlobs.add(blob);
+    const plan = pushPlan(entries, cited, heldBlobs, (entry) => hashOf.get(entry) as string);
+    report.heldBack = plan.heldBack.length;
+    entries = plan.entries;
+    const wanted = new Set(entries.map((entry) => hashOf.get(entry) as string));
     const sentAll = entries;
     const accepted = new Set<string>();
     const lastRefusal = new Map<string, string>();
     for (let pass = 0; pass < PUSH_PASSES && (entries.length > 0 || grants.length > 0); pass += 1) {
-      const refs = await local.blobsCitedBy(entries.map((entry) => hashOf.get(entry) as string));
       let acceptedThisPass = 0;
       const retry: SealedEntry[] = [];
-      for (const batch of appendBatches(entries, grants, refs, (entry) => hashOf.get(entry) as string)) {
+      for (const batch of appendBatches(entries, grants, plan.blobRefs, (entry) => hashOf.get(entry) as string)) {
         const answer = await transport.append(batch, (hash) => local.blob(hash));
         for (const hash of answer.accepted) {
           if (wanted.has(hash) && !accepted.has(hash)) acceptedThisPass += 1;
