@@ -808,6 +808,54 @@ test('push: own entries, other writers\' entries the hub lacks, the blobs they c
   }
 });
 
+test('WR-06: HubTransport.push names the blob each entry uses (from its blobsCitedBy source) and puts it when the hub asks, so the blob reaches the hub', async () => {
+  const world = await syncWorld('transport-push');
+  try {
+    const before = await world.held();
+    const own = await world.a.appendOwn('note.add', { text: 'Fictional long report '.repeat(1200) });
+    assert.ok('ok' in own && own.built.blobs.length === 1, 'the own entry carries a blob');
+    const blob = own.built.blobs[0] as SealedBlob;
+    const { fake, state } = await hubFor(world, { entries: before });
+    try {
+      const cited = { servername: 'localhost', blobsCitedBy: (hashes: readonly string[]) => world.a.blobsCitedBy(hashes) };
+      const transport = syncTransport(world, fake.address, cited);
+      try {
+        const result = await transport.push([own.built.entry], own.built.blobs);
+        assert.deepEqual(result, { accepted: [own.hash], refused: [] });
+        assert.deepEqual(state.appends.flatMap((item) => item.blobRefs), [{ entry: own.hash, blob: blob.hash }]);
+        assert.deepEqual(state.blobs.get(blob.hash), Buffer.from(blob.bytes, 'base64url'), 'the blob given to push is on the hub');
+      } finally {
+        transport.close();
+      }
+      // An entry whose blob was not given is not sent, nor the rest of its log: refused blob-not-held, and the hub is not asked.
+      const big = world.memberWrite({ big: true });
+      const next = world.memberWrite();
+      assert.ok('ok' in (await world.a.ingestForeign([big.entry, next.entry], [])));
+      const without = syncTransport(world, fake.address, cited);
+      try {
+        const appends = state.appends.length;
+        assert.deepEqual(await without.push([big.entry, next.entry], []), { accepted: [], refused: [{ hash: big.hash, reason: 'blob-not-held' }, { hash: next.hash, reason: 'blob-not-held' }] });
+        assert.equal(state.appends.length, appends);
+      } finally {
+        without.close();
+      }
+      // Without a source of blob references the transport cannot name the blobs, so it sends nothing rather than lose them.
+      const blind = syncTransport(world, fake.address);
+      try {
+        const appends = state.appends.length;
+        await assert.rejects(blind.push([own.built.entry], own.built.blobs), /blobsCitedBy/);
+        assert.equal(state.appends.length, appends);
+      } finally {
+        blind.close();
+      }
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
 test('checkpoints: a valid newer checkpoint replaces the kept newest and each is stored as evidence', async () => {
   await withSync('checkpoint', async (world, fake, state) => {
     const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };

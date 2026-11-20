@@ -111,6 +111,11 @@ export interface HubTransportOptions {
   now?: () => Date;
   connectTimeoutMs?: number;
   responseMaxBytes?: number;
+  /**
+   * The blobs the given entries use, as append blobRefs (the local replica's blobsCitedBy). push needs it: entry bodies are sealed, so only the
+   * replica can say which blob an entry uses, and the hub keeps and serves a blob only for the entries that name it (WR-06).
+   */
+  blobsCitedBy?: (entryHashes: readonly string[]) => Promise<Array<{ entry: string; blob: string }>>;
 }
 
 export interface HubHeads extends HeadSet {
@@ -432,6 +437,7 @@ export class HubTransport implements ReplicaTransport {
   private readonly now: () => Date;
   private readonly connectTimeoutMs: number;
   private readonly cap: number;
+  private readonly blobsCitedBy: HubTransportOptions['blobsCitedBy'];
   private main: HubConnection | undefined;
   private opening: Promise<HubConnection> | undefined;
   private readonly readers = new Set<{ close(): void }>();
@@ -451,6 +457,7 @@ export class HubTransport implements ReplicaTransport {
     this.now = options.now ?? ((): Date => new Date());
     this.connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
     this.cap = options.responseMaxBytes ?? RESPONSE_MAX_BYTES;
+    this.blobsCitedBy = options.blobsCitedBy;
   }
 
   /** How many TLS connections this transport opened, the event reader's included. */
@@ -479,11 +486,20 @@ export class HubTransport implements ReplicaTransport {
     }
   }
 
+  /**
+   * Pushes entries with the blobs given (WR-06, WR-07). Each append names the blobs its entries use (from the blobsCitedBy source), and a 409
+   * blob-missing answer puts them. An entry using a blob not given is not sent, nor is the rest of its writer's log: it is refused blob-not-held, and
+   * the hub never holds an entry whose blob it cannot get. Without a blobsCitedBy source nothing is sent, because the blobs could not be named.
+   */
   public async push(entries: readonly SealedEntry[], blobs: readonly SealedBlob[]): Promise<PushResult> {
+    if (this.blobsCitedBy === undefined) throw new Error('Pushing through the hub needs the blobs each entry uses (the blobsCitedBy source), so nothing was sent.');
     const byHash = new Map(blobs.map((blob) => [blob.hash, blob]));
+    const hashOf = new Map(entries.map((entry) => [entry, entryHash(entry.header)] as const));
+    const refs = await this.blobsCitedBy([...hashOf.values()]);
+    const plan = pushPlan(entries, refs, new Set(byHash.keys()), (entry) => hashOf.get(entry) as string);
     const accepted: string[] = [];
-    const refused: PushResult['refused'] = [];
-    for (const batch of appendBatches(entries, [], [])) {
+    const refused: PushResult['refused'] = plan.heldBack.map((hash) => ({ hash, reason: 'blob-not-held' }));
+    for (const batch of appendBatches(plan.entries, [], plan.blobRefs, (entry) => hashOf.get(entry) as string)) {
       const answer = await this.append(batch, (hash) => byHash.get(hash));
       accepted.push(...answer.accepted);
       for (const item of answer.refused) refused.push({ hash: item.hash ?? '', reason: item.reason });
@@ -850,6 +866,36 @@ export async function enrolmentRequest(source: EnrolSource, file: EnrolmentFile,
   const grants = (await source.grants()).map((item) => item.signed);
   const mac = enrolmentMac(file.enrolmentSecret, { enrolment: file.enrolment, hub: file.hub, project, genesisHash: roster.genesisHash, rosterHead: roster.rosterHead });
   return { enrolment: file.enrolment, project, entries: entries.map((entry) => ({ header: entry.header, body: entry.body })), grants, blobs, rosterHead: roster.rosterHead, mac };
+}
+
+/** What a push sends: the entries that go, the blob references they declare, and the hashes of the entries held back. */
+export interface PushPlan { entries: SealedEntry[]; blobRefs: Array<{ entry: string; blob: string }>; heldBack: string[] }
+
+/**
+ * Which entries may go to the hub now (WR-06, WR-07). The hub refuses a whole append when a declared blob is missing (and for a base-stream entry
+ * whose blob it cannot read), and a hub that keeps an entry without its blob leaves every reader waiting for it. So an entry goes only when every
+ * blob it uses is in held (blobs this computer can put), and only those references are declared. An entry that uses a blob not held waits, and so
+ * does every later entry of the same writer's log, which the hub would refuse seq-gap. Entries this computer cannot open name no blob and go as they
+ * are. The order of entries is kept.
+ */
+export function pushPlan(entries: readonly SealedEntry[], refs: ReadonlyArray<{ entry: string; blob: string }>, held: ReadonlySet<string>, entryHashOf: (entry: SealedEntry) => string): PushPlan {
+  const lacking = new Set(refs.filter((ref) => !held.has(ref.blob)).map((ref) => ref.entry));
+  const logKey = (entry: SealedEntry): string => `${entry.header.stream}/${entry.header.writer}`;
+  const stopAt = new Map<string, number>();
+  for (const entry of entries) {
+    if (!lacking.has(entryHashOf(entry))) continue;
+    const key = logKey(entry);
+    stopAt.set(key, Math.min(stopAt.get(key) ?? Number.POSITIVE_INFINITY, entry.header.seq));
+  }
+  const going: SealedEntry[] = [];
+  const heldBack: string[] = [];
+  for (const entry of entries) {
+    const stop = stopAt.get(logKey(entry));
+    if (stop !== undefined && entry.header.seq >= stop) heldBack.push(entryHashOf(entry));
+    else going.push(entry);
+  }
+  const sent = new Set(going.map(entryHashOf));
+  return { entries: going, blobRefs: refs.filter((ref) => sent.has(ref.entry) && held.has(ref.blob)), heldBack };
 }
 
 /** Splits entries and grants into appends the hub takes: at most 200 entries, 64 grants and about 3 MiB each, grants in the first ones. */
