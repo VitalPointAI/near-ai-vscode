@@ -1,9 +1,24 @@
 // Data schemas for the project family: project.genesis and project.import (DESIGN 7.1, 14; D-07). Hub-side: pure, no Yjs; it must not import kinds.ts.
-// Owner: 30-04. It also exports the small checks the other family files of this plan share (closed keys with a named path, one-line text, own reads).
+// Owner: 30-04. It also exports the small checks the other family files of this plan share (closed keys with a named path, one-line text, own reads),
+// and since 31-09 the device descriptor check, which the genesis lead and the roster kinds share. roster.ts imports it from here, so this file never
+// imports roster.ts.
 import { isRecord, isSafeIntegerInRange } from '../../team/validate';
-import { exactKeys, invalidAt, isHash, isIsoTime, isSlug } from './shared';
+import { isSlot } from '../clientIds';
+import { writerIdOf } from '../entry';
+import { exactKeys, invalidAt, isBase64urlBytes, isHash, isIsoTime, isSlug } from './shared';
 
 export const STREAM_HEX = /^[0-9a-f]{32}$/;
+// The largest legacy file a project.import carries whole (D-31): the staff file limit of today's single-machine host (MAX_STAFF_FILE_BYTES in
+// src/staff/staffFiles.ts), kept here as a plain value so this hub-side file imports nothing from the host. Its base64url text is about 2.8 MB, which
+// buildEntry moves into a sealed blob under BLOB_MAX_BYTES.
+export const LEGACY_FILE_MAX_BYTES = 2 * 1024 * 1024;
+// The product ledger's head mark as today's host keeps it: one line of JSON (a signed staff-ledger-head envelope).
+const MARK_MAX_CHARS = 4096;
+// The cells a genesis may name with their first epoch and grant (D-44, D-49).
+const MAX_GENESIS_CELLS = 64;
+const ED25519_PUBLIC_BYTES = 32;
+const X25519_PUBLIC_BYTES = 32;
+const ED25519_SIGNATURE_BYTES = 64;
 
 // Own-property read: a key that is not an own property of the record reads as undefined, whatever the prototype holds.
 export function own(record: Record<string, unknown>, key: string): unknown {
@@ -41,6 +56,52 @@ export function isCount(value: unknown, max = Number.MAX_SAFE_INTEGER): value is
 
 export function isStreamHex(value: unknown): value is string {
   return typeof value === 'string' && STREAM_HEX.test(value);
+}
+
+function isExactBytes(value: unknown, bytes: number): value is string {
+  return isBase64urlBytes(value, bytes) && Buffer.from(value, 'base64url').length === bytes;
+}
+
+// A device as the roster names it (DESIGN 7.4): the Ed25519 key it signs with, the X25519 key it opens wraps with, and the Ed25519 signature that binds
+// them. slot is its roster slot (D-41), 1 to 4095, never reused, assigned in the entry that admits or adds the device; it is optional on the wire so
+// every Phase 30 sample stays valid, and the roster fold requires it where D-41 needs it.
+export function deviceProblem(value: unknown, path: string): string | undefined {
+  if (!isRecord(value)) return invalidAt(path);
+  const keys = keyProblem(value, path, ['writer', 'publicKey', 'x25519', 'x25519Sig'], ['slot']);
+  if (keys !== undefined) return keys;
+  if (!isHash(value.writer)) return invalidAt(`${path}.writer`);
+  if (!isExactBytes(value.publicKey, ED25519_PUBLIC_BYTES)) return invalidAt(`${path}.publicKey`);
+  if (!isExactBytes(value.x25519, X25519_PUBLIC_BYTES)) return invalidAt(`${path}.x25519`);
+  if (!isExactBytes(value.x25519Sig, ED25519_SIGNATURE_BYTES)) return invalidAt(`${path}.x25519Sig`);
+  // The writer id of a device is the hash of its signing key, so a descriptor that names another writer is wrong on its face.
+  if (value.writer !== writerIdOf(value.publicKey)) return invalidAt(`${path}.writer`, 'not the hash of the key');
+  if (hasOwn(value, 'slot') && !isSlot(value.slot)) return invalidAt(`${path}.slot`);
+  return undefined;
+}
+
+// The first cells of a genesis: at most 64 of { cell, epoch, grant }, each cell named once. epoch starts at 1 (never 0); grant is the sha256 of the
+// signed grant object (D-44).
+function genesisCellsProblem(value: unknown, path: string): string | undefined {
+  if (!Array.isArray(value) || value.length > MAX_GENESIS_CELLS) return invalidAt(path);
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const item: unknown = value[index];
+    const at = `${path}[${index}]`;
+    if (!isRecord(item)) return invalidAt(at);
+    const keys = keyProblem(item, at, ['cell', 'epoch', 'grant']);
+    if (keys !== undefined) return keys;
+    if (!isStreamHex(item.cell) || seen.has(item.cell)) return invalidAt(`${at}.cell`);
+    seen.add(item.cell);
+    if (!isSafeIntegerInRange(item.epoch, 1, Number.MAX_SAFE_INTEGER)) return invalidAt(`${at}.epoch`);
+    if (!isHash(item.grant)) return invalidAt(`${at}.grant`);
+  }
+  return undefined;
+}
+
+// The whole legacy file as strict base64url, at most LEGACY_FILE_MAX_BYTES decoded. The length is checked before any decoding, so an oversized text
+// costs nothing. An empty file is a whole file too: its encoding is the empty text.
+export function isLegacyFile(value: unknown): value is string {
+  return value === '' || isBase64urlBytes(value, LEGACY_FILE_MAX_BYTES);
 }
 
 // ---- a small table-driven checker the family files of this plan share ----
@@ -93,16 +154,28 @@ export function validateShape(shapes: Readonly<Record<string, Shape>>, kind: str
 export function validateProjectData(kind: string, data: unknown, path: string): string | undefined {
   if (!isRecord(data)) return invalidAt(path);
   if (kind === 'project.genesis') {
-    const keys = keyProblem(data, path, ['project', 'name', 'profile', 'labelMapHash', 'lead'], ['hub']);
+    // lead.device, level and cells are optional so every Phase 30 genesis stays valid (D-07, D-49); the roster fold requires lead.device.
+    const keys = keyProblem(data, path, ['project', 'name', 'profile', 'labelMapHash', 'lead'], ['hub', 'level', 'cells']);
     if (keys !== undefined) return keys;
     if (!isStreamHex(data.project)) return invalidAt(`${path}.project`);
     if (!isLine(data.name, 120)) return invalidAt(`${path}.name`);
     if (!isSlug(data.profile)) return invalidAt(`${path}.profile`);
     if (!isHash(data.labelMapHash)) return invalidAt(`${path}.labelMapHash`);
     const lead = data.lead;
-    if (!isRecord(lead) || !exactKeys(lead, ['member', 'writer'])) return invalidAt(`${path}.lead`);
+    if (!isRecord(lead) || !exactKeys(lead, ['member', 'writer'], ['device'])) return invalidAt(`${path}.lead`);
     if (!isSlug(lead.member)) return invalidAt(`${path}.lead.member`);
     if (!isHash(lead.writer)) return invalidAt(`${path}.lead.writer`);
+    if (hasOwn(lead, 'device')) {
+      const device = deviceProblem(lead.device, `${path}.lead.device`);
+      if (device !== undefined) return device;
+      // The lead's device is the one the genesis names as the lead's writer, so the anchor a joiner pins names one device, not two.
+      if ((lead.device as Record<string, unknown>).writer !== lead.writer) return invalidAt(`${path}.lead.device.writer`, 'not the lead writer');
+    }
+    if (hasOwn(data, 'level') && !isSlug(data.level)) return invalidAt(`${path}.level`);
+    if (hasOwn(data, 'cells')) {
+      const cells = genesisCellsProblem(data.cells, `${path}.cells`);
+      if (cells !== undefined) return cells;
+    }
     if (hasOwn(data, 'hub')) {
       const hub = data.hub;
       if (!isRecord(hub) || !exactKeys(hub, ['writer', 'certPin'])) return invalidAt(`${path}.hub`);
@@ -112,11 +185,14 @@ export function validateProjectData(kind: string, data: unknown, path: string): 
     return undefined;
   }
   if (kind === 'project.import') {
-    const keys = keyProblem(data, path, ['ledger', 'legacyHead', 'count']);
+    // file and mark are optional so every Phase 30 import stays valid (D-31, D-49); migration writes both where the ledger has them.
+    const keys = keyProblem(data, path, ['ledger', 'legacyHead', 'count'], ['file', 'mark']);
     if (keys !== undefined) return keys;
     if (!isSlug(data.ledger)) return invalidAt(`${path}.ledger`);
     if (!isHash(data.legacyHead)) return invalidAt(`${path}.legacyHead`);
     if (!isCount(data.count)) return invalidAt(`${path}.count`);
+    if (hasOwn(data, 'file') && !isLegacyFile(data.file)) return invalidAt(`${path}.file`);
+    if (hasOwn(data, 'mark') && !isLine(data.mark, MARK_MAX_CHARS)) return invalidAt(`${path}.mark`);
     return undefined;
   }
   return invalidAt(`${path}.kind`);

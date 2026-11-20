@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import { setRunner } from '../lib/gh.mjs';
-import { gatherReview, submitReview } from '../lib/review.mjs';
+import { gatherReview, prDiff, submitReview } from '../lib/review.mjs';
 import { evaluateCommit } from '../lib/workflow.mjs';
 import { OWNER, REPO, REVIEWER, fakeGitHub, greenCommit, openPr } from './fake-github.mjs';
 
@@ -131,4 +131,21 @@ test('gather still fails on any other diff error', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the fallback also covers the too-many-lines refusal, pages through every file, and caps what it assembles', () => {
+  const files = Array.from({ length: 250 }, (_, i) => ({ path: `src/f${i}.ts`, patch: `@@ -1 +1 @@\n-a${i}\n+b${i}` }));
+  const fake = fakeGitHub({ diffTooLarge: 'lines', prs: { 7: openPr(7, 'fix/thing', HEAD, { files }) } });
+  const calls = [];
+  setRunner((command, args) => { calls.push(args.join(' ')); return fake.runner(command, args); });
+  const logged = [];
+  const diff = prDiff(REPO, '7', { log: (line) => logged.push(line), changedFiles: 260, maxBytes: 2000 });
+  assert.ok(calls.some((call) => /--paginate .*pulls\/7\/files/.test(call)), 'the per-file listing is paginated');
+  const sections = diff.split(/(?=^diff --git )/m);
+  assert.equal(sections.length, 251, 'every listed file keeps a section, plus one for the unlisted ones');
+  assert.ok(Buffer.byteLength(diff) < 2000 + 251 * 120, 'patches stop at the cap; later files keep only a header');
+  assert.match(sections[0], /^\+b0$/m);
+  assert.match(sections[249], /left out, the assembled diff reached 2000 bytes/);
+  assert.match(sections[250], /changes 260 files; GitHub listed only 250, so the changes to 10 file/);
+  assert.ok(logged.some((line) => /250 files, 0 without a text patch, \d+ left out over the size cap, 10 not listed by GitHub/.test(line)));
 });

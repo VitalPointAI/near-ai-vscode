@@ -999,6 +999,7 @@ const PROCESS_IMPORTERS: Readonly<Record<string, string>> = {
   'src/services/cyberTools.ts': 'fixed `--version` detection of host security tools; the extension\'s own helper',
   'src/services/onlineHome.ts': 'the GitHub CLI calls of the person\'s own "online home" click; the extension\'s own helper',
   'src/services/stateGit.ts': 'the one place project sync starts git; the extension\'s own helper',
+  'src/staff/replica/decodeHost.ts': 'forks the extension\'s own decode child (dist/staff/replica/decodeWorker.js) with fixed heap, stack and time limits to check updates from other machines before they are decoded; started by the replica store, never by a model call',
   'src/staff/feedImport/runner.ts': 'the feed importer\'s own parser process (the extension\'s worker.js, heap, size and time limits), started only by the person-run Import Feed File command; not a model call',
   'src/team/runGit.ts': 'the one place the team core starts git; the extension\'s own helper'
 };

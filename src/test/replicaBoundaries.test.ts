@@ -27,7 +27,17 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/order',
   'domain/replica/checkpoint',
   'domain/replica/transport',
-  'domain/replica/digest'
+  'domain/replica/digest',
+  'domain/replica/clientIds',
+  'domain/replica/updateGuard',
+  // The roster fold and its key modules (31-12): the hub folds the roster to know who may write, without Yjs. invite.ts derives the safety code
+  // (31-16), so safetyCode and its word list (node:crypto and data only) are hub-side with it.
+  'domain/replica/safetyCode', 'domain/replica/safetyWords',
+  'domain/replica/roster',
+  'domain/replica/rosterMembers',
+  'domain/replica/rosterCells',
+  'domain/replica/cellKeys',
+  'domain/replica/invite'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }

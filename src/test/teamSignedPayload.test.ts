@@ -57,6 +57,9 @@ function statusOf(signer: { fingerprint: string; publicKey: string }, state: 'ac
 const ACTIVE = (signer: PayloadSigner): KeyStatusLookup => statusOf(signer, 'active');
 const at = (iso: string) => (): Date => new Date(iso);
 
+// Fixed key-shaped bytes for the Phase 31 samples (fictional; never a real key).
+const bytes64url = (length: number, fill: number): string => Buffer.alloc(length, fill).toString('base64url');
+
 const SAMPLES: Record<PayloadPurpose, unknown> = {
   'policy-bundle': { version: 1, expiresAt: '2027-01-01T00:00:00Z', issuer: 'dev-sample', rules: [] },
   grant: { capability: 'read', until: '2026-12-01T00:00:00Z', budgetNanoUsd: 5_000_000_000 },
@@ -67,7 +70,12 @@ const SAMPLES: Record<PayloadPurpose, unknown> = {
   'staff-ledger': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', run: 'run-1', product: 'intelligence-estimate', section: 'j2', event: { type: 'propose', hash: 'b'.repeat(64) }, actor: { kind: 'agent', member: 'j2-chief' } },
   'staff-ledger-head': { v: 1, count: 1, head: 'c'.repeat(64) },
   'staff-decision': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', subject: { kind: 'pir', id: 'PIR-1' }, decision: 'approved', wording: 'd'.repeat(64), reasons: [], person: { kind: 'person', name: 'A. Demo', role: 'Commander', deviceFingerprint: 'f'.repeat(16) } },
-  'staff-replica': { v: 2, stream: '1'.repeat(32), writer: 'a'.repeat(64), seq: 0, prev: '0'.repeat(64), epoch: 0, body: { hash: 'b'.repeat(64), size: 128 } }
+  'staff-replica': { v: 2, stream: '1'.repeat(32), writer: 'a'.repeat(64), seq: 0, prev: '0'.repeat(64), epoch: 0, body: { hash: 'b'.repeat(64), size: 128 } },
+  // Phase 31 (D-49): the lead's invite file, the joining device's request, a cell grant and the store's high-water mark.
+  'staff-invite': { v: 1, genesisHash: 'a'.repeat(64), project: '1'.repeat(32), name: 'Operation Example', lead: { member: 'mbr-lead', writer: 'b'.repeat(64), publicKey: bytes64url(32, 1), x25519: bytes64url(32, 2) }, invite: 'inv-1', secret: bytes64url(32, 3), expiresAt: '2026-11-26T12:00:00.000Z' },
+  'staff-join-request': { v: 1, invite: 'inv-1', genesisHash: 'a'.repeat(64), name: 'Bo Chen', publicKey: bytes64url(32, 4), x25519: bytes64url(32, 5), x25519Sig: bytes64url(64, 6), mac: 'c'.repeat(64) },
+  'staff-cell-grant': { v: 1, cell: '2'.repeat(32), epoch: 1, labelSealed: bytes64url(48, 8), wraps: [{ writer: 'd'.repeat(64), wrap: bytes64url(92, 7) }, { writer: 'e'.repeat(64), wrap: bytes64url(92, 9) }] },
+  'staff-replica-mark': { v: 1, rosterHead: 'f'.repeat(64), heads: [{ stream: '3'.repeat(32), writer: 'a'.repeat(64), seq: 12, hash: 'b'.repeat(64) }] }
 };
 
 function failure(verdict: ReturnType<typeof verifyPayload>): PayloadFailureReason | 'ok' {
@@ -124,7 +132,31 @@ test('every purpose round-trips, signed by the device identity and by a plain ag
     assert.equal(failure(agentVerdict), 'ok', purpose);
     if (agentVerdict.ok) assert.deepEqual(agentVerdict.payload, SAMPLES[purpose]);
   }
-  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica']);
+  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark']);
+});
+
+test('D-49: each Phase 31 purpose signs and verifies its own sample, and the same envelope offered for any other purpose is refused wrong-purpose', () => {
+  const agent = agentSigner();
+  const phase31: PayloadPurpose[] = ['staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark'];
+  for (const purpose of phase31) {
+    const envelope = signPayload(agent, purpose, SAMPLES[purpose]);
+    assert.equal(envelope.purpose, purpose);
+    const verdict = verifyPayload(envelope, { purpose, status: ACTIVE(agent) });
+    assert.equal(failure(verdict), 'ok', purpose);
+    if (verdict.ok) assert.deepEqual(verdict.payload, SAMPLES[purpose]);
+    for (const other of PAYLOAD_PURPOSES) {
+      if (other === purpose) continue;
+      assert.equal(failure(verifyPayload(envelope, { purpose: other, status: ACTIVE(agent) })), 'wrong-purpose', `${purpose} offered as ${other}`);
+    }
+    // The purpose is inside the signed bytes: an envelope whose purpose field is edited to another Phase 31 purpose no longer verifies.
+    const swapped = { ...envelope, purpose: phase31[(phase31.indexOf(purpose) + 1) % phase31.length] };
+    assert.equal(failure(verifyPayload(swapped, { purpose: swapped.purpose, status: ACTIVE(agent) })), 'bad-signature', purpose);
+  }
+  // A signature made for an older purpose is not accepted as one of the new ones.
+  const ledgerHead = signPayload(agent, 'staff-ledger-head', SAMPLES['staff-ledger-head']);
+  assert.equal(failure(verifyPayload(ledgerHead, { purpose: 'staff-replica-mark', status: ACTIVE(agent) })), 'wrong-purpose');
+  const replica = signPayload(agent, 'staff-replica', SAMPLES['staff-replica']);
+  assert.equal(failure(verifyPayload(replica, { purpose: 'staff-cell-grant', status: ACTIVE(agent) })), 'wrong-purpose');
 });
 
 test('an envelope with a member id and one without both verify, and the one without has no memberId key at all', () => {
@@ -475,4 +507,33 @@ test('a key record made of keys and hashes in the shapes the history writes is n
     };
     assert.doesNotThrow(() => signPayload(signer, 'key-record', record, { now: () => new Date('2026-03-01T10:00:00.000Z') }), `record ${i} is signed`);
   }
+});
+
+test('generated random fields of the Phase 31 purposes are not mistaken for tokens, and nothing else is let through', () => {
+  const agent = agentSigner();
+  // Random base64url that happens to contain a token shape: the chance match that made grants, admissions and rekeys fail at random.
+  const lookalike = `${randomBytes(9).toString('base64url')}-rt_${randomBytes(12).toString('base64url')}`;
+  const pkcs8 = `MC4CAQAwBQYDK2VwBCIEI${randomBytes(24).toString('base64url')}`;
+  const cases: Array<[PayloadPurpose, (value: string) => unknown, string]> = [
+    ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: value, wraps: [] }), '$.labelSealed'],
+    ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: '', wraps: [{ writer: 'w', wrap: 'x' }, { writer: 'v', wrap: value }] }), '$.wraps[1].wrap'],
+    ['staff-invite', (value) => ({ invite: 'i', secret: value }), '$.secret'],
+    ['staff-invite', (value) => ({ invite: 'i', lead: { member: 'm', x25519: value } }), '$.lead.x25519'],
+    ['staff-join-request', (value) => ({ invite: 'i', x25519: value }), '$.x25519'],
+    ['staff-join-request', (value) => ({ invite: 'i', x25519Sig: value }), '$.x25519Sig'],
+    ['staff-join-request', (value) => ({ invite: 'i', mac: value }), '$.mac']
+  ];
+  for (const [purpose, build, where] of cases) {
+    // At its own path the random value signs.
+    assert.equal(failure(verifyPayload(signPayload(agent, purpose, build(lookalike)), { purpose, status: ACTIVE(agent) })), 'ok', `${purpose} ${where}`);
+    // Private key material at the same path is still refused.
+    throwsPlain(() => signPayload(agent, purpose, build(pkcs8)), new RegExp(`secret-like value at ${where.replace(/[$.[\]]/g, '\\$&')}`));
+    // Text that is not pure base64url at the same path gets the full check.
+    throwsPlain(() => signPayload(agent, purpose, build(`bearer ${lookalike}`)), /secret-like value/);
+    // The same random value under another purpose, or in another field of the same purpose, is still refused.
+    throwsPlain(() => signPayload(agent, 'grant', build(lookalike)), /secret-like value/);
+  }
+  throwsPlain(() => signPayload(agent, 'staff-cell-grant', { cell: 'c', labelSealed: '', wraps: [], note: lookalike }), /secret-like value at \$\.note/);
+  throwsPlain(() => signPayload(agent, 'staff-invite', { invite: 'i', name: lookalike }), /secret-like value at \$\.name/);
+  throwsPlain(() => signPayload(agent, 'staff-join-request', { invite: 'i', wraps: [{ wrap: lookalike }] }), /secret-like value/);
 });

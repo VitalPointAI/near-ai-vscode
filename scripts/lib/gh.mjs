@@ -43,7 +43,7 @@ export function resolveRepo(flag) {
 
 export const PR_FIELDS = [
   'number', 'title', 'url', 'state', 'isDraft', 'author', 'baseRefName', 'headRefName', 'headRefOid',
-  'mergeable', 'mergeStateStatus', 'statusCheckRollup', 'files', 'additions', 'deletions', 'body'
+  'mergeable', 'mergeStateStatus', 'statusCheckRollup', 'files', 'changedFiles', 'additions', 'deletions', 'body'
 ].join(',');
 
 export function viewPr(repo, number) {

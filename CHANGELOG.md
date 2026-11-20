@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+### Staff collaboration (preview)
+
+- **Multi-user staff projects, behind a setting.** Turn on `nearAi.staff.multiUserPreview` (off by
+  default) to try staff projects that several people work on from their own computers. While it
+  is off nothing changes: the commands below are hidden and do nothing.
+- **Make This Staff Project Multi-User.** **NEAR AI: Staff: Make This Staff Project Multi-User**
+  checks the four staff ledgers first, says what will happen, and then moves the project's history
+  into a signed shared record. You become its staff lead. The original files are kept in
+  `.planning/staff/legacy/` and never deleted. For now it converts only projects whose products
+  are all labelled `org/Public`: everyone admitted receives a converted product, so a project with
+  a higher label is refused before anything is written, naming those products. A product file
+  edited while a conversion is half done is never written over: the conversion stops, names the
+  file and says how to finish.
+- **Invite, join and admit by file and six words.** **Staff: Invite to Staff Project** saves an
+  invitation file to send any way you like. The person opens it with **Staff: Join Staff
+  Project**, sends back a join request and reads you six words. **Staff: Admit to Staff Project**
+  shows the same six words and admits them only when you confirm the words match. They open the
+  welcome file you send back with **Staff: Join Staff Project**.
+- **Manage who is in the project.** **Staff: Remove from Staff Project** removes a person, one of
+  their devices or an open invitation. **Staff: Change a Staff Project Member** changes a name,
+  seat, roles, declared clearance or agent seats. **Staff: Add My Other Machine**, **Staff: Name
+  Deputy Lead**, **Staff: Hand Over Staff Lead** and **Staff: Choose Roster Branch** cover a
+  second computer, the deputy, the handover and a roster changed in two places at once. Removing
+  someone or lowering their clearance tells you plainly: "They keep what they already received.
+  They will not receive anything new."
+- **Start This Computer's Shared History Again.** When the shared history on this computer is
+  refused because it is older than what this device has seen, damaged, or its signed record does
+  not verify, **Staff: Start This Computer's Shared History Again** asks first, then moves the
+  folder aside without deleting it, keeps your own changes, and says how to get the rest back: a
+  new welcome file from your staff lead. A damaged line is now reported as damage, not as an
+  older copy.
+- **Invitations from more computers, and a join that recovers.** The lead's other computers, the
+  deputy and a new lead after a handover can now invite people and add computers, not only the
+  computer that created the project. The six words now also cover the inviting computer and a
+  random value from the joining computer, so someone who controls the files both ways cannot make
+  the words match. Opening an invitation no longer ties a computer to the project until the
+  welcome file is opened, so a fake invitation cannot block the real one. A lost welcome file is
+  made again with **Staff: Admit to Staff Project** and the same join request. An interrupted
+  removal or clearance change is finished by the next removal, change or admission, and **Staff:
+  Remove from Staff Project** offers to finish it. Expired invitations are listed so you can cancel
+  them, and **Staff: Choose Roster Branch** describes each change. Join requests made by an earlier
+  preview build are refused: ask the person to make a new one.
+- **Make a Single-Machine Copy.** **Staff: Make a Single-Machine Copy** writes a copy you can work
+  in alone into an empty folder, and says what it does not copy.
+- **Declared, not verified.** Every multi-user screen says that people and clearances are declared
+  by the staff lead, not verified, and that labels are not accreditation.
+- In a shared project, Set Aside the Product Ledger, the product decisions and Decide a PIR now say
+  at once that the step is not available there, instead of after their dialogs.
+- **An invitation that could not be saved can be saved again.** If saving an invitation file fails,
+  **Staff: Remove from Staff Project** on the computer that made it offers to save that invitation
+  again; nothing in the project changes. A project folder whose shared-project file cannot be read
+  now says which error stopped the step, instead of calling the project shared.
+
 ### Military staff teams
 
 - **The COP map looks like the ground.** The map now opens on photo-like aerial imagery of the

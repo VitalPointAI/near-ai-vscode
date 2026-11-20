@@ -1314,6 +1314,292 @@ own account and run records in `.planning/.near-ai/` stay on this computer by de
 in the chat bar shows a sync problem as a plain sentence under it and never includes a token or
 a password.
 
+## Multi-user staff projects (preview)
+
+Multi-user staff projects, where several people and their agents work on the same staff products
+from their own machines, are being built over several releases. What exists in this release is
+switched off unless a person turns on the preview setting `nearAi.staff.multiUserPreview` (off by
+default). A project that never turns multi-user behaves exactly as before.
+
+### Update size limits and the decode worker
+
+Every change to a staff product's text that arrives from another machine is checked before the
+shared text library reads it, because a hostile or damaged change could otherwise make that
+library use a lot of memory or crash.
+
+- **Size limits.** One text change may be at most 256 KiB, and a saved state of a whole product or
+  a snapshot of it at most 2 MiB. Anything larger is refused before it is read. A long text is
+  still fine: it is built from many changes.
+- **Counted before it is unpacked.** A quick pass counts the parts of each change without building
+  anything from them, and refuses a change with more than 100,000 parts or deleted ranges. It also
+  refuses every kind of content except plain text, deleted text and gaps, so embedded objects,
+  formatting and nested structures never reach the library.
+- **A separate process with its own limits.** Changes from other machines are then read in a
+  separate background process, never in the editor's own memory. That process is started with
+  its own memory limit (128 MB, plus up to 32 MB for short-lived data, and a 4 MB stack; on
+  Windows the stack stays at the default of just under 1 MB) and has a 5 second time limit per
+  change. The limits are set on that process's own command line, and the editor's memory
+  settings (such as a larger memory limit given to the editor on its command line or in
+  `NODE_OPTIONS`) are not passed on to it, so they hold however the editor was started. A process
+  that reaches its memory limit is stopped by the JavaScript engine at once; one that passes the
+  time limit is ended by the extension, even in the middle of a long step. Either way the change
+  is reported as too large, and a new process is started for the next change. Any other failure
+  of the process (a crash, or an answer it should not give) reports the change as damaged. A
+  refused or crashed check cannot take the editor down with it.
+- **The check only reports.** The process reads and answers; it never stores, changes or keeps
+  anything. The same counting checks also run inside the extension as a second line, so a change
+  is refused the same way on every machine.
+
+### The replica store and rollback detection
+
+The shared history of a multi-user staff project (every signed change from every person and
+agent, and the sealed text they carry) is kept on each machine in a replica store inside the
+project folder.
+
+- **Where it lives.** The store is the folder `.planning/staff/replica/`: one append-only file per
+  writer per product area, sealed attachments named by their hash, signed key grants, signed
+  checkpoints and the lists of each device's rollback record (below). Entries and attachments are
+  written whole and synced to disk before they count; a line cut short by a crash is never
+  counted. The store never deletes an entry or an attachment and never rewrites a line.
+- **Git ignores it.** The folder holds its own `.gitignore` that ignores everything in it, so the
+  shared history is never committed to your repository by accident. It is carried between
+  machines by the sharing service, not by git, so a branch switch cannot roll it back.
+- **Two windows at once.** Every write takes a lock in the folder, so two editor windows or two
+  processes on one machine never mix or lose each other's lines.
+- **Rollback is noticed.** After each write the device records how far it has seen the shared
+  history: for each writer's file the newest change, the count of changes and a digest of them in
+  order, the changes set aside or waiting for the decode check, and the newest roster change. The
+  record has two parts. The editor's secret storage, outside the project, holds only a small
+  signed record of a few hundred bytes, however many files a project has: the device signs the
+  newest roster change, the sizes of the lists and the sha256 of the file that holds them. The
+  lists themselves are in that file, in the store folder (`marks/`, named by the sha256 of its
+  bytes, one folder per device), and are trusted only when its bytes hash to the signed value and
+  it holds lists of the signed sizes. When the folder is opened again and it holds less than that
+  record (restored from an older backup, a file cut short or deleted, a change swapped, moved or
+  put in between, or the lists file itself gone), the store is refused with a plain message and
+  nothing is changed. A change the device had already read that can no longer be read (a disk
+  error, an edited file) is reported as damage, not as an older copy. A signed record whose
+  signature does not verify, or whose lists file is edited, unreadable, over 64 MB or a symbolic
+  link, is refused the same way and is never trusted, read as empty or silently replaced. The
+  record is written after the changes are on disk, so a record that could not be written never
+  stops the next write; that write records it. The lists file is written first, then the signed
+  record, and the device's older lists files are removed only after the signed record is written,
+  so an interruption at any point leaves a record whose lists file is there.
+- **Starting again is a person's choice.** A refused store is never reset by itself. **Staff:
+  Start This Computer's Shared History Again** asks first and only then moves the store folder
+  aside to a folder beside it (`.planning/staff/replica.set-aside-<time>/`, still ignored by git);
+  it never deletes it. It carries this device's own signed changes, the signed key grants, the
+  sealed attachments and the project record into a new store and starts a new signed record.
+  Changes from other people are not carried: they come back with a new welcome file from the staff
+  lead (and, in a later version, from the sharing service). A store that opens is left alone.
+- **Only this device writes as this device.** A line that names this device as its writer counts
+  only when it carries this device's valid signature. Any other such line is damage, so a planted
+  line can never become this device's newest change or block its next one.
+- **No private keys in the folder.** The store holds only sealed entries, sealed attachments,
+  signed grants and checkpoints, and the lists of the rollback record (hashes, counts and the
+  reasons changes were set aside). No private key, epoch key or join secret is ever written to it;
+  the device key stays in the editor's secret storage.
+- **Changes from other machines are checked first.** A change that arrives from another machine is
+  checked by the decode worker (above) before the shared view is built from it. A change the check
+  refuses is still kept in the store, set aside with the reason, and left out of the shared view.
+  It is never silently dropped, so a person can see what was set aside and why. The list of what
+  was set aside is covered by the device's signed record: it is in the lists file whose hash the
+  record signs, so deleting or editing that file refuses the store, and no file in the project can
+  let a refused change in. A change the check cannot run on yet, because its key or its attachment
+  has not arrived, waits outside the shared view and is checked when they arrive; so does a change
+  found in the folder that no check has passed (copied in by hand, or written by another install
+  of the extension). The project's member list is still read from a change that waits for its
+  key, because that key comes only from the grants the member list places; reading the member
+  list decodes no document update.
+- **Symbolic links are refused.** If any folder or file on the way to the store is a symbolic
+  link, nothing is read or written through it.
+
+### Cell keys, wraps and rekey
+
+A multi-user project is split into label cells: the base cell everyone in the project is on, and
+a cell for each higher label. Everything in a cell (its products, their text, versions and
+decisions) is sealed under that cell's key, so only the devices cleared for the cell can read it.
+
+- **One key per cell per epoch.** Each cell has its own key, 32 random bytes, and a cell gets a
+  new key (a new epoch) whenever someone must stop receiving it. Old keys are kept so old entries
+  stay readable.
+- **A key is wrapped to each cleared device.** Every device has an encryption key pair besides
+  its signing key; the device signs its encryption key so it cannot be swapped. To give a device a
+  cell key, the lead's machine makes a fresh key pair, agrees a shared secret with the device's
+  public key (X25519), derives a wrapping key from it with HKDF-SHA256 bound to the cell, the
+  epoch and the receiving device, and seals the cell key with AES-256-GCM. A wrap copied to
+  another device, cell or epoch does not open.
+- **Grants are signed and sent only to that cell's devices.** The wraps for one cell and epoch
+  travel together in a grant signed by the staff lead (or the deputy, once named). The roster
+  entry that creates the cell or gives it a new key records the hash of the grant, so a changed
+  or substituted grant is refused. A grant is accepted only when its signer could change the
+  roster at the roster it names and every device it wraps to was admitted there. Grants are files
+  outside the shared history and are given only to the devices on that cell: a member never
+  receives the grant of a cell they are not cleared for, and so cannot even see who is on it.
+- **The cell's label is sealed inside the grant.** The level and compartments of a cell are
+  sealed under a key derived from the cell key, so a device below the cell learns only that an
+  unnamed cell exists, not what it is or what is in it.
+- **Removal gives the cell a new key.** Removing a member, revoking a device or lowering a
+  clearance writes a new epoch for every cell the change affects, wrapped only to the devices
+  still cleared. The person or device removed keeps what it already had and cannot open anything
+  written after. The lead is told: "They keep what they already received. They will not receive
+  anything new."
+- **New devices can read the history of their cells.** A device admitted later receives wraps
+  for the earlier epochs of the cells it is cleared for, so the history of those cells stays
+  readable on it.
+- **Write up, never down.** An entry in a higher cell may cite entries in a lower cell. An entry
+  in a lower cell that cites a higher cell is refused when the project's cell order is known, and
+  listed with the reason, so nothing from a higher cell leaks into a lower one through a citation.
+- **Who is cleared is decided when a grant is written.** Clearance checks need the current date
+  and the label scales, so they run on the lead's machine when a grant or a new key is written.
+  The shared history then relies on the signed grant: it never decides clearance itself.
+
+### Device encryption keys and the key ring
+
+Each machine in a multi-user staff project has two keys of its own: the signing key it already
+uses for Team Mode and for signing staff records, and an encryption key that cell keys are wrapped
+to. Both stay on the machine.
+
+- **One encryption key per person per install.** The encryption key is an X25519 key pair made with
+  Node's built-in crypto the first time it is needed. Its private half is kept in the editor's
+  secret storage next to the signing key, under `nearAi.identity.encryptionKey`. It is made inside
+  the same lock as the signing key and read back before it is used, so two editor windows opening
+  at once never make two keys. A stored key is never replaced or deleted by the extension.
+- **Bound to the device by a signature.** The device signs its encryption public key together with
+  its writer id. The roster entry that admits or adds the device carries that signature, and the
+  roster checks it, so nobody can swap in another encryption key for the device without the
+  signature failing.
+- **Only the roster decides which key a cell uses.** A device takes a cell key only from a grant
+  the shared roster has accepted (signed by a device that could change the roster, for a key epoch
+  the roster has started, or the exact grant the roster recorded by hash), or a key it made itself
+  for a grant the roster then recorded. A grant from anyone else, or for a key epoch that has not
+  started yet, is kept on disk but never opened into the key ring, so it cannot choose the key this
+  device writes with. If a new key could not be recorded, the next one is made for the same epoch
+  and only the recorded one is used. While a device catches up on the roster, it may try the keys
+  of other grants addressed to it to read the roster's own entries signed by the lead or the
+  deputy, but it never writes with such a key or keeps it.
+- **Opened cell keys are cached in secret storage only.** The device opens its wrap with the
+  private encryption key and keeps the cell key in memory and in secret storage (one value per
+  project, `nearAi.staff.epochKeys.<project>`), together with the keys it made for new cells and
+  new key epochs. If that cached value is lost, nothing in a grant is lost with it: the grants on
+  disk are encrypted to this device, so the keys are opened again from them.
+- **The project is pinned outside the project folder.** When a device creates or joins a shared
+  project, it records which project that is (the hash of its first signed entry, and the staff
+  lead's public keys) in the extension's own storage, the way Team Mode keeps its trust record.
+  The copy in `.planning/staff/replica/project.json` is only a convenience: a copy that names
+  another project is refused, and opening a folder never records a new project by itself.
+- **Join secrets are kept only until they are used.** The secret in an invitation is kept in
+  secret storage under the invitation's id until the roster records what happened to the
+  invitation (the person was admitted, or the invitation was withdrawn). It is the only secret the
+  extension ever deletes.
+- **Never in the project folder, a log or a file.** Private keys, opened cell keys and join secrets
+  are never written to the project folder, to a log or output channel, to an error message or to
+  any other file. A test scans every file in the project folder and in the extension's storage
+  after a project is made and used, and fails if it finds any of them.
+
+### Invitations, join secrets and the safety code
+
+People join a multi-user staff project by exchanging three small files and comparing six words.
+Nothing is posted anywhere: the files go from person to person any way they like (email, chat, a
+USB stick), and there is no server to trust.
+
+- **Invitations are signed files.** A computer of the staff lead or the deputy lead writes a
+  `.near-staff-invite` file signed with its device key. It names the project (the hash of its first
+  signed entry and the founding lead's public keys), the inviting computer's public keys, the
+  invitation id, when it expires (7 days unless the lead chooses otherwise), and a one-time join
+  secret of 32 random bytes. The joining computer checks the signature and the expiry before it
+  uses anything in the file.
+- **Opening an invitation ties this computer to nothing yet.** The joining computer keeps the
+  project and the inviting computer named in the invitation in the editor's storage, outside the
+  project folder. It pins the project only when the welcome file arrives and the roster in it,
+  read from the project's first signed entry, shows that this computer was admitted through that
+  invitation, and that the invitation was written by the inviting computer while it belonged to
+  the staff lead or the deputy lead. Anything else is refused and nothing is kept, so a fake
+  invitation cannot block the real one.
+- **Each invitation works once, expires, and can be cancelled.** The roster records the
+  invitation when it is made, and records when it is used or cancelled. A join request for an
+  invitation that has expired, was already used or was cancelled is refused with a plain message,
+  and so is one made with a different secret. An invitation for a person's other computer can be
+  answered only by that person's own computer.
+- **The join secret stays on the lead's computer.** The secret is kept in the editor's secret
+  storage until the roster records what happened to the invitation (used or cancelled), and is
+  then deleted. It is the only secret the extension ever deletes. The shared record holds only its
+  SHA-256 hash. If a welcome file is lost, the lead makes it again from the same join request
+  without the secret: the person is already in the roster, and the welcome file works only on
+  their computer. Expired invitations stay listed until the lead cancels them, which deletes their
+  secrets too.
+- **The joining computer proves it holds the secret without sending it.** The `.near-staff-join`
+  file carries the joining device's public keys, signed by that device, and an HMAC-SHA256 of
+  them under the join secret. The secret itself is never in the join request.
+- **The six words catch a swapped key.** Anyone who gets hold of an invitation file can make a
+  join request that passes the secret check, so both screens show six words worked out from the
+  invitation, the founding lead's keys, the inviting computer's keys, the joining device's keys and
+  a random value the joining computer draws after it has read the invitation. Because that value
+  comes after the invitation is fixed, someone who controls the files in both directions cannot
+  prepare two matching sets of words in advance: they have to match one fixed set, about 2^66
+  tries. The lead admits the person only after confirming that the words match, out loud or in
+  person. Admit is refused unless the lead confirms; nothing confirms it for them.
+- **What the person receives is limited to what they are cleared for.** On admission the lead's
+  computer gives the new device the keys, with their earlier epochs, of only the cells the
+  person's declared clearance dominates, and returns a `.near-staff-welcome` file for that device
+  alone. The welcome file holds the signed roster and grants wrapped to that one device, and no
+  secret or key in readable form.
+- **Only the lead or the deputy changes who is in the project.** Inviting, admitting, removing a
+  person or a device, changing a clearance, naming the deputy and handing over the lead are roster
+  changes, and the roster accepts them only from a device of the staff lead or the deputy lead.
+  A join request is admitted on the computer that made its invitation, where its join secret is
+  kept. Removing someone or lowering their clearance moves the affected cells to new keys. Which
+  cells still need a new key is worked out from the roster, so if that is interrupted, the next
+  removal, change or admission finishes it first, and Remove from Staff Project offers to finish
+  it.
+- **People and clearances are declared, not verified.** Until verified credentials arrive, every
+  multi-user result says: "People and clearances in this project are declared by the staff lead,
+  not verified." The six words check that the right device joined; they do not check who the
+  person is or what clearance they really hold.
+
+### People and clearances are declared by the staff lead
+
+Verified credentials arrive in a later release. Until then, a shared staff project knows people
+only by what the staff lead says about them.
+
+- **Declared, not checked.** The name, seat, roles and clearance of each person in a shared
+  project are what the staff lead (or the deputy lead) declares when inviting or changing them.
+  NEAR AI does not check who a person is or what clearance they really hold. The six words check
+  only that the device that joined is the one the person used.
+- **Every screen says so.** Every multi-user confirmation and result shows three notices: that a
+  clearance is self-declared and not an enforced boundary, that labels and routing help prevent
+  mistakes but are not accreditation, and "People and clearances in this project are declared by
+  the staff lead, not verified."
+- **Labels are not accreditation.** A part of the project with a higher label is sealed under its
+  own key and given only to the devices whose declared clearance covers it. That helps prevent
+  mistakes; it does not make any computer accredited for classified information, and a declared
+  clearance can be wrong.
+- **Labelled products are not made multi-user yet.** Making a project multi-user puts every
+  product, its text and the old product ledger in the base cell, which everyone admitted to the
+  project receives whatever clearance is declared for them. So the command refuses a project with
+  any product labelled above `org/Public`, before it asks anything or writes anything, and names
+  those products and their labels. Such a project stays on one machine until a product can be
+  kept in a cell for its label.
+- **Off unless you turn it on.** Everything multi-user is a preview, off unless a person turns on
+  `nearAi.staff.multiUserPreview` in their own settings. The setting applies to the whole editor,
+  so a project folder cannot turn it on for you. While it is off, the multi-user commands are
+  hidden from the Command Palette, a command run anyway only says how to turn it on, no
+  multi-user code is loaded, and no file, folder or secret is made.
+- **Only a person runs these steps.** Making a project multi-user, inviting, joining, admitting,
+  removing, adding a computer, choosing a roster branch, naming the deputy, handing over the lead,
+  changing a member and making a single-machine copy are commands a person runs, each change
+  behind a confirmation. No agent tool runs a command, and none of them is a decision the Staff
+  Room's buttons can run. A person is admitted only after the lead picks "The six words match".
+- **The invitation stays out of the project.** An invitation holds a one-time secret, so the
+  command does not save it inside the project folder, where git could commit it, and saves every
+  invitation, join request and welcome file readable by your own user account only.
+- **The single-machine copy is honest about what it carries.** Steps other people took in the
+  shared project are carried under the name and key of the person who makes the copy, written
+  like "A. Person (approved in the shared project, carried by B. Person)". A decision people made
+  at the same time is left open. The result lists what is not copied (registers, calculator
+  records, gate reports, proposals, settings, observations and the staff event log), and the
+  shared project is not changed.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR
@@ -1385,6 +1671,15 @@ and enter the SBOM from that file:
 | --- | --- | --- | --- |
 | MapLibre GL JS (`maplibre-gl`) | 6.16.0 | BSD-3-Clause | The COP map, 2D and globe (WebGL) |
 | milsymbol | 3.0.5 | MIT | MIL-STD-2525 and APP-6 military symbols |
+
+One piece of third-party data is committed into the source, not vendored: the word list for the
+safety code two people compare when one joins a multi-user staff project. It is data only, never
+run, and `src/test/replicaSafetyCode.test.ts` checks it against the SHA-256 of the published file,
+so a changed, missing or reordered word fails the build:
+
+| Data | Source | License | Used for |
+| --- | --- | --- | --- |
+| BIP-39 English word list (2048 words, in `src/domain/replica/safetyWords.ts`) | `bitcoin/bips`, `bip-0039/english.txt` | MIT | The six safety code words shown when a person joins a multi-user staff project |
 
 Every release carries `sbom.cdx.json` (CycloneDX 1.6) for those components.
 `npm run sbom` builds it and checks each one on OSV.dev; the release fails on a

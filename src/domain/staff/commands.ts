@@ -19,6 +19,27 @@ export const STAFF_COMMANDS = {
   retireWatch: 'nearAi.staff.retireWatch'
 } as const;
 
+/**
+ * The commands that make a staff project shared by several people and manage who is in it (D-36; D-10 for the deputy and the handover, D-23 for a
+ * member change). Each is a VS Code command a person runs from the Command Palette, with dialogs and a modal confirmation, so no agent tool can run
+ * one, and none is a person decision the Staff Room's buttons may run. They are switched off until a person turns on their setting.
+ */
+export const STAFF_MULTI_USER_COMMANDS = {
+  makeMultiUser: 'nearAi.staff.makeMultiUser',
+  invite: 'nearAi.staff.inviteToProject',
+  join: 'nearAi.staff.joinProject',
+  admit: 'nearAi.staff.admitToProject',
+  remove: 'nearAi.staff.removeFromProject',
+  addMachine: 'nearAi.staff.addMyOtherMachine',
+  chooseBranch: 'nearAi.staff.chooseRosterBranch',
+  nameDeputy: 'nearAi.staff.nameDeputyLead',
+  handOver: 'nearAi.staff.handOverLead',
+  updateMember: 'nearAi.staff.updateMember',
+  singleCopy: 'nearAi.staff.makeSingleMachineCopy',
+  // Sets this computer's shared history aside (never deleted) when it is refused rolled back, damaged or unverified (31-REVIEW MJ-08).
+  startHistoryAgain: 'nearAi.staff.startSharedHistoryAgain'
+} as const;
+
 /** The person-only decision commands, the only commands the Staff Room's decision buttons may run. */
 export const PERSON_DECISION_COMMANDS: readonly string[] = [STAFF_COMMANDS.approve, STAFF_COMMANDS.reject, STAFF_COMMANDS.release];
 

@@ -3,7 +3,8 @@
 // Four different outputs, never mixed (Pitfall 11):
 // - held: a piece this machine does not have yet (writer's key, body bytes, epoch key, blob, roster). It becomes verified when the piece arrives.
 // - rejected: permanent and recorded (bad signature, unreadable body, bad schema).
-// - verified with keep: the entry is genuine but changes no state ("unauthorised" at the cited roster, or "made by a newer version").
+// - verified with keep: the entry is genuine but changes no state ("unauthorised" or "observer-only" at the cited roster, or "made by a newer
+//   version").
 // - verified: the fold may use it.
 import { BLOB_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, blobBytesHash, entryHash, openBlob, openBody, parseHeaderShape, sha256Hex, verifyHeader } from './entry';
 import type { EntryBody, EntryHeader, SealedBlob } from './entry';
@@ -29,7 +30,8 @@ export const VERIFY_HOLDS = {
   'body-missing-or-corrupt': 'The entry body is missing or does not match its header, so a good copy is needed.',
   'missing-key': 'This machine does not have the key for this cell and epoch yet.',
   'missing-blob': 'The large part of the entry has not arrived or does not match its hash.',
-  'missing-roster': 'The roster entry this one cites has not arrived yet.'
+  'missing-roster': 'The roster entry this one cites has not arrived yet.',
+  'roster-branch-not-chosen': 'This cites a roster change that was made in two places at once and not chosen, so it waits for the lead or the deputy to choose.'
 } as const;
 export type VerifyHold = keyof typeof VERIFY_HOLDS;
 
@@ -37,7 +39,8 @@ export const KEEP_REASONS = {
   unauthorised: 'The device was not admitted at the roster this entry cites, so it is kept and shown and changes nothing.',
   'newer-version': 'Made by a newer version of the extension. It is kept and passed on and changes nothing here.',
   'hub-actor': 'Written by a hub watch. Nothing in this version accepts hub writes yet, so it is kept and changes nothing.',
-  'folded-in-later-phase': 'This kind of entry is kept and passed on, and is not applied by this version yet.'
+  'folded-in-later-phase': 'This kind of entry is kept and passed on, and is not applied by this version yet.',
+  'observer-only': 'Written by an observer, who reads the project and writes only presence, so it is kept and changes nothing.'
 } as const;
 export type KeepReason = keyof typeof KEEP_REASONS;
 
@@ -121,9 +124,14 @@ function verify(input: unknown, ctx: ReplicaContext): VerifyOutcome {
     if (!dataCheck.ok) return { status: 'rejected', reason: 'bad-data', detail: dataCheck.reason, ...where };
   }
 
+  // A roster hash on a split branch nobody chose is named as such (D-11): the entry is kept and waits, and applies only if that branch is chosen.
+  if (ctx.roster.rosterBranchPending?.(body.roster) === true) return { status: 'held', reason: 'roster-branch-not-chosen', ...where };
   if (!ctx.roster.hasRoster(body.roster)) return { status: 'held', reason: 'missing-roster', ...where };
   const entry: VerifiedEntry = { hash, header, body, data, member: device.member };
   if (!ctx.roster.isAdmitted(header.writer, body.roster)) entry.keep = 'unauthorised';
+  // An observer reads and writes only presence (D-12; presence arrives in Phase 33), so every entry of a member who holds observer and not member at
+  // the cited roster changes nothing.
+  else if (ctx.roster.hasRole(device.member, 'observer', body.roster) && !ctx.roster.hasRole(device.member, 'member', body.roster)) entry.keep = 'observer-only';
   else if (!checked.known) entry.keep = 'newer-version';
   return { status: 'verified', entry };
 }

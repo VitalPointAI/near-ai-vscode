@@ -10,6 +10,8 @@ export const OWNER = 'ALuhning';
 export const REVIEWER = 'near-ai-reviewer';
 
 const notFound = (args) => new Error(`gh ${args.join(' ')} failed: gh: Not Found (HTTP 404)`);
+// The jq filter of prFilePatches (scripts/lib/gh.mjs); matched exactly so a change to it fails the tests.
+const PATCH_LISTING_JQ = '.[] | {filename, previous_filename, status, patch} | tojson';
 const lines = (values) => values.map((value) => JSON.stringify(value)).join('\n');
 
 /** Check runs, workflow run and agent-review status of a commit whose CI and review passed. */
@@ -62,6 +64,7 @@ export function fakeGitHub(state) {
       return `https://github.com/${REPO}/pull/${args[2]}#issuecomment-1\n`;
     }
     if (verb === 'pr' && sub === 'diff') {
+      if (world.diffTooLarge === 'lines') throw new Error(`gh pr diff ${args[2]} failed: could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of lines (20000).`);
       if (world.diffTooLarge) throw new Error(`gh pr diff ${args[2]} failed: could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300). PullRequest.diff too_large`);
       return 'diff --git a/x b/x\n';
     }
@@ -138,7 +141,7 @@ export function fakeGitHub(state) {
     if ((match = /\/pulls\/(\d+)\/files/.exec(endpoint))) {
       const files = world.prs[match[1]]?.files ?? [];
       // The patch listing asks jq for an object per file; the plain listing for the path alone.
-      if (args.some((arg) => arg.includes('patch'))) {
+      if (args.includes(PATCH_LISTING_JQ)) {
         return lines(files.map((file) => ({ filename: file.path, previous_filename: file.previous ?? null, status: file.status ?? 'modified', patch: file.patch ?? null })));
       }
       return lines(files.map((file) => file.path));

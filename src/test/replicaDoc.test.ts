@@ -1,14 +1,21 @@
 // The ownership and compaction rules of co-edited text (plan 30-06, D-18, D-19, D-21, D-35, D-37): a hostile update cannot forge attribution, crash
 // the fold, or make the text depend on the order updates were applied in, and a compaction is a cache that is checked against the log.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { UNATTRIBUTED_WRITER, summariseAuthors } from '../domain/replica/attribution';
-import { applyRemote, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
+import { applyRemote, applyState, applyUpdate, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, docText, encodeDiff, encodeFullState, inspectUpdate, localDelete, localInsert, pendingState, stateVectorOf, textHashOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
-import type { Actor, Dep } from '../domain/replica/entry';
-import { foldEntries } from '../domain/replica/fold';
-import { MAX_UPDATE_BYTES, validateDocData } from '../domain/replica/kindSchemas/doc';
-import type { ProductTextOutput } from '../domain/replica/textFold';
+import type { Actor, Dep, SealedBlob } from '../domain/replica/entry';
+import * as stateKeys from '../domain/state/keys';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
+import { MAX_STATE_BYTES, MAX_UPDATE_BYTES, validateDocData } from '../domain/replica/kindSchemas/doc';
+import { DEFAULT_REDUCERS } from '../domain/replica/reducers';
+import type { AnyReducer } from '../domain/replica/reducers';
+import type { ReplicaContext } from '../domain/replica/rosterView';
+import { COMPACTION_WINDOW, MAX_PRODUCTS_PER_STREAM, MAX_REGISTRATIONS_PER_WRITER_PRODUCT, TEXT_OUTPUT_PROBLEMS, textReducer } from '../domain/replica/textFold';
+import { foldTexts } from '../staff/replica/projection';
+import type { FoldResult } from '../domain/replica/fold';
+import type { ProductTextOutput, TextState } from '../domain/replica/textFold';
 import { createWorld, permutations, rng, updateData } from './helpers/replicaWorld';
 import type { Written, World } from './helpers/replicaWorld';
 import { embedUpdate, foreignFullState, formatUpdate, gcUpdate, mapUpdate, nestedArrayUpdate, nestedTypeUpdate, skipUpdate } from './helpers/replicaYjs';
@@ -25,7 +32,7 @@ function productOf(result: ReturnType<typeof foldEntries>): ProductTextOutput {
 const reasons = (result: ReturnType<typeof foldEntries>): Array<[string, string]> => result.refused.map((item): [string, string] => [item.hash, item.reason]).sort();
 
 function twoWriters(): World {
-  return createWorld({ members: [{ member: 'mbr-wwww', name: 'Wen', devices: ['W'] }, { member: 'mbr-qqqq', name: 'Quinn', devices: ['Q'] }, { member: 'mbr-xxxx', name: 'Xi', devices: ['X'] }] });
+  return createWorld({ members: [{ member: 'mbr-wwww', name: 'Wen', devices: ['W'], agentSeats: ['j2-analyst'] }, { member: 'mbr-qqqq', name: 'Quinn', devices: ['Q'] }, { member: 'mbr-xxxx', name: 'Xi', devices: ['X'] }] });
 }
 
 // ---- Task 2: ownership hardening ------------------------------------------------------------------------------------------------------------
@@ -44,19 +51,21 @@ test('updates that carry an embed, a format, a map value, a nested type or a Ski
   assert.equal(productOf(result).text, 'text');
 });
 
-test('random bytes, a truncated update and a 40 KB update of 20 000 nested arrays are malformed-update and never throw out of the fold', () => {
+// 31-03: the skim refuses the nested arrays (map value content) as forbidden-content before Yjs decodes them, so they never reach the decoder's stack.
+test('random bytes and a truncated update are malformed-update, a 40 KB update of 20 000 nested arrays is forbidden-content before decoding, and none throws out of the fold', () => {
   assert.deepEqual(inspectUpdate(Uint8Array.from(Array.from({ length: 24 }, () => 255))), { error: 'malformed' });
   const real = localInsert(createLocalDoc(31), 0, 'a longer piece of text to cut');
   assert.deepEqual(inspectUpdate(real.slice(0, real.length - 6)), { error: 'malformed' });
   const nested = nestedArrayUpdate(20_000, 31);
   assert.ok(nested.length > 39_000 && nested.length < 41_000);
-  assert.deepEqual(inspectUpdate(nested), { error: 'malformed' });
+  assert.deepEqual(inspectUpdate(nested), { error: 'forbidden-content' });
   const world = twoWriters();
   const editor = world.editor('W', PRODUCT, 31);
   const register = editor.register();
   const entries = [real.slice(0, real.length - 6), nested, Uint8Array.from(Array.from({ length: 24 }, () => 255))].map((bytes) => world.write('W', { kind: 'doc.update', data: updateData(PRODUCT, bytes) }));
   const result = foldEntries(sealed([register, ...entries]), world.ctx());
-  assert.deepEqual(reasons(result), entries.map((item): [string, string] => [item.hash, 'malformed-update']).sort());
+  const expected = ['malformed-update', 'forbidden-content', 'malformed-update'];
+  assert.deepEqual(reasons(result), entries.map((item, index): [string, string] => [item.hash, expected[index] as string]).sort());
   assert.equal(productOf(result).text, '');
 });
 
@@ -254,7 +263,7 @@ function dep(item: Written): Dep {
   return { writer: item.writer, seq: item.seq, hash: item.hash };
 }
 
-interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string; covers?: Dep[]; writer?: string }
+interface CompactOptions { textHash?: string; blobState?: Uint8Array; withDeps?: boolean; stateVector?: Array<[number, number]>; blobText?: string; covers?: Dep[]; writer?: string; deps?: Written[] }
 
 // Each compaction needs its own scene: the writer's chain would otherwise make a second one wait for the first.
 function sceneWith(options: CompactOptions = {}): { scene: Scene; entry: Written } {
@@ -273,7 +282,7 @@ function compaction(scene: Scene, options: CompactOptions = {}): Written {
   const covers = options.covers ?? [dep(scene.updA), dep(scene.updB)];
   return world.write(options.writer ?? 'C', {
     kind: 'doc.compact',
-    deps: options.withDeps === false ? [] : [scene.updA, scene.updB],
+    deps: options.withDeps === false ? [] : options.deps ?? [scene.updA, scene.updB],
     data: { product: PRODUCT, covers, stateVector: options.stateVector ?? stateVectorOf(doc), textHash: options.textHash ?? textHashOf(options.blobText ?? scene.text), stateBlob: blob.hash }
   });
 }
@@ -442,4 +451,373 @@ test('CR-01: the log\'s own text keeps its author next to unverified text, the s
   const own = compaction(second, { withDeps: false, covers: [ghost], ...stateOf(33, [[0, 'my own words']]) });
   const ownProduct = productOf(foldEntries(sealed([second.regC, second.regA, second.regB, own]), second.world.ctx()));
   assert.deepEqual(ownProduct.attribution.map((span) => [span.writer, span.member, span.unverified]), [[writerC, 'mbr-cccc', true]]);
+});
+
+// ---- WR-04 (D-01 (a)): one refused or held update in the covered history no longer switches compaction off ------------------------------------
+
+// C writes an update the fold does not accept, inside the history an honest compaction by B covers.
+function coveredRejectScene(kind: 'refused' | 'held'): { scene: Scene; bad: Written; base: Written[] } {
+  const scene = compactScene();
+  // Refused: text under A's registered client id 11 (foreign-client). Held: text under client 77, which nobody registered (unregistered-client).
+  const stranger = createLocalDoc(kind === 'refused' ? 11 : 77);
+  const bad = scene.world.write('C', { kind: 'doc.update', data: updateData(PRODUCT, localInsert(stranger, 0, 'not accepted')) });
+  return { scene, bad, base: [scene.regC, scene.regA, scene.regB, scene.updA, scene.updB, bad] };
+}
+
+const coveringAll = (scene: Scene, bad: Written): CompactOptions => ({ writer: 'B', deps: [scene.updA, scene.updB, bad], covers: [dep(scene.updA), dep(scene.updB), dep(bad)] });
+
+test('WR-04: an honest compaction whose covered history holds a refused foreign-client update is accepted as verified, and its text is the fold\'s', () => {
+  const { scene, bad, base } = coveredRejectScene('refused');
+  const entry = compaction(scene, coveringAll(scene, bad));
+  const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client']]);
+  const product = productOf(result);
+  assert.deepEqual(product.compactions, [{ entry: entry.hash, verified: true }]);
+  assert.equal(product.text, scene.text);
+  const without = foldEntries(sealed(base), scene.world.ctx());
+  assert.deepEqual(result.digests, without.digests);
+});
+
+test('WR-04: a held covered update is ignored the same way as a refused one when the vector and text hash match', () => {
+  const { scene, bad, base } = coveredRejectScene('held');
+  const entry = compaction(scene, coveringAll(scene, bad));
+  const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual(result.held.map((item) => [item.hash, item.reason]), [[bad.hash, 'unregistered-client']]);
+  assert.deepEqual(result.refused, []);
+  assert.deepEqual(productOf(result).compactions, [{ entry: entry.hash, verified: true }]);
+  assert.equal(productOf(result).text, scene.text);
+});
+
+test('WR-04: a compaction that leaves out an accepted covered update is still refused compact-mismatch next to a refused one', () => {
+  const { scene, bad, base } = coveredRejectScene('refused');
+  // The blob holds only A's text, but the covers name B's accepted update too.
+  const entry = compaction(scene, { ...coveringAll(scene, bad), ...stateOf(11, [[0, 'alpha ']]) });
+  const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+  assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client'], [entry.hash, 'compact-mismatch']].sort());
+  assert.deepEqual(productOf(result).compactions, []);
+  assert.equal(productOf(result).text, scene.text);
+});
+
+test('WR-04: with a refused update covered, a wrong text hash or a wrong state vector is still refused compact-mismatch', () => {
+  for (const wrong of [{ textHash: textHashOf('not the text') }, { stateVector: [[11, 6]] as Array<[number, number]> }]) {
+    const { scene, bad, base } = coveredRejectScene('refused');
+    const entry = compaction(scene, { ...coveringAll(scene, bad), ...wrong });
+    const result = foldEntries(sealed([...base, entry]), scene.world.ctx());
+    assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client'], [entry.hash, 'compact-mismatch']].sort());
+    assert.deepEqual(productOf(result).compactions, []);
+  }
+});
+
+// ---- WR-02 (client part): an agent registration needs the seat --------------------------------------------------------------------------------
+
+const ANALYST: Actor = { kind: 'agent', member: 'j2-analyst', run: 'r-7' };
+
+test('WR-02: an agent registration is refused agent-seat-not-allowed unless the roster lets the device\'s member run that seat, and a view that cannot answer denies', () => {
+  const world = twoWriters();
+  // Xi holds no seat; Wen holds j2-analyst but not j2-chief.
+  const x = world.editor('X', PRODUCT, 51);
+  const byX = x.register({ actor: ANALYST });
+  const typedX = x.insert(0, 'agent text', { actor: ANALYST });
+  const otherSeat = world.editor('W', PRODUCT, 32).register({ actor: { kind: 'agent', member: 'j2-chief', run: 'r-8' } });
+  const byW = world.editor('W', PRODUCT, 31).register({ actor: ANALYST });
+  const result = foldEntries(sealed([byX, typedX, otherSeat, byW]), world.ctx());
+  assert.deepEqual(reasons(result), [[byX.hash, 'agent-seat-not-allowed'], [otherSeat.hash, 'agent-seat-not-allowed']].sort());
+  assert.deepEqual(result.held.map((item) => [item.hash, item.reason]), [[typedX.hash, 'unregistered-client']]);
+  assert.deepEqual(productOf(result).registrations.map((registration) => [registration.clientId, registration.member]), [[31, 'mbr-wwww']]);
+  // Default deny: a roster view without canRunAgent allows no agent registration, and a person registration is unaffected.
+  const roster = Object.assign({}, world.ctx().roster, { canRunAgent: undefined });
+  const person = world.editor('W', PRODUCT, 33).register();
+  const blind = foldEntries(sealed([byX, typedX, otherSeat, byW, person]), world.ctx({ roster }));
+  assert.deepEqual(reasons(blind), [byX, otherSeat, byW].map((item): [string, string] => [item.hash, 'agent-seat-not-allowed']).sort());
+  assert.deepEqual(blind.applied, [person.hash]);
+});
+
+test('WR-02: text typed under an allowed agent registration is attributed to the device\'s member with the agent seat and run', () => {
+  const world = twoWriters();
+  const w = world.editor('W', PRODUCT, 31);
+  const register = w.register({ actor: ANALYST });
+  const typed = w.insert(0, 'assessment', { actor: ANALYST });
+  const result = foldEntries(sealed([register, typed]), world.ctx());
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).attribution, [{ start: 0, length: 10, clientId: 31, writer: world.writerOf('W'), member: 'mbr-wwww', actor: 'agent', agentMember: 'j2-analyst', run: 'r-7' }]);
+});
+
+// ---- WR-05 and WR-08 (text part): bounded registrations, products and compactions, a memoised scratch and a lazy document ---------------------
+
+// The default reducers with the text reducer's final working state captured, so a test can look at what the fold holds.
+function capturing(): { reducers: AnyReducer[]; state(): TextState } {
+  let captured: TextState | undefined;
+  const wrapped: AnyReducer = {
+    ...textReducer,
+    finish(state, view) {
+      captured = state as TextState;
+      return textReducer.finish(state as TextState, view);
+    }
+  };
+  return {
+    reducers: DEFAULT_REDUCERS.map((reducer) => (reducer === textReducer ? wrapped : reducer)),
+    state: () => {
+      assert.ok(captured !== undefined, 'the text reducer finished');
+      return captured;
+    }
+  };
+}
+
+// The same entries folded from scratch and delivered in chunks to the incremental fold give the same outputs and digests.
+function incrementalEqualsFresh(items: readonly Written[], ctx: ReplicaContext, chunks: number): ReturnType<typeof foldEntries> {
+  const entries = sealed(items);
+  const fresh = foldEntries(entries, ctx);
+  let state = createFoldState(ctx);
+  const size = Math.ceil(entries.length / chunks);
+  for (let start = 0; start < entries.length; start += size) state = addEntries(state, entries.slice(start, start + size));
+  assert.deepEqual(state.result.families, fresh.families, 'families');
+  assert.deepEqual(state.result.digests, fresh.digests, 'digests');
+  assert.deepEqual(reasons(state.result), reasons(fresh), 'refusals');
+  assert.deepEqual(state.result.applied.slice().sort(), fresh.applied.slice().sort(), 'applied');
+  return fresh;
+}
+
+test('a stream holds at most 1024 text products: later registrations are refused too-many-products, and a product with only registrations has no Yjs document', () => {
+  assert.equal(MAX_PRODUCTS_PER_STREAM, 1024);
+  const world = twoWriters();
+  const regs = Array.from({ length: 1100 }, (_, index) => world.write('W', { kind: 'doc.client', data: { product: `p-${index}`, clientId: 31, actor: { kind: 'person' } } }));
+  const capture = capturing();
+  const result = foldEntries(sealed(regs), world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual(reasons(result), regs.slice(1024).map((item): [string, string] => [item.hash, 'too-many-products']).sort());
+  assert.equal(result.applied.length, 1024);
+  const state = capture.state();
+  assert.equal(state.products.size, 1024);
+  assert.equal(state.productsPerStream.get(world.stream), 1024);
+  assert.equal([...state.products.values()].every((product) => product.doc === undefined), true);
+  const products = result.families.doc as ProductTextOutput[];
+  assert.equal(products.length, 1024);
+  assert.equal(products.every((product) => product.text === '' && product.stateVector.length === 0 && product.attribution.length === 0 && !product.incomplete), true);
+  // The first accepted update creates the document of its own product only.
+  const typed = world.write('W', { kind: 'doc.update', data: updateData('p-0', localInsert(createLocalDoc(31), 0, 'first words')) });
+  const later = capturing();
+  const withText = foldEntries(sealed([...regs, typed]), world.ctx(), { reducers: later.reducers });
+  assert.equal(withText.applied.includes(typed.hash), true);
+  const docs = [...later.state().products.values()].filter((product) => product.doc !== undefined);
+  assert.deepEqual(docs.map((product) => product.product), ['p-0']);
+  incrementalEqualsFresh([...regs, typed], world.ctx(), 4);
+});
+
+test('one writer registers at most 4096 client ids for one product: the 4097th is refused too-many, and re-registering a held id or another writer is unaffected', () => {
+  assert.equal(MAX_REGISTRATIONS_PER_WRITER_PRODUCT, 4096);
+  const world = twoWriters();
+  const regs = Array.from({ length: 4097 }, (_, index) => world.write('W', { kind: 'doc.client', data: { product: PRODUCT, clientId: index + 1, actor: { kind: 'person' } } }));
+  const again = world.write('W', { kind: 'doc.client', data: { product: PRODUCT, clientId: 1, actor: { kind: 'person' } } });
+  const other = world.editor('Q', PRODUCT, 9000).register();
+  const capture = capturing();
+  const result = foldEntries(sealed([...regs, again, other]), world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual(reasons(result), [[regs[4096].hash, 'too-many']]);
+  assert.equal(result.applied.includes(again.hash) && result.applied.includes(other.hash), true);
+  assert.equal(productOf(result).registrations.length, 4097);
+  const product = capture.state().products.get(`${world.stream}/${PRODUCT}`);
+  assert.deepEqual([product?.registrationCounts.get(world.writerOf('W')), product?.registrationCounts.get(world.writerOf('Q')), product?.doc], [4096, 1, undefined]);
+  incrementalEqualsFresh([...regs, again, other], world.ctx(), 4);
+});
+
+interface LiveScene { world: World; entries: Written[]; type(count: number): void; compact(writer: string): Written }
+
+// A types and B types after seeing A; A can keep typing, after the newest compaction (as an honest editor that has seen it), so each compaction
+// sits at a fixed point in A's typing. compact writes a doc.compact by the given device that covers both writers' heads.
+function liveScene(compactors: string[] = []): LiveScene {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['C', ...compactors] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const entries: Written[] = [a.register(), b.register()];
+  let headA = a.insert(0, 'alpha ');
+  applyRemote(b.doc, encodeFullState(a.doc));
+  const headB = b.insert(6, 'beta');
+  entries.push(headA, headB);
+  let newest: Written | undefined;
+  return {
+    world,
+    entries,
+    type(count) {
+      for (let index = 0; index < count; index += 1) {
+        headA = a.insert(docText(a.doc).length, 'x', newest === undefined ? {} : { deps: [newest] });
+        newest = undefined;
+        entries.push(headA);
+      }
+    },
+    compact(writer) {
+      const fold = createFoldDoc();
+      applyUpdate(fold, encodeFullState(a.doc));
+      applyUpdate(fold, encodeFullState(b.doc));
+      const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(encodeFullState(fold)));
+      world.blobs.set(blob.hash, blob);
+      const heads = [headA, headB];
+      const entry = world.write(writer, { kind: 'doc.compact', deps: heads, data: { product: PRODUCT, covers: heads.map(dep), stateVector: stateVectorOf(fold), textHash: textHashOf(docText(fold)), stateBlob: blob.hash } });
+      entries.push(entry);
+      newest = entry;
+      return entry;
+    }
+  };
+}
+
+test('a writer compacts a product again only after 50 more accepted updates: sooner is refused too-many, and the window is per writer', () => {
+  assert.equal(COMPACTION_WINDOW, 50);
+  const scene = liveScene(['K']);
+  const first = scene.compact('C');
+  scene.type(COMPACTION_WINDOW - 1);
+  const early = scene.compact('C');
+  const otherWriter = scene.compact('K');
+  scene.type(1);
+  const onTime = scene.compact('C');
+  const result = incrementalEqualsFresh(scene.entries, scene.world.ctx(), 5);
+  assert.deepEqual(reasons(result), [[early.hash, 'too-many']]);
+  assert.deepEqual(productOf(result).compactions, [first, otherWriter, onTime].map((entry) => ({ entry: entry.hash, verified: true })));
+  assert.equal(productOf(result).text, `alpha ${'x'.repeat(COMPACTION_WINDOW)}beta`);
+  // Delivered one entry at a time the incremental fold agrees too.
+  let single = createFoldState(scene.world.ctx());
+  for (const entry of sealed(scene.entries)) single = addEntries(single, [entry]);
+  assert.deepEqual(single.result.families, result.families);
+  assert.deepEqual(single.result.digests, result.digests);
+});
+
+test('compactions at one point in the log share one memoised scratch: ten in a row build it once, and a new accepted update builds it again', () => {
+  const compactors = Array.from({ length: 10 }, (_, index) => `K${index}`);
+  const scene = liveScene(compactors);
+  const ten = compactors.map((writer) => scene.compact(writer));
+  const capture = capturing();
+  const result = foldEntries(sealed(scene.entries), scene.world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).compactions.map((record) => [record.entry, record.verified]).sort(), ten.map((entry) => [entry.hash, true]).sort());
+  assert.equal(capture.state().products.get(`${scene.world.stream}/${PRODUCT}`)?.scratchBuilds, 1);
+  scene.type(1);
+  const after = scene.compact('C');
+  const next = capturing();
+  const more = foldEntries(sealed(scene.entries), scene.world.ctx(), { reducers: next.reducers });
+  assert.equal(more.applied.includes(after.hash), true);
+  assert.equal(next.state().products.get(`${scene.world.stream}/${PRODUCT}`)?.scratchBuilds, 2);
+  incrementalEqualsFresh(scene.entries, scene.world.ctx(), 3);
+});
+
+test('compactions that cover only some of the accepted updates are checked against those, and share one memoised build too', () => {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-bbbb', devices: ['B'] }, { member: 'mbr-cccc', devices: ['K0', 'K1'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const b = world.editor('B', PRODUCT, 22);
+  const regs = [a.register(), b.register()];
+  const updA = a.insert(0, 'alpha ');
+  // B types without seeing A, and its update is accepted before the compactions, which cover A's update only.
+  const updB = b.insert(0, 'beta ');
+  const onlyA = stateOf(11, [[0, 'alpha ']]);
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(onlyA.blobState));
+  world.blobs.set(blob.hash, blob);
+  const both = ['K0', 'K1'].map((writer) => world.write(writer, { kind: 'doc.compact', deps: [updA, updB], data: { product: PRODUCT, covers: [dep(updA)], stateVector: onlyA.stateVector, textHash: textHashOf(onlyA.blobText), stateBlob: blob.hash } }));
+  const capture = capturing();
+  const result = foldEntries(sealed([...regs, updA, updB, ...both]), world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).compactions, both.map((entry) => ({ entry: entry.hash, verified: true })));
+  assert.equal(productOf(result).accepted.length, 2);
+  assert.equal(capture.state().products.get(`${world.stream}/${PRODUCT}`)?.scratchBuilds, 1);
+  incrementalEqualsFresh([...regs, updA, updB, ...both], world.ctx(), 2);
+});
+
+// ---- plan 31-07: size gates before a compaction state is opened (31-RESEARCH new defect 1) and the state limit for its inspection (31-03 handoff) ----
+
+// The AES-GCM IV a sealed blob carries: its first 12 bytes on the wire.
+const ivOf = (blob: SealedBlob): string => Buffer.from(blob.bytes, 'base64url').subarray(0, 12).toString('hex');
+
+// One writer types three pieces of 120 000 characters (each update under the update limit), and C compacts them with blob plaintext `state`
+// (the honest full state when absent). Returns the entries, the blob and the honest state.
+function bigScene(state?: Uint8Array, withDeps = true): { world: World; items: Written[]; entry: Written; blob: SealedBlob; honest: Uint8Array } {
+  const world = createWorld({ members: [{ member: 'mbr-aaaa', devices: ['A'] }, { member: 'mbr-cccc', devices: ['C'] }] });
+  const a = world.editor('A', PRODUCT, 11);
+  const reg = a.register();
+  const pieces = ['n', 'o', 'p'].map((letter, index) => a.insert(index * 120_000, `${letter}${'x'.repeat(119_999)}`));
+  const fold = createFoldDoc();
+  // A whole state goes in under the state limit; applyUpdate holds one update to the update limit.
+  assert.equal(applyRemote(fold, encodeFullState(a.doc)), true);
+  const honest = encodeFullState(fold);
+  const blob = sealBlob(world.keyFor(world.stream, 0), world.stream, 0, Buffer.from(state ?? honest));
+  world.blobs.set(blob.hash, blob);
+  const entry = world.write('C', { kind: 'doc.compact', deps: withDeps ? pieces : [], data: { product: PRODUCT, covers: pieces.map(dep), stateVector: stateVectorOf(fold), textHash: textHashOf(docText(fold)), stateBlob: blob.hash } });
+  return { world, items: [reg, ...pieces, entry], entry, blob, honest };
+}
+
+// Folds with a blob lookup that records every hash asked for, and records the IV of every AES-GCM open.
+function spiedFold(world: World, items: readonly Written[]): { result: ReturnType<typeof foldEntries>; looked: string[]; opened: string[] } {
+  const looked: string[] = [];
+  const opens = mock.method(stateKeys, 'openRaw');
+  try {
+    const result = foldEntries(sealed(items), world.ctx({ blobs: (hash) => { looked.push(hash); return world.blobs.get(hash); } }));
+    const opened = opens.mock.calls.map((call) => (call.arguments[1] as { iv: Buffer }).iv.toString('hex'));
+    return { result, looked, opened };
+  } finally {
+    opens.mock.restore();
+  }
+}
+
+test('31-03 handoff: an honest compaction state over the 256 KiB update limit and under the 2 MiB state limit is accepted as verified', () => {
+  const scene = bigScene();
+  assert.ok(scene.honest.length > MAX_UPDATE_BYTES && scene.honest.length < MAX_STATE_BYTES, `state of ${scene.honest.length} bytes`);
+  const { result, looked, opened } = spiedFold(scene.world, scene.items);
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).compactions, [{ entry: scene.entry.hash, verified: true }]);
+  assert.equal(productOf(result).text.length, 360_000);
+  // The spy sees this blob looked up and opened, so the refusals below that show no open are meaningful.
+  assert.ok(looked.includes(scene.blob.hash));
+  assert.ok(opened.includes(ivOf(scene.blob)));
+});
+
+test('a provisional compaction state over the 256 KiB update limit and under the 2 MiB state limit renders its whole text: the fold output, its attribution and the projection reader', () => {
+  const scene = bigScene(undefined, false);
+  assert.ok(scene.honest.length > MAX_UPDATE_BYTES && scene.honest.length < MAX_STATE_BYTES, `state of ${scene.honest.length} bytes`);
+  // The joiner holds the registration and the compaction but none of the updates it covers: the state is loaded provisionally.
+  const [reg] = scene.items;
+  const joiner = foldEntries(sealed([reg, scene.entry]), scene.world.ctx());
+  assert.deepEqual([joiner.refused, joiner.held], [[], []]);
+  const product = productOf(joiner);
+  assert.deepEqual(product.compactions, [{ entry: scene.entry.hash, verified: false }]);
+  // Before the fix the provisional state went through the per-update cap and the text came out empty with no refusal.
+  assert.equal(product.text.length, 360_000);
+  assert.equal(product.textHash, textHashOf(product.text));
+  assert.equal(product.problem, undefined);
+  assert.equal(product.incomplete, false);
+  assert.equal(product.attribution.reduce((sum, span) => sum + span.length, 0), 360_000);
+  // The projection and the single-machine copy read the same text.
+  const { texts, incomplete } = foldTexts(joiner);
+  assert.equal(texts.get(PRODUCT)?.length, 360_000);
+  assert.equal(incomplete.size, 0);
+  // The two apply paths keep their own limits: the whole state applies as a state and is refused as one incoming update.
+  assert.equal(applyUpdate(createFoldDoc(), scene.honest), false);
+  const doc = createFoldDoc();
+  assert.equal(applyState(doc, scene.honest), true);
+  assert.equal(docText(doc).length, 360_000);
+});
+
+test('a product whose output is known to be incomplete is never handed to a reader as its text: foldTexts names it with its reason instead', () => {
+  const fold = { families: { doc: [
+    { product: 'whole', text: 'all of it' },
+    { product: 'partial', text: 'part of', problem: TEXT_OUTPUT_PROBLEMS['compaction-not-applied'] }
+  ] } } as unknown as FoldResult;
+  const { texts, incomplete } = foldTexts(fold);
+  assert.deepEqual([...texts], [['whole', 'all of it']]);
+  assert.deepEqual([...incomplete], [['partial', TEXT_OUTPUT_PROBLEMS['compaction-not-applied']]]);
+  for (const text of Object.values(TEXT_OUTPUT_PROBLEMS)) assert.ok(text.endsWith('.') && !text.includes('\u2014'));
+});
+
+test('new defect 1: a compaction state blob over MAX_STATE_BYTES is refused too-large from its length, looked up but never decrypted', () => {
+  // A plaintext one byte over the limit; its content does not matter, because nothing reads it.
+  const over = bigScene(Buffer.alloc(MAX_STATE_BYTES + 1, 7));
+  const refusedRun = spiedFold(over.world, over.items);
+  assert.deepEqual(reasons(refusedRun.result), [[over.entry.hash, 'too-large']]);
+  assert.ok(refusedRun.looked.includes(over.blob.hash));
+  assert.equal(refusedRun.opened.includes(ivOf(over.blob)), false);
+  assert.deepEqual(productOf(refusedRun.result).compactions, []);
+  // Exactly at the limit the blob passes the gate and is opened; the bytes are not a plain-text state, so the inspection refuses them after decrypting.
+  const at = bigScene(Buffer.alloc(MAX_STATE_BYTES, 7));
+  const atRun = spiedFold(at.world, at.items);
+  assert.ok(atRun.opened.includes(ivOf(at.blob)));
+  assert.deepEqual(reasons(atRun.result), [[at.entry.hash, 'forbidden-content']]);
+  // A state that decodes but is over the limit by Yjs bytes alone is refused too-large by the gate as well, before any decode.
+  const padded = new Uint8Array(MAX_STATE_BYTES + 64);
+  padded.set(over.honest);
+  const big = bigScene(padded);
+  const bigRun = spiedFold(big.world, big.items);
+  assert.deepEqual(reasons(bigRun.result), [[big.entry.hash, 'too-large']]);
+  assert.equal(bigRun.opened.includes(ivOf(big.blob)), false);
 });

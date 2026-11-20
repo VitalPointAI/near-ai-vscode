@@ -34,9 +34,9 @@ function scenario(): Scenario {
   const world = createWorld({
     members: [
       { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] },
-      { member: 'mbr-p', name: 'Pat', roles: ['member', 'answers_for:j2'], devices: ['P'] },
+      { member: 'mbr-p', name: 'Pat', roles: ['member', 'answers_for:j2'], devices: ['P'], agentSeats: ['j2-chief', 'j2-analyst'] },
       { member: 'mbr-q', name: 'Quinn', roles: ['member'], devices: ['Q'] },
-      { member: 'mbr-sl', roles: ['member', 'section_lead:j2'], devices: ['SL'] },
+      { member: 'mbr-sl', roles: ['member', 'section_lead:j2'], devices: ['SL'], agentSeats: ['release-guard', 'tradecraft'] },
       { member: 'mbr-c', name: 'Col Cee', roles: ['member', `decision_for:${COMMANDER}`], devices: ['C'] }
     ]
   });

@@ -17,6 +17,7 @@ import type { StaffHost } from '../staff/staffHost';
 
 import { STAFF_COMMANDS } from '../domain/staff/commands';
 import { registerWatchCommands } from './staffWatchCommands';
+import { registerStaffMultiUserCommands } from './staffMultiUserCommands';
 
 export { STAFF_COMMANDS };
 
@@ -43,7 +44,9 @@ function projectRoot(): string | undefined {
 export function registerStaffCommands(context: StaffCommandContext): void {
   const dir = identityDir(context.globalStorageUri.fsPath);
   const identity = async () => (await loadOrCreateDeviceIdentity(context.secrets, { identityDir: dir })).identity;
-  configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets), headStore: context.secrets });
+  // The replica storage lets a host open a shared (multi-user) project and read it from the shared record (D-28, 31-21); a project that is not shared
+  // loads nothing from it and writes nothing new.
+  configureStaffHosts({ signer: identity, keyStatus: () => localKeyStatus(dir, context.secrets), headStore: context.secrets, replica: { globalStorageDir: context.globalStorageUri.fsPath, identityDir: dir } });
   // The observation store of each project writes its feed events to the same project's staff event log (research note 11, 4.2).
   configureObservationStores({ emit: async (events, root) => { await staffHostFor(root)?.emit(events); } });
   context.subscriptions.push({ dispose: () => { configureStaffHosts(undefined); configureObservationStores(undefined); } });
@@ -61,6 +64,8 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   register(STAFF_COMMANDS.useBranchLedger, () => useBranchLedgerCommand(context, identity));
   register(STAFF_COMMANDS.decidePir, (args) => decidePirCommand(context, identity, args));
   registerWatchCommands(context, identity, register);
+  // The multi-user staff commands: registered always, each switched off until nearAi.staff.multiUserPreview is on (D-36).
+  registerStaffMultiUserCommands(context, identity, register);
 }
 
 function isArgs(value: unknown): value is StaffCommandArgs {
@@ -71,6 +76,18 @@ function hostOrSay(): StaffHost | undefined {
   const root = projectRoot();
   const host = root ? staffHostFor(root) : undefined;
   if (!host) void vscode.window.showInformationMessage('Open the project folder of a staff team first.');
+  return host;
+}
+
+/**
+ * The host of a command that writes to today's single-machine files. In a shared (multi-user) project every such write is refused (D-29, 31-21), so the
+ * command says so at once, before it asks anyone anything or shows a dialog.
+ */
+async function writableHostOrSay(): Promise<StaffHost | undefined> {
+  const host = hostOrSay();
+  if (!host) return undefined;
+  const shared = await host.sharedProjectRefusal();
+  if (shared !== undefined) { void vscode.window.showWarningMessage(shared); return undefined; }
   return host;
 }
 
@@ -100,7 +117,7 @@ export async function askPerson(context: StaffCommandContext, fingerprint: strin
 }
 
 async function decideCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, action: Action, args?: StaffCommandArgs): Promise<void> {
-  const host = hostOrSay();
+  const host = await writableHostOrSay();
   if (!host) return;
   const snapshot = await host.snapshot();
   const choices = snapshot.registry.filter((view) => eligible(action, view));
@@ -193,7 +210,7 @@ export function branchLedgerDetail(check: { readonly reason: 'truncated' | 'repl
  * and is signed with this device's key; the signed entry, not the register file, is what makes the PIR decided.
  */
 async function decidePirCommand(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, args?: StaffCommandArgs): Promise<void> {
-  const host = hostOrSay();
+  const host = await writableHostOrSay();
   if (!host) return;
   const queue = await host.pirsAwaitingDecision();
   if ('unreadable' in queue) { void vscode.window.showWarningMessage(`No PIR can be decided now: ${queue.unreadable}`); return; }
@@ -256,7 +273,7 @@ async function showProducts(): Promise<void> {
 }
 
 async function setAsideLedger(): Promise<void> {
-  const host = hostOrSay();
+  const host = await writableHostOrSay();
   if (!host) return;
   const answer = await vscode.window.showWarningMessage(
     'Set aside the staff product ledger?',

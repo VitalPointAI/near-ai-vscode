@@ -60,9 +60,9 @@ function fixture(): Fixture {
   const world = createWorld({
     members: [
       { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] },
-      { member: 'mbr-p', roles: ['member', 'answers_for:j2'], devices: ['P'] },
+      { member: 'mbr-p', roles: ['member', 'answers_for:j2'], devices: ['P'], agentSeats: ['j2-chief', 'j2-analyst', 'release-guard'] },
       { member: 'mbr-sl', roles: ['member', 'section_lead:j2'], devices: ['SL'] },
-      { member: 'mbr-c', name: 'Col Cee', roles: ['member', `decision_for:${COMMANDER}`], devices: ['C'] },
+      { member: 'mbr-c', name: 'Col Cee', roles: ['member', `decision_for:${COMMANDER}`], devices: ['C'], agentSeats: ['j2-chief'] },
       { member: 'mbr-d', name: 'Col Dee', roles: ['member', `decision_for:${COMMANDER}`], devices: ['D'] },
       { member: 'mbr-f', name: 'Col Eff', roles: ['member', `decision_for:${COMMANDER}`], devices: ['F'] },
       { member: 'mbr-e', name: 'Maj Eee', roles: ['member', 'decision_for:other'], devices: ['E'] },

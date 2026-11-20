@@ -420,6 +420,66 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.makeMultiUser",
+        "title": "Staff: Make This Staff Project Multi-User",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.inviteToProject",
+        "title": "Staff: Invite to Staff Project",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.joinProject",
+        "title": "Staff: Join Staff Project",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.admitToProject",
+        "title": "Staff: Admit to Staff Project",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.removeFromProject",
+        "title": "Staff: Remove from Staff Project",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.addMyOtherMachine",
+        "title": "Staff: Add My Other Machine",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.chooseRosterBranch",
+        "title": "Staff: Choose Roster Branch",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.nameDeputyLead",
+        "title": "Staff: Name Deputy Lead",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.handOverLead",
+        "title": "Staff: Hand Over Staff Lead",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.updateMember",
+        "title": "Staff: Change a Staff Project Member",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.makeSingleMachineCopy",
+        "title": "Staff: Make a Single-Machine Copy",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.startSharedHistoryAgain",
+        "title": "Staff: Start This Computer's Shared History Again",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.label.set",
         "title": "Set Label",
         "category": "NEAR AI"
@@ -975,6 +1035,12 @@
           "default": false,
           "scope": "application",
           "description": "Shows Enable Team Mode in the Command Palette. Team Mode is an early preview: until invitations arrive, a team holds only its owner."
+        },
+        "nearAi.staff.multiUserPreview": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Shows the commands for multi-user staff projects in the Command Palette: make a staff project multi-user, invite, join, admit and remove people, and make a single-machine copy. Multi-user staff projects are an early preview: people and clearances in them are declared by the staff lead, not verified."
         }
       }
     },
@@ -987,6 +1053,54 @@
         {
           "command": "nearAi.team.verifyLog",
           "when": "config.nearAi.team.preview || nearAi.team.active"
+        },
+        {
+          "command": "nearAi.staff.makeMultiUser",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.inviteToProject",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.joinProject",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.admitToProject",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.removeFromProject",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.addMyOtherMachine",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.chooseRosterBranch",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.nameDeputyLead",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.handOverLead",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.updateMember",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.makeSingleMachineCopy",
+          "when": "config.nearAi.staff.multiUserPreview"
+        },
+        {
+          "command": "nearAi.staff.startSharedHistoryAgain",
+          "when": "config.nearAi.staff.multiUserPreview"
         }
       ],
       "explorer/context": [

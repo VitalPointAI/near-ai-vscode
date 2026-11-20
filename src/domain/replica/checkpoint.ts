@@ -7,11 +7,15 @@
 //
 // Signing uses the same purpose as entry headers (staff-replica, D-05). The `type` field and the closed key list keep a checkpoint from ever
 // verifying as an entry header, and a header from verifying as a checkpoint.
+//
+// Version 2 (D-04, D-42) adds to every head the head entry's lamport and the newest roster cited by the head or anything in its causal past. With
+// those a late joiner can check a writer's log that starts right after the head without holding the covered entries (checkpointBases, chain.ts).
+// Version 1 checkpoints still read and verify, and the Phase 30 vector stays byte-identical; their heads are never a join base.
 import { canonicalBytes, fingerprintOf, isStrictBase64url } from '../team/canonical';
 import { signPayload, verifyPayload } from '../team/signedPayload';
 import type { KeyStatusLookup } from '../team/keyStatus';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
-import { isRecord, isSafeIntegerInRange } from '../team/validate';
+import { MAX_LAMPORT, isRecord, isSafeIntegerInRange } from '../team/validate';
 import { buildCausalGraph } from './causal';
 import type { CausalGraph, GraphEntry } from './causal';
 import { HASH_PATTERN, REPLICA_SIGNED_AT, sha256Hex, writerIdOf } from './entry';
@@ -19,7 +23,10 @@ import type { Dep } from './entry';
 import { checkpointOrder } from './order';
 import type { RosterView } from './rosterView';
 
-export const CHECKPOINT_VERSION = 1;
+// The version new checkpoints are written in. signCheckpoint also signs the version 1 shape, so the Phase 30 vector and checkpoints made before
+// version 2 still reproduce; readCheckpoint reads both.
+export const CHECKPOINT_VERSION = 2;
+// About 150 bytes per version 2 head, so 64 KiB holds about 400 heads across all streams: enough for the first release of staff projects.
 export const CHECKPOINT_MAX_BYTES = 64 * 1024;
 // The chained order hash starts from 64 zeros.
 export const ORDER_TIP_START = '0'.repeat(64);
@@ -28,11 +35,24 @@ const PUBLIC_KEY_BYTES = 32;
 const CHECKPOINT_KEYS = ['type', 'v', 'project', 'signer', 'rosterHead', 'streams'] as const;
 const STREAM_KEYS = ['stream', 'heads', 'count', 'orderTip'] as const;
 const STREAM_ID = /^[0-9a-f]{32}$/;
+const HEAD_KEYS_V1 = ['writer', 'seq', 'hash'] as const;
+const HEAD_KEYS_V2 = ['writer', 'seq', 'hash', 'lamport', 'roster'] as const;
+
+// A version 2 head. The shared Dep type stays as it is: entry deps never carry these fields.
+export interface CheckpointHead extends Dep {
+  // The head entry's lamport.
+  lamport: number;
+  // The roster hash with the highest position cited by the head or anything in its causal past (what the chain stage calls newestRoster).
+  roster: string;
+}
+
+// What a late joiner knows of a writer's log from a verified version 2 checkpoint: the head stands in for the entries it covers (chain.ts).
+export interface CheckpointBase { stream: string; writer: string; seq: number; hash: string; lamport: number; roster: string }
 
 export interface CheckpointStream {
   stream: string;
-  // The head of each writer's log in this stream, sorted by writer.
-  heads: Dep[];
+  // The head of each writer's log in this stream, sorted by writer. Version 1 heads are a Dep; version 2 heads are a CheckpointHead.
+  heads: Array<Dep | CheckpointHead>;
   // How many entries of this stream the checkpoint covers, and the chained hash of their final order.
   count: number;
   orderTip: string;
@@ -42,7 +62,7 @@ export interface CheckpointStream {
 
 export interface Checkpoint {
   type: 'checkpoint';
-  v: 1;
+  v: 1 | 2;
   project: string;
   // The writer id of the signing device (the hash of its public key).
   signer: string;
@@ -98,16 +118,21 @@ function isHash(value: unknown): value is string {
   return typeof value === 'string' && HASH_PATTERN.test(value);
 }
 
-function readDep(value: unknown): Dep | undefined {
+// A head with exactly the keys of its version: writer, seq and hash in version 1, and lamport and roster as well in version 2.
+function readHead(value: unknown, version: 1 | 2): Dep | CheckpointHead | undefined {
   if (!isRecord(value)) return undefined;
   const keys = Object.keys(value);
-  if (keys.length !== 3 || !['writer', 'seq', 'hash'].every((key) => keys.includes(key))) return undefined;
-  const { writer, seq, hash } = value;
+  const expected: readonly string[] = version === 1 ? HEAD_KEYS_V1 : HEAD_KEYS_V2;
+  if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) return undefined;
+  const { writer, seq, hash, lamport, roster } = value;
   if (!isHash(writer) || !isHash(hash) || !isSafeIntegerInRange(seq, 0, Number.MAX_SAFE_INTEGER)) return undefined;
-  return { writer, seq: seq as number, hash };
+  if (version === 1) return { writer, seq: seq as number, hash };
+  // The same bounds an entry body's lamport has.
+  if (!isSafeIntegerInRange(lamport, 1, MAX_LAMPORT) || !isHash(roster)) return undefined;
+  return { writer, seq: seq as number, hash, lamport: lamport as number, roster };
 }
 
-function readStream(value: unknown): CheckpointStream | undefined {
+function readStream(value: unknown, version: 1 | 2): CheckpointStream | undefined {
   if (!isRecord(value)) return undefined;
   const keys = Object.keys(value);
   if (!STREAM_KEYS.every((key) => keys.includes(key)) || !keys.every((key) => (STREAM_KEYS as readonly string[]).includes(key) || key === 'digest')) return undefined;
@@ -115,11 +140,11 @@ function readStream(value: unknown): CheckpointStream | undefined {
   if (typeof stream !== 'string' || !STREAM_ID.test(stream) || !Array.isArray(heads)) return undefined;
   if (!isSafeIntegerInRange(count, 0, Number.MAX_SAFE_INTEGER) || !isHash(orderTip)) return undefined;
   if (keys.includes('digest') && !isHash(digest)) return undefined;
-  const read: Dep[] = [];
+  const read: Array<Dep | CheckpointHead> = [];
   for (const head of heads) {
-    const dep = readDep(head);
-    if (dep === undefined) return undefined;
-    read.push(dep);
+    const known = readHead(head, version);
+    if (known === undefined) return undefined;
+    read.push(known);
   }
   const result: CheckpointStream = { stream, heads: read, count: count as number, orderTip };
   if (keys.includes('digest')) result.digest = digest as string;
@@ -133,19 +158,26 @@ export function readCheckpoint(value: unknown): Checkpoint | undefined {
     const keys = Object.keys(value);
     if (keys.length !== CHECKPOINT_KEYS.length || !CHECKPOINT_KEYS.every((key) => keys.includes(key))) return undefined;
     const { type, v, project, signer, rosterHead, streams } = value;
-    if (type !== 'checkpoint' || v !== CHECKPOINT_VERSION) return undefined;
+    if (type !== 'checkpoint' || (v !== 1 && v !== 2)) return undefined;
     if (typeof project !== 'string' || !PROJECT_PATTERN.test(project) || !isHash(signer) || !isHash(rosterHead) || !Array.isArray(streams)) return undefined;
     const read: CheckpointStream[] = [];
     for (const item of streams) {
-      const stream = readStream(item);
+      const stream = readStream(item, v);
       if (stream === undefined) return undefined;
       read.push(stream);
     }
-    return { type: 'checkpoint', v: CHECKPOINT_VERSION, project, signer, rosterHead, streams: read };
+    return { type: 'checkpoint', v, project, signer, rosterHead, streams: read };
   } catch {
     // Hostile input that cannot be read is not a checkpoint.
     return undefined;
   }
+}
+
+// A head with the keys of its version only, in a fixed key order.
+function copyHead(head: Dep | CheckpointHead, version: 1 | 2): Dep | CheckpointHead {
+  if (version === 1) return { writer: head.writer, seq: head.seq, hash: head.hash };
+  const full = head as CheckpointHead;
+  return { writer: full.writer, seq: full.seq, hash: full.hash, lamport: full.lamport, roster: full.roster };
 }
 
 // Streams sorted by id and heads by writer, with no stream or writer twice, so one meaning has one set of bytes.
@@ -155,12 +187,13 @@ export function normaliseCheckpoint(checkpoint: Checkpoint): Checkpoint | undefi
     const heads = [...stream.heads].sort((a, b) => compareText(a.writer, b.writer));
     if (heads.some((head, index) => index > 0 && heads[index - 1].writer === head.writer)) return undefined;
     if (streams.length > 0 && streams[streams.length - 1].stream === stream.stream) return undefined;
-    streams.push({ ...stream, heads: heads.map((head) => ({ writer: head.writer, seq: head.seq, hash: head.hash })) });
+    streams.push({ ...stream, heads: heads.map((head) => copyHead(head, checkpoint.v)) });
   }
   return { ...checkpoint, streams };
 }
 
-// Signs a checkpoint. The same bytes always give the same signature, because the signing time is the constant the entry headers use.
+// Signs a checkpoint in the version it is given: version 2 (CHECKPOINT_VERSION) for every new checkpoint, version 1 only to reproduce one made before.
+// The same bytes always give the same signature, because the signing time is the constant the entry headers use.
 export function signCheckpoint(signer: PayloadSigner, checkpoint: Checkpoint): SignedCheckpoint {
   const read = readCheckpoint(checkpoint);
   const normal = read === undefined ? undefined : normaliseCheckpoint(read);
@@ -204,6 +237,57 @@ export function verifyCheckpoint(signed: unknown, roster: RosterView): Checkpoin
     // Anything unforeseen on hostile input is a refusal of that input.
     return refusal('malformed');
   }
+}
+
+// The join bases of version 2 checkpoints, keyed by head hash (D-04, D-42). Version 1 checkpoints and unreadable payloads give none. The caller passes
+// only checkpoints it verified (verifyCheckpoint): this reads the shape and does not check signatures. Two checkpoints that name one head hash with
+// different values cannot both be right, and a joiner cannot tell which is, so that head gives no base at all; the result does not depend on the
+// order the checkpoints are listed in.
+export function checkpointBases(checkpoints: readonly SignedCheckpoint[]): Map<string, CheckpointBase> {
+  const bases = new Map<string, CheckpointBase>();
+  const disputed = new Set<string>();
+  for (const signed of checkpoints) {
+    const checkpoint = readCheckpoint(signed?.payload);
+    if (checkpoint === undefined || checkpoint.v !== 2) continue;
+    for (const stream of checkpoint.streams) {
+      for (const head of stream.heads as CheckpointHead[]) {
+        const base: CheckpointBase = { stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash, lamport: head.lamport, roster: head.roster };
+        const known = bases.get(head.hash);
+        if (known === undefined) bases.set(head.hash, base);
+        else if (!canonicalBytes(known).equals(canonicalBytes(base))) disputed.add(head.hash);
+      }
+    }
+  }
+  for (const hash of disputed) bases.delete(hash);
+  return bases;
+}
+
+// The version 2 heads of a covered set, per stream: for each writer the entry with the highest seq (ties, which only a fork makes, go to the smaller
+// hash), its lamport, and the roster with the highest position cited by it or anything in its causal past among the entries given. Sorted by writer.
+// The hub builds checkpoint heads with this from Phase 32; entries is the covered set, causally closed.
+export function checkpointHeads(entries: readonly CheckpointEntry[], roster: Pick<RosterView, 'rosterPosition'>): Map<string, CheckpointHead[]> {
+  const graph = buildCausalGraph(entries);
+  const byHash = new Map(entries.map((entry) => [entry.hash, entry]));
+  const last = new Map<string, CheckpointEntry>();
+  for (const entry of entries) {
+    const key = `${entry.header.stream}/${entry.header.writer}`;
+    const known = last.get(key);
+    if (known === undefined || entry.header.seq > known.header.seq || (entry.header.seq === known.header.seq && entry.hash < known.hash)) last.set(key, entry);
+  }
+  const position = (hash: string): number => roster.rosterPosition(hash) ?? -1;
+  const result = new Map<string, CheckpointHead[]>();
+  for (const head of last.values()) {
+    let newest = head.body.roster;
+    for (const hash of graph.past(head.hash)) {
+      const cited = (byHash.get(hash) as CheckpointEntry).body.roster;
+      if (position(cited) > position(newest)) newest = cited;
+    }
+    const list = result.get(head.header.stream) ?? [];
+    list.push({ writer: head.header.writer, seq: head.header.seq, hash: head.hash, lamport: head.body.lamport, roster: newest });
+    result.set(head.header.stream, list);
+  }
+  for (const list of result.values()) list.sort((a, b) => compareText(a.writer, b.writer));
+  return result;
 }
 
 const headHashes = (checkpoint: Checkpoint): string[] => checkpoint.streams.flatMap((stream) => stream.heads.map((head) => head.hash));

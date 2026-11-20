@@ -28,6 +28,10 @@ export interface VscodeStub {
   quickPickAnswers: Array<string | string[] | undefined>;
   // Answers handed to showOpenDialog, in order: the paths picked. An empty queue answers undefined (dismissed).
   openDialogAnswers: Array<string[] | undefined>;
+  // Answers handed to showSaveDialog, in order: the path chosen. An empty queue answers undefined (dismissed).
+  saveDialogAnswers: Array<string | undefined>;
+  // The options of each showSaveDialog call, in order.
+  saveDialogRequests: Array<{ title?: string; defaultPath?: string; filters?: Record<string, string[]> }>;
   // What each showQuickPick call was shown: its items' labels, details and the options.
   quickPickRequests: Array<{ items: Array<{ label: string; description?: string; detail?: string }>; placeHolder?: string; title?: string; canPickMany?: boolean }>;
   // The options of each show*Message call that passed any (modal, detail), in order.
@@ -68,6 +72,8 @@ export function createVscodeStub(): VscodeStub {
 
   const quickPickAnswers: VscodeStub['quickPickAnswers'] = [];
   const openDialogAnswers: VscodeStub['openDialogAnswers'] = [];
+  const saveDialogAnswers: VscodeStub['saveDialogAnswers'] = [];
+  const saveDialogRequests: VscodeStub['saveDialogRequests'] = [];
   const quickPickRequests: VscodeStub['quickPickRequests'] = [];
   const messageOptions: VscodeStub['messageOptions'] = [];
   const renameListeners = new Set<(event: { files: Array<{ oldUri: { fsPath: string }; newUri: { fsPath: string } }> }) => unknown>();
@@ -153,6 +159,11 @@ export function createVscodeStub(): VscodeStub {
         return list.find((item) => item.label === answer);
       },
       showOpenDialog: async (): Promise<Array<{ fsPath: string }> | undefined> => openDialogAnswers.shift()?.map((fsPath) => ({ fsPath })),
+      showSaveDialog: async (options?: { title?: string; defaultUri?: { fsPath?: string }; filters?: Record<string, string[]> }): Promise<{ fsPath: string } | undefined> => {
+        saveDialogRequests.push({ ...(options?.title === undefined ? {} : { title: options.title }), ...(options?.defaultUri?.fsPath === undefined ? {} : { defaultPath: options.defaultUri.fsPath }), ...(options?.filters === undefined ? {} : { filters: options.filters }) });
+        const answer = saveDialogAnswers.shift();
+        return answer === undefined ? undefined : { fsPath: answer };
+      },
       showInputBox: async (options?: { prompt?: string; title?: string; value?: string; placeHolder?: string }): Promise<string | undefined> => {
         inputRequests.push({ ...options });
         return inputAnswers.shift();
@@ -226,7 +237,7 @@ export function createVscodeStub(): VscodeStub {
 
   return {
     vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers, shownDocuments, contentProviders,
-    quickPickAnswers, quickPickRequests, messageOptions, openDialogAnswers,
+    quickPickAnswers, quickPickRequests, messageOptions, openDialogAnswers, saveDialogAnswers, saveDialogRequests,
     async fireRename(files: Array<{ from: string; to: string }>): Promise<void> {
       const event = { files: files.map((file) => ({ oldUri: { fsPath: file.from }, newUri: { fsPath: file.to } })) };
       await Promise.all([...renameListeners].map((listener) => Promise.resolve(listener(event))));

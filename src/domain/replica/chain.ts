@@ -7,10 +7,15 @@
 //   streams too (D-12). The result depends only on the set of entries, never on the order they arrived or on a clock.
 // - an entry with any predecessor (prev or dep) that is not admitted is held, until the predecessor arrives. Excluded entries stay admitted graph
 //   nodes, so other writers' entries that cite them are admitted too ("satisfied by absence"): one forked device never stalls the project.
+// - a late joiner (D-04, D-42) holds a verified version 2 checkpoint instead of the entries it covers. Each head of it is a base: an admitted virtual
+//   predecessor with the head's writer, stream, seq, lamport and roster. An entry whose prev is a base must be the next entry of that writer and stream,
+//   and its lamport and roster are checked against the base exactly as against a held predecessor. A dep that names a covered entry that is not a
+//   head stays missing-predecessor (conservative: the joiner cannot check it until that entry is served).
 import { buildCausalGraph } from './causal';
-import { GENESIS_PREV } from './entry';
-import { acceptableProof, canonicalProof, findEquivocations, forkChosen, parseProof, proofHash, quarantineRecords } from './equivocation';
-import type { EquivocationProof, QuarantineRecord } from './equivocation';
+import type { CheckpointBase } from './checkpoint';
+import { GENESIS_PREV, entryHash } from './entry';
+import { acceptableProof, canonicalProof, findEquivocations, forkStanding, parseProof, proofHash, withBranches } from './equivocation';
+import type { EquivocationProof, ForkResolution, QuarantineRecord } from './equivocation';
 import { totalOrder } from './order';
 import type { ReplicaContext } from './rosterView';
 import type { VerifiedEntry } from './verify';
@@ -65,19 +70,17 @@ function predecessors(entry: VerifiedEntry): string[] {
   return [...preds];
 }
 
-// A permanent refusal that depends on the entry and the entries it names, never on what has not arrived.
-function staticRefusal(entry: VerifiedEntry, nodes: ReadonlyMap<string, VerifiedEntry>): ChainRejection | undefined {
+// A permanent refusal that depends on the entry and the entries and bases it names, never on what has not arrived.
+function staticRefusal(entry: VerifiedEntry, nodes: ReadonlyMap<string, VerifiedEntry>, bases: ReadonlyMap<string, CheckpointBase>): ChainRejection | undefined {
   const { header, body } = entry;
   if (header.seq === 0 && header.prev !== GENESIS_PREV) return 'bad-genesis';
   if (header.seq > 0) {
     if (header.prev === GENESIS_PREV) return 'bad-prev';
-    const previous = nodes.get(header.prev);
-    if (previous !== undefined && (previous.header.stream !== header.stream || previous.header.writer !== header.writer || previous.header.seq !== header.seq - 1)) return 'bad-prev';
+    for (const previous of [nodes.get(header.prev)?.header, bases.get(header.prev)]) {
+      if (previous !== undefined && (previous.stream !== header.stream || previous.writer !== header.writer || previous.seq !== header.seq - 1)) return 'bad-prev';
+    }
   }
-  const badDep = body.deps.some((dep) => {
-    const target = nodes.get(dep.hash);
-    return target !== undefined && (target.header.writer !== dep.writer || target.header.seq !== dep.seq);
-  });
+  const badDep = body.deps.some((dep) => [nodes.get(dep.hash)?.header, bases.get(dep.hash)].some((target) => target !== undefined && (target.writer !== dep.writer || target.seq !== dep.seq)));
   return badDep ? 'bad-dep' : undefined;
 }
 
@@ -89,14 +92,11 @@ function pushTo<T>(map: Map<string, T[]>, key: string, value: T): void {
   else list.push(value);
 }
 
-// The entries to skip: in a forked (writer, stream), every admitted entry from the fork seq on except the chosen branch and its descendants; in
-// other streams, every admitted entry of that writer whose causal past holds one of those excluded forked entries.
-function excludedEntries(admitted: ReadonlyMap<string, VerifiedEntry>, proofs: readonly EquivocationProof[], ctx: ReplicaContext): Set<string> {
+// The entries to skip: in a forked (writer, stream), for every fork slot forkStanding lists, every admitted entry from its seq on except the branch
+// kept there and its descendants; in other streams, every admitted entry of that writer whose causal past holds one of those excluded forked entries.
+function excludedEntries(admitted: ReadonlyMap<string, VerifiedEntry>, resolutions: readonly ForkResolution[]): Set<string> {
   const forks = new Map<string, Array<{ seq: number; chosen: string | undefined }>>();
-  for (const proof of proofs) {
-    const key = `${proof.a.writer}/${proof.a.stream}`;
-    pushTo(forks, key, { seq: proof.a.seq, chosen: forkChosen(proof, ctx.roster) });
-  }
+  for (const resolution of resolutions) pushTo(forks, `${resolution.writer}/${resolution.stream}`, { seq: resolution.seq, chosen: resolution.chosen });
   const chains = new Map<string, VerifiedEntry[]>();
   for (const entry of admitted.values()) {
     const key = `${entry.header.writer}/${entry.header.stream}`;
@@ -151,8 +151,10 @@ function excludedEntries(admitted: ReadonlyMap<string, VerifiedEntry>, proofs: r
 export interface RefusedPlace { stream?: string; writer?: string; seq?: number }
 
 // verifyRejected lets a refused earlier entry of a device's log label the later entries chain-broken instead of missing-predecessor. The fold may
-// pass its verify-stage rejected list as is.
-export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaContext, verifyRejected: readonly RefusedPlace[] = []): ChainResult {
+// pass its verify-stage rejected list as is. bases are the heads of the verified version 2 checkpoints, keyed by head hash (checkpointBases); a base
+// counts as an admitted predecessor whether or not its entry is here too, and its lamport and roster are the ones the checks read, so a joiner and a
+// member who holds everything decide every later entry the same way. No bases is the Phase 30 behaviour.
+export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaContext, verifyRejected: readonly RefusedPlace[] = [], bases: ReadonlyMap<string, CheckpointBase> = new Map()): ChainResult {
   const nodes = new Map<string, VerifiedEntry>();
   for (const entry of verified) nodes.set(entry.hash, entry);
   const sorted = [...nodes.values()].sort((a, b) => compareText(a.hash, b.hash));
@@ -160,7 +162,7 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
   const rejected: RejectedEntry[] = [];
   const live = new Map<string, VerifiedEntry>();
   for (const entry of sorted) {
-    const reason = staticRefusal(entry, nodes);
+    const reason = staticRefusal(entry, nodes, bases);
     if (reason === undefined) live.set(entry.hash, entry);
     else rejected.push({ ...where(entry), stage: 'chain', reason });
   }
@@ -175,8 +177,10 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
   const waiting = new Map<string, string[]>();
   const remaining = new Map<string, number>();
   const queue: VerifiedEntry[] = [];
+  // Admission never waits for a base.
+  const awaited = (entry: VerifiedEntry): string[] => predecessors(entry).filter((pred) => !bases.has(pred));
   for (const entry of live.values()) {
-    const preds = predecessors(entry);
+    const preds = awaited(entry);
     remaining.set(entry.hash, preds.length);
     for (const pred of preds) pushTo(waiting, pred, entry.hash);
     if (preds.length === 0 && !future.has(entry.hash)) queue.push(entry);
@@ -188,13 +192,20 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
   for (let index = 0; index < queue.length; index += 1) {
     const entry = queue[index];
     const preds = predecessors(entry);
-    const expected = 1 + Math.max(0, ...preds.map((pred) => (admitted.get(pred) as VerifiedEntry).body.lamport));
+    const lamportOf = (pred: string): number => bases.get(pred)?.lamport ?? (admitted.get(pred) as VerifiedEntry).body.lamport;
+    const expected = 1 + Math.max(0, ...preds.map(lamportOf));
     if (entry.body.lamport !== expected) {
       rejected.push({ ...where(entry), stage: 'chain', reason: 'bad-lamport' satisfies ChainRejection });
       continue;
     }
     let newest = -1;
     for (const pred of preds) {
+      // A base's roster is already the newest in the head's past (CheckpointHead.roster).
+      const base = bases.get(pred);
+      if (base !== undefined) {
+        newest = Math.max(newest, rosterAt(pred), rosterAt(base.roster));
+        continue;
+      }
       const source = admitted.get(pred) as VerifiedEntry;
       newest = Math.max(newest, rosterAt(pred), rosterAt(source.body.roster), newestRoster.get(pred) as number);
     }
@@ -245,8 +256,19 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
       known.set(proofHash(proof), proof);
     }
   }
-  const proofs = [...known.values()];
-  const excluded = excludedEntries(admitted, proofs, ctx);
+  // Every proof, found or carried, lists every branch this machine knows at its slot (the headers it holds there and the headers of every proof of
+  // that slot), so a device.release naming any branch resolves it in every arrival order (D-01 (b), WR-03). The list is in memory only; the proof's
+  // wire form and hash do not change.
+  const atSlot = new Map<string, string[]>();
+  const headers = new Map<string, VerifiedEntry['header']>();
+  for (const entry of sorted) {
+    pushTo(atSlot, slot(entry.header.stream, entry.header.writer, entry.header.seq), entry.hash);
+    headers.set(entry.hash, entry.header);
+  }
+  for (const proof of known.values()) for (const header of [proof.a, proof.b]) pushTo(atSlot, slot(header.stream, header.writer, header.seq), entryHash(header));
+  const proofs = [...known.values()].map((proof) => withBranches(proof, atSlot.get(slot(proof.a.stream, proof.a.writer, proof.a.seq)) ?? []));
+  const standing = forkStanding(proofs, ctx.roster, headers);
+  const excluded = excludedEntries(admitted, standing.resolutions);
 
   const byText = (a: { hash?: string }, b: { hash?: string }): number => compareText(a.hash ?? '', b.hash ?? '');
   return {
@@ -254,7 +276,7 @@ export function classifyChains(verified: readonly VerifiedEntry[], ctx: ReplicaC
     excluded,
     held: held.sort(byText),
     rejected: rejected.sort(byText),
-    quarantined: quarantineRecords(proofs, ctx.roster),
+    quarantined: standing.quarantined,
     proofs: proofs.sort((a, b) => compareText(proofHash(a), proofHash(b)))
   };
 }

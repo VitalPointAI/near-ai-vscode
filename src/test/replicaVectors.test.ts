@@ -7,9 +7,11 @@ import * as path from 'node:path';
 import test from 'node:test';
 import { canonicalBytes } from '../domain/team/canonical';
 import { openRaw } from '../domain/state/keys';
-import { orderTipOf, recomputeCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
+import { checkpointBases, orderTipOf, readCheckpoint, recomputeCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
+import type { CheckpointHead } from '../domain/replica/checkpoint';
 import { acceptableProof, proofHash, verifyProof } from '../domain/replica/equivocation';
 import { blobAad, entryHash, fromWire, headerAad, openBlob, sha256Hex, verifyHeader } from '../domain/replica/entry';
+import type { EntryBody } from '../domain/replica/entry';
 import { foldEntries } from '../domain/replica/fold';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
@@ -169,4 +171,84 @@ test('the fixture holds no private key bytes: neither the seeds of the vector ke
   }
   const key = epochKey(vectors.epochKeys[0].label);
   assert.equal(text.includes(key.toString('hex')) || text.includes(key.toString('base64url')), false, 'the epoch key is not in the fixture, only its label');
+});
+
+// ---- Plan 31-08: the checkpointV2 section, and the Phase 30 sections byte for byte ----------------------------------------------------------------
+
+// The SHA-256 of the canonical bytes of every section the fixture held at Phase 30 (c1dba334), taken from the committed file before checkpointV2 was
+// added. A test cannot read git history, so the hashes are written here: any change to an old section, however small, fails this test (D-39, P-31-10).
+const PHASE_30_SECTIONS: Readonly<Record<string, string>> = {
+  note: '38cf49e8d3fcd59aa6889e68b53d3875f7adc47a4973e18bfd36cbeb8591f114',
+  labels: 'dd54811d5c1a1c1657f305b0e62a5131eba7552d6def8dd55c893cf0f5fa249b',
+  roster: '5858e68caad80b278e21ad4417f36caf55937a895398dfef80c12dcca30e6218',
+  writers: 'ddfab3008deeffdda57ad2249a6e3e02f01090c02e0027ad9596843c34f0014e',
+  epochKeys: 'e140b63cd0302fbda655da6c600026c51f7dcf65a7e48753fa6c3cc69dc96ccc',
+  entries: 'ca658a0e23db4024bf52438da8b0a0ed412950145091e4e37dffb1c97e032641',
+  blobs: 'dc2ff6f3f9d0bc18a727df22a2dccd55c52000df1b7aaf52fa99928e603a238d',
+  checkpoint: 'fffbcb5c41b1fc1741b9e415869d253ff96a1e6946f648e1e153d953bc630e53',
+  proof: '625df223238351766911f1f7ea53cfa9e6106291831fccd5074c3777f8458a9f',
+  versionHashes: '6d0370b8c1e267db9c37d6126abe6f8c340900682baf7b6139b705d9b28a0eef',
+  digests: '7eb414ffa87dfc50a8b6c9a16b192b186cf885930e4fd5f81d116abfb0b8835e'
+};
+
+test('every Phase 30 section of the fixture is byte-identical to Phase 30, and checkpointV2 is the only key added since', () => {
+  const vectors = committed() as unknown as Record<string, unknown>;
+  for (const [section, hash] of Object.entries(PHASE_30_SECTIONS)) {
+    assert.equal(createHash('sha256').update(canonicalBytes(vectors[section])).digest('hex'), hash, section);
+  }
+  assert.deepEqual(Object.keys(vectors).filter((key) => !(key in PHASE_30_SECTIONS)), ['checkpointV2']);
+  // The version 1 checkpoint still verifies, and its heads are still plain deps.
+  assert.equal(committed().checkpoint.unsigned.v, 1);
+  assert.equal(verifyCheckpoint(committed().checkpoint.signed, contextFor(committed()).roster).ok, true);
+  for (const head of committed().checkpoint.unsigned.streams[0].heads) assert.deepEqual(Object.keys(head).sort(), ['hash', 'seq', 'writer']);
+});
+
+test('the checkpointV2 section verifies, covers the same entries as the version 1 checkpoint, and its heads name each writer\'s last entry with lamport and roster', () => {
+  const vectors = committed();
+  const ctx = contextFor(vectors);
+  const v2 = vectors.checkpointV2;
+  assert.equal(v2.unsigned.v, 2);
+  assert.deepEqual(readCheckpoint(v2.signed.payload), v2.unsigned);
+  const verdict = verifyCheckpoint(v2.signed, ctx.roster);
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.ok && verdict.hash, v2.hash);
+  assert.notEqual(v2.hash, vectors.checkpoint.hash);
+  assert.notEqual(v2.signed.sig, vectors.checkpoint.signed.sig);
+  for (const tip of v2.orderTips) {
+    assert.equal(orderTipOf(tip.order), tip.orderTip);
+    const covered = v2.unsigned.streams.find((stream) => stream.stream === tip.stream);
+    assert.deepEqual([covered?.orderTip, covered?.count], [tip.orderTip, tip.order.length]);
+  }
+  // Same count and order tip as version 1; the heads differ only by the two added fields.
+  assert.deepEqual(v2.orderTips, vectors.checkpoint.orderTips);
+  const heads = v2.unsigned.streams[0].heads as CheckpointHead[];
+  assert.deepEqual(heads.map(({ writer, seq, hash }) => ({ writer, seq, hash })), vectors.checkpoint.unsigned.streams[0].heads);
+  for (const head of heads) {
+    const own = vectors.entries.filter((entry) => entry.header.writer === head.writer);
+    const last = own[own.length - 1];
+    const body = JSON.parse(Buffer.from(last.bodyPlaintext, 'base64url').toString('utf8')) as EntryBody;
+    assert.deepEqual(head, { writer: last.header.writer, seq: last.header.seq, hash: last.entryHash, lamport: body.lamport, roster: vectors.roster.hash });
+  }
+  const verified = vectors.entries.map((entry) => (verifyEntry({ header: entry.header, body: entry.bodyWire }, ctx) as { entry: VerifiedEntry }).entry);
+  assert.deepEqual(recomputeCheckpoint(v2.unsigned, verified), { ok: true, mismatches: [] });
+  assert.equal(checkpointBases([v2.signed]).size, heads.length);
+  assert.equal(checkpointBases([vectors.checkpoint.signed]).size, 0);
+  // With the version 2 checkpoint the vector entries fold to the same digests as with no checkpoint (nothing is concurrent across the prefix).
+  const sealedEntries = vectors.entries.map((entry) => ({ header: entry.header, body: entry.bodyWire }));
+  assert.deepEqual(foldEntries(sealedEntries, ctx, { checkpoints: [v2.signed] }).digests, vectors.digests);
+});
+
+test('a changed lamport or roster in a checkpointV2 head is reported by name and no longer verifies', () => {
+  const cases: Array<[string, (vectors: ReplicaVectors) => void]> = [
+    ['checkpointV2.signed.payload.streams.0.heads.0.lamport', (vectors) => { (vectors.checkpointV2.signed.payload.streams[0].heads[0] as CheckpointHead).lamport += 1; }],
+    ['checkpointV2.signed.payload.streams.0.heads.1.roster', (vectors) => { (vectors.checkpointV2.signed.payload.streams[0].heads[1] as CheckpointHead).roster = '5'.repeat(64); }],
+    ['checkpointV2.unsigned.streams.0.heads.0.lamport', (vectors) => { (vectors.checkpointV2.unsigned.streams[0].heads[0] as CheckpointHead).lamport += 1; }],
+    ['checkpointV2.unsigned.streams.0.heads.1.roster', (vectors) => { (vectors.checkpointV2.unsigned.streams[0].heads[1] as CheckpointHead).roster = '6'.repeat(64); }]
+  ];
+  for (const [field, mutate] of cases) {
+    const changed = copy();
+    mutate(changed);
+    assert.deepEqual(vectorDifferences(committed(), changed), [field]);
+    if (field.includes('.signed.')) assert.equal(verifyCheckpoint(changed.checkpointV2.signed, contextFor(changed).roster).ok, false, field);
+  }
 });

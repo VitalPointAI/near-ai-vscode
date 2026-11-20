@@ -6,7 +6,8 @@
 //     write that lands in between refuses the change, and nothing is written;
 //   - unreadable is never empty: a register that cannot be read whole, or holds one watch that does not read, refuses every change and says why;
 //   - the file alone arms nothing: arming and retiring are a named person's decisions, signed with this device's key in the decision log, and a watch is
-//     read through that log (watchRun.ts trustWatch) before anything acts on it.
+//     read through that log (watchRun.ts trustWatch) before anything acts on it;
+//   - in a shared (multi-user) project every change is refused with the staff host's shared-project refusal before the file is touched (D-29).
 // Who does what: a named person creates, arms, rejects, pauses, resumes, acknowledges and retires (the NEAR AI: Staff watch commands); a member proposes,
 // drafts and reports its drafts ready (the observations server's watch tools); the runtime matches, pauses, resumes and expires, and only while a person
 // attends the project (watchAttendance.ts): nothing runs in the background without one. No step releases, approves or tasks anything.
@@ -136,6 +137,10 @@ export class WatchHost {
    * written only over the exact bytes read. The events are recorded after the write.
    */
   private async change(mutate: (watches: StandingWatch[]) => Promise<Mutation> | Mutation): Promise<StaffResult & { readonly events?: FeedEvent[] }> {
+    // In a shared (multi-user) project the staff host refuses the events of every step (D-29, 31-21), so the register is not written either: a step
+    // is refused whole, before the file is touched, instead of leaving a changed register whose events were never recorded.
+    const shared = await this.options.host()?.sharedProjectRefusal();
+    if (shared !== undefined) return refuse(shared);
     const outcome = await withRegisterLock(this.file, async () => {
       const whole = await readWhole(this.file);
       if (whole.kind === 'unreadable') return refuse(`${STANDING_WATCHES_FILE} cannot be read: ${whole.reason}. Nothing was changed.`);

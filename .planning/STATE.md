@@ -39,6 +39,8 @@ Phase 30 (Replication contract and co-editing core; staff collaboration drop A, 
 
 Phase 31 (Staff roster, cell keys and migration; drop A; MUS-04..06): planned 2026-11-19 on `docs/phase-31-plan`, 23 plans in 10 waves. The owner accepted the four Phase 30 items as recommended (client ids bound to writers through the roster, checkpoint heads for late joiners, a byte limit and pre-decode skim plus a memory-capped decode worker, WR-01..09 first), so waves 1 to 3 (31-01..31-08) harden the Phase 30 core, then WP-R1 (roster and keys, tracer 31-12) and WP-R2 (store and folds, 31-11, 31-13) run in parallel and meet in migration (31-19) and Make a Single-Machine Copy (31-22); commands sit behind `nearAi.staff.multiUserPreview` (31-23). Decisions D-01..D-49 are in 31-CONTEXT.md. Execution branches `feat/phase-31-NN-<slug>` into `feat/phase-31-staff-roster`, one integration PR.
 
+Phase 31 executed 2026-11-20 on `feat/phase-31-staff-roster`: all 23 plans in 10 waves, plus a code review (2 critical, 9 major findings, all fixed with regression tests) and a fix for random key wraps being mistaken for tokens. Verification is human_needed (two-install UAT, the six words read aloud, owner decisions on labelled products in Make Multi-User). Commands stay behind `nearAi.staff.multiUserPreview`, off by default.
+
 Next, in order (owner, 2026-11-18):
 1. Finish 0.4.33: the release PR from `release/0.4.33` (Phase 70's part 4e, the trust badge, and the new team's icon fix), then publishing once the owner approves that version.
 2. The follow-up patch: the review follow-ups carried from Phase 70's part 4 PRs (#87 rounds 4 to 6, #89 review 2, #95 review 4), so Stage 1 continues on a clean gate.
