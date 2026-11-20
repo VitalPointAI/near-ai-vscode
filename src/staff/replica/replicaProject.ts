@@ -27,7 +27,7 @@ import type { DeviceIdentity } from '../../team/identity';
 import { localKeyStatus } from '../../team/keyHistory';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import { isRecord } from '../../domain/team/validate';
-import { buildGrant, newEpochKey, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { buildGrant, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
@@ -39,7 +39,7 @@ import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
-import { epochAt } from '../../domain/replica/rosterCells';
+import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
@@ -273,6 +273,8 @@ export interface AppendOwnOptions {
 }
 export type AppendOwnResult = { ok: true; hash: string; built: BuiltEntry } | ProjectRefused;
 export interface OwnEntry { hash: string; stream: string; seq: number; data: unknown }
+/** A cell this device holds an epoch of (heldCells): label is the sealed label as opened here, for a cell that is not the base cell. */
+export interface HeldCell { cell: string; base: boolean; epochs: number[]; label?: unknown }
 export type WelcomeResult = { ok: true; added: number; held: Array<{ hash: string; reason: string }> } | ProjectRefused;
 export interface ProjectState { roster: RosterState; fold: FoldResult }
 
@@ -524,6 +526,54 @@ export class ReplicaProject {
         if (predicate(opened.data)) return { hash: entryHash(entry.header), stream: entry.header.stream, seq: entry.header.seq, data: opened.data };
       }
       return undefined;
+    });
+  }
+
+  /** Every own stored entry of a kind whose data the predicate accepts, with its stream and hash, in the store's order. findOwn without stopping. */
+  public findOwnAll(kind: string, predicate: (data: unknown) => boolean): Promise<OwnEntry[]> {
+    return this.exclusive(async () => {
+      await this.foldNow();
+      const found: OwnEntry[] = [];
+      for (const entry of this.store.entries()) {
+        if (entry.header.writer !== this.device.writer) continue;
+        const opened = await this.openEntry(entry);
+        if (opened === undefined || opened.kind !== kind) continue;
+        if (predicate(opened.data)) found.push({ hash: entryHash(entry.header), stream: entry.header.stream, seq: entry.header.seq, data: opened.data });
+      }
+      return found;
+    });
+  }
+
+  /**
+   * The cells of the roster at its head of which this device's ring holds at least one epoch, sorted by cell: whether it is the base cell, the epochs
+   * held, and for any other cell its label as sealed (any value; the caller reads it), opened from a grant of a held epoch, newest epoch first, as
+   * membership's cellLabel does. A cell whose label does not open here has no label.
+   */
+  public heldCells(): Promise<HeldCell[]> {
+    return this.exclusive(async () => {
+      const { roster } = await this.foldNow();
+      const position = roster.positions.length - 1;
+      const held: HeldCell[] = [];
+      for (const cell of [...roster.cells.cells.keys()].sort()) {
+        if (epochAt(roster.cells, cell, position) === undefined) continue;
+        const epochs = epochsAt(roster.cells, cell, position).map((item) => item.epoch).filter((epoch) => this.keys.holds(cell, epoch));
+        if (epochs.length === 0) continue;
+        if (cell === this.anchor.project) {
+          held.push({ cell, base: true, epochs });
+          continue;
+        }
+        const record = roster.cells.cells.get(cell);
+        let label: unknown;
+        for (const grant of [...(record?.grants ?? [])].sort((a, b) => b.epoch - a.epoch)) {
+          if (grant.grant.labelSealed === '') continue;
+          const key = this.keys.epochKey(cell, grant.epoch);
+          if (key === undefined) continue;
+          label = openLabel(key, cell, grant.epoch, grant.grant.labelSealed);
+          if (label !== undefined) break;
+        }
+        held.push(label === undefined ? { cell, base: false, epochs } : { cell, base: false, epochs, label });
+      }
+      return held;
     });
   }
 
