@@ -195,7 +195,7 @@ test('cell.create and cell.rekey refusals: cell-exists, cell-unknown, epoch-not-
   }
   for (const reason of ['cell-exists', 'cell-unknown', 'epoch-not-next', 'grant-missing', 'grant-mismatch', 'grant-signer', 'grant-recipient', 'grant-epoch-unknown'] as const) {
     const text = CELL_REFUSALS[reason];
-    assert.ok(text.length > 20 && text.endsWith('.') && !text.includes('—'), reason);
+    assert.ok(text.length > 20 && text.endsWith('.') && !text.includes('\u2014'), reason);
   }
 });
 
