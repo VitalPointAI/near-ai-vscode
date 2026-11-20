@@ -1,14 +1,14 @@
-// The body of the decode worker (D-05 as refined by D-43). Bytes that arrive from outside the machine are inspected here, in a worker thread whose
-// heap and stack are capped by decodeHost.ts, so a decoder bug or a large accepted update costs this thread and never the extension host's.
+// The body of the decode worker (D-05 as refined by D-43). Bytes that arrive from outside the machine are inspected here, in a child process that
+// decodeHost.ts starts with its own heap and stack limits, so a decoder bug or a large accepted update costs this process and never the extension
+// host.
 //
 // The worker only inspects (P-31-12): it answers one job with a small plain summary, never writes, stores or keeps anything between jobs, and never
 // decides on its own what the fold sees. It uses the same pure checks the fold runs in process (doc.ts and the skim in updateGuard.ts), so an honest
-// update gets the same answer here as there. It imports no editor API: a worker thread has none.
+// update gets the same answer here as there. It imports no editor API: a child process has none.
 //
-// Protocol: the host posts { id, kind: 'update' | 'snapshot' | 'state', bytes } and the worker answers { id, ok: true, structs, deletes, clients }
-// or { id, ok: false, error }. structs, deletes and clients are counts. For a snapshot, structs is 0, deletes is its delete ranges and clients is
-// the clients of its state vector.
-import { parentPort } from 'node:worker_threads';
+// Protocol, over the process's job channel (fork() with the advanced serialization): the host sends { id, kind: 'update' | 'snapshot' | 'state',
+// bytes } and the worker answers { id, ok: true, structs, deletes, clients } or { id, ok: false, error }. structs, deletes and clients are counts.
+// For a snapshot, structs is 0, deletes is its delete ranges and clients is the clients of its state vector.
 import { decodeSnapshot, inspectState, inspectUpdate, snapshotStateVector } from '../../domain/replica/doc';
 import type { InspectError, UpdateInspection } from '../../domain/replica/doc';
 import { MAX_STATE_BYTES } from '../../domain/replica/kindSchemas/doc';
@@ -54,12 +54,13 @@ function isJob(value: unknown): value is DecodeJob {
   return typeof value === 'object' && value !== null && Number.isSafeInteger((value as { id?: unknown }).id);
 }
 
-if (parentPort !== null) {
-  const port = parentPort;
-  port.on('message', (message: unknown) => {
+// Only when this file is the child's own entry and has a job channel: importing it for answerJob (or its types) starts no listener, which would
+// otherwise keep the importing process alive.
+if (require.main === module && typeof process.send === 'function') {
+  process.on('message', (message: unknown) => {
     // A message without a job id cannot be answered; the host only ever sends jobs, so it is ignored.
     if (!isJob(message)) return;
     const reply: DecodeReply = { id: message.id, ...answerJob(message.kind, message.bytes) };
-    port.postMessage(reply);
+    process.send?.(reply);
   });
 }

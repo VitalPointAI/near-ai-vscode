@@ -1,6 +1,7 @@
-// The memory-capped decode worker (D-05 as refined by D-43): bytes from outside the machine are inspected in one reused worker thread with
-// resourceLimits and a time limit per job, with the same answer the in-process inspection gives, and a worker that runs out of memory or time costs
-// a restart, never the extension host. Probe bytes are built here with a small varuint writer; no large fixture is committed.
+// The memory-capped decode worker (D-05 as refined by D-43): bytes from outside the machine are inspected in one reused child process with its own
+// heap and stack limits and a time limit per job, with the same answer the in-process inspection gives, and a child that runs out of memory or time
+// costs a restart, never the extension host. ("Worker" below is that child process.) Probe bytes are built here with a small varuint writer; no
+// large fixture is committed.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -205,6 +206,7 @@ const HOG_BAD_REPLY = Uint8Array.of(5);
 const HOG_HEAP_LIMIT = Uint8Array.of(6);
 const HOG_WRONG_ID = Uint8Array.of(7);
 const HOG_NOT_OBJECT = Uint8Array.of(8);
+const HOG_ONE_ALLOCATION = Uint8Array.of(9);
 const HOG_OK = Uint8Array.of(0);
 const HOG_OK_VERDICT: DecodeVerdict = { ok: true, structs: 0, deletes: 0, clients: 0 };
 // Small limits keep the hog cheap: it reaches 16 MB of old generation in well under a second.
@@ -213,9 +215,9 @@ const SMALL = { maxOldGenerationSizeMb: 16, maxYoungGenerationSizeMb: 4 };
 test('a worker that runs out of memory gives too-large, is restarted, and the test process heap barely moves', async () => {
   await withHost(new DecodeHost({ workerFile: HOG, limits: SMALL }), async (host) => {
     assert.deepEqual(await host.inspect('update', HOG_OK), HOG_OK_VERDICT);
-    // Whichever control stops it (resourceLimits, or the host's heap watch where the process flags override resourceLimits), the answer is the same.
+    // The worker's own V8 heap limit is the cap asked for (16 MB old generation plus at most 4 MB young), not the test process's 1536 MB.
     const limit = await host.inspect('update', HOG_HEAP_LIMIT);
-    assert.ok(limit.ok && limit.structs > 0);
+    assert.ok(limit.ok && limit.structs >= 16 && limit.structs <= 20, `the worker's heap limit was ${JSON.stringify(limit)} MB`);
     const before = settledHeap();
     assert.deepEqual(await host.inspect('update', HOG_OOM), { ok: false, error: 'too-large' });
     const grew = settledHeap() - before;
@@ -294,32 +296,99 @@ test('the real worker out of memory on an accepted 100,000-item state gives too-
   });
 });
 
-// A process started with --max-old-space-size gives every worker that heap limit, whatever resourceLimits says (V8 flags win over a worker's
-// constraints). The host's own heap watch must still stop the worker at the cap. Run in a child process so the flag is certainly set.
-test('the heap cap holds even when the process was started with --max-old-space-size', () => {
+// Small limits for the hostile jobs below: the decode cap they must hit (32 MB old generation, 8 MB young) is far under the --max-old-space-size the
+// test process itself runs with (the test wrapper passes 1536 MB in NODE_OPTIONS), the flag that once raised a worker thread's limits to its own.
+const CAPPED = { maxOldGenerationSizeMb: 32, maxYoungGenerationSizeMb: 8 };
+
+// The memory of this test process, read every 5 ms while `job` runs, as the largest growth seen over the value before it started. A decode that ran
+// inside this process (in a worker thread too: its heap is this process's memory) would show here; a decode in a child process does not.
+async function peakGrowthWhile<T>(job: () => Promise<T>): Promise<{ result: T; rssGrowthMb: number }> {
+  const before = process.memoryUsage().rss;
+  let peak = before;
+  const sample = setInterval(() => { peak = Math.max(peak, process.memoryUsage().rss); }, 5);
+  try {
+    const result = await job();
+    peak = Math.max(peak, process.memoryUsage().rss);
+    return { result, rssGrowthMb: Math.round((peak - before) / MB) };
+  } finally {
+    clearInterval(sample);
+  }
+}
+
+test('a hostile job never uses the host process memory: allocation without limit, one huge allocation and a busy loop each give too-large', async () => {
+  await withHost(new DecodeHost({ workerFile: HOG, limits: { ...CAPPED, timeoutMs: 2000 } }), async (host) => {
+    assert.deepEqual(await host.inspect('update', HOG_OK), HOG_OK_VERDICT);
+    const heapBefore = settledHeap();
+    const seen: { verdict: DecodeVerdict; failure: string | undefined; rssGrowthMb: number }[] = [];
+    // 1 allocates in a loop, 9 asks for 512 MB in one synchronous step (nothing on the host side can interrupt it to look), 2 never yields.
+    for (const bytes of [HOG_OOM, HOG_ONE_ALLOCATION, HOG_HANG]) {
+      const { result, rssGrowthMb } = await peakGrowthWhile(() => host.inspect('update', bytes));
+      seen.push({ verdict: result, failure: host.lastFailure, rssGrowthMb });
+    }
+    const heapGrowthMb = Math.round((settledHeap() - heapBefore) / MB);
+    const message = `seen ${JSON.stringify(seen)}, test process heap grew ${heapGrowthMb} MB`;
+    assert.deepEqual(seen.map(({ verdict, failure }) => ({ verdict, failure })), [
+      { verdict: { ok: false, error: 'too-large' }, failure: 'out-of-memory' },
+      { verdict: { ok: false, error: 'too-large' }, failure: 'out-of-memory' },
+      { verdict: { ok: false, error: 'too-large' }, failure: 'timeout' }
+    ], message);
+    assert.ok(seen.every(({ rssGrowthMb }) => rssGrowthMb < 64), message);
+    assert.ok(heapGrowthMb < 16, message);
+    assert.equal(host.restarts, 3);
+    // A fresh decode process answers the next job.
+    assert.deepEqual(await host.inspect('update', HOG_OK), HOG_OK_VERDICT);
+    assert.equal(host.restarts, 3);
+  });
+});
+
+// The decode cap must not depend on how the host process was started. Here the host process gets --max-old-space-size twice over, on its command
+// line and in NODE_OPTIONS (as an editor or a user setup may do); the decode process must still report the cap as its heap limit and be stopped
+// there, and the host process's own peak memory must stay small. Run in a separate host process so both flags are certainly set and its peak
+// memory is its own.
+test('the decode cap holds whatever --max-old-space-size or NODE_OPTIONS the host process was started with', () => {
   const host = path.join(__dirname, '..', 'staff', 'replica', 'decodeHost.js');
   const script = [
     `const { DecodeHost } = require(${JSON.stringify(host)});`,
     '(async () => {',
-    `  const hog = new DecodeHost({ workerFile: ${JSON.stringify(HOG)}, limits: { maxOldGenerationSizeMb: 16, maxYoungGenerationSizeMb: 4 } });`,
+    `  const hog = new DecodeHost({ workerFile: ${JSON.stringify(HOG)}, limits: ${JSON.stringify(CAPPED)} });`,
     '  const limit = await hog.inspect("update", Uint8Array.of(6));',
-    '  const verdict = await hog.inspect("update", Uint8Array.of(1));',
-    // maxRSS is in kilobytes: the peak memory of the whole child, worker included.
+    '  const verdict = await hog.inspect("update", Uint8Array.of(9));',
+    // maxRSS is in kilobytes: the peak memory of this host process, any worker thread included, but not of a child process.
     '  console.log(JSON.stringify({ limit, verdict, failure: hog.lastFailure, restarts: hog.restarts, peakMb: process.resourceUsage().maxRSS / 1024 }));',
     '  await hog.close();',
     '})();'
   ].join('\n');
-  const env = { ...process.env };
-  delete env.NODE_OPTIONS;
-  const run = spawnSync(process.execPath, ['--max-old-space-size=512', '-e', script], { encoding: 'utf8', env, timeout: 20_000 });
+  const env = { ...process.env, NODE_OPTIONS: '--max-old-space-size=1536' };
+  const run = spawnSync(process.execPath, ['--max-old-space-size=512', '-e', script], { encoding: 'utf8', env, timeout: 30_000 });
   assert.equal(run.status, 0, run.stderr);
   const result = JSON.parse(run.stdout.trim()) as { limit: DecodeVerdict; verdict: DecodeVerdict; failure: string; restarts: number; peakMb: number };
-  assert.ok(result.limit.ok && result.limit.structs >= 400, `the worker's heap limit was ${JSON.stringify(result.limit)}: resourceLimits was not overridden`);
+  // V8's heap limit is the old generation plus three semi-spaces: 32 MB plus at most the 8 MB young generation asked for.
+  assert.ok(result.limit.ok && result.limit.structs >= 32 && result.limit.structs <= 40, `the decode heap limit was ${JSON.stringify(result.limit)} MB`);
   assert.deepEqual(result.verdict, { ok: false, error: 'too-large' });
-  assert.equal(result.failure, 'out-of-memory', 'stopped by the heap watch, not by the time limit');
+  assert.equal(result.failure, 'out-of-memory', 'stopped by the heap limit, not by the time limit');
   assert.equal(result.restarts, 1);
-  // Without the heap watch the worker would grow to the process limit (512 MB) before V8 stopped it.
-  assert.ok(result.peakMb < 300, `the child peaked at ${Math.round(result.peakMb)} MB`);
+  // The 512 MB the hog asked for never reached the host process.
+  assert.ok(result.peakMb < 200, `the host process peaked at ${Math.round(result.peakMb)} MB`);
+});
+
+// NODE_OPTIONS in the host's environment must not reach the decode process. A host started with NODE_OPTIONS=--max-heap-size=2048 (a way to give the
+// editor more memory) is the sharp case: V8 refuses to start a process that has both --max-heap-size and the cap's own --max-old-space-size, so a
+// decode process that inherited it would fail at start and every honest update would be refused.
+test('NODE_OPTIONS in the host environment is not passed on: the decode process starts with exactly the cap', async () => {
+  const saved = process.env.NODE_OPTIONS;
+  process.env.NODE_OPTIONS = '--max-heap-size=2048';
+  try {
+    await withHost(new DecodeHost({ workerFile: HOG, limits: CAPPED }), async (host) => {
+      const limit = await host.inspect('update', HOG_HEAP_LIMIT);
+      assert.ok(limit.ok && limit.structs >= 32 && limit.structs <= 40, `the decode heap limit was ${JSON.stringify(limit)} MB`);
+      assert.deepEqual(await host.inspect('update', HOG_OK), HOG_OK_VERDICT);
+      assert.equal(host.restarts, 0);
+      assert.equal(host.starts, 1);
+    });
+  } finally {
+    if (saved === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = saved;
+  }
 });
 
 test('after a hog fails, a host with the real worker still inspects an honest update', async () => {

@@ -1334,14 +1334,19 @@ library use a lot of memory or crash.
   anything from them, and refuses a change with more than 100,000 parts or deleted ranges. It also
   refuses every kind of content except plain text, deleted text and gaps, so embedded objects,
   formatting and nested structures never reach the library.
-- **A separate worker with its own limits.** Changes from other machines are then read in a
-  separate worker thread with a memory limit (128 MB, plus 32 MB for short-lived data and a 4 MB
-  stack) and a 5 second time limit per change. The extension also watches the worker's memory
-  while it reads, because some ways of starting the editor raise the memory limit of every worker.
-  A worker that runs out of memory or time is stopped and started again for the next change, and
-  the change is reported as too large. A refused or crashed check cannot take the editor down
-  with it.
-- **The check only reports.** The worker reads and answers; it never stores, changes or keeps
+- **A separate process with its own limits.** Changes from other machines are then read in a
+  separate background process, never in the editor's own memory. That process is started with
+  its own memory limit (128 MB, plus up to 32 MB for short-lived data, and a 4 MB stack; on
+  Windows the stack stays at the default of just under 1 MB) and has a 5 second time limit per
+  change. The limits are set on that process's own command line, and the editor's memory
+  settings (such as a larger memory limit given to the editor on its command line or in
+  `NODE_OPTIONS`) are not passed on to it, so they hold however the editor was started. A process
+  that reaches its memory limit is stopped by the JavaScript engine at once; one that passes the
+  time limit is ended by the extension, even in the middle of a long step. Either way the change
+  is reported as too large, and a new process is started for the next change. Any other failure
+  of the process (a crash, or an answer it should not give) reports the change as damaged. A
+  refused or crashed check cannot take the editor down with it.
+- **The check only reports.** The process reads and answers; it never stores, changes or keeps
   anything. The same counting checks also run inside the extension as a second line, so a change
   is refused the same way on every machine.
 
