@@ -10,7 +10,9 @@
 // its session gets nowhere.
 //
 // A connection that has not opened a session within the authentication deadline (10 seconds from the handshake) is closed. GET /healthz and the
-// session and enrolment calls work before that, inside the deadline.
+// session, enrolment and join calls work before that, inside the deadline. The deadline is for getting a session, not for an upload: a request
+// whose body is still arriving when it passes (an enrolment of up to 4 MiB on a slow link) is read to the end under the server's minimum-rate rule
+// and answered, and then the connection is closed unless that request opened a session (WR-03).
 //
 // Bounds: one open challenge per socket (a new challenge replaces the old one), single use, 60 seconds; at most 8 tokens per device and 10,000 in
 // all, the oldest dropped first. Tokens, challenges and keying material are never logged and never echoed.
@@ -23,7 +25,7 @@ import { STREAM_ID_PATTERN } from '@ext/domain/replica/entry';
 import { deviceAt } from '@ext/domain/replica/rosterMembers';
 import type { RosterCache } from '../append/rosterCache';
 import type { HubStore } from '../store/hubStore';
-import { sessionKeying } from './server';
+import { sessionKeying, uploadUnderWay } from './server';
 
 export const CHALLENGE_TTL_MS = 60_000;
 export const TOKEN_TTL_MS = 15 * 60_000;
@@ -213,7 +215,13 @@ export class SessionRegistry {
   authDeadline(socket: TLSSocket): void {
     const timer = setTimeout(() => {
       this.deadlines.delete(socket);
-      if (!this.authenticated.has(socket)) socket.destroy();
+      if (this.authenticated.has(socket)) return;
+      const upload = uploadUnderWay(socket);
+      if (upload === undefined) {
+        socket.destroy();
+        return;
+      }
+      this.afterUpload(socket, upload.res);
     }, this.deadlineMs);
     timer.unref();
     this.deadlines.set(socket, timer);
@@ -221,6 +229,35 @@ export class SessionRegistry {
       clearTimeout(timer);
       this.deadlines.delete(socket);
     });
+  }
+
+  /**
+   * The deadline passed while a body was arriving: the server's minimum-rate rule bounds the body, so the request is answered, and then the
+   * connection closes unless that request opened a session. No later request on the connection is read. A handler that never answers is cut off
+   * one more deadline after its body has arrived.
+   */
+  private afterUpload(socket: TLSSocket, res: http.ServerResponse): void {
+    let backstop: NodeJS.Timeout | undefined;
+    let answered = false;
+    const close = (): void => {
+      clearTimeout(backstop);
+      if (answered) return;
+      answered = true;
+      if (this.authenticated.has(socket) || socket.destroyed) return;
+      socket.end();
+      const hard = setTimeout(() => socket.destroy(), this.deadlineMs);
+      hard.unref();
+      socket.once('close', () => clearTimeout(hard));
+    };
+    res.once('finish', close);
+    res.once('close', close);
+    res.req.once('end', () => {
+      backstop = setTimeout(() => {
+        if (!this.authenticated.has(socket)) socket.destroy();
+      }, this.deadlineMs);
+      backstop.unref();
+    });
+    socket.once('close', () => clearTimeout(backstop));
   }
 
   private markAuthenticated(socket: TLSSocket): void {

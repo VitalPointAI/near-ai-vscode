@@ -1,15 +1,17 @@
 // Copied from relay/src/http/server.ts and adapted for the hub (D-28): node:https instead of node:http, TLS 1.3 only (D-29).
 import type http from 'node:http';
 import https from 'node:https';
+import type { Socket } from 'node:net';
 import type { TLSSocket } from 'node:tls';
 import type { HealthRegistry } from '../health';
+import { LIMITS } from '../limits';
 
 // The hub's HTTPS surface: a literal route table, no framework, no body parsing here. The hub ends TLS itself with the operator's certificate, so
 // a device's session answer can bind to this TLS connection's keying material (D-29, D-35). Only TLS 1.3 is offered: a TLS 1.2 client fails the
 // handshake, and a plain HTTP client never gets an answer. GET /healthz is the one route this file owns; the hub's /v1 routes (32-20) arrive
 // through `handler`. Responses never echo the request path or any request data.
 
-export type RejectedRoute = 'healthz' | 'unknown';
+export type RejectedRoute = 'healthz' | 'unknown' | 'slow-upload';
 
 export interface HubTls {
   /** The certificate chain, PEM. */
@@ -28,6 +30,53 @@ export interface HubServerOptions {
   /** Called once per TLS connection after its handshake, before any request (32-20 starts its authentication deadline here). */
   onSecureConnection?: (socket: TLSSocket) => void;
   onRejected?: (route: RejectedRoute, method: string, status: number) => void;
+  /** The request timing; REQUEST_TIMING unless a test shortens it. */
+  timing?: Partial<RequestTiming>;
+}
+
+/**
+ * How long the hub waits for a request (WR-03). Headers must be in within headersMs. A body then gets graceMs, and from there on the bytes that
+ * have arrived must keep up with minBytesPerSecond: a small body (a session call, a join) is in long before the grace ends, a large one (an 8 MiB
+ * blob, a 4 MiB append or enrolment) may take as long as a slow site link needs, and a client that trickles or stalls (slowloris) is cut off
+ * within about a second of falling behind, with 408 too-slow. Holding a connection longer costs a client real upload bandwidth, never only time.
+ */
+export interface RequestTiming {
+  /** The request line and headers. */
+  headersMs: number;
+  /** The time any body gets before the minimum rate applies. */
+  graceMs: number;
+  /** The slowest upload the hub waits for: 16 KiB a second (128 kbit/s), so an 8 MiB blob may take about eight and a half minutes. */
+  minBytesPerSecond: number;
+}
+
+export const REQUEST_TIMING: Readonly<RequestTiming> = Object.freeze({
+  headersMs: 5000,
+  graceMs: 10_000,
+  minBytesPerSecond: 16 * 1024,
+});
+
+/** The largest body any route takes. */
+const LARGEST_BODY_BYTES = Math.max(LIMITS.blobBytes, LIMITS.appendBodyBytes, LIMITS.enrolBodyBytes);
+
+/** Node's whole-request limit, kept only as a backstop behind the minimum rate: the largest body at the minimum rate, after the grace. */
+export function requestBackstopMs(timing: RequestTiming): number {
+  return timing.graceMs + Math.ceil((LARGEST_BODY_BYTES / timing.minBytesPerSecond) * 1000);
+}
+
+/** The request on each connection whose body is being read, so the authentication deadline can let an upload under way finish (session.ts). */
+const uploads = new WeakMap<Socket, { req: http.IncomingMessage; res: http.ServerResponse }>();
+
+/** The request whose body is still arriving on this connection, if any. */
+export function uploadUnderWay(socket: Socket): { req: http.IncomingMessage; res: http.ServerResponse } | undefined {
+  const upload = uploads.get(socket);
+  return upload !== undefined && !upload.req.complete ? upload : undefined;
+}
+
+/** True when the request carries a body: a content-length above zero, or a chunked body. */
+function carriesBody(req: http.IncomingMessage): boolean {
+  const length = req.headers['content-length'];
+  if (length !== undefined) return length !== '0';
+  return req.headers['transfer-encoding'] !== undefined;
 }
 
 export const BASE_HEADERS = {
@@ -61,8 +110,11 @@ export function sendJson(res: http.ServerResponse, status: number, body: string,
 const NOT_FOUND = JSON.stringify({ error: 'not-found', message: 'There is nothing at this address on the hub.' });
 const METHOD_NOT_ALLOWED = JSON.stringify({ error: 'method-not-allowed', message: 'This address answers GET only.' });
 const INTERNAL = JSON.stringify({ error: 'internal', message: 'The hub could not answer this request.' });
+const TOO_SLOW = JSON.stringify({ error: 'too-slow', message: 'The request arrived too slowly for the hub to keep waiting. Try again when the link is faster.' });
 
 export function createHubServer(options: HubServerOptions): https.Server {
+  const timing: RequestTiming = { ...REQUEST_TIMING, ...(options.timing ?? {}) };
+  const checkEveryMs = Math.max(50, Math.min(CONNECTIONS_CHECKING_INTERVAL_MS, timing.graceMs));
   const reject = (route: RejectedRoute, method: string, status: number): void => {
     try {
       // The method comes from the client: only a plain upper-case token is passed on, so nothing else can reach a log line.
@@ -92,11 +144,53 @@ export function createHubServer(options: HubServerOptions): https.Server {
     );
   };
 
+  /** Answers 408 too-slow when it still can, then closes the connection, so the rest of the body is never read. */
+  const tooSlow = (req: http.IncomingMessage, res: http.ServerResponse): void => {
+    const socket = req.socket;
+    reject('slow-upload', req.method ?? 'POST', 408);
+    if (res.headersSent) {
+      socket.destroy();
+      return;
+    }
+    res.writeHead(408, { ...BASE_HEADERS, connection: 'close', 'content-length': Buffer.byteLength(TOO_SLOW) });
+    res.end(TOO_SLOW, () => socket.destroy());
+    // A client that reads nothing never lets the answer drain: the connection is closed regardless.
+    setTimeout(() => socket.destroy(), CONNECTIONS_CHECKING_INTERVAL_MS).unref();
+  };
+
+  /** The minimum-rate rule for one request's body (see RequestTiming). Bytes are counted on the connection, so the routes read the body as before. */
+  const watchUpload = (req: http.IncomingMessage, res: http.ServerResponse): void => {
+    if (!carriesBody(req) || req.complete) return;
+    const socket = req.socket;
+    const started = Date.now();
+    const before = socket.bytesRead;
+    uploads.set(socket, { req, res });
+    const stop = (): void => {
+      clearInterval(timer);
+      if (uploads.get(socket)?.req === req) uploads.delete(socket);
+    };
+    const timer = setInterval(() => {
+      if (req.complete || socket.destroyed) {
+        stop();
+        return;
+      }
+      const elapsed = Date.now() - started;
+      if (elapsed <= timing.graceMs) return;
+      const arrived = socket.bytesRead - before;
+      if (arrived >= ((elapsed - timing.graceMs) / 1000) * timing.minBytesPerSecond) return;
+      stop();
+      tooSlow(req, res);
+    }, checkEveryMs);
+    timer.unref();
+    res.once('close', stop);
+  };
+
   // The literal route table. Paths are compared exactly, after the query is cut off.
   const routes: Readonly<Record<string, HubHandler>> = { '/healthz': healthz };
 
   // headersTimeout and requestTimeout are enforced only when Node checks the open connections, every 30 s by default, so a client that stalls
-  // in its headers would be held for up to 30 s. Checking every second makes the 5 s and 10 s limits real.
+  // in its headers would be held for up to 30 s. Checking every second makes the 5 s header limit real. Bodies are timed by the minimum-rate
+  // rule above; Node's whole-request limit stays only as a backstop sized for the largest body at that rate.
   const server = https.createServer(
     {
       cert: options.tls.cert,
@@ -107,6 +201,7 @@ export function createHubServer(options: HubServerOptions): https.Server {
       connectionsCheckingInterval: CONNECTIONS_CHECKING_INTERVAL_MS,
     },
     (req, res) => {
+      watchUpload(req, res);
       const target = req.url ?? '/';
       const query = target.indexOf('?');
       const route = query < 0 ? target : target.slice(0, query);
@@ -136,8 +231,8 @@ export function createHubServer(options: HubServerOptions): https.Server {
     });
   }
 
-  server.headersTimeout = 5000;
-  server.requestTimeout = 10000;
+  server.headersTimeout = timing.headersMs;
+  server.requestTimeout = requestBackstopMs(timing);
   server.keepAliveTimeout = 5000;
   server.maxHeadersCount = 50;
   return server;

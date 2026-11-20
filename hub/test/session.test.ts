@@ -8,7 +8,9 @@ import { buildSessionAnswer, certPinOf } from '@ext/domain/replica/hubFile';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
 import { AUTH_REFUSALS, SESSION_REFUSALS, TOKENS_PER_DEVICE } from '../src/http/session';
 import type { HubConnection, HubResponse } from './helpers/hubClient';
+import { issueHubFile } from '../src/enrol';
 import { withHub } from './helpers/hubHarness';
+import { slowUpload } from './helpers/slowUpload';
 import type { Hub } from './helpers/hubHarness';
 import { createHubWorld, streamOf } from './helpers/hubWorld';
 import type { HubWorld, WorldDevice } from './helpers/hubWorld';
@@ -324,6 +326,20 @@ test('deadline: GET /healthz answers on a connection that has not authenticated,
     assert.equal(health.status, 200);
     assert.equal(health.json().store, 'ok');
     assert.equal(await connection.closesWithin(2000), true);
+  }));
+
+test('deadline: an enrolment still uploading when the deadline passes is answered, and the connection closes after the answer', () =>
+  withHub({ deadlineMs: 200 }, async (hub) => {
+    const world = createHubWorld();
+    world.admitHub(hub.identity);
+    const issued = issueHubFile(hub.store, hub.identity, { days: 7, now: new Date(hub.now()) });
+    assert.ok(issued.ok, issued.ok ? '' : issued.message);
+    const body = Buffer.from(JSON.stringify(world.enrolRequest(issued.file.payload)), 'utf8');
+    // About a second of upload on a connection that never opens a session: the deadline passes while the body is still arriving.
+    const upload = await slowUpload(hub.port, { method: 'POST', path: '/v1/enrol', body, chunkBytes: Math.ceil(body.length / 10), everyMs: 100, headers: { 'content-type': 'application/json' } });
+    assert.equal(upload.status, 201, `answered ${String(upload.status)} after ${upload.elapsedMs} ms having sent ${upload.sent} of ${body.length} bytes`);
+    assert.ok(upload.elapsedMs > 200, 'the upload finished inside the deadline, so it did not test the deadline');
+    assert.equal(await upload.closesWithin(2000), true, 'a connection without a session stayed open after its deadline');
   }));
 
 // ---- Limits before signatures (D-39, Pitfall 7) ----

@@ -3,7 +3,7 @@ import type https from 'node:https';
 import test from 'node:test';
 import tls from 'node:tls';
 import { HealthRegistry } from '../src/health';
-import { createHubServer, listen, type HubServerOptions } from '../src/http/server';
+import { createHubServer, listen, REQUEST_TIMING, requestBackstopMs, type HubServerOptions } from '../src/http/server';
 import { makeTlsFixture, tlsGet } from './helpers/tlsFixture';
 
 // Phase 32, plan 14 (D-26, D-28), ported from relay/test/health.test.ts: the /healthz contract. The registry is tested directly, the HTTPS surface
@@ -136,10 +136,13 @@ test('paths outside the route table go to the handler, and /healthz with a query
   );
 });
 
-test('the server closes slow clients: headersTimeout 5000 and requestTimeout 10000', async () => {
+test('the server closes slow clients: headers within 5 s, bodies at 16 KiB a second after a 10 s grace, Node\'s whole-request limit only as a backstop', async () => {
   await withServer(registry(), async (_port, server) => {
     assert.equal(server.headersTimeout, 5000);
-    assert.equal(server.requestTimeout, 10000);
+    assert.deepEqual({ graceMs: REQUEST_TIMING.graceMs, minBytesPerSecond: REQUEST_TIMING.minBytesPerSecond }, { graceMs: 10_000, minBytesPerSecond: 16 * 1024 });
+    // The backstop leaves room for the largest body (an 8 MiB blob) at the minimum rate, after the grace (WR-03).
+    assert.equal(server.requestTimeout, requestBackstopMs(REQUEST_TIMING));
+    assert.equal(server.requestTimeout, 10_000 + Math.ceil(((8 * 1024 * 1024) / (16 * 1024)) * 1000));
   });
 });
 

@@ -246,6 +246,8 @@ What the container gives you is what the relay's gives (see [Running with Compos
 
 A reverse proxy in front of the hub must pass TCP through and never end TLS: members' computers bind their session to the hub's own TLS connection, and a proxy that ends TLS breaks that binding, so nothing works through it. Behind a pass-through proxy every member appears to come from the proxy's address, so the hub's per-address limits (120 session openings, 10 join requests and 10 enrolments a minute, 32 event streams) apply to all of them together.
 
+Slow links are expected. The hub wants a request's headers within 5 seconds; a body then gets 10 seconds, after which it must keep arriving at 16 KiB a second (128 kbit/s) or faster, so an 8 MiB attachment can take about eight and a half minutes. A client that trickles or stops is cut off with `408` within about a second of falling behind, and the hub logs `http.rejected` with route `slow-upload`.
+
 ### The hub file and enrolment
 
 Nobody can put a project on the hub without a hub file from you. A hub file (`.near-staff-hub`) names the hub, its address, its certificate pin and its public keys, and carries a one-time enrolment secret, all signed by the hub's own key. To print one that expires in 7 days, while the hub is running:
