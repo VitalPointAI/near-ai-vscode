@@ -25,6 +25,7 @@ import { MIGRATION_REFUSALS } from '../staff/replica/migrate';
 import { PROJECT_REFUSALS_HOST, ReplicaProject } from '../staff/replica/replicaProject';
 import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { COPY_REFUSALS } from '../staff/replica/singleCopy';
+import { START_AGAIN_COMMAND_TITLE, STORE_REFUSALS } from '../staff/replica/store';
 import { LEDGER_DIR, LEDGER_FILE } from '../staff/staffHost';
 import { MemorySecrets } from './helpers/teamHarness';
 import { CLEAN_BODY, J5_TEAM, callTool, writeBody } from './helpers/staffFixtures';
@@ -673,4 +674,64 @@ test('every text a command can show has no em-dash, calls an organization only "
   assert.deepEqual(NOTICES, [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, 'People and clearances in this project are declared by the staff lead, not verified.']);
   // None of the commands is a person decision the Staff Room may run (D-37).
   for (const id of Object.values(C)) assert.equal(PERSON_DECISION_COMMANDS.includes(id), false, id);
+});
+
+// ---- Start This Computer's Shared History Again (31-REVIEW MJ-08) ------------------------------------------------------------------------------
+
+test('start this computer\'s shared history again: a project that opens is left alone; a rolled-back one names the command; dismissing changes nothing; confirming sets it aside and says how to get the history back', async () => {
+  const first = await lead('start-again');
+  await inviteBy(first, 'F. Example');
+  use(first);
+  const untouched = state(first);
+  await run(C.startHistoryAgain);
+  assert.deepEqual(lastNotification(), { level: 'info', message: `${STORE_REFUSALS['not-needed']} ${NOTICES.join(' ')}` });
+  assert.deepEqual(state(first), untouched, 'a project that opens is not set aside');
+  // The lead's base cell file loses its last line (the invitation): the store is refused rolled back, and every command says how to start again.
+  const project = (JSON.parse(readFileSync(path.join(first.root, ...REPLICA_PROJECT_FILE.split('/')), 'utf8')) as { anchor: { project: string } }).anchor.project;
+  const streamDir = path.join(first.root, '.planning', 'staff', 'replica', 'streams', project);
+  const [ownFile] = readdirSync(streamDir);
+  const lines = readFileSync(path.join(streamDir, ownFile), 'utf8').split('\n');
+  assert.equal(lines.length, 3, 'the genesis and the invitation');
+  await writeFile(path.join(streamDir, ownFile), `${lines[0]}\n`);
+  await run(C.invite);
+  assert.equal(lastNotification().level, 'warn');
+  assert.ok(lastNotification().message.includes(START_AGAIN_COMMAND_TITLE), lastNotification().message);
+  const before = state(first);
+  stub.messageAnswers.push(undefined);
+  await run(C.startHistoryAgain);
+  const dialog = lastModal();
+  assert.equal(dialog.message, multi.START_AGAIN_QUESTION);
+  assert.match(dialog.detail ?? '', /older than what this device has already seen/);
+  assert.match(dialog.detail ?? '', /nothing is deleted/);
+  assert.ok((dialog.detail ?? '').includes(multi.START_AGAIN_HOW_BACK_TEXT));
+  hasNotices(dialog.detail ?? '', 'the Start Again dialog');
+  assert.deepEqual(state(first), before, 'dismissing the dialog changes nothing');
+  stub.messageAnswers.push(multi.START_AGAIN_ACTION);
+  await run(C.startHistoryAgain);
+  const result = lastNotification();
+  assert.equal(result.level, 'info');
+  const aside = /set aside in (\.planning\/staff\/replica\.set-aside-\d{8}-\d{6})\//.exec(result.message)?.[1];
+  assert.ok(aside, result.message);
+  assert.match(result.message, /nothing was deleted/);
+  assert.match(result.message, /One change this computer made was carried into the new one/);
+  assert.ok(result.message.includes(multi.START_AGAIN_HOW_BACK_TEXT));
+  hasNotices(result.message, 'the Start Again result');
+  assert.equal(readFileSync(path.join(first.root, aside, 'streams', project, ownFile), 'utf8'), `${lines[0]}\n`, 'the old folder is kept as it was');
+  // The project opens again on this computer, and the command now leaves it alone.
+  assert.deepEqual((await rosterOf(first)).positions.length, 2);
+  await run(C.startHistoryAgain);
+  assert.deepEqual(lastNotification(), { level: 'info', message: `${STORE_REFUSALS['not-needed']} ${NOTICES.join(' ')}` });
+});
+
+test('start this computer\'s shared history again in a folder with no shared project says so and makes nothing; its texts are plain', async () => {
+  const at = install('start-again-none');
+  use(at);
+  const before = state(at);
+  await run(C.startHistoryAgain);
+  assert.deepEqual(lastNotification(), { level: 'warn', message: `${multi.NOT_SHARED_TEXT} ${NOTICES.join(' ')}` });
+  assert.deepEqual(state(at), before);
+  for (const text of [multi.START_AGAIN_QUESTION, multi.START_AGAIN_ACTION, multi.START_AGAIN_HOW_BACK_TEXT, STORE_REFUSALS['not-needed'], STORE_REFUSALS['rolled-back'], STORE_REFUSALS.damaged, STORE_REFUSALS['mark-unverified']]) {
+    assert.equal(text.includes(EM_DASH), false, text);
+    assert.equal(/organi[sz]ation/i.test(text), false, text);
+  }
 });

@@ -35,7 +35,9 @@ export const STAFF_MULTI_USER_COMMANDS = {
   nameDeputy: 'nearAi.staff.nameDeputyLead',
   handOver: 'nearAi.staff.handOverLead',
   updateMember: 'nearAi.staff.updateMember',
-  singleCopy: 'nearAi.staff.makeSingleMachineCopy'
+  singleCopy: 'nearAi.staff.makeSingleMachineCopy',
+  // Sets this computer's shared history aside (never deleted) when it is refused rolled back, damaged or unverified (31-REVIEW MJ-08).
+  startHistoryAgain: 'nearAi.staff.startSharedHistoryAgain'
 } as const;
 
 /** The person-only decision commands, the only commands the Staff Room's decision buttons may run. */

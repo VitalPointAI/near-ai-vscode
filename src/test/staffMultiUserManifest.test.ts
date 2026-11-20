@@ -1,4 +1,4 @@
-// package.json contributions of the multi-user staff commands (plan 31-23, D-36, D-37) and the gate around them: the setting, the eleven commands
+// package.json contributions of the multi-user staff commands (plan 31-23, D-36, D-37) and the gate around them: the setting, the commands
 // under NEAR AI with "Staff: " titles, each hidden from the Command Palette until the setting is on, plain words, none a Staff Room person decision,
 // every one registered; and activation with the setting off loads nothing from src/staff/replica and makes no file, folder or secret (D-29).
 // This file imports no replica module, so the module cache can prove the commands did not load one.
@@ -45,7 +45,8 @@ const TITLES: Readonly<Record<string, string>> = {
   'nearAi.staff.nameDeputyLead': 'Staff: Name Deputy Lead',
   'nearAi.staff.handOverLead': 'Staff: Hand Over Staff Lead',
   'nearAi.staff.updateMember': 'Staff: Change a Staff Project Member',
-  'nearAi.staff.makeSingleMachineCopy': 'Staff: Make a Single-Machine Copy'
+  'nearAi.staff.makeSingleMachineCopy': 'Staff: Make a Single-Machine Copy',
+  'nearAi.staff.startSharedHistoryAgain': 'Staff: Start This Computer\'s Shared History Again'
 };
 
 function plain(text: string, what: string): void {
@@ -122,7 +123,7 @@ test('nearAi.staff.multiUserPreview is a boolean, off by default, application sc
   assert.match(setting.description ?? '', /declared by the staff lead, not verified/);
 });
 
-test('each of the eleven commands is contributed under NEAR AI with its "Staff: " title', () => {
+test('each multi-user command is contributed under NEAR AI with its "Staff: " title', () => {
   assert.deepEqual([...IDS].sort(), Object.keys(TITLES).sort());
   for (const id of IDS) {
     const entries = manifest.contributes.commands.filter((entry) => entry.command === id);
@@ -164,7 +165,7 @@ test('registerStaffCommands registers every contributed multi-user command', () 
   const context = createFakeContext(path.join(tmpdir(), 'near-ai-mu-manifest-none'), new MemorySecrets());
   staffCommands.registerStaffCommands(context as never);
   const contributed = manifest.contributes.commands.map((entry) => entry.command).filter((id) => IDS.includes(id as (typeof IDS)[number]));
-  assert.equal(contributed.length, 11);
+  assert.equal(contributed.length, Object.keys(TITLES).length);
   assert.deepEqual(contributed.filter((id) => !stub.commands.has(id)), [], 'contributed commands without a handler');
   for (const subscription of context.subscriptions) subscription.dispose();
 });

@@ -603,6 +603,45 @@ async function singleCopyCommand(context: StaffCommandContext, identity: () => P
   tell(parts.join(' '));
 }
 
+// ---- start this computer's shared history again (31-REVIEW MJ-08) ----------------------------------------------------------------------------------
+
+export const START_AGAIN_QUESTION = 'Start this computer\'s shared history again?';
+export const START_AGAIN_ACTION = 'Set Aside and Start Again';
+/** The store refusals this command resolves; the store's own START_AGAIN_REFUSALS, kept here so no replica module loads before the handler runs. */
+const START_AGAIN_STORE_REASONS: readonly string[] = ['rolled-back', 'damaged', 'mark-unverified'];
+export const START_AGAIN_HOW_BACK_TEXT = 'To bring the rest of the shared history back, ask your staff lead to send this computer a new welcome file, then open it with Staff: Join Staff Project. A later version brings it back from the sharing service by itself.';
+
+/**
+ * Start This Computer's Shared History Again: for a shared project whose history on this computer is refused rolled back, damaged or unverified.
+ * Says what happened and what will happen, and only on the action button moves the store folder aside (never deleting it), carries this device's
+ * own signed entries, the grants, the attachments and the project record into a new one, and starts a new record of how far this device has seen.
+ * A project that opens is left alone, and any other refusal is shown with its own way out.
+ */
+async function startHistoryAgainCommand(context: StaffCommandContext): Promise<void> {
+  const root = projectRoot();
+  if (!root) { warn(NO_FOLDER_TEXT); return; }
+  if (!(await exists(path.join(root, ...REPLICA_PROJECT_FILE.split('/'))))) { warn(NOT_SHARED_TEXT); return; }
+  const { ReplicaProject, isProjectRefused } = await import('../staff/replica/replicaProject');
+  const { STORE_REFUSALS } = await import('../staff/replica/store');
+  const deps = await replicaDeps(context);
+  const opened = await ReplicaProject.open(root, deps);
+  if (opened === undefined) { warn(NOT_SHARED_TEXT); return; }
+  if (!isProjectRefused(opened)) { await opened.close(); tell(STORE_REFUSALS['not-needed']); return; }
+  if (opened.store === undefined || !START_AGAIN_STORE_REASONS.includes(opened.store)) { warn(shownRefusal(opened.refused, opened.message)); return; }
+  if (!(await confirm(START_AGAIN_QUESTION, [
+    `Why: ${opened.message.split('. ')[0]}.`,
+    'What happens: the shared history folder on this computer, .planning/staff/replica/, is moved aside to a folder beside it and nothing is deleted. A new one is started with this computer\'s own signed changes, the access grants, the attachments and the project record, and this device starts a new record of how far it has seen. Changes from other people are not carried over.',
+    START_AGAIN_HOW_BACK_TEXT
+  ], START_AGAIN_ACTION))) return;
+  const result = await ReplicaProject.startHistoryAgain(root, deps);
+  if (result === undefined) { warn(NOT_SHARED_TEXT); return; }
+  if (isProjectRefused(result)) { warn(shownRefusal(result.refused, result.message)); return; }
+  // The staff host opens the new store on its next read.
+  await staffHostFor(root)?.close();
+  const carried = result.carried === 1 ? 'One change this computer made was' : `${result.carried} changes this computer made were`;
+  tell(`This computer's shared history was set aside in ${result.setAside}/ and nothing was deleted. ${carried} carried into the new one. ${START_AGAIN_HOW_BACK_TEXT}`);
+}
+
 /**
  * Registers every multi-user staff command (always, so the setting needs no reload). Each checks the setting first and, when it is off, shows
  * MULTI_USER_PREVIEW_OFF_TEXT and does nothing else.
@@ -625,4 +664,5 @@ export function registerStaffMultiUserCommands(context: StaffCommandContext, ide
   gated(STAFF_MULTI_USER_COMMANDS.handOver, () => handOverCommand(context));
   gated(STAFF_MULTI_USER_COMMANDS.updateMember, () => updateMemberCommand(context));
   gated(STAFF_MULTI_USER_COMMANDS.singleCopy, () => singleCopyCommand(context, identity));
+  gated(STAFF_MULTI_USER_COMMANDS.startHistoryAgain, () => startHistoryAgainCommand(context));
 }
