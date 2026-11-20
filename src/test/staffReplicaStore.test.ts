@@ -1,19 +1,23 @@
 // The replica store on disk (31-13, D-27, D-46, D-05): layout, self-ignoring folder, signed high-water marks, rollback refusal, torn tails, blob size,
 // two processes appending at once, and entries from outside held back by the injected decode check.
 import assert from 'node:assert/strict';
+import { fork } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { BLOB_MAX_BYTES, GENESIS_PREV, buildEntry, entryHash, sha256Hex } from '../domain/replica/entry';
-import type { BuiltEntry } from '../domain/replica/entry';
+import type { BuiltEntry, SealedEntry } from '../domain/replica/entry';
 import { REPLICA_DIR } from '../domain/staff/multiUser';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import { verifyPayload } from '../domain/team/signedPayload';
 import type { SecretStorageLike } from '../services/auth';
-import { REPLICA_MARK_SECRET_PREFIX, markKey, parseReplicaMark } from '../staff/replica/marks';
+import { REPLICA_MARK_SECRET_PREFIX, markKey, parseReplicaMark, readMark } from '../staff/replica/marks';
 import { ReplicaStore, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
 import type { ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
+import { FileSecrets } from './helpers/replicaStoreChild';
+import type { StoreChildMessage } from './helpers/replicaStoreChild';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
 import type { FixedSigner } from './helpers/replicaWorld';
 
@@ -316,4 +320,129 @@ test('no refusal message names a key, a secret or a hash longer than 12 characte
     assert.doesNotMatch(message, /—/, reason);
     assert.ok(message.length > 20, reason);
   }
+});
+
+// ---- Task 3: two processes and two calls at once ------------------------------------------------------------------------------------------
+
+class StoreChild {
+  private readonly child: ChildProcess;
+  private readonly received: StoreChildMessage[] = [];
+  private readonly waiters = new Set<() => void>();
+  private ended = false;
+  private stderr = '';
+  public readonly exited: Promise<number | null>;
+
+  public constructor(args: string[]) {
+    this.child = fork(path.join(__dirname, 'helpers', 'replicaStoreChild.js'), args, { execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    this.child.stderr?.on('data', (chunk: Buffer) => { this.stderr += chunk.toString('utf8'); });
+    this.child.on('message', (message: StoreChildMessage) => { this.received.push(message); this.wake(); });
+    this.exited = new Promise((resolve) => { this.child.on('exit', (code) => { this.ended = true; this.wake(); resolve(code); }); });
+  }
+
+  private wake(): void {
+    const waiting = [...this.waiters];
+    this.waiters.clear();
+    for (const resolve of waiting) resolve();
+  }
+
+  public async expect(type: StoreChildMessage['type']): Promise<StoreChildMessage> {
+    for (;;) {
+      const found = this.received.find((message) => message.type === type);
+      if (found) return found;
+      const error = this.received.find((message) => message.type === 'error');
+      if (error && error.type === 'error') throw new Error(`the store child failed: ${error.message}`);
+      if (this.ended) throw new Error(`the store child ended before it sent ${type}: ${this.stderr}`);
+      await new Promise<void>((resolve) => { this.waiters.add(resolve); });
+    }
+  }
+
+  public go(): void { this.child.send({ type: 'go' }); }
+  public kill(): void { if (!this.ended) this.child.kill('SIGKILL'); }
+}
+
+test('two processes appending 50 entries each for two writers into one store at once lose and interleave nothing, and the mark names both heads', async () => {
+  const root = project();
+  const secretsFile = path.join(project(), 'secrets.json');
+  const children = [new StoreChild([root, secretsFile, 'window-a', '50', STREAM]), new StoreChild([root, secretsFile, 'window-b', '50', STREAM])];
+  try {
+    await Promise.all(children.map((child) => child.expect('ready')));
+    for (const child of children) child.go();
+    const done = await Promise.all(children.map((child) => child.expect('done')));
+    assert.deepEqual(done, [{ type: 'done', written: 50 }, { type: 'done', written: 50 }]);
+    assert.deepEqual(await Promise.all(children.map((child) => child.exited)), [0, 0]);
+  } finally {
+    for (const child of children) child.kill();
+  }
+  for (const label of ['window-a', 'window-b']) {
+    const writer = fixedSigner(label).writer;
+    const text = readFileSync(streamFile(root, writer), 'utf8');
+    assert.ok(text.endsWith('\n'));
+    const lines = text.split('\n').slice(0, -1);
+    assert.equal(lines.length, 50, `${label}: exactly 50 whole lines`);
+    lines.forEach((line, index) => {
+      const parsed = JSON.parse(line) as SealedEntryLine;
+      assert.equal(parsed.header.writer, writer);
+      assert.equal(parsed.header.seq, index, `${label}: line ${index} holds seq ${index}`);
+    });
+  }
+  const secrets = new FileSecrets(secretsFile);
+  const key = markKey(path.join(root, REPLICA_DIR));
+  const verdict = verifyPayload(JSON.parse((await secrets.get(key)) as string) as unknown, { purpose: 'staff-replica-mark', status: ACTIVE });
+  assert.ok(verdict.ok, 'the shared mark verifies');
+  const mark = parseReplicaMark(verdict.ok ? verdict.payload : undefined);
+  assert.deepEqual(mark?.heads.map((head) => [head.writer, head.seq, head.count]).sort(), [[fixedSigner('window-a').writer, 49, 50], [fixedSigner('window-b').writer, 49, 50]].sort());
+  const reader = await opened(root, depsFor(fixedSigner('window-a'), secrets));
+  assert.equal(reader.entries().length, 100);
+  assert.equal(reader.damagedLines(), 0);
+});
+
+interface SealedEntryLine { header: { writer: string; seq: number } }
+
+test('two processes signing as one device (two windows of one install) appending 25 entries each share one writer file without a fork or a lost line', async () => {
+  const root = project();
+  const secretsFile = path.join(project(), 'secrets.json');
+  const children = [new StoreChild([root, secretsFile, 'one-device', '25', STREAM]), new StoreChild([root, secretsFile, 'one-device', '25', STREAM])];
+  try {
+    await Promise.all(children.map((child) => child.expect('ready')));
+    for (const child of children) child.go();
+    assert.deepEqual(await Promise.all(children.map((child) => child.expect('done'))), [{ type: 'done', written: 25 }, { type: 'done', written: 25 }]);
+    assert.deepEqual(await Promise.all(children.map((child) => child.exited)), [0, 0]);
+  } finally {
+    for (const child of children) child.kill();
+  }
+  const device = fixedSigner('one-device');
+  const lines = readFileSync(streamFile(root, device.writer), 'utf8').split('\n');
+  assert.equal(lines.pop(), '', 'the file ends with a newline');
+  assert.equal(lines.length, 50);
+  const entries = lines.map((line) => JSON.parse(line) as SealedEntry);
+  assert.deepEqual(entries.map((entry) => entry.header.seq), [...Array(50).keys()], 'one entry per seq, in order: no fork');
+  entries.slice(1).forEach((entry, index) => { assert.equal(entry.header.prev, entryHash(entries[index].header), `seq ${index + 1} follows seq ${index}`); });
+  const reader = await opened(root, depsFor(device, new FileSecrets(secretsFile)));
+  assert.equal(reader.entries().length, 50);
+  assert.deepEqual(reader.head(STREAM, device.writer), { seq: 49, hash: entryHash(entries[49].header) });
+});
+
+test('two appendOwn calls at once in one process for one writer keep seq order, and two store objects on one folder share the mark', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const built = chain(lead, 20);
+  const results = await Promise.all([store.appendOwn(built.slice(0, 10)), store.appendOwn(built.slice(10))]);
+  assert.deepEqual(results, [{ ok: true, written: 10 }, { ok: true, written: 10 }]);
+  const lines = readFileSync(streamFile(root, lead.writer), 'utf8').split('\n').slice(0, -1);
+  assert.deepEqual(lines.map((line) => (JSON.parse(line) as SealedEntryLine).header.seq), [...Array(20).keys()]);
+  // Two windows of one install in one process: separate store objects on one folder, one secret storage.
+  const other = fixedSigner('second-window');
+  const first = await opened(root, depsFor(lead, secrets));
+  const second = await opened(root, depsFor(other, secrets));
+  const mine = chain(lead, 5, { from: { seq: 19, hash: built[19].hash } });
+  const theirs = chain(other, 5);
+  const all = await Promise.all([...mine.map((item) => first.appendOwn([item])), ...theirs.map((item) => second.appendOwn([item]))]);
+  assert.ok(all.every((result) => 'ok' in result && result.written === 1));
+  const reopened = await opened(root, depsFor(lead, secrets));
+  assert.equal(reopened.entries().length, 30);
+  const read = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
+  assert.equal(read.kind, 'mark');
+  assert.deepEqual(read.kind === 'mark' && read.mark.heads.map((head) => [head.writer, head.seq, head.count]).sort(), [[lead.writer, 24, 25], [other.writer, 4, 5]].sort());
 });

@@ -11,8 +11,8 @@
 // Rules:
 // - Appends write whole lines in one write, then fsync. A reader ignores bytes after the last newline (a crash mid-append) and never counts them.
 // - Blobs are written to a temporary file, synced, then renamed into place.
-// - Every append runs under withFileLock(storeDir, 'replica.lock'), so two windows of one install never interleave; inside the lock the store first
-//   catches up with lines another window wrote.
+// - Every append runs under withRegisterLock(storeDir) for order inside one process and, inside it, withFileLock(storeDir, 'replica.lock') for
+//   order across windows and processes, so appends never interleave; inside the locks the store first catches up with lines another window wrote.
 // - How far this device has seen is kept in a signed mark in secret storage (marks.ts). Opening a store whose files are behind the mark is refused.
 // - A symbolic link anywhere from the project root to a store file is refused: nothing is read or written through it.
 // - The store never deletes an entry or a blob and never rewrites a line (P-31-17). No private key or secret is ever written here (P-31-18).
@@ -23,6 +23,7 @@ import type { FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../../services/auth';
 import { withFileLock } from '../../services/stateMirrorLock';
+import { withRegisterLock } from '../registerLock';
 import { REPLICA_DIR } from '../../domain/staff/multiUser';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, sha256Hex, writerIdOf } from '../../domain/replica/entry';
 import type { BuiltEntry, SealedBlob, SealedEntry } from '../../domain/replica/entry';
@@ -257,6 +258,26 @@ export class ReplicaStore {
     return this.byHash.has(hash);
   }
 
+  /** The highest seq stored for one writer in one stream and one hash at it, or undefined when the store holds none. */
+  public head(stream: string, writer: string): { seq: number; hash: string } | undefined {
+    const file = this.files.get(fileId(stream, writer));
+    if (!file || file.maxSeq < 0) return undefined;
+    return { seq: file.maxSeq, hash: (file.bySeq.get(file.maxSeq) ?? [])[0] };
+  }
+
+  /** Reads what other windows and processes wrote since this store last looked. Refused like open when a file went backwards. */
+  public async refresh(): Promise<{ ok: true } | StoreRefused> {
+    try {
+      return await this.locked(async () => {
+        await this.catchUp();
+        return { ok: true as const };
+      });
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      throw error;
+    }
+  }
+
   /** How many whole lines could not be read as an entry (damaged or edited lines). They are skipped, never counted. */
   public damagedLines(): number {
     return this.damaged;
@@ -331,17 +352,22 @@ export class ReplicaStore {
 
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
-  /** Runs `work` under the cross-window file lock, after checking that no symbolic link is on the way to the store. */
-  private async locked<T>(work: () => Promise<T>): Promise<T> {
-    const parts = REPLICA_DIR.split('/');
-    const problem = await checkPath(this.root, parts);
-    if (problem) throw new Refusal(problem);
-    await mkdir(this.dir, { recursive: true });
-    return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
-      const again = await checkPath(this.root, parts);
-      if (again) throw new Refusal(again);
-      await this.ensureIgnore();
-      return work();
+  /**
+   * Runs `work` under the in-process register lock (same-process order) and, inside it, the cross-window file lock (other windows and processes),
+   * after checking that no symbolic link is on the way to the store. Neither lock is re-entrant: `work` never calls another locked method.
+   */
+  private locked<T>(work: () => Promise<T>): Promise<T> {
+    return withRegisterLock(this.dir, async () => {
+      const parts = REPLICA_DIR.split('/');
+      const problem = await checkPath(this.root, parts);
+      if (problem) throw new Refusal(problem);
+      await mkdir(this.dir, { recursive: true });
+      return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
+        const again = await checkPath(this.root, parts);
+        if (again) throw new Refusal(again);
+        await this.ensureIgnore();
+        return work();
+      });
     });
   }
 
