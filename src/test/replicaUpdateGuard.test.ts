@@ -5,10 +5,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as v8 from 'node:v8';
 import * as vm from 'node:vm';
-import { MAX_STRUCTS as DOC_MAX_STRUCTS, applyUpdate, buildFromCompaction, createFoldDoc, createLocalDoc, decodeSnapshot, docText, encodeFullState, inspectUpdate, localDelete, localInsert, snapshotOf, snapshotStateVector, stateVectorOf } from '../domain/replica/doc';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import * as path from 'node:path';
+import * as docModule from '../domain/replica/doc';
+import {
+  MAX_STRUCTS as DOC_MAX_STRUCTS, applyRemote, applyUpdate, attributionAtSnapshot, attributionRuns, buildFromCompaction, createFoldDoc, createLocalDoc, decodeSnapshot,
+  docText, encodeFullState, inspectUpdate, localDelete, localInsert, rangesCovered, snapshotMissing, snapshotOf, snapshotReport, snapshotStateVector, stateVectorOf,
+  textAtSnapshot
+} from '../domain/replica/doc';
+import type { AttributionRun, CrdtDoc } from '../domain/replica/doc';
 import { SEALED_OVERHEAD, sealBlob } from '../domain/replica/entry';
 import { MAX_STATE_BYTES, MAX_STRUCTS, MAX_UPDATE_BYTES } from '../domain/replica/kindSchemas/doc';
 import { readVaruint, sealedBlobWithin, skimSnapshot, skimUpdate } from '../domain/replica/updateGuard';
+import { rng } from './helpers/replicaWorld';
 import { embedUpdate, foreignFullState, formatUpdate, mapUpdate, nestedArrayUpdate, nestedTypeUpdate, skipUpdate, testYjs } from './helpers/replicaYjs';
 
 // A forced collection, so heap numbers are not dominated by garbage still waiting (the pattern in scripts/crdt-spike.mjs).
@@ -284,4 +293,137 @@ test('heap ceiling (D-43): the 2 000 000-GC-struct 4 000 007-byte probe grows th
   t.diagnostic(`2000000-struct probe: heap growth ${(inspected.grew / MB).toFixed(2)} MB through inspectUpdate, ${(skimmed.grew / MB).toFixed(2)} MB through skimUpdate (old code +191 MB)`);
   assert.ok(inspected.grew < 64 * MB, `inspectUpdate grew the heap ${(inspected.grew / MB).toFixed(1)} MB`);
   assert.ok(skimmed.grew < 64 * MB, `skimUpdate grew the heap ${(skimmed.grew / MB).toFixed(1)} MB`);
+});
+
+// ---- Task 3: linear delete check, one shared snapshot inspection, the unused export removed ------------------------------------------------
+
+interface Range { clock: number; len: number }
+
+// The check as Phase 30 wrote it: every wanted range inside one held range of the same client, found by scanning all held ranges.
+function naiveCovered(wanted: ReadonlyMap<number, readonly Range[]>, held: ReadonlyMap<number, readonly Range[]>): boolean {
+  for (const [client, ranges] of wanted) {
+    const have = held.get(client) ?? [];
+    for (const range of ranges) if (!have.some((h) => h.clock <= range.clock && h.clock + h.len >= range.clock + range.len)) return false;
+  }
+  return true;
+}
+
+// What the three questions should answer, computed independently with the bundle and the naive delete check.
+function referenceReport(updates: readonly Uint8Array[], snapshotBytes: Uint8Array): { missing: boolean; text: string | undefined; runs: AttributionRun[] | undefined } | undefined {
+  const Y = testYjs();
+  if (decodeSnapshot(snapshotBytes) === undefined) return undefined;
+  const snapshot = Y.decodeSnapshot(snapshotBytes);
+  const scratch = new Y.Doc({ gc: false });
+  for (const update of updates) Y.applyUpdate(scratch, update);
+  const reached = Y.decodeStateVector(Y.encodeStateVector(scratch));
+  const short = [...snapshot.sv.entries()].some(([client, clock]) => (reached.get(client) ?? 0) < clock);
+  if (short || !naiveCovered(snapshot.ds.clients, Y.snapshot(scratch).ds.clients)) return { missing: true, text: undefined, runs: undefined };
+  const at: CrdtDoc = Y.createDocFromSnapshot(scratch, snapshot);
+  return { missing: false, text: at.getText('body').toString(), runs: attributionRuns(at) };
+}
+
+// A seeded document of three authors who each see every edit, with snapshots taken along the way, and an update list that is sometimes complete,
+// sometimes a prefix and sometimes missing one update.
+function randomCase(seed: number): { updates: Uint8Array[]; snapshot: Uint8Array } {
+  const random = rng(seed);
+  const authors = [createLocalDoc(201), createLocalDoc(202), createLocalDoc(203)];
+  const updates: Uint8Array[] = [];
+  const snapshots: Uint8Array[] = [];
+  const steps = 10 + random.int(30);
+  for (let step = 0; step < steps; step += 1) {
+    const doc = random.pick(authors);
+    const length = docText(doc).length;
+    let update: Uint8Array;
+    if (length > 0 && random.chance(0.35)) {
+      const at = random.int(length);
+      update = localDelete(doc, at, 1 + random.int(Math.min(6, length - at)));
+    } else {
+      update = localInsert(doc, random.int(length + 1), random.pick(['a', 'bc', 'def ', 'ghij', 'k l']).repeat(1 + random.int(3)));
+    }
+    updates.push(update);
+    for (const other of authors) if (other !== doc) assert.equal(applyRemote(other, update), true);
+    if (random.chance(0.25)) snapshots.push(snapshotOf(doc));
+  }
+  snapshots.push(snapshotOf(random.pick(authors)));
+  const snapshot = random.pick(snapshots);
+  const shape = random.int(3);
+  if (shape === 0) return { updates, snapshot };
+  if (shape === 1) return { updates: updates.slice(0, random.int(updates.length + 1)), snapshot };
+  const dropped = random.int(updates.length);
+  return { updates: updates.filter((_, index) => index !== dropped), snapshot };
+}
+
+test('snapshotReport answers missing, text and runs as the three separate questions and an independent reference do, on 50 seeded documents', () => {
+  let missing = 0;
+  let present = 0;
+  for (let seed = 1; seed <= 50; seed += 1) {
+    const { updates, snapshot } = randomCase(seed);
+    const report = snapshotReport(updates, snapshot);
+    assert.deepEqual(report, referenceReport(updates, snapshot), `seed ${seed}`);
+    assert.equal(report?.missing === true, snapshotMissing(updates, snapshot), `seed ${seed}`);
+    assert.equal(report?.text, textAtSnapshot(updates, snapshot), `seed ${seed}`);
+    assert.deepEqual(report?.runs, attributionAtSnapshot(updates, snapshot), `seed ${seed}`);
+    if (report?.missing === true) missing += 1;
+    else present += 1;
+  }
+  // Both answers occur, so the comparison exercised each branch.
+  assert.ok(missing > 0 && present > 0, `missing ${missing}, present ${present}`);
+  const garbage = Uint8Array.from([9, 9, 9]);
+  assert.equal(snapshotReport([], garbage), undefined);
+  assert.equal(snapshotMissing([], garbage), false);
+  assert.equal(textAtSnapshot([], garbage), undefined);
+  assert.equal(attributionAtSnapshot([], garbage), undefined);
+  assert.equal(snapshotReport([embedUpdate(31)], snapshotOf(createLocalDoc(31))), undefined);
+});
+
+test('rangesCovered gives the same answer as the scan-everything check on random small inputs, including unsorted and overlapping ranges', () => {
+  const random = rng(4242);
+  const rangesOf = (count: number): Range[] => Array.from({ length: count }, () => ({ clock: random.int(40), len: random.int(8) }));
+  let covered = 0;
+  for (let round = 0; round < 400; round += 1) {
+    const wanted = new Map<number, Range[]>();
+    const held = new Map<number, Range[]>();
+    for (const client of [1, 2]) {
+      if (random.chance(0.8)) wanted.set(client, rangesOf(random.int(4)));
+      if (random.chance(0.8)) held.set(client, rangesOf(random.int(8)));
+    }
+    // Wanted ranges copied from the held ones (and shrunk) make covered answers common.
+    for (const [client, have] of held) if (have.length > 0 && random.chance(0.5)) wanted.set(client, have.map((h) => ({ clock: h.clock + (h.len > 1 ? 1 : 0), len: Math.max(0, h.len - 2) })));
+    const expected = naiveCovered(wanted, held);
+    assert.equal(rangesCovered(wanted, held), expected, JSON.stringify({ wanted: [...wanted], held: [...held] }));
+    if (expected) covered += 1;
+  }
+  assert.ok(covered > 50 && covered < 350, `covered ${covered} of 400`);
+});
+
+test('the delete check is a linear merge walk: 20 000 snapshot ranges against 20 000 held ranges finish in under 1.5 seconds', (t) => {
+  const count = 20_000;
+  const held = new Map([[31, Array.from({ length: count }, (_, index) => ({ clock: 2 * index, len: 1 }))]]);
+  const wanted = new Map([[31, Array.from({ length: count }, (_, index) => ({ clock: 2 * index, len: 1 }))]]);
+  const reversed = new Map([[31, [...(wanted.get(31) as Range[])].reverse()]]);
+  const uncovered = new Map([[31, [...(wanted.get(31) as Range[]), { clock: 2 * count, len: 1 }]]]);
+  const started = performance.now();
+  assert.equal(rangesCovered(wanted, held), true);
+  assert.equal(rangesCovered(reversed, held), true);
+  assert.equal(rangesCovered(uncovered, held), false);
+  const took = performance.now() - started;
+  t.diagnostic(`three checks of ${count} ranges against ${count}: ${took.toFixed(1)} ms`);
+  assert.ok(took < 1500, `took ${took.toFixed(0)} ms`);
+});
+
+test('the unused update-clients export is gone from doc.ts and nothing under src names it (IN-02)', () => {
+  const name = ['update', 'Clients'].join('');
+  assert.equal(name in docModule, false);
+  const src = path.resolve(__dirname, '..', '..', 'src');
+  assert.ok(existsSync(src));
+  const found: string[] = [];
+  const walk = (folder: string): void => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const full = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.ts') && new RegExp(`\\b${name}\\b`).test(readFileSync(full, 'utf8'))) found.push(path.relative(src, full));
+    }
+  };
+  walk(src);
+  assert.deepEqual(found, []);
 });
