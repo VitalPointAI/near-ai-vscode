@@ -9,13 +9,14 @@ import type { PolicySigner } from './authorizations';
 import { LEGAL_BASIS_EXEMPT_CLASSES } from './authorizations';
 import type { PolicyEndpoint } from './endpoints';
 import { POLICY_SECTIONS } from './features';
-import { SCALE_PRESETS, levelIndex } from './labels';
-import type { ScaleTable } from './labels';
+import { SCALE_PRESETS, levelIndex, parseLabel } from './labels';
+import type { Label, ScaleTable } from './labels';
 import { parsePolicyDocument } from './policyDocument';
 import type { PolicyDocument } from './policyDocument';
-import { parseLimitsSection, parseOnboardingSection, parseResidencySection } from './sections';
-import { isRecord, ownValue } from './shape';
-import type { Fields } from './shape';
+import { LOCKABLE_ANSWERS, parseLimitsSection, parseOnboardingSection, parseRegimes, parseResidencySection } from './sections';
+import type { ExportRegime, LockableAnswer } from './sections';
+import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
+import type { Fields, Parsed } from './shape';
 
 /** The ways a key can be narrower. `superset` is a list a layer may only add to (D-60's export regimes). */
 export const NARROWING_DIRECTIONS = Object.freeze([
@@ -182,9 +183,12 @@ function ruleEntryOf(path: string): RuleEntry | undefined {
   }
   for (let length = segments.length - 1; length > 0; length -= 1) {
     const prefix = segments.slice(0, length);
+    // A list's items sit under the list: `people.clearances[].scale` is below `people.clearances`.
+    const listPrefix = [...prefix.slice(0, -1), (prefix[prefix.length - 1] as string).replace(/\[\]$/, '')];
     for (const pattern of patterns) {
       const found = NARROWING[pattern] as NarrowingRule;
-      if (found.subtree === true && segmentsOf(pattern).length === length && patternMatches(pattern, prefix)) return { pattern, rule: found };
+      if (found.subtree !== true || segmentsOf(pattern).length !== length) continue;
+      if (patternMatches(pattern, prefix) || patternMatches(pattern, listPrefix)) return { pattern, rule: found };
     }
   }
   return undefined;
@@ -352,9 +356,12 @@ function within(found: NarrowingRule, after: unknown, before: unknown, scales: S
     case 'subset':
       if (before === undefined) return found.absent === 'weakest' || isEmpty(after);
       if (after === undefined) return found.absent !== 'weakest' && isEmpty(before);
-      return isSubset(listOf(after), listOf(before));
+      // A value that is not a list (a mode id) is within only when it is the same.
+      if (!Array.isArray(after) || !Array.isArray(before)) return sameValue(after, before);
+      return isSubset(after, before);
     case 'superset':
-      return isSubset(listOf(before), listOf(after));
+      if (!Array.isArray(after) || !Array.isArray(before)) return sameValue(after, before);
+      return isSubset(before, after);
     case 'number-lower': {
       const weakest = found.absent === 'weakest' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
       const a = after === undefined ? weakest : after;
@@ -399,11 +406,14 @@ export interface IgnoredSetting {
 export interface ComposedPolicy {
   readonly effective: PolicyDocument;
   readonly ignored: readonly IgnoredSetting[];
+  /** The parts of the project layer that count, when one was given. It never changes `effective`. */
+  readonly project?: ComposedProject;
 }
 
 export interface LayerInput {
   readonly organization?: PolicyDocument;
   readonly personal: PolicyDocument;
+  readonly project?: ProjectLayer;
 }
 
 interface Pending {
@@ -481,6 +491,11 @@ function composeByRule(found: NarrowingRule, pattern: string, segments: readonly
 /** A record with no rule of its own: each key by its own rule. A record your organization leaves out that keeps nothing is left out too. */
 function composeRecord(pattern: string, segments: readonly string[], org: unknown, mine: unknown, context: Context): unknown {
   if (!isRecord(mine)) return org;
+  if (org !== undefined && !isRecord(org)) {
+    // Two different kinds of value cannot be compared: your organization's stands.
+    widen(context, pattern, segments.join('.'), mine, org, segments);
+    return org;
+  }
   const organization = isRecord(org) ? org : undefined;
   const keys = organization === undefined ? [] : Object.keys(organization);
   for (const name of Object.keys(mine)) if (!keys.includes(name)) keys.push(name);
@@ -671,6 +686,9 @@ function withoutUnknownScales(out: Fields, context: Context): void {
     else delete nextMcp['labelCeilings'];
     out['agents'] = { ...copyOf(agents), mcp: nextMcp };
   }
+  const labels = field(out, 'labels');
+  const routing = field(labels, 'routing');
+  if (isRecord(labels) && isRecord(routing)) out['labels'] = { ...copyOf(labels), routing: withKnownLevelKeys(routing, 'levels', 'labels.routing.levels', context) };
   out['residency'] = withKnownLevelKeys(out['residency'], 'byLevel', 'residency.byLevel', context);
   out['models'] = withKnownLevelKeys(out['models'], 'tierByLevel', 'models.tierByLevel', context);
   const people = field(out, 'people');
@@ -776,12 +794,149 @@ function fallback(organization: PolicyDocument, personal: PolicyDocument, contex
  * by its rule, and every wider personal value listed in `ignored`, in table order. A combination that does not parse gives your organization's rules whole.
  */
 export function composeLayers(input: LayerInput): ComposedPolicy {
-  if (input.organization === undefined) return { effective: input.personal, ignored: Object.freeze([]) };
+  const layers = composePersonal(input.organization, input.personal);
+  if (input.project === undefined) return layers;
+  const project = composeProject(input.project, layers.effective, input.organization);
+  return { effective: layers.effective, ignored: Object.freeze([...layers.ignored, ...project.ignored]), project: project.project };
+}
+
+function composePersonal(organization: PolicyDocument | undefined, personal: PolicyDocument): ComposedPolicy {
+  if (organization === undefined) return { effective: personal, ignored: Object.freeze([]) };
   try {
-    return composeWithOrganization(input.organization, input.personal);
+    return composeWithOrganization(organization, personal);
   } catch {
-    return fallback(input.organization, input.personal);
+    return fallback(organization, personal);
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// The project layer (D-22, D-60): in memory in this phase; its single-machine source comes with 32.1 and its shared source with 33.1.
+
+export interface ProjectExercise {
+  /** Why the project runs as an exercise, recorded with the flag (owner Q10). 1 to 200 characters. */
+  readonly reason: string;
+  readonly setAt: string;
+}
+
+export interface ProjectLayer {
+  readonly v: 1;
+  readonly label?: Label;
+  /** A mode id; it counts only when the effective people.organization.allowedModes holds it. */
+  readonly mode?: string;
+  readonly exercise?: ProjectExercise;
+  /** Setup answers fixed for the project, as onboarding.locked has them. */
+  readonly locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>;
+  /** Export regimes the project adds (D-60): a project can add one and never remove one. */
+  readonly regimes?: readonly ExportRegime[];
+}
+
+export interface ComposedProject {
+  readonly label?: Label;
+  readonly mode?: string;
+  readonly exercise?: ProjectExercise;
+  readonly locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>;
+  /** The sorted union of the effective exportControl.regimes and the project's own. */
+  readonly regimes: readonly ExportRegime[];
+}
+
+const PROJECT_MODE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const MAX_EXERCISE_REASON = 200;
+const CONTROL = /[\u0000-\u001F\u007F]/;
+
+function parseExercise(value: unknown, path: string): Parsed<ProjectExercise> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['reason', 'setAt']);
+  if (keys !== undefined) return keys;
+  const reason = ownValue(value, 'reason');
+  if (typeof reason !== 'string' || reason === '' || reason.length > MAX_EXERCISE_REASON || CONTROL.test(reason)) return refused('wrong-type', childPath(path, 'reason'));
+  const setAt = ownValue(value, 'setAt');
+  if (typeof setAt !== 'string' || Number.isNaN(parseIsoMillis(setAt))) return refused('wrong-type', childPath(path, 'setAt'));
+  return { ok: true, value: Object.freeze({ reason, setAt }) };
+}
+
+function parseProjectLocked(value: unknown, path: string): Parsed<Readonly<Partial<Record<LockableAnswer, boolean>>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const out: Partial<Record<LockableAnswer, boolean>> = {};
+  for (const key of Object.keys(value)) {
+    const answer = LOCKABLE_ANSWERS.find((candidate) => candidate === key);
+    if (answer === undefined) return refused('unknown-field', childPath(path, key.slice(0, 40)));
+    const flag = ownValue(value, key);
+    if (typeof flag !== 'boolean') return refused('wrong-type', childPath(path, key));
+    out[answer] = flag;
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+/** Reads a project layer strictly: `v` 1, and optional label (on `scales`), mode, exercise (with its reason), locked answers and export regimes. */
+export function parseProjectLayer(value: unknown, scales: ScaleTable, path = ''): Parsed<ProjectLayer> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const v = ownValue(value, 'v');
+  if (typeof v === 'number' && v !== 1) return refused('unknown-version', childPath(path, 'v'));
+  const keys = checkKeys(value, path, ['v'], ['label', 'mode', 'exercise', 'locked', 'regimes']);
+  if (keys !== undefined) return keys;
+  if (v !== 1) return refused('wrong-type', childPath(path, 'v'));
+  const out: { v: 1; label?: Label; mode?: string; exercise?: ProjectExercise; locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>; regimes?: readonly ExportRegime[] } = { v: 1 };
+  if (Object.prototype.hasOwnProperty.call(value, 'label')) {
+    const label = parseLabel(ownValue(value, 'label'), scales, childPath(path, 'label'));
+    if (!label.ok) return label;
+    out.label = label.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'mode')) {
+    const mode = ownValue(value, 'mode');
+    if (typeof mode !== 'string' || !PROJECT_MODE_PATTERN.test(mode)) return refused('wrong-type', childPath(path, 'mode'));
+    out.mode = mode;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'exercise')) {
+    const exercise = parseExercise(ownValue(value, 'exercise'), childPath(path, 'exercise'));
+    if (!exercise.ok) return exercise;
+    out.exercise = exercise.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'locked')) {
+    const locked = parseProjectLocked(ownValue(value, 'locked'), childPath(path, 'locked'));
+    if (!locked.ok) return locked;
+    out.locked = locked.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'regimes')) {
+    const regimes = parseRegimes(ownValue(value, 'regimes'), childPath(path, 'regimes'));
+    if (!regimes.ok) return regimes;
+    out.regimes = regimes.value;
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+function projectIgnored(key: string, yours: unknown, allowed: unknown): IgnoredSetting {
+  return Object.freeze({ key, layer: 'project', yours: shortText(yours), allowed: shortText(allowed) });
+}
+
+/**
+ * The project layer as a narrowing input: its mode counts when the effective allowedModes holds it (or none exist), your organization's locked answers win
+ * over the project's, its label and exercise flag are carried unchanged, and its regimes join the effective ones (D-22, D-60).
+ */
+function composeProject(project: ProjectLayer, effective: PolicyDocument, organization: PolicyDocument | undefined): { project: ComposedProject; ignored: IgnoredSetting[] } {
+  const ignored: IgnoredSetting[] = [];
+  const out: { label?: Label; mode?: string; exercise?: ProjectExercise; locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>; regimes: readonly ExportRegime[] } = {
+    regimes: Object.freeze([...new Set([...(effective.exportControl?.regimes ?? []), ...(project.regimes ?? [])])].sort())
+  };
+  if (project.label !== undefined) out.label = project.label;
+  if (project.exercise !== undefined) out.exercise = project.exercise;
+  if (project.mode !== undefined) {
+    const allowed = stringList(field(field(effective.people, 'organization'), 'allowedModes'));
+    if (allowed.length === 0 || allowed.includes(project.mode)) out.mode = project.mode;
+    else ignored.push(projectIgnored('people.organization.mode', project.mode, allowed));
+  }
+  if (project.locked !== undefined) {
+    const theirs = organization?.onboarding?.locked ?? {};
+    const locked: Partial<Record<LockableAnswer, boolean>> = {};
+    for (const answer of LOCKABLE_ANSWERS) {
+      const wanted = project.locked[answer];
+      if (wanted === undefined) continue;
+      const fixed = theirs[answer];
+      if (fixed !== undefined && fixed !== wanted) ignored.push(projectIgnored(`onboarding.locked.${answer}`, wanted, fixed));
+      locked[answer] = fixed ?? wanted;
+    }
+    out.locked = Object.freeze(locked);
+  }
+  return { project: Object.freeze(out), ignored };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -803,7 +958,9 @@ export function wideningOf(organization: PolicyDocument | undefined, base: Polic
   const after = composeLayers({ organization, personal: next }).ignored;
   const found: Array<{ readonly order: number; readonly entry: IgnoredSetting }> = [];
   for (const entry of after) {
-    if (!before.some((other) => other.key === entry.key && other.yours === entry.yours)) found.push({ order: orderOf(normalPath(entry.key)), entry });
+    if (!before.some((other) => other.key === entry.key && other.yours === entry.yours)) {
+      found.push({ order: orderOf(ruleEntryOf(entry.key)?.pattern ?? normalPath(entry.key)), entry });
+    }
   }
   for (const path of Object.keys(NARROWING)) {
     if ((NARROWING[path] as NarrowingRule).direction !== 'superset') continue;

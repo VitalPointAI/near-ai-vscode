@@ -2,16 +2,21 @@
 // it key by declared key, a wider personal value is replaced and listed (never a lock-out), and a new widening edit is named before it is signed.
 // Keys are made at test time; every name is fictional.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { effectiveMode } from '../domain/gate/decide';
-import { NARROWING, composeLayers, ignoredSettingsNotice, narrowingOf, wideningOf, widerThanOrganizationText } from '../domain/gate/layers';
-import type { IgnoredSetting } from '../domain/gate/layers';
+import {
+  LAYER_ENVELOPE_KEYS, NARROWING, composeLayers, directionOf, ignoredSettingsNotice, narrowingOf, parseProjectLayer, wideningOf, widerThanOrganizationText
+} from '../domain/gate/layers';
+import type { IgnoredSetting, ProjectLayer } from '../domain/gate/layers';
+import { SCALE_PRESETS } from '../domain/gate/labels';
 import { ROUTING_TIERS } from '../domain/gate/routing';
 import type { ActionPolicyMode } from '../domain/policy';
 import { bundleViewOf, parsePolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import {
-  DAY_MS, FIXED_NOW, authorizationFor, deviceKey, fixtureEndpoints, issuerKey, policyDocumentFor, signAuthorization, signerEntry
+  DAY_MS, FIXED_NOW, authorizationFor, deviceKey, fixtureEndpoints, fullDocumentFor, issuerKey, policyDocumentFor, signAuthorization, signerEntry
 } from './helpers/policyFixtures';
 
 type Loose = any; // a document under edit: each test changes the values it is about
@@ -243,6 +248,8 @@ test('a personal clearance or mapping on a scale the organization does not have 
     doc.people.clearances = [{ scale: 'nato', level: 'NATO Secret', compartments: [], releasability: [] }, ...doc.people.clearances];
     doc.agents.mcp.labelCeilings = { git: { scale: 'nato', level: 'NATO Restricted', compartments: [], releasability: [] } };
     withSection(doc, 'residency', { v: 1, byLevel: { 'nato/NATO Secret': ['CA'], 'org/Internal': ['CA'] } }, 'residency@1');
+    // The strictest tier on a scale your organization lacks is not wider, but it names a level the effective scales lack.
+    doc.labels.routing.levels['nato/Cosmic Top Secret'] = 'deny';
   });
   const composed = composeLayers({ organization: org, personal: mine });
   assert.ok(parsePolicyDocument(plain(composed.effective)).ok);
@@ -251,7 +258,10 @@ test('a personal clearance or mapping on a scale the organization does not have 
   assert.equal(composed.effective.agents.mcp.labelCeilings, undefined);
   assert.deepEqual(composed.effective.residency?.byLevel, { 'org/Internal': ['CA'] });
   const keys = keysOf(composed.ignored);
-  for (const key of ['labels.mappings', 'people.clearances', 'agents.mcp.labelCeilings.git', 'residency.byLevel.nato/NATO Secret', 'labels.routing.levels.nato/NATO Secret']) {
+  for (const key of [
+    'labels.mappings', 'people.clearances', 'agents.mcp.labelCeilings.git', 'residency.byLevel.nato/NATO Secret', 'labels.routing.levels.nato/NATO Secret',
+    'labels.routing.levels.nato/Cosmic Top Secret'
+  ]) {
     assert.ok(keys.includes(key), `${key} is listed`);
   }
   assert.ok(!composed.ignored.some((entry) => entry.key === 'personal layer'), 'the layers combine without the fallback');
@@ -395,4 +405,219 @@ test('D-60, D-62: widening edits on export control are refused with the key name
   });
   assert.equal(wideningOf(org, base, ear), undefined);
   assert.equal(composeLayers({ organization: org, personal: ear }).effective.labels.routing.compartments['EAR'], 'local-only');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Task 3: every accepted key has a direction, and the project layer
+
+/**
+ * 41-01's fully filled document, plus one licence-based export-person record so the one optional authorization key the fixture lacks
+ * (`authorityExpiresAt`) is walked too. The fixture file itself is never edited.
+ */
+function fullyFilled(): Loose {
+  const doc = fullDocumentFor(issuerKey()) as Loose;
+  const licence = signAuthorization(authorizationFor({
+    kind: 'export-person', id: 'export-person-2', subject: { person: 'person-0143' }, scope: { regimes: ['ITAR'] },
+    conditions: { ITAR: { basis: 'licence', authority: 'DSP-5 0001', authorityExpiresAt: new Date(FIXED_NOW + 365 * DAY_MS).toISOString() } }
+  }), issuerKey());
+  doc.authorizations = [...doc.authorizations, plain(licence)].sort((a: Loose, b: Loose) => (a.payload.id < b.payload.id ? -1 : a.payload.id > b.payload.id ? 1 : 0));
+  return doc;
+}
+
+function isEnvelopePath(key: string): boolean {
+  return LAYER_ENVELOPE_KEYS.some((envelope) => key === envelope || key.startsWith(`${envelope}.`));
+}
+
+/** A walked child key: its own name when the table or the envelope names it, `*` when the table has a data-key entry there, else its own name. */
+function walkedChild(parent: string, key: string): string {
+  const literal = parent === '' ? key : `${parent}.${key}`;
+  const names = [...Object.keys(NARROWING), ...LAYER_ENVELOPE_KEYS];
+  if (names.some((name) => name === literal || name.startsWith(`${literal}.`) || name.startsWith(`${literal}[`))) return literal;
+  const wildcard = parent === '' ? '*' : `${parent}.*`;
+  return names.some((name) => name === wildcard || name.startsWith(`${wildcard}.`)) ? wildcard : literal;
+}
+
+/** Every key path of a value: list items as `[]`, data keys of a `*` entry as `*`; a list of plain values and an empty record end a path. */
+function walk(value: unknown, at = '', out: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(value)) {
+    const records = value.filter((item) => typeof item === 'object' && item !== null && !Array.isArray(item));
+    if (records.length === 0) out.add(at);
+    for (const item of records) walk(item, `${at}[]`, out);
+    return out;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) out.add(at);
+    for (const key of keys) walk((value as Loose)[key], walkedChild(at, key), out);
+    return out;
+  }
+  out.add(at);
+  return out;
+}
+
+function undirected(value: unknown): string[] {
+  return [...walk(value)].filter((key) => !isEnvelopePath(key) && directionOf(key) === undefined).sort();
+}
+
+test('D-19: every key a fully filled v2 policy holds has a declared direction', () => {
+  const parsed = parsePolicyDocument(fullyFilled());
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  const paths = walk(parsed.value);
+  assert.ok(paths.size > 80, `the walk reaches every key (${String(paths.size)} paths)`);
+  assert.deepEqual(undirected(parsed.value), []);
+  // D-60: each exportControl key the walk holds, by name.
+  const expected: Record<string, string> = {
+    'exportControl.regimes': 'superset',
+    'exportControl.suggestRules': 'tier-stricter',
+    'exportControl.officials[].regime': 'organization-only',
+    'exportControl.officials[].position': 'organization-only',
+    'exportControl.registration.CGP.registered': 'organization-only',
+    'exportControl.incidents.contacts': 'organization-only',
+    'exportControl.agentNetwork': 'tier-stricter',
+    'exportControl.retention.neverAutoPrune': 'boolean-safe'
+  };
+  for (const [key, direction] of Object.entries(expected)) {
+    assert.ok(paths.has(key), `${key} is walked`);
+    assert.equal(directionOf(key)?.direction, direction, key);
+  }
+  // D-62: the reserved compartments CGP, ITAR and EAR can only be made stricter, and an entry your organization lacks changes nothing.
+  for (const token of ['CGP', 'ITAR', 'EAR']) {
+    const found = directionOf(`labels.routing.compartments.${token}`);
+    assert.equal(found?.direction, 'tier-stricter', token);
+    assert.equal(found?.absent, 'weakest', token);
+  }
+});
+
+test('D-19 has teeth: a path with no direction is reported', () => {
+  const parsed = parsePolicyDocument(fullyFilled());
+  assert.ok(parsed.ok);
+  const planted = plain(parsed.value);
+  planted.limits.plantedKey = 1;
+  assert.deepEqual(undirected(planted), ['limits.plantedKey']);
+});
+
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const SECTION_SOURCES = [
+  'src/domain/gate/policyDocument.ts', 'src/domain/gate/sections.ts', 'src/domain/gate/endpoints.ts', 'src/domain/gate/authorizations.ts',
+  'src/domain/gate/models.ts', 'src/domain/org/peopleSection.ts'
+];
+/** Inside a key, signer or issuer envelope: a key's fingerprint and public key, an issuer's did, a parent's hash. They are checked as one value, never composed. */
+const ENVELOPE_INNER_KEYS = ['fingerprint', 'publicKey', 'did', 'hash'];
+/** bundle.ts BUNDLE_FIELDS and the BundleCeiling keys: only the v1 wire form uses them, and documentFromBundle maps them onto v2 sections. */
+const V1_WIRE_KEYS = [
+  'bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'ceiling', 'scales', 'mappings', 'clearances', 'routing', 'defaultLabel', 'anchorRoots',
+  'statusLists', 'maxOfflineAge', 'maxMode', 'contexts', 'unattendedMcp', 'mcpLabelCeilings', 'localHosts'
+];
+
+/** The quoted names inside every checkKeys( and openSection( call and every `const X_KEYS`, `_FIELDS`, `_REQUIRED` or `_OPTIONAL` list of a source text. */
+function namedKeys(source: string): string[] {
+  const out = new Set<string>();
+  const quoted = (text: string): void => { for (const match of text.matchAll(/'([^'\\]+)'/g)) out.add(match[1] as string); };
+  for (const match of source.matchAll(/\b(checkKeys|openSection)\(/g)) {
+    let depth = 0;
+    let end = (match.index as number) + match[0].length - 1;
+    for (; end < source.length; end += 1) {
+      if (source[end] === '(') depth += 1;
+      if (source[end] === ')') { depth -= 1; if (depth === 0) break; }
+    }
+    quoted(source.slice(match.index as number, end));
+  }
+  for (const match of source.matchAll(/const [A-Z][A-Z0-9_]*_(KEYS|FIELDS|REQUIRED|OPTIONAL)\b[^=]*=[^[]*\[([^\]]*)\]/g)) quoted(match[2] as string);
+  return [...out].sort();
+}
+
+function unaccounted(sources: readonly string[]): string[] {
+  const parsed = parsePolicyDocument(fullyFilled());
+  assert.ok(parsed.ok);
+  const segments = new Set<string>([...ENVELOPE_INNER_KEYS, ...V1_WIRE_KEYS]);
+  for (const key of [...walk(parsed.value), ...Object.keys(NARROWING), ...LAYER_ENVELOPE_KEYS]) {
+    for (const segment of key.split('.')) segments.add(segment.replace(/\[\]$/, ''));
+  }
+  return sources.flatMap(namedKeys).filter((name) => !segments.has(name)).sort();
+}
+
+test('D-19: every key a section parser names is accounted for', () => {
+  const sources = SECTION_SOURCES.map((file) => readFileSync(path.join(REPO_ROOT, file), 'utf8'));
+  const names = sources.flatMap(namedKeys);
+  for (const name of ['maxLabel', 'tlsPins', 'regimes', 'officials', 'signers', 'personalApprovals', 'authorityExpiresAt', 'labelCeilings']) {
+    assert.ok(names.includes(name), `the scan reads ${name}`);
+  }
+  assert.deepEqual(unaccounted(sources), []);
+  assert.deepEqual(unaccounted([...sources, "const keys = checkKeys(value, path, ['plantedKey']);"]), ['plantedKey']);
+});
+
+const EXERCISE = { reason: 'Quarterly staff exercise, fictional data only.', setAt: '2026-11-19T12:00:00.000Z' };
+const INTERNAL_LABEL = { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] };
+
+test('D-22: the project layer parses strictly', () => {
+  const good = { v: 1, label: INTERNAL_LABEL, mode: 'corporate', exercise: EXERCISE, locked: { canada: true }, regimes: ['EAR'] };
+  const parsed = parseProjectLayer(good, SCALE_PRESETS);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  assert.deepEqual(parsed.value, good);
+  assert.ok(Object.isFrozen(parsed.value));
+  assert.ok(parseProjectLayer({ v: 1 }, SCALE_PRESETS).ok);
+  const refusals: Array<[unknown, string, string]> = [
+    [{ v: 1, colour: 'red' }, 'unknown-field', 'colour'],
+    [{ v: 1, exercise: { ...EXERCISE, reason: '' } }, 'wrong-type', 'exercise.reason'],
+    [{ v: 1, exercise: { reason: 'Drill' } }, 'missing-field', 'exercise.setAt'],
+    [{ v: 1, label: { ...INTERNAL_LABEL, scale: 'unknown-scale' } }, 'not-allowed-here', 'label.scale'],
+    [{ v: 2 }, 'unknown-version', 'v'],
+    [{ v: 1, mode: 'Not A Mode' }, 'wrong-type', 'mode'],
+    [{ v: 1, locked: { residency: true } }, 'unknown-field', 'locked.residency'],
+    [{ v: 1, locked: { canada: 'yes' } }, 'wrong-type', 'locked.canada'],
+    [{ v: 1, regimes: ['XYZ'] }, 'not-allowed-here', 'regimes[0]'],
+    [{ v: 1, regimes: [] }, 'empty-list', 'regimes']
+  ];
+  for (const [value, reason, at] of refusals) {
+    const result = parseProjectLayer(value, SCALE_PRESETS);
+    assert.ok(!result.ok, JSON.stringify(value));
+    assert.equal(result.reason, reason, JSON.stringify(value));
+    assert.equal(result.path, at, JSON.stringify(value));
+  }
+});
+
+function projectOf(value: unknown): ProjectLayer {
+  const parsed = parseProjectLayer(value, SCALE_PRESETS);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  return parsed.value;
+}
+
+test('D-22: the project mode is kept only within the organization\'s allowedModes, the organization\'s locked answers win, and the label and exercise flag are carried', () => {
+  const org = organization((doc) => withSection(doc, 'onboarding', { v: 1, locked: { canada: true } }, 'onboarding@1'));
+  const mine = personal();
+  const project = projectOf({ v: 1, label: INTERNAL_LABEL, mode: 'corporate', exercise: EXERCISE, locked: { canada: false } });
+  const composed = composeLayers({ organization: org, personal: mine, project });
+  assert.deepEqual(composed.project?.label, INTERNAL_LABEL);
+  assert.deepEqual(composed.project?.exercise, EXERCISE);
+  assert.equal(composed.project?.mode, 'corporate', 'no allowedModes exist, so the mode is kept');
+  assert.deepEqual(composed.project?.locked, { canada: true });
+  assert.deepEqual(composed.ignored, [{ key: 'onboarding.locked.canada', layer: 'project', yours: 'false', allowed: 'true' }]);
+  // The project layer never changes the effective policy.
+  assert.deepEqual(plain(composed.effective), plain(composeLayers({ organization: org, personal: mine }).effective));
+  // A locked answer that agrees with your organization's is kept and not listed.
+  const agreeing = composeLayers({ organization: org, personal: mine, project: projectOf({ v: 1, locked: { canada: true } }) });
+  assert.deepEqual(agreeing.ignored, []);
+  // The effective policy's allowedModes decide the mode (people.organization arrives with 41-06; here it is set on the in-memory document).
+  const withModes = Object.freeze({
+    ...mine, people: Object.freeze({ v: 1, organization: Object.freeze({ mode: 'corporate', allowedModes: ['corporate', 'military'], projectMayChoose: true, settings: {} }) })
+  }) as unknown as PolicyDocument;
+  const refusedMode = composeLayers({ personal: withModes, project: projectOf({ v: 1, mode: 'academic' }) });
+  assert.equal(refusedMode.effective, withModes);
+  assert.equal(refusedMode.project?.mode, undefined);
+  assert.deepEqual(refusedMode.ignored, [{ key: 'people.organization.mode', layer: 'project', yours: 'academic', allowed: 'corporate, military' }]);
+  const keptMode = composeLayers({ personal: withModes, project: projectOf({ v: 1, mode: 'military' }) });
+  assert.equal(keptMode.project?.mode, 'military');
+  assert.deepEqual(keptMode.ignored, []);
+});
+
+test('D-60: a project layer may add export regimes and never remove one', () => {
+  const org = organization((doc) => withSection(doc, 'exportControl', EXPORT(['ITAR'], { ITAR: 'empowered-official' }), 'export-control@1'));
+  const composed = composeLayers({ organization: org, personal: personal(), project: projectOf({ v: 1, regimes: ['EAR'] }) });
+  assert.deepEqual(composed.project?.regimes, ['EAR', 'ITAR']);
+  assert.deepEqual(composed.effective.exportControl?.regimes, ['ITAR']);
+  const none = composeLayers({ organization: org, personal: personal(), project: projectOf({ v: 1 }) });
+  assert.deepEqual(none.project?.regimes, ['ITAR']);
+  const refused = parseProjectLayer({ v: 1, regimes: ['ITAR', 'NOFORN'] }, SCALE_PRESETS);
+  assert.ok(!refused.ok);
+  assert.equal(refused.path, 'regimes[1]');
 });
