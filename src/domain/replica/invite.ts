@@ -164,3 +164,8 @@ export function checkJoinRequest(value: unknown, expected: { invite: InvitePaylo
     return refuse('malformed');
   }
 }
+
+// RED stub (31-16 Task 1): replaced by the real derivation in the next commit.
+export function inviteSafetyCode(_invite: InvitePayload, _joiner: { publicKey: string; x25519: string }): string[] {
+  return [];
+}
