@@ -258,7 +258,7 @@ test('the merge gates require the hub check after the relay check, and the workf
   assert.ok(line.includes("'secret-scan', 'relay', 'hub'"), 'CI_CHECKS must list hub right after relay so the merge and tag gates wait for it');
   const page = await readFile(path.join(REPO_ROOT, 'docs', 'development-workflow.md'), 'utf8');
   assert.ok(page.split(/\r?\n/).some((row) => row.startsWith('| `hub` |')), 'the gates table in docs/development-workflow.md has a hub row');
-  assert.match(page, /The eight jobs run \*\*in parallel\*\*/, 'the CI section says eight jobs run in parallel');
+  assert.match(page, /The nine jobs run \*\*in parallel\*\*/, 'the CI section says nine jobs run in parallel');
 });
 
 test('the release check refuses hub files in the VSIX', async () => {
