@@ -13,6 +13,7 @@ import type { SessionRegistry } from '../../src/http/session';
 import { generateKeyFile, readEncryptionKey, readSigningKey } from '../../src/keys';
 import type { RateLimitOptions } from '../../src/limits';
 import type { RosterCache } from '../../src/append/rosterCache';
+import type { EventHub, Scheduler } from '../../src/live/events';
 import { composeHub, sweepBlobsOnce } from '../../src/main';
 import { listen } from '../../src/http/server';
 import { openHubStore } from '../../src/store/hubStore';
@@ -34,6 +35,8 @@ export interface StartOptions {
   now?: number;
   deadlineMs?: number;
   limits?: RateLimitOptions;
+  /** The scheduler of the event streams (32-21): keep-alive comments, stuck readers and presence; real timers when absent. */
+  scheduler?: Scheduler;
 }
 
 export interface OpenedSession {
@@ -52,6 +55,8 @@ export interface Hub {
   sessions: SessionRegistry;
   cache: RosterCache;
   server: https.Server;
+  /** The open event streams (32-21). */
+  events: EventHub;
   /** The injected clock, in milliseconds. */
   now(): number;
   advance(ms: number): void;
@@ -94,6 +99,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     now: () => clock,
     ...(options.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
     ...(options.limits === undefined ? {} : { rateLimits: options.limits }),
+    ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     readAnswer,
     onAccepted: (project, list, rosterChanged) => accepted.push({ project, accepted: list, rosterChanged }),
     onEquivocation: (project, proofs) => equivocations.push({ project, proofs }),
@@ -110,6 +116,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     sessions: composed.sessions,
     cache: composed.cache,
     server: composed.server,
+    events: composed.events,
     now: () => clock,
     advance: (ms) => {
       clock += ms;
@@ -151,6 +158,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     },
     sweep: () => sweepBlobsOnce(store, clock),
     async close() {
+      composed.events.closeAll();
       for (const connection of connections) connection.close();
       composed.sessions.close();
       composed.server.closeAllConnections();

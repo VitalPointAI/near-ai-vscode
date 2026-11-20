@@ -1,5 +1,5 @@
-// The hub's /v1 routes, first half (D-34, D-35, D-36, D-39, D-41, D-44, D-69): session, enrol, heads, append, entries and blobs. Events, presence,
-// checkpoints and join requests extend this table in 32-21, 32-22 and 32-25; the client transport (32-23) speaks exactly these shapes.
+// The hub's /v1 routes (D-34, D-35, D-36, D-37, D-39, D-41, D-44, D-69): session, enrol, heads, append, entries and blobs (32-20), and the event
+// stream (32-21). Checkpoint signing and join requests extend this table in 32-22 and 32-25; the client transport (32-23) speaks exactly these shapes.
 //
 // Wire rules. Every JSON answer is application/json with cache-control no-store. An error is {error: id, message: one plain sentence}, with a
 // reason for session and token refusals, and never echoes the request: no path, no token, no challenge, no body. Request bodies are read with a
@@ -19,10 +19,11 @@ import type { TLSSocket } from 'node:tls';
 import { HASH_PATTERN, STREAM_ID_PATTERN } from '@ext/domain/replica/entry';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
 import { APPEND_REFUSALS, appendBatch } from '../append/checks';
-import type { AppendRefusal } from '../append/checks';
+import type { AppendRefusal, AppendResult } from '../append/checks';
 import type { ProjectRoster, RosterCache } from '../append/rosterCache';
 import { enrolProject } from '../enrol';
 import type { EnrolRefusal, HubIdentity } from '../enrol';
+import { EventHub } from '../live/events';
 import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
 import { StoreError } from '../store/hubStore';
@@ -40,15 +41,17 @@ export interface RouteDeps {
   identity: HubIdentity;
   /** Milliseconds; the clock for buckets, appends, enrolment and uploads. */
   now: () => number;
-  /** Called after COMMIT with the entries the hub now has from an append (no-op until 32-21). */
+  /** The open event streams; a registry of its own when absent. */
+  events?: EventHub;
+  /** Called after COMMIT with the entries the hub now has from an append, after the hub's own events are published. */
   onAccepted?: (project: string, accepted: readonly string[], rosterChanged: boolean) => void;
-  /** Called after COMMIT with the equivocation proofs an append recorded (no-op until 32-21). */
+  /** Called after COMMIT with the equivocation proofs an append recorded, after the hub's own events are published. */
   onEquivocation?: (project: string, proofs: readonly EquivocationProof[]) => void;
   /** A route that failed with 500, by route id and error name only. */
   onFailure?: (route: RouteId, error: unknown) => void;
 }
 
-export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get';
+export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get' | 'events';
 
 export const ROUTE_ERRORS = {
   'not-found': 'There is nothing at this address on the hub.',
@@ -157,6 +160,7 @@ interface RouteEntry {
 /** The handler for the /v1 routes, given to createHubServer. */
 export function createRoutes(deps: RouteDeps): HubHandler {
   const { store, cache, sessions, limits, identity } = deps;
+  const events = deps.events ?? new EventHub();
 
   const addressOf = (req: http.IncomingMessage): string => req.socket.remoteAddress ?? 'unknown';
 
@@ -267,6 +271,7 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     }
     // Answered only now, after COMMIT: everything in accepted is on disk.
     const result = outcome.result;
+    const announce = (): Promise<void> => publishAppend(project, auth.writer, result);
     sendJson(
       res,
       200,
@@ -280,11 +285,52 @@ export function createRoutes(deps: RouteDeps): HubHandler {
       }),
     );
     try {
+      await announce();
+    } catch {
+      // Publishing never changes what the hub stored or answered.
+    }
+    try {
       if (result.accepted.length > 0 || result.rosterChanged) deps.onAccepted?.(project, result.accepted, result.rosterChanged);
       if (result.equivocations.length > 0) deps.onEquivocation?.(project, result.equivocations);
     } catch {
       // A failing hook never changes what the hub stored or answered.
     }
+  };
+
+  /**
+   * After COMMIT: one heads event per stream the batch added entries to, naming the new head of each writer in it, sent to the devices on that
+   * stream's access list at the roster the batch left (read now, never cached), except the device that pushed them.
+   */
+  const publishAppend = async (project: string, pusher: string, result: AppendResult): Promise<void> => {
+    if (result.stored.length === 0) return;
+    const roster = await cache.get(project);
+    const touched = new Map<string, Set<string>>();
+    for (const entry of result.stored) {
+      const writers = touched.get(entry.stream) ?? new Set<string>();
+      writers.add(entry.writer);
+      touched.set(entry.stream, writers);
+    }
+    for (const [stream, writers] of touched) {
+      const access = roster.accessList(stream);
+      if (access === undefined) continue;
+      const heads = [...writers]
+        .sort()
+        .flatMap((writer) => {
+          const head = store.headOf(project, stream, writer);
+          return head === undefined ? [] : [{ writer, seq: head.seq, hash: head.hash }];
+        });
+      if (heads.length === 0) continue;
+      events.publish(project, (writer) => writer !== pusher && access.includes(writer), 'heads', { project, stream, heads });
+    }
+  };
+
+  /** GET /v1/projects/:p/events: the stream stays open on this connection until the device, the roster or the hub ends it. */
+  const eventStream: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    const auth = await authenticate(req, res, project);
+    if (auth === undefined) return;
+    req.resume();
+    events.open(res, { project, writer: auth.writer });
   };
 
   const entries: Handler = async (req, res, params) => {
@@ -392,6 +438,7 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     { path: ['v1', 'projects', ':project', 'heads'], methods: { GET: { id: 'heads', handler: heads } } },
     { path: ['v1', 'projects', ':project', 'append'], methods: { POST: { id: 'append', handler: append } } },
     { path: ['v1', 'projects', ':project', 'entries'], methods: { GET: { id: 'entries', handler: entries } } },
+    { path: ['v1', 'projects', ':project', 'events'], methods: { GET: { id: 'events', handler: eventStream } } },
     { path: ['v1', 'blobs', ':hash'], methods: { PUT: { id: 'blob-put', handler: blobPut }, GET: { id: 'blob-get', handler: blobGet } } },
   ];
 
