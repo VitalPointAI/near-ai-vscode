@@ -24,7 +24,9 @@
 // not shared (Pitfall 8). In a shared project:
 // - replay() reads the products from the fold through the projection (replica/projection.ts), so every reader of replay() (status, list, the
 //   registry, the decision queue, the header tamper check in fileDisagreement) works unchanged on the projected state. One ReplicaProject is kept per
-//   host, so its fold context is reused.
+//   host while its store keeps the same identity (the store folder's device and inode numbers and the roster head this device's mark names), so its
+//   fold context is reused. Before each shared read the identity is compared: Start Again (here or in another window), a folder replaced, or a roster
+//   change another window recorded closes the old project and opens it again; a refused fold drops it too; invalidateShared() forgets it (D-09).
 // - every step that would write today's single-machine ledgers or staff files is refused with SHARED_PROJECT_REFUSAL before any file is touched: a
 //   method with a StaffResult returns it, a method without one throws SharedProjectError. Live multi-user writes arrive in Phase 33.
 // - the reads of the decision log, the wargame ledger, the event log and the logistics files read the files the projection wrote back at their usual
@@ -38,7 +40,7 @@ import { readWhole, snapshotOfBytes, writeIfUnchanged } from './staffFiles';
 import { GUARD_CONFIG_FILE } from '../domain/staff/realEntities';
 import { readRealEntities } from './realEntities';
 import { staffProductPath, staffWriteLimit, staffWriteLimitKinds, writeAllowedBy } from '../domain/staff/writeLimits';
-import { mkdir, readFile, readdir, rename, rm, appendFile, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rename, rm, appendFile, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
@@ -76,13 +78,15 @@ import { checkOrder, deriveFromWargame, parseWargamePhase, wargameTurnEvent } fr
 import type { WargameEntry } from '../domain/staff/wargame';
 import { withFileLock } from '../services/stateMirrorLock';
 import { LogisticsHost, readCalculatorCheck, SharedProjectError, sharedProjectRefusal } from './logisticsHost';
-import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
+import { REPLICA_DIR, REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL } from '../domain/staff/multiUser';
 
 export { SharedProjectError } from './logisticsHost';
 
 // The replica host modules, as types only: they are loaded with import() inside the methods that need them, and only for a shared project.
 type SharedProject = import('./replica/replicaProject').ReplicaProject;
 type SharedProjectDeps = import('./replica/replicaProject').ReplicaProjectDeps;
+/** A shared project this host opened, with the identity its store had (storeIdentity): a different identity means the store changed under it. */
+interface SharedOpened { readonly project: SharedProject; readonly deps: SharedProjectDeps; identity: string }
 
 export const LEDGER_DIR = '.planning/staff/ledger';
 export const LEDGER_FILE = 'products.jsonl';
@@ -384,26 +388,62 @@ export class StaffHost {
     return sharedProjectRefusal(this.options.root);
   }
 
-  private sharedOpen: Promise<{ readonly project: SharedProject; readonly deps: SharedProjectDeps } | { readonly problem: string }> | undefined;
+  private sharedOpen: Promise<SharedOpened | { readonly problem: string }> | undefined;
   private sharedCache: { readonly key: string; readonly context: unknown; readonly replay: LedgerReplay } | undefined;
 
   /**
-   * The shared project of this host, opened once and kept, so its fold context is reused from call to call. The replica modules are loaded here, for a
-   * shared project only. A project that cannot be opened is not kept: the next read tries again.
+   * The identity of this project's store as this host sees it (D-09): the store folder's device and inode numbers ('missing' when it is absent), and
+   * the roster head this device's mark names (null when there is no mark or it names none, 'unreadable' when its value does not parse). Start Again,
+   * here or in another window, moves the folder aside and makes a new one; a folder copied back gets a new inode; another window that folds a roster
+   * change records a new head. It is an identity, not a trust decision: the mark is read, never verified here, and the store verifies it itself when
+   * the project is opened again. Called on the shared path only, so marks.ts is never loaded for a project that is not shared.
    */
-  private openShared(): Promise<{ readonly project: SharedProject; readonly deps: SharedProjectDeps } | { readonly problem: string }> {
+  private async storeIdentity(): Promise<string> {
+    const storeDir = path.join(path.resolve(this.options.root), REPLICA_DIR);
+    let folder: string;
+    try {
+      const info = await lstat(storeDir);
+      folder = `${info.dev}:${info.ino}`;
+    } catch (error) {
+      folder = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
+    }
+    let head: string | null = null;
+    const secrets = this.options.headStore;
+    if (secrets) {
+      try {
+        const { markKey } = await import('./replica/marks');
+        const text = await Promise.resolve(secrets.get(markKey(storeDir)));
+        if (text !== undefined) {
+          const stored = JSON.parse(text) as { signed?: { payload?: { rosterHead?: unknown } } } | null;
+          const value = stored?.signed?.payload?.rosterHead;
+          head = typeof value === 'string' ? value : null;
+        }
+      } catch {
+        head = 'unreadable';
+      }
+    }
+    return JSON.stringify([folder, head]);
+  }
+
+  /**
+   * The shared project of this host, opened once and kept while its store keeps the same identity, so its fold context is reused from call to call.
+   * The replica modules are loaded here, for a shared project only. A project that cannot be opened is not kept: the next read tries again. The
+   * identity is taken before the open, so a change made while it opens is seen by the next read.
+   */
+  private openShared(): Promise<SharedOpened | { readonly problem: string }> {
     if (this.sharedOpen) return this.sharedOpen;
-    const pending = (async () => {
+    const pending = (async (): Promise<SharedOpened | { readonly problem: string }> => {
       const replica = this.options.replica;
       const secrets = this.options.headStore;
       if (!replica || !secrets) return { problem: SHARED_PROJECT_UNAVAILABLE };
+      const identity = await this.storeIdentity();
       const { ReplicaProject } = await import('./replica/replicaProject');
       const { cellOrderHook } = await import('./replica/membership');
       const now = (): Date => new Date(this.now());
       // The cell order the fold checks writes against (D-25), from Phase 70 dominance with this host's clock (carried over from 31-20).
       const deps: SharedProjectDeps = { secrets, globalStorageDir: replica.globalStorageDir, ...(replica.identityDir ? { identityDir: replica.identityDir } : {}), now, cellOrder: cellOrderHook({ now }) };
       const opened = await ReplicaProject.open(this.options.root, deps);
-      if (opened instanceof ReplicaProject) return { project: opened, deps };
+      if (opened instanceof ReplicaProject) return { project: opened, deps, identity };
       return { problem: opened === undefined ? SHARED_PROJECT_UNAVAILABLE : `${SHARED_PROJECT_UNAVAILABLE} ${opened.message}` };
     })().catch((error: unknown) => ({ problem: `${SHARED_PROJECT_UNAVAILABLE} ${error instanceof Error ? error.message : String(error)}` }));
     this.sharedOpen = pending;
@@ -412,15 +452,50 @@ export class StaffHost {
   }
 
   /**
+   * The opened shared project whose store still has the identity it was opened with. When the identity changed (Start Again here or in another
+   * window, the folder replaced, a roster change another window recorded), the old project is closed and the project is opened again (D-09).
+   */
+  private async currentShared(): Promise<{ readonly pending: Promise<SharedOpened | { readonly problem: string }>; readonly opened: SharedOpened | { readonly problem: string } }> {
+    const pending = this.openShared();
+    const opened = await pending;
+    if ('problem' in opened || (await this.storeIdentity()) === opened.identity) return { pending, opened };
+    await this.dropShared(pending);
+    const again = this.openShared();
+    return { pending: again, opened: await again };
+  }
+
+  /**
+   * Forgets the shared project this host opened and its replay cache, so the next read opens the project again, then closes the old project after
+   * the work already asked of it (ReplicaProject.close waits for it). Start Again and Make a Single-Machine Copy call it (D-09); close() goes through
+   * it. A host that opened nothing (a project that is not shared) has nothing to forget and loads nothing.
+   */
+  public async invalidateShared(): Promise<void> {
+    const pending = this.sharedOpen;
+    this.sharedOpen = undefined;
+    this.sharedCache = undefined;
+    if (!pending) return;
+    const opened = await pending;
+    if ('project' in opened) await opened.project.close();
+  }
+
+  /** invalidateShared, only when the opened project is still the one `pending` opened (another read may have opened a new one already). */
+  private async dropShared(pending: Promise<SharedOpened | { readonly problem: string }>): Promise<void> {
+    if (this.sharedOpen === pending) await this.invalidateShared();
+  }
+
+  /**
    * A shared project's products, read from the fold through the projection (projection.ts projectLedgerReplay with the imported-ledger overlay), as
    * today's LedgerReplay. The projection is made again only when the fold or its context changed. A project that cannot be opened or folded shows no
    * product and reads as broken with the reason, so nothing reads as fine and nothing is written.
    */
   private async sharedReplay(): Promise<LedgerReplay> {
-    const opened = await this.openShared();
+    const { pending, opened } = await this.currentShared();
     if ('problem' in opened) return unavailableReplay(opened.problem);
     try {
       const { fold } = await opened.project.state();
+      // state() records the roster head in this device's mark: the identity is taken again, so the host's own mark writes never count as a change
+      // from outside. A change another window makes between the two is still met: the next state() reads it, or is refused and reopens below.
+      opened.identity = await this.storeIdentity();
       const context = opened.project.context();
       const key = `${fold.order.length}|${fold.order[fold.order.length - 1] ?? ''}|${fold.checkpoint ?? ''}|${JSON.stringify(fold.digests)}`;
       if (this.sharedCache && this.sharedCache.key === key && this.sharedCache.context === context) return copyReplay(this.sharedCache.replay);
@@ -430,18 +505,16 @@ export class StaffHost {
       this.sharedCache = { key, context, replay };
       return copyReplay(replay);
     } catch (error) {
+      // A refused fold (the store rolled back, say) drops the project, so the next read opens it again instead of keeping a store object on a
+      // folder that may have been set aside.
+      await this.dropShared(pending);
       return unavailableReplay(`${SHARED_PROJECT_UNAVAILABLE} ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  /** Closes the shared project this host opened, if any (its decode worker). A host of a project that is not shared has nothing to close. */
+  /** Closes the shared project this host opened, if any (its decode worker), through invalidateShared. A host of a project that is not shared has nothing to close. */
   public async close(): Promise<void> {
-    const pending = this.sharedOpen;
-    this.sharedOpen = undefined;
-    this.sharedCache = undefined;
-    if (!pending) return;
-    const opened = await pending;
-    if ('project' in opened) await opened.project.close();
+    await this.invalidateShared();
   }
 
   /** The refusal every single-machine write gives in a shared project, or undefined. Checked before any file is touched. */

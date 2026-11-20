@@ -214,7 +214,7 @@ test('every path under .planning/staff is one of today\'s layouts, and every led
   assert.equal((await world.host.wargameEntries()).length, 1);
 });
 
-test('a host of a project that is not shared answers as today with or without the replica storage, and closing it is a no-op', async () => {
+test('a host of a project that is not shared answers as today with or without the replica storage, and invalidating or closing it is a no-op', async () => {
   const { world } = await runWorkload();
   const plain = new StaffHost({ root: world.root, signer: async () => world.signer, keyStatus: async () => trusting(world.signer), headStore: world.headStore });
   const withStorage = world.host;
@@ -222,6 +222,8 @@ test('a host of a project that is not shared answers as today with or without th
   const strip = (snapshot: Awaited<ReturnType<StaffHost['snapshot']>>) => ({ registry: snapshot.registry, decisions: snapshot.decisions, ledgerProblem: snapshot.ledgerProblem });
   assert.deepEqual(strip(await withStorage.snapshot()), strip(await plain.snapshot()));
   assert.deepEqual(await withStorage.branchLedgerCheck(), await plain.branchLedgerCheck());
+  // Forgetting a shared project it never opened is harmless and loads nothing (32-05, D-09); close() goes through it.
+  await withStorage.invalidateShared();
   await withStorage.close();
   assert.deepEqual(replicaModules(), [], 'still no replica module loaded');
 });
