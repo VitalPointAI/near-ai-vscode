@@ -28,7 +28,8 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/checkpoint',
   'domain/replica/transport',
   'domain/replica/digest',
-  'domain/replica/clientIds'
+  'domain/replica/clientIds',
+  'domain/replica/updateGuard'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }

@@ -44,19 +44,21 @@ test('updates that carry an embed, a format, a map value, a nested type or a Ski
   assert.equal(productOf(result).text, 'text');
 });
 
-test('random bytes, a truncated update and a 40 KB update of 20 000 nested arrays are malformed-update and never throw out of the fold', () => {
+// 31-03: the skim refuses the nested arrays (map value content) as forbidden-content before Yjs decodes them, so they never reach the decoder's stack.
+test('random bytes and a truncated update are malformed-update, a 40 KB update of 20 000 nested arrays is forbidden-content before decoding, and none throws out of the fold', () => {
   assert.deepEqual(inspectUpdate(Uint8Array.from(Array.from({ length: 24 }, () => 255))), { error: 'malformed' });
   const real = localInsert(createLocalDoc(31), 0, 'a longer piece of text to cut');
   assert.deepEqual(inspectUpdate(real.slice(0, real.length - 6)), { error: 'malformed' });
   const nested = nestedArrayUpdate(20_000, 31);
   assert.ok(nested.length > 39_000 && nested.length < 41_000);
-  assert.deepEqual(inspectUpdate(nested), { error: 'malformed' });
+  assert.deepEqual(inspectUpdate(nested), { error: 'forbidden-content' });
   const world = twoWriters();
   const editor = world.editor('W', PRODUCT, 31);
   const register = editor.register();
   const entries = [real.slice(0, real.length - 6), nested, Uint8Array.from(Array.from({ length: 24 }, () => 255))].map((bytes) => world.write('W', { kind: 'doc.update', data: updateData(PRODUCT, bytes) }));
   const result = foldEntries(sealed([register, ...entries]), world.ctx());
-  assert.deepEqual(reasons(result), entries.map((item): [string, string] => [item.hash, 'malformed-update']).sort());
+  const expected = ['malformed-update', 'forbidden-content', 'malformed-update'];
+  assert.deepEqual(reasons(result), entries.map((item, index): [string, string] => [item.hash, expected[index] as string]).sort());
   assert.equal(productOf(result).text, '');
 });
 
