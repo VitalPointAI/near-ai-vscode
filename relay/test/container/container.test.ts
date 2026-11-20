@@ -234,7 +234,18 @@ describe('relay container image and Compose project', { timeout: 1_200_000 }, ()
   test('the .dockerignore is an allow-list that keeps state, secrets, git and planning files out of the build context', () => {
     const lines = readFileSync(path.join(REPO_ROOT, '.dockerignore'), 'utf8').split('\n').map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
     assert.equal(lines[0], '*');
-    assert.deepEqual(lines.slice(1), ['!relay/package.json', '!relay/package-lock.json', '!relay/.npmrc', '!relay/tsconfig.json', '!relay/scripts', '!relay/src']);
+    // The relay's six lines come first, exactly and in order. The hub's lines follow them (Phase 32); the whole exact list, hub and src lines
+    // included, is pinned by hub/test/dockerContext.test.ts, so together the two suites check no less than the old exact list did.
+    assert.deepEqual(lines.slice(1, 7), ['!relay/package.json', '!relay/package-lock.json', '!relay/.npmrc', '!relay/tsconfig.json', '!relay/scripts', '!relay/src']);
+    assert.ok(lines.slice(1).every((line) => line.startsWith('!')), 'after * every line lets a literal path in');
+    for (const line of lines.slice(1)) {
+      const pattern = line.slice(1).replace(/^\/+/, '').replace(/\/+$/, '');
+      assert.doesNotMatch(pattern, /[*?[\\]/, `${line} is not a literal path`);
+      assert.ok(pattern !== '' && pattern !== '.' && !pattern.split('/').includes('..'), `${line} is not a plain path inside the repository`);
+      for (const kept of ['relay/state', 'relay/secrets', '.git', '.planning']) {
+        assert.ok(pattern !== kept && !kept.startsWith(`${pattern}/`) && !pattern.startsWith(`${kept}/`), `${line} lets ${kept} into the build context`);
+      }
+    }
   });
 
   test('Compose config: read-only root, all capabilities dropped, no-new-privileges, uid 65532, loopback publish, /tmp tmpfs, Teams secret', async () => {
