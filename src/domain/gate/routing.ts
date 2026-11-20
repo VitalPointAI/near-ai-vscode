@@ -422,6 +422,38 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.this-computer-only': 'Nothing was sent. This chat has read content at Protected C, a classified level or NATO Confidential or above, which never leaves this computer: no cloud and no other host is accredited for it, whatever your organization\'s policy names. Run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
 });
 
+/**
+ * Route rules Phase 41 names before anything can return them (D-10, D-49, D-51). A rule enters ROUTE_RULES only when decideRoute can reach it, because
+ * gateRouting checks that every ROUTE_RULES id is reached; so the new ids wait here, with their sentences, and every record id list already knows them.
+ * Plan 41-10 moves each into ROUTE_RULES and ROUTE_REFUSALS, sentence unchanged, as decideRoute starts to return it. `route.passport` stays here until
+ * Phase 74.1 (report only, recorded as wouldRefuse). No id is on this list and another route list at once.
+ */
+export const ROUTE_RULES_NAMED_AHEAD = Object.freeze([
+  'route.endpoint-unknown',
+  'route.endpoint-ceiling',
+  'route.endpoint-pin',
+  'route.authorization-missing',
+  'route.residency',
+  'route.passport',
+  'route.accredited-device',
+  'route.clearance',
+  'route.model-not-allowed'
+] as const);
+export type NamedAheadRouteRule = (typeof ROUTE_RULES_NAMED_AHEAD)[number];
+
+/** One plain sentence per named-ahead rule, in ROUTE_REFUSALS' form: nothing was sent, why, and what to do. */
+export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, string>> = Object.freeze({
+  'route.endpoint-unknown': 'Nothing was sent. This AI service is not one your organization\'s rules list as a place this chat\'s content may go. Choose a service your rules list or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.endpoint-ceiling': 'Nothing was sent. Your organization\'s rules do not allow content at this chat\'s label on this AI service. Choose a service your rules allow for this label or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.endpoint-pin': 'Nothing was sent. Content at this level may go to this AI service only over a connection whose certificate your organization\'s rules name, or one proven to end in private hardware, and this connection is neither. Use a model on this computer, ask your organization to name the certificate, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.authorization-missing': 'Nothing was sent. Content at this level may go to this AI service only with a signed approval from a person your organization names, and no approval covers this service. Ask your organization\'s security contact for one, use a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.residency': 'Nothing was sent. Your organization\'s rules keep this content in the regions they name, and this AI service is not shown to run there. Choose a service in one of those regions or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.passport': 'Nothing was sent. Your organization has not approved this model for this use. Choose a model your organization approved for this work, or ask your organization\'s security contact to review this one.',
+  'route.accredited-device': 'Nothing was sent. Your organization\'s rules allow content at this level only on a computer recorded as accredited, and this computer is not. Use an accredited computer, ask your organization\'s security contact about this one, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.model-not-allowed': 'Nothing was sent. This model is not allowed for this work. Choose one of the models allowed for this work, or ask whoever manages those settings to allow this one.'
+});
+
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
 export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window, or run NEAR AI: Show Policy to see whether your policy needs attention.';
 

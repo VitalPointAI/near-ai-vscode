@@ -9,9 +9,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { POLICY_EVENT_IDS } from '../domain/gate/bundle';
 import { LABEL_EVENT_IDS } from '../domain/gate/labels';
-import { ROUTE_EVENT_IDS } from '../domain/gate/routing';
+import { ROUTE_EVENT_IDS, ROUTE_REFUSALS, ROUTE_REFUSALS_NAMED_AHEAD, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD } from '../domain/gate/routing';
 import { GATE_RULE_IDS, RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from '../domain/gate/decide';
-import { buildDecisionRecord, unknownRuleListeners, validateDecisionRecord } from '../domain/gate/record';
+import { POLICY_RECORD_VERSIONS, buildDecisionRecord, isModelRequestRecord, unknownRuleListeners, validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecordInput } from '../domain/gate/record';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import { GATE_DIR_NAME } from '../gate/bundleStore';
@@ -30,9 +30,13 @@ function input(rule: string, extra: Partial<DecisionRecordInput> = {}): Decision
 }
 
 test('the policy events are a list of their own, kept apart from the gate\'s rules, and both are known to a record', () => {
-  assert.deepEqual([...POLICY_EVENT_IDS], ['policy.created', 'policy.renewed', 'policy.reset', 'policy.load', 'policy.edit']);
+  // Phase 41 (D-10) appends seven events, in order, after the base's five.
+  assert.deepEqual([...POLICY_EVENT_IDS], [
+    'policy.created', 'policy.renewed', 'policy.reset', 'policy.load', 'policy.edit', 'policy.enrolled', 'policy.organization-updated',
+    'policy.organization-refused', 'policy.migrated', 'policy.proposal-applied', 'policy.proposal-exported', 'policy.reset-personal'
+  ]);
   for (const event of POLICY_EVENT_IDS) assert.ok(!GATE_RULE_IDS.includes(event), `${event} is an event, not a rule`);
-  assert.deepEqual([...RECORD_RULE_IDS].sort(), [...GATE_RULE_IDS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS, ...ROUTE_EVENT_IDS, RECORD_UNKNOWN_RULE].sort());
+  assert.deepEqual([...RECORD_RULE_IDS].sort(), [...GATE_RULE_IDS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS, ...ROUTE_EVENT_IDS, ...ROUTE_RULES_NAMED_AHEAD, RECORD_UNKNOWN_RULE].sort());
   assert.equal(RECORD_UNKNOWN_RULE, 'record.unknown-rule');
   assert.equal(new Set(RECORD_RULE_IDS).size, RECORD_RULE_IDS.length, 'no id is on both lists');
 });
@@ -50,6 +54,62 @@ test('a record is valid with every known rule, and refused with a rule or an ope
   }
   const strange = validateDecisionRecord({ ...record, api: { ...record.api, operation: 'policy.invented' } });
   assert.equal(strange.ok ? '' : strange.path, 'api.operation');
+});
+
+test('D-10, D-51: every route rule Phase 41 writes is named ahead, on no other list, with a sentence that says nothing was sent', () => {
+  const named = [...ROUTE_RULES_NAMED_AHEAD];
+  for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency', 'route.passport',
+    'route.accredited-device', 'route.clearance', 'route.model-not-allowed']) assert.ok(named.includes(id as never), id);
+  assert.deepEqual(Object.keys(ROUTE_REFUSALS_NAMED_AHEAD).sort(), [...named].sort());
+  const emDash = String.fromCharCode(0x2014);
+  for (const id of named) {
+    assert.ok(!(ROUTE_RULES as readonly string[]).includes(id) && !(ROUTE_EVENT_IDS as readonly string[]).includes(id) && !GATE_RULE_IDS.includes(id), `${id} is only named ahead`);
+    const sentence = ROUTE_REFUSALS_NAMED_AHEAD[id];
+    assert.ok(sentence.startsWith('Nothing was sent. '), id);
+    assert.ok(sentence.length < 400, `${id} is ${String(sentence.length)} characters`);
+    assert.ok(!sentence.includes(emDash), id);
+    for (const word of [/NEAR organization/, /TEE/, /\btier/i, /endpoint/i]) assert.ok(!word.test(sentence), `${id} says ${String(word)}`);
+  }
+  // route.accredited-device is the refusal; route.not-accredited stays the report event (D-34).
+  assert.ok((ROUTE_EVENT_IDS as readonly string[]).includes('route.not-accredited'));
+  assert.equal(new Set(RECORD_RULE_IDS).size, RECORD_RULE_IDS.length);
+});
+
+test('D-10, D-36: a record names its policy version (bundle-2 for a v2 policy, bundle-1 by default) and the report-only rules that would have refused', () => {
+  assert.deepEqual([...POLICY_RECORD_VERSIONS], ['bundle-1', 'bundle-2']);
+  const v1 = buildDecisionRecord(input('policy.load'));
+  assert.equal(v1.authorizations[0]?.policy.version, 'bundle-1');
+  assert.equal(validateDecisionRecord(v1).ok, true);
+  const v2 = buildDecisionRecord(input('policy.load', { policyVersion: 'bundle-2' }));
+  assert.equal(v2.authorizations[0]?.policy.version, 'bundle-2');
+  assert.equal(validateDecisionRecord(v2).ok, true);
+  const short = buildDecisionRecord(input('policy.load', { policyVersion: 'bundle-2', short: true }));
+  assert.equal(short.authorizations[0]?.policy.version, 'bundle-2');
+  const newer = validateDecisionRecord({ ...v1, authorizations: [{ ...v1.authorizations[0]!, policy: { ...v1.authorizations[0]!.policy, version: 'bundle-3' } }] });
+  assert.equal(newer.ok ? '' : `${newer.reason} ${newer.path}`, 'not-allowed-here authorizations[0].policy.version');
+  const reported = buildDecisionRecord(input('route.any-cloud', { capability: { verb: 'infer' } as never, wouldRefuse: ['route.passport', 'route.accredited-device'] }));
+  assert.deepEqual(reported.unmapped.nearAi.wouldRefuse, ['route.accredited-device', 'route.passport'], 'written sorted');
+  assert.equal(validateDecisionRecord(reported).ok, true);
+  assert.equal(validateDecisionRecord(buildDecisionRecord(input('route.any-cloud', { wouldRefuse: ['route.passport'] }))).ok, true);
+  assert.equal(validateDecisionRecord(buildDecisionRecord(input('route.any-cloud', { wouldRefuse: ['route.not-tee'] }))).ok, true, 'a shipped refusing rule');
+  for (const bad of [['route.any-cloud'], ['route.invented'], ['policy.load']]) {
+    const record = validateDecisionRecord(buildDecisionRecord(input('route.any-cloud', { wouldRefuse: bad })));
+    assert.equal(record.ok ? '' : `${record.reason} ${record.path}`, 'not-allowed-here unmapped.nearAi.wouldRefuse[0]', bad[0]);
+  }
+  const notList = validateDecisionRecord({ ...v1, unmapped: { nearAi: { ...v1.unmapped.nearAi, wouldRefuse: 'route.passport' } } });
+  assert.equal(notList.ok ? '' : `${notList.reason} ${notList.path}`, 'wrong-type unmapped.nearAi.wouldRefuse');
+  assert.equal(Object.prototype.hasOwnProperty.call(v1.unmapped.nearAi, 'wouldRefuse'), false, 'absent unless given');
+});
+
+test('D-51: a record whose rule is named ahead is a model-request record and is valid', () => {
+  for (const rule of ROUTE_RULES_NAMED_AHEAD) {
+    const record = buildDecisionRecord(input(rule));
+    assert.equal(record.authorizations[0]?.policy.name, rule);
+    assert.equal(isModelRequestRecord(record), true, rule);
+    assert.equal(validateDecisionRecord(record).ok, true, rule);
+  }
+  assert.equal(isModelRequestRecord(buildDecisionRecord(input('policy.enrolled'))), false);
+  assert.ok(Object.keys(ROUTE_REFUSALS).every((id) => !(ROUTE_RULES_NAMED_AHEAD as readonly string[]).includes(id)));
 });
 
 // PR #74 review round 11: a record with a rule nobody knows is not dropped. It is kept under record.unknown-rule, with the id it was given beside it, so no

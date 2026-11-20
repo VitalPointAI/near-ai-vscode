@@ -28,8 +28,14 @@ export type GateContextName = (typeof GATE_CONTEXTS)[number];
 /**
  * The policy's own events, written to the decision logs as records of their own (the record's rule and operation): the policy was created, renewed, reset
  * by the person, loaded at start, or changed through Edit Policy (`policy.edit`, written from plan 21 on and named here first, D-49). They are events, not rules a decision applies, so they are kept apart from GATE_RULE_IDS; RECORD_RULE_IDS joins both.
+ * Phase 41 (D-10) names seven more, in order: this computer enrolled with your organization; your organization's layer updated; a layer refused (older,
+ * or signed by another key); local hosts read as endpoints; a proposal applied to the personal layer; a proposal exported for your organization; Reset
+ * under an organization layer re-signed the personal layer only.
  */
-export const POLICY_EVENT_IDS = Object.freeze(['policy.created', 'policy.renewed', 'policy.reset', 'policy.load', 'policy.edit'] as const);
+export const POLICY_EVENT_IDS = Object.freeze([
+  'policy.created', 'policy.renewed', 'policy.reset', 'policy.load', 'policy.edit', 'policy.enrolled', 'policy.organization-updated',
+  'policy.organization-refused', 'policy.migrated', 'policy.proposal-applied', 'policy.proposal-exported', 'policy.reset-personal'
+] as const);
 export type PolicyEventId = (typeof POLICY_EVENT_IDS)[number];
 
 /** The label of anything nobody labelled, as a fresh install's policy names it: org Public, whose tier is any-cloud, so nothing changes where it goes (D-24). */

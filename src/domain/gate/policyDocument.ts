@@ -20,8 +20,8 @@ import { parseModelsSection } from './models';
 import type { ModelsSection } from './models';
 import { parsePeopleSection } from '../org/peopleSection';
 import type { PeopleSection } from '../org/peopleSection';
-import { parseAgentsSection, parseLabelsSection, parseReservedSection } from './sections';
-import type { AgentsSection, LabelsSection, ReservedSection } from './sections';
+import { parseAgentsSection, parseLabelsSection, parseLimitsSection, parseOnboardingSection, parseReservedSection, parseResidencySection } from './sections';
+import type { AgentsSection, LabelsSection, LimitsSection, OnboardingSection, ReservedSection, ResidencySection } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 import { MAX_PAYLOAD_BYTES, verifyPayload } from '../team/signedPayload';
@@ -66,7 +66,10 @@ export interface PolicyDocument {
   /** Exceptions, each signed by a named person (D-29); parsed for shape here and verified against one key source by verifyAuthorization (D-15). */
   readonly authorizations?: readonly SignedPayload<AuthorizationBody>[];
   readonly models?: ModelsSection;
+  readonly residency?: ResidencySection;
   readonly people?: PeopleSection;
+  readonly onboarding?: OnboardingSection;
+  readonly limits?: LimitsSection;
   readonly reserved?: ReservedSection;
 }
 
@@ -195,18 +198,31 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     if (!authorizations.ok) return authorizations;
     out['authorizations'] = authorizations.value;
   }
-  for (const name of ['residency', 'onboarding', 'limits', 'exportControl'] as const) {
-    if (has(value, name)) return refused('not-available-yet', childPath(path, name));
-  }
+  if (has(value, 'exportControl')) return refused('not-available-yet', childPath(path, 'exportControl'));
   if (has(value, 'models')) {
     const models = parseModelsSection(ownValue(value, 'models'), scales, childPath(path, 'models'));
     if (!models.ok) return models;
     out['models'] = models.value;
   }
+  if (has(value, 'residency')) {
+    const residency = parseResidencySection(ownValue(value, 'residency'), scales, childPath(path, 'residency'));
+    if (!residency.ok) return residency;
+    out['residency'] = residency.value;
+  }
   if (has(value, 'people')) {
     const people = parsePeopleSection(ownValue(value, 'people'), scales, childPath(path, 'people'));
     if (!people.ok) return people;
     out['people'] = people.value;
+  }
+  if (has(value, 'onboarding')) {
+    const onboarding = parseOnboardingSection(ownValue(value, 'onboarding'), scales, childPath(path, 'onboarding'));
+    if (!onboarding.ok) return onboarding;
+    out['onboarding'] = onboarding.value;
+  }
+  if (has(value, 'limits')) {
+    const limits = parseLimitsSection(ownValue(value, 'limits'), childPath(path, 'limits'));
+    if (!limits.ok) return limits;
+    out['limits'] = limits.value;
   }
   if (has(value, 'reserved')) {
     const reserved = parseReservedSection(ownValue(value, 'reserved'), scales, childPath(path, 'reserved'));

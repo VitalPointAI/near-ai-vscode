@@ -75,7 +75,7 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     ...base,
     layer,
     minClient: '0.4.40',
-    requires: ['agents@1', 'authorizations@1', 'endpoints@1', 'labels@1', 'layers@1', 'models@1', 'people@1'],
+    requires: ['agents@1', 'authorizations@1', 'endpoints@1', 'labels@1', 'layers@1', 'limits@1', 'models@1', 'onboarding@1', 'people@1', 'residency@1'],
     labels: { ...base['labels'], routing: { ...base['labels'].routing, compartments: { ...base['labels'].routing.compartments, PROJECT_X: 'attested-cloud' } } },
     agents: {
       ...base['agents'],
@@ -85,6 +85,24 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     endpoints: fixtureEndpoints(),
     authorizations: fixtureAuthorizations(key),
     models: { v: 1 },
+    residency: { v: 1, required: ['CA', 'EU'], byLevel: { 'ca-protected/Protected B': ['CA'] } },
+    onboarding: {
+      v: 1,
+      contacts: [
+        { topic: 'export-control', name: 'Export control desk', how: 'exports@example.org' },
+        { topic: 'security', name: 'Security desk', how: 'security@example.org' }
+      ],
+      locked: { canada: true },
+      kindsOfWork: ['staff', 'software'],
+      defaultScale: 'ca-protected',
+      discovery: {
+        networks: [{ id: 'head-office', dnsSuffix: 'corp.example.org', gateway: '10.20.0.1' }],
+        announce: false,
+        scanRanges: [{ cidr: '10.20.0.0/24', network: 'head-office' }],
+        personalApprovals: true
+      }
+    },
+    limits: { v: 1, spend: { dailyNanoUsd: 5_000_000_000, vaultHoursPerDay: 8, hubDailyNanoUsd: 50_000_000_000 } },
     people: { v: 1, clearances: base['people'].clearances, signers: [signerEntry(key)] },
     reserved: { v: 1, anchorRoots: [{ root: 'a'.repeat(64), proof: ['b'.repeat(64)] }], statusLists: [{ uri: 'https://status.example.org/list', purpose: 'revocation' }], maxOfflineAge: { 'org/Restricted': 86400 } }
   };

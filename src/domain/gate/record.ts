@@ -10,7 +10,7 @@ import { RECORD_RULE_IDS, RECORD_UNKNOWN_RULE } from './decide';
 import type { ActorRef, GateDecision } from './decide';
 import { LABEL_EVENT_IDS } from './labels';
 import type { Label } from './labels';
-import { ROUTE_EVENT_IDS, ROUTE_RULES } from './routing';
+import { ROUTE_EVENT_IDS, ROUTE_REFUSALS, ROUTE_REFUSALS_NAMED_AHEAD, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD } from './routing';
 import type { ConnectionBindingState } from './routing';
 import { isRecord, ownValue, refused } from './shape';
 import type { Parsed, Refusal } from './shape';
@@ -18,6 +18,13 @@ import { CAPABILITY_VERBS } from './vocabulary';
 import type { Capability } from './vocabulary';
 
 export const RECORD_VERSION = 1;
+
+/**
+ * The policy versions a record may name in `authorizations[].policy.version` (Phase 41 D-10): `bundle-1` while the effective policy is a v1 bundle (the
+ * default, as every record before Phase 41 says), `bundle-2` once it is a v2 document. validateDecisionRecord refuses any other.
+ */
+export const POLICY_RECORD_VERSIONS = Object.freeze(['bundle-1', 'bundle-2'] as const);
+export type PolicyRecordVersion = (typeof POLICY_RECORD_VERSIONS)[number];
 export const OCSF_VERSION = '1.9.0';
 /** API Activity (class 6003) in Application Activity (category 6). The gate's "API" is the use of a capability. */
 export const OCSF_API_ACTIVITY = Object.freeze({ class_uid: 6003, category_uid: 6 } as const);
@@ -106,6 +113,13 @@ export interface DecisionRecordInput {
    * check needs is still there, so the record stays version 1.
    */
   readonly short?: boolean;
+  /** The effective policy's version, `bundle-1` when absent (D-10, D-58). Optional: record version 1. */
+  readonly policyVersion?: PolicyRecordVersion;
+  /**
+   * Route rules that would have refused this request but only report in this version (D-36: `route.passport`, and `route.accredited-device` until your
+   * organization turns it on), written sorted to `unmapped.nearAi.wouldRefuse`. Each must be a refusing route rule. Optional: record version 1.
+   */
+  readonly wouldRefuse?: readonly string[];
 }
 
 /**
@@ -181,6 +195,8 @@ export interface DecisionRecord {
       readonly connection?: ConnectionBindingState;
       readonly outboundCause?: string;
       readonly connectionFallback?: 'unpinned';
+      /** Report-only route rules that would have refused (D-36), sorted. */
+      readonly wouldRefuse?: readonly string[];
     };
   };
 }
@@ -290,8 +306,8 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
     authorizations: [{
       decision: allowed ? 'Allowed' : input.outcome === 'asked' ? 'Observed' : 'Denied',
       policy: input.short === true
-        ? { name: input.rule, version: 'bundle-1', is_applied: true }
-        : { name: input.rule, uid: input.bundleHash, version: 'bundle-1', is_applied: true }
+        ? { name: input.rule, version: input.policyVersion ?? 'bundle-1', is_applied: true }
+        : { name: input.rule, uid: input.bundleHash, version: input.policyVersion ?? 'bundle-1', is_applied: true }
     }],
     src_endpoint: { name: SOURCE_NAME },
     unmapped: {
@@ -308,7 +324,8 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.attestation === undefined ? {} : { attestation: input.attestation }),
         ...(input.connection === undefined ? {} : { connection: input.connection }),
         ...(input.outboundCause === undefined ? {} : { outboundCause: input.outboundCause }),
-        ...(input.connectionFallback === undefined ? {} : { connectionFallback: input.connectionFallback })
+        ...(input.connectionFallback === undefined ? {} : { connectionFallback: input.connectionFallback }),
+        ...(input.wouldRefuse === undefined ? {} : { wouldRefuse: [...input.wouldRefuse].sort() })
       }
     }
   };
@@ -348,7 +365,7 @@ function carriesCredentialArgument(value: unknown): boolean {
 }
 
 /** The rules of a model request's record (the route rules) and of the events about a session's routing: the records the model-request log holds. */
-const MODEL_REQUEST_RULES: ReadonlySet<string> = new Set<string>([...ROUTE_RULES, ...ROUTE_EVENT_IDS]);
+const MODEL_REQUEST_RULES: ReadonlySet<string> = new Set<string>([...ROUTE_RULES, ...ROUTE_EVENT_IDS, ...ROUTE_RULES_NAMED_AHEAD]);
 
 /**
  * Whether a record is about a model request (an infer record, or a route event) rather than a tool call or the policy. Model-request records have a log of
@@ -364,6 +381,13 @@ export function isModelRequestRecord(record: Pick<DecisionRecord, 'authorization
 const RECORD_OPERATIONS: ReadonlySet<string> = new Set<string>([...CAPABILITY_VERBS, ...POLICY_EVENT_IDS, ...LABEL_EVENT_IDS]);
 const RECORD_RULES: ReadonlySet<string> = new Set(RECORD_RULE_IDS);
 
+/** The rules a wouldRefuse list may name: refusing route rules, shipped or named ahead (D-36). */
+const WOULD_REFUSE_RULES: ReadonlySet<string> = new Set<string>([...Object.keys(ROUTE_REFUSALS), ...Object.keys(ROUTE_REFUSALS_NAMED_AHEAD)]);
+const POLICY_VERSIONS: ReadonlySet<string> = new Set<string>(POLICY_RECORD_VERSIONS);
+// Field paths are joined at run time: the record id scan reads any quoted text that starts with a rule namespace as a rule id.
+const VERSION_FIELD = ['policy', 'version'].join('.');
+const WOULD_REFUSE_FIELD = ['unmapped', 'nearAi', 'wouldRefuse'].join('.');
+
 /** Every rule a record carries is one of RECORD_RULE_IDS, and its operation is a verb, a policy event or a label event, so no writer can put an id nobody knows on file. */
 function idsKnown(value: Record<string, unknown>): Refusal | undefined {
   const authorizations = value.authorizations;
@@ -371,6 +395,15 @@ function idsKnown(value: Record<string, unknown>): Refusal | undefined {
   for (const [index, entry] of authorizations.entries()) {
     const rule = readPath(entry, 'policy.name');
     if (typeof rule !== 'string' || !RECORD_RULES.has(rule)) return refused('not-allowed-here', `authorizations[${index}].policy.name`);
+    const version = readPath(entry, VERSION_FIELD);
+    if (typeof version !== 'string' || !POLICY_VERSIONS.has(version)) return refused('not-allowed-here', `authorizations[${index}].${VERSION_FIELD}`);
+  }
+  const wouldRefuse = readPath(value, WOULD_REFUSE_FIELD);
+  if (wouldRefuse !== undefined) {
+    if (!Array.isArray(wouldRefuse)) return refused('wrong-type', WOULD_REFUSE_FIELD);
+    for (const [index, id] of wouldRefuse.entries()) {
+      if (typeof id !== 'string' || !WOULD_REFUSE_RULES.has(id)) return refused('not-allowed-here', `${WOULD_REFUSE_FIELD}[${index}]`);
+    }
   }
   const operation = readPath(value, 'api.operation');
   if (typeof operation !== 'string' || !RECORD_OPERATIONS.has(operation)) return refused('not-allowed-here', 'api.operation');

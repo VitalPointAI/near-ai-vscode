@@ -12,6 +12,9 @@ import { bundleViewOf, documentFromBundle, minClientOf, parsePolicyDocument, ver
 import type { PolicyDocument, PolicyLayerState } from '../domain/gate/policyDocument';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { parsePeopleSection } from '../domain/org/peopleSection';
+import {
+  CONTACT_TOPICS, KINDS_OF_WORK, LOCKABLE_ANSWERS, RESIDENCY_REGIONS, parseContacts, parseLimitsSection, parseOnboardingSection, parseResidencySection
+} from '../domain/gate/sections';
 import { signPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { FIXED_NOW, activeKeys, deviceKey, fullDocumentFor, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
@@ -247,4 +250,146 @@ test('no failure sentence used for v2 has an em-dash or names a NEAR organizatio
     assert.ok(!sentence.includes(EM_DASH), sentence);
     assert.ok(!/NEAR organization/.test(sentence), sentence);
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Residency, onboarding and limits (D-08, D-28, D-33, D-63)
+
+function sectionReason(parsed: { ok: boolean; reason?: string; path?: string }): string {
+  return parsed.ok ? 'ok' : `${String(parsed.reason)} ${String(parsed.path)}`;
+}
+
+test('D-33: residency names CA, EU or US, sorted and unique, for every request and per level; unstated never satisfies, so it is refused', () => {
+  const r = (value: unknown): string => sectionReason(parseResidencySection(value, SCALE_PRESETS));
+  assert.deepEqual([...RESIDENCY_REGIONS], ['CA', 'EU', 'US']);
+  assert.equal(r({ v: 1 }), 'ok');
+  assert.equal(r({ v: 1, required: ['CA'] }), 'ok');
+  assert.equal(r({ v: 1, required: ['CA', 'EU', 'US'], byLevel: { 'ca-protected/Protected A': ['CA', 'EU'], 'org/Internal': ['CA'] } }), 'ok');
+  assert.equal(r({ v: 1, required: ['unstated'] }), 'not-allowed-here residency.required[0]');
+  assert.equal(r({ v: 1, required: ['ca'] }), 'not-allowed-here residency.required[0]');
+  assert.equal(r({ v: 1, required: 'CA' }), 'wrong-type residency.required');
+  assert.equal(r({ v: 1, required: [] }), 'empty-list residency.required');
+  assert.equal(r({ v: 1, required: ['EU', 'CA'] }), 'not-sorted residency.required[1]');
+  assert.equal(r({ v: 1, required: ['CA', 'CA'] }), 'duplicate residency.required[1]');
+  assert.equal(r({ v: 1, byLevel: { 'org/Secret': ['CA'] } }), 'unknown-field residency.byLevel.org?Secret', 'paths show a slash as ?');
+  assert.equal(r({ v: 1, byLevel: { 'org/Internal': ['unstated'] } }), 'not-allowed-here residency.byLevel.org?Internal[0]');
+  assert.equal(r({ v: 1, everywhere: true }), 'unknown-field residency.everywhere');
+  assert.equal(r({ v: 2 }), 'unknown-version residency.v');
+  const parsed = parseResidencySection({ v: 1, byLevel: { 'org/Internal': ['CA'], 'ca-protected/Protected A': ['EU'] } }, SCALE_PRESETS);
+  assert.ok(parsed.ok && Object.isFrozen(parsed.value.byLevel));
+  if (parsed.ok) assert.deepEqual(Object.keys(parsed.value.byLevel ?? {}), ['ca-protected/Protected A', 'org/Internal'], 'stored in key order');
+});
+
+test('D-28, D-63: onboarding fills contacts [], locked {} and all five kinds of work; discovery, when present, fills announce true and personalApprovals false', () => {
+  const o = (value: unknown): string => sectionReason(parseOnboardingSection(value, SCALE_PRESETS));
+  const filled = parseOnboardingSection({ v: 1 }, SCALE_PRESETS);
+  assert.ok(filled.ok);
+  if (filled.ok) {
+    assert.deepEqual(filled.value, { v: 1, contacts: [], locked: {}, kindsOfWork: [...KINDS_OF_WORK] });
+    assert.equal(filled.value.discovery, undefined);
+  }
+  const discovery = parseOnboardingSection({ v: 1, discovery: {} }, SCALE_PRESETS);
+  assert.ok(discovery.ok);
+  if (discovery.ok) assert.deepEqual(discovery.value.discovery, { networks: [], announce: true, scanRanges: [], personalApprovals: false });
+  assert.deepEqual([...CONTACT_TOPICS], ['security', 'privacy', 'contract-security', 'it', 'export-control']);
+  assert.deepEqual([...LOCKABLE_ANSWERS], ['canada']);
+  assert.equal(o({ v: 1, locked: { canada: true } }), 'ok');
+  assert.equal(o({ v: 1, locked: { canada: 'yes' } }), 'wrong-type onboarding.locked.canada');
+  assert.equal(o({ v: 1, locked: { europe: true } }), 'unknown-field onboarding.locked.europe');
+  assert.equal(o({ v: 1, kindsOfWork: ['writing', 'software'] }), 'ok', 'the order is the order offered');
+  assert.equal(o({ v: 1, kindsOfWork: [] }), 'empty-list onboarding.kindsOfWork');
+  assert.equal(o({ v: 1, kindsOfWork: ['software', 'software'] }), 'duplicate onboarding.kindsOfWork[1]');
+  assert.equal(o({ v: 1, kindsOfWork: ['gaming'] }), 'not-allowed-here onboarding.kindsOfWork[0]');
+  assert.equal(o({ v: 1, defaultScale: 'ca-protected' }), 'ok');
+  assert.equal(o({ v: 1, defaultScale: 'planet' }), 'not-allowed-here onboarding.defaultScale');
+  assert.equal(o({ v: 1, roles: ['software'] }), 'unknown-field onboarding.roles');
+});
+
+test('D-63: contacts hold at most eight { topic, name, how }, sorted by topic then name; export-control is a topic, an unknown one is refused', () => {
+  const c = (value: unknown): string => sectionReason(parseContacts(value));
+  const contact = (topic: string, name = 'Desk', how = 'desk@example.org'): Record<string, string> => ({ topic, name, how });
+  assert.equal(c([contact('export-control', 'Export control desk'), contact('security')]), 'ok');
+  assert.equal(c([contact('security'), contact('export-control')]), 'not-sorted contacts[1]');
+  assert.equal(c([contact('security'), contact('security')]), 'duplicate contacts[1]');
+  assert.equal(c([contact('legal')]), 'not-allowed-here contacts[0].topic');
+  assert.equal(c([contact('security', '')]), 'wrong-type contacts[0].name');
+  assert.equal(c([contact('security', 'Desk', 'x'.repeat(201))]), 'wrong-type contacts[0].how');
+  assert.equal(c([{ ...contact('security'), email: 'x' }]), 'unknown-field contacts[0].email');
+  const eight = Array.from({ length: 8 }, (_, index) => contact('security', `Desk ${String(index)}`));
+  assert.equal(c(eight), 'ok');
+  assert.equal(c([...eight, contact('security', 'Desk 8')]), 'not-allowed-here contacts');
+});
+
+test('D-28: discovery networks are named by a gateway or a DNS suffix, scan ranges are IPv4 /16 to /32 on a listed network', () => {
+  const d = (discovery: unknown): string => sectionReason(parseOnboardingSection({ v: 1, discovery }, SCALE_PRESETS));
+  const office = { id: 'head-office', gateway: '10.20.0.1' };
+  assert.equal(d({ networks: [office], scanRanges: [{ cidr: '10.20.0.0/24', network: 'head-office' }] }), 'ok');
+  assert.equal(d({ networks: [{ id: 'branch', dnsSuffix: 'branch.example.org' }] }), 'ok');
+  assert.equal(d({ networks: [{ id: 'nowhere' }] }), 'missing-field onboarding.discovery.networks[0].gateway');
+  assert.equal(d({ networks: [{ id: 'x', gateway: '10.20.0.256' }] }), 'wrong-type onboarding.discovery.networks[0].gateway');
+  assert.equal(d({ networks: [{ id: 'x', dnsSuffix: 'Upper.example.org' }] }), 'wrong-type onboarding.discovery.networks[0].dnsSuffix');
+  assert.equal(d({ networks: [{ id: 'b', gateway: '10.0.0.1' }, { id: 'a', gateway: '10.0.0.2' }] }), 'not-sorted onboarding.discovery.networks[1]');
+  assert.equal(d({ networks: Array.from({ length: 17 }, (_, i) => ({ id: `n${String(i).padStart(2, '0')}`, gateway: '10.0.0.1' })) }), 'not-allowed-here onboarding.discovery.networks');
+  assert.equal(d({ scanRanges: [{ cidr: '10.0.0.0/8' }] }), 'not-allowed-here onboarding.discovery.scanRanges[0].cidr');
+  assert.equal(d({ scanRanges: [{ cidr: '10.0.0.0/16' }, { cidr: '10.0.1.7/32' }] }), 'ok');
+  assert.equal(d({ scanRanges: [{ cidr: 'example.org/24' }] }), 'wrong-type onboarding.discovery.scanRanges[0].cidr');
+  assert.equal(d({ scanRanges: [{ cidr: '10.0.0.0/24', network: 'unlisted' }] }), 'not-allowed-here onboarding.discovery.scanRanges[0].network');
+  assert.equal(d({ scanRanges: Array.from({ length: 33 }, (_, i) => ({ cidr: `10.0.${String(i)}.0/24` })) }), 'not-allowed-here onboarding.discovery.scanRanges');
+  assert.equal(d({ announce: 'yes' }), 'wrong-type onboarding.discovery.announce');
+  assert.equal(d({ personalApprovals: 1 }), 'wrong-type onboarding.discovery.personalApprovals');
+  assert.equal(d({ hosts: [] }), 'unknown-field onboarding.discovery.hosts');
+});
+
+test('D-08: limits are whole numbers with the unit in the key; vaultHoursPerDay is 0 to 24; a fraction or trainingTargets is refused', () => {
+  const l = (value: unknown): string => sectionReason(parseLimitsSection(value));
+  assert.equal(l({ v: 1 }), 'ok');
+  assert.equal(l({ v: 1, spend: { dailyNanoUsd: 5_000_000_000, vaultHoursPerDay: 24, hubDailyNanoUsd: 0 } }), 'ok');
+  assert.equal(l({ v: 1, spend: { vaultHoursPerDay: 25 } }), 'not-allowed-here limits.spend.vaultHoursPerDay');
+  assert.equal(l({ v: 1, spend: { dailyNanoUsd: 12.5 } }), 'wrong-type limits.spend.dailyNanoUsd');
+  assert.equal(l({ v: 1, spend: { dailyUsd: 5 } }), 'unknown-field limits.spend.dailyUsd');
+  assert.equal(l({ v: 1, trainingTargets: [] }), 'unknown-field limits.trainingTargets');
+  assert.equal(l({ v: 1, spend: [] }), 'wrong-type limits.spend');
+  // Through the document, a fraction anywhere is refused before the section is read.
+  const doc = v2((d) => { d.limits = { v: 1, spend: { dailyNanoUsd: 12.5 } }; d.requires = ['agents@1', 'labels@1', 'layers@1', 'limits@1', 'people@1']; });
+  assert.equal(reasonOf(doc), 'wrong-type');
+});
+
+test('every section: the full document round-trips, and each section without its feature in requires is malformed', () => {
+  const key = issuerKey();
+  const full = fullDocumentFor(key) as Loose;
+  const parsed = parsePolicyDocument(full);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  if (!parsed.ok) return;
+  for (const section of POLICY_SECTIONS) {
+    if (section === 'exportControl') continue; // TASK5
+    assert.ok(Object.prototype.hasOwnProperty.call(parsed.value, section), `the full document has ${section}`);
+  }
+  for (const section of POLICY_SECTIONS) {
+    const feature = featureForSection(section);
+    if (feature === undefined || feature === 'labels@1' || feature === 'agents@1' || feature === 'export-control@1') continue; // TASK5
+    const without = plain(full);
+    without.requires = without.requires.filter((id: string) => id !== feature);
+    assert.equal(failureOf(without), 'malformed', section);
+  }
+  const again = parsePolicyDocument(plain(parsed.value));
+  assert.ok(again.ok);
+  if (again.ok) assert.deepEqual(again.value, parsed.value);
+});
+
+test('residency, onboarding and limits are read in the document at their own paths', () => {
+  const with3 = (edit: (d: Loose) => void): Loose => v2((d) => {
+    d.requires = ['agents@1', 'labels@1', 'layers@1', 'limits@1', 'onboarding@1', 'people@1', 'residency@1'];
+    d.residency = { v: 1, required: ['CA'] };
+    d.onboarding = { v: 1 };
+    d.limits = { v: 1 };
+    edit(d);
+  });
+  const ok = parsePolicyDocument(with3(() => undefined));
+  assert.ok(ok.ok, ok.ok ? '' : ok.message);
+  if (ok.ok) assert.deepEqual(ok.value.onboarding?.kindsOfWork, [...KINDS_OF_WORK]);
+  const at = (edit: (d: Loose) => void): string => { const parsed = parsePolicyDocument(with3(edit)); return parsed.ok ? 'ok' : `${parsed.reason} ${parsed.path}`; };
+  assert.equal(at((d) => { d.residency.required = ['unstated']; }), 'not-allowed-here residency.required[0]');
+  assert.equal(at((d) => { d.onboarding.contacts = Array.from({ length: 9 }, (_, i) => ({ topic: 'it', name: `Desk ${String(i)}`, how: 'it@example.org' })); }), 'not-allowed-here onboarding.contacts');
+  assert.equal(at((d) => { d.limits.spend = { vaultHoursPerDay: 25 }; }), 'not-allowed-here limits.spend.vaultHoursPerDay');
+  assert.equal(at((d) => { d.onboarding.v = 2; }), 'unknown-version onboarding.v');
 });
