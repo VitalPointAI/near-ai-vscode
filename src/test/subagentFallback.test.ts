@@ -219,6 +219,10 @@ test('pacing: while a model answers 429, its concurrent requests go at most a fe
   const drain = async (stream: AsyncGenerator<CompletionEvent>) => { for await (const _event of stream) { /* to the end */ } };
   await assert.rejects(() => drain(client.streamCompletion(GLM, [{ role: 'user', content: 'a' }], [])), (error: NearAiError) => error.status === 429);
   assert.ok(client.isPaced(GLM));
+  // The 30 ms cooldown ends first (a real timer can wake a little early, and a request then gets the client's local 429 by design); the model stays paced.
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(client.cooldownRemainingMs(GLM), 0);
+  assert.ok(client.isPaced(GLM), 'paced well after the cooldown');
   await Promise.all([0, 1, 2, 3, 4, 5].map((index) => drain(client.streamCompletion(GLM, [{ role: 'user', content: String(index) }], []))));
   assert.ok(most <= PACED_CONCURRENCY, `${most} requests to one paced model at once`);
   assert.equal(inFlight, 0);
