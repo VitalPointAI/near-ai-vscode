@@ -281,7 +281,7 @@ Plans:
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
 **Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 32.1 (mode table and `term()`).
 **Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
-**Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08
+**Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (defined in `.planning/research/portfolio-and-assignment/DESIGN.md`; added to REQUIREMENTS.md when Phase 33.1 is planned)
 **Success Criteria** (what must be TRUE):
   1. A J1 delegate posts a person to "Watch Officer, night" from 1 December; the person proves their computer by safety code, sees no Decline, and reports for duty on 1 December; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
   2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
@@ -749,6 +749,7 @@ Plans:
 **Goal**: An agent can never hold more than it was delegated: every person, agent and machine acts under its own standard DID, authority, clearance, roles and compartments are signed credentials that can be revoked, a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.
 **Depends on**: Phase 70 (and Phase 69's signer and key status)
 **Requirements**: DLGT-01, DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07
+**From the portfolio design (2026-11-20)**: positions and portfolio publishers become verified credentials here, so a posting and a publication can be checked against a person's credential, not only the device key (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
 **Builds on Phase 69 (unchanged, executing)**: the payload signer accepts any Ed25519 signer object (69 D-20) and every check honours one key-status lookup (69 D-09, D-21). The `eddsa-jcs-2022` proof is a second proof format beside Phase 69's signed-payload envelope, using the same signer object, the same raw key and the same canonical JSON, so there is still one signer (69 D-10); the envelope keeps signing policy bundles and approval answers, its `grant` purpose stays reserved, and grants become delegation credentials. Phase 69's device key becomes the device's `did:key` with no key change; 69 D-06's wording about a `did:near` identity is superseded by decision 10; 69-CONTEXT.md D-06 carries a note saying so. Phase 69's build is unaffected: it creates the Ed25519 device key that becomes a `did:key`.
 **Research step (first, before the other plans are written)**: (a) JCS conformance: run the existing canonical JSON and our `eddsa-jcs-2022` signing input against the W3C test vectors and Digital Bazaar's cryptosuite, confirm the integer-only subset equals RFC 8785 for every input the profile allows (research risk 12), and confirm a Data Integrity signing input (two SHA-256 digests) can never equal a Phase 69 signed-payload or team-event input. (b) `did:webvh` hosting and caching: until HQ hosts logs (L4), where people's and your organization's logs live and how they travel (candidates: beside the policy bundle, or over Phase 69's coordination transport); how a log verifies from a cached copy and resumes from cached verified state; the SCID and domain in the identifier; pre-rotation with an offline root key; witnesses. (c) Status list sizing: the 131,072-entry minimum, compressed size, random index allocation, lists per issuer, `validUntil` and cache lifetime, and how a solo install publishes and refreshes its own list.
 **Success Criteria** (what must be TRUE):
@@ -1201,6 +1202,7 @@ Plans:
 **Goal**: Adding a new source takes a few clicks, and agents can write new connectors safely.
 **Depends on**: Phase 88; Phases 72 and 73. May start any time after Phase 92 if capacity allows.
 **Requirements**: DATA-27, DATA-28, DATA-29, DATA-30, DATA-31, DATA-32
+**From the portfolio design (2026-11-20)**: financial, procurement and schedule sources feed the portfolio's publications (Phases 38 to 40) as released, labelled items, never as raw cross-unit access (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
 **Success Criteria** (what must be TRUE):
   1. An agent writes a connector for a REST source that passes conformance and runs after one approval. (DATA-28, DATA-29, DATA-30)
   2. A connector that tries an undeclared host is blocked and recorded. (DATA-29)
