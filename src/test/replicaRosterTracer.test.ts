@@ -96,8 +96,10 @@ test('15.1 invited -> join-requested: the joining device reads the invite file a
   assert.equal(tamperedCheck.ok ? 'ok' : tamperedCheck.reason, 'bad-signature');
   const late = readInvite(joined.inviteFile, new Date('2026-11-27T00:00:00.000Z'));
   assert.equal(late.ok ? 'ok' : late.reason, 'invite-expired');
-  // The roster carries only the hash of the secret, never the secret.
-  assert.ok(!JSON.stringify(world.entries).includes(secret));
+  // The roster carries only the hash of the secret, never the secret: read the opened invite entry through the lead's roster fold.
+  const record = world.foldRoster().members.invites.get(INVITE_ID);
+  assert.equal(record?.secretHash, joinSecretHash(secret));
+  assert.ok(!JSON.stringify(record).includes(secret));
 });
 
 test('both sides compute the same six-word safety code from the invite and the request, and the secret is not an input', () => {
