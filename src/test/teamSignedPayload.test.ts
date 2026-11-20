@@ -509,25 +509,29 @@ test('a key record made of keys and hashes in the shapes the history writes is n
   }
 });
 
+// Every exempt path of the Phase 31 purposes (GENERATED_PATHS in signedPayload.ts): the purpose, a payload with the value at that path, and the path.
+const GENERATED_FIELD_CASES: ReadonlyArray<[PayloadPurpose, (value: string) => unknown, string]> = [
+  ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: value, wraps: [] }), '$.labelSealed'],
+  ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: '', wraps: [{ writer: 'w', wrap: 'x' }, { writer: 'v', wrap: value }] }), '$.wraps[1].wrap'],
+  ['staff-invite', (value) => ({ invite: 'i', secret: value }), '$.secret'],
+  ['staff-invite', (value) => ({ invite: 'i', lead: { member: 'm', x25519: value } }), '$.lead.x25519'],
+  ['staff-join-request', (value) => ({ invite: 'i', x25519: value }), '$.x25519'],
+  ['staff-join-request', (value) => ({ invite: 'i', x25519Sig: value }), '$.x25519Sig'],
+  ['staff-join-request', (value) => ({ invite: 'i', mac: value }), '$.mac']
+];
+/** A path as a regular expression that matches it literally. */
+const pathPattern = (where: string): RegExp => new RegExp(`secret-like value at ${where.replace(/[$.[\]]/g, '\\$&')}`);
+
 test('generated random fields of the Phase 31 purposes are not mistaken for tokens, and nothing else is let through', () => {
   const agent = agentSigner();
   // Random base64url that happens to contain a token shape: the chance match that made grants, admissions and rekeys fail at random.
   const lookalike = `${randomBytes(9).toString('base64url')}-rt_${randomBytes(12).toString('base64url')}`;
   const pkcs8 = `MC4CAQAwBQYDK2VwBCIEI${randomBytes(24).toString('base64url')}`;
-  const cases: Array<[PayloadPurpose, (value: string) => unknown, string]> = [
-    ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: value, wraps: [] }), '$.labelSealed'],
-    ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: '', wraps: [{ writer: 'w', wrap: 'x' }, { writer: 'v', wrap: value }] }), '$.wraps[1].wrap'],
-    ['staff-invite', (value) => ({ invite: 'i', secret: value }), '$.secret'],
-    ['staff-invite', (value) => ({ invite: 'i', lead: { member: 'm', x25519: value } }), '$.lead.x25519'],
-    ['staff-join-request', (value) => ({ invite: 'i', x25519: value }), '$.x25519'],
-    ['staff-join-request', (value) => ({ invite: 'i', x25519Sig: value }), '$.x25519Sig'],
-    ['staff-join-request', (value) => ({ invite: 'i', mac: value }), '$.mac']
-  ];
-  for (const [purpose, build, where] of cases) {
+  for (const [purpose, build, where] of GENERATED_FIELD_CASES) {
     // At its own path the random value signs.
     assert.equal(failure(verifyPayload(signPayload(agent, purpose, build(lookalike)), { purpose, status: ACTIVE(agent) })), 'ok', `${purpose} ${where}`);
     // Private key material at the same path is still refused.
-    throwsPlain(() => signPayload(agent, purpose, build(pkcs8)), new RegExp(`secret-like value at ${where.replace(/[$.[\]]/g, '\\$&')}`));
+    throwsPlain(() => signPayload(agent, purpose, build(pkcs8)), pathPattern(where));
     // Text that is not pure base64url at the same path gets the full check.
     throwsPlain(() => signPayload(agent, purpose, build(`bearer ${lookalike}`)), /secret-like value/);
     // The same random value under another purpose, or in another field of the same purpose, is still refused.
@@ -536,4 +540,27 @@ test('generated random fields of the Phase 31 purposes are not mistaken for toke
   throwsPlain(() => signPayload(agent, 'staff-cell-grant', { cell: 'c', labelSealed: '', wraps: [], note: lookalike }), /secret-like value at \$\.note/);
   throwsPlain(() => signPayload(agent, 'staff-invite', { invite: 'i', name: lookalike }), /secret-like value at \$\.name/);
   throwsPlain(() => signPayload(agent, 'staff-join-request', { invite: 'i', wraps: [{ wrap: lookalike }] }), /secret-like value/);
+});
+
+// D-11 (PR #130 review): the test above uses a lookalike. Here the random field holds a real token shape, built from parts at run time so no
+// token-shaped literal is in the source: a GitHub-style token (the prefix, then 36 letters and digits) and an OpenAI-style key (the prefix, then
+// 48 base64url characters). Both are pure base64url, so the exemption lets them through at the exempt paths and nowhere else.
+test('real token shapes in a generated random field sign at every exempt path, and are refused with the path named anywhere else', () => {
+  const agent = agentSigner();
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const alnum = `${letters}0123456789`;
+  const randomFrom = (alphabet: string, length: number): string => Array.from(randomBytes(length), (byte) => alphabet[byte % alphabet.length]).join('');
+  const github = ['g', 'h', 'p', '_'].join('') + randomFrom(alnum, 36);
+  const openai = ['s', 'k', '-'].join('') + randomFrom(`${alnum}-_`, 48);
+  for (const token of [github, openai]) {
+    assert.match(token, /^[A-Za-z0-9_-]+$/, 'the shape is pure base64url');
+    // Guard: the shape is a real token to the detector. In a plain field of a purpose with no exempt paths it is refused.
+    throwsPlain(() => signPayload(agent, 'grant', { capability: 'read', note: token }), /secret-like value/);
+    for (const [purpose, build, where] of GENERATED_FIELD_CASES) {
+      assert.equal(failure(verifyPayload(signPayload(agent, purpose, build(token)), { purpose, status: ACTIVE(agent) })), 'ok', `${purpose} ${where}`);
+    }
+    // The same shape at a field of the same purposes that is not exempt is refused, with that path named.
+    throwsPlain(() => signPayload(agent, 'staff-invite', { invite: 'i', name: token }), pathPattern('$.name'));
+    throwsPlain(() => signPayload(agent, 'staff-cell-grant', { cell: 'c', labelSealed: '', wraps: [], note: token }), pathPattern('$.note'));
+  }
 });
