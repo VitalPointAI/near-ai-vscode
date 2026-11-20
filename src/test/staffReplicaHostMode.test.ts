@@ -433,7 +433,7 @@ test('a replica project file that cannot be checked (a stat error other than its
   const outside = (): Array<[string, string]> => [...staffTree(env.root, 'replica')].sort();
   const files = outside();
   const proposed = await host.propose(caller(env.root), { product: ANNEX, kind: 'annex' });
-  assert.deepEqual([proposed.ok, proposed.message], [false, expected]);
+  assert.deepEqual([proposed.ok, proposed.ok ? '' : proposed.message], [false, expected]);
   assert.deepEqual(await host.branchLedgerCheck(), { kind: 'broken', message: expected });
   await assert.rejects(() => host.setAsideLedger(), (error: unknown) => error instanceof SharedProjectError && error.message === expected && error.refusal === expected);
   const logistics = host.logistics();
