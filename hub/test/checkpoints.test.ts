@@ -609,6 +609,74 @@ test('trimmed: granted streams past the size limit are dropped from the end of s
     assert.deepEqual(recomputeCheckpoint(payloadOf(signed), mine.open()), { ok: true, mismatches: [] });
   }));
 
+test('WR-05 bounded: the signer keeps only its latest checkpoint in memory, and neither an ask nor a hand-back reads every kept checkpoint again', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    for (let round = 0; round < 4; round += 1) {
+      await append(hub, world, analyst, [note(world, analyst)]);
+      await advance(hub, scheduler, MIN_GAP_MS);
+      await ask(hub, world, analyst);
+      await settle(hub);
+    }
+    const kept = stored(hub, world.project);
+    assert.equal(kept.length, 4);
+
+    const store = hub.store;
+    const readAll = store.checkpoints.bind(store);
+    let fullReads = 0;
+    store.checkpoints = (project: string) => {
+      fullReads += 1;
+      return readAll(project);
+    };
+    try {
+      for (let index = 0; index < 3; index += 1) {
+        await advance(hub, scheduler, ASK_GAP_MS);
+        await ask(hub, world, analyst);
+        await settle(hub);
+      }
+      // Handing back checkpoints the hub already keeps places nothing and reads no other checkpoint either.
+      assert.equal((await ask(hub, world, analyst, [kept[0] as SignedCheckpoint, kept[3] as SignedCheckpoint])).kept, 0);
+      await settle(hub);
+      assert.equal(fullReads, 0, 'an ask or a hand-back read every kept checkpoint again');
+    } finally {
+      store.checkpoints = readAll;
+    }
+    assert.equal(hub.checkpoints?.keptInMemory(world.project), 1, 'every signed checkpoint is still held in memory');
+
+    // Signing goes on and nests after the latest, still holding one checkpoint.
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    const after = stored(hub, world.project);
+    assert.equal(after.length, 5);
+    assert.equal(hub.checkpoints?.keptInMemory(world.project), 1);
+    assert.equal(hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict' || line.event === 'checkpoint.waiting').length, 0);
+    const entries = client(world).open();
+    assert.deepEqual(recomputeCheckpoint(payloadOf(after[4] as SignedCheckpoint), entries, undefined, after.slice(0, 4).map(payloadOf)), { ok: true, mismatches: [] });
+  }));
+
+test('WR-05 bounded: a checkpoint handed back below the latest one makes the whole kept chain be checked again, so a second word about an old prefix still stops signing', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const mine = client(world);
+    const early = payloadOf(honestCheckpoint(hub, world, mine.view, mine.open()));
+    assert.equal(hub.store.checkpoints(world.project).length, 1);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    assert.equal(hub.store.checkpoints(world.project).length, 2);
+    assert.equal(hub.checkpoints?.keptInMemory(world.project), 1);
+    // The first checkpoint's prefix with another order hash, handed back after the hub moved on.
+    const forged = signCheckpoint(hub.identity.signer, { ...early, streams: early.streams.map((stream) => ({ ...stream, orderTip: 'd'.repeat(64) })) });
+    assert.equal((await ask(hub, world, analyst, [forged])).kept, 1);
+    await settle(hub);
+    const conflicts = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict');
+    assert.deepEqual(conflicts.map((line) => line.fields.reason), ['equal-count-tip-mismatch']);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    assert.equal(hub.store.checkpoints(world.project).length, 3, 'signed again after a conflicting checkpoint was handed back');
+  }));
+
 // ---- Task 3: clean shutdown ----
 
 test('shutdown: stopping clears a pending debounce timer, so nothing is signed once shutdown starts, not even on an ask', () =>

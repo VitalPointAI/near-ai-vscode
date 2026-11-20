@@ -181,6 +181,26 @@ CREATE INDEX join_requests_accepted ON join_requests (accepted_at) WHERE accepte
 
 INSERT INTO hub_meta (key, value) VALUES ('schema_version', '1');
 `,
+  // v2 (WR-05): each kept checkpoint's coverage (how many entries it covers), so a handed-back checkpoint is placed among the kept ones with one
+  // query instead of reading and parsing every kept checkpoint. Append-only like the checkpoints it describes; rows of checkpoints kept before
+  // this migration are filled from their bodies.
+  `
+CREATE TABLE checkpoint_coverage (
+  project TEXT NOT NULL,
+  hash TEXT NOT NULL CHECK (length(hash) = 64),
+  coverage INTEGER NOT NULL CHECK (coverage >= 0),
+  PRIMARY KEY (project, hash),
+  FOREIGN KEY (project, hash) REFERENCES checkpoints (project, hash)
+) STRICT;
+
+CREATE INDEX checkpoint_coverage_by_size ON checkpoint_coverage (project, coverage);
+${APPEND_ONLY('checkpoint_coverage')}
+INSERT INTO checkpoint_coverage (project, hash, coverage)
+SELECT c.project, c.hash, max(0, coalesce((SELECT sum(CAST(json_extract(s.value, '$.count') AS INTEGER)) FROM json_each(c.body, '$.payload.streams') AS s), 0))
+FROM checkpoints AS c;
+
+UPDATE hub_meta SET value = '2' WHERE key = 'schema_version';
+`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

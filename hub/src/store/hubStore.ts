@@ -3,7 +3,7 @@ import { chmodSync, closeSync, constants, fchmodSync, lstatSync, mkdirSync, open
 import path from 'node:path';
 import { Database } from 'node:sqlite';
 import { GRANT_MAX_BYTES } from '@ext/domain/replica/cellKeys';
-import { CHECKPOINT_MAX_BYTES } from '@ext/domain/replica/checkpoint';
+import { CHECKPOINT_MAX_BYTES, readCheckpoint } from '@ext/domain/replica/checkpoint';
 import {
   BLOB_MAX_BYTES,
   HASH_PATTERN,
@@ -413,6 +413,16 @@ function toGrant(row: Row): GrantRecord {
 
 function toCheckpoint(row: Row): CheckpointRecord {
   return { hash: row.hash as string, body: row.body as string, signedAt: Number(row.signed_at), receivedAt: Number(row.received_at) };
+}
+
+/** How many entries a signed checkpoint covers (the sum of its stream counts); 0 for a body that is not a checkpoint. */
+function coverageOfBody(body: string): number {
+  try {
+    const checkpoint = readCheckpoint((JSON.parse(body) as { payload?: unknown }).payload);
+    return checkpoint === undefined ? 0 : checkpoint.streams.reduce((total, stream) => total + stream.count, 0);
+  } catch {
+    return 0;
+  }
 }
 
 /** Refuses a symbolic link or anything that is not a real folder where a hub folder should be, and creates a missing one 0700. */
@@ -872,9 +882,52 @@ export class HubStore {
     return this.transaction(() => {
       this.requireProject(project);
       if (this.sql('SELECT 1 FROM checkpoints WHERE project = ? AND hash = ?').get(project, hash) !== undefined) return 'held';
-      this.sql('INSERT INTO checkpoints (project, hash, body, signed_at, received_at) VALUES (?, ?, ?, ?, ?)').run(project, hash, body, signedAt, receivedAt);
+      this.insertCheckpoint(project, hash, body, signedAt, receivedAt);
       return 'stored';
     });
+  }
+
+  /**
+   * Keeps a checkpoint a client handed back (D-54, D-70), placed among the kept ones by its coverage in one transaction (WR-05): just below the
+   * earliest kept checkpoint that covers at least as much, or else after every kept one (and not before now). Reads no other checkpoint body.
+   */
+  putHandedBackCheckpoint(project: string, checkpoint: { hash: string; body: string }, now: number): 'stored' | 'held' {
+    checkProject(project);
+    const hash = checkHash('a checkpoint hash', checkpoint?.hash);
+    const body = checkJsonRecord('the checkpoint', checkpoint.body, CHECKPOINT_BODY_MAX_BYTES);
+    const receivedAt = checkTime('the received time', now);
+    const coverage = coverageOfBody(body);
+    return this.transaction(() => {
+      this.requireProject(project);
+      if (this.sql('SELECT 1 FROM checkpoints WHERE project = ? AND hash = ?').get(project, hash) !== undefined) return 'held';
+      const above = this.sql(
+        'SELECT min(c.signed_at) AS at FROM checkpoints AS c JOIN checkpoint_coverage AS k ON k.project = c.project AND k.hash = c.hash WHERE c.project = ? AND k.coverage >= ?',
+      ).get(project, coverage) as Row | undefined;
+      let signedAt: number;
+      if (above?.at !== null && above?.at !== undefined) {
+        signedAt = Math.max(0, Number(above.at) - 1);
+      } else {
+        const last = this.sql('SELECT max(signed_at) AS at FROM checkpoints WHERE project = ?').get(project) as Row | undefined;
+        signedAt = last?.at === null || last?.at === undefined ? receivedAt : Math.max(receivedAt, Number(last.at) + 1);
+      }
+      this.insertCheckpoint(project, hash, body, signedAt, receivedAt);
+      return 'stored';
+    });
+  }
+
+  private insertCheckpoint(project: string, hash: string, body: string, signedAt: number, receivedAt: number): void {
+    this.sql('INSERT INTO checkpoints (project, hash, body, signed_at, received_at) VALUES (?, ?, ?, ?, ?)').run(project, hash, body, signedAt, receivedAt);
+    this.sql('INSERT INTO checkpoint_coverage (project, hash, coverage) VALUES (?, ?, ?)').run(project, hash, coverageOfBody(body));
+  }
+
+  /** The checkpoints kept after a read cursor, in the order they were kept, each with its own cursor (WR-05: a reader reads only what is new). */
+  checkpointsAfter(project: string, cursor: number): Array<CheckpointRecord & { cursor: number }> {
+    checkProject(project);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) throw invalid('a checkpoint cursor must be a whole number');
+    return (this.sql('SELECT rowid AS cursor, * FROM checkpoints WHERE project = ? AND rowid > ? ORDER BY rowid').all(project, cursor) as Row[]).map((row) => ({
+      ...toCheckpoint(row),
+      cursor: Number(row.cursor),
+    }));
   }
 
   /** Every checkpoint of the project in signing order (then received order, then hash, so the order is total). */
