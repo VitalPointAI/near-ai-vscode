@@ -85,8 +85,11 @@ export interface StreamSession extends StreamOwner {
   address: string;
   /** When the session's token expires, in milliseconds. */
   expiresAt: number;
-  /** Asked at every keep-alive tick: false ends the stream (the device is no longer admitted at the roster head). */
-  allowed: () => boolean;
+  /**
+   * Asked at every keep-alive tick: false ends the stream (the device is no longer admitted at the roster head). A promise is waited for (the
+   * roster is not in memory and is loaded again); one that fails ends the stream, so a check that cannot be made never keeps a stream open (IN-07).
+   */
+  allowed: () => boolean | Promise<boolean>;
 }
 
 export type OpenResult = { ok: true } | { ok: false; status: 429; reason: 'device' | 'address'; retryAfterSeconds: number };
@@ -154,6 +157,8 @@ interface OpenStream extends StreamSession {
   queuedAtOverflow: number;
   keepAlive: Timer;
   stuck: Timer | undefined;
+  /** A standing check that had to load the roster is still running. */
+  checking: boolean;
 }
 
 const STREAM_HEADERS = {
@@ -210,6 +215,7 @@ export class EventHub {
       queuedAtOverflow: 0,
       keepAlive: undefined,
       stuck: undefined,
+      checking: false,
     };
     this.streams.add(stream);
     res.on('close', () => this.forget(stream));
@@ -287,12 +293,40 @@ export class EventHub {
   }
 
   private keepAlive(stream: OpenStream): void {
-    if (stream.ending) return;
-    if (this.now() >= stream.expiresAt || !stream.allowed()) {
+    if (stream.ending || stream.checking) return;
+    if (this.now() >= stream.expiresAt) {
       this.finish(stream);
       return;
     }
-    this.send(stream, KEEP_ALIVE);
+    let verdict: boolean | Promise<boolean>;
+    try {
+      verdict = stream.allowed();
+    } catch {
+      this.finish(stream);
+      return;
+    }
+    if (typeof verdict === 'boolean') {
+      this.afterCheck(stream, verdict);
+      return;
+    }
+    stream.checking = true;
+    verdict.then(
+      (allowed) => {
+        stream.checking = false;
+        this.afterCheck(stream, allowed === true);
+      },
+      () => {
+        stream.checking = false;
+        this.afterCheck(stream, false);
+      },
+    );
+  }
+
+  /** The keep-alive comment for a device still admitted; the end of the stream otherwise. */
+  private afterCheck(stream: OpenStream, allowed: boolean): void {
+    if (stream.ending || stream.closed) return;
+    if (allowed) this.send(stream, KEEP_ALIVE);
+    else this.finish(stream);
   }
 
   /** One numbered frame, or resync and the end when it would take the stream past its budget. Returns whether the frame was taken. */

@@ -404,7 +404,8 @@ export function createRoutes(deps: RouteDeps): HubHandler {
       writer,
       address: addressOf(req),
       expiresAt: auth.session.expiresAt,
-      allowed: () => (cache.peek(project)?.standing(writer) ?? 'admitted') === 'admitted',
+      // A roster not held in memory is loaded again, never taken as admitted (IN-07).
+      allowed: () => cache.peek(project)?.standing(writer) === 'admitted' || cache.get(project).then((roster) => roster.standing(writer) === 'admitted'),
     });
     if (!opened.ok) sendError(res, 429, 'too-many-streams', { 'retry-after': String(opened.retryAfterSeconds) });
   };

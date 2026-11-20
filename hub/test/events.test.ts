@@ -4,6 +4,7 @@ import { setImmediate as tick } from 'node:timers/promises';
 import { checkpointHash, signCheckpoint } from '@ext/domain/replica/checkpoint';
 import type { Checkpoint, SignedCheckpoint } from '@ext/domain/replica/checkpoint';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
+import { canonicalize } from '@ext/domain/team/canonical';
 import { TOKEN_TTL_MS } from '../src/http/session';
 import { EVENT_BUDGET_BYTES, EVENT_TIMING } from '../src/live/events';
 import { LIMITS } from '../src/limits';
@@ -378,6 +379,35 @@ test('keep-alive: a stream whose session token has expired ends at the next keep
     scheduler.advance(EVENT_TIMING.keepAliveMs);
     await stream.end();
     assert.equal(hub.events.size, 0);
+  }));
+
+test('keep-alive: a stream whose roster is not held in memory checks the stored roster at the next tick and ends when the device was revoked', () =>
+  withLive({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    const stream = await (await EventClient.open(hub, analyst, world.project)).events();
+    assert.equal(stream.status, 200);
+    await stream.until((item) => item.retries.length === 1, 'the retry line');
+    // The revoke reaches the store without the append route (which ends the stream itself), and the roster cache is dropped, as the append
+    // checks do when a batch was checked against a roster that is no longer the cached one.
+    const revoke = world.rosterEntry(world.lead, 'device.revoke', { member: analyst.member, writer: analyst.writer });
+    hub.store.commitAppend(world.project, { entries: [{ header: canonicalize(revoke.entry.header), body: revoke.entry.body, receivedAt: hub.now() }], at: hub.now() });
+    hub.cache.invalidate(world.project);
+    assert.equal(hub.cache.peek(world.project), undefined);
+    scheduler.advance(EVENT_TIMING.keepAliveMs);
+    await stream.end(2000);
+    assert.equal(hub.events.size, 0);
+  }));
+
+test('keep-alive: a stream whose roster is not held in memory stays open at the next tick when the device is still admitted', () =>
+  withLive({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    const stream = await (await EventClient.open(hub, analyst, world.project)).events();
+    await stream.until((item) => item.retries.length === 1, 'the retry line');
+    hub.cache.invalidate(world.project);
+    scheduler.advance(EVENT_TIMING.keepAliveMs);
+    await stream.until((item) => item.comments.length === 1, 'a keep-alive comment', 2000);
+    assert.equal(stream.ended, false);
+    assert.equal(hub.events.size, 1);
   }));
 
 test('audience: a device off a label cell hears nothing of that cell\'s stream while a device on it does', () =>
