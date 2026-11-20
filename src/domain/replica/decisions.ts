@@ -107,35 +107,21 @@ export function resolveDecisions(input: DecisionInput): DecisionResult {
   for (const id of [...heldIds].sort(compareText)) held.push({ id, reason: 'unknown-decision-seen' });
   active = active.filter((act) => !heldIds.has(act.id));
 
-  // Precedence: x precedes y when x is in y's causal past or y saw x; closed transitively (deps are capped, so neither alone is enough).
-  const closureOf = (acts: readonly DecisionAct[]): Map<string, Set<string>> => {
-    const past = new Map<string, Set<string>>();
-    for (const y of acts) {
-      past.set(y.id, new Set(acts.filter((x) => x.id !== y.id && (input.before(x.id, y.id) || y.seen.includes(x.id))).map((x) => x.id)));
-    }
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const set of past.values()) {
-        for (const id of [...set]) {
-          for (const further of past.get(id) ?? []) {
-            if (!set.has(further)) { set.add(further); changed = true; }
-          }
-        }
-      }
-    }
-    return past;
-  };
-  let closure = closureOf(active);
-  const cyclic = active.filter((act) => closure.get(act.id)?.has(act.id) ?? false).map((act) => act.id);
+  // Precedence: x precedes y when x is in y's causal past or y saw x; closed transitively (deps are capped, so neither alone is enough). The direct
+  // edges cost at most one call to `before` per ordered pair; the closure is then built in one pass in topological order (WR-06), since precedence only
+  // points from an entry to entries made before it. Acts on a cycle (impossible with real entries, IN-01) are found as strongly connected parts.
+  const direct = precedenceEdges(active, input.before);
+  const cyclic = cyclicActs(direct).map((index) => active[index].id).sort(compareText);
   if (cyclic.length > 0) {
-    if (input.strict === true) throw new Error(`Decision precedence cycle on version ${input.versionHash}: ${[...cyclic].sort(compareText).join(', ')}`);
-    for (const id of cyclic.sort(compareText)) held.push({ id, reason: 'precedence-cycle' });
-    active = active.filter((act) => !cyclic.includes(act.id));
-    closure = closureOf(active);
+    if (input.strict === true) throw new Error(`Decision precedence cycle on version ${input.versionHash}: ${cyclic.join(', ')}`);
+    for (const id of cyclic) held.push({ id, reason: 'precedence-cycle' });
   }
+  const onCycle = new Set(cyclic);
+  const { order, closure } = closeInOrder(active, direct, onCycle);
+  active = order;
   const preceded = (x: DecisionAct, y: DecisionAct): boolean => closure.get(y.id)?.has(x.id) ?? false;
 
-  const valid = settleValidity(active, closure, preceded, refused);
+  const valid = settleValidity(active, preceded, refused);
   const final = settle(valid, preceded);
 
   const result: DecisionResult = {
@@ -156,20 +142,106 @@ export function resolveDecisions(input: DecisionInput): DecisionResult {
   return result;
 }
 
+/** For each act, the indexes of the acts directly before it: in its causal past, or named in its seen list. At most one `before` call per ordered pair. */
+function precedenceEdges(acts: readonly DecisionAct[], before: (a: string, b: string) => boolean): number[][] {
+  return acts.map((y, j) => {
+    const seen = new Set(y.seen);
+    const preds: number[] = [];
+    acts.forEach((x, i) => {
+      if (i !== j && (seen.has(x.id) || before(x.id, y.id))) preds.push(i);
+    });
+    return preds;
+  });
+}
+
+/** The indexes of the acts that lie on a precedence cycle: members of a strongly connected part with more than one act (Tarjan, without recursion). */
+function cyclicActs(preds: readonly number[][]): number[] {
+  const n = preds.length;
+  const index = new Array<number>(n).fill(-1);
+  const low = new Array<number>(n).fill(0);
+  const onStack = new Array<boolean>(n).fill(false);
+  const stack: number[] = [];
+  const found: number[] = [];
+  let counter = 0;
+  for (let root = 0; root < n; root += 1) {
+    if (index[root] !== -1) continue;
+    const work: [number, number][] = [[root, 0]];
+    while (work.length > 0) {
+      const frame = work[work.length - 1];
+      const [v, next] = frame;
+      if (next === 0) { index[v] = counter; low[v] = counter; counter += 1; stack.push(v); onStack[v] = true; }
+      if (next < preds[v].length) {
+        frame[1] = next + 1;
+        const w = preds[v][next];
+        if (index[w] === -1) work.push([w, 0]);
+        else if (onStack[w]) low[v] = Math.min(low[v], index[w]);
+        continue;
+      }
+      work.pop();
+      if (work.length > 0) { const parent = work[work.length - 1][0]; low[parent] = Math.min(low[parent], low[v]); }
+      if (low[v] === index[v]) {
+        const part: number[] = [];
+        for (let w = -1; w !== v;) { w = stack.pop() as number; onStack[w] = false; part.push(w); }
+        if (part.length > 1) found.push(...part);
+      }
+    }
+  }
+  return found;
+}
+
 /**
- * Which acts are valid in their own causal past (D-25, D-37). Acts are visited with the smaller pasts first, so every act meets its past
- * already judged. Valid means: not after an effective withdraw or supersede (terminal, unless the act's past is itself contested), a release
+ * The acts not on a cycle in topological order (every act after all acts before it), and each act's transitive precedence set, built in that one
+ * pass: an act's set is its direct predecessors and their sets. A predecessor already in the set is skipped, because its own set is then in it too.
+ */
+function closeInOrder(acts: readonly DecisionAct[], preds: readonly number[][], onCycle: ReadonlySet<string>): { order: DecisionAct[]; closure: Map<string, Set<string>> } {
+  const keep = acts.map((act) => !onCycle.has(act.id));
+  const position = new Array<number>(acts.length).fill(-1);
+  const order: number[] = [];
+  // Depth-first post-order over predecessors puts every act after its predecessors. Roots go in id order so the order depends only on the acts.
+  const roots = acts.map((_, i) => i).filter((i) => keep[i]).sort((a, b) => compareText(acts[a].id, acts[b].id));
+  for (const root of roots) {
+    if (position[root] !== -1) continue;
+    const work: [number, number][] = [[root, 0]];
+    position[root] = -2;
+    while (work.length > 0) {
+      const frame = work[work.length - 1];
+      const [v, next] = frame;
+      if (next < preds[v].length) {
+        frame[1] = next + 1;
+        const w = preds[v][next];
+        if (keep[w] && position[w] === -1) { position[w] = -2; work.push([w, 0]); }
+        continue;
+      }
+      work.pop();
+      position[v] = order.length;
+      order.push(v);
+    }
+  }
+  const closure = new Map<string, Set<string>>();
+  for (const v of order) {
+    const set = new Set<string>();
+    const direct = preds[v].filter((w) => keep[w]).sort((a, b) => position[b] - position[a]);
+    for (const w of direct) {
+      if (set.has(acts[w].id)) continue;
+      set.add(acts[w].id);
+      for (const further of closure.get(acts[w].id) as Set<string>) set.add(further);
+    }
+    closure.set(acts[v].id, set);
+  }
+  return { order: order.map((v) => acts[v]), closure };
+}
+
+/**
+ * Which acts are valid in their own causal past (D-25, D-37). Acts are visited in topological order, so every act meets its past already judged. Valid means: not after an effective withdraw or supersede (terminal, unless the act's past is itself contested), a release
  * with an effective approval in its past, a supersede with a release in its past, a decline that saw only unconfirmed acts.
  */
 function settleValidity(
-  active: readonly DecisionAct[],
-  closure: Map<string, Set<string>>,
+  ordered: readonly DecisionAct[],
   preceded: (x: DecisionAct, y: DecisionAct) => boolean,
   refused: { id: string; reason: DecisionRefusal }[],
 ): DecisionAct[] {
-  const visit = [...active].sort((a, b) => ((closure.get(a.id)?.size ?? 0) - (closure.get(b.id)?.size ?? 0)) || compareText(a.id, b.id));
   const valid: DecisionAct[] = [];
-  for (const act of visit) {
+  for (const act of ordered) {
     const past = valid.filter((x) => preceded(x, act));
     const inPast = settle(past, preceded);
     const only = inPast.classes.length === 1 ? inPast.classes[0] : undefined;
