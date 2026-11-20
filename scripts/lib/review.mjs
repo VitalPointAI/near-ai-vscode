@@ -20,30 +20,54 @@ export function isDiffTooLarge(error) {
   return /too_large|HTTP 406|exceeded the maximum/i.test(String(error?.message ?? error));
 }
 
+/** The most the per-file fallback assembles; files past it keep their header only, so they still show as left out. */
+export const MAX_ASSEMBLED_DIFF_BYTES = 16_000_000;
+
 /**
  * The PR's unified diff. GitHub refuses `gh pr diff` above 300 files or 20,000 lines (HTTP 406
  * too_large); the review then builds the same diff from the paginated per-file API, which serves
  * up to 3,000 files. A file GitHub sends no patch for (binary, or itself too large) gets a
- * section saying so, so the reviewer sees it changed and that its content was not shown.
+ * section saying so, so the reviewer sees it changed and that its content was not shown. The
+ * assembled text stops growing at `maxBytes` (later files keep a header saying they were left
+ * out), and when the API returned fewer files than the PR changes, a last section says so.
  */
-export function prDiff(repo, number, log = console.log) {
+export function prDiff(repo, number, { log = console.log, changedFiles, maxBytes = MAX_ASSEMBLED_DIFF_BYTES } = {}) {
   try {
     return gh(['pr', 'diff', String(number), '--repo', repo]);
   } catch (error) {
     if (!isDiffTooLarge(error)) throw error;
   }
   const entries = prFilePatches(repo, number);
-  const withoutPatch = entries.filter((entry) => typeof entry.patch !== 'string').length;
-  log(`GitHub refused the whole diff as too large; built it from the per-file API (${entries.length} files, ${withoutPatch} without a text patch).`);
-  return entries.map((entry) => {
+  const sections = [];
+  let used = 0;
+  let withoutPatch = 0;
+  let leftOut = 0;
+  for (const entry of entries) {
     const to = entry.filename;
     const from = entry.previous_filename ?? to;
     const header = `diff --git a/${from} b/${to}\n`;
-    if (typeof entry.patch !== 'string') return `${header}(${entry.status}: no text diff from GitHub, binary or too large to show)\n`;
-    const oldName = entry.status === 'added' ? '/dev/null' : `a/${from}`;
-    const newName = entry.status === 'removed' ? '/dev/null' : `b/${to}`;
-    return `${header}--- ${oldName}\n+++ ${newName}\n${entry.patch.endsWith('\n') ? entry.patch : `${entry.patch}\n`}`;
-  }).join('');
+    let section;
+    if (typeof entry.patch !== 'string') {
+      withoutPatch += 1;
+      section = `${header}(${entry.status}: no text diff from GitHub, binary or too large to show)\n`;
+    } else {
+      const oldName = entry.status === 'added' ? '/dev/null' : `a/${from}`;
+      const newName = entry.status === 'removed' ? '/dev/null' : `b/${to}`;
+      section = `${header}--- ${oldName}\n+++ ${newName}\n${entry.patch.endsWith('\n') ? entry.patch : `${entry.patch}\n`}`;
+      if (used + Buffer.byteLength(section) > maxBytes) {
+        leftOut += 1;
+        section = `${header}(${entry.status}: left out, the assembled diff reached ${maxBytes} bytes)\n`;
+      }
+    }
+    used += Buffer.byteLength(section);
+    sections.push(section);
+  }
+  const missing = Number.isInteger(changedFiles) && changedFiles > entries.length ? changedFiles - entries.length : 0;
+  if (missing) {
+    sections.push(`diff --git a/(more files) b/(more files)\n(the PR changes ${changedFiles} files; GitHub listed only ${entries.length}, so the changes to ${missing} file(s) are not shown and not named)\n`);
+  }
+  log(`GitHub refused the whole diff as too large; built it from the per-file API (${entries.length} files, ${withoutPatch} without a text patch, ${leftOut} left out over the size cap${missing ? `, ${missing} not listed by GitHub` : ''}).`);
+  return sections.join('');
 }
 
 /** Writes pr.json, checks.json, files.txt and diff.patch for the reviewers into `out` (or a new temp dir). */
@@ -58,7 +82,7 @@ export function gatherReview(repo, number, out, { log = console.log } = {}) {
   writeFileSync(path.join(dir, 'pr.json'), `${JSON.stringify({ ...rest, files: files.map((file) => ({ path: file })) }, null, 2)}\n`);
   writeFileSync(path.join(dir, 'checks.json'), `${JSON.stringify(checks, null, 2)}\n`);
   writeFileSync(path.join(dir, 'files.txt'), `${files.join('\n')}\n`);
-  writeFileSync(path.join(dir, 'diff.patch'), prDiff(repo, number, log));
+  writeFileSync(path.join(dir, 'diff.patch'), prDiff(repo, number, { log, changedFiles: pr.changedFiles }));
   const { table, ci } = checkSummary(checks);
   log(`PR #${pr.number}: ${pr.title}`);
   log(`${pr.headRefName} -> ${pr.baseRefName} @ ${pr.headRefOid}`);
