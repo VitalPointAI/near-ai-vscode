@@ -1,5 +1,5 @@
 import type { NearAiSettings } from '../domain/config';
-import { routeAllows, type PrivateRoute } from './agentSession';
+import { routeAllows, type PrivateRoute } from './privateRoute';
 import { estimateImageCostUsd, type AgentMessage, type ModelInfo } from './nearAiClient';
 import { OutboundGuard } from './outboundGuard';
 import { withPrivateOnly } from '../gate/sessionMark';

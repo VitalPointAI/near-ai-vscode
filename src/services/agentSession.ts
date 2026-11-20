@@ -82,6 +82,7 @@ import { staffHostFor } from '../staff/staffHost';
 import { observationStoreFor } from '../staff/observationStore';
 import { attend } from '../staff/watchAttendance';
 import { watchHostFor } from '../staff/watchHost';
+import { privateRefusal, routeAllows, type PrivateRoute } from './privateRoute';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -267,29 +268,13 @@ const lastAssistantText = (transcript: AgentMessage[]): string => { for (let ind
 const WRITING_CAPABILITIES: ReadonlySet<string> = new Set(['workspaceWrite', 'sharedWrite', 'shell', 'mediaGeneration', 'mediaPublication']);
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
+export { routeAllows, type PrivateRoute } from './privateRoute';
 /**
  * One sidebar conversation with the agent. Keeps the message history (saved locally so it can be
  * resumed) and a persistent shell, routes approvals and questions to the webview, runs GSD skills
  * and sub-agents (foreground or background, with pause/stop and a concurrency limit), manages the
  * context window, and keeps each run's file checkpoints so the user can revert it.
  */
-/** The client a run sends every request through: NEAR AI Cloud (with or without checkable attestation) or a local runtime. */
-export interface PrivateRoute { kind: 'near' | 'local'; attestation: boolean }
-
-/** Whether a `privacy: private` member may run on this catalog entry over this route. Anything unknown is refused. */
-export function routeAllows(route: PrivateRoute | undefined, model: { privacyBoundary?: string } | undefined): boolean {
-  if (!route || !model) return false;
-  if (route.kind === 'local') return model.privacyBoundary === 'local';
-  return route.kind === 'near' && route.attestation && model.privacyBoundary === 'tee';
-}
-
-function privateRefusal(label: string, tier: string | undefined, route: PrivateRoute | undefined): string {
-  const fix = `To let ${label} use any model instead, change its line to privacy: any.`;
-  if (!route) return `${label} must run on a private model (its team file says privacy: private), but this run did not say which route it uses, so no model can be confirmed private. ${fix}`;
-  if (route.kind === 'local') return `${label} must run on a private model (its team file says privacy: private). This run uses your local runtime, and none of its models are offered to this run. Add a local model, or start the run on a local model, then run again. ${fix}`;
-  if (!route.attestation) return `${label} must run on a private model (its team file says privacy: private), but this run's endpoint is not NEAR AI Cloud, so a TEE model's attestation cannot be checked. Use NEAR AI Cloud, or start the run on a local model, then run again. ${fix}`;
-  return `${label} must run on a private model (its team file says privacy: private), and none of the models this run may use runs in a NEAR TEE or on this machine. Choose a NEAR TEE model for the ${tier ?? 'deep'} tier (setting nearAi.agent.${tier ?? 'deep'}Model), or add a local model, then run again. ${fix}`;
-}
 
 /** Where a chat whose stored label cannot be read opens: the default scale's highest level, never lower than it was (edge CLAS-04 encoding). */
 export const UNREADABLE_CHAT_LABEL: Label = Object.freeze({ scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] });
