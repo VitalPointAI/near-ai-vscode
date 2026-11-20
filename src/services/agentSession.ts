@@ -83,6 +83,7 @@ import { observationStoreFor } from '../staff/observationStore';
 import { attend } from '../staff/watchAttendance';
 import { watchHostFor } from '../staff/watchHost';
 import { privateRefusal, routeAllows, type PrivateRoute } from './privateRoute';
+import { answerFactsOf, type AnswerFacts } from './answerFacts';
 
 /** What the installed Open-GSD runtime provides to a conversation. */
 export interface GsdContext {
@@ -269,6 +270,7 @@ const WRITING_CAPABILITIES: ReadonlySet<string> = new Set(['workspaceWrite', 'sh
 const minutesSince = (at: number) => { const seconds = Math.max(0, Math.round((Date.now() - at) / 1000)); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)} min`; };
 
 export { routeAllows, type PrivateRoute } from './privateRoute';
+export { answerFactsOf } from './answerFacts';
 /**
  * One sidebar conversation with the agent. Keeps the message history (saved locally so it can be
  * resumed) and a persistent shell, routes approvals and questions to the webview, runs GSD skills
@@ -325,9 +327,6 @@ export const FAILED_CHECKS_KEPT = 100;
 export const CHECK_AGAIN_NEW_CHAT_TEXT =
   'An earlier failed check in this chat can no longer be checked again from the editor, so the levels that need an attested cloud stay stopped for this chat. Start a new chat to send content at those levels to NEAR AI Cloud again.';
 
-/** What a lead answer's badge is chosen from, apart from its check and the chat's other checks. */
-type AnswerFacts = Omit<TrustBadgeFacts, 'verification' | 'verificationSummary' | 'earlierCheckFailed'>;
-
 /** One lead answer's badge: the facts it is chosen from, its check as far as it got, and what Check again needs. */
 interface BadgeEntry {
   /** The chat the answer belongs to, and the answer's text: where and under which key its settled badge is kept (plan 27). */
@@ -341,36 +340,6 @@ interface BadgeEntry {
   readonly answeredAt: number;
   verification: TrustVerification;
   result?: AnswerCheckResult;
-}
-
-/** Where a model runs, from the page's own privacy words when no catalog entry says (the words come from the same catalog). */
-function boundaryFromPrivacy(privacy: string): { boundary: AnswerFacts['boundary']; forwardedTo?: string } {
-  if (privacy.startsWith('Private')) return { boundary: 'tee' };
-  if (privacy.startsWith('Local')) return { boundary: 'local' };
-  const forwarded = /^Not private · forwarded(?: to (.+))?$/.exec(privacy);
-  if (forwarded) return { boundary: 'cloud', ...(forwarded[1] ? { forwardedTo: forwarded[1] } : {}) };
-  return { boundary: undefined };
-}
-
-/** The facts of a lead answer that never change after it arrived: where its model runs, its endpoint, its signature id and its connection (CLAS-08). */
-export function answerFactsOf(request: Pick<AgentTurnRequest, 'client' | 'model' | 'privacy' | 'local' | 'modelCatalog'>, usage: UsageMetadata | undefined): AnswerFacts {
-  const client = request.client as Partial<Pick<NearAiClient, 'nearEndpoint' | 'catalogEntry'>>;
-  let entry: ModelInfo | undefined;
-  try { entry = typeof client.catalogEntry === 'function' ? client.catalogEntry(request.model) : undefined; } catch { entry = undefined; }
-  const listed = request.modelCatalog?.find((candidate) => candidate.id === request.model);
-  const known = entry?.privacyBoundary ?? listed?.privacyBoundary;
-  const named: { boundary: AnswerFacts['boundary']; forwardedTo?: string } = known === 'tee' || known === 'cloud' || known === 'local' ? { boundary: known, ...(entry?.forwardedTo ? { forwardedTo: entry.forwardedTo } : {}) } : boundaryFromPrivacy(request.privacy);
-  let nearEndpoint = false;
-  try { nearEndpoint = client.nearEndpoint === true; } catch { nearEndpoint = false; }
-  return {
-    route: request.local ? 'local' : 'near',
-    nearEndpoint,
-    boundary: named.boundary,
-    ...(named.forwardedTo ? { forwardedTo: named.forwardedTo } : {}),
-    hasEvidence: usage?.evidence !== undefined,
-    ...(usage?.connection === undefined ? {} : { connection: usage.connection }),
-    connectionFresh: usage?.connectionPinned === true
-  };
 }
 
 export class AgentConversation {
