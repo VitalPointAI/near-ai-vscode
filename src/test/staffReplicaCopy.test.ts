@@ -19,22 +19,27 @@ import { deviceAt } from '../domain/replica/rosterMembers';
 import { replicaVersionHash } from '../domain/replica/versions';
 import type { ProductVersions } from '../domain/replica/versions';
 import { LEDGER_PROBLEMS, parseLedgerHeadMark } from '../domain/staff/ledger';
+import { CALC_LEDGER_FILE, replayCalcLedger } from '../domain/staff/logistics';
+import type { PlanningFactor } from '../domain/staff/logistics';
+import { DECISION_LOG_FILE, replayPersonDecisions } from '../domain/staff/personDecisions';
 import type { ProductState } from '../domain/staff/ledger';
-import { REPLICA_DIR } from '../domain/staff/multiUser';
+import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import type { PersonActor } from '../domain/staff/release';
 import { verifyPayload } from '../domain/team/signedPayload';
 import type { DeviceIdentity } from '../team/identity';
 import { isMigrationRefused, ledgerHeadKey, makeMultiUser, projectionInputOf } from '../staff/replica/migrate';
 import type { MigrationDeps } from '../staff/replica/migrate';
-import { projectLedgerReplay } from '../staff/replica/projection';
+import { ledgerLinesOf, projectLedgerReplay } from '../staff/replica/projection';
 import { admitJoinRequest, inviteToProject, joinFromInvite, openWelcome, updateMember } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ProjectRefused } from '../staff/replica/replicaProject';
 import { CONTESTED_AT_COPY_TEXT, COPY_REFUSALS, carriedApprovalName, makeSingleMachineCopy } from '../staff/replica/singleCopy';
 import type { CopyDeps, CopyRefused, CopyResult } from '../staff/replica/singleCopy';
-import { LEDGER_DIR, LEDGER_FILE, StaffHost, productPath } from '../staff/staffHost';
-import { callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, trusting, writeBody } from './helpers/staffFixtures';
+import { LEDGER_DIR, LEDGER_FILE, StaffHost, WARGAME_DIR, WARGAME_FILE, productPath } from '../staff/staffHost';
+import type { StaffTeamInfo } from '../staff/staffHost';
+import { callLogistics, callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
+import { fixedSigner } from './helpers/replicaWorld';
 import type { StaffWorld } from './helpers/staffFixtures';
 
 const NOW = '2026-11-20T10:00:00.000Z';
@@ -417,4 +422,106 @@ test('a folder that holds no shared project is refused not-shared with nothing w
   const env = await freshEnv('not-shared');
   await releasedProduct(worldOf(env));
   await refusedWithNothingWritten(env, path.join(env.base, 'copy'), 'not-shared');
+});
+
+// ---- Task 3: the decision log, the calculator ledger and the wargame ledger -------------------------------------------------------------------------
+
+const J4_TEAM: StaffTeamInfo = { slug: 'j4-logistics', section: 'j4', sectionLead: 'j4-director', members: ['j4-director', 'log-plans-officer', 'jloc-chief', 'release-guard'] };
+const FUEL: PlanningFactor = { id: 'fuel-cargo-truck', what: 'Fuel for one cargo truck', rate: 250, unit: 'litres', per: 'vehicle per day', enteredBy: 'A. Demo' };
+const FUEL_CALC = { id: 'fuel-phase-1', title: 'Class III (bulk) for phase 1', lines: [{ factor: 'fuel-cargo-truck', count: 40, item: 'cargo trucks' }], days: 3, onHand: 21000 };
+const TURN = { coa: 'coa-a', enemyCoa: 'mlcoa', turn: 1, phase: 'action', hHourOffsetMinutes: 0, moves: [], results: [], decisionPoints: [] };
+const OTHER_NAME = 'B. Other';
+const wording = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+interface FourLedgers { readonly env: Env; readonly other: ReturnType<typeof fixedSigner>['signer'] }
+
+/**
+ * A single-machine project with all four ledgers made multi-user. The decision log holds a decision of this device's person and, after it, one of
+ * another person signed on their own device (the log came to this computer with the project, and today's key status trusts both devices).
+ */
+let fourTemplate: Promise<FourLedgers> | undefined;
+function fourLedgers(): Promise<FourLedgers> {
+  fourTemplate ??= (async () => {
+    const env = await freshEnv('four');
+    const other = fixedSigner('copy-other-device').signer;
+    const both: KeyTrust = (signer) => trusting(signer, other);
+    const world = worldOf(env);
+    world.host = hostAt(env, env.root, both);
+    await releasedProduct(world);
+    const mine = await world.host.signWatchDecision(world.person(), { watch: 'watch-bridge', decision: 'approved', wording: wording('watch the bridge'), reasons: [] });
+    assert.ok(mine.ok, mine.ok ? '' : mine.message);
+    const otherHost = new StaffHost({ root: env.root, signer: async () => other, keyStatus: async () => trusting(env.signer, other), now: () => Date.parse('2026-11-18T13:00:00.000Z') });
+    const theirs = await otherHost.signWatchDecision({ kind: 'person', name: OTHER_NAME, role: DECISION_ROLE, deviceFingerprint: other.fingerprint }, { watch: 'watch-ford', decision: 'rejected', wording: wording('watch the ford'), reasons: ['The ford is out of range.'] });
+    assert.ok(theirs.ok, theirs.ok ? '' : theirs.message);
+    await writeFactors(env.root, [FUEL]);
+    must(await callLogistics(world, J4_TEAM, 'calc_run', FUEL_CALC, 'log-plans-officer'), 'calc_run');
+    must(await callTool(world, J5_TEAM, 'mcp__staff-products__wargame', { action: 'record', phase: TURN }, 'plans-writer'), 'wargame');
+    const deps = { ...env.deps, staffKeyStatus: async () => both(env.signer) };
+    const result = await makeMultiUser(env.root, deps, { name: NAME });
+    assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
+    return { env: { ...env, deps }, other };
+  })();
+  return fourTemplate;
+}
+
+let copyCounter = 0;
+async function fourCopy(): Promise<{ four: FourLedgers; destination: string; result: CopyResult }> {
+  const four = await fourLedgers();
+  copyCounter += 1;
+  const destination = path.join(four.env.base, `copy-${copyCounter}`);
+  return { four, destination, result: await copied(four.env, destination) };
+}
+
+const signerOnly = (env: Env) => trusting(env.signer);
+
+test('the decision log is re-signed by the copier, another person\'s decision carried under the copier\'s key, and replayPersonDecisions verifies it', async () => {
+  const { four, destination, result } = await fourCopy();
+  const file = path.join(destination, LEDGER_DIR, DECISION_LOG_FILE);
+  assert.ok(result.written.includes(`${LEDGER_DIR}/${DECISION_LOG_FILE}`));
+  const lines = ledgerLinesOf(readFileSync(file));
+  const replay = replayPersonDecisions(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-decision', status: signerOnly(four.env) }));
+  assert.equal(replay.broken, undefined, 'the copy\'s decision log verifies with the copier\'s key alone');
+  assert.equal(replay.entries, 2);
+  const bridge = replay.decisions.get('watch:watch-bridge');
+  const ford = replay.decisions.get('watch:watch-ford');
+  assert.equal(bridge?.person.name, 'A. Demo', 'this device\'s own person keeps their name');
+  assert.equal(bridge?.decision, 'approved');
+  assert.equal(ford?.person.name, carriedApprovalName(OTHER_NAME, COPIER.name, 'rejected'));
+  assert.equal(ford?.person.name, 'B. Other (rejected in the shared project, carried by C. Copier)');
+  assert.equal(ford?.person.deviceFingerprint, four.env.signer.fingerprint);
+  assert.equal(ford?.decision, 'rejected');
+  assert.deepEqual(ford?.reasons, ['The ford is out of range.']);
+  assert.ok(signersOf(file).every((fingerprint) => fingerprint === four.env.signer.fingerprint), 'nothing in the copy is signed as the other person');
+  assert.ok(!signersOf(file).includes(four.other.fingerprint));
+  assert.equal(result.carried, 1, 'one decision is carried; every product step was this device\'s own');
+});
+
+test('the calculator ledger is re-signed by the copier and replayCalcLedger verifies it with the same records', async () => {
+  const { four, destination } = await fourCopy();
+  const shared = replayCalcLedger(ledgerLinesOf(readFileSync(path.join(four.env.root, LEDGER_DIR, CALC_LEDGER_FILE))), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status: signerOnly(four.env) }));
+  assert.equal(shared.broken, undefined);
+  const copy = replayCalcLedger(ledgerLinesOf(readFileSync(path.join(destination, LEDGER_DIR, CALC_LEDGER_FILE))), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status: signerOnly(four.env) }));
+  assert.equal(copy.broken, undefined, 'the copy\'s calculator ledger verifies with today\'s function');
+  assert.equal(copy.entries, shared.entries);
+  const records = (replay: typeof copy) => [...replay.records.values()].map((entry) => ({ record: entry.record, kind: entry.kind, hash: entry.hash, member: entry.member, at: entry.at }));
+  assert.deepEqual(records(copy), records(shared));
+});
+
+test('a host rooted at the copy gives the same PIR and watch decisions and wargame turns as the shared project, and the wargame lines are byte for byte the projection\'s', async () => {
+  const { four, destination, result } = await fourCopy();
+  const sharedHost = hostAt(four.env, four.env.root, (signer) => trusting(signer, four.other));
+  const copyHost = hostAt(four.env, destination);
+  const outcomes = (map: ReadonlyMap<string, { decision: string }>) => [...map.entries()].map(([key, entry]) => [key, entry.decision]).sort();
+  const sharedDecisions = await sharedHost.pirDecisions();
+  assert.equal(sharedDecisions.size, 2);
+  assert.deepEqual(outcomes(await copyHost.pirDecisions()), outcomes(sharedDecisions));
+  assert.deepEqual(await copyHost.wargameEntries(), await sharedHost.wargameEntries());
+  assert.equal((await copyHost.wargameEntries()).length, 1);
+  assert.deepEqual(readFileSync(path.join(destination, WARGAME_DIR, WARGAME_FILE)), readFileSync(path.join(four.env.root, WARGAME_DIR, WARGAME_FILE)));
+  assert.equal((await copyHost.replay()).broken, undefined);
+  assert.deepEqual(result.notices, multiUserNoticeLines());
+  assert.deepEqual(result.left, []);
+  assert.deepEqual(result.written, [
+    `${LEDGER_DIR}/${CALC_LEDGER_FILE}`, `${LEDGER_DIR}/${DECISION_LOG_FILE}`, `${LEDGER_DIR}/${LEDGER_FILE}`, productPath('j5', CONOPS), `${WARGAME_DIR}/${WARGAME_FILE}`
+  ].sort());
 });
