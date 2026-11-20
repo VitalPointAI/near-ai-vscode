@@ -567,7 +567,7 @@ test('a destination with staff files is refused destination-has-staff-files when
 test('every copy refusal is a plain sentence that ends by saying what to do next', () => {
   const NEXT = /^(Choose|Make|Open)\b/;
   for (const [reason, text] of Object.entries(COPY_REFUSALS)) {
-    assert.equal(text.includes('—'), false, `${reason}: no em-dash`);
+    assert.equal(text.includes('\u2014'), false, `${reason}: no em-dash`);
     assert.match(text, /^The copy was not made, because /, reason);
     assert.ok(text.includes('Nothing was written.'), `${reason}: says nothing was written`);
     const sentences = text.split(/(?<=\.)\s+/);
