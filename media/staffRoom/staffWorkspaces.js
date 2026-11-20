@@ -41,6 +41,8 @@
     // Every event log entry the page has seen, by id, across the whole log (not only the page shown): an escalation is announced wherever it is. A new
     // entry moves once, when it is first drawn (on this page or a later one); an old row never moves when paging.
     let seenLog = new Set();
+    // The entries escalated when the page last drew the log: an entry already there whose status turns to escalated is announced too, once.
+    let escalatedLog = new Set();
     let toRise = new Set();
     let first = true;
 
@@ -394,11 +396,12 @@
       const ids = new Set(j3.eventLog.rows.map((row) => row.id));
       toRise = new Set([...toRise].filter((id) => ids.has(id)));
       for (const row of j3.eventLog.rows) {
-        if (first || seenLog.has(row.id)) continue;
-        toRise.add(row.id);
-        if (row.status === 'escalated') h.announce('Event log: ' + row.id + ' escalated' + (row.ccir ? ' on CCIR ' + row.ccir : '') + '.');
+        if (first) continue;
+        if (!seenLog.has(row.id)) toRise.add(row.id);
+        if (row.status === 'escalated' && !escalatedLog.has(row.id)) h.announce('Event log: ' + row.id + ' escalated' + (row.ccir ? ' on CCIR ' + row.ccir : '') + '.');
       }
       seenLog = ids;
+      escalatedLog = new Set(j3.eventLog.rows.filter((row) => row.status === 'escalated').map((row) => row.id));
       const rows = h.el('ol', 'evrows');
       rows.setAttribute('aria-label', 'Event log');
       paged(rows, 'j3:log', j3.eventLog.rows, (row, parent) => {

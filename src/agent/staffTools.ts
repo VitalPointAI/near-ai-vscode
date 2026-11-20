@@ -24,7 +24,7 @@ export const STAFF_PRODUCTS_SERVER = 'staff-products';
 export const GUARD_SCAN_SERVER = 'guard-scan';
 
 /** The staff-products tools: the agent verbs of the state machine, then the registers, the wargame and the step mark. */
-export const STAFF_PRODUCT_TOOL_VERBS = [...AGENT_PRODUCT_VERBS, 'register', 'register_read', 'wargame', 'step', 'lint'] as const;
+export const STAFF_PRODUCT_TOOL_VERBS = [...AGENT_PRODUCT_VERBS, 'register', 'register_read', 'wargame', 'wargame_read', 'step', 'lint'] as const;
 
 export const staffToolName = (server: string, verb: string): string => `mcp__${server}__${verb}`;
 
@@ -281,15 +281,18 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
     run: async (input, context) => result(await hostOf().registerRead(callerOf(context), input.register))
   };
 
+  // Writing the wargame ledger (record a phase, derive the registers from it) is a member's: the host refuses anyone else (StaffHost.memberOf), so the
+  // tool is offered to members only. Reading it is its own read tool, wargame_read, offered to the lead too, so what the lead is offered is exactly what
+  // it may call (0.4.35 follow-up). action read stays on this tool for team files written before the split.
   const wargame: AgentTool<{ action: 'record' | 'derive' | 'read'; phase?: unknown }> = {
     name: name('wargame'),
-    description: '[staff-products] The wargame ledger. action record writes one phase of a turn, in order ACTION (friendly), REACTION (adversary), COUNTERACTION (friendly), for one COA against one adversary COA: phase is { coa, enemyCoa, turn, phase, hHourOffsetMinutes, moves: [{ unit, path: [[x, y]], sidc? }], results, decisionPoints: [{ id, description, decisionMaker, indicator?, nai?, pir?, recommendedAction? }], sync: [{ row, entry, section? }], branches }. action derive builds the sync matrix, DST and DSM rows and the branch list from the record (written to those registers when you are their writer). action read returns the record.',
-    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['record', 'derive', 'read'] }, phase: { type: 'object' } }, required: ['action'], additionalProperties: false },
+    description: '[staff-products] Writes the wargame ledger. action record writes one phase of a turn, in order ACTION (friendly), REACTION (adversary), COUNTERACTION (friendly), for one COA against one adversary COA: phase is { coa, enemyCoa, turn, phase, hHourOffsetMinutes, moves: [{ unit, path: [[x, y]], sidc? }], results, decisionPoints: [{ id, description, decisionMaker, indicator?, nai?, pir?, recommendedAction? }], sync: [{ row, entry, section? }], branches }. action derive builds the sync matrix, DST and DSM rows and the branch list from the record (written to those registers when you are their writer). To read the record, use wargame_read.',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['record', 'derive'] }, phase: { type: 'object' } }, required: ['action'], additionalProperties: false },
     capability: 'workspaceWrite',
     manifest: writeManifest(name('wargame')),
     parse: (raw) => {
       const action = raw.action;
-      if (action !== 'record' && action !== 'derive' && action !== 'read') throw new ToolError('action is record, derive or read.');
+      if (action !== 'record' && action !== 'derive' && action !== 'read') throw new ToolError('action is record or derive; read the record with wargame_read.');
       if (action === 'record' && (typeof raw.phase !== 'object' || raw.phase === null)) throw new ToolError('record needs phase.');
       return { action, ...(raw.phase !== undefined ? { phase: raw.phase } : {}) };
     },
@@ -298,10 +301,27 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
       const host = hostOf();
       if (input.action === 'record') return result(await host.wargameRecord(callerOf(context), input.phase));
       if (input.action === 'derive') return result(await host.wargameDerive(callerOf(context)));
-      const entries = await host.wargameEntries();
-      // The ledger is written by other members: what it holds goes back fenced, the way every read tool's answer does (staffFence.ts).
-      return entries.length ? fenceStaffText(name('wargame'), JSON.stringify(entries, null, 2)) : 'No wargame phases recorded yet.';
+      // A write tool's answer is not fenced by fenceReadResults, so the ledger it returns here is fenced in place (staffFence.ts).
+      return fenceStaffText(name('wargame'), await readWargame());
     }
+  };
+
+  // The ledger is written by other members; wargame_read is a read tool, so fenceReadResults fences its whole answer.
+  const readWargame = async (): Promise<string> => {
+    const entries = await hostOf().wargameEntries();
+    return entries.length ? JSON.stringify(entries, null, 2) : 'No wargame phases recorded yet.';
+  };
+
+  const wargameRead: AgentTool<Record<string, never>> = {
+    name: name('wargame_read'),
+    description: '[staff-products] Reads the wargame ledger: every recorded phase of every turn, in order. Reads only.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    capability: 'read',
+    manifest: readManifest(name('wargame_read')),
+    concurrent: true,
+    parse: () => ({}),
+    title: () => 'Read the wargame',
+    run: async () => readWargame()
   };
 
   const step: AgentTool<{ step: number; section?: string }> = {
@@ -345,9 +365,9 @@ export function staffTools(access: StaffToolAccess): AgentTool<any>[] {
   };
 
   // The tools only a member may call (the host refuses the run's lead and anyone not on the team, StaffHost.memberOf) are offered only to members, so
-  // the lead is never offered a tool it may not call (0.4.35). The lead keeps what it may call: status, list, register_read, wargame (it reads the
-  // record; recording and deriving stay a member's, refused by the host), step, lint and the guard scan.
+  // the lead is never offered a tool it may not call (0.4.35). The lead keeps what it may call: status, list, register_read, wargame_read, step, lint
+  // and the guard scan.
   const forMembers = <T>(tool: AgentTool<T>): AgentTool<T> => ({ ...tool, offeredTo: (agentLabel) => isStaffMember(access.team, agentLabel) });
   // Every read tool's answer is fenced whole: products, registers and reports are other members' text (staffFence.ts).
-  return fenceReadResults([...[propose, verdict, submit, withdraw].map(forMembers), status, list, forMembers(register), registerRead, wargame, step, lint, scan]);
+  return fenceReadResults([...[propose, verdict, submit, withdraw].map(forMembers), status, list, forMembers(register), registerRead, forMembers(wargame), wargameRead, step, lint, scan]);
 }
