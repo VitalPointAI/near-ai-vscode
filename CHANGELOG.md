@@ -4,6 +4,32 @@
 
 ### Fixes
 
+- **Content that must stay local no longer reaches a host by a broad pattern or plain http.** A
+  host your organization names as local now serves Protected B, org Restricted and NATO Restricted
+  content only when the policy names that exact host (not a `*.` pattern) and the runtime uses
+  https. Protected C, Canadian classified levels and NATO Confidential and above never leave this
+  computer, even for a named host. A request this refuses says why and how to fix the policy, and a
+  policy with a `*.` entry is told so when the window starts.
+- **Classified work on an unaccredited computer is said out loud.** When a chat's classified or
+  Protected C content goes to a model, the chat says once that this computer is not recorded as
+  accredited, and the decision log records it. Nothing is refused for it yet.
+- **"Private" now means checked, every time.** A private team or member, Team Studio's private
+  calls and TEE-only mode no longer trust the model list's word: each request goes only to a model
+  on this computer, or to NEAR AI Cloud over a connection proven to end inside its private
+  hardware, and is refused before anything is sent otherwise. The model picker now reads "Private ·
+  NEAR AI private hardware, checked each time it is used".
+- **Staff teams say where their private models come from.** Setting up or running a military staff
+  team now says that the private models NEAR AI offers today come from developers in the People's
+  Republic of China, so the team is for fictional or exercise material only until your organization
+  approves a model for operational work. Nothing changes about where the work goes.
+- **A newer policy asks you to update, never to reset.** A policy that needs a feature or setting
+  this version does not know still runs reading and planning only, and now says to update the
+  extension instead of offering to reset the policy to its defaults, which would have discarded its
+  rules.
+- **Labels read by name.** Labels now show the scale's name with the level ("Organization:
+  Internal", "Canada, Classified: Confidential"), and the organization's Confidential level reads
+  "Sensitive" so it is never mistaken for the classified one. Stored labels are unchanged, and the
+  staff checks and a chat's label now rank levels by your policy's own scales.
 - **Agents that start together in their own git worktrees no longer fail at random.** When a team
   started several members with worktree isolation in one repository, git could refuse one of the
   worktrees ("failed to read .../commondir") because they were created at the same moment. They

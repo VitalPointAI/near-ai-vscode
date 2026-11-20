@@ -17,6 +17,7 @@ import { applyStaffSetup, levelChoices, nationChoices, planStaffSetup, profileCh
 import { buildStudioContext, parseStudioMessage } from '../services/teamStudioPage';
 import { TeamUpdater } from '../services/teamUpdates';
 import { buildToolsDirectory, type DirectoryInput } from '../services/toolsDirectory';
+import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 // Drop 1 integration: the staff servers on the Tools page and in the Team Studio picker, NEAR AI: Set Up a Staff Team, and Update Team for staff teams.
 
@@ -252,4 +253,28 @@ test('TeamUpdater previews a library staff team against the open project\'s sett
   // Without an open project it still plans the team, with the defaults, and leaves AGENTS.md alone.
   const alone = await new TeamUpdater(library).preview(setup.teamFile);
   assert.ok(alone && !alone.guidance);
+});
+
+// Coherence review S5: where a staff team is set up, it says plainly that the private models NEAR AI offers today come from PRC developers, so the team is
+// for fictional or exercise material only until your organization approves a model. Copy only: the team stays private and nothing about routing changes.
+test('S5: the J2 and J4 team files carry the PRC-origin sentence in their "Private models only" rule, and stay private', async () => {
+  const { STAFF_PRIVATE_MODELS_TEXT } = await import('../domain/staff/products');
+  const { J4_STAFF_TEMPLATE } = await import('../agent/staff/templates');
+  for (const template of [J2_STAFF_TEMPLATE, J4_STAFF_TEMPLATE]) {
+    const plan = planStaffSetup({ templateId: template.id, options: { settings: settings(), locality: 'cloud' }, agents: '', projectJson: '{}' });
+    assert.ok(JSON.stringify(plan).includes(`a run stops rather than send the work to a forwarded model. ${STAFF_PRIVATE_MODELS_TEXT}`.replace(/"/g, '\\"')), template.id);
+    assert.equal(parseTeam(plan.team, `${plan.roster.fileName}.md`).private, true, 'the team is still private');
+  }
+});
+
+test('S5: the staff setup\'s model step and its last message say the same sentence', async () => {
+  const { STAFF_PRIVATE_MODELS_TEXT } = await import('../domain/staff/products');
+  const stub = createVscodeStub();
+  const uninstall = installVscodeStub(stub);
+  try {
+    const command = await import('../services/staffSetupCommand');
+    assert.ok(command.readyMessage('J2 intelligence', 'j2', false).includes(STAFF_PRIVATE_MODELS_TEXT));
+    const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'staffSetupCommand.ts'), 'utf8');
+    assert.match(source, /label: 'NEAR AI Cloud', detail: `Private models in NEAR's TEE; members that research may use the web tools\. \$\{STAFF_PRIVATE_MODELS_TEXT\}`/);
+  } finally { uninstall(); }
 });

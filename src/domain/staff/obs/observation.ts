@@ -9,7 +9,9 @@
 // The row is the shape of the v0.6.0 `observation` table, column for column (OBSERVATION_V06_COLUMNS), so the one-shot "local staff store" connector
 // imports drop 2 segments into the host without rework.
 import { createHash } from 'node:crypto';
-import { HANDLING_FLAGS, SCALE_PRESETS } from '../../gate/labels';
+import { HANDLING_FLAGS } from '../../gate/labels';
+import type { ScaleTable } from '../../gate/labels';
+import { activeScales, joinLabelKeys, labelKeyAtLeast } from '../../gate/labelAlgebra';
 import type { HandlingFlag } from '../../gate/labels';
 import {
   INFORMATION_CREDIBILITY_GRADES, INTELLIGENCE_DISCIPLINES, PARTNER_ONLY_DISCIPLINES, SOURCE_RELIABILITY_GRADES, STANDARD_IDENTITIES
@@ -144,31 +146,20 @@ export function segmentId(feed: string, channel: string, knownAt: string): strin
 
 // ---- Labels -------------------------------------------------------------------------------------------------------------------------------
 
-function splitLabel(label: string): { scale: string; level: string } {
-  const at = label.indexOf('/');
-  return { scale: label.slice(0, at), level: label.slice(at + 1) };
-}
+// Coherence review S7: ranked by the one label module against the active signed policy's scales (the shipped presets only while it failed closed), the
+// same ranking the gate and a chat's label use, so a custom or extended scale is judged the same way everywhere.
 
-/** The rank of a `scale/level` label on its scale, or -1 when unknown. */
-function rankOf(label: string): number {
-  const { scale, level } = splitLabel(label);
-  return Object.prototype.hasOwnProperty.call(SCALE_PRESETS, scale) ? SCALE_PRESETS[scale].levels.indexOf(level) : -1;
-}
-
-/** Whether `label` is on the same scale as `floor` and at least as high. */
-export function labelAtLeast(label: string, floor: string): boolean {
-  return splitLabel(label).scale === splitLabel(floor).scale && rankOf(label) >= rankOf(floor) && rankOf(floor) >= 0;
+/** Whether `label` is on the same scale as `floor` and at least as high, on the active policy's scales. */
+export function labelAtLeast(label: string, floor: string, scales: ScaleTable = activeScales()): boolean {
+  return labelKeyAtLeast(label, floor, scales);
 }
 
 /**
  * The label of something derived from rows (a track, a corroboration count, a layer, a draft): the highest of its inputs (note 11, 3.5). Labels on
  * different scales do not join without a mapping in the policy bundle, so mixing them gives undefined and the caller refuses the derivation.
  */
-export function joinTemplateLabels(labels: readonly string[]): string | undefined {
-  if (labels.length === 0) return undefined;
-  const scale = splitLabel(labels[0]).scale;
-  if (labels.some((label) => splitLabel(label).scale !== scale || rankOf(label) < 0)) return undefined;
-  return labels.reduce((highest, label) => (rankOf(label) > rankOf(highest) ? label : highest));
+export function joinTemplateLabels(labels: readonly string[], scales: ScaleTable = activeScales()): string | undefined {
+  return joinLabelKeys(labels, scales);
 }
 
 // ---- Reading --------------------------------------------------------------------------------------------------------------------------------

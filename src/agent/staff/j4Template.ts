@@ -9,7 +9,7 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../
 import { CROSSWALK_STEPS, PLANNING_TYPES, STAFF_LEVELS, STAFF_NATIONS, STAFF_PROFILE_IDS, SUPPORT_PLANNING_RULE } from '../../domain/staff/doctrine';
 import type { CrosswalkStep } from '../../domain/staff/doctrine';
 import type { StepRole } from '../../domain/staff/events';
-import { STAFF_MARKERS } from '../../domain/staff/products';
+import { STAFF_MARKERS, STAFF_PRIVATE_MODELS_TEXT } from '../../domain/staff/products';
 import { defaultStaffSettings, levelOffer, renderProfileMarkdown } from '../../domain/staff/profiles';
 import type { StaffSettings } from '../../domain/staff/profiles';
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
@@ -140,7 +140,7 @@ export function j4Guidance(settings: StaffSettings): string {
     '- **Exercise data only.** These templates are unclassified, and so is everything the team writes: fictional scenarios, notional units and notional numbers. No real stock levels, unit holdings or contract values. Real operational plans belong on accredited systems.',
     `- **Labels are not accreditation.** ${LABELS_NOT_ACCREDITATION_TEXT}`,
     `- **Clearances are self-declared.** ${CLEARANCE_SELF_ASSERTED_TEXT}`,
-    '- **Private models only.** The team is marked private: every member runs on a NEAR TEE or local model, and a run stops rather than send the work to a forwarded model.',
+    `- **Private models only.** The team is marked private: every member runs on a NEAR TEE or local model, and a run stops rather than send the work to a forwarded model. ${STAFF_PRIVATE_MODELS_TEXT}`,
     `- **People decide.** Members recommend and mark each decision \`${STAFF_MARKERS.decisionFor} <role>\` with options and risk. The commander sets priorities of support; a review board and a contracting officer decide contracts; the surgeon decides medical matters; a named person approves and releases every product in the Staff Room. No member commits resources, signs a contract, sets a priority, or writes "approved", "selected" or "released" about its own work.`,
     `- **One writer per product.** Each product has one owning member; others propose changes in .planning/staff/proposals/<product>/ and the owner merges them. The jloc-chief is the one writer of the COP logistics layer. A member waiting on another section writes \`${STAFF_MARKERS.waitingOn} <section>: <what>\` and carries on.`,
     `- **Health products** carry \`${STAFF_MARKERS.surgeonReview}\`: they assist a qualified surgeon and are never medical advice. Mortuary affairs products hold no personal data.`,

@@ -12,6 +12,7 @@ import { privateRouteFor } from '../services/providerCache';
 import { AgentConversation, GsdContext, routeAllows, type PrivateRoute } from '../services/agentSession';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { newTestConversation } from './helpers/gatedRuns';
+import { privateOnlyNow } from '../gate/sessionMark';
 
 // A team member marked `privacy: private` runs only on a model in a NEAR TEE or on this machine:
 // the most capable private model for its tier, and never a forwarded one, even when that is all
@@ -178,4 +179,41 @@ test('the run\'s route counts as attested NEAR for every spelling of NEAR\'s own
   assert.deepEqual(privateRouteFor({ provider: 'hybrid', baseUrl: '' }, true), { kind: 'local', attestation: false }, 'a hybrid run on its local model is local');
   assert.deepEqual(privateRouteFor({ provider: 'hybrid', baseUrl: '' }, false), { kind: 'near', attestation: true });
   assert.equal(isNearCloudEndpoint(undefined), true);
+});
+
+// Coherence review S4: the catalog's word only chooses a private member's model. Every request the member makes is sent with the private floor on, so the
+// gate's own check (a model on this computer, or a NEAR TEE model over a connection proven to end inside its private hardware) decides at the client. The
+// lead and a member that is not private run without it, and TEE-only mode puts it on the whole run.
+test('S4: a private member\'s requests carry the private floor; the lead and other members do not unless TEE-only mode is on', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-private-floor-'));
+  const home = await mkdtemp(path.join(tmpdir(), 'near-ai-private-floor-gsd-'));
+  await mkdir(path.join(home, 'gsd-core'), { recursive: true });
+  const teamFile = path.join(root, '.planning', '.near-ai', 'team.md');
+  const member = (name: string, privacy?: 'private') => ({ name, description: name, tools: ['Read'], body: `You are ${name}.`, file: teamFile, model: 'deep', ...(privacy ? { privacy } : {}) });
+  const gsd: GsdContext = { home, skills: [], shellEnv: {}, agents: [member('editor', 'private'), member('writer')] };
+  const call = (id: string, type: string): ToolCall => ({ id, type: 'function', function: { name: 'Agent', arguments: JSON.stringify({ subagent_type: type, prompt: 'go' }) } });
+  const floors = new Map<string, boolean>();
+  const near = {
+    async *streamCompletion(_model: string, messages: AgentMessage[]): AsyncGenerator<CompletionEvent> {
+      const usage = { verificationStatus: 'unknown' as const, latencyMs: 1 };
+      const who = /^You are ([\w-]+)\./.exec(String(messages[0].content))?.[1] ?? 'lead';
+      if (!floors.has(who)) floors.set(who, privateOnlyNow());
+      if (who !== 'lead') { yield { type: 'done', message: { role: 'assistant', content: 'done' }, finishReason: 'stop', usage }; return; }
+      if (!messages.some((message) => message.role === 'tool')) { yield { type: 'done', message: { role: 'assistant', content: null, tool_calls: [call('a1', 'editor'), call('a2', 'writer')] }, finishReason: 'tool_calls', usage }; return; }
+      yield { type: 'done', message: { role: 'assistant', content: 'all done' }, finishReason: 'stop', usage };
+    },
+    async actualCostsUsd() { return undefined; }
+  };
+  const send = async (teeOnly: boolean) => {
+    floors.clear();
+    const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
+    try {
+      await conversation.send({ text: 'go', client: near as never, model: 'cloud/frontier', privacy: 'Not private', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, gsd, tiers: TIERS, availableModels: CATALOG.map((entry) => entry.id), modelCatalog: CATALOG, route: { kind: 'near', attestation: true }, ...(teeOnly ? { teeOnly: true } : {}) });
+    } finally {
+      conversation.dispose();
+    }
+    return Object.fromEntries(floors);
+  };
+  assert.deepEqual(await send(false), { lead: false, editor: true, writer: false });
+  assert.deepEqual(await send(true), { lead: true, editor: true, writer: true });
 });

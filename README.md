@@ -257,7 +257,9 @@ writes the exact commands and leaves them for you to approve and run.
 Studio) makes a military staff section team for this project: choose the
 section (J2 intelligence, J5 plans, J3 operations or J4 logistics), the doctrine profile (US Joint, US Army
 MDMP or NATO/Canadian), the level, the nation and the kind of planning, then
-check the roster before anything is written. The team goes to your teams as
+check the roster before anything is written. Staff teams are marked private,
+and the setup says: "The private models NEAR AI offers today come from developers in the People's Republic of China. Use this team only on fictional or exercise material until your organization approves a model for operational work."
+A chat that runs a staff team says it once too. The team goes to your teams as
 `<section>-<profile>-<level>.md` and runs with `/team:<that name>`; PROFILE.md
 and the section's skills go under `.planning/staff/`, the staff settings into
 `.planning/.near-ai/project.json`, and the section's guidance into `AGENTS.md`
@@ -789,11 +791,15 @@ until it runs out aren't shown.
   for its tier, and if there is none the member does not run and the lead is
   told why, so its work is never sent to a forwarded model. To choose that
   model, set `nearAi.agent.deepModel` (or the standard or fast tier the
-  member names) to a model whose picker label reads "Private · runs in NEAR
-  TEE", or to a local model; if the configured tier model is forwarded, the
+  member names) to a model whose picker label reads "Private · NEAR AI
+  private hardware, checked each time it is used", or to a local model; if the configured tier model is forwarded, the
   next private tier model is used (deep, then standard, then fast for a deep
   member), then the most capable other private model. `privacy: any`, or no
-  line, lets the member use any model the run may use. The extension always
+  line, lets the member use any model the run may use. The picker's word only
+  chooses the model: each request a private member sends goes only when the
+  same check the labels use passes (a model on this computer, or NEAR AI Cloud
+  over a connection proven to end inside its private hardware), and is refused
+  before anything is sent otherwise. The extension always
   writes `privacy:` as the member's last line before its instructions, so an
   older version that does not know it still reads the member's tools
   correctly; if you write it by hand, put it after `tools:` too.
@@ -1458,7 +1464,9 @@ copy of Open-GSD to a project that doesn't already have one.
   narrow it. **NEAR AI: Show Policy** shows it, read only. If it is missing,
   changed or expired, only reading and planning run until you run
   **NEAR AI: Reset Policy to Defaults**, which asks first and keeps your old
-  file. Every model request is checked against its routing before anything is
+  file. A policy written for a newer version of the extension is never reset
+  for you: it says to update the extension, and until then only reading and
+  planning run. Every model request is checked against its routing before anything is
   sent and leaves a record in a log of its own; on a fresh install nothing
   changes where requests go. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - **Labels and clearances.** **NEAR AI: Set Label** labels a file, a folder or
@@ -1468,6 +1476,13 @@ copy of Open-GSD to a project that doesn't already have one.
   is sent. Content at a level that needs a private cloud model goes to NEAR AI
   Cloud only over a connection proven to end inside its private hardware, and
   each such answer is checked afterwards; otherwise it stays on this computer.
+  A host your organization names as local serves Protected B and the other
+  local-only levels only when the policy names that exact host and it uses
+  https, and Protected C, classified and NATO Confidential and above never
+  leave this computer. Classified work on this computer says once per chat that
+  the computer is not recorded as accredited. Labels show the scale's name with
+  the level ("Organization: Internal"); the organization's Confidential level
+  reads "Sensitive".
   Only you lower a chat's label, with **NEAR AI: Lower This Chat's Label** and a
   reason. Click the chat's label beside the model to run it, or use the button
   under a refusal that names it; lowering a file's label does not lower a chat
@@ -1482,7 +1497,8 @@ copy of Open-GSD to a project that doesn't already have one.
 - A **privacy check** runs on every chat message before it is sent. Likely
   credentials and private-file paths are held back (you can send a message once
   anyway), personal data asks first, and `tee-only` mode blocks models NEAR
-  forwards to other providers.
+  forwards to other providers and holds every request to the private-hardware
+  check.
 - A **trust badge** under each cloud answer of the lead agent says **Verified private model**,
   **Model verified, connection not proven** or **Not verified**. It is set only
   from checks that ran: NEAR's signature over the exact request and response, a
@@ -1543,7 +1559,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.sync.keepKeyInProject` | `true` | Keep the project's chat key in a private file (mode 0600) in the project's ignored state folder, so every editor on this computer can open the chats and use the NEAR AI key with no set-up. Off: each new editor or browser asks for the recovery code. |
 | `nearAi.sync.intervalMinutes` | `10` | How often, in minutes, a project with sync turned on syncs in the background while idle. 0 turns the background sync off (0 to 1440). Sync itself runs only after you turn it on. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
-| `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers. |
+| `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers, and sends a request only when it runs on this computer or over a connection proven to end inside NEAR AI Cloud's private hardware. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount: the larger of NEAR's own total for the key (with a usage reporting token) and this computer's spend ledger. |
 | `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
 | `nearAi.spend.useNearUsageTotal` | `true` | With a usage reporting token set, show NEAR's own total (and check the daily limit against it). Its description links to **Set usage reporting token** and **Clear**; the token itself lives in secret storage. |

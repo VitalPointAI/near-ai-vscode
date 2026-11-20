@@ -178,6 +178,16 @@ test('policyDocumentText for a policy that failed is exactly the title, the note
   assert.ok(!gateCommands.policyDocumentText(silent, 0).endsWith('\n'));
 });
 
+test('S6: Show Policy for a policy written for a newer version says to update and never offers Reset; other failures still name Reset', () => {
+  for (const reason of ['needs-update', 'unknown-field', 'unsupported-version', 'vocabulary-unknown'] as const) {
+    const text = gateCommands.policyDocumentText(failedClosed(reason), 0);
+    assert.match(text, /update the extension/i, reason);
+    assert.ok(!/Reset Policy to Defaults/.test(text), reason);
+    assert.match(text, /State: not usable, so only reading and planning are allowed/);
+  }
+  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset Policy to Defaults/);
+});
+
 test('policyDocumentText lists each MCP server\'s label ceiling, and says when none is set (WP-GATE)', () => {
   const issuer = { fingerprint: 'device-test', publicKey: 'A'.repeat(43) };
   const stateFor = (ceilings: unknown): BundleState => {

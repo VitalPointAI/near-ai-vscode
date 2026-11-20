@@ -26,7 +26,7 @@ import type { OutboundFingerprints } from './outboundCheck';
 import type { LabelVerdict } from '../domain/gate/decide';
 import { SessionMark, whyNotDominated } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import { labelKey } from '../domain/gate/labels';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { Clearance, Label } from '../domain/gate/labels';
 import { routingWhileFailedClosed, strictestLabelOf, tierForLabel, tierForMark } from '../domain/gate/routing';
 import type { RoutingTable, RoutingTier } from '../domain/gate/routing';
@@ -985,7 +985,7 @@ export function markVerdictFor(runtime: GateRuntime, before: Mark | undefined, m
  * names Lower This Chat's Label too, so the chat offers that button under the refusal.
  */
 export function mcpCeilingText(server: string, above: Label, ceiling: Clearance): string {
-  return `This chat holds content at ${labelKey(above)}, above the highest label your policy lets the MCP server "${server}" receive (${labelKey(ceiling)}${ceiling.expiresAt === undefined ? '' : `, until ${ceiling.expiresAt}`}), so nothing was sent to it. Use this server from a chat that has not read that content, or change its ceiling with NEAR AI: Edit Policy. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.`;
+  return `This chat holds content at ${labelKeyShown(above)}, above the highest label your policy lets the MCP server "${server}" receive (${labelKeyShown(ceiling)}${ceiling.expiresAt === undefined ? '' : `, until ${ceiling.expiresAt}`}), so nothing was sent to it. Use this server from a chat that has not read that content, or change its ceiling with NEAR AI: Edit Policy. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.`;
 }
 
 /** The sentence of label.mcp-ceiling when the ceiling could not be checked (review round 1): the call is refused, fail closed, and no label is blamed. */

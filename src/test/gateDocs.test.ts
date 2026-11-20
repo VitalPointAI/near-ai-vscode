@@ -622,3 +622,34 @@ test('SECURITY.md, README and CHANGELOG say Public requests go over the proven c
   assert.ok(entry.includes('Levels that need an attested cloud still refuse on a mismatch.'));
   for (const text of [badge, entry]) { assert.ok(!text.includes(EM_DASH)); assert.doesNotMatch(text, /NEAR organization/); }
 });
+
+// Coherence review safety patch: SECURITY.md and README say what the code now enforces, in the code's own words where the code owns them.
+test('safety patch: SECURITY.md and README say what S1, S2, S4, S5, S6 and S8 enforce, and the staff sentence word for word', async () => {
+  const { STAFF_PRIVATE_MODELS_TEXT } = await import('../domain/staff/products');
+  const { PRIVATE_MODEL_LABEL } = await import('../services/chatBridge');
+  const security = flat(SECURITY);
+  const readme = flat(README);
+  // S5: the same sentence the setup, the team file and the chat show.
+  assert.ok(security.includes(STAFF_PRIVATE_MODELS_TEXT), 'SECURITY.md');
+  assert.ok(readme.includes(STAFF_PRIVATE_MODELS_TEXT), 'README');
+  // S4: the picker's words, and that the check, not the catalog, decides.
+  assert.ok(security.includes(`**${PRIVATE_MODEL_LABEL}**`));
+  assert.ok(readme.includes(PRIVATE_MODEL_LABEL));
+  assert.ok(!security.includes('runs in NEAR TEE') && !readme.includes('runs in NEAR TEE'), 'the old picker words are gone');
+  assert.match(security, /the catalog's word only chooses a model/);
+  // S1: exact host over https for local-only levels; this computer only for the most sensitive; the rule ids.
+  assert.match(security, /names that exact host, not a `\*\.` pattern, and the runtime is reached over https/);
+  assert.match(security, /`route\.local-host-not-exact`/);
+  assert.match(security, /`route\.this-computer-only`/);
+  assert.match(readme, /names that exact host and it uses https/);
+  // S2: the notice and its record, and that nothing is refused yet.
+  assert.match(security, /`route\.not-accredited` once per chat\. Nothing is refused for it in this version/);
+  // S6: update, never Reset, for a policy written for a newer version.
+  assert.match(security, /says to update the extension\. It never offers Reset as the fix/);
+  assert.match(readme, /A policy written for a newer version of the extension is never reset for you/);
+  // S8: shown by the scale's name; Confidential on the organization scale reads Sensitive.
+  assert.match(security, /The organization scale's Confidential level is shown as "Sensitive"/);
+  assert.match(readme, /the organization's Confidential level reads "Sensitive"/);
+  assert.ok(!security.includes(EM_DASH));
+  for (const text of [security, readme]) assert.ok(!/NEAR organization/.test(text));
+});

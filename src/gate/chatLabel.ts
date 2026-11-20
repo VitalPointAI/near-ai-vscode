@@ -4,7 +4,8 @@
 // else keeps the joined, higher label. Node only, no vscode.
 import { raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
-import { SCALE_PRESETS, parseLabel } from '../domain/gate/labels';
+import { parseLabel } from '../domain/gate/labels';
+import { activeScales } from '../domain/gate/labelAlgebra';
 import type { Label } from '../domain/gate/labels';
 import { NO_KNOWN_KEYS, combineKeyStatus, teamKeyStatus } from '../domain/team/keyStatus';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -62,7 +63,8 @@ function markOf(value: unknown): Mark | undefined {
   if (!Array.isArray(value) || value.length === 0 || value.length > 16) return undefined;
   const out: Label[] = [];
   for (const entry of value) {
-    const parsed = parseLabel(entry, SCALE_PRESETS);
+    // Coherence review S7: read on the active policy's scales, so a lowering on a custom scale can be read (the presets only while it failed closed).
+    const parsed = parseLabel(entry, activeScales());
     if (!parsed.ok) return undefined;
     out.push(parsed.value);
   }
@@ -72,7 +74,8 @@ function markOf(value: unknown): Mark | undefined {
 /** `mark` raised by every label of `by`. */
 function raiseBy(mark: Mark, by: Mark): Mark {
   let raised: Mark = mark;
-  for (const label of by) raised = raiseMark(raised, label, SCALE_PRESETS);
+  const scales = activeScales();
+  for (const label of by) raised = raiseMark(raised, label, scales);
   return raised;
 }
 

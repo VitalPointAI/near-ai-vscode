@@ -283,7 +283,7 @@ test('in a real run the refused call never reaches the server, the agent is told
   const highRuntime = runtimeUnder(bundle);
   const { outputs } = await runWith(root, [call('c1', 'mcp__partner__lookup', { sku: 'SW-24' })], grantsAt([label('org', 'Confidential')]), highRuntime, toolsOf(REMOTE, high));
   assert.deepEqual(high.sent, [], 'nothing was sent to the server');
-  assert.match(outputs.join('\n'), /above the highest label your policy lets the MCP server "partner" receive \(org\/Internal\)/);
+  assert.match(outputs.join('\n'), /above the highest label your policy lets the MCP server "partner" receive \(Organization: Internal\)/);
   assert.match(outputs.join('\n'), /NEAR AI: Lower This Chat's Label/);
   const refusals = highRuntime.records.filter((record) => record.authorizations[0]?.policy.name === 'label.mcp-ceiling');
   assert.equal(refusals.length, 1, 'one decision record for the refusal');
@@ -296,9 +296,10 @@ test('in a real run the refused call never reaches the server, the agent is told
 test('the refusal sentence is plain: no em-dash, names the server, the label and the ceiling, and the ways on', () => {
   const text = mcpCeilingText('partner', label('org', 'Confidential') as Label, ceilingOf('org', 'Internal', { expiresAt: '2030-01-01T00:00:00.000Z' }));
   assert.equal(text.includes(String.fromCharCode(0x2014)), false);
-  assert.match(text, /org\/Confidential/);
+  // Coherence review S8: the scale's name with the level, and the organization's Confidential reads "Sensitive".
+  assert.match(text, /Organization: Sensitive/);
   assert.match(text, /"partner"/);
-  assert.match(text, /org\/Internal, until 2030-01-01T00:00:00\.000Z/);
+  assert.match(text, /Organization: Internal, until 2030-01-01T00:00:00\.000Z/);
   assert.match(text, /nothing was sent to it/);
   assert.match(text, /NEAR AI: Edit Policy/);
 });

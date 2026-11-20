@@ -26,6 +26,8 @@ import type { InferTier } from '../domain/gate/vocabulary';
 export interface RouteAttestation {
   failed: boolean;
   closed?: boolean;
+  /** Set once this chat has said, and recorded, that classified work runs on a computer not recorded as accredited (coherence review S2): once per chat. */
+  notAccreditedTold?: boolean;
 }
 
 /**
@@ -69,6 +71,8 @@ export interface SessionRoute {
   readonly attestation: RouteAttestation;
   /** Told when the check after an answer at attested-cloud settles (D-36). Never awaited by a request. */
   readonly onAnswerChecked?: AnswerCheckListener;
+  /** Shows a chat notice (coherence review S2). Never awaited, and a notice that cannot be shown never changes a request. */
+  readonly onNotice?: (text: string) => void;
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -78,7 +82,7 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  * The route of one run, from its gate runtime: the runtime's policy, actor, sink and clock. `markOf` defaults to the empty mark (the default label);
  * plan 22 gives a chat's runs the chat's mark. `attestation` is the chat's shared object, so a sub-agent and its parent share one route state.
  */
-export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener } = {}): SessionRoute {
+export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void } = {}): SessionRoute {
   return {
     markOf: options.markOf ?? (() => EMPTY_MARK),
     bundleState: runtime.bundleState,
@@ -88,7 +92,8 @@ export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () =>
     ...(runtime.newRecordId === undefined ? {} : { newRecordId: runtime.newRecordId }),
     ...(runtime.productVersion === undefined ? {} : { productVersion: runtime.productVersion }),
     attestation: options.attestation ?? { failed: false },
-    ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked })
+    ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
+    ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice })
   };
 }
 
@@ -121,6 +126,40 @@ export function withSessionRoute<T>(route: SessionRoute, work: () => T): T {
 /** The route of the work running now, or undefined outside every route. */
 export function currentSessionRoute(): SessionRoute | undefined {
   return routes.getStore();
+}
+
+// ---- The private floor (coherence review S4) ----
+
+const privateOnly = new AsyncLocalStorage<boolean>();
+let privateOnlySetting: (() => boolean) | undefined;
+
+/**
+ * Runs `work` with the private floor on: every model request it makes, however deep, counts as private only when the gate's own check passes (a model on
+ * this computer, or a private model on NEAR AI Cloud over a connection proven to end inside its private hardware). A private team or member runs this way.
+ * Nesting never turns the floor off.
+ */
+export function withPrivateOnly<T>(work: () => T): T {
+  return privateOnly.run(true, work);
+}
+
+/**
+ * Sets (or clears) the setting that turns the floor on for every request (nearAi.privacyMode tee-only). The returned function clears it only while it is
+ * still the one set.
+ */
+export function setPrivateOnlySetting(read: (() => boolean) | undefined): () => void {
+  privateOnlySetting = read;
+  return () => { if (privateOnlySetting === read) privateOnlySetting = undefined; };
+}
+
+/** True when the request running now must use verified private hardware or this computer. A setting that cannot be read leaves the floor on (fail closed). */
+export function privateOnlyNow(): boolean {
+  if (privateOnly.getStore() === true) return true;
+  if (privateOnlySetting === undefined) return false;
+  try {
+    return privateOnlySetting() === true;
+  } catch {
+    return true;
+  }
 }
 
 /** The route of a window with no gate host: failed closed (no policy is known), recorded nowhere, a person with no session. */
@@ -290,6 +329,34 @@ export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, re
     bundleHash,
     ...(mark.length === 0 ? {} : { mark }),
     attestation: request.attestation
+  });
+}
+
+/**
+ * The record that classified work ran on a computer not recorded as accredited (`route.not-accredited`, coherence review S2): written once per chat, beside
+ * the allowed request's own record. It refuses nothing. The label is the one that needs an accredited system; never a host or a path.
+ */
+export function notAccreditedRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: RouteRecordContext & { readonly label: Label; readonly reason: string }): DecisionRecord {
+  const recordId = (route.newRecordId ?? randomUUID)();
+  const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';
+  const model = recordedModelName(request.model);
+  const asked: InferTier = decision.tier === 'deny' ? 'local-only' : decision.tier;
+  return buildDecisionRecord({
+    recordId,
+    sequence: 0,
+    time: clockOf(route),
+    productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
+    actor: route.actor,
+    model: { name: model, provider },
+    callId: `route.not-accredited-${recordId}`,
+    capability: { verb: 'infer', tier: asked, provider, model },
+    resource: { name: model, type: 'model' },
+    outcome: 'allowed',
+    rule: 'route.not-accredited',
+    reason: context.reason,
+    bundleHash: context.bundleHash,
+    label: context.label,
+    ...(isDefaultMark(context.mark, context.defaultLabel) ? {} : { mark: context.mark })
   });
 }
 

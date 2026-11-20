@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { RunCheckpoints } from '../agent/checkpoints';
 import { compactConversation, contextAction, contextStatus, DEFAULT_COMPACT_AT_TOKENS, DEFAULT_CONTEXT_WINDOW, DEFAULT_THRESHOLDS, estimateTokens, trimOldToolResults } from '../agent/context';
 import type { GateHost } from '../gate/host';
-import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, sessionRouteFrom, withPrivateOnly, withSessionRoute } from '../gate/sessionMark';
 import type { AnswerCheckListener, AnswerCheckResult, RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { approveFloorCallLate, endFloorApprovals, recordLateApproval, unavailableGateRuntime } from '../agent/gateAdapter';
 import { projectLabelOf, scalesOf } from '../agent/gateLabels';
@@ -14,7 +14,8 @@ import { OutboundFingerprints } from '../agent/outboundCheck';
 import { SessionMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
-import { SCALE_PRESETS } from '../domain/gate/labels';
+import { activeScales, labelKeyShown } from '../domain/gate/labelAlgebra';
+import { STAFF_PRIVATE_MODELS_TEXT } from '../domain/staff/products';
 import type { Label } from '../domain/gate/labels';
 import { isDefaultMark } from '../gate/sessionMark';
 import { chatLabelOf } from './threadStore';
@@ -299,7 +300,7 @@ export const LOWERING_OVERTAKEN_TEXT =
 
 /** Said when a chat's stored label cannot be read. */
 export const UNREADABLE_CHAT_LABEL_TEXT =
-  "This chat's saved label could not be read, so it opens at org/Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
+  "This chat's saved label could not be read, so it opens at Organization: Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
 
 /** The chat panel's conversations still open, so the window's shutdown can close them (PR #95 review round 3). */
 const openConversations = new Set<AgentConversation>();
@@ -395,6 +396,8 @@ export class AgentConversation {
    * the old one is marked closed, so a check that settles late sets nothing on the chat that replaced it.
    */
   private chatAttestation: RouteAttestation = { failed: false };
+  /** Set once this chat has said where staff teams' private models come from (coherence review S5): once per chat. */
+  private staffModelsTold = false;
   public get routeAttestation(): RouteAttestation { return this.chatAttestation; }
   /** The results of the checks after each run's attested-cloud answers (D-36, D-55), by run id, the newest 50, with the run's route. */
   private readonly answerChecks = new Map<string, { route: SessionRoute; results: Map<string, AnswerCheckResult> }>();
@@ -587,7 +590,7 @@ export class AgentConversation {
     const outcome = await store.setChatLabel(id, mark, lowering, from).catch(() => undefined);
     if (outcome !== 'raised-meanwhile' || id !== this.conversationId) return;
     const stored = await store.storedChatMark(id).catch(() => undefined);
-    if (stored !== undefined) this.chatMark?.raise(stored, SCALE_PRESETS);
+    if (stored !== undefined) this.chatMark?.raise(stored, activeScales());
     this.post({ type: 'notice', text: LOWERING_OVERTAKEN_TEXT });
   }
 
@@ -595,7 +598,8 @@ export class AgentConversation {
   public labelText(): string {
     const mark = this.chatMark?.current();
     if (mark === undefined || isDefaultMark(mark, this.defaultLabel)) return '';
-    return mark.map((label) => `${label.scale}/${label.level}${label.compartments.length ? ` (${label.compartments.join(', ')})` : ''}`).join(', ');
+    // Coherence review S8: the scale's name with the level ("Organization: Sensitive"), never the raw id.
+    return mark.map((label) => `${labelKeyShown(label)}${label.compartments.length ? ` (${label.compartments.join(', ')})` : ''}`).join(', ');
   }
 
   private showLabel(): void {
@@ -800,6 +804,12 @@ export class AgentConversation {
     const heartbeat = setInterval(() => this.heartbeat(runStartedAt), this.progressTiming.checkMs);
     // A person's staff run attends the project while it runs: the standing watches run with it and pause when nothing attends (WP-WATCH, Q5).
     if (request.team?.staff) watchHostFor(this.root);
+    // Coherence review S5: a staff team is marked private, and every private model NEAR AI offers today is from PRC developers. Said once per chat; no
+    // routing changes.
+    if (request.team?.staff && !this.staffModelsTold) {
+      this.staffModelsTold = true;
+      this.post({ type: 'notice', text: STAFF_PRIVATE_MODELS_TEXT });
+    }
     const releaseAttendance = request.team?.staff ? attend(this.root, { kind: 'run', id: runId }) : () => undefined;
     try {
       let result: RunResult;
@@ -810,9 +820,12 @@ export class AgentConversation {
         const attestation = this.chatAttestation;
         let routeOfRun: SessionRoute | undefined;
         const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked }) : defaultSessionRoute();
+        const onNotice = (text: string): void => this.post({ type: 'notice', text });
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked, onNotice }) : defaultSessionRoute();
         routeOfRun = runRoute;
-        result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal)));
+        // Coherence review S4: in TEE-only mode every request of the run counts as private only when the gate's own check passes, not on the catalog's word.
+        const runAll = () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal));
+        result = await withSpendTag({ kind: 'main', runId, conversationId: this.conversationId, agentId: mainId }, () => (request.teeOnly === true ? withPrivateOnly(runAll) : runAll()));
       } catch (error) {
         this.activity?.agentEnded(mainId, 'failed', error instanceof Error ? error.message : String(error));
         await this.recordRunSplit(request, mainId, extraUsage);
@@ -1746,9 +1759,12 @@ export class AgentConversation {
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
             // (research 9.1); outside a parent route (a test) it starts from the chat's own state.
             const parentRoute = currentSessionRoute();
-            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}) }) : parentRoute ?? defaultSessionRoute();
+            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}), ...(parentRoute?.onNotice ? { onNotice: parentRoute.onNotice } : {}) }) : parentRoute ?? defaultSessionRoute();
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
-            const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal)));
+            // Coherence review S4: a private member (its own line, or a private team's) is sent only when the gate's own check passes: a model on this
+            // computer, or a private NEAR AI Cloud model over a connection proven to end inside its private hardware. The catalog's word only chose the model.
+            const runChild = () => withSessionRoute(childRoute, () => child.run(childMessages, agent.abort.signal));
+            const result = await withSpendTag({ kind: 'sub-agent', agentId: agent.id }, () => (privateMember ? withPrivateOnly(runChild) : runChild()));
             this.activity?.agentEnded(agent.id, result.outcome);
             staffLane(request, this.root, runId, label, onTeam, result.outcome === 'cancelled' ? 'cancelled' : result.outcome === 'completed' ? 'done' : 'failed');
             await this.persistAgent(request, agent.id);

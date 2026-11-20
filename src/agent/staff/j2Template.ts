@@ -8,7 +8,7 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../
 import { CROSSWALK_STEPS, STAFF_LEVELS, STAFF_NATIONS, STAFF_PROFILE_IDS, PLANNING_TYPES } from '../../domain/staff/doctrine';
 import type { CrosswalkStep } from '../../domain/staff/doctrine';
 import type { StepRole } from '../../domain/staff/events';
-import { STAFF_MARKERS } from '../../domain/staff/products';
+import { STAFF_MARKERS, STAFF_PRIVATE_MODELS_TEXT } from '../../domain/staff/products';
 import { defaultStaffSettings, levelOffer, renderProfileMarkdown } from '../../domain/staff/profiles';
 import type { StaffSettings } from '../../domain/staff/profiles';
 import type { StaffTeamBlock } from '../../domain/staff/teamBlock';
@@ -133,7 +133,7 @@ export function j2Guidance(settings: StaffSettings, options: Pick<J2RenderOption
     '- **Exercise data only.** These templates are unclassified, and so is everything the team writes: fictional scenarios, fictional forces, notional numbers. Real operational plans belong on accredited systems. A member that sees classified material, a real unit identifier or current-operations content stops and reports it.',
     `- **Labels are not accreditation.** ${LABELS_NOT_ACCREDITATION_TEXT}`,
     `- **Clearances are self-declared.** ${CLEARANCE_SELF_ASSERTED_TEXT}`,
-    '- **Private models only.** The team is marked private: every member runs on a NEAR TEE or local model, and a run stops rather than send the work to a forwarded model.',
+    `- **Private models only.** The team is marked private: every member runs on a NEAR TEE or local model, and a run stops rather than send the work to a forwarded model. ${STAFF_PRIVATE_MODELS_TEXT}`,
     `- **People decide.** Members recommend and mark each decision \`${STAFF_MARKERS.decisionFor} <role>\` with options and risk. The commander approves PIRs; the ${v.ops} approves the allocation of collection assets; a named person approves and releases every product in the Staff Room. No member writes "approved", "selected" or "released" about its own work, tasks collection, nominates a target or decides on operations.`,
     `- **One writer per product.** Each product has one owning member. Others propose changes in .planning/staff/proposals/<product>/ and the owner merges them. A member waiting on another section writes \`${STAFF_MARKERS.waitingOn} <section>: <what>\` and carries on with what does not depend on it.`,
     `- **Gates, in this order.** The tradecraft-reviewer's SIGN-OFF, then the release-guard's CLEARED, both on the product's exact version, then a person's decision. An edit voids both verdicts. Members register versions with mcp__staff-products__propose, the gates record verdicts with mcp__staff-products__verdict, and the ${chief} submits with mcp__staff-products__submit; approval is not a tool.`,

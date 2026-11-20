@@ -174,7 +174,7 @@ test('tracer: Set Label marks a file Protected B in a signed map, and an agent\'
   // The person's policy goes back to the default, which holds no clearance on the Canadian scale.
   await s.host.reset();
   const ran = await agentRun(s, [call('r1', 'Read', { file_path: 'secret/plan.md' })]);
-  assert.match(ran.outputs[0] ?? '', /^Not allowed: This file is labelled ca-protected\/Protected B, and your policy gives you no clearance on that scale\./);
+  assert.match(ran.outputs[0] ?? '', /^Not allowed: This file is labelled Canada, Protected: Protected B, and your policy gives you no clearance on that scale\./);
   assert.ok(!ran.transcript.includes(SECRET_TEXT), 'the file\'s content never reached the transcript');
   const records = await projectRecords(s);
   assert.equal(records.filter((record) => ruleOf(record) === 'label.set').length, 1, 'one label.set record');
@@ -286,7 +286,7 @@ test('a hand edit that deletes or lowers a verified label still resolves it from
   assert.match(allowed.outputs[0] ?? '', new RegExp(SECRET_TEXT), 'read under the person\'s own clearance');
   await s.host.reset();
   const refused = await agentRun(s, [call('r2', 'Read', { file_path: 'secret/plan.md' })]);
-  assert.match(refused.outputs[0] ?? '', /^Not allowed: This file is labelled ca-protected\/Protected B, and your policy gives you no clearance on that scale\./);
+  assert.match(refused.outputs[0] ?? '', /^Not allowed: This file is labelled Canada, Protected: Protected B, and your policy gives you no clearance on that scale\./);
   assert.ok(!refused.transcript.includes(SECRET_TEXT), 'the hand edit did not drop the label');
 });
 

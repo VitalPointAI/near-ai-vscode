@@ -10,7 +10,8 @@ import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import {
   BINDING_MAX_AGE_MS, BINDING_REFUSALS, CONNECTION_BINDING_STATES, DEFAULT_ROUTING, ROUTE_EVENT_IDS, ROUTE_REFUSALS, ROUTE_RULES, TIER_ORDER, decideRoute,
-  isBindingFresh, isLocalRouteHost, parseRouting, routingWhileFailedClosed, tierForLabel, tierForMark
+  isBindingFresh, isLocalRouteHost, localHostMatch, localHostPatternNotice, parseRouting, patternLocalHosts, routingWhileFailedClosed, tierForLabel, tierForMark,
+  usesHttps
 } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteFacts, RoutingTable } from '../domain/gate/routing';
 
@@ -85,7 +86,10 @@ test('every rule id can be reached, and every refusing rule has one plain senten
     [markOf(org('Restricted')), DEFAULT_ROUTING, LOCAL_REMOTE],
     [markOf(org('Internal')), DEFAULT_ROUTING, NEAR_CLOUD],
     [markOf(org('Internal')), DEFAULT_ROUTING, { ...NEAR_TEE, attestationFailed: true }],
-    [markOf(org('Internal')), DEFAULT_ROUTING, { ...NEAR_TEE, clientRoute: undefined }]
+    [markOf(org('Internal')), DEFAULT_ROUTING, { ...NEAR_TEE, clientRoute: undefined }],
+    // Coherence review S1: a local-only level on a host only a *. pattern names, and a classified level on any host but this computer.
+    [markOf(org('Restricted')), withLocalHosts('*.example.org'), LOCAL_REMOTE],
+    [markOf(label('ca-classified', 'Secret')), withLocalHosts('models.example.org'), LOCAL_REMOTE]
   ];
   for (const [mark, routing, facts] of cases) reached.add(decideRoute(mark, routing, facts).rule);
   assert.deepEqual([...reached].sort(), [...ROUTE_RULES].sort());
@@ -329,7 +333,7 @@ test('an allowed request decided outside any session is route.default-session; a
   assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...LOCAL_OK, sessionless: true }).rule, 'route.default-session');
   assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...NEAR_TEE, sessionless: true }).rule, 'route.no-local-model');
   assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...NEAR_TEE, clientRoute: undefined, sessionless: true }).rule, 'route.no-session');
-  assert.deepEqual([...ROUTE_EVENT_IDS], ['route.attestation-checked', 'route.attestation-cleared']);
+  assert.deepEqual([...ROUTE_EVENT_IDS], ['route.attestation-checked', 'route.attestation-cleared', 'route.not-accredited']);
   for (const event of ROUTE_EVENT_IDS) assert.ok(!(ROUTE_RULES as readonly string[]).includes(event), `${event} is an event, not a rule`);
 });
 
@@ -350,4 +354,101 @@ test('D-53: while the policy is failed closed every tier above any-cloud is at l
   assert.equal(decideRoute(markOf(org('Internal')), closed, NEAR_TEE_BOUND).rule, 'route.no-local-model');
   assert.equal(decideRoute(markOf(org('Internal')), closed, LOCAL_OK).rule, 'route.local-only');
   assert.equal(decideRoute(markOf(org('Restricted')), closed, LOCAL_REMOTE).rule, 'route.local-host-not-local');
+});
+
+// ---- Coherence review S1: local hosts for local-only and classified levels ----
+
+const classified = (level: string): Label => label('ca-classified', level);
+const PROTECTED_B = label('ca-protected', 'Protected B');
+
+test('S1: a local-only level goes to a named host only through an exact entry over https; a *. pattern or plain http is refused with a sentence saying what changed', () => {
+  const exact = withLocalHosts('models.example.org');
+  const pattern = withLocalHosts('*.example.org');
+  // Allowed: an exact entry over https, and this computer whatever the scheme.
+  assert.equal(decideRoute(markOf(PROTECTED_B), exact, LOCAL_REMOTE).rule, 'route.local-only');
+  assert.equal(decideRoute(markOf(org('Restricted')), exact, LOCAL_REMOTE).rule, 'route.local-only');
+  assert.equal(decideRoute(markOf(PROTECTED_B), pattern, LOCAL_OK).rule, 'route.local-only');
+  // Refused: a pattern match, plain http to the exact host, and a bare host that says nothing about its scheme.
+  const byPattern = decideRoute(markOf(PROTECTED_B), pattern, LOCAL_REMOTE);
+  assert.deepEqual({ allowed: byPattern.allowed, rule: byPattern.rule }, { allowed: false, rule: 'route.local-host-not-exact' });
+  assert.match(byPattern.reason ?? '', /^Nothing was sent\. From this version, .*exact host, not a \*\. pattern, and the runtime uses https/);
+  assert.equal(decideRoute(markOf(PROTECTED_B), exact, { ...LOCAL_REMOTE, host: 'http://models.example.org:11434' }).rule, 'route.local-host-not-exact');
+  assert.equal(decideRoute(markOf(PROTECTED_B), exact, { ...LOCAL_REMOTE, host: 'models.example.org' }).rule, 'route.local-host-not-exact');
+  // An exact entry wins over a pattern that also matches; a host named by neither is still not local.
+  assert.equal(decideRoute(markOf(PROTECTED_B), withLocalHosts('*.example.org', 'models.example.org'), LOCAL_REMOTE).rule, 'route.local-only');
+  assert.equal(decideRoute(markOf(PROTECTED_B), exact, { ...LOCAL_REMOTE, host: 'https://other.example.org' }).rule, 'route.local-host-not-local');
+  // The default label decides an empty mark the same way.
+  assert.equal(decideRoute([], pattern, LOCAL_REMOTE, PROTECTED_B).rule, 'route.local-host-not-exact');
+});
+
+test('S1: attested-cloud levels keep today\'s looser rule: a *. pattern or plain http still counts as local for them', () => {
+  const pattern = withLocalHosts('*.example.org');
+  assert.equal(decideRoute(markOf(org('Internal')), pattern, LOCAL_REMOTE).rule, 'route.attested-cloud');
+  assert.equal(decideRoute(markOf(label('ca-protected', 'Protected A')), withLocalHosts('models.example.org'), { ...LOCAL_REMOTE, host: 'http://models.example.org' }).rule, 'route.attested-cloud');
+  // org Public is any-cloud: no host check at all.
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, LOCAL_REMOTE).rule, 'route.any-cloud');
+});
+
+test('S1: Protected C, classified and NATO Confidential and above never leave this computer, even for an exact named host over https', () => {
+  const exact = withLocalHosts('models.example.org');
+  for (const held of [label('ca-protected', 'Protected C'), classified('Confidential'), classified('Secret'), classified('Top Secret'), label('nato', 'NATO Confidential'), label('nato', 'NATO Secret'), label('nato', 'Cosmic Top Secret')]) {
+    const named = decideRoute(markOf(held), exact, LOCAL_REMOTE);
+    assert.deepEqual({ allowed: named.allowed, rule: named.rule }, { allowed: false, rule: 'route.this-computer-only' }, `${held.scale}/${held.level}`);
+    assert.match(named.reason ?? '', /^Nothing was sent\. .*never leaves this computer/);
+    // An unnamed host gets the same sentence, never advice to name it.
+    assert.equal(decideRoute(markOf(held), DEFAULT_ROUTING, LOCAL_REMOTE).rule, 'route.this-computer-only');
+    // This computer is unchanged: allowed.
+    assert.equal(decideRoute(markOf(held), exact, LOCAL_OK).rule, 'route.local-only', `${held.scale}/${held.level} on this computer`);
+  }
+  // A classified label anywhere in the mark decides, whatever else it holds.
+  assert.equal(decideRoute(markOf(org('Restricted'), classified('Secret')), exact, LOCAL_REMOTE).rule, 'route.this-computer-only');
+  // NATO Restricted and Protected B are local-only but not this-computer-only: an exact https host still serves them.
+  assert.equal(decideRoute(markOf(label('nato', 'NATO Restricted')), exact, LOCAL_REMOTE).rule, 'route.local-only');
+});
+
+test('S1: the notice for a policy with a *. pattern names the entry, what changed and how to fix it; plain words', () => {
+  const routing = { patternLocalHosts, localHostPatternNotice, localHostMatch, usesHttps };
+  const pattern = withLocalHosts('*.example.org', 'models.example.org');
+  assert.deepEqual([...routing.patternLocalHosts(pattern)], ['*.example.org']);
+  assert.deepEqual([...routing.patternLocalHosts(withLocalHosts('models.example.org'))], []);
+  const text = routing.localHostPatternNotice(['*.example.org']);
+  assert.match(text, /\*\.example\.org/);
+  assert.match(text, /exact name/);
+  assert.match(text, /https/);
+  assert.match(text, /NEAR AI: Edit Policy/);
+  assert.ok(!text.includes(String.fromCharCode(0x2014)) && !/NEAR organization/i.test(text));
+  assert.equal(routing.localHostMatch('https://a.example.org', ['*.example.org']), 'pattern');
+  assert.equal(routing.localHostMatch('https://a.example.org', ['a.example.org']), 'exact');
+  assert.equal(routing.localHostMatch('http://127.0.0.1:1', []), 'loopback');
+  assert.equal(routing.localHostMatch('https://b.example.com', ['*.example.org']), 'none');
+  assert.equal(routing.usesHttps('https://a.example.org/v1'), true);
+  assert.equal(routing.usesHttps('HTTPS://a.example.org'), true);
+  assert.equal(routing.usesHttps('http://a.example.org'), false);
+  assert.equal(routing.usesHttps('a.example.org'), false);
+  assert.equal(routing.usesHttps('https://'), false);
+});
+
+// ---- Coherence review S4: the private floor ----
+
+test('S4: a private floor raises any-cloud to attested-cloud, so a private model counts only with a fresh bound connection; it never lowers a tier', () => {
+  // Without the floor, org Public goes to any model.
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD).allowed, true);
+  // With it: a forwarded model is refused, a TEE model with no fresh proof is refused, and one with a fresh proof goes.
+  const forwarded = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD, undefined, 'attested-cloud');
+  assert.deepEqual({ allowed: forwarded.allowed, tier: forwarded.tier, rule: forwarded.rule }, { allowed: false, tier: 'attested-cloud', rule: 'route.not-tee' });
+  assert.match(forwarded.reason ?? '', /^Nothing was sent\. This run may use only verified private hardware or this computer/);
+  const stale = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, { ...NEAR_TEE_BOUND, now: NOW + BINDING_MAX_AGE_MS }, undefined, 'attested-cloud');
+  assert.equal(stale.allowed, false);
+  assert.match(stale.reason ?? '', /^Nothing was sent\. This run may use only verified private hardware/);
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_TEE, undefined, 'attested-cloud').allowed, false);
+  const fresh = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_TEE_BOUND, undefined, 'attested-cloud');
+  assert.deepEqual({ allowed: fresh.allowed, rule: fresh.rule }, { allowed: true, rule: 'route.attested-cloud' });
+  // A model on this computer always counts.
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, LOCAL_OK, undefined, 'attested-cloud').allowed, true);
+  // The floor never lowers: Restricted stays local-only, and its own refusal keeps its own words.
+  const restricted = decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, NEAR_TEE_BOUND, undefined, 'attested-cloud');
+  assert.deepEqual({ tier: restricted.tier, rule: restricted.rule }, { tier: 'local-only', rule: 'route.no-local-model' });
+  assert.equal(restricted.reason, ROUTE_REFUSALS['route.no-local-model']);
+  // A floor below the mark's tier changes nothing.
+  assert.deepEqual(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE, undefined, 'any-cloud'), decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE));
 });

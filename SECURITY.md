@@ -46,14 +46,28 @@ NEAR AI runs some models inside an attested trusted execution environment
 from NEAR's model catalog (`/v1/model/list`) and shows it in the model picker
 and on every reply:
 
-- **Private · runs in NEAR TEE**: NEAR reports attestation support and serves
-  the model itself (for example GLM 5.3, Kimi K3, Qwen 3.x).
+- **Private · NEAR AI private hardware, checked each time it is used**: NEAR
+  reports attestation support and serves the model itself (for example GLM
+  5.3, Kimi K3, Qwen 3.x).
 - **Not private · forwarded to …**: NEAR forwards the request to another
   provider, named in the label (for example `openrouter.ai` for DeepSeek V4.1
   Flash, `anthropic.com` for Claude models).
 
-The label reflects NEAR's catalog. Set `nearAi.privacyMode` to `tee-only` to
-block every model NEAR forwards elsewhere.
+The label reflects NEAR's catalog, and the catalog's word only chooses a
+model. Where a model must be private (a team or member marked
+`privacy: private`, Team Studio's private calls, and every request while
+`nearAi.privacyMode` is `tee-only`), a request counts as private only when the
+same check the labels use passes, each time it is sent: a model on this
+computer, or a private model on NEAR AI Cloud's own endpoint over a connection
+proven to end inside its private hardware (see "Attested cloud in this
+version" below). Otherwise nothing is sent, and the refusal says so. Set
+`nearAi.privacyMode` to `tee-only` to hold every request to that check.
+
+**Where private models come from.** Military staff teams are marked private,
+and every private model NEAR AI offers today comes from developers in the
+People's Republic of China. Where a staff team is set up, in its team file,
+and once in each chat that runs one, it says: "The private models NEAR AI offers today come from developers in the People's Republic of China. Use this team only on fictional or exercise material until your organization approves a model for operational work."
+This changes nothing about where the team's work is sent.
 
 ### The trust badge on each answer
 
@@ -349,6 +363,11 @@ is what that file and the records beside it do in this version.
 - **When it cannot be trusted.** If the file is missing, unsigned, changed or
   expired, only reading and planning run until you run **NEAR AI: Reset Policy
   to Defaults**, and the project's key folder stays off limits in every case.
+  A policy written for a newer version (one that names a feature in its
+  `requires` list, or a setting, version or action this version does not know)
+  is never applied in part and never ignored: only reading and planning run, and
+  the sentence says to update the extension. It never offers Reset as the fix,
+  because a reset would discard every rule the policy holds.
   The status bar says "Policy: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
   missing counts as a changed one. A file signed by a key this computer does
@@ -465,7 +484,13 @@ Labels and routing are an organizational control that helps prevent mistakes. Th
 ### Classification labels and routing
 
 **What a label is.** A label is a level on a scale (for example `org/Confidential`),
-with optional compartments and handling flags. **NEAR AI: Set Label** labels a
+with optional compartments and handling flags. Labels are stored by that id
+and shown by the scale's name with the level ("Organization: Internal",
+"Canada, Classified: Confidential"). The organization scale's Confidential
+level is shown as "Sensitive" so it is never mistaken for the Canadian
+classified level of the same name; its id stays `org/Confidential`. Every check
+that ranks levels, the staff checks and a chat's label included, reads your
+policy's own scales. **NEAR AI: Set Label** labels a
 file, a folder or the project; the labels are kept in
 `.planning/.near-ai/labels.json`, signed with your device key, and travel with
 the project, so anyone who can read the project can read its labels.
@@ -540,7 +565,23 @@ its policy.
 
 **Local means this computer.** Local-only means a model on this computer
 (localhost, 127.0.0.1 or [::1]) unless your organization names another host in
-its policy.
+its policy's local hosts, with two limits. Content at a local-only level (Protected
+B, `org/Restricted` and NATO Restricted by default) goes to a named host only
+when the policy names that exact host, not a `*.` pattern, and the runtime is
+reached over https; otherwise it is refused with `route.local-host-not-exact`.
+Content at Protected C, any Canadian classified level, or NATO Confidential and
+above never leaves this computer, even for an exact named host, and is refused
+with `route.this-computer-only`. A pattern or plain http still counts as local
+for levels whose tier is attested-cloud. A policy whose local hosts hold a
+`*.` pattern is told so, naming the entry, each time the window starts.
+
+**Classified work on a computer not recorded as accredited.** When a chat's
+content at Protected C, a Canadian classified level, or NATO Confidential and
+above goes to a model, the chat says once: "This computer is not recorded as
+accredited for" the label, that nothing stops you yet, and that your
+organization may require an accredited system. The decision log records
+`route.not-accredited` once per chat. Nothing is refused for it in this
+version; once your organization can issue accreditation records, it will be.
 
 **Calls that could send data off this computer.** While a chat's label is
 local-only or deny, a web fetch, a web search, an add-on server call or a
@@ -699,7 +740,11 @@ where attestation can be checked (never a local catalog entry, and never a
 different endpoint that claims TEE); a run on a local runtime uses only its
 local models. If the run has no such model, or its route is unknown, that
 member does not run and the lead is told why; its work is never sent to a
-forwarded model instead. New
+forwarded model instead. Choosing the model is not the check: each request the
+member sends counts as private only when the gate's own check passes, a model
+on this computer or a private model on NEAR AI Cloud over a connection proven
+within the last ten minutes to end inside its private hardware, and is refused
+before anything is sent otherwise. New
 research teams set this on every member, and new presales teams on their
 reviewer; `privacy: any` turns it off for a member.
 

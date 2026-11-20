@@ -2,6 +2,7 @@
 // shows the roster (who drafts and who decides), then writes the team, its skills, PROFILE.md, the staff settings and the section's guidance, and offers
 // to load the starter exercise scenario. The planning and writing live in staffSetup.ts; this file only asks and confirms.
 import { OPEN_STAFF_ROOM_COMMAND } from '../domain/staff/commands';
+import { STAFF_PRIVATE_MODELS_TEXT } from '../domain/staff/products';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
@@ -49,7 +50,7 @@ export interface StaffSetupChat { prefill(text: string): Promise<void> }
 
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
 export function readyMessage(teamName: string, slug: string, archived: boolean): string {
-  return `${teamName} is set up for this project as /team:${slug}. Task it now to put its command in the NEAR AI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
+  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the NEAR AI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
 export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat): Promise<string | undefined> {
@@ -82,7 +83,7 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   const redTeam = questions.redTeam ? await pick(title, 'Include the independent red team?', questions.redTeam, 6, steps) : undefined;
   if (questions.redTeam && redTeam === undefined) return undefined;
   const where = await pick(title, 'Where may the members\' models run?', [
-    { value: 'cloud' as const, label: 'NEAR AI Cloud', detail: 'Private models in NEAR\'s TEE; members that research may use the web tools.' },
+    { value: 'cloud' as const, label: 'NEAR AI Cloud', detail: `Private models in NEAR's TEE; members that research may use the web tools. ${STAFF_PRIVATE_MODELS_TEXT}` },
     { value: 'local' as const, label: 'Local runtime only', detail: 'Models on this machine; the team is made without web tools.' }
   ], 6, steps);
   if (!where) return undefined;
