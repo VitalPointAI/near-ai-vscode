@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { canonicalBytes } from '../team/canonical';
 import { ENDPOINT_CLASSES } from './endpoints';
 import type { EndpointClass } from './endpoints';
+import { levelIndex } from './labels';
 import type { ScaleTable } from './labels';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
@@ -28,6 +29,11 @@ export type ModelsMode = (typeof MODELS_MODES)[number];
 
 export const MAX_PASSPORTS = 256;
 export const MAX_MATCH_PATTERNS = 8;
+export const MAX_LOCAL_CATALOGUE = 64;
+export const MAX_LOCAL_ARTIFACTS = 8;
+export const MAX_ORDER = 256;
+export const MAX_TIER_BY_LEVEL = 256;
+export const MAX_TIER_BY_PROJECT = 64;
 /** A passport lives at most this long after it is issued. */
 export const MAX_PASSPORT_DAYS = 365;
 const MAX_LIST = 16;
@@ -44,6 +50,12 @@ export type ArtifactFormat = (typeof ARTIFACT_FORMATS)[number];
 /** The triggers that end a passport early (provenance 5.4). */
 export const REEVALUATION_TRIGGERS = Object.freeze(['artifact-change', 'quantization', 'fine-tune', 'licence-change', 'us-law-change', 'canada-law-change', 'hosting-change'] as const);
 export type ReevaluationTrigger = (typeof REEVALUATION_TRIGGERS)[number];
+/** The lowest tier a default for each job must reach (provenance 5.1 and 6.1): a checking or agent job needs agent work, a feature job chat you review. */
+export const JOB_MINIMUM_TIER: Readonly<Record<ModelJob, UseTier>> = Object.freeze({
+  standard: 'T2', deep: 'T2', fast: 'T2', vision: 'T1', embed: 'T1', rerank: 'T1', safety: 'T2', transcription: 'T1', image: 'T1', backup: 'T2', t0: 'T0'
+});
+/** Hosting your organization runs or this computer runs: at T2 and above the passport must name the exact weights (provenance 5.2). */
+const ARTIFACT_REQUIRED_CLASSES: readonly EndpointClass[] = Object.freeze(['local', 'org-plain', 'org-tee']);
 
 export interface PassportTeacher {
   readonly model: string;
@@ -110,6 +122,23 @@ export interface Passport {
   readonly reevaluateOn: readonly ReevaluationTrigger[];
 }
 
+/** One weights file the local model manager (Phase 32.2) may fetch for a passport. Sizes are integer bytes (D-08). */
+export interface LocalArtifact {
+  readonly format: ArtifactFormat;
+  readonly quantization: string;
+  readonly source: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+  readonly licence: { readonly id: string; readonly url: string };
+}
+
+/** The shape of a local catalogue entry, for Phase 32.2: the passport it serves, its files, and the smallest hardware band it fits. */
+export interface LocalCatalogueEntry {
+  readonly passport: string;
+  readonly artifacts: readonly LocalArtifact[];
+  readonly minFitBand: string;
+}
+
 /**
  * The models section. `mode`, `unknownMaxTier` and `passports` are absent only in the empty section `{ v: 1 }`, which means the shipped behaviour: report
  * mode, T0 for a model with no passport and the shipped passports alone.
@@ -118,7 +147,17 @@ export interface ModelsSection {
   readonly v: 1;
   readonly mode?: ModelsMode;
   readonly unknownMaxTier?: 'T0';
+  /** `scale/level` to the tier it raises a request to; it only raises the shipped values (useTierFor). */
+  readonly tierByLevel?: Readonly<Record<string, UseTier>>;
+  /** Project kind (`staff`, `staff-exercise`) to the tier it raises a request to. */
+  readonly tierByProject?: Readonly<Record<string, UseTier>>;
   readonly passports?: readonly Passport[];
+  /** Your organization's default passport per job; each names a passport in this section that reaches the job's tier. */
+  readonly defaults?: Readonly<Partial<Record<ModelJob, string>>>;
+  /** Sorted by passport, unique. */
+  readonly localCatalogue?: readonly LocalCatalogueEntry[];
+  /** The model resolver's preference order: passport ids in this section, each once. */
+  readonly order?: readonly string[];
 }
 
 /** The passport a model id resolves to, with its hash and its tier at the time asked. */
@@ -132,13 +171,15 @@ export interface ResolvedPassport {
 
 /** The keys of the models section in the provenance design's schema (WP-0), in the order the design lists them. */
 export const MODELS_SECTION_KEYS = Object.freeze(['mode', 'unknownMaxTier', 'tierByLevel', 'tierByProject', 'passports', 'defaults', 'localCatalogue', 'order'] as const);
-/** The keys a later task of plan 41-05 reads; refused as not available yet until then. */
-const NOT_YET = Object.freeze(['tierByLevel', 'tierByProject', 'defaults', 'localCatalogue', 'order']);
 
 const PASSPORT_ID_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 const MATCH_PATTERN = /^[A-Za-z0-9._/:*-]{1,128}$/;
 const ORIGIN_PATTERN = /^[A-Z]{2}$/;
 const FAMILY_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** Project kinds and hardware bands share this token form. */
+const TOKEN_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** A pattern made only of `*` matches every model: never allowed. */
+const BARE_WILDCARD = /^\*+$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
 
@@ -285,7 +326,8 @@ function parseArtifact(value: unknown, path: string): Parsed<PassportArtifact> {
   const quantization = parseText(ownValue(value, 'quantization'), childPath(path, 'quantization'), 64);
   if (!quantization.ok) return quantization;
   const remoteCode = ownValue(value, 'remoteCode');
-  if (remoteCode !== false) return refused('wrong-type', childPath(path, 'remoteCode'));
+  if (typeof remoteCode !== 'boolean') return refused('wrong-type', childPath(path, 'remoteCode'));
+  if (remoteCode) return refused('not-allowed-here', childPath(path, 'remoteCode'));
   return { ok: true, value: Object.freeze({ format: format.value, sha256: sha256.value, quantization: quantization.value, remoteCode }) };
 }
 
@@ -304,12 +346,31 @@ function parseEvaluation(value: unknown, path: string): Parsed<PassportEvaluatio
 
 function parseMatch(value: unknown, path: string): Parsed<readonly string[]> {
   if (Array.isArray(value) && value.length === 0) return refused('empty-list', path);
-  return parseSetList(value, path, MAX_MATCH_PATTERNS, (item, where) => parsePattern(item, where, MATCH_PATTERN), (item) => item);
+  return parseSetList(value, path, MAX_MATCH_PATTERNS, (item, where) => {
+    const pattern = parsePattern(item, where, MATCH_PATTERN);
+    return pattern.ok && BARE_WILDCARD.test(pattern.value) ? refused('not-allowed-here', where) : pattern;
+  }, (item) => item);
 }
 
 function parseHosting(value: unknown, path: string): Parsed<readonly EndpointClass[]> {
   if (Array.isArray(value) && value.length === 0) return refused('empty-list', path);
   return parseSetList(value, path, ENDPOINT_CLASSES.length, (item, where) => parseChoice(item, where, ENDPOINT_CLASSES), (item) => item);
+}
+
+/** The WP-0 rules that read more than one field: each refuses at the field whose value is not allowed given the others. */
+function passportRule(
+  origin: string, hosting: readonly EndpointClass[], hasArtifact: boolean, hasEvaluation: boolean, maxTier: UseTier, issuedAt: string, expiresAt: string, path: string
+): Refusal | undefined {
+  const issued = parseIsoMillis(issuedAt);
+  const expires = parseIsoMillis(expiresAt);
+  if (expires <= issued || expires - issued > MAX_PASSPORT_DAYS * DAY_MS) return refused('not-allowed-here', childPath(path, 'expiresAt'));
+  if (maxTier === 'T3' && !hasEvaluation) return refused('not-allowed-here', childPath(path, 'maxTier'));
+  if (origin === 'XX' && maxTier !== 'T0') return refused('not-allowed-here', childPath(path, 'maxTier'));
+  if (!hasArtifact && tierRank(maxTier) >= tierRank('T2')) {
+    const index = hosting.findIndex((endpointClass) => ARTIFACT_REQUIRED_CLASSES.includes(endpointClass));
+    if (index >= 0) return refused('not-allowed-here', `${childPath(path, 'hosting')}[${String(index)}]`);
+  }
+  return undefined;
 }
 
 const PASSPORT_REQUIRED = ['id', 'match', 'developer', 'origin', 'lineage', 'licence', 'legal', 'hosting', 'maxTier', 'issuedAt', 'expiresAt', 'reevaluateOn'] as const;
@@ -356,6 +417,8 @@ function parsePassport(value: unknown, path: string): Parsed<Passport> {
   if (!expiresAt.ok) return expiresAt;
   const reevaluateOn = parseSetList(ownValue(value, 'reevaluateOn'), childPath(path, 'reevaluateOn'), REEVALUATION_TRIGGERS.length, (item, where) => parseChoice(item, where, REEVALUATION_TRIGGERS), (item) => item);
   if (!reevaluateOn.ok) return reevaluateOn;
+  const rule = passportRule(origin.value, hosting.value, has(value, 'artifact'), has(value, 'evaluation'), maxTier.value, issuedAt.value, expiresAt.value, path);
+  if (rule !== undefined) return rule;
   out['maxTier'] = maxTier.value;
   out['issuedAt'] = issuedAt.value;
   out['expiresAt'] = expiresAt.value;
@@ -364,18 +427,126 @@ function parsePassport(value: unknown, path: string): Parsed<Passport> {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
+// The section's other keys
+
+function parseTierMap(value: unknown, path: string, max: number, keyAllowed: (key: string) => boolean): Parsed<Readonly<Record<string, UseTier>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = Object.keys(value);
+  if (keys.length > max) return refused('not-allowed-here', path);
+  const out: Record<string, UseTier> = {};
+  for (const key of keys.sort()) {
+    const where = childPath(path, key.slice(0, 40));
+    if (!keyAllowed(key)) return refused('not-allowed-here', where);
+    const tier = parseChoice(ownValue(value, key), where, USE_TIERS);
+    if (!tier.ok) return tier;
+    out[key] = tier.value;
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+/** A `scale/level` key naming a level the document's scales hold. */
+function isLevelKey(key: string, scales: ScaleTable): boolean {
+  const slash = key.indexOf('/');
+  return slash > 0 && levelIndex(scales, key.slice(0, slash), key.slice(slash + 1)) >= 0;
+}
+
+function parseDefaults(value: unknown, path: string, byId: ReadonlyMap<string, Passport>): Parsed<Readonly<Partial<Record<ModelJob, string>>>> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, [], MODEL_JOBS);
+  if (keys !== undefined) return keys;
+  const out: Partial<Record<ModelJob, string>> = {};
+  for (const job of MODEL_JOBS) {
+    if (!has(value, job)) continue;
+    const where = childPath(path, job);
+    const id = parsePattern(ownValue(value, job), where, PASSPORT_ID_PATTERN);
+    if (!id.ok) return id;
+    const passport = byId.get(id.value);
+    if (passport === undefined || tierRank(declaredMaxTier(passport)) < tierRank(JOB_MINIMUM_TIER[job])) return refused('not-allowed-here', where);
+    out[job] = id.value;
+  }
+  return { ok: true, value: Object.freeze(out) };
+}
+
+function parseOrder(value: unknown, path: string, byId: ReadonlyMap<string, Passport>): Parsed<readonly string[]> {
+  const list = parseList(value, path, MAX_ORDER, (item, where) => parsePattern(item, where, PASSPORT_ID_PATTERN));
+  if (!list.ok) return list;
+  const seen = new Set<string>();
+  for (let index = 0; index < list.value.length; index += 1) {
+    const id = list.value[index] as string;
+    const where = `${path}[${String(index)}]`;
+    if (seen.has(id)) return refused('duplicate', where);
+    if (!byId.has(id)) return refused('not-allowed-here', where);
+    seen.add(id);
+  }
+  return list;
+}
+
+function parseLocalArtifact(value: unknown, path: string): Parsed<LocalArtifact> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['format', 'quantization', 'source', 'sha256', 'sizeBytes', 'licence']);
+  if (keys !== undefined) return keys;
+  const format = parseChoice(ownValue(value, 'format'), childPath(path, 'format'), ARTIFACT_FORMATS);
+  if (!format.ok) return format;
+  const quantization = parseText(ownValue(value, 'quantization'), childPath(path, 'quantization'), 64);
+  if (!quantization.ok) return quantization;
+  const source = parseText(ownValue(value, 'source'), childPath(path, 'source'), 256);
+  if (!source.ok) return source;
+  const sha256 = parsePattern(ownValue(value, 'sha256'), childPath(path, 'sha256'), HEX_64);
+  if (!sha256.ok) return sha256;
+  const sizeBytes = ownValue(value, 'sizeBytes');
+  if (typeof sizeBytes !== 'number' || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1) return refused('wrong-type', childPath(path, 'sizeBytes'));
+  const licencePath = childPath(path, 'licence');
+  const licence = ownValue(value, 'licence');
+  if (!isRecord(licence)) return refused('wrong-type', licencePath);
+  const licenceKeys = checkKeys(licence, licencePath, ['id', 'url']);
+  if (licenceKeys !== undefined) return licenceKeys;
+  const licenceId = parseText(ownValue(licence, 'id'), childPath(licencePath, 'id'), MAX_LIST_TEXT);
+  if (!licenceId.ok) return licenceId;
+  const url = parseText(ownValue(licence, 'url'), childPath(licencePath, 'url'), 256);
+  if (!url.ok) return url;
+  return {
+    ok: true,
+    value: Object.freeze({
+      format: format.value, quantization: quantization.value, source: source.value, sha256: sha256.value, sizeBytes,
+      licence: Object.freeze({ id: licenceId.value, url: url.value })
+    })
+  };
+}
+
+function parseCatalogueEntry(value: unknown, path: string, byId: ReadonlyMap<string, Passport>): Parsed<LocalCatalogueEntry> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['passport', 'artifacts', 'minFitBand']);
+  if (keys !== undefined) return keys;
+  const passport = parsePattern(ownValue(value, 'passport'), childPath(path, 'passport'), PASSPORT_ID_PATTERN);
+  if (!passport.ok) return passport;
+  if (!byId.has(passport.value)) return refused('not-allowed-here', childPath(path, 'passport'));
+  const artifactsPath = childPath(path, 'artifacts');
+  const rawArtifacts = ownValue(value, 'artifacts');
+  if (Array.isArray(rawArtifacts) && rawArtifacts.length === 0) return refused('empty-list', artifactsPath);
+  const artifacts = parseList(rawArtifacts, artifactsPath, MAX_LOCAL_ARTIFACTS, parseLocalArtifact);
+  if (!artifacts.ok) return artifacts;
+  const seen = new Set<string>();
+  for (let index = 0; index < artifacts.value.length; index += 1) {
+    const hash = (artifacts.value[index] as LocalArtifact).sha256;
+    if (seen.has(hash)) return refused('duplicate', `${artifactsPath}[${String(index)}]`);
+    seen.add(hash);
+  }
+  const minFitBand = parsePattern(ownValue(value, 'minFitBand'), childPath(path, 'minFitBand'), TOKEN_PATTERN);
+  if (!minFitBand.ok) return minFitBand;
+  return { ok: true, value: Object.freeze({ passport: passport.value, artifacts: artifacts.value, minFitBand: minFitBand.value }) };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
 // The section
 
 /** Reads the models section against the document's scales (the scales name the levels of `tierByLevel`). */
 export function parseModelsSection(value: unknown, scales: ScaleTable, path = 'models'): Parsed<ModelsSection> {
-  void scales;
   if (!isRecord(value)) return refused('wrong-type', path);
   const v = ownValue(value, 'v');
   if (typeof v === 'number' && v !== 1) return refused('unknown-version', childPath(path, 'v'));
   const keys = checkKeys(value, path, ['v'], MODELS_SECTION_KEYS);
   if (keys !== undefined) return keys;
   if (v !== 1) return refused('wrong-type', childPath(path, 'v'));
-  for (const key of NOT_YET) if (has(value, key)) return refused('not-available-yet', childPath(path, key));
   if (Object.keys(value).length === 1) return { ok: true, value: Object.freeze({ v: 1 }) };
   let mode: ModelsMode = 'report';
   if (has(value, 'mode')) {
@@ -387,13 +558,42 @@ export function parseModelsSection(value: unknown, scales: ScaleTable, path = 'm
     const unknown = parseChoice(ownValue(value, 'unknownMaxTier'), childPath(path, 'unknownMaxTier'), ['T0'] as const);
     if (!unknown.ok) return unknown;
   }
+  const out: Record<string, unknown> = { v: 1, mode, unknownMaxTier: 'T0' };
+  if (has(value, 'tierByLevel')) {
+    const tierByLevel = parseTierMap(ownValue(value, 'tierByLevel'), childPath(path, 'tierByLevel'), MAX_TIER_BY_LEVEL, (key) => isLevelKey(key, scales));
+    if (!tierByLevel.ok) return tierByLevel;
+    out['tierByLevel'] = tierByLevel.value;
+  }
+  if (has(value, 'tierByProject')) {
+    const tierByProject = parseTierMap(ownValue(value, 'tierByProject'), childPath(path, 'tierByProject'), MAX_TIER_BY_PROJECT, (key) => TOKEN_PATTERN.test(key));
+    if (!tierByProject.ok) return tierByProject;
+    out['tierByProject'] = tierByProject.value;
+  }
   let passports: readonly Passport[] = Object.freeze([]);
   if (has(value, 'passports')) {
     const parsedPassports = parseSetList(ownValue(value, 'passports'), childPath(path, 'passports'), MAX_PASSPORTS, parsePassport, (item) => item.id);
     if (!parsedPassports.ok) return parsedPassports;
     passports = parsedPassports.value;
   }
-  return { ok: true, value: Object.freeze({ v: 1, mode, unknownMaxTier: 'T0', passports }) };
+  out['passports'] = passports;
+  // The cross-checks run after every passport is read, so their paths name the default, order or catalogue entry.
+  const byId = new Map(passports.map((passport) => [passport.id, passport] as const));
+  if (has(value, 'defaults')) {
+    const defaults = parseDefaults(ownValue(value, 'defaults'), childPath(path, 'defaults'), byId);
+    if (!defaults.ok) return defaults;
+    out['defaults'] = defaults.value;
+  }
+  if (has(value, 'localCatalogue')) {
+    const catalogue = parseSetList(ownValue(value, 'localCatalogue'), childPath(path, 'localCatalogue'), MAX_LOCAL_CATALOGUE, (item, where) => parseCatalogueEntry(item, where, byId), (item) => item.passport);
+    if (!catalogue.ok) return catalogue;
+    out['localCatalogue'] = catalogue.value;
+  }
+  if (has(value, 'order')) {
+    const order = parseOrder(ownValue(value, 'order'), childPath(path, 'order'), byId);
+    if (!order.ok) return order;
+    out['order'] = order.value;
+  }
+  return { ok: true, value: Object.freeze(out) as unknown as ModelsSection };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
