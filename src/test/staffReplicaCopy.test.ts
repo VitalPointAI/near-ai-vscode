@@ -506,6 +506,76 @@ test('the happy path stores the mark before the copy is in place: at the probe t
   assert.equal((await hostAt(env, destination).replay()).broken, undefined);
 });
 
+/** The count and head a mark text names, when it verifies as this device's staff-ledger-head mark. */
+function markOf(env: Env, text: string | undefined): unknown {
+  assert.ok(text !== undefined, 'a mark is stored');
+  const verdict = verifyPayload(JSON.parse(text) as unknown, { purpose: 'staff-ledger-head', status: trusting(env.signer) });
+  assert.ok(verdict.ok, 'the mark verifies');
+  return parseLedgerHeadMark(verdict.payload);
+}
+
+test('a stop between the mark and the rename leaves the mark and the staging folder and no staff project; copying again into the same folder succeeds', async () => {
+  const env = await migrated('stopped');
+  const destination = path.join(env.base, 'copy');
+  const key = ledgerHeadKey(destination);
+  // The probe throwing is the state a process stop at that point leaves: nothing after it runs.
+  await assert.rejects(withProbe(() => { throw new Error('The process stopped here.'); }, () => makeSingleMachineCopy(env.root, destination, env.deps)), /The process stopped here\./);
+  const stale = env.secrets.values.get(key);
+  assert.ok(stale !== undefined, 'the mark is stored');
+  const first = stagingFolders(destination);
+  assert.equal(first.length, 1, 'the staging folder holds the files');
+  assert.ok(existsSync(path.join(destination, '.planning', first[0], 'ledger', LEDGER_FILE)));
+  assert.equal(existsSync(path.join(destination, '.planning', 'staff')), false, 'the destination does not read as a staff project');
+
+  // Copying again, an hour later, into the same folder: nothing refuses it, its own mark replaces the stale one, and the copy replays without a break.
+  const later = { ...env.deps, now: () => new Date('2026-11-20T11:00:00.000Z') };
+  const result = await copied(env, destination, later);
+  assert.equal(result.destination, path.join(destination, '.planning', 'staff'));
+  const fresh = env.secrets.values.get(key);
+  assert.notEqual(fresh, stale, 'the second run\'s mark replaces the stale one');
+  const replay = await hostAt(env, destination).replay();
+  assert.equal(replay.broken, undefined, 'today\'s host replays the copy without a break');
+  assert.deepEqual(markOf(env, fresh), { v: 1, count: replay.entries, head: replay.head });
+  assert.equal(env.secrets.values.get(key), fresh, 'the replay found the mark as the copy wrote it');
+  assert.deepEqual(stagingFolders(destination), first, 'the first run\'s staging folder is kept, and the second run leaves none');
+});
+
+test('an older version\'s copy left without a mark is refused unmarked-copy with nothing written, and the sentence asks for a new, empty folder', async () => {
+  const env = await migrated('unmarked');
+  const destination = path.join(env.base, 'copy');
+  await copied(env, destination);
+  // An older version renamed the copy into place and stopped before it stored the mark.
+  await env.secrets.delete(ledgerHeadKey(destination));
+  await refusedWithNothingWritten(env, destination, 'unmarked-copy');
+  assert.match(COPY_REFUSALS['unmarked-copy'], /Make the copy again into a new, empty folder\.$/);
+});
+
+test('a destination with staff files is refused destination-has-staff-files when its product ledger has its mark, or when it has no product ledger', async () => {
+  const env = await migrated('marked-or-none');
+  // A finished copy with its mark: not left unfinished, but not empty either.
+  const finished = path.join(env.base, 'copy');
+  await copied(env, finished);
+  assert.ok(env.secrets.values.has(ledgerHeadKey(finished)));
+  await refusedWithNothingWritten(env, finished, 'destination-has-staff-files');
+  // Staff files with a ledger folder but no product ledger, and no mark: nothing names it a copy.
+  const other = path.join(env.base, 'other');
+  await mkdir(path.join(other, ...LEDGER_DIR.split('/')), { recursive: true });
+  writeFileSync(path.join(other, LEDGER_DIR, 'events.jsonl'), '');
+  await refusedWithNothingWritten(env, other, 'destination-has-staff-files');
+});
+
+test('every copy refusal is a plain sentence that ends by saying what to do next', () => {
+  const NEXT = /^(Choose|Make|Open)\b/;
+  for (const [reason, text] of Object.entries(COPY_REFUSALS)) {
+    assert.equal(text.includes('—'), false, `${reason}: no em-dash`);
+    assert.match(text, /^The copy was not made, because /, reason);
+    assert.ok(text.includes('Nothing was written.'), `${reason}: says nothing was written`);
+    const sentences = text.split(/(?<=\.)\s+/);
+    assert.match(sentences[sentences.length - 1], NEXT, `${reason}: ends with what to do next (${text})`);
+  }
+  assert.ok('unmarked-copy' in COPY_REFUSALS);
+});
+
 // ---- Task 3: the decision log, the calculator ledger and the wargame ledger -------------------------------------------------------------------------
 
 const J4_TEAM: StaffTeamInfo = { slug: 'j4-logistics', section: 'j4', sectionLead: 'j4-director', members: ['j4-director', 'log-plans-officer', 'jloc-chief', 'release-guard'] };

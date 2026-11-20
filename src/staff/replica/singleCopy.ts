@@ -25,7 +25,7 @@
 // holds staff files. Every refusal is checked before anything is written. The copy is first written to a staging folder beside its final place
 // (.planning/staff.copy-<random>), and only when every file is there is that folder renamed to .planning/staff in one step, so a copy that fails part
 // way never looks like a staff project. The copy's signed head mark is stored after every file is staged and before that rename, and taken back when
-// the rename fails, so a copy in place always has its mark on this computer (D-07). Nothing is ever deleted.
+// the rename fails, so a copy in place always has its mark on this computer (D-07). No file is ever deleted.
 //
 // Not carried in Phase 31: the files no replica kind covers yet (registers, calculator record files, gate reports, proposals, settings, observations)
 // and events.jsonl; the copy's StaffHost starts its own events. A person can copy those files by hand.
@@ -64,8 +64,9 @@ import type { ReplicaProjectDeps } from './replicaProject';
 export const COPY_REFUSALS = {
   'destination-inside-shared': 'The copy was not made, because the folder you chose is the shared project\'s folder or inside it, and the copy never writes into the shared project. Nothing was written. Choose a new folder outside the shared project.',
   'destination-has-staff-files': 'The copy was not made, because the folder you chose already holds staff files (a .planning/staff folder). Nothing was written. Choose a new, empty folder.',
-  'not-shared': 'The copy was not made, because this folder holds no shared staff project. Nothing was written. A project that is not shared is already a single-machine project.',
-  'project-refused': 'The copy was not made, because the shared project could not be opened. Nothing was written.'
+  'unmarked-copy': 'The copy was not made, because the folder you chose holds a single-machine copy that was left unfinished: this computer has no signed record of its ledger, so it cannot tell whether the copy is whole. Nothing was written. Make the copy again into a new, empty folder.',
+  'not-shared': 'The copy was not made, because this folder holds no shared staff project. Nothing was written. A project that is not shared is already a single-machine project. Open the shared project folder, or ask your staff lead for an invitation.',
+  'project-refused': 'The copy was not made, because the shared project could not be opened on this computer. Nothing was written. Make the copy again once it opens; the reason it did not open follows.'
 } as const;
 export type CopyRefusal = keyof typeof COPY_REFUSALS;
 
@@ -166,13 +167,16 @@ async function realOf(target: string): Promise<string> {
 
 const within = (child: string, parent: string): boolean => child === parent || child.startsWith(`${parent}${path.sep}`);
 
-/** Why the destination cannot take a copy of the shared project, or undefined. Writes nothing. */
-async function destinationProblem(sharedRoot: string, destination: string): Promise<CopyRefusal | undefined> {
+/** Why the destination cannot take a copy of the shared project, or undefined. Reads this computer's secret storage; writes nothing. */
+async function destinationProblem(sharedRoot: string, destination: string, secrets: CopyDeps['secrets']): Promise<CopyRefusal | undefined> {
   const shared = await realOf(sharedRoot);
   const target = await realOf(destination);
   // The shared project's folder and everything in it (its replica folder above all) is never written; neither is a folder the shared project is in
   // the staff folder of.
   if (within(target, shared) || within(target, path.join(shared, ...REPLICA_DIR.split('/'))) || within(shared, path.join(target, '.planning', 'staff'))) return 'destination-inside-shared';
+  // A copy an older version put in place and then stopped before storing its mark (D-07, D-65): today's host would take its ledger on first read with
+  // nothing to check it against, so this computer cannot tell whether it is whole. Only the copy flow can tell it apart, for its own destination.
+  if (await exists(path.join(destination, ...LEDGER_DIR.split('/'), LEDGER_FILE)) && (await secrets.get(ledgerHeadKey(destination))) === undefined) return 'unmarked-copy';
   if (await exists(path.join(destination, '.planning', 'staff'))) return 'destination-has-staff-files';
   return undefined;
 }
@@ -528,13 +532,14 @@ async function takeBackMark(deps: CopyDeps, key: string, stored: string): Promis
 
 /**
  * Make a Single-Machine Copy: folds the shared project at `sharedRoot` into today's single-machine staff files at `destination`, signed by this
- * device (see the file comment). Refused, with nothing written anywhere, when the destination is in the shared project or already holds staff files,
- * and when the folder holds no shared project this computer can open. The shared project is only read.
+ * device (see the file comment). Refused, with nothing written anywhere, when the destination is in the shared project or already holds staff files
+ * (a copy left there without its head mark is named as such), and when the folder holds no shared project this computer can open. The shared
+ * project is only read.
  */
 export async function makeSingleMachineCopy(sharedRoot: string, destination: string, deps: CopyDeps): Promise<CopyResult | CopyRefused> {
   const shared = path.resolve(sharedRoot);
   const target = path.resolve(destination);
-  const problem = await destinationProblem(shared, target);
+  const problem = await destinationProblem(shared, target, deps.secrets);
   if (problem !== undefined) return refuse(problem);
 
   const opened = await ReplicaProject.open(shared, deps);
