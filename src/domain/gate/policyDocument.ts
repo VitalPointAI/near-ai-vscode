@@ -10,6 +10,8 @@
 import { BUNDLE_VERSION, CLOCK_SKEW_MS, UPDATE_REASONS, bundleHash, checkNumbers, checkRequires, effectiveNow, failedClosed, needsRenewal, needsUpdateSentence,
   parseBundle, parseIssuer, parseTimestamp, payloadReason, shapeReason, FINGERPRINT_PATTERN, HEX_64 } from './bundle';
 import type { BundleIssuer, BundleState, PolicyBundle } from './bundle';
+import { parseAuthorizations } from './authorizations';
+import type { AuthorizationBody } from './authorizations';
 import { migrateLocalHosts, parseEndpoints } from './endpoints';
 import type { PolicyEndpoint } from './endpoints';
 import { ALWAYS_REQUIRED_FEATURES, POLICY_SECTIONS, featureForSection } from './features';
@@ -23,7 +25,7 @@ import type { AgentsSection, LabelsSection, ReservedSection } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 import { MAX_PAYLOAD_BYTES, verifyPayload } from '../team/signedPayload';
-import type { PayloadSignerRef } from '../team/signedPayload';
+import type { PayloadSignerRef, SignedPayload } from '../team/signedPayload';
 import type { KeyStatusLookup } from '../team/keyStatus';
 import { GATE_VOCABULARY_VERSION } from './vocabulary';
 
@@ -61,6 +63,8 @@ export interface PolicyDocument {
   readonly agents: AgentsSection;
   /** Where AI may run (D-24). Absent means no place beyond this computer is named, today's behaviour with no local hosts. */
   readonly endpoints?: readonly PolicyEndpoint[];
+  /** Exceptions, each signed by a named person (D-29); parsed for shape here and verified against one key source by verifyAuthorization (D-15). */
+  readonly authorizations?: readonly SignedPayload<AuthorizationBody>[];
   readonly models?: ModelsSection;
   readonly people?: PeopleSection;
   readonly reserved?: ReservedSection;
@@ -186,7 +190,12 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     if (!endpoints.ok) return endpoints;
     out['endpoints'] = endpoints.value;
   }
-  for (const name of ['authorizations', 'residency', 'onboarding', 'limits', 'exportControl'] as const) {
+  if (has(value, 'authorizations')) {
+    const authorizations = parseAuthorizations(ownValue(value, 'authorizations'), childPath(path, 'authorizations'));
+    if (!authorizations.ok) return authorizations;
+    out['authorizations'] = authorizations.value;
+  }
+  for (const name of ['residency', 'onboarding', 'limits', 'exportControl'] as const) {
     if (has(value, name)) return refused('not-available-yet', childPath(path, name));
   }
   if (has(value, 'models')) {

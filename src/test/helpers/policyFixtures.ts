@@ -3,8 +3,10 @@
 // The key technique (a PKCS8 prefix and a seed from SHA-256 of a label) is copied from replicaWorld's fixedSigner, not imported, so the gate's tests stay
 // apart from the replica helpers.
 import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
+import { MAX_DAYS_BY_KIND, SUBJECT_FOR_KIND } from '../../domain/gate/authorizations';
+import type { AuthorizationBody, AuthorizationKind, AuthorizationScope, AuthorizationSubject, NamedPerson } from '../../domain/gate/authorizations';
 import { defaultBundlePayload } from '../../domain/gate/bundle';
-import { documentFromBundle } from '../../domain/gate/policyDocument';
+import { MAX_ORGANIZATION_LAYER_BYTES, documentFromBundle } from '../../domain/gate/policyDocument';
 import type { PolicyDocument, PolicyLayerName } from '../../domain/gate/policyDocument';
 import { fingerprintOf } from '../../domain/team/canonical';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
@@ -73,7 +75,7 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
     ...base,
     layer,
     minClient: '0.4.40',
-    requires: ['agents@1', 'endpoints@1', 'labels@1', 'layers@1', 'models@1', 'people@1'],
+    requires: ['agents@1', 'authorizations@1', 'endpoints@1', 'labels@1', 'layers@1', 'models@1', 'people@1'],
     labels: { ...base['labels'], routing: { ...base['labels'].routing, compartments: { ...base['labels'].routing.compartments, PROJECT_X: 'attested-cloud' } } },
     agents: {
       ...base['agents'],
@@ -81,8 +83,9 @@ export function fullDocumentFor(key: PayloadSigner, options: FullDocumentOptions
       requireAccreditedDevice: true
     },
     endpoints: fixtureEndpoints(),
+    authorizations: fixtureAuthorizations(key),
     models: { v: 1 },
-    people: { v: 1, clearances: base['people'].clearances },
+    people: { v: 1, clearances: base['people'].clearances, signers: [signerEntry(key)] },
     reserved: { v: 1, anchorRoots: [{ root: 'a'.repeat(64), proof: ['b'.repeat(64)] }], statusLists: [{ uri: 'https://status.example.org/list', purpose: 'revocation' }], maxOfflineAge: { 'org/Restricted': 86400 } }
   };
   if (layer !== 'organization') document['parent'] = { hash: 'c'.repeat(64), issuer: issuerKey().fingerprint };
@@ -102,6 +105,107 @@ export function fixtureEndpoints(): Array<Record<string, unknown>> {
     { id: 'vendor-enclave', class: 'vendor-tee', host: 'enclave.example.net', scheme: 'https', tlsPins: [], region: 'EU', maxLabel: ['ca-protected/Protected B', 'org/Confidential'], attestation: 'vendor-tee-v1' },
     { id: 'vendor-region', class: 'vendor-region', host: 'ca.example.net', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected A', 'org/Internal'], provider: 'example' }
   ];
+}
+
+/** The fictional person every fixture authorization names. */
+export const NAMED_PERSON: NamedPerson = Object.freeze({ name: 'Alex Example', role: 'Security officer' });
+
+/** A people.signers entry for a key, under the fixtures' named person unless another is given. */
+export function signerEntry(key: PayloadSigner, person: NamedPerson = NAMED_PERSON): Record<string, string> {
+  return { name: person.name, role: person.role, publicKey: key.publicKey, fingerprint: key.fingerprint };
+}
+
+const DEFAULT_SUBJECT_VALUE: Readonly<Record<string, string>> = Object.freeze({
+  endpoint: 'models-example-org', model: 'example/model-7b', device: 'dev-0123456789abcdef0123456789abcdef', item: 'docs/plan.md', person: 'person-0142'
+});
+
+export interface AuthorizationOptions {
+  readonly kind: AuthorizationKind;
+  readonly subject?: AuthorizationSubject;
+  /** Length in days; the kind's maximum by default (30 for a kind with none). */
+  readonly days?: number;
+  readonly id?: string;
+  readonly issuedAt?: string;
+  readonly expiresAt?: string;
+  readonly scope?: AuthorizationScope;
+  readonly conditions?: unknown;
+  readonly evidence?: string;
+  readonly namedPerson?: NamedPerson;
+  readonly revokedBy?: string;
+}
+
+/** An authorization body of one kind, issued at FIXED_NOW by the fixtures' named person, with every field overridable. */
+export function authorizationFor(options: AuthorizationOptions): AuthorizationBody {
+  const issuedAt = options.issuedAt ?? new Date(FIXED_NOW).toISOString();
+  const days = options.days ?? MAX_DAYS_BY_KIND[options.kind] ?? 30;
+  const subjectKind = SUBJECT_FOR_KIND[options.kind];
+  const body: Record<string, unknown> = {
+    v: 1,
+    id: options.id ?? `${options.kind}-1`,
+    kind: options.kind,
+    subject: options.subject ?? { [subjectKind]: DEFAULT_SUBJECT_VALUE[subjectKind] },
+    scope: options.scope ?? {},
+    conditions: options.conditions ?? [],
+    evidence: options.evidence ?? 'TRA-2026-11-0042',
+    namedPerson: options.namedPerson ?? NAMED_PERSON,
+    issuedAt,
+    expiresAt: options.expiresAt ?? new Date(Date.parse(issuedAt) + days * DAY_MS).toISOString()
+  };
+  if (options.revokedBy !== undefined) body['revokedBy'] = options.revokedBy;
+  return body as unknown as AuthorizationBody;
+}
+
+/** One authorization envelope (purpose policy-authorization), signed by `key` at the body's issuedAt. */
+export function signAuthorization(body: AuthorizationBody | Record<string, unknown>, key: PayloadSigner): SignedPayload<AuthorizationBody> {
+  return signPayload(key, 'policy-authorization', body as AuthorizationBody, { now: () => new Date(String((body as { issuedAt: string }).issuedAt)) });
+}
+
+/** One signed authorization of every kind, sorted by id, as plain JSON (one of them revoked, so revokedBy is present). */
+export function fixtureAuthorizations(key: PayloadSigner): unknown[] {
+  const bodies: AuthorizationBody[] = [
+    authorizationFor({ kind: 'accredited-device', id: 'accredited-device-1' }),
+    authorizationFor({ kind: 'declassify', id: 'declassify-1', conditions: ['Only the summary section.'], revokedBy: 'declassify-2' }),
+    authorizationFor({
+      kind: 'protected-b', id: 'protected-b-1', subject: { endpoint: 'models-example-org' },
+      scope: { projects: ['project-alpha'], labels: ['ca-protected/Protected B'], uses: ['chat', 't1'] }, conditions: ['Pinned connection only.']
+    }),
+    authorizationFor({ kind: 'residency-exception', id: 'residency-exception-1', subject: { endpoint: 'vendor-enclave' } }),
+    authorizationFor({ kind: 't1-risk', id: 't1-risk-1' })
+  ];
+  return bodies.map((body) => plain(signAuthorization(body, key)));
+}
+
+/** Your organization's layer signed by its issuer with the one signer (purpose org-policy-layer, up to 1 MiB), at the document's own issuedAt. */
+export function signOrganizationLayer(doc: PolicyDocument | Record<string, unknown>, key: PayloadSigner): SignedPayload {
+  return signPayload(key, 'org-policy-layer', doc, { now: () => new Date(String((doc as { issuedAt: string }).issuedAt)), maxBytes: MAX_ORGANIZATION_LAYER_BYTES });
+}
+
+export interface EnrolmentFileOptions {
+  readonly issuer: PayloadSigner;
+  /** The signed first organization layer; the starting rules as your organization's layer by default. */
+  readonly layer?: SignedPayload;
+  readonly serial?: number;
+  readonly issuedAt?: string;
+  readonly expiresAt?: string;
+}
+
+/**
+ * The text of an enrolment file (D-11): an org-enrolment envelope signed by the issuer key itself, naming the fictional Example Organization and its
+ * security desk, the issuer's key, the dates, a serial and the first organization layer.
+ */
+export function enrolmentFileFor(options: EnrolmentFileOptions): string {
+  const issuedAt = options.issuedAt ?? new Date(FIXED_NOW).toISOString();
+  const layer = options.layer ?? signOrganizationLayer(policyDocumentFor({ key: options.issuer, layer: 'organization' }), options.issuer);
+  const payload = {
+    v: 1,
+    organization: { name: 'Example Organization', contacts: [{ topic: 'security', name: 'Security desk', how: 'security@example.org' }] },
+    issuer: { publicKey: options.issuer.publicKey },
+    issuedAt,
+    expiresAt: options.expiresAt ?? new Date(Date.parse(issuedAt) + 365 * DAY_MS).toISOString(),
+    serial: options.serial ?? 1,
+    layer
+  };
+  return JSON.stringify(signPayload(options.issuer, 'org-enrolment', payload, { now: () => new Date(issuedAt) }));
 }
 
 /** The personal layer signed by this device with the one signer (purpose policy-bundle), at the document's own issuedAt (D-12's repeat check). */
