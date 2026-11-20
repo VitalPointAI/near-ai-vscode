@@ -12,10 +12,14 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import {
+  FROZEN_ABOVE,
   LAYERS,
+  SCALE_PRESETS_ALLOWED,
+  WARN_ABOVE,
   baselineText,
   compareWithBaseline,
   findViolations,
+  foldersInCycles,
   layerOf,
   scanArchitecture,
   unplacedTopLevel,
@@ -99,6 +103,96 @@ test('D-45: an empty scan fails', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('D-45 vscode-below-editor has teeth: every import form in an engine or domain file is reported, the editor and the composition root are not', () => {
+  const forms = ["import * as vscode from 'vscode';", "const lazy = await import('vscode');", "const old = require('vscode');", "import type { Uri } from 'vscode';"];
+  for (const form of forms) {
+    const found = findViolations(planted({
+      'agent/planted.ts': form,
+      'gate/planted.ts': form,
+      'domain/x/planted.ts': form,
+      'services/planted.ts': form,
+      'extension.ts': form
+    }));
+    assert.deepEqual(found.rules['vscode-below-editor'], ['agent/planted.ts -> vscode', 'domain/x/planted.ts -> vscode', 'gate/planted.ts -> vscode'], form);
+  }
+  const comment = findViolations(planted({ 'agent/note.ts': "// never import * as vscode from 'vscode' here\n * import * as vscode from 'vscode';" }));
+  assert.deepEqual(comment.rules['vscode-below-editor'], []);
+});
+
+test('D-45 folder-cycle has teeth: every file edge inside a cycle of engine folders is reported, downward and editor edges are not', () => {
+  assert.deepEqual(foldersInCycles([
+    { file: 'agent/a.ts', target: 'staff/x' },
+    { file: 'agent/b.ts', target: 'staff/y' },
+    { file: 'staff/c.ts', target: 'agent/z' }
+  ]), ['agent/a.ts -> staff', 'agent/b.ts -> staff', 'staff/c.ts -> agent']);
+  assert.deepEqual(foldersInCycles([
+    { file: 'agent/p.ts', target: 'mcp/q' },
+    { file: 'mcp/r.ts', target: 'gsd/s' },
+    { file: 'gsd/t.ts', target: 'agent/u' },
+    { file: 'agent/d.ts', target: 'domain/x' },
+    { file: 'domain/e.ts', target: 'agent/f' },
+    { file: 'agent/g.ts', target: 'services/h' },
+    { file: 'services/k.ts', target: 'agent/l' },
+    { file: 'team/m.ts', target: 'gate/n' },
+    { file: 'agent/o.ts', target: 'agent/inner' }
+  ]), ['agent/p.ts -> mcp', 'gsd/t.ts -> agent', 'mcp/r.ts -> gsd']);
+  // The rule runs over real imports too.
+  const found = findViolations(planted({
+    'agent/a.ts': "import { x } from '../staff/x';",
+    'staff/c.ts': "import { z } from '../agent/z';",
+    'gate/one.ts': "import { t } from '../team/t';"
+  }));
+  assert.deepEqual(found.rules['folder-cycle'], ['agent/a.ts -> staff', 'staff/c.ts -> agent']);
+});
+
+test('D-45 scale-presets has teeth: an import of SCALE_PRESETS outside src/domain/gate and the two failed-closed fallbacks is reported', () => {
+  const importLine = "import { SCALE_PRESETS, labelKey } from '../domain/gate/labels';";
+  const found = findViolations(planted({
+    'services/planted.ts': importLine,
+    'services/caveat.ts': "import { SCALE_PRESETS_CAVEAT_TEXT } from '../domain/gate/labels';",
+    'services/spaced.ts': "import {\n  labelKey,\n  SCALE_PRESETS\n} from '../domain/gate/labels';",
+    'services/namespace.ts': "import * as labels from '../domain/gate/labels';\nconst scales = labels.SCALE_PRESETS;",
+    'services/note.ts': '// SCALE_PRESETS is read through the policy, never imported here',
+    'domain/gate/x.ts': "import { SCALE_PRESETS } from './labels';",
+    'gate/host.ts': importLine,
+    'agent/gateLabels.ts': importLine
+  }));
+  assert.deepEqual(found.rules['scale-presets'], ['services/namespace.ts', 'services/planted.ts', 'services/spaced.ts']);
+  assert.deepEqual(Object.keys(SCALE_PRESETS_ALLOWED).sort(), ['agent/gateLabels.ts', 'gate/host.ts']);
+  for (const reason of Object.values(SCALE_PRESETS_ALLOWED)) assert.match(reason, /failed-closed fallback: the gate's own presets when no policy can be read/);
+});
+
+test('D-45 get-configuration has teeth: a settings read outside services/settings.ts is reported, comments are not', () => {
+  const read = "const config = vscode.workspace.getConfiguration('nearAi');";
+  const found = findViolations(planted({
+    'services/planted.ts': read,
+    'services/settings.ts': read,
+    'services/comment.ts': "// read through settings.ts, never vscode.workspace.getConfiguration('nearAi')\n * getConfiguration('nearAi') in a block comment\n/* getConfiguration('x') */",
+    'extension.ts': read
+  }));
+  assert.deepEqual(found.rules['get-configuration'], ['extension.ts', 'services/planted.ts']);
+});
+
+test('D-45 file sizes: a frozen file may not grow, a new file above 1,200 fails, above 800 is a warning', (t) => {
+  assert.equal(FROZEN_ABOVE, 1200);
+  assert.equal(WARN_ABOVE, 800);
+  const found = findViolations(planted({
+    'services/big.ts': 'x\n'.repeat(1001),
+    'services/huge.ts': 'x\n'.repeat(1201),
+    'services/edge.ts': 'x\n'.repeat(1200),
+    'services/mid.ts': 'x\n'.repeat(900),
+    'services/small.ts': 'x\n'.repeat(800)
+  }));
+  assert.equal(found.sizes['services/big.ts'], 1001);
+  const comparison = compareWithBaseline(found, { rules: {}, fileSizes: { 'services/big.ts': 1000 } });
+  assert.deepEqual(comparison.grown, ['services/big.ts: 1001 lines, frozen at 1000; move the part you change out first']);
+  assert.deepEqual(comparison.tooLarge, ['services/huge.ts: 1201 lines, new file above 1,200']);
+  assert.deepEqual(comparison.warnings, ['services/edge.ts: 1200 lines, above 800', 'services/mid.ts: 900 lines, above 800']);
+  for (const warning of comparison.warnings) t.diagnostic(`warning: ${warning}`);
+  const atSize = compareWithBaseline(found, { rules: {}, fileSizes: { 'services/big.ts': 1001, 'services/huge.ts': 1201 } });
+  assert.deepEqual([atSize.grown, atSize.tooLarge, atSize.shrunk], [[], [], []]);
 });
 
 test('D-45: the repository passes against its baseline (re-record with NEAR_AI_WRITE_BASELINE=1)', () => {

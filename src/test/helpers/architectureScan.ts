@@ -37,7 +37,21 @@ export const SEAMS: readonly Seam[] = [
   { from: 'team', target: 'services/stateMirrorLock', typeOnly: false, reason: 'the shared mirror lock, which imports only Node modules' }
 ];
 
-export const ARCHITECTURE_RULES = ['upward-import'] as const;
+/** The files outside src/domain/gate that may import SCALE_PRESETS, each with its reason (REVIEW S7: one label ranking, no second evaluator). */
+export const SCALE_PRESETS_ALLOWED: Readonly<Record<string, string>> = {
+  'gate/host.ts': "failed-closed fallback: the gate's own presets when no policy can be read (GateHost)",
+  'agent/gateLabels.ts': "failed-closed fallback: the gate's own presets when no policy can be read (agent label check)"
+};
+
+/** The one file that reads editor settings (D-45). */
+export const SETTINGS_FILE = 'services/settings.ts';
+
+/** A file above this many lines gives a warning. */
+export const WARN_ABOVE = 800;
+/** A file above this many lines fails unless the baseline froze it at its size; a frozen file may not grow (DEVELOPER-STRUCTURE section 1). */
+export const FROZEN_ABOVE = 1200;
+
+export const ARCHITECTURE_RULES = ['vscode-below-editor', 'upward-import', 'folder-cycle', 'scale-presets', 'get-configuration'] as const;
 export type ArchitectureRule = (typeof ARCHITECTURE_RULES)[number];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }
@@ -89,6 +103,85 @@ function under(target: string, folder: string): boolean {
   return target === folder || target.startsWith(`${folder}/`);
 }
 
+function isComment(line: string): boolean {
+  const trimmed = line.trimStart();
+  return trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*');
+}
+
+const SCALE_PRESETS_WORD = /\bSCALE_PRESETS\b/;
+const SCALE_PRESETS_PROPERTY = /\.[ \t]*SCALE_PRESETS\b/;
+const GET_CONFIGURATION = /\bgetConfiguration[ \t]*\(/;
+
+/** Whether a file names SCALE_PRESETS in an import or re-export statement, or reads it as a property of a namespace import or require(). */
+function usesScalePresets(text: string): boolean {
+  for (const match of text.matchAll(STATIC_FORM)) if (SCALE_PRESETS_WORD.test(match[0])) return true;
+  return text.split('\n').some((line) => !isComment(line) && SCALE_PRESETS_PROPERTY.test(line));
+}
+
+function readsConfiguration(text: string): boolean {
+  return text.split('\n').some((line) => !isComment(line) && GET_CONFIGURATION.test(line));
+}
+
+function folderOf(module: string): string {
+  return module.split('/')[0] ?? '';
+}
+
+function isEngineFolder(folder: string): boolean {
+  return folder.includes('.') ? false : layerEntry(folder)?.layer === 'engine';
+}
+
+export interface FileEdge { file: string; target: string }
+
+/**
+ * The file edges that lie on a cycle of engine folders, as "<file> -> <target folder>", sorted. The folder graph has one node per engine folder and
+ * an edge for each file import from one engine folder to another; Tarjan's algorithm finds the strongly connected components, and every edge whose
+ * two folders share a component of more than one folder is a line. Edges to the domain or the editor are not cycles here (the upward-import rule
+ * covers the editor).
+ */
+export function foldersInCycles(edges: readonly FileEdge[]): string[] {
+  const engineEdges = edges
+    .map((edge) => ({ file: edge.file, from: folderOf(edge.file), to: folderOf(edge.target) }))
+    .filter((edge) => edge.from !== edge.to && isEngineFolder(edge.from) && isEngineFolder(edge.to));
+  const next = new Map<string, Set<string>>();
+  for (const edge of engineEdges) {
+    if (!next.has(edge.from)) next.set(edge.from, new Set());
+    if (!next.has(edge.to)) next.set(edge.to, new Set());
+    next.get(edge.from)?.add(edge.to);
+  }
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const component = new Map<string, number>();
+  let counter = 0;
+  let components = 0;
+  const visit = (node: string): void => {
+    index.set(node, counter);
+    low.set(node, counter);
+    counter += 1;
+    stack.push(node);
+    onStack.add(node);
+    for (const to of next.get(node) ?? []) {
+      if (!index.has(to)) {
+        visit(to);
+        low.set(node, Math.min(low.get(node) as number, low.get(to) as number));
+      } else if (onStack.has(to)) {
+        low.set(node, Math.min(low.get(node) as number, index.get(to) as number));
+      }
+    }
+    if (low.get(node) === index.get(node)) {
+      for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
+        onStack.delete(member);
+        component.set(member, components);
+        if (member === node) break;
+      }
+      components += 1;
+    }
+  };
+  for (const node of [...next.keys()].sort()) if (!index.has(node)) visit(node);
+  return sortedUnique(engineEdges.filter((edge) => component.get(edge.from) === component.get(edge.to)).map((edge) => `${edge.file} -> ${edge.to}`));
+}
+
 function isSeam(file: string, target: string, typeOnly: boolean): boolean {
   const from = file.split('/')[0];
   return SEAMS.some((seam) => seam.from === from && seam.target === target && (!seam.typeOnly || typeOnly));
@@ -126,21 +219,42 @@ function lineCount(text: string): number {
 
 /** Every rule over a set of sources keyed by their path under src (forward slashes). */
 export function findViolations(sources: ReadonlyMap<string, string>): ArchitectureFindings {
+  const vscodeBelow = new Set<string>();
   const upward = new Set<string>();
+  const edges: FileEdge[] = [];
+  const scalePresets = new Set<string>();
+  const configuration = new Set<string>();
   const sizes: Record<string, number> = {};
   const unplaced: string[] = [];
   for (const [file, text] of sources) {
     sizes[file] = lineCount(text);
-    if (layerOf(file) === undefined) {
+    const layer = layerOf(file);
+    if (layer === undefined) {
       unplaced.push(file);
       continue;
     }
     for (const ref of importsOf(text)) {
+      if (ref.specifier === 'vscode' && layer.rank < EDITOR_RANK) vscodeBelow.add(`${file} -> vscode`);
       const target = resolveTarget(file, ref.specifier);
-      if (target !== undefined && isUpward(file, target, ref.typeOnly)) upward.add(`${file} -> ${target}`);
+      if (target === undefined) continue;
+      if (isUpward(file, target, ref.typeOnly)) upward.add(`${file} -> ${target}`);
+      edges.push({ file, target });
     }
+    if (!under(file, 'domain/gate') && !Object.prototype.hasOwnProperty.call(SCALE_PRESETS_ALLOWED, file) && usesScalePresets(text)) scalePresets.add(file);
+    if (file !== SETTINGS_FILE && readsConfiguration(text)) configuration.add(file);
   }
-  return { rules: { 'upward-import': sortedUnique(upward) }, sizes, unplaced: unplaced.sort(), files: sources.size };
+  return {
+    rules: {
+      'vscode-below-editor': sortedUnique(vscodeBelow),
+      'upward-import': sortedUnique(upward),
+      'folder-cycle': foldersInCycles(edges),
+      'scale-presets': sortedUnique(scalePresets),
+      'get-configuration': sortedUnique(configuration)
+    },
+    sizes,
+    unplaced: unplaced.sort(),
+    files: sources.size
+  };
 }
 
 /** Every .ts file under `srcRoot` except the test folder, keyed by its path under srcRoot with forward slashes. */
@@ -180,6 +294,14 @@ export interface BaselineComparison {
   added: string[];
   /** Baseline lines not found today (and frozen files that are gone), as "<rule>: <line>". They fail only when the baseline must be tight. */
   stale: string[];
+  /** Frozen files above their recorded size. These always fail. */
+  grown: string[];
+  /** Frozen files below their recorded size (the baseline can be lowered). They fail only when the baseline must be tight. */
+  shrunk: string[];
+  /** Files not frozen above FROZEN_ABOVE lines. These always fail. */
+  tooLarge: string[];
+  /** Files not frozen above WARN_ABOVE lines. A warning only. */
+  warnings: string[];
 }
 
 /** Compare today's findings with the baseline for the given rules. */
@@ -192,12 +314,32 @@ export function compareWithBaseline(found: ArchitectureFindings, baseline: Archi
     for (const line of today) if (!recorded.has(line)) added.push(`${rule}: ${line}`);
     for (const line of recorded) if (!today.has(line)) stale.push(`${rule}: ${line}`);
   }
-  return { added: added.sort(), stale: stale.sort() };
+  const grown: string[] = [];
+  const shrunk: string[] = [];
+  const tooLarge: string[] = [];
+  const warnings: string[] = [];
+  for (const [file, frozen] of Object.entries(baseline.fileSizes)) {
+    const size = found.sizes[file];
+    if (size === undefined) stale.push(`fileSizes: ${file}`);
+    else if (size > frozen) grown.push(`${file}: ${size} lines, frozen at ${frozen}; move the part you change out first`);
+    else if (size < frozen) shrunk.push(`${file}: ${size} lines, frozen at ${frozen}`);
+  }
+  for (const [file, size] of Object.entries(found.sizes)) {
+    if (Object.prototype.hasOwnProperty.call(baseline.fileSizes, file)) continue;
+    if (size > FROZEN_ABOVE) tooLarge.push(`${file}: ${size} lines, new file above 1,200`);
+    else if (size > WARN_ABOVE) warnings.push(`${file}: ${size} lines, above ${WARN_ABOVE}`);
+  }
+  return { added: added.sort(), stale: stale.sort(), grown: grown.sort(), shrunk: shrunk.sort(), tooLarge: tooLarge.sort(), warnings: warnings.sort() };
 }
 
 /** The baseline file text for today's findings: sorted lists per rule, two-space indent, trailing newline. */
 export function baselineText(found: ArchitectureFindings): string {
   const rules: Record<string, string[]> = {};
   for (const rule of ARCHITECTURE_RULES) rules[rule] = sortedUnique(found.rules[rule]);
-  return `${JSON.stringify({ rules, fileSizes: {} }, null, 2)}\n`;
+  const fileSizes: Record<string, number> = {};
+  for (const file of Object.keys(found.sizes).sort()) {
+    const size = found.sizes[file] as number;
+    if (size > FROZEN_ABOVE) fileSizes[file] = size;
+  }
+  return `${JSON.stringify({ rules, fileSizes }, null, 2)}\n`;
 }
