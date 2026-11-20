@@ -4,8 +4,6 @@
 
 ### Fixes
 
-### Fixes
-
 - **Agents that start together in their own git worktrees no longer fail at random.** When a team
   started several members with worktree isolation in one repository, git could refuse one of the
   worktrees ("failed to read .../commondir") because they were created at the same moment. They
