@@ -449,6 +449,82 @@ test('remove: cancelling an open invitation writes invite.void; removing one dev
   assert.ok(memberAt(roster.members, member, headOf(roster)), 'the member stays');
 });
 
+test('MJ-02: a welcome file that could not be saved is made again through Admit with the same join request, writing nothing, and it opens', async () => {
+  const first = await lead('remake-lead');
+  const joiner = install('remake-joiner');
+  const { request } = await joinBy(joiner, await inviteBy(first, 'B. Example'), 'B. Example');
+  // The save place does not exist, so the welcome file is not saved: the person is admitted all the same, and the lead is told how to make it again.
+  await admitBy(first, request, multi.SIX_WORDS_MATCH, path.join(first.out, 'missing', 'welcome'));
+  const unsaved = lastNotification();
+  assert.equal(unsaved.level, 'warn');
+  assert.ok(unsaved.message.includes(multi.WELCOME_NOT_SAVED_TEXT), unsaved.message);
+  const before = state(first);
+  // Admit again with the same request: the person is already in, so only Make Welcome File is offered, with no six words to compare.
+  const welcome = path.join(first.out, 'welcome-again');
+  await admitBy(first, request, multi.MAKE_WELCOME_AGAIN, welcome);
+  const asked = lastModal();
+  assert.equal(asked.message, 'Make the welcome file for B. Example again?');
+  hasNotices(asked.detail ?? '', 'the make-again question');
+  assert.match(lastNotification().message, /The welcome file for B\. Example was made again\./);
+  assert.ok(existsSync(`${welcome}${WELCOME_FILE_EXTENSION}`));
+  const after = state(first);
+  assert.deepEqual(after.files[path.join('project', REPLICA_PROJECT_FILE)], before.files[path.join('project', REPLICA_PROJECT_FILE)]);
+  assert.deepEqual(Object.keys(after.files).filter((name) => name.startsWith(`project${path.sep}`)).sort(), Object.keys(before.files).filter((name) => name.startsWith(`project${path.sep}`)).sort(), 'nothing new in the project');
+  use(joiner);
+  stub.openDialogAnswers.push([`${welcome}${WELCOME_FILE_EXTENSION}`]);
+  await run(C.join);
+  assert.match(lastNotification().message, /You joined the shared staff project/);
+});
+
+test('MN-02: an expired invitation is listed by Remove as expired, and cancelling it voids it and forgets its join secret', async () => {
+  const first = await lead('expired');
+  const opened1 = await ReplicaProject.open(first.root, { ...first.deps, now: () => new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) });
+  assert.ok(opened1 instanceof ReplicaProject);
+  opened.push(opened1);
+  const { inviteToProject } = await import('../staff/replica/membership');
+  const invited = await inviteToProject({ project: opened1, deps: { ...first.deps, now: () => new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) } }, { name: 'G. Example', seat: 'j2-analyst', clearance: { scale: 'org', level: 'Internal', compartments: [], releasability: [] }, days: 1 });
+  await opened1.close();
+  assert.ok(invited.ok, invited.message);
+  const id = invited.invite as string;
+  assert.ok([...first.secrets.values.keys()].some((key) => key.endsWith(id)), 'the join secret is kept');
+  use(first);
+  stub.quickPickAnswers.push('Invitation for G. Example (expired)');
+  stub.messageAnswers.push('Cancel Invitation');
+  await run(C.remove);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items;
+  assert.ok(listed.some((item) => item.label === 'Invitation for G. Example (expired)' && /to clean it up/.test(item.description ?? '')), listed.map((item) => item.label).join(' | '));
+  assert.match(lastNotification().message, /The invitation was cancelled\./);
+  const roster = await rosterOf(first);
+  assert.equal(inviteAt(roster.members, id, headOf(roster))?.state, 'voided');
+  assert.equal([...first.secrets.values.keys()].some((key) => key.endsWith(id)), false, 'its join secret is forgotten');
+});
+
+test('MJ-03: Remove offers to finish a removal left unfinished, first in its list; finishing moves the cells to new keys and the offer goes away', async () => {
+  const { lead: first, member } = await pair('finish');
+  const project1 = await ReplicaProject.open(first.root, first.deps);
+  assert.ok(project1 instanceof ReplicaProject);
+  opened.push(project1);
+  assert.ok('ok' in (await project1.appendOwn('member.remove', { member })));
+  await project1.close();
+  stub.quickPickAnswers.push(undefined);
+  await run(C.remove);
+  const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1].items;
+  assert.equal(listed[0].label, multi.FINISH_UNFINISHED_LABEL);
+  assert.match(listed[0].description ?? '', /^One part of the project is still on a key/);
+  stub.quickPickAnswers.push(multi.FINISH_UNFINISHED_LABEL);
+  stub.messageAnswers.push('Finish');
+  await run(C.remove);
+  assert.equal(lastModal().message, 'Finish the removal or clearance change left unfinished?');
+  assert.ok((lastModal().detail ?? '').includes(REKEY_KEEP_TEXT));
+  const result = lastNotification();
+  assert.equal(result.level, 'info', result.message);
+  assert.match(result.message, /The removal or clearance change left unfinished is now finished\. One part of the project was moved to a new key\./);
+  hasNotices(result.message, 'the finish result');
+  stub.quickPickAnswers.push(undefined);
+  await run(C.remove);
+  assert.equal(stub.quickPickRequests[stub.quickPickRequests.length - 1].items.some((item) => item.label === multi.FINISH_UNFINISHED_LABEL), false);
+});
+
 test('add my other machine: the lead\'s own computer is offered first and the invitation is saved with its extension', async () => {
   const first = await lead('machine');
   stub.quickPickAnswers.push('My other computer');
@@ -508,19 +584,22 @@ test('choose roster branch: two lead computers change the roster offline; the co
   await to.close();
   assert.equal((await rosterOf(first)).pending.length, 1, 'the roster is split');
 
-  // Dismissed: the two changes are listed with the split sentence, and nothing is chosen.
+  // Dismissed: the two changes are listed with the split sentence, and nothing is chosen. Changed for MN-03: each change used to be shown as a hash
+  // prefix only; it is now opened and described (what it does, who wrote it, when), with the hash prefix kept at the end of the description.
   await run(C.chooseBranch);
   const listed = stub.quickPickRequests[stub.quickPickRequests.length - 1];
-  assert.deepEqual(listed.items.map((item) => item.label), ['Change 1 of 2', 'Change 2 of 2']);
+  assert.deepEqual(listed.items.map((item) => item.label), ['Change 1 of 2: Changes the details of B. Example', 'Change 2 of 2: Changes the details of B. Example']);
   for (const item of listed.items) assert.equal(item.detail, ROSTER_SPLIT_TEXT);
-  const label = listed.items.find((item) => item.description === `entry ${branchTwo.slice(0, 12)}`)?.label;
+  for (const item of listed.items) assert.match(item.description ?? '', /^by mbr-lead, \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC, entry [0-9a-f]{12}$/);
+  const label = listed.items.find((item) => (item.description ?? '').endsWith(`entry ${branchTwo.slice(0, 12)}`))?.label;
   assert.ok(label, 'the second computer\'s change is listed');
   assert.equal((await rosterOf(first)).pending.length, 1);
 
   stub.quickPickAnswers.push(label);
   stub.messageAnswers.push('Use This Change');
   await run(C.chooseBranch);
-  assert.ok((lastModal().detail ?? '').startsWith(ROSTER_SPLIT_TEXT));
+  assert.ok((lastModal().detail ?? '').startsWith(`Changes the details of B. Example.\n\n${ROSTER_SPLIT_TEXT}`));
+  assert.match(lastModal().message, /^Use change [12] of 2\?$/);
   hasNotices(lastModal().detail ?? '', 'the choose confirmation');
   assert.match(lastNotification().message, /^The roster branch was chosen\./);
   const roster = await rosterOf(first);
@@ -657,7 +736,8 @@ test('join: a file that is not an invitation is refused with the invitation read
 test('every text a command can show has no em-dash, calls an organization only "your organization", and every refusal says what to do next', () => {
   const own = [
     multi.MULTI_USER_PREVIEW_OFF_TEXT, multi.MAKE_MULTI_USER_QUESTION, multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT,
-    multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.NOT_COPIED_TEXT, multi.SIX_WORDS_MATCH, multi.SIX_WORDS_DIFFER, ...Object.values(multi.REFUSAL_NEXT_STEPS)
+    multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.NOT_COPIED_TEXT, multi.SIX_WORDS_MATCH, multi.SIX_WORDS_DIFFER, ...Object.values(multi.REFUSAL_NEXT_STEPS),
+    multi.MAKE_WELCOME_AGAIN, multi.WELCOME_NOT_SAVED_TEXT, multi.FINISH_UNFINISHED_LABEL
   ];
   const refusals: Array<[string, string]> = [
     ...Object.entries(MEMBERSHIP_REFUSALS), ...Object.entries(MIGRATION_REFUSALS), ...Object.entries(COPY_REFUSALS), ...Object.entries(PROJECT_REFUSALS_HOST),

@@ -11,7 +11,11 @@
 // None of these commands is a person decision the Staff Room may run (PERSON_DECISION_COMMANDS), and no agent tool runs a VS Code command (D-37).
 //
 // Admission (D-16): the lead opens the join request, sees the person's name and the six words, and the person is admitted only when the lead picks
-// "The six words match" in a modal dialog; "They do not match" or closing the dialog writes nothing.
+// "The six words match" in a modal dialog; "They do not match" or closing the dialog writes nothing. A join request whose person is already in (their
+// welcome file was lost or never saved) is offered "Make Welcome File" instead, which writes nothing and makes the welcome again (MJ-02).
+//
+// Remove from Staff Project lists, before the members, a way to finish a removal or clearance change whose rekeys were interrupted (MJ-03), and lists
+// expired invitations too, so they can be cancelled and their join secrets forgotten (MN-02).
 import { createHash } from 'node:crypto';
 import { chmod, lstat, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -59,6 +63,12 @@ export const INVITE_INSIDE_PROJECT_TEXT = 'The invitation holds a one-time secre
 export const SEAT_TEXT = 'A seat is lowercase letters, digits and dashes, for example j2-analyst, so nothing was changed. Run the command again with a seat like that.';
 export const AGENT_SEATS_TEXT = 'Agent seats are lowercase letters, digits and dashes, separated by commas, so nothing was changed. Run the command again with seats like that.';
 /** What a Single-Machine Copy does not carry (31-22: no replica kind covers these yet), said plainly with what to do. */
+/** The Admit dialog's action for a join request whose person is already admitted (MJ-02). */
+export const MAKE_WELCOME_AGAIN = 'Make Welcome File';
+/** What the lead is told when an admitted person's welcome file could not be saved (MJ-02). */
+export const WELCOME_NOT_SAVED_TEXT = 'Run Staff: Admit to Staff Project again with the same join request to make their welcome file again.';
+/** The Remove list's first item when a removal or clearance change was left unfinished (MJ-03). */
+export const FINISH_UNFINISHED_LABEL = 'Finish the change left unfinished';
 export const NOT_COPIED_TEXT = 'Not copied: the registers, the calculator record files, gate reports, proposals, settings, observations and the staff event log (events.jsonl). Copy the folders you need from the shared project by hand, and copy .planning/staff/calculator/ too, or the copy cannot check its calculator numbers.';
 
 /** The ledgers Make Multi-User checks, in the words the dialog uses. */
@@ -247,9 +257,12 @@ async function pickClearance(title: string): Promise<{ scale: string; level: str
 }
 
 interface MemberView { member: string; name: string; seat?: string; roles: readonly string[]; devices: Array<{ writer: string; slot?: number }> }
-interface RosterRead { members: MemberView[]; invites: Array<{ invite: string; name: string; forMember?: string }>; lead?: string; self?: string; pending: Array<{ at: string; branches: string[]; text: string }> }
+interface RosterRead { members: MemberView[]; invites: Array<{ invite: string; name: string; forMember?: string; expired: boolean }>; lead?: string; self?: string; pending: Array<{ at: string; branches: string[]; text: string }> }
 
-/** What the pickers list: the members and their devices, the open invitations and the pending splits at the roster head. Read only. */
+/**
+ * What the pickers list: the members and their devices, the invitations still open in the roster (expired ones too, marked, so they can be cancelled
+ * and their secrets forgotten, MN-02) and the pending splits at the roster head. Read only.
+ */
 async function readRoster(shared: SharedProjectHost): Promise<RosterRead> {
   const { roster } = await shared.project.state();
   const { deviceAt, devicesOfMemberAt, inviteAt, memberAt } = await import('../domain/replica/rosterMembers');
@@ -264,8 +277,9 @@ async function readRoster(shared: SharedProjectHost): Promise<RosterRead> {
     members.push({ member: id, name: record.name, ...(record.seat === undefined ? {} : { seat: record.seat }), roles: record.roles, devices });
   }
   const invites = [...roster.members.invites.values()]
-    .filter((record) => inviteAt(roster.members, record.invite, position, at)?.state === 'open')
-    .map((record) => ({ invite: record.invite, name: record.name, ...(record.forMember === undefined ? {} : { forMember: record.forMember }) }));
+    .map((record) => ({ record, state: inviteAt(roster.members, record.invite, position, at)?.state }))
+    .filter((item) => item.state === 'open' || item.state === 'expired')
+    .map(({ record, state }) => ({ invite: record.invite, name: record.name, ...(record.forMember === undefined ? {} : { forMember: record.forMember }), expired: state === 'expired' }));
   const lead = leadAt(roster, position);
   const self = deviceAt(roster.members, shared.project.deviceWriter, position)?.member;
   return { members, invites, ...(lead === undefined ? {} : { lead }), ...(self === undefined ? {} : { self }), pending: roster.pending.map((item) => ({ at: item.at, branches: [...item.branches], text: item.text })) };
@@ -405,6 +419,15 @@ async function admitCommand(context: StaffCommandContext): Promise<void> {
     const { roster } = await shared.project.state();
     const declared = review.invite === undefined ? undefined : roster.members.invites.get(review.invite);
     const who = declared?.name ?? 'this person';
+    const { WELCOME_FILE_EXTENSION } = await import('../domain/replica/invite');
+    if (review.alreadyAdmitted === true) {
+      // Already in: their welcome file was lost or never saved. Making it again writes nothing and works on their computer only (MJ-02).
+      if (!(await confirm(`Make the welcome file for ${who} again?`, [review.message, 'Nothing in the project changes. The welcome file works only on their computer.'], MAKE_WELCOME_AGAIN))) return;
+      const again = await saveTarget(`welcome-${fileSlug(who)}${WELCOME_FILE_EXTENSION}`, WELCOME_FILE_EXTENSION, `Save the welcome file for ${who}`, 'Staff welcome file');
+      if (!again) return;
+      await deliver(await membership.remakeWelcome(shared, read.text), again, WELCOME_NOT_SAVED_TEXT);
+      return;
+    }
     const words = (review.safetyWords ?? []).join(' ');
     const answer = await vscode.window.showWarningMessage(
       `Admit ${who}? Compare these six words with them: ${words}`,
@@ -421,30 +444,47 @@ async function admitCommand(context: StaffCommandContext): Promise<void> {
     );
     if (answer === SIX_WORDS_DIFFER) { warn(WORDS_DIFFER_TEXT); return; }
     if (answer !== SIX_WORDS_MATCH) { warn(WORDS_NOT_CONFIRMED_TEXT); return; }
-    const { WELCOME_FILE_EXTENSION } = await import('../domain/replica/invite');
     const target = await saveTarget(`welcome-${fileSlug(who)}${WELCOME_FILE_EXTENSION}`, WELCOME_FILE_EXTENSION, `Save the welcome file for ${who}`, 'Staff welcome file');
     if (!target) { warn('Nobody was admitted, because the welcome file was given no place. Nothing was changed. Run Staff: Admit to Staff Project again when you are ready.'); return; }
     const result = await membership.admitJoinRequest(shared, read.text, { codeMatched: true });
-    await deliver(result, target, 'Ask for help to bring them in another way.');
+    await deliver(result, target, WELCOME_NOT_SAVED_TEXT);
   });
 }
 
-type RemoveChoice = { kind: 'member'; member: MemberView } | { kind: 'device'; member: MemberView; writer: string; slot?: number } | { kind: 'invite'; invite: string; name: string };
+type RemoveChoice = { kind: 'member'; member: MemberView } | { kind: 'device'; member: MemberView; writer: string; slot?: number } | { kind: 'invite'; invite: string; name: string } | { kind: 'finish'; count: number };
 
-/** Remove from Staff Project (D-17, D-23): a member, one of a member's devices, or an open invitation; the rekey sentence before and after. */
+/**
+ * Remove from Staff Project (D-17, D-23): a member, one of a member's devices, or an open or expired invitation; the rekey sentence before and after.
+ * When a removal or clearance change was left unfinished, finishing it is offered first (MJ-03).
+ */
 async function removeCommand(context: StaffCommandContext): Promise<void> {
   await withShared(context, async (shared, membership) => {
     const view = await readRoster(shared);
     const choices: Array<{ label: string; description: string; choice: RemoveChoice }> = [];
+    const unfinished = await membership.unfinishedRekeys(shared);
+    if (unfinished > 0) {
+      const parts = unfinished === 1 ? 'One part of the project is' : `${unfinished} parts of the project are`;
+      choices.push({ label: FINISH_UNFINISHED_LABEL, description: `${parts} still on a key a removed device or a member no longer cleared holds`, choice: { kind: 'finish', count: unfinished } });
+    }
     for (const member of view.members) {
       choices.push({ label: member.name, description: `Remove ${member.name} and every device of theirs`, choice: { kind: 'member', member } });
       for (const device of member.devices) choices.push({ label: `${member.name}, device in slot ${device.slot ?? '?'}`, description: 'Remove this one device', choice: { kind: 'device', member, writer: device.writer, ...(device.slot === undefined ? {} : { slot: device.slot }) } });
     }
-    for (const invite of view.invites) choices.push({ label: `Invitation for ${invite.name}`, description: `Cancel the open invitation ${invite.invite}`, choice: { kind: 'invite', invite: invite.invite, name: invite.name } });
+    for (const invite of view.invites) {
+      choices.push(invite.expired
+        ? { label: `Invitation for ${invite.name} (expired)`, description: `Cancel the expired invitation ${invite.invite} to clean it up`, choice: { kind: 'invite', invite: invite.invite, name: invite.name } }
+        : { label: `Invitation for ${invite.name}`, description: `Cancel the open invitation ${invite.invite}`, choice: { kind: 'invite', invite: invite.invite, name: invite.name } });
+    }
     const picked = await vscode.window.showQuickPick(choices.map(({ label, description }) => ({ label, description })), { title: 'Remove from the staff project', placeHolder: 'Pick a member, a device or an open invitation' });
     const choice = picked === undefined ? undefined : choices.find((item) => item.label === picked.label && item.description === picked.description)?.choice;
     if (!choice) return;
     const { REKEY_KEEP_TEXT } = await import('../domain/replica/cellKeys');
+    if (choice.kind === 'finish') {
+      const parts = choice.count === 1 ? 'One part of the project still uses' : `${choice.count} parts of the project still use`;
+      if (!(await confirm('Finish the removal or clearance change left unfinished?', [`${parts} a key that a removed device, or a member no longer cleared for it, holds. Finishing moves them to a new key for the people still on them.`, REKEY_KEEP_TEXT], 'Finish'))) return;
+      show(await membership.finishRekeys(shared));
+      return;
+    }
     if (choice.kind === 'invite') {
       if (!(await confirm(`Cancel the invitation for ${choice.name}?`, ['Nobody can join with it after this. You can invite them again with a new invitation.'], 'Cancel Invitation'))) return;
       show(await membership.voidInvite(shared, choice.invite));
@@ -484,11 +524,19 @@ async function chooseBranchCommand(context: StaffCommandContext): Promise<void> 
     const split = view.pending[0];
     // With no split, the flow gives its own sentence.
     if (split === undefined) { show(await membership.chooseRosterBranch(shared, '')); return; }
-    const items = split.branches.map((branch, index) => ({ label: `Change ${index + 1} of ${split.branches.length}`, description: `entry ${branch.slice(0, 12)}`, detail: split.text, branch }));
+    // Each change is opened and described (MN-03): what it does, who wrote it and when, so the lead does not choose blind.
+    const described = await membership.describeRosterBranches(shared);
+    const items = split.branches.map((branch, index) => {
+      const view = described.find((item) => item.branch === branch);
+      const summary = view?.summary ?? 'A roster change this computer cannot read';
+      const when = view?.at === undefined ? '' : `, ${view.at.slice(0, 16).replace('T', ' ')} UTC`;
+      return { short: `change ${index + 1} of ${split.branches.length}`, label: `Change ${index + 1} of ${split.branches.length}: ${summary}`, description: `${view?.by === undefined ? '' : `by ${view.by}${when}, `}entry ${branch.slice(0, 12)}`, detail: split.text, summary, branch };
+    });
     const picked = await vscode.window.showQuickPick(items.map(({ label, description, detail }) => ({ label, description, detail })), { title: 'Choose a roster branch', placeHolder: split.text });
-    const branch = picked === undefined ? undefined : items.find((item) => item.label === picked.label)?.branch;
+    const chosen = picked === undefined ? undefined : items.find((item) => item.label === picked.label && item.description === picked.description);
+    const branch = chosen?.branch;
     if (!branch) return;
-    if (!(await confirm(`Use ${picked?.label.toLowerCase() ?? 'this change'}?`, [split.text, 'The other change at the same point stays unapplied and is kept in the record.'], 'Use This Change'))) return;
+    if (!(await confirm(`Use ${chosen?.short ?? 'this change'}?`, [`${chosen?.summary ?? ''}.`, split.text, 'The other change at the same point stays unapplied and is kept in the record.'], 'Use This Change'))) return;
     show(await membership.chooseRosterBranch(shared, branch));
   });
 }

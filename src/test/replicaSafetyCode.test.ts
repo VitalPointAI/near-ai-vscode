@@ -1,5 +1,6 @@
-// The safety code (D-16, D-49): six words from the BIP-39 English list, pinned by its sha256, derived from the invite id, the genesis hash and both
-// devices' signing and X25519 keys. Two people comparing six words aloud are comparing a value bound to both devices' keys and this invite.
+// The safety code (D-16, D-49): six words from the BIP-39 English list, pinned by its sha256, derived from the invite id, the genesis hash, the
+// anchor's, the inviter's and the joining device's signing and X25519 keys, and the joining device's fresh nonce (MJ-01). Two people comparing six words
+// aloud are comparing a value bound to every device key of this invite, which an attacker in the middle can match only with a second preimage.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
@@ -16,11 +17,14 @@ const FIXED: SafetyCodeInput = {
   invite: 'inv-fixed',
   genesisHash: sha256('genesis/fixed').toString('hex'),
   lead: { publicKey: sha256('lead/sign').toString('base64url'), x25519: sha256('lead/x25519').toString('base64url') },
-  joiner: { publicKey: sha256('joiner/sign').toString('base64url'), x25519: sha256('joiner/x25519').toString('base64url') }
+  inviter: { publicKey: sha256('inviter/sign').toString('base64url'), x25519: sha256('inviter/x25519').toString('base64url') },
+  joiner: { publicKey: sha256('joiner/sign').toString('base64url'), x25519: sha256('joiner/x25519').toString('base64url') },
+  nonce: sha256('joiner/nonce').subarray(0, 16).toString('base64url')
 };
 // Computed once from the derivation in safetyCode.ts and frozen: a change of the derivation (domain, field order, length prefix, bit order or word
-// list) changes these words and fails this test, so two versions of the extension can never show different words for one invite.
-const FIXED_WORDS = ['tiny', 'help', 'cabin', 'half', 'boat', 'exchange'];
+// list) changes these words and fails this test, so two versions of the extension can never show different words for one invite. Changed for MJ-01
+// (v2: the inviter and the joining nonce are inputs, under a new domain); the v1 words were tiny help cabin half boat exchange.
+const FIXED_WORDS = ['orange', 'example', 'normal', 'journey', 'gain', 'dress'];
 
 function randomBytes(random: Rng, length: number): Buffer {
   const bytes = Buffer.alloc(length);
@@ -33,7 +37,9 @@ function randomInput(random: Rng): SafetyCodeInput {
     invite: `inv-${randomBytes(random, 6).toString('hex')}`,
     genesisHash: randomBytes(random, 32).toString('hex'),
     lead: { publicKey: randomBytes(random, 32).toString('base64url'), x25519: randomBytes(random, 32).toString('base64url') },
-    joiner: { publicKey: randomBytes(random, 32).toString('base64url'), x25519: randomBytes(random, 32).toString('base64url') }
+    inviter: { publicKey: randomBytes(random, 32).toString('base64url'), x25519: randomBytes(random, 32).toString('base64url') },
+    joiner: { publicKey: randomBytes(random, 32).toString('base64url'), x25519: randomBytes(random, 32).toString('base64url') },
+    nonce: randomBytes(random, 16).toString('base64url')
   };
 }
 
@@ -53,7 +59,8 @@ test('safetyCode gives six words of the list for a fixed input, the same on ever
   assert.equal(SAFETY_CODE_WORDS, 6);
   const first = safetyCode(FIXED);
   assert.deepEqual(first, FIXED_WORDS);
-  assert.deepEqual(safetyCode({ ...FIXED, lead: { ...FIXED.lead }, joiner: { ...FIXED.joiner } }), first);
+  assert.equal(SAFETY_CODE_DOMAIN, 'near-ai/safety-code/v2');
+  assert.deepEqual(safetyCode({ ...FIXED, lead: { ...FIXED.lead }, inviter: { ...FIXED.inviter }, joiner: { ...FIXED.joiner } }), first);
   for (const word of first) assert.ok(SAFETY_WORDS.includes(word), word);
 });
 
@@ -62,7 +69,7 @@ test('the words are the first 66 bits of the length-prefixed sha256 read as six 
   for (let round = 0; round < 50; round += 1) {
     const input = randomInput(random);
     const hash = createHash('sha256').update(`${SAFETY_CODE_DOMAIN}\0`, 'utf8');
-    for (const value of [input.invite, input.genesisHash, input.lead.publicKey, input.lead.x25519, input.joiner.publicKey, input.joiner.x25519]) {
+    for (const value of [input.invite, input.genesisHash, input.lead.publicKey, input.lead.x25519, input.inviter.publicKey, input.inviter.x25519, input.joiner.publicKey, input.joiner.x25519, input.nonce]) {
       const bytes = Buffer.from(value, 'utf8');
       const length = Buffer.alloc(4);
       length.writeUInt32BE(bytes.length);
@@ -74,7 +81,7 @@ test('the words are the first 66 bits of the length-prefixed sha256 read as six 
   }
 });
 
-test('for 200 seeded inputs, changing any single field changes the code, and swapping the lead and the joiner changes it too', () => {
+test('for 200 seeded inputs, changing any single field (the inviter and the joining nonce included) changes the code, and swapping the lead and the joiner changes it too', () => {
   const random = rng(4242);
   for (let round = 0; round < 200; round += 1) {
     const input = randomInput(random);
@@ -85,6 +92,10 @@ test('for 200 seeded inputs, changing any single field changes the code, and swa
       ['genesisHash', { ...input, genesisHash: other.genesisHash }],
       ['lead.publicKey', { ...input, lead: { ...input.lead, publicKey: other.lead.publicKey } }],
       ['lead.x25519', { ...input, lead: { ...input.lead, x25519: other.lead.x25519 } }],
+      ['inviter.publicKey', { ...input, inviter: { ...input.inviter, publicKey: other.inviter.publicKey } }],
+      ['inviter.x25519', { ...input, inviter: { ...input.inviter, x25519: other.inviter.x25519 } }],
+      ['nonce', { ...input, nonce: other.nonce }],
+      ['inviter is the lead', { ...input, inviter: input.lead }],
       ['joiner.publicKey', { ...input, joiner: { ...input.joiner, publicKey: other.joiner.publicKey } }],
       ['joiner.x25519', { ...input, joiner: { ...input.joiner, x25519: other.joiner.x25519 } }],
       ['swapped', { ...input, lead: input.joiner, joiner: input.lead }],
@@ -96,8 +107,10 @@ test('for 200 seeded inputs, changing any single field changes the code, and swa
 });
 
 test('safetyCodeText joins the words with single spaces in lower case, and non-text input is refused', () => {
-  assert.equal(safetyCodeText(FIXED_WORDS), 'tiny help cabin half boat exchange');
+  assert.equal(safetyCodeText(FIXED_WORDS), FIXED_WORDS.join(' '));
   assert.equal(safetyCodeText(['Tiny', 'HELP']), 'tiny help');
   assert.equal(safetyCodeText(safetyCode(FIXED)).split(' ').length, 6);
   assert.throws(() => safetyCode({ ...FIXED, invite: 7 as unknown as string }), /text/);
+  assert.throws(() => safetyCode({ ...FIXED, nonce: undefined as unknown as string }), /text/);
+  assert.throws(() => safetyCode({ ...FIXED, inviter: undefined as unknown as SafetyCodeInput['inviter'] }), /text/);
 });
