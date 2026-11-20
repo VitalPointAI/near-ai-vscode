@@ -43,6 +43,7 @@ import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
+import type { Citation } from '../../domain/replica/chain';
 import type { HeadSet } from '../../domain/replica/transport';
 import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
@@ -734,6 +735,31 @@ export class ReplicaProject {
     });
   }
 
+  /**
+   * The deps that entries the chain stage holds for a missing predecessor cite and the store does not hold, each with the citing entry's stream
+   * (D-50, D-63): the hub sync cites them for its withheld finding. Only those held entries are opened, and only their bodies (not a blob they use).
+   */
+  public missingDeps(): Promise<Citation[]> {
+    return this.exclusive(async () => {
+      const { fold } = await this.foldNow();
+      const cited = new Map<string, Citation>();
+      for (const held of fold.held) {
+        if (held.stage !== 'chain' || held.reason !== 'missing-predecessor' || held.hash === undefined) continue;
+        const entry = this.entryByHash(held.hash);
+        const key = entry === undefined ? undefined : this.keys.epochKey(entry.header.stream, entry.header.epoch);
+        const plain = entry === undefined || key === undefined ? undefined : openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+        const body = plain === undefined ? undefined : parseJson(plain);
+        if (entry === undefined || !isRecord(body) || !Array.isArray(body.deps)) continue;
+        for (const dep of body.deps as unknown[]) {
+          if (!isRecord(dep) || typeof dep.writer !== 'string' || !HASH_PATTERN.test(dep.writer) || typeof dep.hash !== 'string' || !HASH_PATTERN.test(dep.hash)) continue;
+          if (!Number.isSafeInteger(dep.seq) || (dep.seq as number) < 0 || cited.has(dep.hash) || this.store.has(dep.hash)) continue;
+          cited.set(dep.hash, { stream: entry.header.stream, writer: dep.writer, seq: dep.seq as number, hash: dep.hash });
+        }
+      }
+      return [...cited.values()].sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+    });
+  }
+
   /** Every signed cell grant stored, with its hash. */
   public signedGrants(): Promise<Array<{ hash: string; signed: unknown }>> {
     return this.exclusive(async () => (await this.store.grants()).grants.map((grant) => ({ hash: grant.hash, signed: grant.signed })));
@@ -1141,6 +1167,7 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
     async putCheckpoint(signed) {
       settle(await project.putCheckpoint(signed));
     },
-    covered: (hub) => project.hubCells(hub)
+    covered: (hub) => project.hubCells(hub),
+    missingDeps: () => project.missingDeps()
   };
 }
