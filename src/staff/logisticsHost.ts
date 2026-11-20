@@ -26,7 +26,7 @@ import type {
 import { STAFF_SLUG } from '../domain/staff/parse';
 import { withFileLock } from '../services/stateMirrorLock';
 import type { StaffHostOptions } from './staffHost';
-import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
+import { REPLICA_DIR, REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
 
 export const STAFF_LEDGER_DIR = '.planning/staff/ledger';
 const CALC_LOCK = 'calculator.lock';
@@ -49,10 +49,17 @@ export class SharedProjectError extends Error {
   }
 }
 
+// The record of an unfinished Start Again and the folders it sets aside or leaves beside the store. These are the names src/staff/replica/store.ts
+// writes (START_AGAIN_INTENT_FILE and its two folder patterns); they are spelled out here so this file never loads src/staff/replica.
+const START_AGAIN_INTENT = `${REPLICA_DIR}.start-again.json`;
+const STORE_LEFTOVER = /^replica\.(?:set-aside-\d{8}-\d{6}(?:-\d+)?|new-[0-9a-f]{12})$/;
+
 /**
- * Why a single-machine write must not run here, or undefined when it may: one stat of the replica project file, failing closed. The file present
- * gives SHARED_PROJECT_REFUSAL; any stat error but its absence gives a sentence naming that error, never the shared-project sentence (a folder
- * that cannot be read is not known to be shared). StaffHost and the watch host use the same check.
+ * Why a single-machine write must not run here, or undefined when it may, failing closed. The replica project file present gives
+ * SHARED_PROJECT_REFUSAL. When it is absent, the project still reads as shared while a Start Again is unfinished (its intent is there) or while a
+ * folder set aside or left beside the store holds a project.json (the store folder is gone, 32-CONTEXT D-03): a crash in Start Again never opens
+ * the project to single-machine writes. Any error but absence gives a sentence naming that error, never the shared-project sentence (a folder that
+ * cannot be read is not known to be shared). StaffHost and the watch host use the same check.
  */
 export async function sharedProjectRefusal(root: string): Promise<string | undefined> {
   try {
@@ -60,8 +67,32 @@ export async function sharedProjectRefusal(root: string): Promise<string | undef
     return SHARED_PROJECT_REFUSAL;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return sharedCheckFailedText(code);
+  }
+  try {
+    await lstat(path.join(root, ...START_AGAIN_INTENT.split('/')));
+    return SHARED_PROJECT_REFUSAL;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return sharedCheckFailedText(code);
+  }
+  const staff = path.join(root, ...path.posix.dirname(REPLICA_DIR).split('/'));
+  let names: string[];
+  try {
+    names = await readdir(staff);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
     return code === 'ENOENT' || code === 'ENOTDIR' ? undefined : sharedCheckFailedText(code);
   }
+  for (const name of names.filter((item) => STORE_LEFTOVER.test(item))) {
+    try {
+      if ((await lstat(path.join(staff, name))).isDirectory() && (await lstat(path.join(staff, name, path.posix.basename(REPLICA_PROJECT_FILE)))).isFile()) return SHARED_PROJECT_REFUSAL;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return sharedCheckFailedText(code);
+    }
+  }
+  return undefined;
 }
 
 async function readText(file: string): Promise<string | undefined> {
