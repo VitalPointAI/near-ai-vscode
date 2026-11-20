@@ -271,6 +271,26 @@ function residencyEffect(key: string, after: unknown, direction: ProposalDirecti
   return `Where AI runs: ${key} changes.${DIRECTION_SENTENCES[direction]}`;
 }
 
+/** The models keys in plain words: the schema's own names (tiers, passports) never reach a person (D-42, GLOSSARY). */
+const MODELS_KEY_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  mode: 'whether model checks only record or also refuse',
+  unknownMaxTier: 'what a model with no record may do',
+  tierByLevel: 'which models may handle work at each label',
+  tierByProject: 'which models may handle each kind of project',
+  passports: 'the models your organization approved',
+  defaults: 'the model chosen first for each job',
+  localCatalogue: 'the models this computer may download',
+  order: 'the order models are tried in'
+});
+
+function modelsEffect(key: string, direction: ProposalDirection, scales: ScaleTable): string {
+  if (key.startsWith('tierByLevel.')) return `${labelKeyShown(key.slice('tierByLevel.'.length), scales)} work: which models may handle it changes.${DIRECTION_SENTENCES[direction]}`;
+  if (key.startsWith('tierByProject.')) return `Projects marked ${key.slice('tierByProject.'.length)}: which models may handle them changes.${DIRECTION_SENTENCES[direction]}`;
+  const head = key.split(/[.[]/)[0] ?? '';
+  const words = Object.prototype.hasOwnProperty.call(MODELS_KEY_WORDS, head) ? MODELS_KEY_WORDS[head] : 'how models are chosen';
+  return `Models: ${String(words)} changes.${DIRECTION_SENTENCES[direction]}`;
+}
+
 function effectOf(section: PolicySectionName, change: RawChange, direction: ProposalDirection, scales: ScaleTable): string {
   const { key, before, after } = change;
   if (section === 'labels' && key.startsWith('routing.levels.')) return routingEffect(key.slice('routing.levels.'.length), after, direction, scales);
@@ -280,6 +300,7 @@ function effectOf(section: PolicySectionName, change: RawChange, direction: Prop
   }
   if (section === 'authorizations' && key.startsWith('[')) return authorizationEffect(before, after, direction);
   if (section === 'residency') return residencyEffect(key, after, direction, scales);
+  if (section === 'models') return modelsEffect(key, direction, scales);
   if (section === 'agents' && key === 'requireAccreditedDevice') {
     return after === true ? 'Classified work will need a computer your organization approved.' : 'Classified work will no longer need a computer your organization approved.';
   }
