@@ -18,8 +18,10 @@ import type { KeyStatusLookup } from '../team/keyStatus';
 import { MAX_PAYLOAD_BYTES, signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 import { isRecord } from '../team/validate';
-import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from './entry';
-import { X25519_KEY_BYTES, x25519BindingBytes } from './cellKeys';
+import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, entryHash, parseHeaderShape, writerIdOf } from './entry';
+import type { EntryHeader, SealedBlob, SealedEntry } from './entry';
+import { X25519_KEY_BYTES, readGrant, x25519BindingBytes } from './cellKeys';
+import type { RosterAnchor } from './roster';
 import { safetyCode } from './safetyCode';
 
 export const INVITE_FILE_EXTENSION = '.near-staff-invite';
@@ -247,16 +249,112 @@ export function inviteSafetyCode(invite: InvitePayload, joiner: SafetyCodeKeys):
   });
 }
 
-// RED stubs (31-16 Task 3): replaced by the welcome file in the next commit.
-export const WELCOME_MAX_BYTES = 0;
-export interface WelcomeFile { v: 1; genesis: import('./entry').SealedEntry; roster: import('./entry').SealedEntry[]; blobs: import('./entry').SealedBlob[]; grants: unknown[] }
-export interface BuildWelcomeInput { genesis: import('./entry').SealedEntry; roster: readonly import('./entry').SealedEntry[]; blobs: readonly import('./entry').SealedBlob[]; grants: readonly unknown[]; writer: string; cells: readonly string[] }
-export function buildWelcome(input: BuildWelcomeInput): WelcomeFile {
-  return { v: 1, genesis: input.genesis, roster: [], blobs: [], grants: [] };
-}
-export function readWelcome(_value: unknown, _pinned: { genesisHash: string; writer: string }): { ok: true; welcome: WelcomeFile; entries: import('./entry').SealedEntry[] } | InviteFailure {
-  return refuse('malformed');
-}
-export function inviteAnchor(invite: InvitePayload): import('./roster').RosterAnchor {
+
+// The pin a joining device takes from an invite it read (D-07): the genesis hash, the project id and the lead's member id and keys.
+export function inviteAnchor(invite: InvitePayload): RosterAnchor {
   return { genesisHash: invite.genesisHash, project: invite.project, lead: { member: invite.lead.member, writer: invite.lead.writer, publicKey: invite.lead.publicKey, x25519: invite.lead.x25519 } };
+}
+
+// A welcome file is larger than an invite (it carries the roster), so its cap is the store's blob limit.
+export const WELCOME_MAX_BYTES = BLOB_MAX_BYTES;
+export const WELCOME_VERSION = 1;
+const WELCOME_KEYS = ['v', 'genesis', 'roster', 'blobs', 'grants'] as const;
+const BASE64URL = /^[A-Za-z0-9_-]*$/;
+
+// genesis: the project.genesis entry. roster: the other entries of the roster stream, in the order the lead holds them. blobs: the sealed blobs those
+// entries name. grants: the signed cell grants addressed to the new device only (every epoch of each cell it is cleared for, D-45).
+export interface WelcomeFile { v: 1; genesis: SealedEntry; roster: SealedEntry[]; blobs: SealedBlob[]; grants: unknown[] }
+
+// writer: the joining device. cells: the cells it is cleared for (the lead's host decides clearance, D-22). grants: any grants the lead's host holds;
+// only those of a cleared cell whose every wrap names the joining device are carried (the host builds per-device grants for admission, 31-20).
+export interface BuildWelcomeInput { genesis: SealedEntry; roster: readonly SealedEntry[]; blobs: readonly SealedBlob[]; grants: readonly unknown[]; writer: string; cells: readonly string[] }
+
+const copyEntry = (entry: SealedEntry): SealedEntry => JSON.parse(JSON.stringify({ header: entry.header, body: entry.body })) as SealedEntry;
+
+// Builds the welcome the lead returns after Admit. The input is the lead's own store, so a grant that does not read or an entry outside the roster stream
+// is a fault of the caller: it throws a plain error instead of leaving it out silently.
+export function buildWelcome(input: BuildWelcomeInput): WelcomeFile {
+  const stream = input.genesis.header.stream;
+  const genesisHash = entryHash(input.genesis.header);
+  const roster: SealedEntry[] = [];
+  for (const entry of input.roster) {
+    if (entry.header.stream !== stream) throw new Error('The welcome file was not made: a roster entry belongs to another stream.');
+    if (entryHash(entry.header) !== genesisHash) roster.push(copyEntry(entry));
+  }
+  const grants: unknown[] = [];
+  for (const signed of input.grants) {
+    const read = readGrant(signed);
+    if (!read.ok) throw new Error('The welcome file was not made: one of the cell grants does not read.');
+    if (input.cells.includes(read.grant.cell) && read.grant.wraps.every((wrap) => wrap.writer === input.writer)) grants.push(JSON.parse(JSON.stringify(signed)) as unknown);
+  }
+  const welcome: WelcomeFile = { v: WELCOME_VERSION, genesis: copyEntry(input.genesis), roster, blobs: input.blobs.map((blob) => ({ hash: blob.hash, bytes: blob.bytes })), grants };
+  if (canonicalBytes(welcome).length > WELCOME_MAX_BYTES) throw new Error(`The welcome file was not made: the roster is larger than the ${WELCOME_MAX_BYTES} bytes a welcome file can carry.`);
+  return welcome;
+}
+
+// A sealed entry read from hostile input: exact keys, a header of the exact shape, and a base64url body. A fresh object, never the input.
+function sealedEntryOf(value: unknown): SealedEntry | undefined {
+  if (!isRecord(value) || !hasKeys(value, ['header', 'body'])) return undefined;
+  const shape = parseHeaderShape(own(value, 'header'));
+  const body = own(value, 'body');
+  if (!shape.ok || typeof body !== 'string' || !BASE64URL.test(body)) return undefined;
+  const header: EntryHeader = { ...shape.header, body: { hash: shape.header.body.hash, size: shape.header.body.size } };
+  return { header, body };
+}
+
+function sealedBlobOf(value: unknown): SealedBlob | undefined {
+  if (!isRecord(value) || !hasKeys(value, ['hash', 'bytes'])) return undefined;
+  const hash = own(value, 'hash');
+  const bytes = own(value, 'bytes');
+  if (typeof hash !== 'string' || !HASH_PATTERN.test(hash) || typeof bytes !== 'string' || !BASE64URL.test(bytes)) return undefined;
+  const blob: SealedBlob = { hash, bytes };
+  return blobBytesHash(blob) === hash ? blob : undefined;
+}
+
+export type WelcomeRead = { ok: true; welcome: WelcomeFile; entries: SealedEntry[] } | InviteFailure;
+
+// The joining device's read of a welcome file (its JSON text or its parsed content) against the genesis hash it pinned from the invite and its own
+// writer id. Checks, in order: size, shape (entries, blobs and grants each read as hostile input; every roster entry in the genesis stream; every
+// blob's bytes match its name), the genesis hash (wrong-project), every grant's signature, and that every wrap of every grant names this device
+// (wrong-device). entries is the genesis then the roster, ready for the roster fold, which checks every signature and rule itself. Never throws.
+export function readWelcome(file: unknown, pinned: { genesisHash: string; writer: string }): WelcomeRead {
+  try {
+    const parsed = fileValue(file, WELCOME_MAX_BYTES);
+    if (!parsed.ok) return parsed;
+    // One plain snapshot of the input, so every check below reads the same values.
+    const value: unknown = JSON.parse(canonicalBytes(parsed.value).toString('utf8'));
+    if (!isRecord(value) || !hasKeys(value, WELCOME_KEYS) || own(value, 'v') !== WELCOME_VERSION) return refuse('malformed');
+    const genesis = sealedEntryOf(own(value, 'genesis'));
+    const rosterIn = own(value, 'roster');
+    const blobsIn = own(value, 'blobs');
+    const grantsIn = own(value, 'grants');
+    if (genesis === undefined || !Array.isArray(rosterIn) || !Array.isArray(blobsIn) || !Array.isArray(grantsIn)) return refuse('malformed');
+    const roster: SealedEntry[] = [];
+    for (const item of rosterIn as unknown[]) {
+      const entry = sealedEntryOf(item);
+      if (entry === undefined || entry.header.stream !== genesis.header.stream) return refuse('malformed');
+      roster.push(entry);
+    }
+    const blobs: SealedBlob[] = [];
+    for (const item of blobsIn as unknown[]) {
+      const blob = sealedBlobOf(item);
+      if (blob === undefined) return refuse('malformed');
+      blobs.push(blob);
+    }
+    if (entryHash(genesis.header) !== pinned.genesisHash) return refuse('wrong-project');
+    const grants: unknown[] = [];
+    let forAnotherDevice = false;
+    for (const item of grantsIn as unknown[]) {
+      const read = readGrant(item);
+      if (!read.ok) return refuse(read.reason === 'bad-signature' ? 'bad-signature' : 'malformed');
+      if (!read.grant.wraps.every((wrap) => wrap.writer === pinned.writer)) forAnotherDevice = true;
+      grants.push(item);
+    }
+    if (forAnotherDevice) return refuse('wrong-device');
+    const welcome: WelcomeFile = { v: WELCOME_VERSION, genesis, roster, blobs, grants };
+    return { ok: true, welcome, entries: [genesis, ...roster] };
+  } catch {
+    // Hostile input never throws out of the reader.
+    return refuse('malformed');
+  }
 }
