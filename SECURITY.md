@@ -1437,9 +1437,12 @@ project folder.
 
 ### Cell keys, wraps and rekey
 
-A multi-user project is split into label cells: the base cell everyone in the project is on, and
-a cell for each higher label. Everything in a cell (its products, their text, versions and
-decisions) is sealed under that cell's key, so only the devices cleared for the cell can read it.
+A multi-user project is split into label cells. The base cell carries only the roster (who is
+in the project, their devices, roles and declared clearances) and entries about the project as a
+whole. Every member holds it, and so will your organization's sync hub once one is connected.
+Every product is in the cell for its label, `org/Public` included, so the base cell never holds
+product text. Everything in a cell (its products, their text, versions and decisions) is sealed
+under that cell's key, so only the devices cleared for the cell can read it.
 
 - **One key per cell per epoch.** Each cell has its own key, 32 random bytes, and a cell gets a
   new key (a new epoch) whenever someone must stop receiving it. Old keys are kept so old entries
@@ -1474,6 +1477,48 @@ decisions) is sealed under that cell's key, so only the devices cleared for the 
 - **Who is cleared is decided when a grant is written.** Clearance checks need the current date
   and the label scales, so they run on the lead's machine when a grant or a new key is written.
   The shared history then relies on the signed grant: it never decides clearance itself.
+
+### Labelled products in shared projects
+
+A shared staff project keeps each product in a part of the project (a label cell) for its label,
+so a person's computer holds only the products their declared clearance covers.
+
+- **Each product lives in the part for its label.** A part is made the first time a label is
+  used, and its key goes only to the devices whose member's declared clearance covers the label.
+  No hub is given a part for a label unless the staff lead grants it.
+- **The base part carries only the roster.** The part every member holds names the people, their
+  devices, roles and declared clearances, and nothing else. A sync hub given that part, as your
+  organization's hub will be, never reads product text.
+- **`org/Internal` is the default label.** A product made without a label is `org/Internal`. A
+  product keeps its label for its whole life; to give it another label, make a new product with
+  that label.
+- **Write up, never down, for pins.** A version may pin only products at its own label or below.
+  The computer writing the version refuses a pin above it before anything is written, and every
+  computer that reads the project refuses it too.
+- **The lead makes a part only for a label they are declared cleared for.** A staff lead whose
+  declared clearance does not cover a label is told: "You are not declared cleared for that
+  label, so this computer cannot hold that part of the project. Ask the staff lead to declare a
+  clearance that covers it, or keep this project on one machine." With no declared clearance,
+  only `org/Public` parts can be made.
+- **The old ledgers stay whole in a part only the staff lead holds.** Making a project
+  multi-user keeps the old product ledger and decision log, unchanged, in a legacy part that only
+  the staff lead holds, and a deputy declared cleared for every label in them. Each label's part
+  gets only its own products' ledger lines. The calculator and wargame ledgers go to the
+  `org/Internal` part.
+- **Projects shared with 0.4.35 keep working, but cannot connect to a hub.** Their products stay
+  in the part every member holds, and they keep working as before. They cannot be connected to a
+  sync hub, because the hub must hold every key of that part, and so could read those products.
+  The way forward: "This project was made shared by an earlier preview, and its products sit in
+  the part of the project the hub must read. Make a single-machine copy and make that copy
+  multi-user again; the new shared project keeps each product in its own part."
+- **A member below a part never receives it.** A member whose declared clearance does not cover
+  a part never receives its key, its grants, its history or its attachments, and cannot tell
+  whether a product is in it. Entries of that part handed to their computer by mistake stay
+  sealed and wait, unread. The single-machine copy carries only the parts this computer holds,
+  and says "Parts of this project you are not cleared for were not copied."
+- **Product files in your folder hold what this computer holds.** The product files a shared
+  project writes in your project folder hold the text of every part this computer holds. Do not
+  commit them to a repository that people who are not cleared for those parts can read.
 
 ### Device encryption keys and the key ring
 
@@ -1595,12 +1640,9 @@ only by what the staff lead says about them.
   own key and given only to the devices whose declared clearance covers it. That helps prevent
   mistakes; it does not make any computer accredited for classified information, and a declared
   clearance can be wrong.
-- **Labelled products are not made multi-user yet.** Making a project multi-user puts every
-  product, its text and the old product ledger in the base cell, which everyone admitted to the
-  project receives whatever clearance is declared for them. So the command refuses a project with
-  any product labelled above `org/Public`, before it asks anything or writes anything, and names
-  those products and their labels. Such a project stays on one machine until a product can be
-  kept in a cell for its label.
+- **Labelled products get a part of their own.** Making a project multi-user puts each product
+  in a part of the project for its label, given only to the devices whose declared clearance
+  covers that label. See "Labelled products in shared projects" above for who receives what.
 - **Off unless you turn it on.** Everything multi-user is a preview, off unless a person turns on
   `nearAi.staff.multiUserPreview` in their own settings. The setting applies to the whole editor,
   so a project folder cannot turn it on for you. While it is off, the multi-user commands are
