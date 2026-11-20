@@ -234,7 +234,8 @@ async function staffProject(label: string): Promise<Install> {
   const host = hosts.staffHostFor(at.root);
   assert.ok(host);
   await writeBody(at.root, 'j5', 'concept-of-operations', CLEAN_BODY);
-  const proposed = await callTool({ root: at.root, host } as StaffWorld, J5_TEAM, 'mcp__staff-products__propose', { product: 'concept-of-operations', kind: 'plan' }, 'lead-planner');
+  // Labelled org/Public: Make Multi-User refuses a product labelled above the base cell (W-1).
+  const proposed = await callTool({ root: at.root, host } as StaffWorld, J5_TEAM, 'mcp__staff-products__propose', { product: 'concept-of-operations', kind: 'plan', label: 'org/Public' }, 'lead-planner');
   assert.ok(proposed.ok, proposed.text);
   return at;
 }

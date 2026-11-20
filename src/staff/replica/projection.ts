@@ -44,7 +44,7 @@ import { eventsForTransition } from '../../domain/staff/events';
 import type { StaffEvent } from '../../domain/staff/events';
 import { apply, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash, projectHeader, replayLedger } from '../../domain/staff/ledger';
 import type { HistoryItem, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
-import { PRODUCT_KINDS, renderProductHeader } from '../../domain/staff/products';
+import { PRODUCT_KINDS, renderProductHeader, splitProductFile } from '../../domain/staff/products';
 import type { ProductDependency } from '../../domain/staff/products';
 import type { ProductRecord, ReleaseEvent, StaffActor } from '../../domain/staff/release';
 import { staffProductPath } from '../../domain/staff/writeLimits';
@@ -501,16 +501,33 @@ function foldTexts(fold: FoldResult): Map<string, string> {
   return out;
 }
 
-/** Writes `text` at `relative` unless the file already holds it; a file that holds something else is written over only when `replace` says so. */
-async function writeProjected(root: string, relative: string, text: string, replace: boolean, out: ProjectionWrite): Promise<void> {
+/** Why writeProjections left a file as it was, in the words a person reads (the `reason` of a `left` item). */
+export const PROJECTION_LEFT_REASONS = {
+  unreadable: 'it cannot be read',
+  'not-imported': 'it holds something other than the imported ledger, so it was left as it is',
+  'text-changed': 'its text is not the text in the shared history (it was edited), so it was left as it is with the edit in it',
+  raced: 'it changed while it was being written, so the change there stands'
+} as const;
+
+/**
+ * Writes `text` at `relative` unless the file already holds it. A file that holds something else is written over only when `keep` (given the file's
+ * text) returns undefined; otherwise it is left and listed with the reason `keep` gives. The write is a compare-and-swap against the text `keep` saw.
+ */
+async function writeProjected(root: string, relative: string, text: string, keep: (current: string) => string | undefined, out: ProjectionWrite): Promise<void> {
   const file = path.join(root, ...relative.split('/'));
   const read = await readWhole(file);
-  if (read.kind === 'unreadable') { out.left.push({ path: relative, reason: `it cannot be read: ${read.reason}` }); return; }
+  if (read.kind === 'unreadable') { out.left.push({ path: relative, reason: `${PROJECTION_LEFT_REASONS.unreadable}: ${read.reason}` }); return; }
   if (read.kind === 'text' && read.text === text) { out.unchanged.push(relative); return; }
-  if (read.kind === 'text' && !replace) { out.left.push({ path: relative, reason: 'it holds something other than the imported ledger, so it was left as it is' }); return; }
+  const kept = read.kind === 'text' ? keep(read.text) : undefined;
+  if (kept !== undefined) { out.left.push({ path: relative, reason: kept }); return; }
   const written = await writeIfUnchanged(file, read.kind === 'text' ? snapshotOfBytes(read.bytes) : { exists: false }, text);
   if (written) out.written.push(relative);
-  else out.left.push({ path: relative, reason: 'it changed while it was being written, so the change there stands' });
+  else out.left.push({ path: relative, reason: PROJECTION_LEFT_REASONS.raced });
+}
+
+/** A product file's body as the staff host and the conversion read it: what follows its header, or the whole text when it has none. */
+function productBodyOf(text: string): string {
+  return splitProductFile(text)?.body ?? text;
 }
 
 /**
@@ -519,6 +536,10 @@ async function writeProjected(root: string, relative: string, text: string, repl
  * byte as imported. Every write is a compare-and-swap (writeIfUnchanged) and a file that already holds the projected bytes is not touched. A passthrough
  * ledger whose path already holds other bytes is left as it is and listed, never written over; nothing is ever deleted. The events log is not written:
  * an imported product adds no step to it (its events were sent when the steps were made), and steps written on top arrive with Phase 33's live layer.
+ *
+ * A product file is written over only when its body is already the fold's text, so only its header changes (MJ-09): a body that differs holds an
+ * edit the shared history does not, and is left as it is and listed with PROJECTION_LEFT_REASONS['text-changed']. (Phase 33, which writes other
+ * people's text, compares with the text it last projected instead.)
  */
 export async function writeProjections(root: string, input: ProjectionInput, passthrough: readonly PassthroughLedger[] = []): Promise<ProjectionWrite> {
   const out: ProjectionWrite = { written: [], unchanged: [], left: [] };
@@ -528,7 +549,7 @@ export async function writeProjections(root: string, input: ProjectionInput, pas
     if (body === undefined) continue;
     // A product with no text in the fold and no file on disk stays without one, as today's host leaves a product file that is gone.
     if (body === '' && (await readWhole(path.join(root, ...staffProductPath(item.state.record.section, product).split('/')))).kind === 'missing') continue;
-    await writeProjected(root, staffProductPath(item.state.record.section, product), projectProductFile(item.state, body), true, out);
+    await writeProjected(root, staffProductPath(item.state.record.section, product), projectProductFile(item.state, body), (current) => (productBodyOf(current) === body ? undefined : PROJECTION_LEFT_REASONS['text-changed']), out);
   }
   for (const ledger of passthrough) {
     const record = importOf(input.fold, ledger.ledger);
@@ -537,7 +558,7 @@ export async function writeProjections(root: string, input: ProjectionInput, pas
     const text = bytes.toString('utf8');
     // Only bytes that read back exactly as text are written: the file must come back byte for byte, never re-encoded.
     if (!Buffer.from(text, 'utf8').equals(bytes)) { out.left.push({ path: ledger.path, reason: 'its imported bytes are not plain text, so it was not written back' }); continue; }
-    await writeProjected(root, ledger.path, text, false, out);
+    await writeProjected(root, ledger.path, text, () => PROJECTION_LEFT_REASONS['not-imported'], out);
   }
   return out;
 }

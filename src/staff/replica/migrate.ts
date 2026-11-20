@@ -4,7 +4,8 @@
 // The steps, in order, each one safe to run again (D-34):
 //   verify       today's four ledgers are checked exactly as today's host checks them: products.jsonl with its signed head mark from SecretStorage,
 //                decisions.jsonl, calculator.jsonl, and the unsigned wargame ledger. A broken ledger stops here with today's sentence and its way out
-//                (Set Aside the Product Ledger, or Use This Branch's Ledger), before anything is written (D-30).
+//                (Set Aside the Product Ledger, or Use This Branch's Ledger), before anything is written (D-30). So does a product labelled above
+//                the base cell (BASE_CELL_LABEL, W-1): everything a conversion writes goes into the base cell, which everyone admitted receives.
 //   genesis      the shared project is made with this device's person as the staff lead (ReplicaProject.createSharedProject, which reuses a genesis
 //                this device already wrote and pinned).
 //   import       one project.import per legacy file present, carrying the legacy head (the last entry digest of a signed ledger, the sha256 of the
@@ -12,11 +13,13 @@
 //                the ledger is looked up first and never sealed twice: a second seal is a second signed header at one seq, a fork (Pitfall 4).
 //   reconstruct  each product becomes a live text written by the lead's device and, when its current text is known and its pins can be named, one
 //                version whose text is the original's (D-32). Every one of these entries cites the products import in its deps, which is how the
-//                projection tells an imported product. Approvals and releases stay as their original signed entries inside the import.
+//                projection tells an imported product. Approvals and releases stay as their original signed entries inside the import. A product
+//                file changed since an earlier run wrote its text stops the conversion product-changed, before anything is written (MJ-09).
 //   move-legacy  the four originals move to .planning/staff/legacy/ keeping their paths under .planning/staff; nothing is deleted, the head mark in
 //                SecretStorage is left as it is, and a file already in the legacy folder is never written over (D-33).
 //   projections  the product files are written from the fold and the decisions, calculator and wargame ledgers back from their imports at their
-//                usual paths (projection.ts writeProjections).
+//                usual paths (projection.ts writeProjections). A product file whose text is not the fold's is never written over: the conversion
+//                stops product-changed instead of finishing.
 //   complete     project.json records that the conversion finished; a later run is refused already-shared.
 //
 // Not imported in Phase 31 (D-32): observations, and every file with no replica kind yet (registers, calculator records, gate reports, proposals,
@@ -56,7 +59,7 @@ import { identityDir as identityDirOf } from '../../team/identity';
 import { localKeyStatus } from '../../team/keyHistory';
 import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staffFiles';
 import { LEDGER_DIR, LEDGER_FILE, LEDGER_HEAD_SECRET_PREFIX, STAFF_SETTINGS_FILE, USE_BRANCH_LEDGER_WAY_OUT, WARGAME_DIR, WARGAME_FILE, unreadableText } from '../staffHost';
-import { IMPORTED_PRODUCTS_LEDGER, ledgerLinesOf, projectionEntry, writeProjections } from './projection';
+import { IMPORTED_PRODUCTS_LEDGER, PROJECTION_LEFT_REASONS, ledgerLinesOf, projectionEntry, writeProjections } from './projection';
 import type { PassthroughLedger, ProjectionEntry, ProjectionInput, ProjectionWrite } from './projection';
 import { ReplicaProject, isProjectRefused, projectFile } from './replicaProject';
 import type { ReplicaProjectDeps } from './replicaProject';
@@ -115,19 +118,54 @@ function brokenText(ledger: LegacyLedgerId, broken: { seq: number; reason: strin
   }
 }
 
+/**
+ * The one label the base cell may carry (W-1). Every person admitted to a shared project is on the base cell, whatever clearance the staff lead declares
+ * for them, and a conversion writes every product, its text, its version and the whole product ledger there. So only a product labelled org/Public, which
+ * every declared clearance may read, can be converted; a project holding any other label is refused before anything is written, until products can
+ * be kept in a cell for their label.
+ */
+export const BASE_CELL_LABEL = 'org/Public';
+
 /** Plain sentences for every way a conversion stops. A broken ledger's message is this sentence followed by today's sentence for that ledger. */
 export const MIGRATION_REFUSALS = {
   'ledger-broken': 'This project was not made multi-user, because one of its ledgers does not verify. Nothing was written.',
   'already-shared': 'This project is already multi-user, so nothing was changed.',
   'no-staff-project': 'This folder holds no staff project (there is no .planning/staff folder), so there is nothing to make multi-user. Nothing was changed.',
   'ledger-changed': 'A ledger changed after this project started becoming multi-user, so the conversion stopped and nothing more was written. Ask your staff lead for help: the shared history already holds the ledger as it was.',
+  'label-above-base': `This project was not made multi-user, because some of its products are labelled above ${BASE_CELL_LABEL}. Everyone admitted to a shared project receives its products, whatever clearance the staff lead declares for them, so such a product could reach a person not cleared for it. Nothing was written. Keep this project on one machine for now, or ask each product's owner to propose it again labelled ${BASE_CELL_LABEL} if nothing in it needs a higher label (that makes a new version, which needs its gate checks and approval again).`,
+  'product-changed': 'A product file changed after this project started becoming multi-user, so the conversion stopped and nothing more was written. The file was left as it is, with the change in it. To finish, copy the file somewhere safe, put back the text it had when the conversion started (git or your backups hold it), and run Make This Staff Project Multi-User again. Your copy keeps the change.',
   'project-refused': 'The shared project could not be made, so the conversion stopped.'
 } as const;
 export type MigrationRefusal = keyof typeof MIGRATION_REFUSALS;
-export interface MigrationRefused { refused: MigrationRefusal; message: string; ledger?: LegacyLedgerId }
+export interface MigrationRefused {
+  refused: MigrationRefusal;
+  message: string;
+  ledger?: LegacyLedgerId;
+  /** product-changed: the product file, from the project root. */
+  file?: string;
+}
 
 const refuse = (reason: MigrationRefusal, message?: string, ledger?: LegacyLedgerId): MigrationRefused =>
   ({ refused: reason, message: message ?? MIGRATION_REFUSALS[reason], ...(ledger === undefined ? {} : { ledger }) });
+
+/** The refusal for a product file whose text is no longer what the conversion read and recorded (MJ-09), naming the file. */
+const productChanged = (file: string): MigrationRefused =>
+  ({ refused: 'product-changed', message: `${MIGRATION_REFUSALS['product-changed']} The file: ${file}.`, file });
+
+// The products a label refusal names before it says how many more there are.
+const LABEL_LIST_LIMIT = 10;
+
+/** The products of a verified product ledger labelled above the base cell (W-1), by name, each with its current label. */
+export function productsAboveBaseCell(replay: LedgerReplay): Array<{ product: string; label: string }> {
+  return [...replay.products].filter(([, state]) => state.meta.label !== BASE_CELL_LABEL).map(([product, state]) => ({ product, label: state.meta.label }))
+    .sort((a, b) => (a.product < b.product ? -1 : a.product > b.product ? 1 : 0));
+}
+
+function labelRefusal(above: ReadonlyArray<{ product: string; label: string }>): MigrationRefused {
+  const named = above.slice(0, LABEL_LIST_LIMIT).map((item) => `${item.product} (${item.label})`).join(', ');
+  const more = above.length > LABEL_LIST_LIMIT ? `, and ${above.length - LABEL_LIST_LIMIT} more` : '';
+  return refuse('label-above-base', `${MIGRATION_REFUSALS['label-above-base']} Labelled above ${BASE_CELL_LABEL}: ${named}${more}.`, 'products');
+}
 
 export function isMigrationRefused(value: unknown): value is MigrationRefused {
   return isRecord(value) && typeof value.refused === 'string' && Object.hasOwn(MIGRATION_REFUSALS, value.refused) && typeof value.message === 'string';
@@ -233,6 +271,7 @@ export function verifyLegacyBytes(ledger: LegacyLedgerId, bytes: Buffer, status:
  * Verifies today's four ledgers exactly as today's host does (D-30), writing nothing. Each is read from its usual path, or from its legacy path once
  * an interrupted conversion has moved it there. A ledger that is absent is skipped, except the product ledger when its head mark says it held entries
  * (today's host reads that as cut short or deleted). The first ledger that does not verify, or cannot be read whole, refuses with today's sentence.
+ * A product ledger whose products carry a label above the base cell is refused label-above-base, naming them (W-1).
  */
 export async function verifyLegacyLedgers(root: string, deps: VerifyDeps): Promise<{ ok: true; ledgers: LegacyRead[] } | MigrationRefused> {
   const status = await deps.staffKeyStatus();
@@ -254,6 +293,10 @@ export async function verifyLegacyLedgers(root: string, deps: VerifyDeps): Promi
     if (at === undefined) continue;
     ledgers.push({ ledger: ledger.ledger, path: at, bytes, head: verified.head, count: verified.count, ...(mark.text === undefined ? {} : { mark: mark.text }), ...(verified.replay ? { replay: verified.replay } : {}) });
   }
+  // Every product goes into the base cell, which everyone admitted receives (W-1): a label above it is refused here, before the command asks anything.
+  const replay = ledgers.find((item) => item.ledger === 'products')?.replay;
+  const above = replay === undefined ? [] : productsAboveBaseCell(replay);
+  if (above.length > 0) return labelRefusal(above);
   return { ok: true, ledgers };
 }
 
@@ -406,16 +449,71 @@ async function importLedgers(project: ReplicaProject, ledgers: readonly LegacyRe
   return out;
 }
 
+/** One product as the reconstruct step reads it, before it writes anything: the body read from its file, the updates and the version that body gives. */
+interface ProductPlan {
+  readonly name: string;
+  readonly state: ProductState;
+  readonly body: string;
+  readonly clientId: number;
+  /** The doc after every update, for the version's snapshot. */
+  readonly doc: ReturnType<typeof createLocalDoc>;
+  readonly updates: string[];
+  readonly pins: Pin[];
+  /** The replica hash of the version this body gives; undefined when the body is not the current version's text or a pin cannot be named. */
+  readonly replicaHash?: string;
+}
+
 /**
  * The reconstruct step (D-32). The lead first gets the section roles the products need, so its device counts as each product's owner side (a staff lead
  * alone does not). Then, per product, in dependency order: product.create with the ledger's roles, a doc.client in the lead's slot, the text in
  * doc.update pieces, and, when the file's body is exactly the current version's text and every pin names a reconstructed version, version.propose with
  * that text and its header in a sealed blob. Each entry cites the products import; each is looked up before it is written.
+ *
+ * MJ-09: every product file is read and checked against what an earlier run already wrote for it before anything is written. The updates an earlier
+ * run wrote use the product's client from clock 0, so they must be the first of the updates the body read now gives, byte for byte, and a version it
+ * proposed must be the one this body gives. Otherwise the file changed since that run (the staff host refuses tool writes then, but not an editor), and
+ * the step stops product-changed naming the file: a second update over the same clocks would fold into a mix of the old text and the new, and the
+ * projections step would then write that over the edited file.
  */
 async function reconstruct(project: ReplicaProject, root: string, replay: LedgerReplay, importEntry: string, leadMember: string): Promise<{ products: string[]; versions: string[] }> {
   const products = replay.products;
   const sections = [...new Set([...products.values()].map((state) => state.record.section))].sort((a, b) => STAFF_SECTION_IDS.indexOf(a) - STAFF_SECTION_IDS.indexOf(b));
   let { roster } = await project.state();
+  const slot = deviceAt(roster.members, project.deviceWriter, roster.positions.length - 1)?.slot ?? 1;
+  const own = await ownEntries(project, ['product.create', 'doc.client', 'doc.update', 'version.propose']);
+  const has = (kind: string, match: (data: Record<string, unknown>) => boolean): boolean => own.some((item) => item.kind === kind && match(item.data));
+  const counters = new Map([...products.keys()].sort().map((name, index) => [name, index] as const));
+
+  // Read and check every product first, so a changed file stops the step before it writes anything.
+  const replicaHashes = new Map<string, string>();
+  const plans: ProductPlan[] = [];
+  for (const name of dependencyOrder(products)) {
+    const state = products.get(name) as ProductState;
+    const relative = staffProductPath(state.record.section, name);
+    const read = await readWhole(fileOf(root, relative));
+    const text = read.kind === 'text' ? read.text : '';
+    const body = splitProductFile(text)?.body ?? text;
+    const clientId = clientIdOf(slot, counters.get(name) as number);
+    // The same client id and text give the same update bytes every run, so an update already written is found by its bytes.
+    const doc = createLocalDoc(clientId);
+    const updates = chunksOf(body).map((piece) => Buffer.from(localInsert(doc, docText(doc).length, piece)).toString('base64url'));
+    const written = new Set(own.filter((item) => item.kind === 'doc.update' && item.data.product === name).map((item) => item.data.update));
+    if (written.size > updates.length || !updates.slice(0, written.size).every((update) => written.has(update))) throw new Stop(productChanged(relative));
+    // Today's ledger keeps only the hash of each version; the text is known only while the file's body is still the current version's.
+    const pins: Pin[] = [];
+    for (const dependency of state.meta.dependsOn) {
+      const pinned = replicaHashes.get(`${dependency.product}@${dependency.version}`);
+      if (pinned === undefined) break;
+      pins.push({ product: dependency.product, hash: pinned });
+    }
+    const replicaHash = productHash(body, state.meta.dependsOn) === state.record.hash && pins.length === state.meta.dependsOn.length ? replicaVersionHash(body, pins) : undefined;
+    // A version an earlier run proposed holds the text that run read: a body that no longer gives it has changed since (an empty file filled in, say).
+    const proposed = own.filter((item) => item.kind === 'version.propose' && item.data.product === name).map((item) => item.data.hash);
+    if (proposed.length > 0 && (replicaHash === undefined || !proposed.includes(replicaHash))) throw new Stop(productChanged(relative));
+    if (replicaHash !== undefined) replicaHashes.set(`${name}@${state.record.version}`, replicaHash);
+    plans.push({ name, state, body, clientId, doc, updates, pins, ...(replicaHash === undefined ? {} : { replicaHash }) });
+  }
+
   const at = roster.positions.length - 1;
   const roles = memberAt(roster.members, leadMember, at)?.roles ?? [];
   const wanted = ['member', ...sections.map((section) => `section_lead:${section}`)];
@@ -424,49 +522,26 @@ async function reconstruct(project: ReplicaProject, root: string, replay: Ledger
     ({ roster } = await project.state());
   }
   const position = roster.positions.length - 1;
-  const slot = deviceAt(roster.members, project.deviceWriter, position)?.slot ?? 1;
   const stream = project.projectId;
   const epoch = epochAt(roster.cells, stream, position);
   const key = epoch === undefined ? undefined : project.keys.epochKey(stream, epoch);
   if (epoch === undefined || key === undefined) throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} This computer does not hold the key of the project's base cell.`));
 
-  const own = await ownEntries(project, ['product.create', 'doc.client', 'doc.update', 'version.propose']);
-  const has = (kind: string, match: (data: Record<string, unknown>) => boolean): boolean => own.some((item) => item.kind === kind && match(item.data));
-  const counters = new Map([...products.keys()].sort().map((name, index) => [name, index] as const));
-  const replicaHashes = new Map<string, string>();
   const versions: string[] = [];
   const deps = { deps: [importEntry] };
-
-  for (const name of dependencyOrder(products)) {
-    const state = products.get(name) as ProductState;
-    const { section, roles: productRoles, version, hash } = state.record;
+  for (const plan of plans) {
+    const { name, state, body, clientId, doc, pins, replicaHash } = plan;
+    const { section, roles: productRoles } = state.record;
     if (!has('product.create', (data) => data.product === name)) {
       appended(await project.appendOwn('product.create', { product: name, section, roles: { ...productRoles }, title: name }, deps));
     }
-    const clientId = clientIdOf(slot, counters.get(name) as number);
     if (!has('doc.client', (data) => data.product === name && data.clientId === clientId)) {
       appended(await project.appendOwn('doc.client', { product: name, clientId, actor: { kind: 'person' } }, deps));
     }
-    const read = await readWhole(fileOf(root, staffProductPath(section, name)));
-    const text = read.kind === 'text' ? read.text : '';
-    const body = splitProductFile(text)?.body ?? text;
-    // The same client id and text give the same update bytes every run, so an update already written is found by its bytes.
-    const doc = createLocalDoc(clientId);
-    for (const piece of chunksOf(body)) {
-      const update = Buffer.from(localInsert(doc, docText(doc).length, piece)).toString('base64url');
+    for (const update of plan.updates) {
       if (!has('doc.update', (data) => data.product === name && data.update === update)) appended(await project.appendOwn('doc.update', { product: name, update }, deps));
     }
-    // Today's ledger keeps only the hash of each version; the text is known only while the file's body is still the current version's.
-    if (productHash(body, state.meta.dependsOn) !== hash) continue;
-    const pins: Pin[] = [];
-    for (const dependency of state.meta.dependsOn) {
-      const pinned = replicaHashes.get(`${dependency.product}@${dependency.version}`);
-      if (pinned === undefined) break;
-      pins.push({ product: dependency.product, hash: pinned });
-    }
-    if (pins.length !== state.meta.dependsOn.length) continue;
-    const replicaHash = replicaVersionHash(body, pins);
-    replicaHashes.set(`${name}@${version}`, replicaHash);
+    if (replicaHash === undefined) continue;
     if (has('version.propose', (data) => data.product === name && data.hash === replicaHash)) { versions.push(name); continue; }
     const header = { kind: state.meta.kind, label: state.meta.label, profile: state.meta.profile, level: state.meta.level };
     const plain = canonicalBytes({ text: body, header });
@@ -597,6 +672,9 @@ export async function makeMultiUser(root: string, deps: MigrationDeps, options: 
     if (options.stopAfter === 'move-legacy') return result('move-legacy', { project: project.projectId, imported, ...rebuilt, moved });
 
     const projections = await writeProjections(absolute, await projectionInputOf(project, deps), PASSTHROUGH_LEDGERS);
+    // A product file edited after reconstruct read it is left with the edit (MJ-09); the conversion does not finish over it, and a rerun names it.
+    const edited = projections.left.find((item) => item.reason === PROJECTION_LEFT_REASONS['text-changed']);
+    if (edited !== undefined) return productChanged(edited.path);
     if (options.stopAfter === 'projections') return result('projections', { project: project.projectId, imported, ...rebuilt, moved, projections });
 
     await writeMarker(absolute, imported.length, (deps.now?.() ?? new Date()).toISOString());
