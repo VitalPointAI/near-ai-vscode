@@ -35,6 +35,13 @@ relay/**/*.db
 relay/**/*.db-wal
 relay/**/*.db-shm
 
+# Sync hub (hub/): runtime state and secret files, never committed. Hub secrets kept beside the relay sit under relay/secrets/, ignored above.
+hub/state/
+hub/secrets/
+hub/**/*.db
+hub/**/*.db-wal
+hub/**/*.db-shm
+
 # The COP map page's vendored libraries are committed (media/vendor/VENDORED.json lists them with their hashes).
 !media/vendor/
 
