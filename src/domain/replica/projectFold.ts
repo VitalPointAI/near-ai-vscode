@@ -8,8 +8,12 @@
 // project.import records one legacy ledger the lead brought in, and is listed once however often it is repeated (the key is ledger, legacy head and count;
 // the first in fold order is the one listed). Since D-31 and D-49 it may carry the whole legacy file and the product ledger's signed head mark; the
 // output lists the sha256 of the file and whether a mark came with it, so migration can find each imported file and re-verify it.
+// Since D-20 (plan 32-08) an import is the whole ledger or one cell's part of it (scope, with lines for a part); an import with no scope is whole. The
+// repeat key adds the scope, so a whole import and a cell import of one ledger in one stream are both listed.
 import { createHash } from 'node:crypto';
 import { canonicalize } from '../team/canonical';
+import type { ImportScope } from './kindSchemas/project';
+import { importScopeOf } from './productCells';
 import type { FamilyReducer, ReduceOutcome } from './reducers';
 import type { VerifiedEntry } from './verify';
 
@@ -30,7 +34,8 @@ interface GenesisData {
   hub?: { writer: string; certPin: string };
 }
 // file is strict base64url and mark one line of text, both checked by the project.import schema before the reducer sees them.
-interface ImportData { ledger: string; legacyHead: string; count: number; file?: string; mark?: string }
+// scope and lines are checked by the schema too: scope is whole or cell, and lines (a count) comes only with a cell import.
+interface ImportData { ledger: string; legacyHead: string; count: number; file?: string; mark?: string; scope?: ImportScope; lines?: number }
 
 export interface ProjectGenesis {
   entry: string;
@@ -44,7 +49,8 @@ export interface ProjectGenesis {
   content: string;
 }
 // fileHash: the sha256 hex of the decoded legacy file, absent when the import carried no file. marked: the import carried the signed head mark.
-export interface ProjectImport { ledger: string; legacyHead: string; count: number; entry: string; member: string; writer: string; fileHash?: string; marked: boolean }
+// scope: whole when the entry named none (D-20). lines: how many ledger lines a cell import carries, absent on a whole import.
+export interface ProjectImport { ledger: string; legacyHead: string; count: number; entry: string; member: string; writer: string; fileHash?: string; marked: boolean; scope: ImportScope; lines?: number }
 export interface ProjectStreamState { genesis: ProjectGenesis | undefined; imports: ProjectImport[] }
 export interface ProjectState { streams: Map<string, ProjectStreamState> }
 
@@ -70,7 +76,9 @@ const copyImport = (item: ProjectImport): ProjectImport => ({
   member: item.member,
   writer: item.writer,
   ...(item.fileHash === undefined ? {} : { fileHash: item.fileHash }),
-  marked: item.marked
+  marked: item.marked,
+  scope: item.scope,
+  ...(item.lines === undefined ? {} : { lines: item.lines })
 });
 
 const fileHashOf = (file: string): string => createHash('sha256').update(Buffer.from(file, 'base64url')).digest('hex');
@@ -83,6 +91,11 @@ function streamState(state: ProjectState, stream: string): ProjectStreamState {
   }
   return found;
 }
+
+const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+// Ledger, legacy head, count, then scope (whole before cell), so a whole and a cell import of one ledger always list in the same order.
+const compareImports = (a: ProjectImport, b: ProjectImport): number =>
+  compareText(a.ledger, b.ledger) || compareText(a.legacyHead, b.legacyHead) || a.count - b.count || (a.scope === b.scope ? 0 : a.scope === 'whole' ? -1 : 1);
 
 function refused(reason: ProjectRefusal): ReduceOutcome {
   return { status: 'refused', reason };
@@ -114,7 +127,8 @@ export const projectReducer: FamilyReducer<ProjectState, ProjectOutput> = {
     }
     const data = entry.data as ImportData;
     const current = streamState(state, entry.header.stream);
-    const repeat = current.imports.some((item) => item.ledger === data.ledger && item.legacyHead === data.legacyHead && item.count === data.count);
+    const scope = importScopeOf(data);
+    const repeat = current.imports.some((item) => item.ledger === data.ledger && item.legacyHead === data.legacyHead && item.count === data.count && item.scope === scope);
     if (!repeat) {
       current.imports.push({
         ledger: data.ledger,
@@ -124,7 +138,9 @@ export const projectReducer: FamilyReducer<ProjectState, ProjectOutput> = {
         member: entry.member,
         writer: entry.header.writer,
         ...(data.file === undefined ? {} : { fileHash: fileHashOf(data.file) }),
-        marked: data.mark !== undefined
+        marked: data.mark !== undefined,
+        scope,
+        ...(scope === 'cell' && data.lines !== undefined ? { lines: data.lines } : {})
       });
     }
     return { status: 'applied' };
@@ -141,10 +157,11 @@ export const projectReducer: FamilyReducer<ProjectState, ProjectOutput> = {
         labelMapHash: item.genesis?.labelMapHash ?? null,
         lead: item.genesis === undefined ? null : { member: item.genesis.lead.member, writer: item.genesis.lead.writer },
         hub: item.genesis === undefined || item.genesis.hub === null ? null : { writer: item.genesis.hub.writer, certPin: item.genesis.hub.certPin },
-        imports: item.imports.map(copyImport).sort((a, b) => (a.ledger === b.ledger ? (a.legacyHead < b.legacyHead ? -1 : a.legacyHead > b.legacyHead ? 1 : a.count - b.count) : a.ledger < b.ledger ? -1 : 1))
+        imports: item.imports.map(copyImport).sort(compareImports)
       }));
   },
-  // The digest form keeps its Phase 30 tuple (ledger, legacy head, count, entry): the entry hash already commits to the file and the mark.
+  // The digest form keeps its Phase 30 tuple (ledger, legacy head, count, entry): the entry hash already commits to the file, the mark, the scope and
+  // the lines, so no Phase 31 digest moves (plan 32-08).
   canonical(output, stream) {
     const found = output.find((item) => item.stream === stream);
     if (found === undefined) return null;
