@@ -3,7 +3,7 @@
 **Status:** design, for planning. Docs only: nothing here is built yet.
 **Written:** 2026-11-19, against `origin/main` at d17589a1.
 **Milestone:** v0.5.0 Governed agent platform (new Phases 74.1 and 74.2), with an amendment to the v0.6.0 model factory (Phases 98 and 99).
-**Owner decisions recorded:** 2026-11-19 (section 2).
+**Owner decisions recorded:** 2026-11-19 (section 2), amended 2026-11-20 (gpt-oss-120b added as a third Western family).
 
 ## 1. Key points first
 
@@ -12,11 +12,11 @@
 3. The design adds a **model passport**: a short signed record of who made a model, where, from what, under which licence, how it is hosted, which exact files run, and the highest **use tier** it may serve. Passports live in your organization's signed policy bundle under an optional `ceiling.models` key. A model with no passport may be used only in the isolated research lane (T0).
 4. Each request gets a **use tier** worked out from facts the extension already has (tools granted, unattended or not, the chat's label, the project type, the role). The gate refuses a model whose passport does not cover the tier, before anything is sent, in plain words, and never falls back silently to a forbidden model.
 5. PRC-origin models stay usable for research and evaluation in an **isolated T0 lane** (red teaming, threat analysis, the cyber harness), for plain human-reviewed chat (T1) only with a signed, time-boxed risk acceptance by a named senior person, and never for agent work, code, Protected B (T2) or classified and operational work (T3).
-6. The extension ships **Western defaults**: NVIDIA Nemotron 3 (Nano, Super, Ultra) and Cohere Command A+ as the two Western model families, Whisper for transcription and FLUX for images (both already Western). Defaults move to one place in the code.
-7. Today NEAR AI Cloud hosts no Western open-weight model in its private hardware. Two paths are decided: the owner asks NEAR to host Nemotron 3 and Command A+, and the design adds **your organization's own attested hosting** (`org-tee`) in a Canadian data centre, verified like NEAR's.
+6. The extension ships **Western defaults**: NVIDIA Nemotron 3 (Nano, Super, Ultra), Cohere Command A+ and OpenAI gpt-oss-120b as the three Western model families, Whisper for transcription and FLUX for images (both already Western). Defaults move to one place in the code.
+7. Today NEAR AI Cloud hosts no Western open-weight model in its private hardware. Two paths are decided: the owner asks NEAR to host Nemotron 3, Command A+ and gpt-oss-120b, and the design adds **your organization's own attested hosting** (`org-tee`) in a Canadian data centre, verified like NEAR's.
 8. Checking roles (reviewers, the release guard, the tradecraft reviewer, red team, editor, plan checker, safety classifier) must run on a **different model family** from the model they check.
 9. Outputs carry provenance: model, artifact hash and passport hash in staff product headers, ledger entries and run records, plus a per-project **AI bill of materials** (CycloneDX ML-BOM) beside the code SBOM.
-10. The model factory changes base: Nemotron 3 Nano first, Super on bigger hardware, Command A+ as the second lineage. PRC models may be **teachers only**, only in the T0 lane, and never share a base with the student.
+10. The model factory changes base: Nemotron 3 Nano first, Super on bigger hardware, gpt-oss-120b as a base of another lineage, Command A+ for serving and as a second lineage. PRC models may be **teachers only**, only in the T0 lane, and never share a base with the student.
 
 ## 2. Owner decisions (2026-11-19)
 
@@ -26,6 +26,7 @@
 | 2 | PRC-origin models | Allowed at T0. At T1 only with a signed, time-boxed risk acceptance by a named senior person. Never at T2 or T3. |
 | 3 | Who sets model rules | Your organization's signed policy. The extension ships Western defaults as the starting point. |
 | 4 | Cyber harness | T0 lane only for now. No Western model available today can do that work. |
+| 5 | gpt-oss-120b (2026-11-20) | Added to the Western models used as base models: a third Western family beside Nemotron 3 and Command A+, for serving, for checking roles and as a model factory base. The owner's ask to NEAR covers it too. |
 
 ## 3. Background
 
@@ -246,6 +247,7 @@ The extension ships passports for the current NEAR catalogue and the planned Wes
 | FLUX.2 klein | `black-forest-labs/FLUX.2-klein-4B` | DE | nearai-tee | T2 | Licence to confirm |
 | Nemotron 3 (Nano, Super, Ultra) | exact ids once hosted | US | nearai-tee or org-tee | T2 | NVIDIA trained from scratch; some post-training synthetic data from DeepSeek V3.2, Kimi K2 and Qwen3-Coder (recorded as teachers); dataset licence inheritance to check |
 | Command A+ | exact id once hosted | CA | nearai-tee or org-tee | T2 | Apache 2.0, 218B, May 2026 |
+| gpt-oss (120b, 20b) | exact ids once hosted (`openai/gpt-oss-120b`, `openai/gpt-oss-20b` are the upstream names) | US | nearai-tee or org-tee | T2 | OpenAI open-weight, Apache 2.0 plus OpenAI's gpt-oss usage policy (to put on the allowed list); 120b is a mixture of experts (about 117B total, 5.1B active) shipped in MXFP4, which fits one 80 GB GPU; text only; training data not published, so the passport records the developer's model card and safety report as its evidence |
 | Closed Western APIs | `anthropic/*`, `openai/gpt-*`, `google/*`, `x-ai/*` | US | closed-api | T2 | Routing still allows them only where the label allows `any-cloud` |
 | Llama-Nemotron | `nvidia/Llama-*Nemotron*` | US | as listed | T2 | Family `llama`; DeepSeek-R1 reasoning data recorded as a teacher |
 | OpenReasoning-Nemotron | `nvidia/OpenReasoning-Nemotron-*` | **CN** | as listed | T0 | Qwen2.5 base, so PRC origin despite the name |
@@ -328,13 +330,13 @@ The defaults name passports, not raw ids, so the same default works on NEAR and 
 
 | Role | Western default | Second choice (other family) | Notes |
 |---|---|---|---|
-| Standard tier and chat | Nemotron 3 Super | Command A+ | |
-| Deep tier | Nemotron 3 Ultra | Command A+ | Command A+ first where Ultra is not hosted |
-| Fast tier | Nemotron 3 Nano | a small Western model of another family | |
+| Standard tier and chat | Nemotron 3 Super | Command A+, then gpt-oss-120b | |
+| Deep tier | Nemotron 3 Ultra | Command A+, then gpt-oss-120b | Command A+ first where Ultra is not hosted |
+| Fast tier | Nemotron 3 Nano | gpt-oss-20b | Another family at a small size |
 | Vision | a Nemotron vision model, if NVIDIA ships one in the Nemotron 3 line | Cohere Command A Vision | Licence check: Command A Vision was released under a non-commercial licence; question N1 |
 | Embeddings | a Western embedding model with a passport (NVIDIA's Llama-based retriever models or IBM Granite embedding) | Cohere Embed (private deployment) | Re-embedding the knowledge base is needed when it changes |
 | Reranker | NVIDIA's Llama-based reranker or IBM Granite reranker | Cohere Rerank (private deployment) | |
-| Safety classifier | a small Western model of a different family from the run's model (for example NVIDIA's Llama-based safety guard when runs use Nemotron) | Nemotron 3 Nano when runs use Command A+ | Different-lineage rule (9) |
+| Safety classifier | a small Western model of a different family from the run's model (for example NVIDIA's Llama-based safety guard, or gpt-oss-20b, when runs use Nemotron) | Nemotron 3 Nano when runs use Command A+ or gpt-oss | Different-lineage rule (9) |
 | Backup | the other Western family at the same tier | | Different family keeps a stall from being a shared fault |
 | Transcription | `openai/whisper-large-v3` | | Already Western, already in NEAR's TEE |
 | Image | `black-forest-labs/FLUX.2-klein-4B` | | Already Western, already in NEAR's TEE |
@@ -395,7 +397,7 @@ A checker must not share a family with the model it checks, because a backdoor o
 - **Roles covered:** reviewers in team runs, the staff release guard (`src/domain/staff/releaseGuard.ts`), the J2 tradecraft reviewer, red team, editor, plan checker, and the safety classifier.
 - **Family** comes from `lineage.family` in the passport. A model with no passport has no known family and cannot check anything.
 - **Choice:** the resolver picks the checker's configured model; if it shares a family with the model that produced the work, it picks the role's second choice; if no allowed model of another family exists for the tier, the check goes to a person (`model.same-lineage`), never to a same-family model.
-- **Western families today:** Nemotron and Command A+ are the two primary Western families. Closed Western APIs (where the label allows `any-cloud`) and small Western models of other bases (Llama-based, Granite) can serve as further families once passported.
+- **Western families today:** Nemotron, Command A+ and gpt-oss are the three primary Western families, so a checker of another family is available at every tier once they are hosted. Closed Western APIs (where the label allows `any-cloud`) and small Western models of other bases (Llama-based, Granite) can serve as further families once passported.
 - **Records:** each check records both families, so an audit can show that no product was checked by its own family.
 
 ## 10. Provenance on outputs
@@ -428,6 +430,7 @@ This amends `.planning/research/data-platform/04-model-factory-and-opportunity-a
 | First specialist base | Nemotron 3 Nano | Western origin, trained from scratch, data mostly published; fits the 128 GB Strix Halo and the GB10 for LoRA and QLoRA (to measure in Phase 85) |
 | Larger specialists | Nemotron 3 Super | On larger hardware than one Strix Halo or GB10 |
 | Serving and second lineage | Command A+ | Canadian, Apache 2.0; the other family for checking roles and cross-checks |
+| Base of another lineage | gpt-oss-120b (gpt-oss-20b for small specialists) | US, Apache 2.0, a mixture of experts with about 5.1B active parameters, so training and serving cost like a much smaller dense model; LoRA on the MXFP4 weights to measure on the Strix Halo and the GB10 in Phase 85; gives a specialist whose checker can be Nemotron or Command A+ |
 
 Qwen, Gemma and Phi stop being default bases. Qwen is PRC-origin, so any specialist trained on it is PRC-origin and T0 only. Gemma and Phi may be added later with passports of their own.
 
@@ -440,7 +443,7 @@ Qwen, Gemma and Phi stop being default bases. Qwen is PRC-origin, so any special
 
 ### 11.3 Licences
 
-The job spec refuses to start when a base, a dataset or a teacher's terms are not on your organization's allowed list. It records inherited licences (NVIDIA dataset terms for Nemotron, Apache 2.0 for Command A+), and the specialist's passport carries the result.
+The job spec refuses to start when a base, a dataset or a teacher's terms are not on your organization's allowed list. It records inherited licences (NVIDIA dataset terms for Nemotron, Apache 2.0 for Command A+, Apache 2.0 and OpenAI's gpt-oss usage policy for gpt-oss), and the specialist's passport carries the result.
 
 ### 11.4 Evaluation additions
 
@@ -514,6 +517,7 @@ States: `received`, `tier-derived`, `passport-resolved`, `checked`, `allowed`, `
 |---|---|
 | N1 | Will you host Nemotron 3 (Nano, Super, Ultra) in your TEE, and a Nemotron vision model if NVIDIA ships one? Can you state the origin of the privacy filter model? |
 | N2 | Will you host Cohere Command A+ in your TEE? |
+| N2a | Will you host OpenAI gpt-oss-120b (and gpt-oss-20b) in your TEE? |
 | N3 | Can `/v1/models` carry provenance fields: developer, origin, base model, licence, artifact hash, quantization? |
 | N4 | Will you give notice before a model's weights, quantization, hosting or id change, and a stable id per artifact? |
 | N5 | Can the attestation report name the hash of the model weights loaded, so a passport can bind to it? |
