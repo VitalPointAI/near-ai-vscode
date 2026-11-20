@@ -2,6 +2,7 @@
 // before sending (its route, host, the model's catalogue entry, the binding fact held in memory, the clock), read here so the client's one choke point
 // stays small. No vscode import and no network call: everything here is read from memory.
 import { isNearCloudEndpoint } from '../domain/config';
+import { ConnectionNotBoundError, NEAR_TLS_FINGERPRINT_KIND, pinnedFetch } from './connectionBinding';
 import { TIER_ORDER } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteFacts, RoutingTier } from '../domain/gate/routing';
 import type { ModelInfo } from '../domain/provider/messages';
@@ -39,6 +40,33 @@ export function routeFactsFor(input: RouteFactsInput): RouteFacts {
     ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels })
   };
   return facts;
+}
+
+// ---- A connection held to your organization's pins (D-26) ----
+
+function notBound(error: unknown): boolean {
+  return error instanceof ConnectionNotBoundError || (error as { cause?: unknown } | undefined)?.cause instanceof ConnectionNotBoundError;
+}
+
+/**
+ * A fetch held to one of a place's TLS pins (D-26, T-41-130): each pin in order, as an SPKI SHA-256 hash (the form tlsPins hold). A connection that presents
+ * another key is refused by the pinned fetch before a byte is written, so only then is the next pin tried; the last such error is thrown. Any other error
+ * stops at once. With no pin nothing is sent. `connect` is the pinned fetch of one pin (tests give their own).
+ */
+export function pinnedFetchAny(pins: readonly string[], connect: (pin: string) => typeof fetch = (pin) => pinnedFetch(pin, NEAR_TLS_FINGERPRINT_KIND)): typeof fetch {
+  const held = [...pins];
+  return (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    let last: unknown = new ConnectionNotBoundError('Your organization\'s rules give no pin for this server, so nothing was sent.');
+    for (const pin of held) {
+      try {
+        return await connect(pin)(input, init);
+      } catch (error) {
+        if (!notBound(error)) throw error;
+        last = error;
+      }
+    }
+    throw last;
+  }) as typeof fetch;
 }
 
 // ---- One private floor (D-37) ----

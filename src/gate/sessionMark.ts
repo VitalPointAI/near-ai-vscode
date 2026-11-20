@@ -15,7 +15,7 @@ import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
-import { notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
+import { ROUTE_REFUSALS, notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { RouteDecision, RouteEventId, RouteFacts, RoutePolicy, RoutingTable, VerifiedAuthorization } from '../domain/gate/routing';
 import { verifyAuthorization } from '../domain/gate/authorizations';
@@ -441,13 +441,25 @@ export function notAccreditedRecordFor(route: SessionRoute, decision: RouteDecis
  */
 export function noteNotAccredited(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, model: string | undefined, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable }): void {
   try {
-    const label = thisComputerOnlyLabelOf(context.mark, context.defaultLabel);
+    // A decision made with a policy names the label itself (D-34): none when an accredited-device authorization covers this device. Without a policy, the
+    // safety patch's own rule.
+    const label = decision.allowedBy !== undefined ? decision.notAccredited : thisComputerOnlyLabelOf(context.mark, context.defaultLabel);
     if (label === undefined || route.attestation.notAccreditedTold === true) return;
     route.attestation.notAccreditedTold = true;
     const reason = notAccreditedText(labelKeyShown(label));
     try { route.sink?.record(notAccreditedRecordFor(route, decision, facts, model === undefined ? {} : { model }, { ...context, label, reason })); } catch { /* D-21 */ }
     try { route.onNotice?.(reason); } catch { /* a notice never changes a request */ }
   } catch { /* D-21 */ }
+}
+
+/**
+ * A request your organization's rules pin to a server (D-26) whose connection matched none of the pins: nothing was written over it. The refusal is
+ * recorded beside the request's own record, and the refusing decision returned. A record that cannot be kept never changes the refusal (D-21).
+ */
+export function endpointPinRefusal(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, context: RouteRecordContext): RouteDecision {
+  const refused: RouteDecision = { allowed: false, tier: decision.tier, rule: 'route.endpoint-pin', reason: ROUTE_REFUSALS['route.endpoint-pin'] };
+  try { route.sink?.record(routeRecordFor(route, refused, facts, facts.model === undefined ? {} : { model: facts.model.id }, context)); } catch { /* D-21 */ }
+  return refused;
 }
 
 function clockOf(route: SessionRoute): number {

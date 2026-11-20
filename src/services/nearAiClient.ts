@@ -6,8 +6,8 @@ import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, Routi
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
-import { currentSessionRoute, defaultSessionRoute, noteNotAccredited, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
-import { floorFor, routeFactsFor } from './privateRoute';
+import { currentSessionRoute, defaultSessionRoute, endpointPinRefusal, noteNotAccredited, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
+import { floorFor, pinnedFetchAny, routeFactsFor } from './privateRoute';
 import type { RouteRecordContext, SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
@@ -88,6 +88,8 @@ export interface NearAiClientOptions {
   binding?: ConnectionBindingSource;
   /** True when the session can use a local model instead of this client (a hybrid profile's NEAR client), so a refusal names the right fix. */
   localModelAvailable?: boolean;
+  /** The fetch held to a place's TLS pins when your organization's rules pin it (D-26). Defaults to pinnedFetchAny; tests give their own. */
+  pinnedFetchFor?: (pins: readonly string[]) => typeof fetch;
   /** For tests: the root the after-answer check trusts instead of Intel's, and the time it checks certificates at. Production leaves it unset. */
   attestationTrust?: { trustedRoot?: string; now?: () => Date };
 }
@@ -179,6 +181,8 @@ interface RouteCheck {
   readonly optionalPin?: ConnectionBindingFact;
   /** Writes a second record for an optionally pinned request that fell back to an unpinned send (the first was written at the decision). Once only. */
   readonly recordFallback?: () => void;
+  /** The TLS pins of your organization's server the send is held to (D-26): a level that needs a pin, allowed there. */
+  readonly pinTo?: readonly string[];
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
@@ -1213,7 +1217,8 @@ export class NearAiClient implements ModelEndpoint {
       context,
       ...(this.options.binding === undefined ? {} : { connection: fact }),
       ...(pinned === undefined ? {} : { pinned }),
-      ...(optionalPin === undefined ? {} : { optionalPin, recordFallback })
+      ...(optionalPin === undefined ? {} : { optionalPin, recordFallback }),
+      ...(decision.pinTo === undefined ? {} : { pinTo: decision.pinTo })
     };
   }
 
@@ -1222,6 +1227,7 @@ export class NearAiClient implements ModelEndpoint {
    * A source that cannot give a pinned fetch cannot carry the request at all: refused, never sent over an unpinned connection (CLAS-05).
    */
   private fetchFor(check: RouteCheck | undefined): typeof fetch {
+    if (check?.pinTo !== undefined) { try { return (this.options.pinnedFetchFor ?? pinnedFetchAny)(check.pinTo); } catch { throw this.pinRefused(check); } }
     if (check?.pinned === undefined && check?.optionalPin !== undefined) {
       // At any-cloud a source that gives no pinned fetch leaves the request as it was before (unpinned, not proven), never refused.
       try { return this.options.binding?.fetchFor?.(check.optionalPin) ?? this.fetchFn; } catch { return this.fetchFn; }
@@ -1231,6 +1237,12 @@ export class NearAiClient implements ModelEndpoint {
     try { pinned = this.options.binding?.fetchFor?.(check.pinned); } catch { pinned = undefined; }
     if (pinned === undefined) throw this.notBound(check, 'The binding source gives no pinned connection.');
     return pinned;
+  }
+
+  /** A connection to your organization's server that matched none of its pins (D-26): recorded, and nothing was sent. */
+  private pinRefused(check: RouteCheck): RouteRefusedError {
+    const refused = endpointPinRefusal(check.route, check.decision, check.facts, check.context);
+    return new RouteRefusedError(refused.rule, refused.reason ?? 'Nothing was sent.');
   }
 
   /** A pinned connection that did not present the attested key: the host is marked not-bound, the refusal is recorded, and nothing was sent. */
@@ -1328,6 +1340,7 @@ export class NearAiClient implements ModelEndpoint {
             attempt -= 1;
             continue;
           }
+          if (check?.pinTo !== undefined && notBound) throw this.pinRefused(check);
           // The pinned connection presented another key: nothing was written, the host is not bound any more, and the request is refused (CLAS-05).
           if (check !== undefined && notBound) throw this.notBound(check, (error as Error).message);
           // Sent but cancelled or timed out before NEAR answered: NEAR may still have done (and billed) the work.
