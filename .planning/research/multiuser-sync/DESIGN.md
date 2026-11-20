@@ -2,9 +2,13 @@
 
 Date: 2026-11-19. Status: design and phase plan, no code changed. Read against `origin/main` at d3c2e00c (release 0.4.34).
 
+**Conforms to the coherence review (2026-11-20):** "your organization's server" is the one user word for the hub; turning on, inviting and joining fold into Get Started under "Share with people", with an invitation file opening Get Started already filled in; Add My Other Machine joins My computers; genesis pins your organization's issuer; the roster's user word comes from `term()` ("People", or "Roster" in Military mode); seats become positions, decision roles live on positions, and one delegation rule applies; the roster member id is the person id with an optional `did`; "cell" in the key sense is "key group" in prose and "Who can see this" on screens; clearance checks use the one label service over the active scale table and the meet of personal and roster clearance; the hub runs the same gate core (`decideRoute`, endpoints, passports) and its spend cap is the lower of the policy and the operator's file; the project label, mode and setup answers are project-stream entries; Team Mode is frozen and imported at L2; "relay" means messaging only and L5 is hub federation; the hub and relay share `services-kit/` after Phase 32; the Staff Room uses the one trust line. Decisions of 2026-11-19 are kept; superseded text carries a dated note. See `.planning/research/coherence/REVIEW.md` (conflicts K18, K20, K21, K23, K24, K28, K31, K37, K50, K51).
+
 Companion: `RESEARCH.md` in this folder (options, sources, comparison tables). Inputs: the staff teams design (`.planning/research/staff-teams/10-STAFF-TEAMS-DESIGN.md`, 4.1 to 4.5 and 9), note 11 (`11-operational-feeds-cop.md`, 4.5 to 4.7), the paused knowledge base design (`.planning/milestones/v0.5.0-paused/`), the roadmap (Phase 27, Phases 68 to 71, L2, L5) and the code cited below.
 
 Words used here: a **person** is a human staff member; a **device** is one install of the extension on one machine for one person; a **stream** is everything about one staff project at one label cell; a **writer** is a device writing to a stream; an **entry** is one signed line in a writer's log; the **fold** is the pure function every machine runs to turn all entries into staff state; the **hub** is your organization's sync hub.
+
+Words on screens follow the glossary (`.planning/research/coherence/GLOSSARY.md`), not this list: people see "your organization's server" for the hub, "Who can see this" for a cell, "member" (or the mode word) for a person, "position" for a seat, and the mode's word for the roster and the lead, all produced by `term(concept, mode)`. Writer, entry, stream, genesis, epoch, wrap, grant, join secret and seat stay in code, records and administrator detail panes. In prose this design keeps "cell" for a key group because the code and Phase 30 contract use it.
 
 ---
 
@@ -19,7 +23,8 @@ Words used here: a **person** is a human staff member; a **device** is one insta
 7. **The hub is its own service in the relay's Docker Compose stack**, built like the relay, with its own state, port and threat model.
 8. **Edge machines keep working offline.** Appends are local first. Git with one ref per writer, a LAN peer link and a sealed bundle file carry the same logs when the hub is out of reach.
 9. **Team Mode (L2) moves onto this layer** when L2 starts: one multi-writer log in the product, not two.
-10. **Delivery: Phases 30 to 35 in the 0.4.x line**, as two staff collaboration drops. Drop A (30 to 33) gives live multi-user staff projects through the hub. Drop B (34, 35) adds offline transports, shared agent work, observation sharing and hub watches. Verified identities and hub-to-hub federation follow with Phase 71 and L5.
+   > **Coherence review (2026-11-20):** until L2 the Team Mode log is frozen (preview, no new features) and its name is retired from user copy; at L2 it is imported onto the replica layer (ADR-010), and "Share with people" is the one way to work with others for every project type.
+10. **Delivery: Phases 30 to 35 in the 0.4.x line**, as two staff collaboration drops. Drop A (30 to 33) gives live multi-user staff projects through the hub. Drop B (34, 35) adds offline transports, shared agent work, observation sharing and hub watches. Verified identities and hub-to-hub federation follow with Phase 71 and L5 (L5 is hub federation of the same streams; "relay" names only the messaging relay).
 
 ---
 
@@ -93,6 +98,8 @@ The lesson: the hash chain is right; the single global chain breaks, because it 
 ### 4.1 Streams and cells
 
 A **cell** is a level plus a compartment set from the Phase 70 label map. Each project has one **roster stream** (base cell, readable by every member) and one stream per cell for its products, decisions, registers, watches, run summaries and observation segments. Stream and cell ids on the wire are random 128-bit values; the cell's level and compartments are only inside its encrypted grant (8.2).
+
+> **Coherence review (2026-11-20):** a cell is a **key group** in design prose and "Who can see this" on screens; it is never a unit of the organization. Whether one level dominates another is decided by the one dependency-free label service (`dominates`, `join`, `atLeast` over the active policy's scale table, `src/domain/gate/labels.ts`), the same module the hub imports, never by the shipped `SCALE_PRESETS`. In a shared project the project label, the organization mode, the exercise flag and the setup answers are project-stream entries (`project.genesis`, then `project.policy`), not files in git (conflict K23).
 
 ### 4.2 Entry format (version 2)
 
@@ -251,7 +258,9 @@ Design 10's dependency rule carries over unchanged: dependants pin a version has
 
 ### 7.1 Genesis and the roster
 
-**Make This Staff Project Multi-User** writes `project.genesis`, signed by the person who runs it, who becomes the **staff lead**. Genesis names the project id, profile, level, label map hash, the lead's device, first cell grants, and the hub's key and certificate pin if any. Every machine pins it on join (Team Mode's `GenesisAnchor` and the trust pin of `src/team/teamFile.ts` are the model).
+**Make This Staff Project Multi-User** writes `project.genesis`, signed by the person who runs it, who becomes the **staff lead**. Genesis names the project id, profile, level, label map hash, the lead's device, first cell grants, and the hub's key and certificate pin if any.
+
+> **Coherence review (2026-11-20):** the command is folded into Get Started: the owner picks **Share with people** (in the guide, its checklist, the Staff Room or Settings > My computers and sharing), and the old command id stays a hidden alias for two minor releases. Genesis also pins your organization's issuer fingerprint when this computer has one, so every member's machine checks the project against the same organization rules; without one it records "self-signed on this computer". "Profile" here means the doctrine (screens say "Doctrine"), and "staff lead" is the Military mode's word for who decides membership, produced by `term()` (team lead, responsible manager or project leader in other modes). Every machine pins it on join (Team Mode's `GenesisAnchor` and the trust pin of `src/team/teamFile.ts` are the model).
 
 The roster is single-writer and linear: only the devices of the staff lead and the deputy lead write it (owner decision 5), and every roster entry cites the previous one (`rosterPrev`), so authority never needs general state resolution (the Matrix lesson, `RESEARCH.md`).
 - Online, the hub accepts a roster entry only if `rosterPrev` is the current head.
@@ -269,9 +278,13 @@ The roster is single-writer and linear: only the devices of the staff lead and t
 
 Roles: **staff lead** (writes the roster), **deputy lead** (also writes the roster, and may hand over the lead), **member** (reads and writes granted cells), **decision roles** (approve, reject, release for named products or sections), **observer** (reads, writes only presence), **hub** (service member). Agents act under the device of the person who ran them and are not roster members.
 
+> **Superseded 2026-11-20 (coherence review):** decision roles and seats are replaced by **positions** (assigned positions design, Phase 33.1). A seat (for example `j2-chief`) is the position's id; what a person may decide lives on the position they are posted to, never on the person and never in a team file, which names a position only. Every shared project has positions; in invitation mode they are created silently, one per invitation, so nobody sees the word. Before multi-user the local person holds every position. Granting and handing over authority follows the one delegation rule (a subset of what the delegator holds, with scope, expiry and depth), shared with Phase 71's credentials (conflicts K18, K21). The roster member id is the one person id in your organization and carries an optional `did` slot (Phase 41), so Phase 71 fills it without a new id (K20). The roster is shown as "People" (Corporate, Public service, Capital) or "Roster" (Military only); staff setup says "check the team" for its agents. The staff lead and deputy lead keep writing the roster as owner decision 5 says; in other modes they carry the mode's word.
+
 ### 7.2 Self-declared until Phase 71, then credentials
 
 Before Phase 71 the lead declares names, seats and clearances. Every multi-user screen shows `CLEARANCE_SELF_ASSERTED_TEXT` and `LABELS_NOT_ACCREDITATION_TEXT` (`src/domain/gate/labels.ts`) and "People and clearances in this project are declared by the staff lead, not verified." Decisions are device-key signed, as design 10 Q10 accepted.
+
+> **Coherence review (2026-11-20):** the clearance used for every check is the **effective clearance**: the meet of the person's own declared clearance (personal policy layer) and the roster clearance for this project; "Why this label" shows both. Phase 71 credentials replace both later (conflict K31). A decision is signed by the person's device key or, from Phase 71, credential, never by "the policy key", because your organization signs the policy.
 
 After Phase 71: persons are `did:webvh`, devices `did:key` (the same Ed25519 key, so no log change), seats, roles and clearances are verifiable credentials from your organization, revoked through status lists with a maximum offline age per level. Roster entries then cite credentials instead of declarations.
 
@@ -284,9 +297,13 @@ After Phase 71: persons are `did:webvh`, devices `did:key` (the same Ed25519 key
 
 Invitations are single use, expire, and can be voided.
 
+> **Coherence review (2026-11-20):** **Invite to Staff Project** becomes "Invite" under Share with people, and **Join Staff Project** is replaced by opening the invitation file: it opens Get Started already filled in (project, position, hub), with question 1 set to the invited section, then shows the safety code. The join secret, genesis hash and invite id stay inside the file and never appear on a main screen. Old command ids stay hidden aliases for two minor releases.
+
 ### 7.4 Device keys
 
 Signing uses the Phase 69 Ed25519 device identity in SecretStorage (`src/team/identity.ts`). Encryption uses a new X25519 key per device, also in SecretStorage, bound by an Ed25519 signature in the roster; `node:crypto` provides both. One identity per person per install (Phase 69). On a shared code-server each person keeps their own copy and install storage; SHRD-02's recovery code later backs up both keys. A second machine of the same person joins through **Add My Other Machine**, a short invite from the lead (later, L2's "Replace my device").
+
+> **Coherence review (2026-11-20):** Add My Other Machine joins **My computers** (Project Sync with the recovery code), so a person has one place for "this is also me" and one for "share with other people". The roster keeps the one device lifecycle (add, rotate, revoke, quarantine, release, section 15.2) for every device, whichever path added it, and the device key stays one per install with its X25519 key bound to it (ADR-009).
 
 ---
 
@@ -295,7 +312,7 @@ Signing uses the Phase 69 Ed25519 device identity in SecretStorage (`src/team/id
 ### 8.1 Rules
 
 1. **Everything lives in its cell**: a product with its text, versions, decisions and claims; observations by their label.
-2. **Senders filter**: a device or the hub offers a stream only to peers whose clearance at the current roster dominates the cell (declared before Phase 71, verified after).
+2. **Senders filter**: a device or the hub offers a stream only to peers whose effective clearance at the current roster dominates the cell, as decided by the one label service (declared before Phase 71, verified after).
 3. **Ciphertext elsewhere**: bodies and blobs are sealed under the cell's epoch key. A git host, a lost USB stick, or the hub for ungranted cells holds only ciphertext.
 4. **Write up, never down**: a higher cell may cite lower-cell objects; the reverse is dropped by the fold and logged.
 5. **Downgrading is a person's act**: a new product in the lower cell by a person whose role allows it, with a sanitisation note.
@@ -355,6 +372,9 @@ Mitigations for metadata: size padding (Phase 27 pads objects), optional fixed-i
 - **Compose**: a `hub` service in the relay's stack (`relay/compose.yaml`) under its own profile, so either runs without the other. Same hardening as the relay service (non-root uid, read-only root, `cap_drop: [ALL]`, `no-new-privileges`, `pids_limit`, `mem_limit`, tmpfs `/tmp`), its own volume `hub-state` and secret files. Unlike the relay's loopback port, the hub publishes its TLS port on an interface the operator chooses, because edge machines connect directly. The hub ends TLS itself so the device challenge binds to the session; a reverse proxy, if any, passes TCP through.
 - It never runs tools, never touches messaging channels, never sees persons' NEAR AI keys. It may hold one model credential for watch drafting (10.6), from a secret file.
 - It can be built before the relay phases, because it shares only the build, image and Compose patterns. The relay README gains a hub operator section (certificates, pins, backups, restore drill, upgrades); Phase 84's runbook absorbs it.
+- People see the hub as **your organization's server**. Its status page lists what it does for them (sync today; data and messaging when those services run there), so the data host and the messaging relay do not add new words.
+
+> **Coherence review (2026-11-20):** after Phase 32 ships, the logger, secrets-from-files, state folder and health check the hub copies from the relay move into one `services-kit/` used by both `relay/` and `hub/` (ADR-014, conflict K50). Phase 32 is not changed while it is being built. "Relay" means the messaging relay only.
 
 ### 10.2 The hub as a cleared member
 
@@ -401,8 +421,9 @@ A heartbeat every 5 seconds, TTL 30 seconds: person, seat, runs in progress, and
 1. **Draft only**: a hub watch reads its cell and writes `watch.match` and draft proposals (an INTREP, a revised assessment) as `actor: hub`. It cannot verdict as a person, submit, approve, reject or release; the fold refuses that as for any agent.
 2. **No tools**: no shell, web, MCP or file writes. A fixed program: evaluate, match, one model call with a fixed prompt, propose.
 3. **Rate limits**: match id = hash(watch id, sorted observation ids, window), identical on hub and edge, de-duplicated in a window; at most 4 drafts per hour per watch and 60 per hub by default; alerts digested per person.
-4. **Spend cap**: a daily cap set by the operator; at the cap watches match and alert without drafting, and say so.
-5. **Route by label**: drafting only through a provider the cell's Phase 70 route allows; a `local-only` cell needs a local model reachable from the hub, else alert only.
+4. **Spend cap**: a daily cap that is the lower of your organization's `limits.spend.hubDailyUsd` and the operator's file; at the cap watches match and alert without drafting, and say so.
+5. **Route by label**: drafting goes only to an endpoint that the same pure gate core allows: `decideRoute(label, use, endpoint, authorizations, residency, passport, clearance)` over the policy's `endpoints[]` list and model approvals, with the policy the hub loaded at `hub.admit`. A cell whose label needs this computer or your organization's own hardware needs such an endpoint reachable from the hub, else alert only. The run summary carries the same trust facts as an answer in the extension (Runs on, Verified, Allowed).
+   > **Superseded 2026-11-20 (coherence review):** the earlier wording, "a daily cap set by the operator" and "only through a provider the cell's Phase 70 route allows", is replaced by guards 4 and 5 above, so the hub never routes "by the cell's route" with no policy, passports or verifier (conflict K24).
 6. **Kill switch**, each immediate: the lead's signed `watch.killSwitch` pauses every hub watch in the project; any decision-role holder can pause one watch; the operator's file switch pauses all watches on the hub. Paused watches queue "missed while paused: N", never drop.
 7. **Visible**: each hub watch run writes a `run.summary` (matches, drafts, model, spend).
 8. **Phase 74 later**: a hub watch then runs under a person-signed run contract, with these guards as its floor.
@@ -433,10 +454,10 @@ Runs stay on the machine that runs them. Shared is a summary, signed by that dev
 
 Owner decision 1 turns one-writer-per-product into per-run coordination, not a cross-person lock.
 - A **claim** names a target (a product section by heading anchor, a register row, a step board task), holder (person, device, run, member), purpose and lease (20 minutes, renewed every 5 while working).
-- A run's lead member reads the folded claims before assigning work and skips targets others hold. Member tools: `claims.list`, `claims.take`.
-- **Concurrent claims** on one target show "double-claimed". The fold suggests a holder by fold order; the other run's lead is told and yields (`run.release`), or the person who started it decides. Editing is never blocked; the CRDT keeps both contributions.
+- A run's coordinating agent reads the folded claims before assigning work and skips targets others hold. Member tools: `claims.list`, `claims.take`.
+- **Concurrent claims** on one target show "double-claimed". The fold suggests a holder by fold order; the other run's coordinating agent is told and yields (`run.release`), or the person who started it decides. Editing is never blocked; the CRDT keeps both contributions.
 - A lease lapses when renewal is overdue by the lease plus the 10-minute skew allowance. A device back online renews an old claim only if nobody claimed the target since.
-- Inside one run, the single-writer rule stays as the run lead's assignment of parts.
+- Inside one run, the single-writer rule stays as the coordinating agent's assignment of parts.
 - Claims show on the step board and in the editor gutter ("J2 analyst agent on the J2 chief's machine is writing 'Enemy courses of action', claimed 14:02").
 
 Example: the J2 chief's run claims "Adversary COAs" and "Threat overview"; the deputy's run, starting later, reads the claims and takes "Key terrain" and "Weather effects". Both write into the same live text and each person watches the other's agents in their sections. Had both been offline and claimed one section, both see "double-claimed" on reconnect; one yields, and if both kept writing the owner tidies the attributed text before proposing a version.
@@ -455,7 +476,7 @@ Example: the J2 chief's run claims "Adversary COAs" and "Threat overview"; the d
 
 ## 13. What stays per person
 
-Chats, transcripts, prompts and tool calls (Phase 27 state); NEAR AI key, spend ledger, daily limit and model choices (SHRD-01 on shared hosts); device keys, high-water marks and session tokens (SecretStorage); personal files outside `.planning/staff/**`. Presence history is kept nowhere. Phase 27 sync is unchanged and still does not carry `.planning/staff/**`.
+Chats, transcripts, prompts and tool calls (Phase 27 state); NEAR AI key, spend ledger, daily limit and model choices (SHRD-01 on shared hosts; the daily limit and model choices narrow inside your organization's `limits.spend` and model approvals); device keys, high-water marks and session tokens (SecretStorage); personal files outside `.planning/staff/**`. Presence history is kept nowhere. Phase 27 sync is unchanged and still does not carry `.planning/staff/**`.
 
 ---
 
@@ -503,7 +524,7 @@ Every transition below gets a test (section 17).
 
 | State | Meaning | Leaves to (trigger) |
 |---|---|---|
-| `single-machine` | Not multi-user | `connecting` (Make Multi-User, Join) |
+| `single-machine` | Not multi-user | `connecting` (Share with people, or opening an invitation file) |
 | `connecting` | Opening TLS to hub or peer | `authenticating` (TLS up, pin matches); `offline` (unreachable after 10 s); `attention` (pin mismatch) |
 | `authenticating` | Signed challenge | `catching-up` (session); `refused` (not in roster, revoked, quarantined) |
 | `catching-up` | Exchanging what each lacks | `live` (heads equal); `offline` (link lost) |
@@ -641,7 +662,7 @@ Dependencies, one line each: WP-R0 is the shared contract, so nothing runs besid
 | 33 Live multi-user staff projects | WP-LIVE, Integration A | Drop A release |
 | 34 Offline transports | WP-OFF | Drop B (0.4.x) |
 | 35 Shared agent work, observations and hub watches | WP-AGT, WP-OBS, WP-WATCH, Integration B | Drop B release |
-| Later | Credentials in the roster (Phase 71); status lists and offline age; hub-to-hub federation and checkpoints into L4 roots (L5); Team Mode onto this layer (L2) | v0.5.0 and later |
+| Later | Credentials in the roster (Phase 71); status lists and offline age; hub federation and checkpoints into L4 roots (L5); Team Mode imported onto this layer (L2) | v0.5.0 and later |
 
 Phases 30 to 35 need nothing from Phases 71 to 74; Phase 70's labels (on `main`) give the cells.
 
@@ -666,6 +687,8 @@ Requirement ids (added to REQUIREMENTS.md when Phase 30 is planned):
 
 When L2 starts, Team Mode's log moves to one replica stream per team at the project base cell, per-writer logs instead of one compare-and-swap branch.
 
+> **Coherence review (2026-11-20):** until then Team Mode is frozen and its log is import-only at L2 (ADR-010). Its `Member.id` values map onto roster member ids on import (ADR-009), its `permissions.ts` matrix gives way to positions and the one delegation rule, and its `teeOnly` and `allowedModels` become narrowing inputs to `decideRoute`. After the import, people see only "Share with people"; the name "Team Mode" is not shown.
+
 | Files | Fate |
 |---|---|
 | `canonical.ts`, `signedPayload.ts`, `keyStatus.ts`, `keyRecords.ts`, `secrets.ts`, `recentMap.ts`, `src/team/identity.ts`, `keyHistory.ts`, `runGit.ts`, `cleanRemote.ts`, `syncScheduler.ts` | Reused as is |
@@ -678,15 +701,20 @@ When L2 starts, Team Mode's log moves to one replica stream per team at the proj
 
 ## 19. UX
 
-Plain words, one sentence per state, as the Phase 27 sync control and Staff Room do.
+Plain words, one sentence per state, as the Phase 27 sync control and Staff Room do. Words follow the glossary; mode-varying words (member, staff lead, roster, posting) come from `term()`.
 
-- **Turning on.** **Make This Staff Project Multi-User** (also a Staff Room button): "Where will this project sync?" with **Your organization's sync hub** (address and pin, or open the operator's invitation) or **No hub yet: git, room network or files only**. Then "You will be the staff lead. You decide who joins and what they may see." with the self-declared and not-accreditation sentences. Then "Checking this project's records... Ready: 41 products, 6 decisions, 2 registers. Nothing will be deleted." Then "This project is now shared. Invite people from the Staff Room."
-- **Inviting.** Name, seat, decision roles, clearance. "Send this file to them: J5-lead.near-staff-invite. It works once and expires on 26 November." Then in the Staff Room: "The J5 lead wants to join. Compare this code with them: river lantern seven copper north field." **Admit** or **Decline**.
-- **Presence.** Staff Room header: people with seat and a dot, green live or grey "last seen 14:02"; hover "Working on the intelligence estimate. Running 2 agents." Cursors with names in the editor; claimed sections in the gutter; who is on each step of the step board.
+- **Turning on.** **Share with people** (a step in Get Started, its checklist, a Staff Room button and Settings > My computers and sharing): "Where will this project sync?" with **Your organization's server** (open the operator's invitation, or enter its address and check the fingerprint) or **No server yet: git, room network or files only**. Then "You will be the staff lead. You decide who joins and what they may see." with the self-declared and not-accreditation sentences. Then "Checking this project's records... Ready: 41 products, 6 decisions, 2 registers. Nothing will be deleted." Then "This project is now shared. Invite people from the Staff Room."
+- **Inviting.** Name, position, what they decide, clearance. "Send this file to them: J5-lead.near-staff-invite. It works once and expires on 26 November." The person opens the file and Get Started opens already filled in. Then in the Staff Room: "The J5 lead wants to join. Compare this code with them: river lantern seven copper north field." **Admit** or **Decline**.
+- **Your other computers.** Adding your own second machine is under **My computers**, with the recovery code, not under Share with people.
+- **Presence.** Staff Room header: people with position and a dot, green live or grey "last seen 14:02"; hover "Working on the intelligence estimate. Running 2 agents." Cursors with names in the editor; claimed sections in the gutter; who is on each step of the step board.
+- **Who can see this.** Each product and register shows "Who can see this" (the people cleared for its label), never cell ids, epochs or grants.
+- **Trust.** Agent cards and products use the one trust line: Runs on (for a hub watch, "your organization's server" and then where the model ran), Verified, Allowed. Counts read "18 of 18 agents verified".
 - **Contested.** Decision queue card: "Contested: the commander approved v5 and the deputy commander rejected it at the same time. Neither applies. A new decision is needed." Both reasons; **Approve v5**, **Reject v5**.
-- **Other conflicts.** "Changed by two people at once: 'Due 1800' (J3) or 'Due 2000' (J5). Pick one." "Your run and the J5 lead's run both claimed 'Key terrain'. **Let Theirs Continue** or **Keep Mine**." "One of the J4's machines signed two different histories. Its new work is held until the staff lead looks at it."
-- **Sync status.** In the Staff Room bar and status bar, from 15.3: "Live", "Catching up (37 entries)", "Offline: working on this computer. Last synced 14:02.", "Not accepted by the hub: ask the staff lead.", "Needs attention: the hub showed an older copy of this project." Each with one action (Sync Now, Show Details, Export for...).
-- **Offline banner.** "You are offline. Your changes are kept here and will sync when the hub is back. Decisions you make now may become contested if someone else decides the same thing." Decisions since the last checkpoint show "not yet confirmed by the hub".
+- **Other conflicts.** "Changed by two people at once: 'Due 1800' (J3) or 'Due 2000' (J5). Pick one." "Your run and the J5 lead's run both claimed 'Key terrain'. **Let Theirs Continue** or **Keep Mine**." "One of the J4's computers signed two different histories. Its new work is held until the staff lead looks at it."
+- **Sync status.** In the Staff Room bar, from 15.3: "Live", "Catching up (37 changes)", "Offline: working on this computer. Last synced 14:02.", "Not accepted by your organization's server: ask the staff lead.", "Needs attention: your organization's server showed an older copy of this project." Each with one action (Sync Now, Show Details, Export for...). The status bar has one NEAR AI item (label, trust and sync, for example "Protected B · Verified · Synced"); sync detail is in its popover.
+- **Offline banner.** "You are offline. Your changes are kept here and will sync when your organization's server is back. Decisions you make now may become contested if someone else decides the same thing." Decisions since the last checkpoint show "not yet confirmed by your organization's server".
+
+> **Superseded 2026-11-20 (coherence review):** the first draft of this section used the command **Make This Staff Project Multi-User**, the option **Your organization's sync hub**, the word "seat", "Catching up (37 entries)", "hub" in sync messages and a separate sync item in the status bar. The flow and every sentence's meaning are unchanged; only the words and where it starts changed (conflicts K16, K24, K28, K37).
 
 ---
 
@@ -715,8 +743,22 @@ The owner accepted these on 2026-11-19. They are decided, and they override anyt
 
 1. **Vendoring Yjs.** Yes. Yjs 13.6.33 and `lib0` are vendored into the bundle, pinned and hash-checked like MapLibre and milsymbol, recorded in SECURITY.md as the first vendored code in the extension host itself.
 2. **Hub model credential.** A dedicated NEAR AI key of your organization for the hub, with its own daily spend cap set in the signed policy. Local models for `local-only` cells once the data platform host exists.
+   > **Coherence review (2026-11-20):** kept, and made exact: the cap is the lower of the policy's `limits.spend.hubDailyUsd` and the operator's file (guard 4), and "local models reachable from the hub" are `local` or `org-plain` entries in the policy's `endpoints[]` list that `decideRoute` allows for the cell's label.
 3. **Default hub grants.** None. The staff lead grants the hub each cell, with the trade-off sentence shown.
 4. **Edits during review.** Show "N changes since v5". After about 20 changes, prompt the product's owner to propose a new version. Never withdraw automatically.
 5. **Lost staff lead before Phase 71.** The roster names a deputy lead who can also sign membership changes, so losing one lead is not fatal. Re-founding by export and import stays as the last resort.
 6. **Way back to single-machine.** **Make a Single-Machine Copy** ships in drop A, so there is always a safe exit.
 7. **Release vehicle.** Yes: two staff collaboration drops in 0.4.x (Phases 30 to 33, then 34 and 35).
+
+---
+
+## 22. Open questions from the coherence rewrite (2026-11-20)
+
+The coherence review did not settle these. Each has a recommended default; nothing is decided here.
+
+| # | Question | Recommended default |
+|---|---|---|
+| C1 | Which policy does the hub load when the project has no organization issuer yet (single person policy, "self-signed on this computer")? | The policy the staff lead's device signed, pinned by hash at `hub.admit` and shown as "rules self-signed on the staff lead's computer"; the hub replaces it when the organization layer is pinned, after the lead confirms. |
+| C2 | Does the hub's clearance ceiling (set by the lead in `hub.admit`) also have to sit inside an organization-layer limit? | Yes: the effective hub ceiling is the meet of the lead's ceiling and an organization entry for the hub when one exists (same "narrow only" rule as people). |
+| C3 | How do existing roster entries with a `seat` become positions in Phase 33.1? | No wire change: the `seat` field is read as the position id; Phase 33.1 adds position entries that cite it, and decision roles on a member are folded as that position's decisions. |
+| C4 | Where does **Make a Single-Machine Copy** (owner decision 6) live once setup commands fold into Get Started? | An action under Share with people in the Staff Room and Settings > My computers and sharing, with the old command id kept as a hidden alias. |
