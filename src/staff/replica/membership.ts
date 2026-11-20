@@ -55,6 +55,7 @@ import type { InviteLead, InvitePayload, InviteRefusal, JoinRequestPayload } fro
 import type { ProjectOutput } from '../../domain/replica/projectFold';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
+import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
 import type { MemberRecord } from '../../domain/replica/rosterMembers';
@@ -70,6 +71,8 @@ import { PROJECT_REFUSALS_HOST, ReplicaProject, ReplicaProjectError, anchorOf, g
 import type { ProjectRefused, ReplicaProjectDeps } from './replicaProject';
 import { parseSealed } from './store';
 
+/** Added to what naming a deputy or handing over the lead says when that gave the person the legacy cell (D-20). */
+export const LEGACY_GIVEN_TEXT = 'They were also given the part of the project that holds its history from before it was shared.';
 /** How long an invitation is open when the lead does not say (D-14). */
 export const INVITE_DEFAULT_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -162,7 +165,7 @@ function foldMessage(reason: string): string {
 }
 
 const now = (deps: ReplicaProjectDeps): Date => deps.now?.() ?? new Date();
-const headOf = (roster: RosterState): { hash: string; position: number } => ({ hash: roster.positions[roster.positions.length - 1], position: roster.positions.length - 1 });
+export const headOf = (roster: RosterState): { hash: string; position: number } => ({ hash: roster.positions[roster.positions.length - 1], position: roster.positions.length - 1 });
 
 /** Runs a flow, turning a store refusal on refresh into a plain result instead of an exception. */
 async function guarded<T extends MembershipResult>(work: () => Promise<T>): Promise<T | MembershipResult> {
@@ -176,19 +179,24 @@ async function guarded<T extends MembershipResult>(work: () => Promise<T>): Prom
 
 // ---- clearance at write time (D-22) --------------------------------------------------------------------------------------------------------------
 
-interface CellInfo {
+export interface CellInfo {
   cell: string;
   base: boolean;
   /** The label read from a grant this device can open; undefined for the base cell or when it cannot be read here. */
   label?: Label;
+  /** The labels of the lead-only legacy cell (D-20), read from its sealed legacy form; such a cell has no single label. */
+  legacy?: readonly Label[];
   /** The label as sealed, to seal again into new grants. */
   raw?: unknown;
   /** False for a labelled cell whose label this device cannot open: nobody is counted cleared for it here (fail closed). */
   known: boolean;
 }
 
-/** The label of a cell, opened from any grant of it this device holds the epoch key for. Undefined when none opens. */
-function cellLabel(roster: RosterState, keys: DeviceKeyRing, cell: string, scales: ScaleTable): { label: Label; raw: unknown } | undefined {
+/**
+ * The label of a cell, opened from any grant of it this device holds the epoch key for. The lead-only legacy cell (D-20) seals the legacy form, a set
+ * of labels, read first: it gives legacy and no label. Undefined when none opens.
+ */
+function cellLabel(roster: RosterState, keys: DeviceKeyRing, cell: string, scales: ScaleTable): { label?: Label; legacy?: Label[]; raw: unknown } | undefined {
   const record = roster.cells.cells.get(cell);
   if (record === undefined) return undefined;
   const grants = [...record.grants].sort((a, b) => b.epoch - a.epoch);
@@ -197,6 +205,8 @@ function cellLabel(roster: RosterState, keys: DeviceKeyRing, cell: string, scale
     const key = keys.epochKey(cell, grant.epoch);
     if (key === undefined) continue;
     const raw = openLabel(key, cell, grant.epoch, grant.grant.labelSealed);
+    const legacy = raw === undefined ? undefined : readLegacyCellLabel(raw, scales);
+    if (legacy !== undefined) return { legacy, raw };
     const parsed = raw === undefined ? undefined : parseLabel(raw, scales);
     if (parsed !== undefined && parsed.ok) return { label: parsed.value, raw };
   }
@@ -204,7 +214,7 @@ function cellLabel(roster: RosterState, keys: DeviceKeyRing, cell: string, scale
 }
 
 /** Every cell the roster has at the position, with its label as this device can read it. */
-function cellsAt(roster: RosterState, keys: DeviceKeyRing, position: number, scales: ScaleTable): CellInfo[] {
+export function cellsAt(roster: RosterState, keys: DeviceKeyRing, position: number, scales: ScaleTable): CellInfo[] {
   const project = roster.anchor.project;
   const cells: CellInfo[] = [];
   for (const cell of [...roster.cells.cells.keys()].sort()) {
@@ -214,7 +224,8 @@ function cellsAt(roster: RosterState, keys: DeviceKeyRing, position: number, sca
       continue;
     }
     const label = cellLabel(roster, keys, cell, scales);
-    cells.push(label === undefined ? { cell, base: false, known: false } : { cell, base: false, label: label.label, raw: label.raw, known: true });
+    if (label?.legacy !== undefined) cells.push({ cell, base: false, legacy: label.legacy, raw: label.raw, known: true });
+    else cells.push(label?.label === undefined ? { cell, base: false, known: false } : { cell, base: false, label: label.label, raw: label.raw, known: true });
   }
   return cells;
 }
@@ -227,9 +238,9 @@ function clearanceOf(value: unknown, scales: ScaleTable): Clearance | undefined 
   return parsed.ok ? parsed.value : undefined;
 }
 
-interface Gate { scales: ScaleTable; context: DominanceContext }
+export interface Gate { scales: ScaleTable; context: DominanceContext }
 
-function gateOf(shared: SharedProjectHost): Gate {
+export function gateOf(shared: SharedProjectHost): Gate {
   const scales = shared.scales ?? SCALE_PRESETS;
   return { scales, context: { scales, mappings: shared.mappings ?? [], now: now(shared.deps).getTime() } };
 }
@@ -238,9 +249,17 @@ function gateOf(shared: SharedProjectHost): Gate {
  * Is the member cleared for the cell? Every member is on the base cell. A labelled cell this device cannot read clears nobody. A member with a
  * declared clearance is cleared when it dominates the label (Phase 70, all five conditions). A member with no declared clearance (only the founding
  * lead, whose genesis names none) is cleared for the cells one of its devices already holds, so the lead is never dropped from a cell it founded.
+ * The legacy cell (D-20) clears only the lead or the deputy at the position (leadOrDeputy), and then only with a declared clearance that dominates
+ * every label in it (or, with none declared, when a device of theirs already holds it): admission, an ordinary member and a hub never get it.
  */
-function clearedFor(clearance: unknown, info: CellInfo, holds: boolean, gate: Gate): boolean {
+export function clearedFor(clearance: unknown, info: CellInfo, holds: boolean, gate: Gate, leadOrDeputy = false): boolean {
   if (info.base) return true;
+  if (info.legacy !== undefined) {
+    if (!info.known || !leadOrDeputy) return false;
+    if (clearance === undefined) return holds;
+    const declared = clearanceOf(clearance, gate.scales);
+    return declared !== undefined && info.legacy.every((label) => dominates(declared, label, gate.context));
+  }
   if (!info.known || info.label === undefined) return false;
   if (clearance === undefined) return holds;
   const parsed = clearanceOf(clearance, gate.scales);
@@ -254,22 +273,24 @@ function memberHolds(roster: RosterState, member: string, cell: string, position
 }
 
 /** What a change does to the members, for computing who is cleared after it before it is written. */
-interface Change { without?: ReadonlySet<string>; clearance?: { member: string; value: unknown } }
+export interface Change { without?: ReadonlySet<string>; clearance?: { member: string; value: unknown } }
 
 /** The devices cleared for the cell at the position, after the change: person devices of cleared members, and hub devices granted the cell. */
-function clearedDevices(roster: RosterState, info: CellInfo, position: number, gate: Gate, change: Change = {}): string[] {
+export function clearedDevices(roster: RosterState, info: CellInfo, position: number, gate: Gate, change: Change = {}): string[] {
   const writers: string[] = [];
   for (const versions of roster.members.devices.values()) {
     const device = versions.find((record) => record.from <= position && (record.until === undefined || position < record.until));
     if (device === undefined || change.without?.has(device.writer)) continue;
     if (device.kind === 'hub') {
-      if (hubCellsAt(roster.members, device.member, position)?.includes(info.cell) === true) writers.push(device.writer);
+      // The hub is never on the legacy cell (D-64), whatever hub.grant says.
+      if (info.legacy === undefined && hubCellsAt(roster.members, device.member, position)?.includes(info.cell) === true) writers.push(device.writer);
       continue;
     }
     const record = memberAt(roster.members, device.member, position);
     if (record === undefined) continue;
     const clearance = change.clearance?.member === record.member ? change.clearance.value : record.clearance;
-    if (clearedFor(clearance, info, memberHolds(roster, record.member, info.cell, position), gate)) writers.push(device.writer);
+    const leadOrDeputy = leadAt(roster, position) === record.member || deputyAt(roster, position) === record.member;
+    if (clearedFor(clearance, info, memberHolds(roster, record.member, info.cell, position), gate, leadOrDeputy)) writers.push(device.writer);
   }
   return writers.sort();
 }
@@ -293,6 +314,7 @@ export function cellOrderHook(options: { scales?: ScaleTable; mappings?: readonl
       const to = labelOf(cited);
       if (to === null) return true;
       const from = labelOf(citing);
+      // A legacy cell has no single label, so it answers no either way; nothing cites it.
       if (from === null || from === undefined || to === undefined) return false;
       return dominates({ scale: from.scale, level: from.level, compartments: from.compartments, releasability: from.releasability }, to, context);
     };
@@ -302,7 +324,7 @@ export function cellOrderHook(options: { scales?: ScaleTable; mappings?: readonl
 // ---- the writer's checks and the roster's answer -------------------------------------------------------------------------------------------------
 
 /** The refusal for a roster change this device cannot make now, or undefined. */
-function writerProblem(shared: SharedProjectHost, roster: RosterState): MembershipResult | undefined {
+export function writerProblem(shared: SharedProjectHost, roster: RosterState): MembershipResult | undefined {
   const head = headOf(roster);
   if (!isRosterWriterAt(roster, shared.project.deviceWriter, head.position)) return refuse('not-a-roster-writer');
   if (roster.pending.length > 0) return refuse('roster-split');
@@ -317,7 +339,7 @@ async function applied(shared: SharedProjectHost, hash: string): Promise<{ roste
   return found === undefined ? refuse('change-not-applied') : refused(found.reason, foldMessage(found.reason));
 }
 
-async function append(shared: SharedProjectHost, kind: string, data: unknown, roster?: string): Promise<{ hash: string; roster: RosterState } | MembershipResult> {
+export async function append(shared: SharedProjectHost, kind: string, data: unknown, roster?: string): Promise<{ hash: string; roster: RosterState } | MembershipResult> {
   const written = await shared.project.appendOwn(kind, data, roster === undefined ? {} : { roster });
   if (isProjectRefused(written)) return fromProject(written);
   const outcome = await applied(shared, written.hash);
@@ -813,13 +835,14 @@ interface GrantPlan { cell: string; epochs: Array<{ epoch: number; key: Buffer }
 
 /**
  * The grants a device needs for every cell its member is cleared for, with every epoch of each (D-45), and their keys from this device's ring. A
- * cleared cell with an epoch key this device does not hold is no-grant-key: refused before anything is written.
+ * cleared cell with an epoch key this device does not hold is no-grant-key: refused before anything is written. leadOrDeputy says the member is the
+ * lead or the deputy (the legacy cell rule, D-20); it is false at admission, so admission never grants the legacy cell.
  */
-function grantPlans(shared: SharedProjectHost, roster: RosterState, member: { clearance: unknown; holdsMember?: string }, cells: readonly CellInfo[], gate: Gate, position: number, skip: (cell: string) => boolean = () => false): GrantPlan[] | MembershipResult {
+function grantPlans(shared: SharedProjectHost, roster: RosterState, member: { clearance: unknown; holdsMember?: string; leadOrDeputy?: boolean }, cells: readonly CellInfo[], gate: Gate, position: number, skip: (cell: string) => boolean = () => false): GrantPlan[] | MembershipResult {
   const plans: GrantPlan[] = [];
   for (const info of cells) {
     const holds = member.holdsMember !== undefined && memberHolds(roster, member.holdsMember, info.cell, position);
-    if (!clearedFor(member.clearance, info, holds, gate) || skip(info.cell)) continue;
+    if (!clearedFor(member.clearance, info, holds, gate, member.leadOrDeputy === true) || skip(info.cell)) continue;
     const epochs: Array<{ epoch: number; key: Buffer }> = [];
     for (const item of epochsAt(roster.cells, info.cell, position)) {
       const key = shared.project.keys.epochKey(info.cell, item.epoch);
@@ -1439,6 +1462,37 @@ export async function describeRosterBranches(shared: SharedProjectHost): Promise
   });
 }
 
+/**
+ * After a deputy.name or lead.handover entry: gives each person device of the member that does not hold it every epoch of each legacy cell (D-20) the
+ * member is now cleared for, when this device holds the keys. The grants name that entry's roster while this device is still a roster writer there
+ * (naming a deputy), and otherwise the roster the entry cites (a handover: the fold places a grant only from a roster writer at the roster it names).
+ * The cells given, sorted; none when this device cannot give them (the role change stands, and a device of the lead or the deputy that holds the keys
+ * can give them later).
+ */
+async function giveLegacy(shared: SharedProjectHost, written: { hash: string; roster: RosterState }, cited: string, member: string): Promise<string[]> {
+  const { roster } = written;
+  const position = roster.positionOf.get(written.hash);
+  if (position === undefined) return [];
+  const at = isRosterWriterAt(roster, shared.project.deviceWriter, position) ? written.hash : cited;
+  if (roster.positionOf.get(at) === undefined) return [];
+  const gate = gateOf(shared);
+  const legacy = cellsAt(roster, shared.project.keys, position, gate.scales).filter((info) => info.legacy !== undefined);
+  if (legacy.length === 0) return [];
+  const record = memberAt(roster.members, member, position);
+  if (record === undefined) return [];
+  const leadOrDeputy = leadAt(roster, position) === member || deputyAt(roster, position) === member;
+  const given = new Set<string>();
+  for (const device of devicesOfMemberAt(roster.members, member, position).filter((item) => item.kind === 'person')) {
+    const holding = (cell: string): boolean => (granteesAt(roster.cells, cell, position, () => true) ?? []).includes(device.writer);
+    const plans = grantPlans(shared, roster, { clearance: record.clearance, holdsMember: member, leadOrDeputy }, legacy, gate, position, holding);
+    if (isResult(plans)) continue;
+    const stored = await writeGrants(shared, plans, { writer: device.writer, x25519: device.x25519 }, at);
+    if (stored !== undefined) continue;
+    for (const plan of plans) given.add(plan.cell);
+  }
+  return [...given].sort();
+}
+
 /** Names the deputy lead (D-10): only the lead may; the deputy is refused with the roster's sentence. */
 export function nameDeputy(shared: SharedProjectHost, member: string): Promise<MembershipResult> {
   return guarded(async () => {
@@ -1453,7 +1507,8 @@ export function nameDeputy(shared: SharedProjectHost, member: string): Promise<M
     if (member === leadAt(roster, head.position)) return refused('names-the-lead', ROSTER_REFUSALS['names-the-lead']);
     const written = await append(shared, 'deputy.name', { member });
     if (isResult(written)) return written;
-    return done(`${record.name} is now the deputy lead.`, { member });
+    const given = await giveLegacy(shared, written, head.hash, member);
+    return done(`${record.name} is now the deputy lead.${given.length === 0 ? '' : ` ${LEGACY_GIVEN_TEXT}`}`, { member, ...(given.length === 0 ? {} : { granted: given }) });
   });
 }
 
@@ -1476,6 +1531,7 @@ export function handOverLead(shared: SharedProjectHost, input: { to: string; rea
     if (input.to === lead) return refused('names-the-lead', ROSTER_REFUSALS['names-the-lead']);
     const written = await append(shared, 'lead.handover', { to: input.to, reason: input.reason });
     if (isResult(written)) return written;
-    return done(`${record.name} is now the staff lead.`, { member: input.to });
+    const given = await giveLegacy(shared, written, head.hash, input.to);
+    return done(`${record.name} is now the staff lead.${given.length === 0 ? '' : ` ${LEGACY_GIVEN_TEXT}`}`, { member: input.to, ...(given.length === 0 ? {} : { granted: given }) });
   });
 }
