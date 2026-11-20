@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
@@ -303,13 +303,55 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 35 to break down)
 
+### Guided setup: viable options, a plain recommendation and local models (Phases 32.1 and 32.2, added 2026-11-20)
+
+Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agreed shape of 2026-11-20: setup asks about the work in plain words (role; personal information; Protected A, B or classified markings; client information under a contract security clause; must it stay in Canada), turns the answers into a project label that the signed policy's routing table then decides on, so the guide is a front door to the gate and never a second gate; it offers only options that are viable on that machine (detected, configured, allowed by the policy, and answering a test request), never local models where no local server answers; it gives one recommendation with a one-sentence reason and greys ruled-out options with the reason; the policy wins, and when answers need what it does not allow the guide says who to ask and offers no workaround; Protected C and classified work get no recommendation; changes are previewed before Apply, re-runs show only differences, and answers are recorded. Then each role lands where it works, and with the data platform the guide offers the matching one-click connections. A local model manager shows what the machine can run (unified memory on Strix Halo and GB10 first), installs Western models from passports with verified hashes and licences, and assigns tiers. Both phases ship in the 0.4.x line after Phase 32 and before Phases 36 and 37, so Cohere's options arrive through the guide; they need only the Phase 70 gate, may run beside Phases 33 to 35 (different files), and share one contract before running in parallel. The data-connection step (GUIDE-09) lands in Phase 89. Requirement ids GUIDE-01 to GUIDE-09 and LMOD-01 to LMOD-07 are defined in the design (section 16) and are added to REQUIREMENTS.md when Phase 32.1 is planned. Open owner decisions D1 to D11 are in the design (section 17), each with a default.
+
+### Phase 32.1: Guided setup with viable options and a plain recommendation (INSERTED)
+**Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
+**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records). Phase 74.1 not required: the guide reads the shipped passport rows as data until it lands.
+**Inserted**: 2026-11-20 at the owner's request.
+**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08
+**Success Criteria** (what must be TRUE):
+  1. On a laptop with no local AI and a NEAR AI key, a developer answering "internal work, Canada No" is recommended NEAR AI private hardware with its reason, and local appears only under "Not available here" with the hardware reason. (GUIDE-01, GUIDE-03, GUIDE-04)
+  2. With a local server serving a passported model, an analyst answering "sensitive personal information" gets the project labelled Protected B and is recommended this computer; NEAR AI is greyed with the routing sentence; a hosted option appears for Protected B only when the policy records an authorization for it. (GUIDE-02, GUIDE-04, GUIDE-05)
+  3. Secret, Protected C, or contract work without written Contract Security Program approval stops with a plain sentence and no option, and the label is applied. (GUIDE-02)
+  4. A policy that locks Canada greys NEAR AI and non-Canadian vaults with the residency reason; nothing outside the verified policy is ever offered, and no policy edit or label lowering is suggested. (GUIDE-06)
+  5. Check answers lists what will change before Apply; a re-run shows only differences and never lowers a label; a signed record holds the answers, viability snapshot, policy hash, options, recommendation and choice. (GUIDE-07)
+  6. Staff officers land in the Staff Room with their section's team and developers in chat with the project team; the path works by keyboard and screen reader, and nothing animates with reduced motion; existing profiles and discovery answers work unchanged. (GUIDE-08)
+**Research flags**: (1) Open owner decisions D1 to D4, D6, D7 and D9. (2) Exact probe ports and signature endpoints per local server, checked against current releases. (3) Mapping of personal information to Protected A or B to be confirmed by your organization's security officer before rollout.
+**Undo cost**: Low to medium: an optional `onboarding` bundle key and a `setupGuide` entry in `project.json`.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 32.1 to break down)
+
+### Phase 32.2: Local model manager (INSERTED)
+**Goal**: On the appliance or any capable computer, a person sees what local models the machine can run and how fast, installs the recommended Western models with verified hashes and accepted licences, assigns them to the tiers, and the guide then offers local AI as a viable option.
+**Depends on**: Phase 32.1's shared contract (device class, server adapters, viability); may run beside the rest of 32.1. Phase 85 later sets the appliance's default server and replaces estimates with measurements.
+**Inserted**: 2026-11-20 at the owner's request.
+**Requirements**: LMOD-01, LMOD-02, LMOD-03, LMOD-04, LMOD-05, LMOD-06, LMOD-07
+**Success Criteria** (what must be TRUE):
+  1. On a Strix Halo machine the page shows the unified memory the GPU can use (or how to raise it), fit bands and speed estimates per model and quantization, and a benchmark replaces the estimates with measured numbers. (LMOD-01, LMOD-03)
+  2. Models installed through Ollama and through a llama.cpp models folder are verified against the signed catalogue's hash; a changed file is rejected and never reaches the server; the licence is shown and accepted first. (LMOD-02, LMOD-05)
+  3. Assigning models to the fast, standard and deep tiers passes the test and tool-calling requests, and the guide then shows local AI as viable. (LMOD-04, LMOD-06)
+  4. PRC-origin and passport-less models install only into the research lane's list and never appear in a tier selector; removal asks first and names the tiers affected; every action is recorded. (LMOD-04, LMOD-05, LMOD-07)
+**Research flags**: (1) Open owner decisions D5, D8, D10 and D11. (2) Whether Ollama's model layer digest equals the GGUF file's sha256. (3) Unified memory figures on Strix Halo (GTT limits) and GB10 (`nvidia-smi` reports no memory) from Phase 85.
+**Undo cost**: Low: a catalogue inside `ceiling.models` and the manager's own folder.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 32.2 to break down)
+
 ### Cohere Model Vault: a third inference endpoint (Phases 36 and 37, added 2026-11-20)
 
 Design: `.planning/research/cohere-model-vault/DESIGN.md`. Owner decisions of 2026-11-20 ("go with your recommendations"): Cohere Model Vault becomes a third provider beside NEAR AI and local, and project setup offers any combination; an Encrypted vault counts as attested only while Cohere's pinned proxy and the extension's own check both pass; a Standard vault is its own class, "sovereign region, not attested", never counted as private hardware; no vault receives Protected B without a signed authorization in your organization's policy (assessment reference, named person, expiry), and classified content never goes to a vault; cost control is manual until Cohere publishes a lifecycle API. Both phases ship in the 0.4.x line after Phase 32: they need only the Phase 70 gate on `main`, so they do not wait for Phases 71 to 74; Phase 74.1 enforces the vault model passports when it lands and Phase 74.2 reuses Phase 37's transport and verdict shapes. Phase 36 may run beside Phases 33 to 35 (different files). Requirement ids CVLT-01 to CVLT-11 are defined in the design (section 14) and are added to REQUIREMENTS.md when Phase 36 is planned. Open owner decisions D1 to D6 are in the design (section 15), each with a default.
 
 ### Phase 36: Cohere Model Vault provider, sovereign-region class and cost control
 **Goal**: Your organization can add Cohere vaults beside NEAR AI and local, each request goes only where the label, use tier and policy allow, a Standard vault is never treated as private hardware, Protected B reaches a vault only with a recorded authorization, and vault running costs are visible and limited.
-**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (the bundle, labels, routing, trust badge). Phase 74.1 not required: its passport check covers vault models when it lands.
+**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (the bundle, labels, routing, trust badge). Phase 74.1 not required: its passport check covers vault models when it lands. Phase 32.1: vaults are offered as guide options (Standard, Encrypted) through its option registry, and the vault readiness check is their viability check (`.planning/research/guided-onboarding/DESIGN.md`, section 12).
 **Requirements**: CVLT-01, CVLT-02, CVLT-03, CVLT-04, CVLT-05, CVLT-06, CVLT-07
 **Success Criteria** (what must be TRUE):
   1. A person ticks NEAR AI, local and a Canadian Standard vault in setup and adds the key once; a chat at `org/Public` or `org/Internal` can use a model on the vault, while a label outside the vault's signed ceiling is refused for it with a plain sentence and nothing is sent. (CVLT-01, CVLT-02, CVLT-03)
@@ -895,7 +937,7 @@ Plans:
 ### Phase 89: Microsoft 365 connector with one-click connection
 **Goal**: An administrator connects Microsoft 365 with one sign-in, and SharePoint, OneDrive and Exchange appear in the data map, then backfill and stay in sync, with their permissions and labels.
 **Depends on**: Phases 86 and 88; Phase 73 (the broker holds the certificate).
-**Requirements**: DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, CONN-01, CONN-02
+**Requirements**: DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, CONN-01, CONN-02, GUIDE-09 (the guided setup's data-connection step, `.planning/research/guided-onboarding/DESIGN.md` section 11)
 **Success Criteria** (what must be TRUE):
   1. On the test tenant, an administrator signs in once and setup creates your organization's own app registration with a certificate generated on the host and admin consent; no shared app is used, nothing of the sign-in is kept after setup, and the sites, drives and mailboxes appear as a `proposed` source in inventory-only mode. (CONN-01, DATA-09)
   2. A backfill completes and the source reaches `live`, and a file's permission change hides the file from a removed person before their next query. (DATA-10, DATA-11)
@@ -1464,6 +1506,8 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
+| 32.1. Guided setup with viable options and a plain recommendation | 0/TBD | Not started (after Phase 32, before Phase 36) | - |
+| 32.2. Local model manager | 0/TBD | Not started (after 32.1's shared contract) | - |
 | 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phase 32; may run beside 33 to 35) | - |
 | 37. Cohere Encrypted Vault as an attested endpoint | 0/TBD | Not started (after Phase 36) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
