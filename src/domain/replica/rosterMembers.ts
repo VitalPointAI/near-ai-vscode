@@ -9,7 +9,7 @@
 // kind. A kind with no rule yet is refused roster-kind-pending, never applied.
 import { verifySignature } from '../team/canonical';
 import { x25519BindingBytes } from './cellKeys';
-import { isSlot } from './clientIds';
+import { MAX_SLOT, isSlot } from './clientIds';
 import type { VerifiedEntry } from './verify';
 
 export const MEMBER_REFUSALS = {
@@ -189,9 +189,11 @@ export function hubSignerAt(state: MembersState, writer: string, position: numbe
 
 const refused = (reason: MemberRefusal | 'roster-kind-pending'): MemberApplyOutcome => ({ status: 'refused', reason });
 
-// Why a new device cannot be added at this point, or undefined. The X25519 key must be bound by the device's own Ed25519 signature (D-19) and the slot
-// must be in range and never given before (D-41).
+// Why a new device cannot be added at this point, or undefined. A slot must be left, the slot must be in range and never given before (D-41), and the
+// X25519 key must be bound by the device's own Ed25519 signature over x25519BindingBytes (D-19).
 function newDeviceProblem(state: MembersState, device: DeviceDescriptor): MemberRefusal | undefined {
+  // Every slot ever given counts, revoked or not, so the project has at most 4095 devices in its whole life.
+  if (state.slots.size >= MAX_SLOT) return 'device-limit';
   if (!isSlot(device.slot)) return 'slot-out-of-range';
   if (state.slots.has(device.slot)) return 'slot-in-use';
   if (!verifySignature(x25519BindingBytes(device.x25519, device.writer), device.x25519Sig, device.publicKey)) return 'bad-binding';
@@ -351,6 +353,44 @@ function applyRemove(state: MembersState, data: RemoveData, ctx: MemberApplyCont
   return { status: 'applied' };
 }
 
+interface RotateData { member: string; from: string; device: DeviceDescriptor }
+interface RevokeData { member: string; writer: string }
+
+// The member's device in force at the cited roster, or undefined when the roster does not have it for that member.
+function deviceOf(state: MembersState, member: string, writer: string, cited: number): DeviceRecord | undefined {
+  const record = deviceAt(state, writer, cited);
+  return record !== undefined && record.member === member ? record : undefined;
+}
+
+// device.rotate (DESIGN 15.2 active -> rotated): the old writer is admitted at rosters before this position and not from it; the new device, with its
+// own slot and binding, from it on (D-20). The old slot stays given.
+function applyRotate(state: MembersState, data: RotateData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const old = deviceOf(state, data.member, data.from, ctx.position - 1);
+  if (old === undefined) return refused('device-unknown');
+  if (state.devices.has(data.device.writer)) return refused('device-exists');
+  const problem = newDeviceProblem(state, data.device);
+  if (problem !== undefined) return refused(problem);
+  old.until = ctx.position;
+  addDevice(state, data.member, data.device, old.kind, ctx.position);
+  return { status: 'applied' };
+}
+
+// device.revoke (DESIGN 15.2 active -> revoked, quarantined -> revoked). Revoking the lead's last device would leave no device able to write the
+// roster, so the lead's own devices may not do it; the deputy may, so a lost or compromised lead device can be cut off (D-09, D-48).
+function applyRevoke(state: MembersState, entry: VerifiedEntry, data: RevokeData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const cited = ctx.position - 1;
+  const target = deviceOf(state, data.member, data.writer, cited);
+  if (target === undefined) return refused('device-unknown');
+  if (target.member === ctx.lead) {
+    const leadDevices = devicesOfMemberAt(state, ctx.lead, cited).filter((device) => device.kind === 'person');
+    const signer = deviceAt(state, entry.header.writer, cited);
+    const byDeputy = ctx.deputy !== undefined && signer !== undefined && signer.member === ctx.deputy;
+    if (leadDevices.length <= 1 && !byDeputy) return refused('last-lead-device');
+  }
+  target.until = ctx.position;
+  return { status: 'applied' };
+}
+
 // Applies one member, device, hub or invite kind. The data was checked against its closed schema at verification. Validates first and changes the
 // state only when the outcome is applied.
 export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx: MemberApplyContext): MemberApplyOutcome {
@@ -367,6 +407,10 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
       return applyVoid(state, entry.data as VoidData, ctx);
     case 'device.add':
       return applyDeviceAdd(state, entry, entry.data as DeviceAddData, ctx);
+    case 'device.rotate':
+      return applyRotate(state, entry.data as RotateData, ctx);
+    case 'device.revoke':
+      return applyRevoke(state, entry, entry.data as RevokeData, ctx);
     default:
       // member.update, member.remove, device.*, hub.* and invite.void: 31-14 adds their rules.
       return refused('roster-kind-pending');

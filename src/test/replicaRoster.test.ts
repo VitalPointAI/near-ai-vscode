@@ -8,8 +8,11 @@ import test from 'node:test';
 import { joinSecretHash } from '../domain/replica/invite';
 import { ORIGIN_ROSTER, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
-import { MEMBER_REFUSALS, inviteAt } from '../domain/replica/rosterMembers';
-import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld } from './helpers/replicaRosterWorld';
+import { clientIdOf, MAX_SLOT } from '../domain/replica/clientIds';
+import { MEMBER_REFUSALS, applyGenesisLead, applyMemberEntry, createMembersState, inviteAt } from '../domain/replica/rosterMembers';
+import type { MemberApplyOutcome, MembersState } from '../domain/replica/rosterMembers';
+import type { VerifiedEntry } from '../domain/replica/verify';
+import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_AT, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import type { Written } from './helpers/replicaWorld';
 
@@ -273,4 +276,158 @@ test('Add My Other Machine (D-18): a device.add naming an invite made for anothe
   assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(5), invite: 'inv-nobody' })), 'invite-unknown');
   // A forMember invite for a member the roster does not have is refused when it is written.
   assert.equal(refusalOf(line, line.tryEntry('member.invite', inviteData('inv-ghost', { forMember: 'mbr-ghost' }))), 'member-unknown');
+});
+
+// ---- devices (D-19, D-20, D-41) ----
+
+// An entry as the driver hands it to the members module, for calling the module directly: only the fields the module reads.
+function bareEntry(kind: string, data: unknown, signer: string, at: string = ROSTER_AT): VerifiedEntry {
+  return { hash: 'e'.repeat(64), header: { writer: signer }, body: { kind, at }, data, member: '' } as unknown as VerifiedEntry;
+}
+
+const reasonOf = (outcome: MemberApplyOutcome): string => (outcome.status === 'applied' ? 'applied' : outcome.reason);
+
+test('15.2 (none) -> active: admit and device.add each make an active device with its slot; clientIdOwner and deviceEncryptionKey answer for it', () => {
+  const { line, jo, admit } = lineWithJo();
+  const laptop = line.world.device('JO-LAPTOP', JO);
+  const added = line.next('device.add', { member: JO, device: laptop.descriptor(5) });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  const view = rosterView(state);
+  assert.equal(view.clientIdOwner?.(clientIdOf(2, 7), admit.hash), jo.writer);
+  assert.equal(view.deviceEncryptionKey?.(jo.writer, admit.hash), jo.x25519);
+  assert.equal(view.clientIdOwner?.(clientIdOf(5, 0), added.hash), laptop.writer);
+  assert.equal(view.clientIdOwner?.(clientIdOf(5, 0), admit.hash), undefined);
+  assert.equal(view.deviceEncryptionKey?.(laptop.writer, added.hash), laptop.x25519);
+  assert.equal(view.deviceEncryptionKey?.(laptop.writer, admit.hash), undefined);
+  assert.equal(view.deviceKey(laptop.writer)?.member, JO);
+  // A device for a member the roster does not have is refused.
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: 'mbr-nobody', device: line.world.device('X', 'mbr-nobody').descriptor(9) })), 'member-unknown');
+});
+
+test('device refusals: bad-binding, slot-in-use (even of a revoked device), slot-out-of-range and device-exists, through the fold', () => {
+  const { line, jo } = lineWithJo();
+  const laptop = line.world.device('JO-LAPTOP', JO);
+  // The laptop's descriptor carrying Jo's binding signature: the X25519 key is not bound by the laptop's own signing key (T-31-41).
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: { ...laptop.descriptor(5), x25519Sig: jo.x25519Sig } })), 'bad-binding');
+  // Another device's X25519 key with this device's signature over it does not verify either.
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: { ...laptop.descriptor(5), x25519: jo.x25519 } })), 'bad-binding');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(2) })), 'slot-in-use');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(1) })), 'slot-in-use');
+  const { slot: _slot, ...noSlot } = laptop.descriptor(5);
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: noSlot })), 'slot-out-of-range');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: jo.descriptor(5) })), 'device-exists');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: line.world.lead.descriptor(5) })), 'device-exists');
+  // A slot outside 1 to 4095 never reaches the module: the wire schema refuses it first.
+  for (const slot of [0, MAX_SLOT + 1]) {
+    const attempt = line.tryEntry('device.add', { member: JO, device: laptop.descriptor(slot) });
+    assert.equal(attempt.state.positions[attempt.state.positions.length - 1], line.head);
+    assert.ok(attempt.state.refused.some((item) => item.hash === attempt.written.hash), String(slot));
+  }
+  // The slot of a revoked device is never given again (P-31-19).
+  line.next('device.add', { member: JO, device: laptop.descriptor(5) });
+  line.next('device.revoke', { member: JO, writer: laptop.writer });
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: line.world.device('JO-TABLET', JO).descriptor(5) })), 'slot-in-use');
+  // Nor may the revoked device come back under a new slot.
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(6) })), 'device-exists');
+});
+
+test('slot-out-of-range in the module for slot 0 and 4096, and device-limit for a 4096th device once every slot was given (D-41)', () => {
+  const lead = rosterDevice('LEAD', 'mbr-lead');
+  const state: MembersState = createMembersState({ lead: { member: 'mbr-lead', writer: lead.writer, publicKey: lead.publicKey, x25519: lead.x25519 } });
+  assert.equal(applyGenesisLead(state, lead.descriptor(1), 1).status, 'applied');
+  const add = (device: { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot?: number }, position: number): string =>
+    reasonOf(applyMemberEntry(state, bareEntry('device.add', { member: 'mbr-lead', device }, lead.writer), { position, lead: 'mbr-lead' }));
+  const probe = rosterDevice('PROBE', 'mbr-lead');
+  assert.equal(add(probe.descriptor(0), 2), 'slot-out-of-range');
+  assert.equal(add(probe.descriptor(MAX_SLOT + 1), 2), 'slot-out-of-range');
+  // Slots 2 to 4095, one device each, through the same rule (each binding checked).
+  for (let slot = 2; slot <= MAX_SLOT; slot += 1) assert.equal(add(rosterDevice(`SLOT-${slot}`, 'mbr-lead').descriptor(slot), slot), 'applied', String(slot));
+  assert.equal(state.slots.size, MAX_SLOT);
+  assert.equal(add(probe.descriptor(MAX_SLOT), MAX_SLOT + 1), 'device-limit');
+  assert.equal(add(probe.descriptor(2), MAX_SLOT + 1), 'device-limit');
+  assert.equal(state.devices.has(probe.writer), false);
+});
+
+test('15.2 active -> rotated: device.rotate ends the old writer at the rotation and starts the new one there with a new slot', () => {
+  const { line, jo, admit } = lineWithJo();
+  const fresh = line.world.device('JO-NEW', JO);
+  assert.equal(refusalOf(line, line.tryEntry('device.rotate', { member: JO, from: fresh.writer, device: fresh.descriptor(6) })), 'device-unknown');
+  assert.equal(refusalOf(line, line.tryEntry('device.rotate', { member: 'mbr-lead', from: jo.writer, device: fresh.descriptor(6) })), 'device-unknown');
+  assert.equal(refusalOf(line, line.tryEntry('device.rotate', { member: JO, from: jo.writer, device: line.world.lead.descriptor(6) })), 'device-exists');
+  assert.equal(refusalOf(line, line.tryEntry('device.rotate', { member: JO, from: jo.writer, device: fresh.descriptor(2) })), 'slot-in-use');
+  const rotate = line.next('device.rotate', { member: JO, from: jo.writer, device: fresh.descriptor(6) });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  const view = rosterView(state);
+  // The old key stays valid at rosters before the rotation point (D-20).
+  assert.equal(view.isAdmitted(jo.writer, admit.hash), true);
+  assert.equal(view.isAdmitted(jo.writer, rotate.hash), false);
+  assert.equal(view.isAdmitted(fresh.writer, admit.hash), false);
+  assert.equal(view.isAdmitted(fresh.writer, rotate.hash), true);
+  assert.equal(view.deviceKey(jo.writer)?.publicKey, jo.publicKey);
+  assert.equal(view.clientIdOwner?.(clientIdOf(2, 0), admit.hash), jo.writer);
+  assert.equal(view.clientIdOwner?.(clientIdOf(2, 0), rotate.hash), undefined);
+  assert.equal(view.clientIdOwner?.(clientIdOf(6, 0), rotate.hash), fresh.writer);
+  assert.equal(view.memberName(JO, rotate.hash), 'Jo Analyst');
+  // The rotated-away writer cannot be rotated again.
+  assert.equal(refusalOf(line, line.tryEntry('device.rotate', { member: JO, from: jo.writer, device: line.world.device('JO-THIRD', JO).descriptor(7) })), 'device-unknown');
+});
+
+test('15.2 active -> revoked: device.revoke ends the device from its position on and leaves earlier rosters as they were', () => {
+  const { line, jo, admit } = lineWithJo();
+  assert.equal(refusalOf(line, line.tryEntry('device.revoke', { member: 'mbr-lead', writer: jo.writer })), 'device-unknown');
+  const revoke = line.next('device.revoke', { member: JO, writer: jo.writer, reason: 'Laptop lost.' });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  const view = rosterView(state);
+  assert.equal(view.isAdmitted(jo.writer, admit.hash), true);
+  assert.equal(view.isAdmitted(jo.writer, revoke.hash), false);
+  assert.equal(view.deviceEncryptionKey?.(jo.writer, revoke.hash), undefined);
+  assert.equal(view.clientIdOwner?.(clientIdOf(2, 0), revoke.hash), undefined);
+  // The member stays a member with no device.
+  assert.equal(view.memberName(JO, revoke.hash), 'Jo Analyst');
+  assert.equal(refusalOf(line, line.tryEntry('device.revoke', { member: JO, writer: jo.writer })), 'device-unknown');
+});
+
+test('15.2 active -> revoked: the lead\'s last device revoked by the lead is refused last-lead-device; signed by the deputy it applies (D-09, D-48)', () => {
+  const { line, jo } = lineWithJo();
+  const lead = line.world.lead;
+  assert.equal(refusalOf(line, line.tryEntry('device.revoke', { member: lead.member, writer: lead.writer })), 'last-lead-device');
+  // The members module's rule, with a ctx naming the signer's member as deputy (deputy-signed entries reach it through the driver after 31-17).
+  const revokeData = { member: lead.member, writer: lead.writer, rosterPrev: line.head };
+  const position = line.fold().positions.length;
+  const fresh = (): MembersState => line.fold().members;
+  assert.equal(reasonOf(applyMemberEntry(fresh(), bareEntry('device.revoke', revokeData, lead.writer), { position, lead: lead.member, deputy: JO })), 'last-lead-device');
+  assert.equal(reasonOf(applyMemberEntry(fresh(), bareEntry('device.revoke', revokeData, jo.writer), { position, lead: lead.member })), 'last-lead-device');
+  const byDeputy = fresh();
+  assert.equal(reasonOf(applyMemberEntry(byDeputy, bareEntry('device.revoke', revokeData, jo.writer), { position, lead: lead.member, deputy: JO })), 'applied');
+  assert.equal(byDeputy.devices.get(lead.writer)?.find((record) => record.until === undefined), undefined);
+  // With a second device the lead may revoke the first one.
+  const spare = line.world.device('LEAD-SPARE', lead.member);
+  line.next('device.add', { member: lead.member, device: spare.descriptor(7) });
+  const revoke = line.next('device.revoke', { member: lead.member, writer: lead.writer });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  const view = rosterView(state);
+  assert.equal(view.isAdmitted(lead.writer, revoke.hash), false);
+  assert.equal(view.isAdmitted(spare.writer, revoke.hash), true);
+  assert.equal(view.hasRole(lead.member, 'staff_lead', revoke.hash), true);
+});
+
+test('15.2 active -> rotated: the lead rotates its own device; the new device writes the roster from the rotation on and the old one is refused not-a-roster-writer', () => {
+  const line = createLine();
+  const lead = line.world.lead;
+  const fresh = line.world.device('LEAD-NEW', lead.member);
+  const rotate = line.next('device.rotate', { member: lead.member, from: lead.writer, device: fresh.descriptor(8) });
+  // The next roster entry, signed by the new device.
+  const invite = line.world.rosterEntry(fresh, 'member.invite', inviteData('inv-jo'), rotate.hash);
+  const state = line.world.foldRoster({ entries: [...line.entries, invite.entry] });
+  assert.deepEqual(state.refused, []);
+  assert.equal(state.positions[state.positions.length - 1], invite.hash);
+  assert.equal(rosterView(state).isAdmitted(lead.writer, rotate.hash), false);
+  // The same entry signed by the rotated-away device is refused at the head.
+  const stale = line.world.rosterEntry(lead, 'member.invite', inviteData('inv-kim'), rotate.hash);
+  const refusedState = line.world.foldRoster({ entries: [...line.entries, stale.entry] });
+  assert.deepEqual(refusedState.refused, [{ hash: stale.hash, kind: 'member.invite', reason: 'not-a-roster-writer' }]);
 });
