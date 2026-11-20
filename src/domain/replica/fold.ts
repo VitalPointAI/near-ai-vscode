@@ -4,7 +4,8 @@
 // - applied: used by a reducer.
 // - held: waiting for a piece that is missing; it becomes applied when the piece arrives.
 // - rejected: permanently refused at verification or chain stage.
-// - refused: a reducer refused it (for example forged attribution, or a client id collision).
+// - refused: a reducer refused it (for example forged attribution, or a client id collision), or the fold refused it write-down before any reducer
+//   saw it (an entry citing a cell its own cell does not dominate, when the context supplies the cell order).
 // - kept: genuine but not applied (unauthorised, made by a newer version, hub actor, or a family folded in a later phase).
 // - excluded: skipped because its writer is quarantined (filled by plan 30-05).
 //
@@ -117,6 +118,8 @@ interface Prepared {
   plan: CheckpointPlan;
   // How many of the first entries in the order are final under the checkpoints.
   prefix: number;
+  // The checkpoint heads entries may cite without the entry itself (join bases), by hash: the write-down check reads their stream.
+  bases: ReadonlyMap<string, CheckpointBase>;
 }
 
 // The reducers' states as they stood at the end of the final prefix, kept so a late entry outside the prefix refolds from there.
@@ -324,13 +327,14 @@ function prepare(store: Store, ctx: ReplicaContext, options: FoldOptions): Prepa
     const record = { ...(outcome.hash === undefined ? {} : { hash: outcome.hash }), ...place, stage: 'verify' as const, reason: outcome.reason };
     (outcome.status === 'held' ? verifyHeld : verifyRejected).push(record);
   }
-  const chains = classifyChains(verified, ctx, verifyRejected, joinBases(options.checkpoints ?? [], ctx));
+  const bases = joinBases(options.checkpoints ?? [], ctx);
+  const chains = classifyChains(verified, ctx, verifyRejected, bases);
   const graph = buildCausalGraph(chains.admitted);
   const plan = planCheckpoints(options.checkpoints ?? [], graph);
   const ordered = checkpointOrder(chains.admitted, plan.sets);
   let prefix = 0;
   while (prefix < ordered.length && plan.final.has(ordered[prefix].hash)) prefix += 1;
-  return { verifyHeld, verifyRejected, chains, graph, ordered, plan, prefix };
+  return { verifyHeld, verifyRejected, chains, graph, ordered, plan, prefix, bases };
 }
 
 function freshRun(reducers: readonly AnyReducer[]): Run {
@@ -368,6 +372,19 @@ function viewOf(prepared: Prepared, run: Run, ctx: ReplicaContext): FoldView {
   };
 }
 
+// Write up, never down (D-25, DESIGN 8.1 rule 4). A stream is a cell, so an entry may cite (deps) an entry in another stream only when its own cell
+// dominates that cell; ctx.cellOrder answers that, from Phase 70 dominance the host computed. Without cellOrder every citation is allowed, as in Phase
+// 30. A dep is always an admitted entry or a checkpoint base (the chain stage holds an entry whose dep is neither), so its stream is known; one that
+// is not counts as a write down. prev is always in the entry's own stream.
+function writesDown(entry: VerifiedEntry, view: FoldView, bases: ReadonlyMap<string, CheckpointBase>, ctx: ReplicaContext): boolean {
+  if (ctx.cellOrder === undefined) return false;
+  const own = entry.header.stream;
+  return entry.body.deps.some((dep) => {
+    const cited = view.entry(dep.hash)?.header.stream ?? bases.get(dep.hash)?.stream;
+    return cited === undefined || (cited !== own && ctx.cellOrder?.(own, cited) !== true);
+  });
+}
+
 // The one apply loop: each entry from `from` on lands in exactly one list. It returns the snapshot at the end of the final prefix: the one given when it
 // is for this prefix, otherwise a copy taken as the loop passes the end of the prefix, or none when the loop starts beyond it.
 function applyFrom(run: Run, prepared: Prepared, ctx: ReplicaContext, from: number, keep?: Snapshot): Snapshot | undefined {
@@ -394,6 +411,11 @@ function applyFrom(run: Run, prepared: Prepared, ctx: ReplicaContext, from: numb
     const slot = family === undefined ? undefined : run.states.get(family);
     if (family === undefined || slot === undefined) {
       run.kept.push({ hash: entry.hash, reason: 'folded-in-later-phase', ...label });
+      continue;
+    }
+    // Refused before the reducer sees it: nothing is applied, and the entry stays a node of its chain and of the causal graph.
+    if (writesDown(entry, view, prepared.bases, ctx)) {
+      run.refused.push({ hash: entry.hash, reason: 'write-down', family });
       continue;
     }
     const outcome = slot.reducer.apply(slot.state, entry, view);
