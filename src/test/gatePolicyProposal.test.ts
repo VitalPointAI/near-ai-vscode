@@ -74,7 +74,7 @@ const VAULT = Object.freeze({ id: 'vault-ca', class: 'vendor-region', host: 'vau
 const always = (direction: ProposalDirection): DirectionOf => () => direction;
 
 /** Words that never appear in a sentence a person reads on the rules page (GLOSSARY sections 1 and 3, the plan's copy rule). */
-const FORBIDDEN = [/—/, /endpoint/i, /\bTEE\b/i, /\btier/i, /\blayer/i, /\bissuer/i, /policy bundle/i, /NEAR(\s+AI)?('s)?\s+organization/i, /\bteam\b/i];
+const FORBIDDEN = [/\u2014/, /endpoint/i, /\bTEE\b/i, /\btier/i, /\blayer/i, /\bissuer/i, /policy bundle/i, /NEAR(\s+AI)?('s)?\s+organization/i, /\bteam\b/i];
 
 function assertPlain(text: string): void {
   for (const word of FORBIDDEN) assert.doesNotMatch(text, word, `"${text}" has ${String(word)}`);

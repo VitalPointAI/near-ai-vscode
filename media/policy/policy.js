@@ -4,9 +4,10 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
-  const ACTION_LABELS = { apply: 'Apply to my rules', discard: 'Discard' };
+  const ACTION_LABELS = { apply: 'Apply to my rules', export: 'Save a file for your organization', discard: 'Discard' };
   const MARKERS = { widens: 'Wider', narrows: 'Stricter' };
   const text = (value) => (typeof value === 'string' ? value : '');
+  let lastAtSeq = 0;
 
   function button(label, onClick, secondary) {
     const node = el('button', secondary ? 'secondary' : '', label);
@@ -20,7 +21,7 @@
     box.replaceChildren();
     if (!proposal || typeof proposal !== 'object') { box.hidden = true; return; }
     box.hidden = false;
-    box.append(el('h2', '', 'Proposed change'));
+    box.append(el('h2', '', proposal.stale === true ? 'Proposed change (out of date)' : 'Proposed change'));
     if (text(proposal.from)) box.append(el('p', 'hint', 'Asked by: ' + text(proposal.from)));
     if (text(proposal.reason)) box.append(el('p', 'hint', text(proposal.reason)));
     const list = el('ul', 'changes');
@@ -62,18 +63,31 @@
     }
   }
 
+  // Show as stored and Reset live on this page only; the host decides what each does.
+  function renderPageActions() {
+    $('page-actions').replaceChildren(
+      button('Show as stored', () => vscode.postMessage({ type: 'show-stored' }), true),
+      button('Reset my rules', () => vscode.postMessage({ type: 'reset' }), true)
+    );
+  }
+
   window.addEventListener('message', (event) => {
     const message = event.data;
     if (!message || typeof message !== 'object') return;
     if (message.type === 'state') {
       $('title').textContent = text(message.title);
+      $('set-by').textContent = text(message.setBy);
       $('notice').textContent = text(message.notice);
       renderProposal(message.proposal, message.actions);
-      renderSections(message.sections, text(message.at));
+      // Scroll to the section asked for once per request, not on every update.
+      const seq = typeof message.atSeq === 'number' ? message.atSeq : 0;
+      renderSections(message.sections, seq !== lastAtSeq ? text(message.at) : '');
+      lastAtSeq = seq;
     } else if (message.type === 'error') {
       $('notice').textContent = text(message.text);
     }
   });
 
+  renderPageActions();
   vscode.postMessage({ type: 'ready' });
 })();
