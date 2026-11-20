@@ -12,7 +12,7 @@ import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
 import { UPDATE_REASONS } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
-import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
+import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, RESERVED_EXPORT_COMPARTMENTS, SCALE_PRESETS_CAVEAT_TEXT, exportMarkingsShown, labelKey, parseLabel } from '../domain/gate/labels';
 import type { Clearance, Label } from '../domain/gate/labels';
 import { dominates, raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
@@ -426,7 +426,8 @@ export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this c
 export const LOWERED_HERE_ONLY_TEXT = "Your other computers cannot check this computer's key yet, so the copies of this chat there keep the higher label until you lower it there too.";
 export const LOWER_CHAT_REASON_PROMPT = "Why may this chat's content now go where a lower label allows? The reason is kept with the chat, and travels with its encrypted metadata to your other computers.";
 
-function labelsShown(mark: Mark): string {
+/** A chat's mark as the label screens show it (D-62): each label as labelShown gives it. */
+export function labelsShown(mark: Mark): string {
   return mark.map((label) => labelShown(label)).join(', ');
 }
 
@@ -513,7 +514,7 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
   const before = mark.lowerByPerson(picked.mark, reason);
   if (signed === undefined) void Promise.resolve(vscode.window.showWarningMessage(LOWERING_NOT_SIGNED_TEXT)).catch(() => undefined);
   // The record's label is the strictest label of the new mark, as every label event's is (recordLabelEvent works it out from the mark).
-  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, mark: picked.mark, from: before, reason: `Lowered from ${labelsShown(before)} to ${labelsShown(picked.mark)}: ${reason}` });
+  host.recordLabelEvent(chat.root, { event: 'label.declassify', path: `chat ${chat.id}`, mark: picked.mark, from: before, reason: `Lowered from ${before.map((each) => labelRecorded(each)).join(', ')} to ${picked.mark.map((each) => labelRecorded(each)).join(', ')}: ${reason}` });
   void Promise.resolve(vscode.window.showInformationMessage(`${`This chat's label is now ${labelsShown(picked.mark)}.`} ${LOWERED_HERE_ONLY_TEXT}`)).catch(() => undefined);
   return true;
 }
@@ -551,12 +552,22 @@ export interface LabelTarget {
   readonly path: string;
 }
 
-/** A label as Set Label and Lower This Chat's Label show it: the scale's name with the level (coherence review S8), then compartments and handling. */
-function labelShown(label: Label): string {
-  const parts = [labelKeyShown(label)];
-  if (label.compartments.length > 0) parts.push(`compartments ${label.compartments.join(', ')}`);
-  if (label.handling.length > 0) parts.push(label.handling.join(', '));
-  return parts.join(', ');
+/**
+ * A label as Set Label and Lower This Chat's Label show it: the scale's name with the level (coherence review S8), each reserved export compartment as its
+ * words after the level from the label module (D-62), then the other compartments and the handling.
+ */
+export function labelShown(label: Label): string {
+  const reserved: readonly string[] = RESERVED_EXPORT_COMPARTMENTS;
+  return labelParts(exportMarkingsShown(labelKeyShown(label), label.compartments), label.compartments.filter((token) => !reserved.includes(token)), label.handling);
+}
+
+/** A label as records and administrator panes keep it (D-62): every compartment as its token. */
+export function labelRecorded(label: Label): string {
+  return labelParts(labelKeyShown(label), label.compartments, label.handling);
+}
+
+function labelParts(shown: string, compartments: readonly string[], handling: readonly string[]): string {
+  return [shown, ...(compartments.length > 0 ? [`compartments ${compartments.join(', ')}`] : []), ...(handling.length > 0 ? [handling.join(', ')] : [])].join(', ');
 }
 
 /** Said when the label file changed under Set Label so that the change became a lowering no reason was given for: nothing is written. */
