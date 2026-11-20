@@ -532,6 +532,7 @@ test('conflict: two kept checkpoints of this hub that do not nest stop signing f
     assert.deepEqual(Object.keys(conflicts[0]?.fields ?? {}).sort(), ['kept', 'project', 'reason']);
     assert.equal(conflicts[0]?.fields.project, world.project);
     assert.equal(conflicts[0]?.fields.reason, 'not-nested');
+    assert.deepEqual((hub.checkpoints?.stuck() ?? []).map((item) => [item.project, item.state, item.reason]), [[world.project, 'conflict', 'not-nested']]);
 
     await append(hub, world, analyst, [note(world, analyst)]);
     await append(hub, other.world, other.analyst, [note(other.world, other.analyst)]);
@@ -652,6 +653,73 @@ test('WR-05 bounded: the signer keeps only its latest checkpoint in memory, and 
     assert.equal(hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict' || line.event === 'checkpoint.waiting').length, 0);
     const entries = client(world).open();
     assert.deepEqual(recomputeCheckpoint(payloadOf(after[4] as SignedCheckpoint), entries, undefined, after.slice(0, 4).map(payloadOf)), { ok: true, mismatches: [] });
+  }));
+
+const coveredStreams = (signed: SignedCheckpoint): Set<string> => new Set(streamsOf(signed));
+
+test('WR-09 trimmed and still nested: a granted cell whose first entries push the checkpoint past the size limit is left out, and the hub keeps signing every cell it covered', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const cells: string[] = [];
+    const { world } = await team(hub, (made) => {
+      for (let index = 0; index < 200; index += 1) {
+        const cell = made.world.labelCell(`sector-${index}`, [made.world.lead]).cell;
+        grantToHub(hub, made.world, cell);
+        cells.push(cell);
+      }
+    });
+    // The first 120 cells get a note each and fit in one checkpoint. A granted cell with no entry is not listed.
+    const early = cells.slice(0, 120);
+    const late = cells.slice(120);
+    for (let start = 0; start < early.length; start += 60) await append(hub, world, world.lead, early.slice(start, start + 60).map((cell) => note(world, world.lead, { stream: cell })));
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const c1 = stored(hub, world.project)[0] as SignedCheckpoint;
+    assert.ok(c1, 'nothing was signed');
+    assert.ok(early.every((cell) => coveredStreams(c1).has(cell)), 'the first checkpoint did not cover every early cell');
+
+    // The other 80 cells get their first notes, and five early cells one more: all of them together pass the size limit.
+    await append(hub, world, world.lead, [...late, ...early.slice(0, 5)].map((cell) => note(world, world.lead, { stream: cell })));
+    await advance(hub, scheduler, MIN_GAP_MS);
+    const kept = stored(hub, world.project);
+    assert.equal(kept.length, 2, 'the hub stopped signing once the covered cells passed the size limit');
+    const c2 = kept[1] as SignedCheckpoint;
+    const listed = coveredStreams(c2);
+    assert.ok(listed.has(world.project));
+    assert.ok(early.every((cell) => listed.has(cell)), 'a cell the first checkpoint covered was dropped');
+    assert.ok(late.some((cell) => !listed.has(cell)), 'nothing was left out');
+    // Nested after C1, as clients check it.
+    const mine = client(world);
+    assert.ok(verifyCheckpoint(c2, mine.view).ok);
+    assert.deepEqual(recomputeCheckpoint(payloadOf(c2), mine.open(), undefined, [payloadOf(c1)]), { ok: true, mismatches: [] });
+    assert.equal(checkpointConflict(c1, c2), undefined);
+    assert.deepEqual(hub.checkpoints?.stuck() ?? [], []);
+  }));
+
+test('WR-09 stuck is reported: when the cells already covered alone pass the size limit, the hub logs the project and the reason once and lists it as stuck', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const cells: string[] = [];
+    const { world, officer } = await team(hub, (made) => {
+      for (let index = 0; index < 120; index += 1) {
+        const cell = made.world.labelCell(`shared-${index}`, [made.world.lead, made.officer]).cell;
+        grantToHub(hub, made.world, cell);
+        cells.push(cell);
+      }
+    });
+    for (let start = 0; start < cells.length; start += 60) await append(hub, world, world.lead, cells.slice(start, start + 60).map((cell) => note(world, world.lead, { stream: cell })));
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    assert.equal(stored(hub, world.project).length, 1);
+    // A second writer in every covered cell: the heads of the covered cells alone no longer fit, and dropping a covered cell would be a rollback.
+    for (let start = 0; start < cells.length; start += 60) await append(hub, world, officer, cells.slice(start, start + 60).map((cell) => note(world, officer, { stream: cell })));
+    await advance(hub, scheduler, MIN_GAP_MS);
+    await advance(hub, scheduler, ASK_GAP_MS);
+    await ask(hub, world, officer);
+    await settle(hub);
+    assert.equal(stored(hub, world.project).length, 1);
+    const stuck = hub.checkpoints?.stuck() ?? [];
+    assert.deepEqual(stuck.map((item) => ({ project: item.project, state: item.state, reason: item.reason })), [{ project: world.project, state: 'too-large', reason: 'covered-over-limit' }]);
+    const logged = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.too_large');
+    assert.equal(logged.length, 1, 'the stuck state was logged on every attempt');
+    assert.deepEqual(Object.keys(logged[0]?.fields ?? {}).sort(), ['project', 'reason', 'streams']);
+    assert.equal(logged[0]?.fields.reason, 'covered-over-limit');
   }));
 
 test('WR-05 bounded: a checkpoint handed back below the latest one makes the whole kept chain be checked again, so a second word about an old prefix still stops signing', () =>
