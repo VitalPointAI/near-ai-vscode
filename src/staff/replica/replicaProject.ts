@@ -48,7 +48,7 @@ import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
 import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
 import type { DeviceEncryptionKey } from './keyring';
-import { ReplicaStore } from './store';
+import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
 
 /** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
@@ -85,6 +85,27 @@ function refuse(reason: ProjectRefusal, message?: string): ProjectRefused {
 
 function storeRefused(refused: StoreRefused): ProjectRefused {
   return { refused: 'store-refused', message: refused.message, store: refused.refused };
+}
+
+/**
+ * Finishes a Start Again left unfinished in `root` (32-CONTEXT D-03) before anything decides the folder holds no shared project: while it is
+ * unfinished the store folder, and project.json in it, may be gone. Nothing is made for a folder with no intent. A refusal is the store's.
+ */
+async function finishUnfinished(root: string, deps: ReplicaProjectDeps): Promise<ProjectRefused | undefined> {
+  try {
+    await lstat(path.join(path.resolve(root), ...START_AGAIN_INTENT_FILE.split('/')));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+  }
+  const device = await deviceKeys(deps);
+  const finished = await finishStartAgain(root, storeDeps(deps, device.identity));
+  return 'ok' in finished ? undefined : storeRefused(finished);
+}
+
+/** The refusal of a folder whose shared history went missing (its store folder is gone beside a folder set aside that holds project.json). */
+function historyMissing(): ProjectRefused {
+  return storeRefused({ refused: 'rolled-back', message: STORE_REFUSALS['rolled-back'] });
 }
 
 export function isProjectRefused(value: unknown): value is ProjectRefused {
@@ -287,12 +308,16 @@ export class ReplicaProject {
   }
 
   /**
-   * Opens the shared project in `root`. Undefined when the folder holds no shared project (no project.json). Refused when this computer has not
-   * joined it (no pin), when project.json disagrees with the pin, when either cannot be read, or when the store refuses.
+   * Opens the shared project in `root`. A Start Again left unfinished is finished first (32-CONTEXT D-03). Undefined when the folder holds no shared
+   * project (no project.json, and no folder set aside beside a missing store folder holds one). Refused when this computer has not joined it (no
+   * pin), when project.json disagrees with the pin, when either cannot be read, when the store refuses, or rolled-back when the store folder is gone
+   * beside a folder set aside that holds project.json (its shared history went missing; Start Again carries from that folder).
    */
   public static async open(root: string, deps: ReplicaProjectDeps): Promise<ReplicaProject | ProjectRefused | undefined> {
+    const unfinished = await finishUnfinished(root, deps);
+    if (unfinished !== undefined) return unfinished;
     const local = await readAnchorFile(projectFile(root));
-    if (local.kind === 'missing') return undefined;
+    if (local.kind === 'missing') return (await sharedHistoryMissing(root)) ? historyMissing() : undefined;
     if (local.kind === 'damaged') return refuse('pin-damaged');
     const pin = await readAnchorFile(genesisPinFile(deps.globalStorageDir, local.anchor.project));
     if (pin.kind === 'damaged') return refuse('pin-damaged');
@@ -387,12 +412,15 @@ export class ReplicaProject {
   /**
    * Starts this computer's shared history of the project in `root` again, after the person confirmed it (31-REVIEW MJ-08): only when its store is
    * refused rolled-back, damaged or mark-unverified (ReplicaStore.startAgain). The store folder is moved aside, never deleted; this device's own
-   * signed entries, the grants, the blobs and project.json are carried into a new one; its mark starts again. Undefined when the folder holds no
-   * shared project. The rest of the history comes back with a new welcome file, opened with Staff: Join Staff Project.
+   * signed entries, the grants, the blobs and project.json are carried into a new one; its mark starts again. A Start Again left unfinished is
+   * finished first, and a store folder that is gone beside a folder set aside holding project.json is started again from that folder (32-CONTEXT
+   * D-03). Undefined when the folder holds no shared project. The rest of the history comes back with a new welcome file, opened with Staff: Join Staff Project.
    */
   public static async startHistoryAgain(root: string, deps: ReplicaProjectDeps): Promise<StartedAgain | ProjectRefused | undefined> {
+    const unfinished = await finishUnfinished(root, deps);
+    if (unfinished !== undefined) return unfinished;
     const local = await readAnchorFile(projectFile(root));
-    if (local.kind === 'missing') return undefined;
+    if (local.kind === 'missing' && !(await sharedHistoryMissing(root))) return undefined;
     const device = await deviceKeys(deps);
     const result = await ReplicaStore.startAgain(root, storeDeps(deps, device.identity));
     return 'ok' in result ? result : storeRefused(result);
