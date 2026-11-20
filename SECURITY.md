@@ -1891,7 +1891,10 @@ and Signal for your organization. It is not part of the extension and is never i
   returns five fields that identify no one: version, uptime, the Teams and Signal states (both
   `not-configured` for now), and the number of runs in progress.
 - It listens on `127.0.0.1` by default. Its container publishes the port on `127.0.0.1` only, and
-  public HTTPS is meant to end at your own reverse proxy.
+  public HTTPS is meant to end at your own reverse proxy. Keep that proxy patched: for NGINX,
+  version 1.30.7 (stable) or 1.31.9 (mainline) or newer fixes CVE-2026-123633 and
+  CVE-2026-123007 (unauthenticated code execution with HTTP/2 on), and until you upgrade, HTTP/2
+  should be off (`relay/README.md`, "Running with Compose"). The relay and the hub do not use NGINX.
 - It reads secrets only from files with no group or world access, refuses a secret given as a
   plain environment value, keeps its state in a private folder (0700, files 0600), and writes
   logs through a redaction layer that drops credentials and message text and replaces phone
