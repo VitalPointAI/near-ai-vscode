@@ -12,23 +12,36 @@
 // The hub reads the base cell (the roster) always, so it can check appends (D-40), and a cell more only when the lead gives it one after reading the
 // trade-off. It is never given the lead-only legacy cell (D-20, D-64). No result or message holds a key, a binding signature or the hub file's
 // enrolment secret, and this module stores neither the hub file nor its secret.
-import { earlierEpochGrants } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, earlierEpochGrants } from '../../domain/replica/cellKeys';
 import { HUB_FILE_REFUSALS, readHubFile } from '../../domain/replica/hubFile';
 import type { HubFilePayload } from '../../domain/replica/hubFile';
 import type { RosterState } from '../../domain/replica/roster';
+import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { epochsAt } from '../../domain/replica/rosterCells';
-import { MEMBER_REFUSALS } from '../../domain/replica/rosterMembers';
+import { MEMBER_REFUSALS, devicesOfMemberAt, hubAt } from '../../domain/replica/rosterMembers';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
 import { isRecord } from '../../domain/team/validate';
 import { multiUserNoticeLines } from '../../domain/staff/multiUser';
-import { MEMBERSHIP_REFUSALS, append, headOf, writerProblem } from './membership';
+import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, unfinishedRekeys, writerProblem } from './membership';
 import type { MembershipResult, SharedProjectHost } from './membership';
 import { ReplicaProjectError, isProjectRefused } from './replicaProject';
+
+/** Shown to the lead at each grant of a cell to the hub (DESIGN 10.2), word for word; the lead confirms it before anything is written. */
+export const HUB_GRANT_TRADE_OFF = 'The hub will be able to read everything in this cell. Anyone who takes over the hub server can read it too. Grant only cells whose watches must run when nobody is at a computer.';
 
 /** The hub flows' own refusals, one plain sentence each (D-37). None names a key, a secret or a hash, and none uses a dash as punctuation. */
 export const HUB_MEMBERSHIP_REFUSALS = {
   'device-exists': MEMBER_REFUSALS['device-exists'],
-  'member-exists': MEMBER_REFUSALS['member-exists']
+  'member-exists': MEMBER_REFUSALS['member-exists'],
+  'trade-off-not-confirmed': `Nothing was given to the hub, because the trade-off was not confirmed. Give the hub this part of the project only after reading and confirming this: ${HUB_GRANT_TRADE_OFF}`,
+  'legacy-cell': 'This part of the project holds its history from before it was shared. It stays with the staff lead and the deputy lead only, so it is never given to the hub. Nothing was changed.',
+  'above-hub-ceiling': 'This part of the project is labelled above the highest clearance you set for the hub, so it was not given to the hub. Nothing was changed.',
+  'hub-holds-cell': 'The hub already holds this part of the project, so nothing was changed.',
+  'cell-unknown': 'That part of the project is not in the roster, so nothing was given to the hub. Nothing was changed.',
+  'no-hub': 'This project has no hub admitted, so nothing was changed. Admit your organization\'s hub first.',
+  'hub-not-named': 'This project has more than one hub admitted, so say which hub the change is for. Nothing was changed.',
+  'hub-unknown': 'That hub is not in this project\'s roster, so nothing was changed. Check the hub and try again.',
+  'hub-revoked': 'That hub was removed from the project, so it is given nothing more and is never admitted again. Nothing was changed.'
 } as const;
 export type HubMembershipRefusal = keyof typeof HUB_MEMBERSHIP_REFUSALS;
 
@@ -136,5 +149,131 @@ export function admitHub(shared: SharedProjectHost, hubFileText: unknown, input:
     const stored = await grantEpochs(shared, { cell: base, epochs: missing, roster, grantedAt, hub: file });
     if (stored !== undefined) return stored;
     return done(`${hubName(file)} was admitted. It can read the roster, so it can check every change sent to it, and nothing else until you give it a part of the project.`, { hub: file.hub, writer: file.writer });
+  });
+}
+
+/** The hub a flow is for: the one named, or the only hub in force at the position. Its device's writer and X25519 key, its cells and its ceiling. */
+interface HubInForce { hub: string; writer: string; x25519: string; cells: readonly string[]; ceiling: unknown }
+
+function hubOf(roster: RosterState, position: number, named: string | undefined): HubInForce | HubMembershipResult {
+  const ids = named !== undefined ? [named] : [...roster.members.hubs.keys()].filter((hub) => hubAt(roster.members, hub, position) !== undefined);
+  if (ids.length === 0) return refuse('no-hub');
+  if (ids.length > 1) return refuse('hub-not-named');
+  const hub = ids[0] as string;
+  if (!roster.members.hubs.has(hub)) return refuse('hub-unknown');
+  const record = hubAt(roster.members, hub, position);
+  const device = devicesOfMemberAt(roster.members, hub, position).find((item) => item.kind === 'hub');
+  if (record === undefined || device === undefined) return refuse('hub-revoked');
+  return { hub, writer: device.writer, x25519: device.x25519, cells: record.cells, ceiling: record.ceiling };
+}
+
+/** The position of the hub.grant that first gave the hub the cell (the start of the first hub version listing it), or undefined. */
+function grantedAtOf(roster: RosterState, hub: string, cell: string): number | undefined {
+  return roster.members.hubs.get(hub)?.find((record) => record.cells.includes(cell))?.from;
+}
+
+export interface GrantCellToHubInput {
+  /** The cell to give the hub. */
+  cell: string;
+  /** True only when the lead read HUB_GRANT_TRADE_OFF and confirmed it. Nothing else ever confirms it. */
+  confirmed: boolean;
+  /** The hub's id; the only hub in force when absent. */
+  hub?: string;
+}
+
+/**
+ * Gives the hub one more cell (D-40, DESIGN 10.2), so its watches on that cell can run when nobody is at a computer. Refused, before anything is
+ * written: the lead-only legacy cell, always and first (D-20, D-64); unless the lead confirmed the trade-off; as every roster change; a cell the hub
+ * already holds; a cell whose label this device cannot read; and a cell whose label the hub's ceiling does not dominate (Phase 70 dominance with the
+ * host clock). Then hub.grant, and one grant per epoch of the cell with its label sealed, so every later rekey of the cell keeps wrapping to the hub.
+ * Run again after a stop between the two, it writes only the grants that are missing.
+ */
+export function grantCellToHub(shared: SharedProjectHost, input: GrantCellToHubInput): Promise<HubMembershipResult> {
+  return guarded(async () => {
+    const { project } = shared;
+    const { roster } = await project.state();
+    const at = headOf(roster);
+    const gate = gateOf(shared);
+    const info = cellsAt(roster, project.keys, at.position, gate.scales).find((item) => item.cell === input.cell);
+    if (info === undefined) return refuse('cell-unknown');
+    if (info.legacy !== undefined || (info.raw !== undefined && readLegacyCellLabel(info.raw, gate.scales) !== undefined)) return refuse('legacy-cell');
+    if (input.confirmed !== true) return refuse('trade-off-not-confirmed');
+    const problem = writerProblem(shared, roster);
+    if (problem !== undefined) return problem;
+    const hub = hubOf(roster, at.position, input.hub);
+    if (isResult(hub)) return hub;
+    const holds = hub.cells.includes(info.cell);
+    if (holds && missingEpochs(roster, info.cell, hub.writer, at.position).length === 0) return refuse('hub-holds-cell');
+    if (!info.known) return refuseMembership('no-grant-key');
+    if (!clearedFor(hub.ceiling, info, false, gate)) return refuse('above-hub-ceiling');
+    if (epochKeys(shared, info.cell, missingEpochs(roster, info.cell, hub.writer, at.position)) === undefined) return refuseMembership('no-grant-key');
+    let current = roster;
+    let grantedAt = grantedAtOf(roster, hub.hub, info.cell);
+    if (!holds) {
+      const granted = await append(shared, 'hub.grant', { hub: hub.hub, cell: info.cell });
+      if (isResult(granted)) return granted;
+      current = granted.roster;
+      grantedAt = current.positionOf.get(granted.hash);
+    }
+    const missing = epochKeys(shared, info.cell, missingEpochs(current, info.cell, hub.writer, headOf(current).position));
+    if (missing === undefined || grantedAt === undefined) return refuseMembership('no-grant-key');
+    const stored = await grantEpochs(shared, { cell: info.cell, epochs: missing, roster: current, grantedAt, hub, ...(info.base ? {} : { label: info.raw }) });
+    if (stored !== undefined) return stored;
+    return done(`The hub (${hub.hub}) can now read this part of the project, and every new key it gets.`, {
+      notices: [...multiUserNoticeLines(), HUB_GRANT_TRADE_OFF], granted: [info.cell], hub: hub.hub, writer: hub.writer
+    });
+  });
+}
+
+/** What a revoke says: who was removed, how many cells moved to a new key, and the agreed words on what the hub keeps. */
+function revokeMessage(first: string, rekeyed: readonly string[]): string {
+  const moved = rekeyed.length === 0 ? '' : ` ${rekeyed.length === 1 ? 'One part of the project was' : `${rekeyed.length} parts of the project were`} moved to a new key.`;
+  return `${first}${moved} ${REKEY_KEEP_TEXT}`;
+}
+
+/**
+ * Revokes the hub (DESIGN 10.2): hub.revoke ends the hub and its device, so it signs no checkpoint from there on, and then every cell it held (the
+ * base cell and each granted cell) moves to a new key without it, through membership's finishRekeys (reason hub-revoked). Refused before anything is
+ * written as every roster change, and when the hub holds a cell whose label this device cannot read (that cell could not be moved here). A removal
+ * left unfinished is finished first. A revoke whose rekeys were interrupted is finished by revokeHub again or by the next roster flow; with nothing
+ * left it is refused hub-revoked.
+ */
+export function revokeHub(shared: SharedProjectHost, input: { hub?: string } = {}): Promise<HubMembershipResult> {
+  return guarded(async () => {
+    const { project } = shared;
+    const { roster } = await project.state();
+    const problem = writerProblem(shared, roster);
+    if (problem !== undefined) return problem;
+    const at = headOf(roster);
+    const hub = hubOf(roster, at.position, input.hub);
+    if (isResult(hub)) {
+      // The hub named was revoked already: finish what its revoke left, if anything.
+      if (hub.reason !== 'hub-revoked' || input.hub === undefined || await unfinishedRekeys(shared) === 0) return hub;
+      const finished = await finishRekeys(shared);
+      if (!finished.ok) return finished;
+      return done(revokeMessage(`The removal of the hub (${input.hub}) left unfinished is now finished.`, finished.rekeyed ?? []), { rekeyed: finished.rekeyed ?? [], hub: input.hub });
+    }
+    const gate = gateOf(shared);
+    const infos = cellsAt(roster, project.keys, at.position, gate.scales);
+    for (const cell of hub.cells) {
+      const info = infos.find((item) => item.cell === cell);
+      if (info !== undefined && !info.known) return refuseMembership('no-grant-key');
+    }
+    // As every roster flow: a removal left unfinished is finished first.
+    let earlier: string[] = [];
+    if (await unfinishedRekeys(shared) > 0) {
+      const finished = await finishRekeys(shared);
+      if (!finished.ok) return finished;
+      earlier = finished.rekeyed ?? [];
+    }
+    const written = await append(shared, 'hub.revoke', { hub: hub.hub });
+    if (isResult(written)) return written;
+    const finished = await finishRekeys(shared);
+    if (!finished.ok && finished.reason !== 'nothing-to-finish') return finished;
+    const rekeyed = finished.ok ? finished.rekeyed ?? [] : [];
+    const note = earlier.length === 0 ? '' : `A removal or clearance change left unfinished was finished first: ${earlier.length === 1 ? 'one part of the project was' : `${earlier.length} parts of the project were`} moved to a new key. `;
+    return done(`${note}${revokeMessage(`Your organization's hub (${hub.hub}) was removed from the project, and it signs nothing for the project from now on.`, rekeyed)}`, {
+      rekeyed: [...earlier, ...rekeyed], hub: hub.hub, writer: hub.writer
+    });
   });
 }
