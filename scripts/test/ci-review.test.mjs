@@ -3,7 +3,7 @@
 // faked with a local HTTP server, so nothing leaves the machine.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -295,6 +295,45 @@ test('the overall cap stops a review that never finishes, without another attemp
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /attempt 1 failed: the review took longer than 2 seconds/);
   assert.doesNotMatch(result.stderr, /attempt 2/);
+});
+
+test('a call stops at the review\'s shared deadline, makes only the attempts it was given, and reports how many it made', async () => {
+  const { dir } = gathered();
+  const promptPath = path.join(dir, 'prompt.md');
+  writeFileSync(promptPath, 'prompt');
+  const attemptsFile = path.join(dir, 'attempts.txt');
+  const quiet = await slowServer([{ choices: [{ delta: { reasoning_content: 'hmm' } }] }], 10, { end: false });
+  const base = { REVIEW_MODEL_API_KEY: 'k', REVIEW_MODEL: 'm', REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${quiet.address().port}`, REVIEW_ATTEMPTS_FILE: attemptsFile };
+
+  // One attempt allowed: a quiet model is not retried.
+  const one = await run('ci-review-call.mjs', [promptPath], { ...base, REVIEW_IDLE_SECONDS: '1', REVIEW_MAX_ATTEMPTS: '1' });
+  assert.notEqual(one.status, 0);
+  assert.match(one.stderr, /attempt 1 failed: the model went quiet/);
+  assert.doesNotMatch(one.stderr, /attempt 2/);
+  assert.equal(readFileSync(attemptsFile, 'utf8'), '1');
+
+  // The deadline cuts a call short of its own 45 minutes, and is not retried.
+  const thinking = Array.from({ length: 50 }, () => ({ choices: [{ delta: { reasoning_content: 'hmm' } }] }));
+  const slow = await slowServer(thinking, 200);
+  const started = Date.now();
+  const cut = await run('ci-review-call.mjs', [promptPath], { ...base, REVIEW_MODEL_BASE_URL: `http://127.0.0.1:${slow.address().port}`, REVIEW_IDLE_SECONDS: '5', REVIEW_DEADLINE: String(Date.now() + 1_500) });
+  assert.notEqual(cut.status, 0);
+  assert.ok(Date.now() - started < 8_000);
+  assert.match(cut.stderr, /attempt 1 failed: the review ran out of its time budget/);
+  assert.doesNotMatch(cut.stderr, /attempt 2/);
+
+  // A deadline already past makes no attempt at all.
+  writeFileSync(attemptsFile, 'unchanged');
+  const late = await run('ci-review-call.mjs', [promptPath], { ...base, REVIEW_DEADLINE: String(Date.now() - 1) });
+  assert.notEqual(late.status, 0);
+  assert.match(late.stderr, /ran out of its time budget/);
+  assert.equal(readFileSync(attemptsFile, 'utf8'), 'unchanged', 'no attempt was counted');
+
+  for (const [name, value] of [['REVIEW_MAX_ATTEMPTS', '0'], ['REVIEW_MAX_ATTEMPTS', '4'], ['REVIEW_DEADLINE', 'soon']]) {
+    const bad = await run('ci-review-call.mjs', [promptPath], { ...base, [name]: value });
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stderr, new RegExp(`${name} must be`));
+  }
 });
 
 test('the quiet and overall limits must be whole seconds', async () => {

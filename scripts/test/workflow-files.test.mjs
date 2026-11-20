@@ -150,3 +150,12 @@ test('the agent review workflow posts and approves only as near-ai-reviewer, fro
     }
   }
 });
+
+test('the review\'s shared time budget ends inside the review job\'s limit, so a stalled review posts its failure', async () => {
+  const { REVIEW_BUDGET_SECONDS, REVIEW_JOB_MARGIN_MINUTES } = await import('../lib/ci-review.mjs');
+  const review = jobs(read('agent-review.yml')).get('review');
+  const limit = Number(/timeout-minutes:\s*(\d+)/.exec(review)?.[1]);
+  assert.ok(limit > 0 && limit <= 360, 'the review job has a limit within GitHub\'s 360 minutes');
+  assert.ok(REVIEW_BUDGET_SECONDS / 60 + REVIEW_JOB_MARGIN_MINUTES <= limit,
+    `the model budget (${REVIEW_BUDGET_SECONDS / 60} minutes) plus ${REVIEW_JOB_MARGIN_MINUTES} minutes for the rest fits the job's ${limit} minutes`);
+});

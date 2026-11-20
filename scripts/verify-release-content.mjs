@@ -1,9 +1,8 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openZip } from './lib/zip.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
@@ -19,44 +18,15 @@ if (!existsSync(vsixPath)) {
   process.exit();
 }
 
-let entries;
+// The package is read in process (scripts/lib/zip.mjs), so this gate needs no `unzip` tool.
+let zip;
 try {
-  entries = execFileSync('unzip', ['-Z1', vsixPath], { cwd: root, encoding: 'utf8' })
-    .split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+  zip = openZip(vsixPath);
 } catch (error) {
-  try {
-    entries = listZipCentralDirectory(vsixPath);
-  } catch (fallbackError) {
-    fail(`could not list ${vsixPath} with the local unzip tool or ZIP parser: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
-    process.exit();
-  }
+  fail(`could not read ${vsixPath} as a ZIP file: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit();
 }
-
-function listZipCentralDirectory(file) {
-  const archive = readFileSync(file);
-  const minimumEndRecord = 22;
-  const searchStart = Math.max(0, archive.length - 65_557);
-  let endRecord = -1;
-  for (let offset = archive.length - minimumEndRecord; offset >= searchStart; offset -= 1) {
-    if (archive.readUInt32LE(offset) === 0x06054b50) { endRecord = offset; break; }
-  }
-  if (endRecord < 0) throw new Error('ZIP end-of-central-directory record was not found');
-  const directorySize = archive.readUInt32LE(endRecord + 12);
-  const directoryOffset = archive.readUInt32LE(endRecord + 16);
-  const entries = [];
-  let offset = directoryOffset;
-  const end = directoryOffset + directorySize;
-  while (offset < end) {
-    if (archive.readUInt32LE(offset) !== 0x02014b50) throw new Error(`invalid ZIP central-directory record at byte ${offset}`);
-    const nameLength = archive.readUInt16LE(offset + 28);
-    const extraLength = archive.readUInt16LE(offset + 30);
-    const commentLength = archive.readUInt16LE(offset + 32);
-    entries.push(archive.toString('utf8', offset + 46, offset + 46 + nameLength));
-    offset += 46 + nameLength + extraLength + commentLength;
-  }
-  if (offset !== end || entries.length === 0) throw new Error('ZIP central-directory bounds were invalid');
-  return entries;
-}
+const entries = zip.entries;
 
 const entrySet = new Set(entries);
 const required = [
@@ -186,7 +156,7 @@ for (const [file, hash] of vendoredFiles) {
   if (!entrySet.has(entry)) { fail(`vendored file is missing from the package: ${entry}`); continue; }
   let bytes;
   try {
-    bytes = execFileSync('unzip', ['-p', vsixPath, entry], { cwd: root, maxBuffer: 64 * 1024 * 1024 });
+    bytes = zip.read(entry);
   } catch (error) {
     fail(`could not read ${entry} from the package to check its hash: ${error instanceof Error ? error.message : String(error)}`);
     continue;
@@ -197,23 +167,26 @@ for (const [file, hash] of vendoredFiles) {
 
 // The map tiles: every tile each packaged index lists is in the package with the size and hash the index records, and nothing unlisted is.
 const tileFolders = ['extension/media/map/globe', 'extension/resources/staff/env/iron-lantern/tiles'];
-const scratch = mkdtempSync(resolve(tmpdir(), 'near-vsix-tiles-'));
-try {
-  execFileSync('unzip', ['-q', vsixPath, ...tileFolders.map((folder) => `${folder}/*`), '-d', scratch], { cwd: root });
-  for (const folder of tileFolders) {
-    const index = JSON.parse(readFileSync(resolve(scratch, folder, 'index.json'), 'utf8'));
-    const listed = new Set([`${folder}/index.json`, `${folder}/DATA.json`]);
-    for (const [setId, set] of Object.entries(index.sets)) for (const [path, bytes, sha] of set.tiles) {
-      const entry = `${folder}/${setId}/${path}.${set.format}`;
-      listed.add(entry);
-      let data;
-      try { data = readFileSync(resolve(scratch, entry)); } catch { fail(`packaged tile ${entry} is missing`); continue; }
-      if (data.length !== bytes || createHash('sha256').update(data).digest('hex') !== sha) fail(`packaged tile ${entry} does not match its index`);
-    }
-    const strays = entries.filter((entry) => entry.startsWith(`${folder}/`) && !entry.endsWith('/') && !listed.has(entry));
-    if (strays.length) fail(`files in ${folder} that no index lists: ${strays.slice(0, 5).join(', ')}`);
+for (const folder of tileFolders) {
+  let index;
+  try {
+    index = JSON.parse(zip.read(`${folder}/index.json`).toString('utf8'));
+  } catch (error) {
+    fail(`could not read ${folder}/index.json from the package: ${error instanceof Error ? error.message : String(error)}`);
+    continue;
   }
-} finally { rmSync(scratch, { recursive: true, force: true }); }
+  const listed = new Set([`${folder}/index.json`, `${folder}/DATA.json`]);
+  for (const [setId, set] of Object.entries(index.sets)) for (const [path, bytes, sha] of set.tiles) {
+    const entry = `${folder}/${setId}/${path}.${set.format}`;
+    listed.add(entry);
+    if (!entrySet.has(entry)) { fail(`packaged tile ${entry} is missing`); continue; }
+    let data;
+    try { data = zip.read(entry); } catch (error) { fail(`packaged tile ${entry} could not be read: ${error instanceof Error ? error.message : String(error)}`); continue; }
+    if (data.length !== bytes || createHash('sha256').update(data).digest('hex') !== sha) fail(`packaged tile ${entry} does not match its index`);
+  }
+  const strays = entries.filter((entry) => entry.startsWith(`${folder}/`) && !entry.endsWith('/') && !listed.has(entry));
+  if (strays.length) fail(`files in ${folder} that no index lists: ${strays.slice(0, 5).join(', ')}`);
+}
 
 // The size gate (research note on the map tiles, section 6): the package stays at most 14 MiB and 4,000 files.
 const VSIX_MAX_BYTES = 14 * 1024 * 1024;
@@ -227,7 +200,7 @@ if (entries.length > VSIX_MAX_ENTRIES) fail(`the package has ${entries.length} e
 const crdt = JSON.parse(readFileSync(resolve(root, 'scripts/crdt-vendor.json'), 'utf8'));
 const crdtEntry = 'extension/vendor/yjs/yjs.cjs';
 try {
-  const actual = createHash('sha256').update(execFileSync('unzip', ['-p', vsixPath, crdtEntry], { cwd: root, maxBuffer: 64 * 1024 * 1024 })).digest('hex');
+  const actual = createHash('sha256').update(zip.read(crdtEntry)).digest('hex');
   if (actual !== crdt.output?.sha256) fail(`vendored file ${crdtEntry} does not match its recorded hash (${actual} != ${crdt.output?.sha256})`);
 } catch (error) {
   fail(`could not read ${crdtEntry} from the package to check its hash: ${error instanceof Error ? error.message : String(error)}`);

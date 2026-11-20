@@ -224,6 +224,8 @@ function fakeModelSequence(replies) {
         const messages = JSON.parse(body).messages ?? [];
         prompts.push(messages.map((message) => message.content).join('\n'));
         const reply = replies[Math.min(prompts.length - 1, replies.length - 1)];
+        // A number answers with that HTTP status instead of a reply.
+        if (typeof reply === 'number') { response.writeHead(reply); response.end(); return; }
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ choices: [{ message: { content: reply } }] }));
       });
@@ -248,6 +250,9 @@ test('a PR too large for one review is reviewed in parts, each prompt holding on
     assert.ok(prompt.includes(`diff --git a/${own} b/${own}`), `part ${index + 1} carries ${own}`);
     for (const other of bigFiles.filter((file) => file.path !== own)) assert.ok(!prompt.includes(`diff --git a/${other.path} b/${other.path}`), `part ${index + 1} leaves out ${other.path}`);
     assert.match(prompt, /- src\/d\.ts/, 'the file that fit nowhere is named in every part');
+    const listed = /<<<UNTRUSTED FILES \w+>>>\n([\s\S]*?)\n<<<END UNTRUSTED FILES/.exec(prompt)?.[1];
+    assert.equal(listed, own, `part ${index + 1} lists only its own changed file`);
+    assert.match(prompt, /only this part's 1 file\(s\); the other 2 changed\s+file\(s\) are in the other parts/, 'and says how many are elsewhere');
   }
   assert.deepEqual(result.omitted, ['src/d.ts'], 'so the PR still waits for the owner');
   assert.equal(result.state, 'success');
@@ -288,4 +293,91 @@ test('combined part reviews have one verdict, one Head-SHA and one recommendatio
     const result = parseReview(combinePartReviews([PASS, bad], HEAD));
     assert.equal(reviewDecision(result, HEAD, { requireRecommendation: true }).state, 'failure', label);
   }
+});
+
+test('combined part reviews keep a quoted verdict inside a finding and show each part\'s own verdict', () => {
+  const quoting = [
+    '## Recommendation: MERGE',
+    '',
+    'Fine.',
+    '',
+    '- [MINOR] scripts/x.mjs:1 the example reply should read:',
+    '',
+    '```',
+    'Verdict: PASS',
+    `Head-SHA: ${HEAD}`,
+    '## Recommendation: MERGE',
+    '```',
+    '',
+    'Verdict: PASS',
+    `Head-SHA: ${HEAD}`,
+    ''
+  ].join('\n');
+  const failing = `## Recommendation: DO NOT MERGE\n\n- [MAJOR] src/y.ts:2 wrong\n\n**Verdict:** FAIL\nHead-SHA: ${HEAD}\n`;
+  const combined = combinePartReviews([quoting, failing], HEAD);
+  assert.ok(combined.includes(`\`\`\`\nVerdict: PASS\nHead-SHA: ${HEAD}\n## Recommendation: MERGE\n\`\`\``), 'the quoted example is kept as written');
+  assert.match(combined, /^Part 1 verdict: PASS$/m);
+  assert.match(combined, /^Part 2 verdict: FAIL$/m);
+  assert.match(combined, /^#### Part 2 recommendation: DO NOT MERGE$/m);
+  const parsed = parseReview(combined);
+  assert.deepEqual(parsed.problems, []);
+  assert.equal(parsed.verdict, 'FAIL');
+  assert.equal(parsed.headSha, HEAD);
+  assert.equal(parsed.recommendation, 'DO NOT MERGE');
+  assert.equal(reviewDecision(parsed, HEAD, { requireRecommendation: true }).state, 'failure');
+  const passing = parseReview(combinePartReviews([quoting, PASS], HEAD));
+  assert.deepEqual(passing.problems, []);
+  assert.equal(reviewDecision(passing, HEAD, { requireRecommendation: true }).state, 'success', 'a quoted verdict alone does not fail a passing review');
+});
+
+/** A model that keeps thinking and never answers, so only a time limit can end the call. */
+function stalledModel() {
+  let requests = 0;
+  return new Promise((resolve) => {
+    const server = createServer((request, response) => {
+      requests += 1;
+      request.resume();
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      const tick = setInterval(() => {
+        if (response.destroyed) { clearInterval(tick); return; }
+        response.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'hmm' } }] })}\n\n`);
+      }, 100);
+      response.on('close', () => clearInterval(tick));
+    });
+    server.listen(0, '127.0.0.1', () => { servers.push(server); resolve({ url: `http://127.0.0.1:${server.address().port}/v1`, count: () => requests }); });
+  });
+}
+
+test('a stalled review in parts ends inside its shared budget and posts a failure status', async () => {
+  const fake = install({ diffTooLarge: true }, { files: bigFiles.slice(0, 3) });
+  const model = await stalledModel();
+  const started = Date.now();
+  await assert.rejects(reviewPr(REPO, '12', { ...quiet, env: env(model.url), budgetSeconds: 2 }), /ran out of its time budget/);
+  assert.ok(Date.now() - started < 15_000, 'the whole review stops at the budget, not at each part\'s own 45 minutes');
+  assert.equal(model.count(), 1, 'no later part or retry starts once the budget is spent');
+  const last = fake.world.commits[HEAD].statuses.at(-1);
+  assert.equal(last.state, 'failure');
+  assert.equal(last.creator, REVIEWER);
+  assert.match(last.description, /could not finish: .*time budget/);
+  assert.deepEqual(approvePr(REPO, '12', HEAD, { ...quiet, env: env() }), { approved: false });
+});
+
+test('the parts of one review share their retries', async () => {
+  // Part 1 needs both retries; part 2 then gets a single attempt, so its failure ends the review.
+  const fake = install({ diffTooLarge: true }, { files: bigFiles.slice(0, 3) });
+  const model = await fakeModelSequence([503, 503, PASS, 503, PASS]);
+  await assert.rejects(reviewPr(REPO, '12', { ...quiet, env: env(model.url) }), /HTTP 503/);
+  assert.equal(model.prompts.length, 4, 'three attempts for part 1 and one for part 2');
+  assert.match(model.prompts[3], /This is part 2 of 3\./);
+  assert.equal(fake.world.commits[HEAD].statuses.at(-1).state, 'failure');
+});
+
+test('a single review whose model fails posts a failure status instead of leaving none', async () => {
+  const fake = install();
+  const model = await fakeModelSequence([401]);
+  await assert.rejects(reviewPr(REPO, '12', { ...quiet, env: env(model.url) }), /HTTP 401/);
+  assert.equal(model.prompts.length, 1, 'a 401 is not retried');
+  const last = fake.world.commits[HEAD].statuses.at(-1);
+  assert.equal(last.state, 'failure');
+  assert.match(last.description, /HTTP 401/);
 });
