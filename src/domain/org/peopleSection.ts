@@ -11,11 +11,15 @@ import { parseClearance } from '../gate/labels';
 import type { Clearance, ScaleTable } from '../gate/labels';
 import { checkKeys, childPath, isRecord, isSafeIntegerInRange, ownValue, refused } from '../gate/shape';
 import type { Parsed } from '../gate/shape';
-import { MODE_IDS } from './modes';
-import type { ModeId } from './modes';
+import {
+  DEFAULT_MAX_DELEGATION_DEPTH, DEFAULT_OVERDUE_DAYS, MAX_DELEGATION_DEPTH, MAX_OVERDUE_DAYS, MIN_OVERDUE_DAYS, MODES, MODE_IDS, ORGANIZATION_SETTING_KEYS
+} from './modes';
+import type { ModeBehaviour, ModeId, OrganizationSettings } from './modes';
 
-/** The settings of people.organization as parsed: the two numbers always filled with their defaults, each boolean only when written (D-40). */
-export interface OrganizationSettings {
+export type { OrganizationSettings } from './modes';
+
+/** people.organization.settings as parsed: the two numbers always filled with their defaults, each boolean only when written (D-40). */
+export interface ParsedOrganizationSettings extends OrganizationSettings {
   /** How many times posting authority may be passed on: 0 (the default) means delegates may not delegate again (portfolio O2). */
   readonly maxDelegationDepth: number;
   /** Days after the start date before an unreported posting is overdue (portfolio D4). */
@@ -30,7 +34,7 @@ export interface OrganizationBlock {
   /** Whether a project may pick its own mode from `allowedModes`. */
   readonly projectMayChoose: boolean;
   /** Always present after parsing, so a document is its own wire form with every default filled. */
-  readonly settings: OrganizationSettings;
+  readonly settings: ParsedOrganizationSettings;
 }
 
 export interface PeopleSection {
@@ -46,27 +50,43 @@ export interface PeopleSection {
 const PEOPLE_OPTIONAL = ['clearances', 'signers', 'organization'] as const;
 const ORGANIZATION_REQUIRED = ['mode', 'allowedModes', 'projectMayChoose'] as const;
 const ORGANIZATION_OPTIONAL = ['settings'] as const;
-const DEFAULT_MAX_DELEGATION_DEPTH = 0;
-const DEFAULT_OVERDUE_DAYS = 2;
+/** The settings that turn a permission on: each needs every allowed mode to offer that permission already, so a setting can only tighten (D-40). */
+const PERMISSION_SETTINGS = ['acting', 'dualHatting', 'mayDecline'] as const satisfies ReadonlyArray<keyof OrganizationSettings & keyof ModeBehaviour>;
+const BOOLEAN_SETTINGS = ['acting', 'dualHatting', 'enrolAtReport', 'guests', 'mayDecline', 'temporary'] as const;
 
 function parseModeId(value: unknown, path: string): Parsed<ModeId> {
   return typeof value === 'string' && (MODE_IDS as readonly string[]).includes(value) ? { ok: true, value: value as ModeId } : refused('wrong-type', path);
 }
 
-function parseSettings(value: unknown, path: string): Parsed<OrganizationSettings> {
+/**
+ * Settings parse strictly and may only tighten: a permission turned on (`true`) where any allowed mode does not offer it is refused at that key, so
+ * declining can never be enabled while an assignment or appointment mode is allowed (T-41-60). The two numbers are filled with their defaults.
+ */
+function parseSettings(value: unknown, path: string, allowedModes: readonly ModeId[]): Parsed<ParsedOrganizationSettings> {
   if (!isRecord(value)) return refused('wrong-type', path);
-  const keys = checkKeys(value, path, [], ['maxDelegationDepth', 'overdueDays']);
+  const keys = checkKeys(value, path, [], ORGANIZATION_SETTING_KEYS);
   if (keys !== undefined) return keys;
-  const number = (key: string, min: number, max: number, fallback: number): Parsed<number> => {
-    if (!Object.prototype.hasOwnProperty.call(value, key)) return { ok: true, value: fallback };
-    const found = ownValue(value, key);
-    return isSafeIntegerInRange(found, min, max) ? { ok: true, value: found } : refused('wrong-type', childPath(path, key));
+  const out: { -readonly [K in keyof ParsedOrganizationSettings]: ParsedOrganizationSettings[K] } = {
+    maxDelegationDepth: DEFAULT_MAX_DELEGATION_DEPTH, overdueDays: DEFAULT_OVERDUE_DAYS
   };
-  const maxDelegationDepth = number('maxDelegationDepth', 0, 2, DEFAULT_MAX_DELEGATION_DEPTH);
-  if (!maxDelegationDepth.ok) return maxDelegationDepth;
-  const overdueDays = number('overdueDays', 1, 30, DEFAULT_OVERDUE_DAYS);
-  if (!overdueDays.ok) return overdueDays;
-  return { ok: true, value: Object.freeze({ maxDelegationDepth: maxDelegationDepth.value, overdueDays: overdueDays.value }) };
+  const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
+  for (const key of BOOLEAN_SETTINGS) {
+    if (!has(key)) continue;
+    const found = ownValue(value, key);
+    if (typeof found !== 'boolean') return refused('wrong-type', childPath(path, key));
+    out[key] = found;
+  }
+  const numbers = [['maxDelegationDepth', 0, MAX_DELEGATION_DEPTH], ['overdueDays', MIN_OVERDUE_DAYS, MAX_OVERDUE_DAYS]] as const;
+  for (const [key, min, max] of numbers) {
+    if (!has(key)) continue;
+    const found = ownValue(value, key);
+    if (!isSafeIntegerInRange(found, min, max)) return refused('wrong-type', childPath(path, key));
+    out[key] = found;
+  }
+  for (const key of PERMISSION_SETTINGS) {
+    if (out[key] === true && !allowedModes.every((mode) => MODES[mode].behaviour[key])) return refused('not-allowed-here', childPath(path, key));
+  }
+  return { ok: true, value: Object.freeze(out) };
 }
 
 function parseOrganizationBlock(value: unknown, path: string): Parsed<OrganizationBlock> {
@@ -83,7 +103,8 @@ function parseOrganizationBlock(value: unknown, path: string): Parsed<Organizati
   if (!allowedModes.value.includes(mode.value)) return refused('not-allowed-here', childPath(path, 'mode'));
   const projectMayChoose = ownValue(value, 'projectMayChoose');
   if (typeof projectMayChoose !== 'boolean') return refused('wrong-type', childPath(path, 'projectMayChoose'));
-  const settings = parseSettings(Object.prototype.hasOwnProperty.call(value, 'settings') ? ownValue(value, 'settings') : {}, childPath(path, 'settings'));
+  const settingsValue = Object.prototype.hasOwnProperty.call(value, 'settings') ? ownValue(value, 'settings') : {};
+  const settings = parseSettings(settingsValue, childPath(path, 'settings'), allowedModes.value);
   if (!settings.ok) return settings;
   return { ok: true, value: Object.freeze({ mode: mode.value, allowedModes: allowedModes.value, projectMayChoose, settings: settings.value }) };
 }

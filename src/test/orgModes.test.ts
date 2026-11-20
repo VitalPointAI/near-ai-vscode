@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { parsePolicyDocument } from '../domain/gate/policyDocument';
-import { CONCEPT_KEYS, MODES, MODE_IDS, SOURCE_STATUSES } from '../domain/org/modes';
-import type { ModeId } from '../domain/org/modes';
+import { CONCEPT_KEYS, MAX_DELEGATION_DEPTH, MODES, MODE_IDS, ORGANIZATION_SETTING_KEYS, SOURCE_STATUSES, effectiveBehaviour } from '../domain/org/modes';
+import type { ModeId, OrganizationSettings } from '../domain/org/modes';
 import { parsePeopleSection } from '../domain/org/peopleSection';
 import { HOW_YOUR_ORGANIZATION_WORKS, modeName, planningProfileFor, term } from '../domain/org/terms';
 import { STAFF_PROFILE_IDS } from '../domain/staff/doctrine';
@@ -182,5 +182,135 @@ test('D-40: doctrine stays a profile under term()', () => {
   assert.equal(planningProfileFor('corporate', 'us-joint'), 'none', 'a mode without doctrine ignores the choice');
   for (const outside of ['caf-opp', 'NATO-CA', '', '__proto__', 'constructor']) {
     assert.equal(planningProfileFor('military', outside), 'nato-ca', `profile ${outside} is refused`);
+  }
+});
+
+/** An organization block over `allowedModes` (sorted by the caller), with `mode` the first of them unless given. */
+function over(allowedModes: string[], settings: Loose = {}, mode: string = allowedModes[0] ?? 'corporate'): Loose {
+  return people({ mode, allowedModes, projectMayChoose: true, settings });
+}
+
+function parsedSettings(value: unknown): Loose {
+  const parsed = parsePeopleSection(value, SCALE_PRESETS);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  return parsed.ok ? parsed.value.organization?.settings : undefined;
+}
+
+test('D-40: maxDelegationDepth defaults to 0, accepts 0 to 2 and refuses 3 (wrong-type), -1 and 1.5', () => {
+  assert.equal(MAX_DELEGATION_DEPTH, 2);
+  assert.equal(parsedSettings(over(['corporate'])).maxDelegationDepth, 0);
+  assert.equal(parsedSettings(people({ mode: 'corporate', allowedModes: ['corporate'], projectMayChoose: false })).maxDelegationDepth, 0, 'settings absent');
+  for (const depth of [0, 1, 2]) assert.equal(parsedSettings(over(['military'], { maxDelegationDepth: depth })).maxDelegationDepth, depth);
+  for (const depth of [3, -1, 1.5, '1', null, Number.NaN, Number.POSITIVE_INFINITY, true]) {
+    assert.equal(outcome(over(['military'], { maxDelegationDepth: depth })), 'wrong-type people.organization.settings.maxDelegationDepth', String(depth));
+  }
+});
+
+test('D-40: declining can never be turned on in an assignment mode', () => {
+  assert.equal(outcome(over(['corporate', 'military'], { mayDecline: true })), 'not-allowed-here people.organization.settings.mayDecline');
+  for (const mode of ['capital', 'military', 'public-service']) {
+    assert.equal(outcome(over([mode], { mayDecline: true })), 'not-allowed-here people.organization.settings.mayDecline', mode);
+    assert.equal(outcome(over(['corporate', mode].sort(), { mayDecline: true }, 'corporate')), 'not-allowed-here people.organization.settings.mayDecline', mode);
+  }
+  assert.equal(outcome(over(['corporate'], { mayDecline: true })), 'ok');
+  assert.equal(parsedSettings(over(['corporate'], { mayDecline: true })).mayDecline, true);
+  for (const modes of [['corporate'], ['military'], ['capital', 'corporate', 'military', 'public-service']]) {
+    assert.equal(outcome(over(modes, { mayDecline: false })), 'ok', modes.join(' '));
+  }
+  assert.equal(outcome(over(['corporate'], { mayDecline: 'yes' })), 'wrong-type people.organization.settings.mayDecline');
+});
+
+test('D-40: acting or dualHatting true is refused while Corporate is an allowed mode', () => {
+  for (const key of ['acting', 'dualHatting']) {
+    assert.equal(outcome(over(['corporate'], { [key]: true })), `not-allowed-here people.organization.settings.${key}`);
+    assert.equal(outcome(over(['corporate', 'military'], { [key]: true }, 'military')), `not-allowed-here people.organization.settings.${key}`);
+    assert.equal(outcome(over(['capital', 'military', 'public-service'], { [key]: true })), 'ok', key);
+    for (const modes of [['corporate'], ['military'], ['capital', 'corporate', 'military', 'public-service']]) {
+      assert.equal(outcome(over(modes, { [key]: false })), 'ok', `${key} ${modes.join(' ')}`);
+    }
+  }
+});
+
+test('D-40: effectiveBehaviour never allows declining in an assignment or appointment mode', () => {
+  const values: OrganizationSettings[] = [
+    {}, { mayDecline: true }, { mayDecline: false }, { acting: true, dualHatting: true, guests: true, temporary: true },
+    JSON.parse('{"__proto__":{"mayDecline":true},"mayDecline":true}') as OrganizationSettings
+  ];
+  for (const mode of MODE_IDS) {
+    for (const settings of values) {
+      const behaviour = effectiveBehaviour(mode, settings);
+      const expected = mode === 'corporate' && settings.mayDecline !== false;
+      assert.equal(behaviour.mayDecline, expected, `${mode} ${JSON.stringify(settings)}`);
+      if (MODES[mode].behaviour.joiningModel !== 'invitation') assert.equal(behaviour.mayDecline, false, mode);
+      assert.ok(Object.isFrozen(behaviour));
+    }
+  }
+  assert.equal(effectiveBehaviour('corporate', { mayDecline: false }).mayDecline, false);
+  assert.equal(MODES.corporate.behaviour.mayDecline, true, 'the table itself is never changed');
+});
+
+test('D-40: effectiveBehaviour only turns a permission off or a duty on, never widens a mode', () => {
+  const widest: OrganizationSettings = { acting: true, dualHatting: true, enrolAtReport: false, guests: true, mayDecline: true, temporary: true };
+  const narrowest: OrganizationSettings = { acting: false, dualHatting: false, enrolAtReport: true, guests: false, mayDecline: false, temporary: false };
+  for (const mode of MODE_IDS) {
+    const row = MODES[mode].behaviour;
+    const wide = effectiveBehaviour(mode, widest);
+    for (const key of ['mayDecline', 'acting', 'dualHatting'] as const) assert.equal(wide[key], row[key], `${mode} ${key}`);
+    assert.equal(wide.guests, row.guests);
+    assert.equal(wide.temporary, row.temporary);
+    assert.equal(wide.enrolAtReport, false);
+    assert.equal(wide.joiningModel, row.joiningModel);
+    const narrow = effectiveBehaviour(mode, narrowest);
+    for (const key of ['mayDecline', 'acting', 'dualHatting'] as const) assert.equal(narrow[key], false, `${mode} ${key}`);
+    assert.equal(narrow.guests, 'if-policy-allows');
+    assert.equal(narrow.temporary, 'no');
+    assert.equal(narrow.enrolAtReport, true);
+    assert.equal(narrow.handoverRequired, row.handoverRequired, 'a duty the mode has stays');
+    assert.equal(effectiveBehaviour(mode, {}).enrolAtReport, false, 'reading in is allowed from enrolment by default (portfolio D3)');
+  }
+});
+
+test('D-40: overdueDays is an integer from 1 to 30 (default 2); enrolAtReport, guests, temporary are booleans', () => {
+  assert.equal(parsedSettings(over(['military'])).overdueDays, 2);
+  for (const days of [1, 2, 30]) assert.equal(parsedSettings(over(['military'], { overdueDays: days })).overdueDays, days);
+  for (const days of [0, 31, 2.5, -2, '2', null]) {
+    assert.equal(outcome(over(['military'], { overdueDays: days })), 'wrong-type people.organization.settings.overdueDays', String(days));
+  }
+  for (const key of ['enrolAtReport', 'guests', 'temporary']) {
+    for (const mode of MODE_IDS) {
+      assert.equal(parsedSettings(over([mode], { [key]: true }))[key], true, `${key} ${mode}`);
+      assert.equal(parsedSettings(over([mode], { [key]: false }))[key], false, `${key} ${mode}`);
+    }
+    for (const bad of ['true', 1, null, {}]) assert.equal(outcome(over(['military'], { [key]: bad })), `wrong-type people.organization.settings.${key}`);
+  }
+  assert.equal(outcome(over(['military'], 'tight')), 'wrong-type people.organization.settings');
+  assert.equal(outcome(over(['military'], [])), 'wrong-type people.organization.settings');
+});
+
+test('D-40: mode not in allowedModes, a bad allowedModes list and an unknown mode id are refused', () => {
+  assert.equal(outcome(over(['military'], {}, 'corporate')), 'not-allowed-here people.organization.mode');
+  assert.equal(outcome(over([], {}, 'corporate')), 'empty-list people.organization.allowedModes');
+  assert.equal(outcome(over(['military', 'corporate'], {}, 'corporate')), 'not-sorted people.organization.allowedModes[1]');
+  assert.equal(outcome(over(['corporate', 'corporate'], {}, 'corporate')), 'duplicate people.organization.allowedModes[1]');
+  assert.equal(outcome(over(['corporate'], {}, 'navy')), 'wrong-type people.organization.mode');
+  assert.equal(outcome(over(['corporate', 'navy'], {}, 'corporate')), 'wrong-type people.organization.allowedModes[1]');
+  assert.equal(outcome(over(['Corporate'], {}, 'Corporate')), 'wrong-type people.organization.mode');
+  assert.equal(outcome(people({ mode: 'corporate', allowedModes: 'corporate', projectMayChoose: false })), 'wrong-type people.organization.allowedModes');
+  assert.equal(outcome(people({ mode: 'corporate', allowedModes: ['corporate'], projectMayChoose: 'no' })), 'wrong-type people.organization.projectMayChoose');
+  assert.equal(outcome(people({ allowedModes: ['corporate'], projectMayChoose: false })), 'missing-field people.organization.mode');
+  assert.equal(outcome(people({ mode: 'corporate', projectMayChoose: false })), 'missing-field people.organization.allowedModes');
+  assert.equal(outcome(people({ mode: 'corporate', allowedModes: ['corporate'] })), 'missing-field people.organization.projectMayChoose');
+  assert.equal(outcome(people('corporate')), 'wrong-type people.organization');
+  assert.equal(outcome(over(['capital', 'corporate', 'military', 'public-service'], {}, 'public-service')), 'ok');
+});
+
+test('D-40: ORGANIZATION_SETTING_KEYS lists exactly the settings the parser accepts', () => {
+  assert.deepEqual([...ORGANIZATION_SETTING_KEYS], [...ORGANIZATION_SETTING_KEYS].sort());
+  const every: Loose = {};
+  for (const key of ORGANIZATION_SETTING_KEYS) every[key] = key === 'maxDelegationDepth' ? 1 : key === 'overdueDays' ? 5 : false;
+  const settings = parsedSettings(over(['corporate'], every));
+  assert.deepEqual(Object.keys(settings).sort(), [...ORGANIZATION_SETTING_KEYS]);
+  for (const key of ['invented', 'joiningModel', 'handoverRequired', 'invitationExpiryDays', 'allowedModes', 'constructor', 'toString']) {
+    assert.equal(outcome(over(['corporate'], { ...every, [key]: false })), `unknown-field people.organization.settings.${key}`, key);
   }
 });

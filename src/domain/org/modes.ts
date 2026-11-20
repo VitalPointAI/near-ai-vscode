@@ -58,8 +58,8 @@ export interface ModeBehaviour {
   /** Whether the order must cite an instrument (for example an appointment letter). */
   readonly instrumentRequired: boolean;
   readonly acting: boolean;
-  /** Temporary joining: offered, or only as a guest. */
-  readonly temporary: 'yes' | 'guest-only';
+  /** Temporary joining: offered, only as a guest, or (only ever after your organization's settings turn it off) not offered. */
+  readonly temporary: 'yes' | 'guest-only' | 'no';
   readonly dualHatting: boolean;
   /** Whether replacing a holder needs a handover (never empty, never two). */
   readonly handoverRequired: boolean;
@@ -216,3 +216,67 @@ export const MODES: Readonly<Record<ModeId, ModeRow>> = Object.freeze({
   corporate: CORPORATE,
   capital: CAPITAL
 });
+
+/** The settings people.organization may hold (D-40), sorted. Each one may only tighten what every allowed mode offers. */
+export const ORGANIZATION_SETTING_KEYS = ['acting', 'dualHatting', 'enrolAtReport', 'guests', 'maxDelegationDepth', 'mayDecline', 'overdueDays', 'temporary'] as const;
+export type OrganizationSettingKey = (typeof ORGANIZATION_SETTING_KEYS)[number];
+
+/** How many times posting authority may be passed on, at most (portfolio O2). */
+export const MAX_DELEGATION_DEPTH = 2;
+/** By default delegates may not delegate again (portfolio D2 and O2). */
+export const DEFAULT_MAX_DELEGATION_DEPTH = 0;
+/** Days after the start date before an unreported posting is overdue (portfolio D4), and the range a policy may set. */
+export const DEFAULT_OVERDUE_DAYS = 2;
+export const MIN_OVERDUE_DAYS = 1;
+export const MAX_OVERDUE_DAYS = 30;
+
+/** Your organization's settings for how people join (D-40). Every key is optional; a boolean not written leaves the mode's own behaviour. */
+export interface OrganizationSettings {
+  /** False turns acting off. True is allowed only where every allowed mode offers acting. */
+  readonly acting?: boolean;
+  /** False turns dual-hatting off. True is allowed only where every allowed mode offers it. */
+  readonly dualHatting?: boolean;
+  /** True means a person reads in only once they report (portfolio D3); false (the default) allows it from enrolment. */
+  readonly enrolAtReport?: boolean;
+  /** False means guests come only if the policy allows them. */
+  readonly guests?: boolean;
+  readonly maxDelegationDepth?: number;
+  /** False turns declining off. True is allowed only where every allowed mode lets people decline: never in an assignment or appointment mode. */
+  readonly mayDecline?: boolean;
+  readonly overdueDays?: number;
+  /** False turns temporary joining off. */
+  readonly temporary?: boolean;
+}
+
+/** A mode's behaviour after your organization's settings, plus the one duty a setting adds. */
+export interface EffectiveBehaviour extends ModeBehaviour {
+  readonly enrolAtReport: boolean;
+}
+
+/**
+ * The behaviour a project in `mode` has under `settings`. It starts from the mode's row and only ever turns a permission off or a duty on, so a stored
+ * setting can never widen a mode: declining stays impossible in an assignment or appointment mode whatever the settings say (T-41-60, defence in depth
+ * behind the parser's refusal). Only an explicit `false` turns a permission off and only an explicit `true` turns the duty on.
+ */
+export function effectiveBehaviour(mode: ModeId, settings: OrganizationSettings): EffectiveBehaviour {
+  // A programming error, never user input: parsed policies only ever carry known mode ids.
+  if (!(MODE_IDS as readonly string[]).includes(mode)) throw new TypeError(`No mode row for ${String(mode).slice(0, 40)}.`);
+  const row = MODES[mode].behaviour;
+  const off = (value: unknown): boolean => value === false;
+  const out: EffectiveBehaviour = {
+    joiningModel: row.joiningModel,
+    mayDecline: row.mayDecline && !off(settings.mayDecline),
+    whoMayPost: row.whoMayPost,
+    instrumentRequired: row.instrumentRequired,
+    acting: row.acting && !off(settings.acting),
+    temporary: off(settings.temporary) ? 'no' : row.temporary,
+    dualHatting: row.dualHatting && !off(settings.dualHatting),
+    handoverRequired: row.handoverRequired,
+    positionsPersist: row.positionsPersist,
+    guests: off(settings.guests) ? 'if-policy-allows' : row.guests,
+    planningProfile: row.planningProfile,
+    enrolAtReport: settings.enrolAtReport === true,
+    ...(row.invitationExpiryDays === undefined ? {} : { invitationExpiryDays: row.invitationExpiryDays })
+  };
+  return Object.freeze(out);
+}
