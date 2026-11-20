@@ -1302,6 +1302,39 @@ library use a lot of memory or crash.
   anything. The same counting checks also run inside the extension as a second line, so a change
   is refused the same way on every machine.
 
+### The replica store and rollback detection
+
+The shared history of a multi-user staff project (every signed change from every person and
+agent, and the sealed text they carry) is kept on each machine in a replica store inside the
+project folder.
+
+- **Where it lives.** The store is the folder `.planning/staff/replica/`: one append-only file per
+  writer per product area, sealed attachments named by their hash, signed key grants and signed
+  checkpoints. Entries and attachments are written whole and synced to disk before they count; a
+  line cut short by a crash is never counted. The store never deletes an entry or an attachment
+  and never rewrites a line.
+- **Git ignores it.** The folder holds its own `.gitignore` that ignores everything in it, so the
+  shared history is never committed to your repository by accident. It is carried between
+  machines by the sharing service, not by git, so a branch switch cannot roll it back.
+- **Two windows at once.** Every write takes a lock in the folder, so two editor windows or two
+  processes on one machine never mix or lose each other's lines.
+- **Rollback is noticed.** After each write the device records how far it has seen the shared
+  history (the newest change and the count of changes from each writer, and the newest roster
+  change) in the editor's secret storage, outside the project, signed with the device's own key.
+  When the folder is opened again and it holds less than that record (restored from an older
+  backup, a file cut short or deleted, a change swapped for another), the store is refused with a
+  plain message and nothing is changed. A record whose signature does not verify is refused the
+  same way and is never trusted or silently replaced.
+- **No private keys in the folder.** The store holds only sealed entries, sealed attachments and
+  signed grants and checkpoints. No private key, epoch key or join secret is ever written to it;
+  the device key stays in the editor's secret storage.
+- **Changes from other machines are checked first.** A change that arrives from another machine is
+  checked by the decode worker (above) before the shared view is built from it. A change the check
+  refuses is still kept in the store, set aside with the reason, and left out of the shared view.
+  It is never silently dropped, so a person can see what was set aside and why.
+- **Symbolic links are refused.** If any folder or file on the way to the store is a symbolic
+  link, nothing is read or written through it.
+
 ## Costs
 
 Estimates come from NEAR's published per-model prices and the token usage NEAR

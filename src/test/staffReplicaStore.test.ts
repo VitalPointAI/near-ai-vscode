@@ -11,11 +11,14 @@ import { BLOB_MAX_BYTES, GENESIS_PREV, buildEntry, entryHash, sha256Hex } from '
 import type { BuiltEntry, SealedEntry } from '../domain/replica/entry';
 import { REPLICA_DIR } from '../domain/staff/multiUser';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
-import { verifyPayload } from '../domain/team/signedPayload';
+import { checkpointHash } from '../domain/replica/checkpoint';
+import type { SignedCheckpoint } from '../domain/replica/checkpoint';
+import { canonicalBytes } from '../domain/team/canonical';
+import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { SecretStorageLike } from '../services/auth';
-import { REPLICA_MARK_SECRET_PREFIX, markKey, parseReplicaMark, readMark } from '../staff/replica/marks';
+import { REPLICA_MARK_SECRET_PREFIX, markKey, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
 import { ReplicaStore, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
-import type { ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
+import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
 import { FileSecrets } from './helpers/replicaStoreChild';
 import type { StoreChildMessage } from './helpers/replicaStoreChild';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
@@ -445,4 +448,167 @@ test('two appendOwn calls at once in one process for one writer keep seq order, 
   const read = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
   assert.equal(read.kind, 'mark');
   assert.deepEqual(read.kind === 'mark' && read.mark.heads.map((head) => [head.writer, head.seq, head.count]).sort(), [[lead.writer, 24, 25], [other.writer, 4, 5]].sort());
+});
+
+// ---- Task 4: entries from outside, grants and checkpoints, SECURITY.md --------------------------------------------------------------------
+
+/** A check that refuses the entries whose hash is in `refuse`, and counts its calls. */
+function countingCheck(refuse: ReadonlySet<string>): { check: ForeignCheck; calls: string[] } {
+  const calls: string[] = [];
+  const check: ForeignCheck = (entry) => {
+    const hash = entryHash(entry.header);
+    calls.push(hash);
+    return Promise.resolve(refuse.has(hash) ? { ok: false, reason: 'too-large: the update is over the size limit' } : { ok: true });
+  };
+  return { check, calls };
+}
+
+test('ingestForeign keeps all three entries when the check refuses one, holds that one back with its reason, and the held list survives a reopen', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const colleague = fixedSigner('colleague');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const foreign = chain(colleague, 3);
+  const { check, calls } = countingCheck(new Set([foreign[1].hash]));
+  const result = await store.ingestForeign(foreign.map((item) => item.entry), [], check);
+  assert.deepEqual(result, { ok: true, added: 3, duplicates: 0, held: [{ hash: foreign[1].hash, reason: 'too-large: the update is over the size limit' }], dropped: 0, blobsAdded: 0, blobsRefused: 0 });
+  assert.equal(calls.length, 3);
+  assert.equal(readFileSync(streamFile(root, colleague.writer), 'utf8').split('\n').length, 4, 'all three lines are written, the held one too');
+  assert.deepEqual(store.heldForCheck(), [{ hash: foreign[1].hash, reason: 'too-large: the update is over the size limit' }]);
+  assert.deepEqual(store.entries(), [foreign[0].entry, foreign[2].entry], 'the fold gets every entry except the held one');
+  assert.ok(store.has(foreign[1].hash), 'the held entry is kept in the store');
+  const again = await opened(root, depsFor(lead, secrets));
+  assert.deepEqual(again.heldForCheck(), store.heldForCheck());
+  assert.deepEqual(again.entries(), [foreign[0].entry, foreign[2].entry]);
+  const mark = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
+  assert.deepEqual(mark.kind === 'mark' && mark.mark.heads.map((head) => [head.writer, head.seq, head.count]), [[colleague.writer, 2, 3]], 'entries from outside move the mark too');
+});
+
+test('an entry already in the store delivered again (or twice in one call, or as a JSON clone) is not written twice and not checked twice', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const colleague = fixedSigner('colleague');
+  const store = await opened(root, depsFor(lead));
+  const foreign = chain(colleague, 3);
+  const first = countingCheck(new Set([foreign[2].hash]));
+  await store.ingestForeign([foreign[0].entry, foreign[0].entry, foreign[1].entry, foreign[2].entry], [], first.check);
+  assert.equal(first.calls.length, 3, 'the copy in the same call is not checked');
+  const second = countingCheck(new Set());
+  const result = await store.ingestForeign([...foreign.map((item) => JSON.parse(JSON.stringify(item.entry)) as unknown), foreign[1].entry], [], second.check);
+  assert.equal('ok' in result && result.added, 0);
+  assert.equal('ok' in result && result.duplicates, 4);
+  assert.deepEqual(second.calls, [], 'nothing already stored is checked again, so a held entry is not let in by a later check');
+  assert.equal(readFileSync(streamFile(root, colleague.writer), 'utf8').split('\n').length, 4);
+  assert.deepEqual(store.heldForCheck().map((item) => item.hash), [foreign[2].hash]);
+  const own = await opened(root, depsFor(lead));
+  const third = countingCheck(new Set());
+  assert.equal(((await own.ingestForeign(foreign.map((item) => item.entry), [], third.check)) as IngestResult).duplicates, 3, 'a second store object reads them from disk');
+  assert.deepEqual(third.calls, []);
+});
+
+test('ingestForeign drops what is not a sealed entry, counts a throwing check as a refusal, and refuses wrong or oversized blobs', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const colleague = fixedSigner('colleague');
+  const store = await opened(root, depsFor(lead));
+  const [big, plain] = [chain(colleague, 1, { big: true })[0], chain(fixedSigner('third'), 1)[0]];
+  const damagedBody = { ...plain.entry, body: `${plain.entry.body.slice(0, -2)}${plain.entry.body.endsWith('AA') ? 'BB' : 'AA'}` };
+  const wrongBlob = { hash: big.blobs[0].hash, bytes: Buffer.from('not the blob').toString('base64url') };
+  const huge = Buffer.alloc(BLOB_MAX_BYTES + 1, 1);
+  const throwing: ForeignCheck = (entry) => (entryHash(entry.header) === plain.hash ? Promise.reject(new Error('worker gone')) : Promise.resolve({ ok: true }));
+  const result = await store.ingestForeign([null, 'text', { header: {}, body: '' }, damagedBody, big.entry, plain.entry], [wrongBlob, { hash: sha256Hex(huge), bytes: huge.toString('base64url') }, big.blobs[0]], throwing);
+  assert.ok('ok' in result);
+  assert.equal(result.dropped, 4);
+  assert.equal(result.added, 2);
+  assert.deepEqual(result.held, [{ hash: plain.hash, reason: 'The decode check could not run on this update.' }]);
+  assert.equal(result.blobsAdded, 1);
+  assert.equal(result.blobsRefused, 2);
+  assert.deepEqual(await store.blob(big.blobs[0].hash), big.blobs[0]);
+  assert.equal(existsSync(path.join(root, REPLICA_DIR, 'blobs', sha256Hex(huge))), false);
+  assert.deepEqual(store.entries(), [big.entry]);
+  const reasons = await store.ingestForeign(chain(fixedSigner('fourth'), 1).map((item) => item.entry), [], () => Promise.resolve({ ok: false, reason: `line one\nline two ${'z'.repeat(400)}` }));
+  assert.ok('ok' in reasons);
+  assert.equal(reasons.held[0].reason.includes('\n'), false, 'a reason is kept as one line');
+  assert.equal(reasons.held[0].reason.length, 200);
+});
+
+test('held.json that cannot be read refuses the store (never read as empty), and a held.json that is a symbolic link is refused', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const foreign = chain(fixedSigner('colleague'), 2);
+  await store.ingestForeign(foreign.map((item) => item.entry), [], countingCheck(new Set([foreign[0].hash])).check);
+  const held = path.join(root, REPLICA_DIR, 'held.json');
+  const good = readFileSync(held, 'utf8');
+  writeFileSync(held, '{"v":1,"held":[{"hash":"zz"}]}');
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'unreadable');
+  rmSync(held);
+  const target = path.join(project(), 'held.json');
+  writeFileSync(target, good);
+  symlinkSync(target, held);
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'symlink');
+  rmSync(held);
+  writeFileSync(held, good);
+  assert.deepEqual((await opened(root, depsFor(lead, secrets))).heldForCheck().map((item) => item.hash), [foreign[0].hash]);
+});
+
+test('putGrant and putCheckpoint write content-addressed files atomically; grants() and checkpoints() read them back and list a damaged file as unreadable', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const store = await opened(root, depsFor(lead));
+  const cell = streamId('store/cell');
+  const grant = signPayload(lead.signer, 'staff-cell-grant', { cell, epoch: 1, device: 'd1', wrapped: 'w' }, { now: () => new Date(AT) });
+  const put = await store.putGrant(cell, 1, grant);
+  assert.ok('ok' in put);
+  assert.equal(put.hash, sha256Hex(canonicalBytes(grant)));
+  const name = path.join(root, REPLICA_DIR, 'grants', cell, `1-${put.hash}.json`);
+  assert.ok(statSync(name).isFile());
+  assert.deepEqual(await store.putGrant(cell, 1, grant), put, 'the same grant twice is one file');
+  assert.deepEqual(readdirSync(path.join(root, REPLICA_DIR, 'grants', cell)), [`1-${put.hash}.json`], 'no temporary file is left behind');
+  const checkpoint = { v: 1, purpose: 'staff-replica', signer: { fingerprint: 'f', publicKey: 'k' }, signedAt: AT, payload: { v: 2, stream: STREAM }, sig: 'signature' } as unknown as SignedCheckpoint;
+  const cp = await store.putCheckpoint(checkpoint);
+  assert.ok('ok' in cp);
+  assert.equal(cp.hash, checkpointHash(checkpoint));
+  assert.deepEqual(await store.grants(), { grants: [{ cell, epoch: 1, hash: put.hash, signed: JSON.parse(JSON.stringify(grant)) as unknown }], unreadable: [] });
+  assert.deepEqual(await store.checkpoints(), { checkpoints: [{ hash: cp.hash, signed: JSON.parse(JSON.stringify(checkpoint)) as unknown }], unreadable: [] });
+  // A grant file that does not parse, and one whose content is not what its name says, are listed, never dropped silently.
+  writeFileSync(path.join(root, REPLICA_DIR, 'grants', cell, `2-${'b'.repeat(64)}.json`), '{ not json');
+  writeFileSync(path.join(root, REPLICA_DIR, 'grants', cell, `3-${'c'.repeat(64)}.json`), JSON.stringify(grant));
+  writeFileSync(path.join(root, REPLICA_DIR, 'checkpoints', `${'d'.repeat(64)}.json`), JSON.stringify(checkpoint));
+  const read = await store.grants();
+  assert.equal(read.grants.length, 1);
+  assert.deepEqual(read.unreadable, [
+    { file: `grants/${cell}/2-${'b'.repeat(64)}.json`, reason: 'it is not readable JSON' },
+    { file: `grants/${cell}/3-${'c'.repeat(64)}.json`, reason: 'its content does not match its name' }
+  ]);
+  assert.deepEqual((await store.checkpoints()).unreadable, [{ file: `checkpoints/${'d'.repeat(64)}.json`, reason: 'its content does not match its name' }]);
+  await assert.rejects(() => store.putGrant('../escape', 1, grant), /cell id/);
+  await assert.rejects(() => store.putGrant(cell, 0, grant), /epoch of 1 or more/);
+});
+
+test('a recorded roster head is in the mark, and a store that no longer holds that entry is refused rolled-back', async () => {
+  const root = project();
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const roster = chain(lead, 2, { stream: streamId('store/roster') });
+  await store.appendOwn(roster);
+  assert.deepEqual(await store.recordRosterHead(roster[1].hash), { ok: true });
+  const key = markKey(path.join(root, REPLICA_DIR));
+  const read = await readMark(secrets, key, ACTIVE);
+  assert.equal(read.kind === 'mark' && read.mark.rosterHead, roster[1].hash);
+  await assert.rejects(() => store.recordRosterHead('e'.repeat(64)), /not an entry in this store/);
+  await writeMark(secrets, key, lead.signer, { v: 1, rosterHead: 'e'.repeat(64), heads: [] });
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'rolled-back');
+});
+
+test('SECURITY.md has the replica store subsection once, inside the multi-user section, with no em-dash', () => {
+  const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
+  assert.equal(text.split('\n').filter((line) => line === '### The replica store and rollback detection').length, 1);
+  const section = text.slice(text.indexOf('## Multi-user staff projects (preview)'), text.indexOf('\n## ', text.indexOf('## Multi-user staff projects (preview)') + 1));
+  assert.ok(section.includes('### The replica store and rollback detection'));
+  assert.doesNotMatch(text, /—/);
+  for (const phrase of ['.planning/staff/replica/', 'git', 'secret storage', 'private key', 'set aside']) assert.ok(section.toLowerCase().includes(phrase.toLowerCase()), phrase);
 });

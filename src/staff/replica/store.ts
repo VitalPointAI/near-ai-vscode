@@ -6,6 +6,9 @@
 //   .gitignore                          '*' and '!.gitignore': git ignores the folder, so the store is never committed by accident.
 //   streams/<stream>/<writer>.jsonl     one sealed entry per line ({ header, body }), append-only, one file per writer per stream.
 //   blobs/<hash>                        sealed blob wire bytes, named by their sha256.
+//   grants/<cell>/<epoch>-<hash>.json   signed cell grants, named by the sha256 of their canonical bytes.
+//   checkpoints/<hash>.json             signed checkpoints, named by checkpointHash.
+//   held.json                           the store's own index of entries from outside that the decode check refused: kept, never folded.
 //   replica.lock                        the cross-window lock file (withFileLock).
 //
 // Rules:
@@ -15,6 +18,8 @@
 //   order across windows and processes, so appends never interleave; inside the locks the store first catches up with lines another window wrote.
 // - How far this device has seen is kept in a signed mark in secret storage (marks.ts). Opening a store whose files are behind the mark is refused.
 // - A symbolic link anywhere from the project root to a store file is refused: nothing is read or written through it.
+// - Entries from outside the machine pass an injected check (the decode worker, wired by the project host) before they reach the fold. An entry the
+//   check refuses is still written, listed in held.json with its reason, and left out of entries(); it is never silently dropped (D-05).
 // - The store never deletes an entry or a blob and never rewrites a line (P-31-17). No private key or secret is ever written here (P-31-18).
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -29,7 +34,12 @@ import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BO
 import type { BuiltEntry, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
+import { canonicalBytes } from '../../domain/team/canonical';
+import { checkpointHash } from '../../domain/replica/checkpoint';
+import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
+import { MAX_PAYLOAD_BYTES } from '../../domain/team/signedPayload';
 import { isRecord } from '../../domain/team/validate';
+import { readWhole } from '../staffFiles';
 import { compareWithMark, markKey, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark } from './marks';
 
@@ -68,6 +78,55 @@ export interface ReplicaStoreDeps {
 }
 
 export type AppendResult = { ok: true; written: number } | StoreRefused;
+
+/** The injected check an entry from outside passes before it reaches the fold. A refusal keeps the entry in the store, held back with the reason. */
+export type ForeignCheck = (entry: SealedEntry) => Promise<{ ok: true } | { ok: false; reason: string }>;
+
+export interface IngestResult {
+  ok: true;
+  /** New entries written (held ones included). */
+  added: number;
+  /** Entries the store already had, or given twice in this call: not written again and not checked again. */
+  duplicates: number;
+  /** New entries the check refused: written, and left out of entries(). */
+  held: Array<{ hash: string; reason: string }>;
+  /** Inputs that are not a sealed entry, or whose body does not match its header. */
+  dropped: number;
+  blobsAdded: number;
+  /** Blobs not written: over BLOB_MAX_BYTES, or bytes that do not match their name. */
+  blobsRefused: number;
+}
+
+/** A signed grant or checkpoint file read back, or the file named with why it could not be. Unreadable files are listed, never dropped silently. */
+export interface StoredGrant { cell: string; epoch: number; hash: string; signed: unknown }
+export interface StoredCheckpoint { hash: string; signed: unknown }
+export interface UnreadableFile { file: string; reason: string }
+
+/** The most held.json may hold, and the longest reason kept for one held entry. */
+const HELD_MAX_BYTES = 16 * 1024 * 1024;
+const MAX_HELD_REASON = 200;
+const SIGNED_FILE_MAX_BYTES = 2 * MAX_PAYLOAD_BYTES;
+
+/** A check's reason as one plain line of at most MAX_HELD_REASON characters. */
+function heldReason(reason: unknown): string {
+  const text = typeof reason === 'string' ? reason.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : '';
+  return (text || 'The decode check refused this update.').slice(0, MAX_HELD_REASON);
+}
+
+function parseHeld(text: string): Map<string, string> | undefined {
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (!isRecord(value) || value.v !== 1 || !Array.isArray(value.held)) return undefined;
+    const held = new Map<string, string>();
+    for (const item of value.held) {
+      if (!isRecord(item) || typeof item.hash !== 'string' || !HASH_PATTERN.test(item.hash) || typeof item.reason !== 'string') return undefined;
+      held.set(item.hash, heldReason(item.reason));
+    }
+    return held;
+  } catch {
+    return undefined;
+  }
+}
 
 function refusal(reason: StoreRefusal): StoreRefused {
   return { refused: reason, message: STORE_REFUSALS[reason] };
@@ -222,6 +281,7 @@ export class ReplicaStore {
   private readonly files = new Map<string, StreamFile>();
   private readonly byHash = new Map<string, SealedEntry>();
   private readonly order: string[] = [];
+  private held = new Map<string, string>();
   private damaged = 0;
 
   private constructor(public readonly root: string, public readonly dir: string, private readonly deps: ReplicaStoreDeps) {}
@@ -236,6 +296,7 @@ export class ReplicaStore {
     try {
       return await store.locked(async () => {
         await store.catchUp();
+        await store.loadHeld();
         const mark = await store.readOwnMark();
         const compared = compareWithMark(mark ?? { v: 1, rosterHead: null, heads: [] }, store.fileStates());
         if (!compared.ok) throw new Refusal('rolled-back');
@@ -248,9 +309,14 @@ export class ReplicaStore {
     }
   }
 
-  /** Every stored entry, in the order the store first saw it. */
+  /** What the fold gets: every stored entry except those the decode check held back, in the order the store first saw them. */
   public entries(): SealedEntry[] {
-    return this.order.map((hash) => this.byHash.get(hash) as SealedEntry);
+    return this.order.filter((hash) => !this.held.has(hash)).map((hash) => this.byHash.get(hash) as SealedEntry);
+  }
+
+  /** Stored entries the decode check refused, with its reason. They stay in the store and out of the fold. */
+  public heldForCheck(): Array<{ hash: string; reason: string }> {
+    return [...this.held].filter(([hash]) => this.byHash.has(hash)).map(([hash, reason]) => ({ hash, reason }));
   }
 
   /** Is an entry with this hash in the store? */
@@ -270,6 +336,7 @@ export class ReplicaStore {
     try {
       return await this.locked(async () => {
         await this.catchUp();
+        await this.loadHeld();
         return { ok: true as const };
       });
     } catch (error) {
@@ -343,6 +410,189 @@ export class ReplicaStore {
         const touched = await this.appendLines(fresh);
         await this.writeOwnMark(mark, touched);
         return { ok: true, written: fresh.length };
+      });
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      throw error;
+    }
+  }
+
+  /**
+   * Takes entries and blobs from outside the machine. Each input is checked for shape and body hash only (signatures are the fold's job); each new
+   * entry then passes `check`. Every new entry is written, refused or not; a refused one is recorded in held.json first, so it can never reach the
+   * fold, and is listed by heldForCheck(). An entry already stored is neither written nor checked again. A check that throws counts as a refusal.
+   */
+  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
+    let dropped = 0;
+    let duplicates = 0;
+    const seen = new Set<string>();
+    const fresh: Array<{ entry: SealedEntry; hash: string }> = [];
+    for (const value of entries) {
+      const entry = parseSealed(value);
+      if (!entry) { dropped += 1; continue; }
+      const hash = entryHash(entry.header);
+      if (seen.has(hash) || this.byHash.has(hash)) { duplicates += 1; continue; }
+      seen.add(hash);
+      fresh.push({ entry, hash });
+    }
+    const refusedBy = new Map<string, string>();
+    for (const { entry, hash } of fresh) {
+      let verdict: { ok: true } | { ok: false; reason: string } | undefined;
+      try {
+        verdict = await check(entry);
+      } catch {
+        verdict = { ok: false, reason: 'The decode check could not run on this update.' };
+      }
+      if (verdict?.ok !== true) refusedBy.set(hash, heldReason((verdict as { reason?: unknown } | undefined)?.reason));
+    }
+    let blobsRefused = 0;
+    const goodBlobs = new Map<string, Buffer>();
+    for (const blob of blobs) {
+      if (typeof blob?.bytes === 'string' && blob.bytes.length > MAX_BLOB_CHARS) { blobsRefused += 1; continue; }
+      const wire = blobWire(blob);
+      if (!wire || wire.length > BLOB_MAX_BYTES || sha256Hex(wire) !== blob.hash) { blobsRefused += 1; continue; }
+      goodBlobs.set(blob.hash, wire);
+    }
+    try {
+      return await this.locked(async () => {
+        await this.catchUp();
+        await this.loadHeld();
+        const mark = await this.readOwnMark();
+        // Another window may have stored some of these since the check ran: those are duplicates now.
+        const toWrite = fresh.filter(({ hash }) => !this.byHash.has(hash));
+        duplicates += fresh.length - toWrite.length;
+        const held = toWrite.filter(({ hash }) => refusedBy.has(hash)).map(({ hash }) => ({ hash, reason: refusedBy.get(hash) as string }));
+        if (held.length > 0) {
+          for (const item of held) this.held.set(item.hash, item.reason);
+          await this.writeHeld();
+        }
+        let blobsAdded = 0;
+        for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
+        if (toWrite.length > 0) {
+          const touched = await this.appendLines(toWrite.map(({ entry }) => entry));
+          await this.writeOwnMark(mark, touched);
+        }
+        return { ok: true as const, added: toWrite.length, duplicates, held, dropped, blobsAdded, blobsRefused };
+      });
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      throw error;
+    }
+  }
+
+  /** Records the roster head this device has folded to in the mark, so a store that lost that entry is refused rolled-back. */
+  public async recordRosterHead(hash: string): Promise<{ ok: true } | StoreRefused> {
+    if (!this.byHash.has(hash)) throw new Error('Nothing was recorded: the roster head is not an entry in this store.');
+    try {
+      return await this.locked(async () => {
+        await this.catchUp();
+        const mark = await this.readOwnMark();
+        await this.writeOwnMark(mark, new Set(), hash);
+        return { ok: true as const };
+      });
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      throw error;
+    }
+  }
+
+  /** Writes a signed cell grant as grants/<cell>/<epoch>-<hash>.json, by temporary file and rename. The same grant twice is one file. */
+  public async putGrant(cell: string, epoch: number, signed: unknown): Promise<{ ok: true; hash: string } | StoreRefused> {
+    if (!STREAM_ID_PATTERN.test(cell) || !Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Nothing was written: a grant needs a cell id and an epoch of 1 or more.');
+    const bytes = canonicalBytes(signed);
+    if (bytes.length > MAX_PAYLOAD_BYTES) throw new Error('Nothing was written: the grant is larger than a signed item may be.');
+    const hash = sha256Hex(bytes);
+    return this.putSigned(['grants', cell], `${epoch}-${hash}.json`, bytes, hash);
+  }
+
+  /** Writes a signed checkpoint as checkpoints/<checkpointHash>.json, by temporary file and rename. */
+  public async putCheckpoint(signed: SignedCheckpoint): Promise<{ ok: true; hash: string } | StoreRefused> {
+    if (!isRecord(signed) || !isRecord(signed.payload) || typeof signed.sig !== 'string') throw new Error('Nothing was written: the checkpoint is not a signed checkpoint.');
+    const bytes = canonicalBytes(signed);
+    if (bytes.length > SIGNED_FILE_MAX_BYTES) throw new Error('Nothing was written: the checkpoint is larger than a signed item may be.');
+    const hash = checkpointHash(signed);
+    return this.putSigned(['checkpoints'], `${hash}.json`, bytes, hash);
+  }
+
+  /** Every grant file, read back and checked against its name; files that cannot be read are listed with why. */
+  public async grants(): Promise<{ grants: StoredGrant[]; unreadable: UnreadableFile[] }> {
+    const grants: StoredGrant[] = [];
+    const unreadable: UnreadableFile[] = [];
+    const top = await this.listDir(['grants'], unreadable);
+    for (const cell of top) {
+      if (!STREAM_ID_PATTERN.test(cell)) { unreadable.push({ file: `grants/${cell}`, reason: 'its name is not a cell id' }); continue; }
+      for (const name of await this.listDir(['grants', cell], unreadable)) {
+        const file = `grants/${cell}/${name}`;
+        const match = /^([1-9][0-9]{0,15})-([0-9a-f]{64})\.json$/.exec(name);
+        if (!match) { unreadable.push({ file, reason: 'its name is not one the store writes' }); continue; }
+        const read = await this.readSigned(file, (value) => sha256Hex(canonicalBytes(value)) === match[2]);
+        if ('reason' in read) unreadable.push({ file, reason: read.reason }); else grants.push({ cell, epoch: Number(match[1]), hash: match[2], signed: read.value });
+      }
+    }
+    return { grants, unreadable };
+  }
+
+  /** Every checkpoint file, read back and checked against its name; files that cannot be read are listed with why. */
+  public async checkpoints(): Promise<{ checkpoints: StoredCheckpoint[]; unreadable: UnreadableFile[] }> {
+    const checkpoints: StoredCheckpoint[] = [];
+    const unreadable: UnreadableFile[] = [];
+    for (const name of await this.listDir(['checkpoints'], unreadable)) {
+      const file = `checkpoints/${name}`;
+      const match = /^([0-9a-f]{64})\.json$/.exec(name);
+      if (!match) { unreadable.push({ file, reason: 'its name is not one the store writes' }); continue; }
+      const read = await this.readSigned(file, (value) => isRecord(value) && checkpointHash(value as unknown as SignedCheckpoint) === match[1]);
+      if ('reason' in read) unreadable.push({ file, reason: read.reason }); else checkpoints.push({ hash: match[1], signed: read.value });
+    }
+    return { checkpoints, unreadable };
+  }
+
+  /** Names in a store folder, leaving out temporary files; a folder that is a link or cannot be listed is reported as unreadable. */
+  private async listDir(parts: readonly string[], unreadable: UnreadableFile[]): Promise<string[]> {
+    const problem = await checkPath(this.root, [...REPLICA_DIR.split('/'), ...parts]);
+    if (problem) { unreadable.push({ file: parts.join('/'), reason: problem === 'symlink' ? 'it is a symbolic link' : 'it is not a folder the store made' }); return []; }
+    try {
+      return (await readdir(path.join(this.dir, ...parts))).filter((name) => !name.endsWith('.tmp')).sort();
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') unreadable.push({ file: parts.join('/'), reason: 'it could not be listed' });
+      return [];
+    }
+  }
+
+  private async readSigned(relative: string, matches: (value: unknown) => boolean): Promise<{ value: unknown } | { reason: string }> {
+    const file = path.join(this.dir, relative);
+    try {
+      if ((await lstat(file)).isSymbolicLink()) return { reason: 'it is a symbolic link' };
+    } catch {
+      return { reason: 'it could not be opened' };
+    }
+    const read = await readWhole(file, SIGNED_FILE_MAX_BYTES);
+    if (read.kind === 'missing') return { reason: 'it is gone' };
+    if (read.kind === 'unreadable') return { reason: read.reason };
+    let value: unknown;
+    try { value = JSON.parse(read.text) as unknown; } catch { return { reason: 'it is not readable JSON' }; }
+    try {
+      if (!matches(value)) return { reason: 'its content does not match its name' };
+    } catch {
+      return { reason: 'its content does not match its name' };
+    }
+    return { value };
+  }
+
+  private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string): Promise<{ ok: true; hash: string } | StoreRefused> {
+    try {
+      return await this.locked(async () => {
+        const dir = await ensureDir(this.dir, parts);
+        const file = path.join(dir, name);
+        try {
+          const info = await lstat(file);
+          if (info.isSymbolicLink()) throw new Refusal('symlink');
+          if (info.isFile()) return { ok: true as const, hash };
+        } catch (error) {
+          if (error instanceof Refusal) throw error;
+          if (errorCode(error) !== 'ENOENT') throw new Refusal('unreadable');
+        }
+        await writeAtomic(file, bytes);
+        return { ok: true as const, hash };
       });
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
@@ -528,18 +778,42 @@ export class ReplicaStore {
   }
 
   /** Writes one blob's wire bytes under its hash unless a plain file with that name is already there. */
-  private async putBlobBytes(hash: string, wire: Buffer): Promise<void> {
+  private async putBlobBytes(hash: string, wire: Buffer): Promise<boolean> {
     const dir = await ensureDir(this.dir, ['blobs']);
     const file = path.join(dir, hash);
     try {
       const info = await lstat(file);
       if (info.isSymbolicLink()) throw new Refusal('symlink');
-      if (info.isFile()) return;
+      if (info.isFile()) return false;
     } catch (error) {
       if (error instanceof Refusal) throw error;
       if (errorCode(error) !== 'ENOENT') throw new Refusal('unreadable');
     }
     await writeAtomic(file, wire);
+    return true;
+  }
+
+  /** Reads held.json. Unreadable is refused, never read as empty: an empty list would let refused entries into the fold. */
+  private async loadHeld(): Promise<void> {
+    const file = path.join(this.dir, 'held.json');
+    try {
+      if ((await lstat(file)).isSymbolicLink()) throw new Refusal('symlink');
+    } catch (error) {
+      if (error instanceof Refusal) throw error;
+      if (errorCode(error) === 'ENOENT') { this.held = new Map(); return; }
+      throw new Refusal('unreadable');
+    }
+    const read = await readWhole(file, HELD_MAX_BYTES);
+    if (read.kind === 'missing') { this.held = new Map(); return; }
+    const held = read.kind === 'text' ? parseHeld(read.text) : undefined;
+    if (!held) throw new Refusal('unreadable');
+    this.held = held;
+  }
+
+  /** Rewrites held.json whole, by temporary file and rename. It is the store's own index, not history, so a whole rewrite is allowed. */
+  private async writeHeld(): Promise<void> {
+    const held = [...this.held].map(([hash, reason]) => ({ hash, reason }));
+    await writeAtomic(path.join(this.dir, 'held.json'), `${JSON.stringify({ v: 1, held })}\n`);
   }
 
   private fileStates(): MarkFileState[] {
@@ -554,14 +828,14 @@ export class ReplicaStore {
   }
 
   /** The mark moved forward for the files written: their heads now, every other head as it was. */
-  private async writeOwnMark(before: ReplicaMark | undefined, touched: ReadonlySet<string>): Promise<void> {
+  private async writeOwnMark(before: ReplicaMark | undefined, touched: ReadonlySet<string>, rosterHead?: string): Promise<void> {
     const heads = new Map<string, MarkHead>((before?.heads ?? []).map((head) => [fileId(head.stream, head.writer), head]));
     for (const id of touched) {
       const file = this.files.get(id);
       if (!file || file.maxSeq < 0) continue;
       heads.set(id, { stream: file.stream, writer: file.writer, seq: file.maxSeq, hash: (file.bySeq.get(file.maxSeq) ?? [])[0], count: file.hashes.size });
     }
-    const mark: ReplicaMark = { v: 1, rosterHead: before?.rosterHead ?? null, heads: [...heads.values()] };
+    const mark: ReplicaMark = { v: 1, rosterHead: rosterHead ?? before?.rosterHead ?? null, heads: [...heads.values()] };
     await writeMark(this.deps.secrets, markKey(this.dir), await this.deps.signer(), mark, this.deps.now ?? (() => new Date()));
   }
 }
