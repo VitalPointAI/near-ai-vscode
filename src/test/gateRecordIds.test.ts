@@ -58,9 +58,9 @@ test('a record is valid with every known rule, and refused with a rule or an ope
 
 /** The Phase 41 route rules decideRoute reaches (41-10), moved from the named-ahead list into ROUTE_RULES in this order, each with its sentence unchanged. */
 const ROUTE_RULES_MOVED = ['route.model-not-allowed', 'route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing',
-  'route.accredited-device', 'route.residency'];
+  'route.accredited-device', 'route.residency', 'route.clearance'];
 /** The Phase 41 route rules still named ahead, in order. */
-const ROUTE_RULES_STILL_AHEAD = ['route.passport', 'route.clearance', 'route.export-control'];
+const ROUTE_RULES_STILL_AHEAD = ['route.passport', 'route.export-control'];
 
 test('D-10, D-51: every route rule Phase 41 writes is named ahead until decideRoute reaches it, on one list only, with a sentence that says nothing was sent', () => {
   const named = [...ROUTE_RULES_NAMED_AHEAD];

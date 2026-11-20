@@ -8,11 +8,13 @@
 import { isLoopbackHost } from '../config';
 import { authorizationCovers } from './authorizations';
 import type { AuthorizationBody, AuthorizationKind, AuthorizationQuestion } from './authorizations';
+import { markDominated, meetClearance } from './dominance';
 import type { Mark } from './dominance';
 import { endpointCeilingAllows, findEndpoint, needsEndpointAuthorization } from './endpoints';
 import type { EndpointClass, EndpointRegion, PolicyEndpoint } from './endpoints';
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
+import { USE_TIERS, passportCovers, resolvePassport } from './models';
 import type { ModelsSection, UseTier } from './models';
 import { residencyAllows } from './residency';
 import type { ResidencySection } from './sections';
@@ -425,7 +427,8 @@ export const ROUTE_RULES = Object.freeze([
   'route.endpoint-pin',
   'route.authorization-missing',
   'route.accredited-device',
-  'route.residency'
+  'route.residency',
+  'route.clearance'
 ] as const);
 export type RouteRule = (typeof ROUTE_RULES)[number];
 export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only' | 'route.default-session'>;
@@ -455,7 +458,8 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.endpoint-pin': 'Nothing was sent. Content at this level may go to this AI service only over a connection whose certificate your organization\'s rules name, or one proven to end in private hardware, and this connection is neither. Use a model on this computer, ask your organization to name the certificate, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.authorization-missing': 'Nothing was sent. Content at this level may go to this AI service only with a signed approval from a person your organization names, and no approval covers this service. Ask your organization\'s security contact for one, use a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.accredited-device': 'Nothing was sent. Your organization\'s rules allow content at this level only on a computer recorded as accredited, and this computer is not. Use an accredited computer, ask your organization\'s security contact about this one, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.residency': 'Nothing was sent. Your organization\'s rules keep this content in the regions they name, and this AI service is not shown to run there. Choose a service in one of those regions or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.'
+  'route.residency': 'Nothing was sent. Your organization\'s rules keep this content in the regions they name, and this AI service is not shown to run there. Choose a service in one of those regions or a model on this computer, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
+  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.'
 });
 
 /**
@@ -467,7 +471,6 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
  */
 export const ROUTE_RULES_NAMED_AHEAD = Object.freeze([
   'route.passport',
-  'route.clearance',
   'route.export-control'
 ] as const);
 export type NamedAheadRouteRule = (typeof ROUTE_RULES_NAMED_AHEAD)[number];
@@ -475,7 +478,6 @@ export type NamedAheadRouteRule = (typeof ROUTE_RULES_NAMED_AHEAD)[number];
 /** One plain sentence per named-ahead rule, in ROUTE_REFUSALS' form: nothing was sent, why, and what to do. */
 export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, string>> = Object.freeze({
   'route.passport': 'Nothing was sent. Your organization has not approved this model for this use. Choose a model your organization approved for this work, or ask your organization\'s security contact to review this one.',
-  'route.clearance': 'Nothing was sent. This chat\'s label is above what you are cleared for. Ask your organization\'s security contact about your clearance, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.export-control': 'Nothing was sent. This content is marked Controlled goods (Canada), ITAR or US export-controlled (EAR), and your organization has not approved this AI service, or you sending it there, for that marking. Use a model on this computer, or ask your organization\'s export-control contact.'
 });
 
@@ -707,8 +709,8 @@ export function endpointOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'mo
 /**
  * The policy steps, run only on a request the safety patch's checks allowed, in the order of D-36: the place (route.endpoint-unknown), its ceiling
  * (route.endpoint-ceiling), a pin or binding (route.endpoint-pin), an authorization (route.authorization-missing), an accredited device
- * (route.accredited-device, reported unless your organization turns refusal on) and residency (route.residency). The first refusing step decides; a step
- * that only reports never hides a later refusal.
+ * (route.accredited-device, reported unless your organization turns refusal on), residency (route.residency), the passport (route.passport, reported
+ * only) and clearance (route.clearance). The first refusing step decides; a step that only reports never hides a later refusal.
  */
 function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy): RouteDecision {
   const labels: readonly Label[] = mark.length === 0 ? (defaultLabel === undefined ? [] : [defaultLabel]) : mark;
@@ -770,6 +772,29 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
     if (!residency.ok) return refuse(decision.tier, 'route.residency');
     if (residency.exception !== undefined) addRecord(allowedBy, authorizationRecord(residency.exception));
   }
+  // Step 7 (D-42): the model's passport, report only whatever the section's mode says, until 74.1. No place counts as a closed API, the widest class.
+  if (policy.models !== undefined) {
+    const modelId = facts.model?.id ?? '';
+    const resolved = resolvePassport(policy.models, modelId, policy.now);
+    const requestUse: UseTier = facts.use ?? 'T1';
+    const subject = resolved?.passport.id ?? modelId;
+    const risks = policy.authorizations.filter((candidate) => keysOf(labels).every((key) => authorizationCovers(candidate.body, {
+      kind: 't1-risk', subject: { model: subject }, project: policy.project, label: key, use: 't1'
+    }, policy.now)));
+    const verdict = passportCovers({ resolved, use: requestUse, endpointClass: endpoint?.class ?? 'closed-api', t1RiskCovers: risks.length > 0, now: policy.now });
+    if (!verdict.covers) {
+      wouldRefuse.add('route.passport');
+    } else if (resolved !== undefined) {
+      addRecord(allowedBy, Object.freeze({ kind: 'model-approval' as const, passport: resolved.passport.id, maxTier: resolved.maxTier, expiresAt: resolved.passport.expiresAt }));
+      // A use above the passport's tier went only because a named person accepted the risk: that record allowed it too.
+      if (USE_TIERS.indexOf(requestUse) > USE_TIERS.indexOf(resolved.maxTier)) for (const risk of risks) addRecord(allowedBy, authorizationRecord(risk));
+    }
+  }
+  // Step 8 (D-35, D-53): clearance, only with a roster clearance. The personal clearance alone already decided every read that raised the mark.
+  if (policy.rosterClearances !== undefined) {
+    const effective = effectiveClearances(policy.clearances, policy.rosterClearances, policy.scales, policy.mappings);
+    if (!markDominated(effective, labels, { scales: policy.scales, mappings: policy.mappings, now: policy.now })) return refuse(decision.tier, 'route.clearance');
+  }
   const out: { -readonly [K in keyof RouteDecision]: RouteDecision[K] } = { ...decision };
   if (endpoint !== undefined) out.endpoint = endpoint;
   out.allowedBy = Object.freeze(allowedBy);
@@ -777,6 +802,27 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
   if (notAccredited !== undefined) out.notAccredited = notAccredited;
   if (pinTo !== undefined) out.pinTo = pinTo;
   return out;
+}
+
+/** The `scale/level` keys an authorization is asked about: one per label, or a single question with no label for a mark with none. */
+function keysOf(labels: readonly Label[]): ReadonlyArray<string | undefined> {
+  return labels.length === 0 ? [undefined] : labels.map((label) => labelKey(label));
+}
+
+/**
+ * The effective clearance (D-35): the personal clearances alone when no roster is given; otherwise every defined meet of a personal and a roster
+ * clearance, so the roster can only narrow what the person declared. Two clearances with no meet give nothing.
+ */
+export function effectiveClearances(personal: readonly Clearance[], roster: readonly Clearance[] | undefined, scales: ScaleTable, mappings: readonly ScaleMapping[]): readonly Clearance[] {
+  if (roster === undefined) return personal;
+  const out: Clearance[] = [];
+  for (const mine of personal) {
+    for (const theirs of roster) {
+      const met = meetClearance(mine, theirs, scales, mappings);
+      if (met !== undefined) out.push(met);
+    }
+  }
+  return Object.freeze(out);
 }
 
 /** The classes whose connection must be proven bound to private hardware before a level that needs it goes there (D-26). */

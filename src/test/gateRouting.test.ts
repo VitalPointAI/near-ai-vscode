@@ -21,6 +21,8 @@ import {
   usesHttps
 } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
+import { ROUTE_RULES_NAMED_AHEAD } from '../domain/gate/routing';
+import { FIXED_NOW, issuerKey, policyDocumentFor } from './helpers/policyFixtures';
 
 function label(scale: string, level: string, extra: Partial<Label> = {}): Label {
   return { scale, level, compartments: [], releasability: [], handling: [], ...extra };
@@ -89,6 +91,7 @@ function policyOf(...entries: Array<Record<string, unknown>>): RoutePolicy {
 
 const MODELS_INTERNAL = { id: 'models', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Internal'] };
 const MODELS_PROTECTED_B = { ...MODELS_INTERNAL, maxLabel: ['ca-protected/Protected B', 'org/Restricted'] };
+const ORG_PUBLIC_CLEARANCE = { scale: 'org', level: 'Public', compartments: [], releasability: [] };
 /** A TLS pin's shape (SHA-256 hex), made at test time from a word. */
 const TEST_PIN = createHash('sha256').update('routing-test-pin', 'utf8').digest('hex');
 
@@ -117,7 +120,8 @@ test('every rule id can be reached, and every refusing rule has one plain senten
     [markOf(label('ca-protected', 'Protected B')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf(MODELS_PROTECTED_B)],
     [markOf(label('ca-protected', 'Protected B')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf({ ...MODELS_PROTECTED_B, tlsPins: [TEST_PIN] })],
     [markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, LOCAL_OK, { ...policyOf(), organization: true, requireAccreditedDevice: true }],
-    [markOf(org('Internal')), withLocalHosts('models.example.org'), LOCAL_REMOTE, { ...policyOf(MODELS_INTERNAL), residency: { v: 1, required: ['EU'] } }]
+    [markOf(org('Internal')), withLocalHosts('models.example.org'), LOCAL_REMOTE, { ...policyOf(MODELS_INTERNAL), residency: { v: 1, required: ['EU'] } }],
+    [markOf(org('Internal')), DEFAULT_ROUTING, LOCAL_OK, { ...policyOf(), clearances: [ORG_PUBLIC_CLEARANCE], rosterClearances: [ORG_PUBLIC_CLEARANCE] }]
   ];
   for (const [mark, routing, facts, policy] of cases) reached.add(decideRoute(mark, routing, facts, undefined, undefined, policy).rule);
   assert.deepEqual([...reached].sort(), [...ROUTE_RULES].sort());
@@ -526,4 +530,83 @@ test('PR #143 review: a policy that routes a this-computer-only level to a cloud
   assert.equal(decideRoute(markOf(label('ca-protected', 'Protected B')), routingWith({ 'ca-protected/Protected B': 'attested-cloud' }), NEAR_TEE_BOUND).rule, 'route.attested-cloud');
   // With the shipped table (already local-only) the refusal keeps its own words.
   assert.equal(decideRoute(markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, NEAR_TEE).rule, 'route.no-local-model');
+});
+
+// ---- Phase 41 FND-02: the default policy read as v2 routes exactly as v1 does; D-62, D-63: export-controlled content stays on this computer ----
+
+/** The RoutePolicy of the starting rules read as a v2 document (documentFromBundle): its places, the people section's clearances, no residency, no models. */
+function defaultRoutePolicy(): { policy: RoutePolicy; defaultLabel: Label } {
+  const doc = policyDocumentFor({ key: issuerKey() });
+  assert.equal(doc.residency, undefined);
+  assert.equal(doc.models, undefined);
+  const policy: RoutePolicy = {
+    endpoints: doc.endpoints ?? [], authorizations: [], scales: doc.labels.scales, mappings: doc.labels.mappings, clearances: doc.people?.clearances ?? [],
+    organization: false, requireAccreditedDevice: doc.agents.requireAccreditedDevice, now: FIXED_NOW
+  };
+  return { policy, defaultLabel: doc.labels.defaultLabel };
+}
+
+/** Every preset label, client route, host, binding and model of the routing table, with and without the private floor. */
+function routingCases(): Array<{ mark: Mark; facts: RouteFacts; floor?: 'attested-cloud' }> {
+  const labels: Label[] = [];
+  for (const scale of Object.keys(SCALE_PRESETS)) for (const level of SCALE_PRESETS[scale]!.levels) labels.push(label(scale, level));
+  const hosts = ['http://127.0.0.1:11434', 'https://cloud-api.near.ai/v1', 'https://models.example.org'];
+  const bindings: Array<ConnectionBindingFact | undefined> = [undefined];
+  const cases: Array<{ mark: Mark; facts: RouteFacts; floor?: 'attested-cloud' }> = [];
+  for (const held of labels) {
+    for (const clientRoute of ['near', 'local', undefined] as const) {
+      for (const host of hosts) {
+        const freshness = [
+          undefined,
+          { state: 'bound' as const, host, checkedAt: FIXED_NOW - 60_000 },
+          { state: 'bound' as const, host, checkedAt: FIXED_NOW - BINDING_MAX_AGE_MS - 1 }
+        ];
+        for (const binding of [...bindings, ...freshness.slice(1)]) {
+          for (const privacyBoundary of ['tee', 'local', 'cloud', undefined]) {
+            const facts: RouteFacts = {
+              clientRoute, host, nearEndpoint: host.includes('cloud-api.near.ai'), attestationFailed: false, now: FIXED_NOW,
+              model: privacyBoundary === undefined ? undefined : { id: `example/${privacyBoundary}-model`, privacyBoundary }, ...(binding === undefined ? {} : { binding })
+            };
+            for (const floor of [undefined, 'attested-cloud' as const]) cases.push(floor === undefined ? { mark: markOf(held), facts } : { mark: markOf(held), facts, floor });
+          }
+        }
+      }
+    }
+  }
+  return cases;
+}
+
+test('FND-02: the default policy read as v2 decides every routing case as v1 does', () => {
+  const { policy, defaultLabel } = defaultRoutePolicy();
+  const cases = routingCases();
+  assert.ok(cases.length >= 1000, `${String(cases.length)} cases`);
+  let allowed = 0;
+  for (const { mark, facts, floor } of cases) {
+    const v1 = decideRoute(mark, DEFAULT_ROUTING, facts, defaultLabel, floor);
+    const v2 = decideRoute(mark, DEFAULT_ROUTING, facts, defaultLabel, floor, policy);
+    const name = `${mark[0]!.scale}/${mark[0]!.level} ${String(facts.clientRoute)} ${facts.host} ${facts.binding === undefined ? 'no binding' : String(facts.binding.checkedAt)} ${String(facts.model?.privacyBoundary)} ${String(floor)}`;
+    assert.deepEqual({ allowed: v2.allowed, tier: v2.tier, rule: v2.rule }, { allowed: v1.allowed, tier: v1.tier, rule: v1.rule }, name);
+    assert.equal(v2.reason, v1.reason, name);
+    assert.notEqual(v2.rule, 'route.export-control', name);
+    if (v1.allowed) allowed += 1;
+  }
+  assert.ok(allowed > 100 && allowed < cases.length, `${String(allowed)} allowed: both sides are exercised`);
+});
+
+test('D-62, D-63: ITAR, CGP and EAR keep content on this computer under the default policy; route.export-control is never returned and stays named ahead', () => {
+  const { policy, defaultLabel } = defaultRoutePolicy();
+  const nearBound: RouteFacts = { ...NEAR_TEE, binding: { state: 'bound', host: NEAR_TEE.host, checkedAt: FIXED_NOW - 60_000 }, now: FIXED_NOW };
+  for (const token of ['ITAR', 'CGP', 'EAR']) {
+    const marked = org('Internal', { compartments: [token] });
+    assert.equal(tierForLabel(marked, DEFAULT_ROUTING), 'local-only', token);
+    const cloud = decideRoute(markOf(marked), DEFAULT_ROUTING, nearBound, defaultLabel, undefined, policy);
+    assert.deepEqual({ allowed: cloud.allowed, tier: cloud.tier }, { allowed: false, tier: 'local-only' }, token);
+    assert.notEqual(cloud.rule, 'route.export-control');
+    const here = decideRoute(markOf(marked), DEFAULT_ROUTING, { ...LOCAL_OK, now: FIXED_NOW }, defaultLabel, undefined, policy);
+    assert.deepEqual({ allowed: here.allowed, rule: here.rule }, { allowed: true, rule: 'route.local-only' }, token);
+    // The same label without the marking still goes where it does today.
+    assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, nearBound, defaultLabel, undefined, policy).allowed, true);
+  }
+  assert.deepEqual([...ROUTE_RULES_NAMED_AHEAD], ['route.passport', 'route.export-control']);
+  assert.equal((ROUTE_RULES as readonly string[]).includes('route.export-control'), false);
 });
