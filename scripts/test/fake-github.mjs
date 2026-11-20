@@ -61,7 +61,10 @@ export function fakeGitHub(state) {
       world.comments = [...(world.comments ?? []), { number: args[2], by: world.login }];
       return `https://github.com/${REPO}/pull/${args[2]}#issuecomment-1\n`;
     }
-    if (verb === 'pr' && sub === 'diff') return 'diff --git a/x b/x\n';
+    if (verb === 'pr' && sub === 'diff') {
+      if (world.diffTooLarge) throw new Error(`gh pr diff ${args[2]} failed: could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300). PullRequest.diff too_large`);
+      return 'diff --git a/x b/x\n';
+    }
     if (verb !== 'api') throw new Error(`unexpected gh ${line}`);
 
     const rest = args.slice(1).filter((arg) => arg !== '--paginate');
@@ -132,7 +135,14 @@ export function fakeGitHub(state) {
       if (!sha) throw notFound(args);
       return JSON.stringify({ object: { type: 'commit', sha } });
     }
-    if ((match = /\/pulls\/(\d+)\/files/.exec(endpoint))) return lines((world.prs[match[1]]?.files ?? []).map((file) => file.path));
+    if ((match = /\/pulls\/(\d+)\/files/.exec(endpoint))) {
+      const files = world.prs[match[1]]?.files ?? [];
+      // The patch listing asks jq for an object per file; the plain listing for the path alone.
+      if (args.some((arg) => arg.includes('patch'))) {
+        return lines(files.map((file) => ({ filename: file.path, previous_filename: file.previous ?? null, status: file.status ?? 'modified', patch: file.patch ?? null })));
+      }
+      return lines(files.map((file) => file.path));
+    }
     throw new Error(`unexpected gh ${line}`);
   };
   return { world, calls, runner, called: (pattern) => calls.filter((call) => pattern.test(call.join(' '))) };
