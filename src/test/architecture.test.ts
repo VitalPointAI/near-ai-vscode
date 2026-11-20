@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import {
+  ARCHITECTURE_RULES,
   FROZEN_ABOVE,
   LAYERS,
   SCALE_PRESETS_ALLOWED,
@@ -23,18 +24,27 @@ import {
   layerOf,
   scanArchitecture,
   unplacedTopLevel,
-  type ArchitectureBaseline
+  type ArchitectureBaseline,
+  type BaselineComparison
 } from './helpers/architectureScan';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SRC = path.join(REPO_ROOT, 'src');
 const BASELINE_FILE = path.join(SRC, 'test', 'architecture-baseline.json');
 const MINIMUM_FILES = 400;
-/** The rules the ratchet compares with the baseline today. */
-const RATCHET_RULES = ['upward-import'] as const;
+const TIGHT = process.env.NEAR_AI_BASELINE_TIGHT === '1';
 
 function readBaseline(): ArchitectureBaseline {
   return JSON.parse(readFileSync(BASELINE_FILE, 'utf8')) as ArchitectureBaseline;
+}
+
+/** The stale lines and shrunk frozen sizes of a comparison: a failure when the baseline must be tight, diagnostics otherwise. */
+function enforceTightness(comparison: BaselineComparison, tight: boolean, report: (message: string) => void): void {
+  const loose = [...comparison.stale.map((line) => `stale: ${line}`), ...comparison.shrunk.map((line) => `shrunk: ${line}`)];
+  if (tight && loose.length > 0) {
+    assert.fail(`the baseline is not tight; delete these lines or lower these sizes (or re-record with NEAR_AI_WRITE_BASELINE=1 and review the diff):\n${loose.join('\n')}`);
+  }
+  for (const line of loose) report(`baseline can shrink: ${line}`);
 }
 
 function planted(files: Record<string, string>): Map<string, string> {
@@ -195,7 +205,7 @@ test('D-45 file sizes: a frozen file may not grow, a new file above 1,200 fails,
   assert.deepEqual([atSize.grown, atSize.tooLarge, atSize.shrunk], [[], [], []]);
 });
 
-test('D-45: the repository passes against its baseline (re-record with NEAR_AI_WRITE_BASELINE=1)', () => {
+test('D-45: the repository passes against its baseline for every rule and every frozen size (re-record with NEAR_AI_WRITE_BASELINE=1)', (t) => {
   const found = scanArchitecture(SRC, MINIMUM_FILES);
   assert.deepEqual(found.unplaced, [], 'every source file has a layer');
   if (process.env.NEAR_AI_WRITE_BASELINE === '1') {
@@ -203,9 +213,67 @@ test('D-45: the repository passes against its baseline (re-record with NEAR_AI_W
     assert.fail('baseline written; review the diff and run again without NEAR_AI_WRITE_BASELINE');
   }
   const baseline = readBaseline();
-  const comparison = compareWithBaseline(found, baseline, RATCHET_RULES);
+  const comparison = compareWithBaseline(found, baseline);
   assert.deepEqual(comparison.added, [], 'new violations: fix them in the code that added them, never by adding a baseline line');
+  assert.deepEqual(comparison.grown, [], 'frozen files may not grow');
+  assert.deepEqual(comparison.tooLarge, [], 'a file above 1,200 lines that the baseline does not freeze: split it');
+  for (const warning of comparison.warnings) t.diagnostic(`warning: ${warning}`);
   const upward = baseline.rules['upward-import'] ?? [];
   assert.ok(upward.includes('domain/auth.ts -> services/nearAiClient'), 'the baseline records the domain/auth.ts leak');
   assert.ok(!upward.some((line) => line.startsWith('domain/state/threadView.ts') || line.startsWith('domain/state/threadCapture.ts')), '41-07 removed the two domain/state leaks');
+});
+
+test('D-45: frozen files are exactly the files above 1,200 lines when the baseline was recorded', () => {
+  const frozen = readBaseline().fileSizes;
+  const files = Object.keys(frozen);
+  assert.ok(files.length >= 3, `expected at least 3 frozen files, found ${files.length}`);
+  for (const [file, size] of Object.entries(frozen)) assert.ok(Number.isInteger(size) && size > FROZEN_ABOVE, `${file} is frozen at ${size}, not above ${FROZEN_ABOVE}`);
+  for (const file of ['services/agentSession.ts', 'services/nearAiClient.ts', 'services/chat.ts']) assert.ok(files.includes(file), `${file} is frozen`);
+});
+
+test('D-45: the tightness check fails on a stale line or a lowered size only when the baseline must be tight', () => {
+  const found = findViolations(planted({
+    'domain/leak.ts': "import { x } from '../services/x';",
+    'services/large.ts': 'x\n'.repeat(1300)
+  }));
+  const comparison = compareWithBaseline(found, {
+    rules: { 'upward-import': ['domain/gone.ts -> services/x', 'domain/leak.ts -> services/x'] },
+    fileSizes: { 'services/large.ts': 1400, 'services/removed.ts': 1500 }
+  });
+  assert.deepEqual(comparison.added, []);
+  assert.deepEqual(comparison.grown, []);
+  assert.deepEqual(comparison.stale, ['fileSizes: services/removed.ts', 'upward-import: domain/gone.ts -> services/x']);
+  assert.deepEqual(comparison.shrunk, ['services/large.ts: 1300 lines, frozen at 1400']);
+  assert.throws(() => enforceTightness(comparison, true, () => undefined), (error: Error) => {
+    assert.match(error.message, /stale: upward-import: domain\/gone\.ts -> services\/x/);
+    assert.match(error.message, /stale: fileSizes: services\/removed\.ts/);
+    assert.match(error.message, /shrunk: services\/large\.ts: 1300 lines, frozen at 1400/);
+    return true;
+  });
+  const reported: string[] = [];
+  enforceTightness(comparison, false, (message) => reported.push(message));
+  assert.equal(reported.length, 3);
+  // A tight baseline passes in both modes.
+  const exact = compareWithBaseline(found, { rules: { 'upward-import': ['domain/leak.ts -> services/x'] }, fileSizes: { 'services/large.ts': 1300 } });
+  enforceTightness(exact, true, () => assert.fail('nothing to report'));
+});
+
+test('D-45: the baseline is tight (enforced at the close of a phase with NEAR_AI_BASELINE_TIGHT=1)', (t) => {
+  const comparison = compareWithBaseline(scanArchitecture(SRC, MINIMUM_FILES), readBaseline());
+  enforceTightness(comparison, TIGHT, (message) => t.diagnostic(message));
+});
+
+test('D-45: the baseline file is sorted and has no duplicate line', () => {
+  const text = readFileSync(BASELINE_FILE, 'utf8');
+  const baseline = JSON.parse(text) as ArchitectureBaseline;
+  assert.deepEqual(Object.keys(baseline).sort(), ['fileSizes', 'rules']);
+  assert.deepEqual(Object.keys(baseline.rules), [...ARCHITECTURE_RULES], 'one list per rule, in rule order');
+  for (const rule of ARCHITECTURE_RULES) {
+    const lines = baseline.rules[rule] ?? [];
+    assert.deepEqual(lines, [...lines].sort(), `${rule} is sorted`);
+    assert.equal(new Set(lines).size, lines.length, `${rule} has no duplicate line`);
+  }
+  const files = Object.keys(baseline.fileSizes);
+  assert.deepEqual(files, [...files].sort(), 'fileSizes is sorted');
+  assert.ok(text.endsWith('}\n') && text.includes('\n  "rules": {'), 'two-space indent and a trailing newline');
 });
