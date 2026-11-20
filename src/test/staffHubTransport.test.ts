@@ -893,6 +893,36 @@ test('WR-07: an entry whose blob neither this computer nor the hub holds waits w
   }
 });
 
+test('IN-05: a grant the hub could not place yet (its cell.create in a later append) is sent again with the retried entries, so they are taken in the same exchange', async () => {
+  const world = await syncWorld('grant-retry');
+  try {
+    const before = await world.held();
+    const grants = (await world.a.signedGrants()).map((grant) => grant.signed);
+    assert.ok(grants.length > 0, 'this computer holds a grant');
+    // 201 entries from the member: the last one always lands in the second append (200 entries each), after the grants went in the first.
+    const memberEntries = Array.from({ length: APPEND_MAX_ENTRIES + 1 }, () => world.memberWrite().entry);
+    assert.ok('ok' in (await world.a.ingestForeign(memberEntries, [])));
+    const gated = await world.a.appendOwn('note.add', { text: 'Fictional cell report' });
+    assert.ok('ok' in gated);
+    const { fake, state } = await hubFor(world, { entries: before, grants: [] });
+    // The hub places the grant only once the member's last entry (standing in for the cell.create) is held, and only then takes the gated entry.
+    const last = memberEntries[memberEntries.length - 1] as SealedEntry;
+    state.grantRules = new Map(grants.map((grant) => [grantHash(grant), { after: entryHash(last.header), opens: new Set([gated.hash]) }] as const));
+    try {
+      const report = await syncA(world, fake.address);
+      assert.equal(report.outcome, 'synced', JSON.stringify(report));
+      assert.deepEqual(report.refusedByHub, [], 'the gated entry was taken once the grant was placed');
+      assert.equal(report.pushed, APPEND_MAX_ENTRIES + 2);
+      for (const grant of grants) assert.ok(state.grants.has(grantHash(grant)), 'the grant is on the hub');
+      assert.equal(state.appends.filter((item) => item.grants.length > 0).length, 2, 'the grant went in the first append and again with the retry');
+    } finally {
+      await fake.close();
+    }
+  } finally {
+    await world.a.close();
+  }
+});
+
 test('checkpoints: a valid newer checkpoint replaces the kept newest and each is stored as evidence', async () => {
   await withSync('checkpoint', async (world, fake, state) => {
     const leadHead = await world.a.head(world.project, world.a.deviceWriter) as { seq: number; hash: string };

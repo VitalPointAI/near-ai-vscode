@@ -450,6 +450,8 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     for (let pass = 0; pass < PUSH_PASSES && (entries.length > 0 || grants.length > 0); pass += 1) {
       let acceptedThisPass = 0;
       const retry: SealedEntry[] = [];
+      // A grant the hub could not place yet (its cell.create was in a later append) goes again with the retried entries (IN-05).
+      const retryGrants: unknown[] = [];
       for (const batch of appendBatches(entries, grants, plan.blobRefs, (entry) => hashOf.get(entry) as string)) {
         const answer = await transport.append(batch, (hash) => local.blob(hash));
         for (const hash of answer.accepted) {
@@ -463,8 +465,12 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
           lastRefusal.set(hash, item.reason);
           if (entry !== undefined && RETRY_REFUSALS.has(item.reason)) retry.push(entry);
         }
+        for (const item of answer.grantsRefused) {
+          const grant = item.reason === 'grant-not-placed' ? batch.grants?.[item.index] : undefined;
+          if (grant !== undefined) retryGrants.push(grant);
+        }
       }
-      grants = [];
+      grants = retryGrants;
       if (acceptedThisPass === 0) break;
       entries = retry;
     }
