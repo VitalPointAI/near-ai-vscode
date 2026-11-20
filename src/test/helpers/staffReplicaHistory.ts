@@ -34,6 +34,8 @@ export const TWIN_MEMBER = 'mbr-demo';
 export const TWIN_PERSON_NAME = 'A. Demo';
 export const DECISION_ROLE = 'commander';
 export const TWIN_RUN = 'run-1';
+/** A second device, of a member who may run only the release-guard seat. No scenario uses it; tests write concurrent verdicts with it. */
+export const GUARD_DEVICE = 'guard-desk';
 
 export const CONOPS = 'concept-of-operations';
 export const ANNEX = 'annex-b';
@@ -151,6 +153,13 @@ function replicaWorld(): World {
       devices: [TWIN_DEVICE],
       agentSeats: ['lead-planner', 'j5-chief', 'j2-chief', 'release-guard', 'tradecraft-reviewer'],
       slots: [1]
+    }, {
+      member: 'mbr-guard',
+      name: 'B. Guard',
+      roles: ['member'],
+      devices: [GUARD_DEVICE],
+      agentSeats: ['release-guard'],
+      slots: [2]
     }]
   });
 }
