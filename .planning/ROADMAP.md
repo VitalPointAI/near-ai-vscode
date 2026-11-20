@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
@@ -25,7 +25,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (integer numbering: Phases 26 to 35 so far) when 0.4.x work is planned with GSD.
+Next phases are added here (integer numbering: Phases 26 to 37 so far) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -302,6 +302,44 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 35 to break down)
+
+### Cohere Model Vault: a third inference endpoint (Phases 36 and 37, added 2026-11-20)
+
+Design: `.planning/research/cohere-model-vault/DESIGN.md`. Owner decisions of 2026-11-20 ("go with your recommendations"): Cohere Model Vault becomes a third provider beside NEAR AI and local, and project setup offers any combination; an Encrypted vault counts as attested only while Cohere's pinned proxy and the extension's own check both pass; a Standard vault is its own class, "sovereign region, not attested", never counted as private hardware; no vault receives Protected B without a signed authorization in your organization's policy (assessment reference, named person, expiry), and classified content never goes to a vault; cost control is manual until Cohere publishes a lifecycle API. Both phases ship in the 0.4.x line after Phase 32: they need only the Phase 70 gate on `main`, so they do not wait for Phases 71 to 74; Phase 74.1 enforces the vault model passports when it lands and Phase 74.2 reuses Phase 37's transport and verdict shapes. Phase 36 may run beside Phases 33 to 35 (different files). Requirement ids CVLT-01 to CVLT-11 are defined in the design (section 14) and are added to REQUIREMENTS.md when Phase 36 is planned. Open owner decisions D1 to D6 are in the design (section 15), each with a default.
+
+### Phase 36: Cohere Model Vault provider, sovereign-region class and cost control
+**Goal**: Your organization can add Cohere vaults beside NEAR AI and local, each request goes only where the label, use tier and policy allow, a Standard vault is never treated as private hardware, Protected B reaches a vault only with a recorded authorization, and vault running costs are visible and limited.
+**Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (the bundle, labels, routing, trust badge). Phase 74.1 not required: its passport check covers vault models when it lands.
+**Requirements**: CVLT-01, CVLT-02, CVLT-03, CVLT-04, CVLT-05, CVLT-06, CVLT-07
+**Success Criteria** (what must be TRUE):
+  1. A person ticks NEAR AI, local and a Canadian Standard vault in setup and adds the key once; a chat at `org/Public` or `org/Internal` can use a model on the vault, while a label outside the vault's signed ceiling is refused for it with a plain sentence and nothing is sent. (CVLT-01, CVLT-02, CVLT-03)
+  2. A Standard vault answer is never shown as private, `tee-only` blocks it, and a bundle that lists Protected C, `org/Restricted`, any classified level or NATO Restricted and above for a vault is refused as a whole. (CVLT-03, CVLT-05)
+  3. Protected B content is refused for every vault without an authorization, allowed with a valid signed one in scope, refused again after it expires, and the route record and trust badge name the authorization. (CVLT-04)
+  4. A paused vault gives the not-ready card before a run starts, with Open vault page and Check again; the idle warning appears after the set time; estimated vault hours appear in the spend view, count toward the daily and per-run limits, and stopping at the limit says that it does not stop the hourly charge. No undocumented endpoint is called. (CVLT-06, CVLT-07)
+  5. Existing NEAR, local and hybrid profiles and discovery answers work unchanged; SECURITY.md and README describe vaults, the two classes and the Protected B rule.
+**Research flags**: (1) Open owner decisions D1 (a fourth badge state), D2 (Standard vault default ceiling), D3 (auto-pause later). (2) Questions for Cohere C1 to C3, C6, C9 to C12: lifecycle API, paused responses and billing, streaming and tool calling, CCCS Medium assessment, the region's cloud and facilities.
+**Undo cost**: Medium: a new optional bundle key and authorization records are signed into policies, so settle the schema in WP-0.
+**Plans:** 0 plans
+**UI hint**: yes
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 36 to break down)
+
+### Phase 37: Cohere Encrypted Vault as an attested endpoint
+**Goal**: An Encrypted vault counts as attested private hardware only while Cohere's proxy and this extension's own check both prove it, and nothing is sent when they do not.
+**Depends on**: Phase 36.
+**Requirements**: CVLT-08, CVLT-09, CVLT-10, CVLT-11
+**Success Criteria** (what must be TRUE):
+  1. With Docker or Podman present, setup starts Cohere's proxy from the digest pinned in the signed policy on a random loopback port, the readiness check proves the attestation, and an `org/Internal` chat is answered with the verified private badge and the vault sentence. (CVLT-08, CVLT-10, CVLT-11)
+  2. A different image digest, a port held by another process, a refused proxy connection, an expired or wrongly signed attestation token, an empty policy match, or an Integritee policy release whose Sigstore bundle does not verify each refuse before sending, and the rule is recorded; nothing ever falls back to the plain vault endpoint or another endpoint. (CVLT-08, CVLT-09, CVLT-10)
+  3. Without a container runtime the Encrypted vault is shown as unavailable on that machine with the reason, and no request reaches its endpoint. (CVLT-08)
+  4. Protected B to an Encrypted vault is refused without an authorization even when attested; route records carry platform, policy release, token hash and proxy image digest. (CVLT-10, CVLT-11)
+**Research flags**: (1) Encrypted vaults run only in the US today (Canada and the EU "coming soon"). (2) Questions for Cohere C4, C5, C7, C8: Canada date, Command in Encrypted, attestation without the proxy and the SEV-SNP token format, the proxy's source and signatures. (3) Open owner decisions D4 (shared proxy) and D5 (SEV-SNP proxy-only). (4) Revisit a Node-only verifier when Cohere publishes the protocol or a supported JavaScript client.
+**Undo cost**: Low to medium: a transport behind one interface and an optional `attestation` object in a vault entry.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 37 to break down)
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -700,7 +738,7 @@ Plans:
   1. The bundle's optional `routing.attestedHosts` names each organization host with its expected measurements, accepted hardware roots and allowed model artifact hashes; a host it does not name never counts as attested. (OTEE-01)
   2. A request to a named host is sent only after its attestation verifies and the connection is bound to it (the D-50 rule); a wrong measurement, an unexpected weights hash or an unbound connection is refused before anything is sent, in plain words. (OTEE-02, OTEE-03)
   3. A verified `org-tee` model satisfies `attested-cloud` and is recorded with hosting `org-tee` and its attested artifact hash. (OTEE-04)
-**Research flags**: (1) Run the same open-source private inference stack NEAR uses so one verifier serves both, or add a second verifier for NVIDIA NIM on confidential computing. (2) Attestation proves code and weights, not location: the Canadian location is recorded as a contractual fact. (3) The end-to-end check needs your organization's hosting to exist; the code and tests do not.
+**Research flags**: (1) Run the same open-source private inference stack NEAR uses so one verifier serves both, or add a second verifier for NVIDIA NIM on confidential computing. (2) Attestation proves code and weights, not location: the Canadian location is recorded as a contractual fact. (3) The end-to-end check needs your organization's hosting to exist; the code and tests do not. (4) Reuse Phase 37's `VaultTransport` and `AttestationVerdict` shapes (`.planning/research/cohere-model-vault/DESIGN.md`, section 7.5) if Phase 37 lands first.
 **Undo cost**: Low to medium: a new optional bundle key and a new hosting class.
 **Plans:** 0 plans
 
@@ -1426,6 +1464,8 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
+| 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phase 32; may run beside 33 to 35) | - |
+| 37. Cohere Encrypted Vault as an attested endpoint | 0/TBD | Not started (after Phase 36) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
