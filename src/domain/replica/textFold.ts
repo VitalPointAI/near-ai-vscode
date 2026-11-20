@@ -60,6 +60,7 @@ export interface ProductTextOutput {
 export const TEXT_REFUSALS = {
   'client-collision': 'Another device already registered this client id for this product, so this device must pick a different one.',
   'foreign-client-id': 'The client id is not in the range the roster gives this device, so this device may not register it.',
+  'agent-seat-not-allowed': 'The registration names an agent seat that the roster does not let this device\'s member run.',
   'actor-mismatch': 'The registration names a different actor than the entry that carries it.',
   'malformed-update': 'The text update cannot be read.',
   'foreign-client': 'The update inserts text under a client id registered to another device, so it is refused as forged attribution.',
@@ -123,6 +124,10 @@ interface CompactData { product: string; covers: Dep[]; stateVector: Array<[numb
 function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData, view: FoldView): ReduceOutcome {
   if (canonicalize(data.actor) !== canonicalize(entry.body.actor)) return refused('actor-mismatch');
   const roster = view.ctx.roster;
+  // An agent's text is attributed to its seat only when the device's member may run that seat at the cited roster (WR-02, D-12). Default deny: a
+  // view that cannot answer allows no agent registration.
+  const actor = entry.body.actor;
+  if (actor.kind === 'agent' && roster.canRunAgent?.(entry.member, actor.member, entry.body.roster) !== true) return refused('agent-seat-not-allowed');
   if (roster.clientIdOwner !== undefined && roster.clientIdOwner(data.clientId as number, entry.body.roster) !== entry.header.writer) return refused('foreign-client-id');
   const product = productText(state, entry.header.stream, data.product);
   const clientId = data.clientId as number;

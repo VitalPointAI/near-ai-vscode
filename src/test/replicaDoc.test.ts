@@ -25,7 +25,7 @@ function productOf(result: ReturnType<typeof foldEntries>): ProductTextOutput {
 const reasons = (result: ReturnType<typeof foldEntries>): Array<[string, string]> => result.refused.map((item): [string, string] => [item.hash, item.reason]).sort();
 
 function twoWriters(): World {
-  return createWorld({ members: [{ member: 'mbr-wwww', name: 'Wen', devices: ['W'] }, { member: 'mbr-qqqq', name: 'Quinn', devices: ['Q'] }, { member: 'mbr-xxxx', name: 'Xi', devices: ['X'] }] });
+  return createWorld({ members: [{ member: 'mbr-wwww', name: 'Wen', devices: ['W'], agentSeats: ['j2-analyst'] }, { member: 'mbr-qqqq', name: 'Quinn', devices: ['Q'] }, { member: 'mbr-xxxx', name: 'Xi', devices: ['X'] }] });
 }
 
 // ---- Task 2: ownership hardening ------------------------------------------------------------------------------------------------------------
@@ -497,4 +497,38 @@ test('WR-04: with a refused update covered, a wrong text hash or a wrong state v
     assert.deepEqual(reasons(result), [[bad.hash, 'foreign-client'], [entry.hash, 'compact-mismatch']].sort());
     assert.deepEqual(productOf(result).compactions, []);
   }
+});
+
+// ---- WR-02 (client part): an agent registration needs the seat --------------------------------------------------------------------------------
+
+const ANALYST: Actor = { kind: 'agent', member: 'j2-analyst', run: 'r-7' };
+
+test('WR-02: an agent registration is refused agent-seat-not-allowed unless the roster lets the device\'s member run that seat, and a view that cannot answer denies', () => {
+  const world = twoWriters();
+  // Xi holds no seat; Wen holds j2-analyst but not j2-chief.
+  const x = world.editor('X', PRODUCT, 51);
+  const byX = x.register({ actor: ANALYST });
+  const typedX = x.insert(0, 'agent text', { actor: ANALYST });
+  const otherSeat = world.editor('W', PRODUCT, 32).register({ actor: { kind: 'agent', member: 'j2-chief', run: 'r-8' } });
+  const byW = world.editor('W', PRODUCT, 31).register({ actor: ANALYST });
+  const result = foldEntries(sealed([byX, typedX, otherSeat, byW]), world.ctx());
+  assert.deepEqual(reasons(result), [[byX.hash, 'agent-seat-not-allowed'], [otherSeat.hash, 'agent-seat-not-allowed']].sort());
+  assert.deepEqual(result.held.map((item) => [item.hash, item.reason]), [[typedX.hash, 'unregistered-client']]);
+  assert.deepEqual(productOf(result).registrations.map((registration) => [registration.clientId, registration.member]), [[31, 'mbr-wwww']]);
+  // Default deny: a roster view without canRunAgent allows no agent registration, and a person registration is unaffected.
+  const roster = Object.assign({}, world.ctx().roster, { canRunAgent: undefined });
+  const person = world.editor('W', PRODUCT, 33).register();
+  const blind = foldEntries(sealed([byX, typedX, otherSeat, byW, person]), world.ctx({ roster }));
+  assert.deepEqual(reasons(blind), [byX, otherSeat, byW].map((item): [string, string] => [item.hash, 'agent-seat-not-allowed']).sort());
+  assert.deepEqual(blind.applied, [person.hash]);
+});
+
+test('WR-02: text typed under an allowed agent registration is attributed to the device\'s member with the agent seat and run', () => {
+  const world = twoWriters();
+  const w = world.editor('W', PRODUCT, 31);
+  const register = w.register({ actor: ANALYST });
+  const typed = w.insert(0, 'assessment', { actor: ANALYST });
+  const result = foldEntries(sealed([register, typed]), world.ctx());
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(productOf(result).attribution, [{ start: 0, length: 10, clientId: 31, writer: world.writerOf('W'), member: 'mbr-wwww', actor: 'agent', agentMember: 'j2-analyst', run: 'r-7' }]);
 });
