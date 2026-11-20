@@ -23,9 +23,12 @@
 // check is one stat, made once per public call and never kept for the process, and nothing under src/staff/replica/ is loaded for a project that is
 // not shared (Pitfall 8). In a shared project:
 // - replay() reads the products from the fold through the projection (replica/projection.ts), so every reader of replay() (status, list, the
-//   registry, the decision queue, the header tamper check in fileDisagreement) works unchanged on the projected state. One ReplicaProject is kept per
-//   host while its store keeps the same identity (the store folder's device and inode numbers and the roster head this device's mark names), so its
-//   fold context is reused. Before each shared read the identity is compared: Start Again (here or in another window), a folder replaced, or a roster
+//   registry, the decision queue, the header tamper check in fileDisagreement) works unchanged on the projected state. The fold folds every part of
+//   the project (every cell) this device holds, so the shared read shows the products of each of them, each with its own label (the lead's machine
+//   shows every product), and nothing of a part this device does not hold: an entry of a cell it holds no key for waits outside the fold, so no
+//   status, list or replay text names its products, labels or counts (D-23).
+// - One ReplicaProject is kept per host while its store keeps the same identity (the store folder's device and inode numbers and the roster head
+//   this device's mark names), so its fold context is reused. Before each shared read the identity is compared: Start Again (here or in another window), a folder replaced, or a roster
 //   change another window recorded closes the old project and opens it again; a refused fold drops it too; invalidateShared() forgets it (D-09).
 // - every step that would write today's single-machine ledgers or staff files is refused with SHARED_PROJECT_REFUSAL before any file is touched: a
 //   method with a StaffResult returns it, a method without one throws SharedProjectError. Live multi-user writes arrive in Phase 33.

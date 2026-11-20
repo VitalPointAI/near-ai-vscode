@@ -22,13 +22,17 @@ import { isProjectRefused, ReplicaProject } from '../staff/replica/replicaProjec
 import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { STORE_REFUSALS } from '../staff/replica/store';
 import { markKey } from '../staff/replica/marks';
+import { cellOrderHook } from '../staff/replica/membership';
+import { cellLabelTexts } from '../staff/replica/labelCells';
+import { bringIn, orgClearance, syncTo } from './helpers/labelCellWorld';
+import type { Seat as CellSeat } from './helpers/labelCellWorld';
 import { memberAt } from '../domain/replica/rosterMembers';
 import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
 import type { StaffEvent } from '../domain/staff/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
 import type { ValidationLogEntry } from '../domain/staff/logistics';
 import { EVENTS_FILE, LEDGER_DIR, productPath, SHARED_PROJECT_UNAVAILABLE, SharedProjectError, StaffHost } from '../staff/staffHost';
-import type { StaffCaller, StaffTeamInfo } from '../staff/staffHost';
+import type { StaffCaller, StaffResult, StaffTeamInfo } from '../staff/staffHost';
 import { callLogistics, callTool, CLEAN_BODY, hashIn, J3_TEAM, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
 
@@ -101,7 +105,7 @@ function full(): Promise<Env> {
     const env = await freshEnv('template');
     const world = worldOf(env);
     await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
-    // Labelled org/Public: Make Multi-User refuses a product labelled above the base cell (W-1).
+    // Labelled org/Public: Make Multi-User puts it into the org/Public cell, which the lead's declared clearance (org/Internal) covers (D-15, D-19).
     const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE, options: OPTIONS, dissent: DISSENT }, 'lead-planner'), 'submit');
@@ -684,5 +688,121 @@ test('close() goes through invalidateShared and ends the decode worker of the pr
     assert.equal(held.ownDecoder, undefined);
   } finally {
     opens.restore();
+  }
+});
+
+// ---- 32-11 (D-23): the host shows every cell this device holds, each with its label, and nothing of a cell it does not hold -------------------------
+
+const ESTIMATE = 'estimate';
+// A canary phrase only the org/Internal product's text holds: no text a member below that cell reads may hold it.
+const CANARY = 'Northwind ford crossing';
+const ESTIMATE_BODY = `# Estimate\n\nThe ${CANARY} takes one battalion at a time.\n`;
+
+/**
+ * The lead converts a project with the concept of operations (org/Public, released), an estimate (org/Internal, draft, its text holding the canary)
+ * and a calculator record, the lead's declared clearance org/Internal; the lead's open project as a label cell seat, and the cells by label.
+ */
+async function labelledLead(label: string): Promise<{ env: Env; lead: CellSeat; cells: { base: string; public: string; internal: string } }> {
+  const env = await freshEnv(label);
+  const world = worldOf(env);
+  await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
+  const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE }, 'lead-planner'), 'submit');
+  for (const action of ['approve', 'release'] as const) {
+    const decided = await world.host.decide(world.person(), { product: CONOPS, action, hash });
+    assert.ok(decided.ok, decided.ok ? '' : decided.message);
+  }
+  await writeBody(world.root, 'j5', ESTIMATE, ESTIMATE_BODY);
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ESTIMATE, kind: 'estimate', label: 'org/Internal' }, 'lead-planner'), 'propose estimate');
+  await writeFactors(world.root, [FUEL]);
+  must(await callLogistics(world, J4_TEAM, 'calc_run', FUEL_CALC, 'log-plans-officer'), 'calc_run');
+  await migrate(env);
+  const now = (): Date => new Date(NOW);
+  const deps = { ...env.deps, cellOrder: cellOrderHook({ now }) };
+  const opened = await ReplicaProject.open(env.root, deps);
+  assert.ok(opened instanceof ReplicaProject, isProjectRefused(opened) ? opened.message : 'no shared project');
+  const lead: CellSeat = { at: { root: env.root, global: env.global, secrets: env.secrets as CellSeat['at']['secrets'], deps, clock: { now: now() } }, p: opened, host: { project: opened, deps }, member: `mbr-${opened.deviceWriter.slice(0, 16)}`, writer: opened.deviceWriter, results: [] };
+  const byLabel = new Map([...(await cellLabelTexts(opened))].map(([cell, text]) => [text, cell]));
+  const cells = { base: opened.projectId, public: byLabel.get('org/Public') as string, internal: byLabel.get('org/Internal') as string };
+  assert.ok(cells.public !== undefined && cells.internal !== undefined, `the lead holds both label cells (${[...byLabel.keys()].join(', ')})`);
+  return { env, lead, cells };
+}
+
+/** The text of a host result: what a member reads, whether it is an answer or a refusal. */
+const textOf = (result: StaffResult): string => (result.ok ? result.text : result.message);
+
+/** Today's staff host over a label cell seat's folder, with the replica storage the extension gives it, signed by that install's device. */
+async function seatHost(seat: CellSeat): Promise<StaffHost> {
+  const { signer } = await ReplicaProject.localDevice(seat.at.deps);
+  const clock = { now: Date.parse('2026-11-21T08:00:00.000Z') };
+  return new StaffHost({ root: seat.at.root, signer: async () => signer, keyStatus: async () => trusting(signer), headStore: seat.at.secrets, now: () => { clock.now += 1000; return clock.now; }, replica: { globalStorageDir: seat.at.global } });
+}
+
+/** Every text a member reads of the host: the status of each product it lists, the list of every section, the replay, the registry and the queue. */
+async function everyText(host: StaffHost, root: string): Promise<string[]> {
+  const replay = await host.replay();
+  const texts = [JSON.stringify([...replay.products]), JSON.stringify(replay.broken ?? null)];
+  const listed = await host.list(caller(root), { all: true });
+  texts.push(textOf(listed));
+  for (const product of replay.products.keys()) texts.push(textOf(await host.status(caller(root), product)));
+  const snapshot = await host.snapshot();
+  texts.push(JSON.stringify(snapshot.registry), JSON.stringify(snapshot.decisions), JSON.stringify(snapshot.ledgerProblem ?? null));
+  return texts;
+}
+
+test('not cleared: on the lead the shared read lists both products with their own labels; on a member cleared only for org/Public it lists the org/Public product alone and no text holds the other cell', async () => {
+  const { env, lead, cells } = await labelledLead('not-cleared');
+  const leadHost = worldOf(env, true).host;
+  const m = await bringIn(lead, 'not-cleared-m', 'M. Member', orgClearance('Public'));
+  await syncTo(lead, m, [cells.base, cells.public]);
+  const memberHost = await seatHost(m);
+  try {
+    // The lead: every product of every cell it holds, each with its cell's label.
+    const leadReplay = await leadHost.replay();
+    assert.equal(leadReplay.broken, undefined, leadReplay.broken?.reason);
+    assert.deepEqual([...leadReplay.products.keys()].sort(), [CONOPS, ESTIMATE].sort());
+    const conopsStatus = await leadHost.status(caller(env.root), CONOPS);
+    assert.ok(conopsStatus.ok && textOf(conopsStatus).includes('Label: org/Public.'), textOf(conopsStatus));
+    const estimateStatus = await leadHost.status(caller(env.root), ESTIMATE);
+    assert.ok(estimateStatus.ok && textOf(estimateStatus).includes('Label: org/Internal.'), textOf(estimateStatus));
+    const leadList = await leadHost.list(caller(env.root), { all: true });
+    assert.ok(textOf(leadList).includes(CONOPS) && textOf(leadList).includes(ESTIMATE), textOf(leadList));
+
+    // The member: the org/Public product alone, with the lead's state and history.
+    const memberReplay = await memberHost.replay();
+    assert.equal(memberReplay.broken, undefined, memberReplay.broken?.reason);
+    assert.deepEqual([...memberReplay.products.keys()], [CONOPS]);
+    assert.deepEqual(withoutImported(memberReplay.products.get(CONOPS)), withoutImported(leadReplay.products.get(CONOPS)), 'the lead\'s state and history of the concept of operations');
+    const memberStatus = await memberHost.status(caller(m.at.root), CONOPS);
+    assert.ok(memberStatus.ok && textOf(memberStatus).includes('Label: org/Public.'), textOf(memberStatus));
+    for (const text of await everyText(memberHost, m.at.root)) {
+      for (const word of [ESTIMATE, 'org/Internal', CANARY]) assert.equal(text.includes(word), false, `a member's text holds "${word}": ${text.slice(0, 300)}`);
+    }
+  } finally {
+    await leadHost.close();
+    await memberHost.close();
+    await lead.p.close();
+  }
+});
+
+test('a member cleared for org/Internal holding both label cells but not the legacy cell: the shared read lists both products, each with its own label, as the lead sees them', async () => {
+  const { env, lead, cells } = await labelledLead('both-cells');
+  const leadHost = worldOf(env, true).host;
+  const m = await bringIn(lead, 'both-cells-m', 'M. Member', orgClearance('Internal'));
+  await syncTo(lead, m, [cells.base, cells.public, cells.internal]);
+  const memberHost = await seatHost(m);
+  try {
+    const leadReplay = await leadHost.replay();
+    const memberReplay = await memberHost.replay();
+    assert.equal(memberReplay.broken, undefined, memberReplay.broken?.reason);
+    assert.deepEqual([...memberReplay.products.keys()].sort(), [CONOPS, ESTIMATE].sort());
+    for (const product of [CONOPS, ESTIMATE]) assert.deepEqual(withoutImported(memberReplay.products.get(product)), withoutImported(leadReplay.products.get(product)), product);
+    const estimate = await memberHost.status(caller(m.at.root), ESTIMATE);
+    assert.ok(estimate.ok && textOf(estimate).includes('Label: org/Internal.'), textOf(estimate));
+  } finally {
+    await leadHost.close();
+    await memberHost.close();
+    await lead.p.close();
   }
 });
