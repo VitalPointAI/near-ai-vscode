@@ -14,15 +14,18 @@ import { makeTlsFixture, tlsGet, type TlsResponse } from '../helpers/tlsFixture'
 
 // Phase 32, plan 17 (D-25, D-26, D-31, MUS-07): builds the hub image from the repository root and proves, on the real image, that it is pinned
 // like the relay's, holds only its two files of code and no secret, has no shell or package manager, prints a key line for the operator and
-// answers /healthz over TLS 1.3 when given its four secret files. Run it with `npm run test:container`; it is not part of `npm test`.
+// answers /healthz over TLS 1.3 when given its four secret files. Then, through relay/compose.yaml, that the hub service sits only in profile
+// hub, is hardened like the relay, publishes on 127.0.0.1 unless the operator chooses, starts alone with no relay secret, and comes back
+// healthy after a hard kill. Run it with `npm run test:container`; it is not part of `npm test`.
 //
-// Hygiene: the suite makes one image tag, its own containers and temporary folders, all named with one random suffix, and removes exactly
-// those. It never touches an operator's own near-ai-relay project, its volumes or its secret files: a planted file that is already there stops
+// Hygiene: the suite makes one image tag, one Compose project, its own containers and temporary folders, all named with one random suffix,
+// and removes exactly those. It never touches an operator's own near-ai-relay project, its volumes or its secret files: a planted file that is already there stops
 // the suite instead of being overwritten. It never skips: with no Docker the suite fails with a plain message.
 
 const SUFFIX = randomBytes(4).toString('hex');
 const IMAGE = `near-ai-hub:test-${SUFFIX}`;
 const RUN_CONTAINER = `near-ai-hub-test-${SUFFIX}-run`;
+const PROJECT = `near-ai-hub-test-${SUFFIX}`;
 // Test-only key lines, made fresh for each run so a leftover can never match by accident. The signing line is also planted where an operator
 // keeps the real one (relay/secrets/hub/), so the build proves .dockerignore keeps it out of the image.
 const SIGNING_LINE = generateKeyFile('signing');
@@ -47,8 +50,13 @@ const RELAY_DOCKERFILE = path.join(REPO_ROOT, 'relay', 'Dockerfile');
 const PLANTED_PARENT = path.join(REPO_ROOT, 'relay', 'secrets');
 const PLANTED_DIR = path.join(PLANTED_PARENT, 'hub');
 const PLANTED_FILE = path.join(PLANTED_DIR, 'hub_signing_key');
+const COMPOSE_FILE = path.join(REPO_ROOT, 'relay', 'compose.yaml');
 
 let secretsDir = '';
+// An empty folder given as the relay's secrets folder, so a hub started from Compose proves it needs no relay secret (D-25).
+let emptyRelaySecretsDir = '';
+let hostPort = 0;
+let projectStarted = false;
 let tlsKeyBody: string[] = [];
 let imageBuilt = false;
 let plantedFileCreated = false;
@@ -163,8 +171,108 @@ function secretMounts(): string[] {
   return SECRET_FILES.flatMap((name) => ['-v', `${path.join(secretsDir, name)}:/run/secrets/${name}:ro`]);
 }
 
+/**
+ * The environment for every Compose call: the operator's own NEAR_AI_RELAY_, NEAR_AI_HUB_, RELAY_, HUB_ and COMPOSE_ settings are dropped, then
+ * this run's image, port and secret folders are set. `omit` leaves a variable out after that, to see Compose's own default.
+ */
+function composeEnv(extra: Record<string, string> = {}, omit: readonly string[] = []): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!/^(NEAR_AI_RELAY_|NEAR_AI_HUB_|RELAY_|HUB_|COMPOSE_)/.test(name)) env[name] = value;
+  }
+  const result: NodeJS.ProcessEnv = {
+    ...env,
+    NEAR_AI_HUB_IMAGE: IMAGE,
+    NEAR_AI_HUB_PUBLISH_PORT: String(hostPort),
+    NEAR_AI_HUB_SECRETS_DIR: secretsDir,
+    NEAR_AI_RELAY_SECRETS_DIR: emptyRelaySecretsDir,
+    ...extra,
+  };
+  for (const name of omit) delete result[name];
+  return result;
+}
+
+function compose(args: string[], extra: Record<string, string> = {}): Promise<Result> {
+  return run('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', ...args], { env: composeEnv(extra) });
+}
+
+async function services(profiles: readonly string[]): Promise<string[]> {
+  const flags = profiles.flatMap((profile) => ['--profile', profile]);
+  const result = await mustRun('docker', ['compose', '-f', COMPOSE_FILE, ...flags, 'config', '--services'], { env: composeEnv() });
+  return result.stdout.split('\n').filter(Boolean).sort();
+}
+
+interface ComposeService {
+  profiles?: string[];
+  image?: string;
+  user?: string;
+  read_only?: boolean;
+  cap_drop?: string[];
+  security_opt?: string[];
+  pids_limit?: number;
+  mem_limit?: string | number;
+  tmpfs?: string[];
+  ports?: Array<{ host_ip?: string; target: number; published: string; protocol?: string }>;
+  volumes?: Array<{ type: string; source: string; target: string }>;
+  secrets?: Array<Record<string, unknown>>;
+  environment?: Record<string, string | null>;
+  healthcheck?: { test?: string[] };
+  depends_on?: unknown;
+  restart?: string;
+}
+
+interface ComposeConfig {
+  services: Record<string, ComposeService>;
+  secrets: Record<string, { file?: string }>;
+  volumes: Record<string, unknown>;
+}
+
+async function hubConfig(extra: Record<string, string> = {}, omit: readonly string[] = []): Promise<ComposeConfig> {
+  const result = await mustRun('docker', ['compose', '-f', COMPOSE_FILE, '--profile', 'hub', 'config', '--format', 'json'], { env: composeEnv(extra, omit) });
+  return JSON.parse(result.stdout) as ComposeConfig;
+}
+
+/**
+ * compose up of the hub alone, retried once on a new port when the published port was taken between freePort() closing its probe and Compose
+ * binding it. Any other failure is returned as it is.
+ */
+async function composeUpHub(): Promise<Result> {
+  const args = ['up', '-d', '--no-build', '--wait', '--wait-timeout', '120', 'hub'];
+  const first = await compose(args);
+  if (first.code === 0 || !PORT_TAKEN.test(`${first.stdout}\n${first.stderr}`)) return first;
+  await compose(['down', '--remove-orphans', '--timeout', '5']); // the project's containers only; the state volume is kept
+  hostPort = await freePort();
+  return compose(args);
+}
+
+async function hubLogs(): Promise<string> {
+  const result = await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'logs', '--no-color', '--no-log-prefix', 'hub'], { env: composeEnv() });
+  return `${result.stdout}\n${result.stderr}`;
+}
+
+function logEvents(text: string): Array<Record<string, unknown>> {
+  const events: Array<Record<string, unknown>> = [];
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('{')) continue;
+    try {
+      events.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      // not a hub line
+    }
+  }
+  return events;
+}
+
+async function hubHealth(): Promise<string> {
+  const state = await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'ps', '--format', 'json', 'hub'], { env: composeEnv() });
+  const line = state.stdout.trim().split('\n')[0];
+  if (!line) return 'absent';
+  const row = JSON.parse(line) as { Health: string; State: string };
+  return row.State === 'running' ? row.Health : row.State;
+}
+
 // 20 minutes, below the hub CI job's 25: a hang is then reported as this suite's timeout, not as a cancelled job.
-describe('hub container image', { timeout: 1_200_000 }, () => {
+describe('hub container image and Compose service', { timeout: 1_200_000 }, () => {
   before(async () => {
     const dockerVersion = await run('docker', ['version', '--format', '{{.Server.Version}}']).catch(() => undefined);
     assert.ok(dockerVersion && dockerVersion.code === 0, 'Docker is required for the container suite and was not found or is not running (install Docker, then run it again)');
@@ -205,6 +313,9 @@ describe('hub container image', { timeout: 1_200_000 }, () => {
       '-v', `${secretsDir}:/secrets`, buildImageRef(), '65532:65532', ...SECRET_FILES.map((name) => `/secrets/${name}`),
     ]);
 
+    emptyRelaySecretsDir = await mkdtemp(path.join(tmpdir(), 'hub-container-no-relay-secrets-'));
+    hostPort = await freePort();
+
     // BuildKit (docker build) takes no --memory flag; the build's own steps are one npm ci, one tsc and one esbuild run.
     await mustRun('docker', ['build', '-f', 'hub/Dockerfile', '-t', IMAGE, REPO_ROOT]);
     imageBuilt = true;
@@ -212,6 +323,9 @@ describe('hub container image', { timeout: 1_200_000 }, () => {
 
   after(async () => {
     // Only the objects this run made, each by its exact name.
+    if (projectStarted) {
+      await run('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'down', '-v', '--remove-orphans', '--timeout', '5'], { env: composeEnv() });
+    }
     for (const id of createdContainers) await run('docker', ['rm', '-f', id]);
     if (imageBuilt) await run('docker', ['rmi', IMAGE]);
     if (plantedFileCreated) await rm(PLANTED_FILE, { force: true });
@@ -219,6 +333,7 @@ describe('hub container image', { timeout: 1_200_000 }, () => {
       if ((await readdir(dir).catch(() => ['x'])).length === 0) await rm(dir, { recursive: true, force: true });
     }
     if (secretsDir) await rm(secretsDir, { recursive: true, force: true });
+    if (emptyRelaySecretsDir) await rm(emptyRelaySecretsDir, { recursive: true, force: true });
   }, { timeout: 180_000 });
 
   test('every Dockerfile FROM is pinned by digest, two stages, the same two images as the relay', () => {
@@ -324,5 +439,136 @@ describe('hub container image', { timeout: 1_200_000 }, () => {
     assert.ok(!names.some((name) => name.startsWith('build/') || name.startsWith('state-skel') || name.startsWith('app-skel')), 'no build leftovers in the final image');
     assert.ok(names.includes('var/lib/near-ai-hub/'), 'the empty state directory is in the image');
     assert.equal(secretFound, false, 'the planted key appears in the exported image bytes');
+  });
+
+  test('Compose: the hub is only in profile hub; the default and the signal profile leave it out', async () => {
+    assert.deepEqual(await services([]), ['relay']);
+    assert.deepEqual(await services(['hub']), ['hub', 'relay']);
+    assert.ok(!(await services(['signal'])).includes('hub'), 'the signal profile does not start the hub');
+  });
+
+  test('Compose config: the hub is hardened like the relay, has its own volume and its four secrets, and publishes 8443 on 127.0.0.1 by default', async () => {
+    const config = await hubConfig();
+    const hub = config.services.hub;
+    assert.ok(hub, 'a hub service');
+    assert.deepEqual(hub.profiles, ['hub']);
+    assert.equal(hub.image, IMAGE);
+    assert.equal(hub.read_only, true);
+    assert.deepEqual(hub.cap_drop, ['ALL']);
+    assert.ok(hub.security_opt?.includes('no-new-privileges:true'));
+    assert.equal(hub.user, '65532:65532');
+    assert.ok(typeof hub.pids_limit === 'number' && hub.pids_limit > 0 && hub.pids_limit <= 512, 'a process limit');
+    assert.ok(Number(hub.mem_limit) > 0 && Number(hub.mem_limit) <= 2 * 1024 ** 3, 'a memory limit of at most 2 GiB');
+    assert.deepEqual(hub.tmpfs?.map((entry) => entry.split(':')[0]), ['/tmp'], 'only /tmp is writable besides the volume');
+    assert.deepEqual(
+      hub.volumes?.map(({ type, source, target }) => ({ type, source, target })),
+      [{ type: 'volume', source: 'hub-state', target: '/var/lib/near-ai-hub' }],
+    );
+    assert.ok(Object.hasOwn(config.volumes, 'hub-state'), 'the hub-state volume is declared');
+    // Compose ignores uid, gid and mode on file secrets, so the file must not pretend to set them.
+    assert.deepEqual(hub.secrets, SECRET_FILES.map((name) => ({ source: name, target: `/run/secrets/${name}` })));
+    for (const name of SECRET_FILES) assert.equal(config.secrets[name]?.file, path.join(secretsDir, name));
+    assert.equal(hub.environment?.HUB_TLS_CERT_FILE, '/run/secrets/hub_tls_cert');
+    assert.equal(hub.environment?.HUB_TLS_KEY_FILE, '/run/secrets/hub_tls_key');
+    assert.equal(hub.environment?.HUB_SIGNING_KEY_FILE, '/run/secrets/hub_signing_key');
+    assert.equal(hub.environment?.HUB_ENCRYPTION_KEY_FILE, '/run/secrets/hub_encryption_key');
+    assert.equal(hub.environment?.HUB_STATE_DIR, '/var/lib/near-ai-hub');
+    assert.equal(hub.environment?.HUB_PUBLIC_ADDRESS ?? '', '', 'no public address unless the operator sets one');
+    assert.deepEqual(hub.healthcheck?.test, ['CMD', '/nodejs/bin/node', '/app/bin.mjs', '--healthcheck']);
+    assert.equal(hub.depends_on, undefined, 'the hub does not need the relay');
+    assert.equal(hub.ports?.length, 1);
+    assert.equal(hub.ports?.[0]?.target, 8443);
+    assert.equal(hub.ports?.[0]?.host_ip, '127.0.0.1');
+    assert.equal(hub.ports?.[0]?.published, String(hostPort));
+
+    // Neither service holds the other's secrets.
+    assert.deepEqual(config.services.relay?.secrets, [{ source: 'teams_app_secret', target: '/run/secrets/teams_app_secret' }]);
+    assert.ok(!Object.keys(config.services.relay?.environment ?? {}).some((name) => name.startsWith('HUB_')), 'the relay gets no hub setting');
+    assert.equal(config.services.relay?.depends_on, undefined, 'the relay does not need the hub');
+
+    // Compose's own defaults: port 8443 on 127.0.0.1, secrets from relay/secrets/hub.
+    const defaults = await hubConfig({}, ['NEAR_AI_HUB_PUBLISH_PORT', 'NEAR_AI_HUB_SECRETS_DIR', 'NEAR_AI_HUB_IMAGE']);
+    assert.equal(defaults.services.hub?.ports?.[0]?.published, '8443');
+    assert.equal(defaults.services.hub?.ports?.[0]?.host_ip, '127.0.0.1');
+    assert.equal(defaults.services.hub?.image, 'near-ai-hub:local');
+    assert.equal(defaults.secrets.hub_signing_key?.file, path.join(REPO_ROOT, 'relay', 'secrets', 'hub', 'hub_signing_key'));
+
+    // The operator chooses the interface and the public address.
+    const open = await hubConfig({ NEAR_AI_HUB_PUBLISH_ADDRESS: '0.0.0.0', NEAR_AI_HUB_PUBLIC_ADDRESS: 'hub.example.invalid:8443' });
+    assert.equal(open.services.hub?.ports?.[0]?.host_ip, '0.0.0.0');
+    assert.equal(open.services.hub?.environment?.HUB_PUBLIC_ADDRESS, 'hub.example.invalid:8443');
+  });
+
+  test('Compose up of the hub alone, with no relay secret: healthy, /healthz on loopback over TLS 1.3, and no key value in the logs', { timeout: 240_000 }, async () => {
+    assert.deepEqual(await readdir(emptyRelaySecretsDir), [], 'the relay secrets folder is empty');
+    projectStarted = true;
+    const up = await composeUpHub();
+    assert.equal(up.code, 0, `compose up failed:\n${up.stdout}\n${up.stderr}\n${await hubLogs().catch(() => 'no logs')}`);
+
+    assert.equal(await hubHealth(), 'healthy');
+    const running = (await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'ps', '--services'], { env: composeEnv() })).stdout.split('\n').filter(Boolean);
+    assert.deepEqual(running, ['hub'], 'only the hub is running; the relay was not started');
+
+    const reply = await healthzWithin(hostPort, 30_000);
+    assert.equal(reply.protocol, 'TLSv1.3');
+    assert.equal(typeof (JSON.parse(reply.body) as { version?: unknown }).version, 'string');
+
+    const raw = await hubLogs();
+    const events = logEvents(raw);
+    assert.ok(events.some((event) => event.event === 'hub.listening'), 'hub.listening was logged');
+    const loaded = events.find((event) => event.event === 'secrets.loaded');
+    assert.ok(loaded, 'secrets.loaded was logged');
+    for (const name of ['HUB_TLS_CERT', 'HUB_TLS_KEY', 'HUB_SIGNING_KEY', 'HUB_ENCRYPTION_KEY']) assert.match(String(loaded.names), new RegExp(`\\b${name}\\b`));
+    assertNoSecretIn(raw, 'the hub log');
+  });
+
+  test('running hub container: read-only root, writable /tmp, no capabilities, no-new-privileges, uid 65532, private state directory', async () => {
+    const script = [
+      "const fs = require('node:fs');",
+      'const out = {};',
+      "try { fs.writeFileSync('/app/probe', 'x'); out.appWrite = 'ok'; } catch (error) { out.appWrite = error.code; }",
+      "try { fs.writeFileSync('/probe', 'x'); out.rootWrite = 'ok'; } catch (error) { out.rootWrite = error.code; }",
+      "try { fs.writeFileSync('/tmp/probe', 'x'); fs.unlinkSync('/tmp/probe'); out.tmpWrite = 'ok'; } catch (error) { out.tmpWrite = error.code; }",
+      "const status = fs.readFileSync('/proc/self/status', 'utf8');",
+      'out.capEff = /^CapEff:\\s*(\\S+)/m.exec(status)[1];',
+      'out.noNewPrivs = /^NoNewPrivs:\\s*(\\S+)/m.exec(status)[1];',
+      'out.uid = process.getuid();',
+      "const stat = fs.statSync('/var/lib/near-ai-hub');",
+      'out.dir = { mode: (stat.mode & 0o777).toString(8), uid: stat.uid };',
+      'console.log(JSON.stringify(out));',
+    ].join('\n');
+    const result = await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'exec', '-T', 'hub', '/nodejs/bin/node', '-e', script], { env: composeEnv() });
+    const probe = JSON.parse(result.stdout.trim()) as {
+      appWrite: string;
+      rootWrite: string;
+      tmpWrite: string;
+      capEff: string;
+      noNewPrivs: string;
+      uid: number;
+      dir: { mode: string; uid: number };
+    };
+    assert.equal(probe.appWrite, 'EROFS');
+    assert.equal(probe.rootWrite, 'EROFS');
+    assert.equal(probe.tmpWrite, 'ok');
+    assert.match(probe.capEff, /^0+$/);
+    assert.equal(probe.noNewPrivs, '1');
+    assert.equal(probe.uid, 65532);
+    assert.deepEqual(probe.dir, { mode: '700', uid: 65532 });
+  });
+
+  test('after a hard kill and compose start the hub is healthy again and answers /healthz', { timeout: 300_000 }, async () => {
+    await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'kill', '-s', 'KILL', 'hub'], { env: composeEnv() });
+    // The restart policy may bring it back by itself; compose start covers the case where it has not.
+    await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, '--profile', 'hub', 'start', 'hub'], { env: composeEnv() });
+    let health = '';
+    for (let attempt = 0; attempt < 120 && health !== 'healthy'; attempt += 1) {
+      health = await hubHealth();
+      if (health !== 'healthy') await sleep(500);
+    }
+    assert.equal(health, 'healthy', `the hub is ${health} after the kill`);
+    const listening = logEvents(await hubLogs()).filter((event) => event.event === 'hub.listening');
+    assert.ok(listening.length >= 2, 'the hub started again after the kill');
+    assert.equal((await healthzWithin(hostPort, 30_000)).status, 200);
+    assertNoSecretIn(await hubLogs(), 'the hub log after the restart');
   });
 });
