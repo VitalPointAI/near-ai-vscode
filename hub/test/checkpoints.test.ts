@@ -213,3 +213,398 @@ test('tracer: the client verifies the checkpoint with its own roster and recompu
     // Every base cell entry is covered: the genesis, the roster entries and the note.
     assert.equal(payload.streams[0]?.count, world.entries.filter((entry) => entry.header.stream === world.project).length);
   }));
+
+// ---- Task 2: coverage, nesting, timing, handed-back checkpoints, conflict and trimming ----
+
+test('coverage: entries in an ungranted label cell are never covered and that stream is absent, while the base cell stream always is', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, officer, ops } = await team(hub);
+    const inOps = [note(world, officer, { stream: ops }), note(world, world.lead, { stream: ops })];
+    await append(hub, world, officer, [inOps[0] as Written]);
+    await append(hub, world, world.lead, [inOps[1] as Written]);
+    await append(hub, world, officer, [note(world, officer)]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const signed = stored(hub, world.project)[0] as SignedCheckpoint;
+    assert.deepEqual(streamsOf(signed), [world.project]);
+    const mine = client(world);
+    assert.deepEqual(recomputeCheckpoint(payloadOf(signed), mine.open()), { ok: true, mismatches: [] });
+  }));
+
+test('coverage: once hub.grant and the grant to the hub device arrive, the ungranted cell is granted and its stream appears in the next checkpoint', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, officer, ops } = await team(hub);
+    const earlier = note(world, officer, { stream: ops });
+    await append(hub, world, officer, [earlier]);
+    await append(hub, world, officer, [note(world, officer)]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    assert.deepEqual(streamsOf(stored(hub, world.project)[0] as SignedCheckpoint), [world.project]);
+
+    const granted = grantToHub(hub, world, ops);
+    await append(hub, world, world.lead, [granted.entry], [granted.grant]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    const kept = stored(hub, world.project);
+    assert.equal(kept.length, 2);
+    const second = kept[1] as SignedCheckpoint;
+    assert.deepEqual(streamsOf(second).sort(), [world.project, ops].sort());
+    const opsStream = payloadOf(second).streams.find((stream) => stream.stream === ops);
+    assert.deepEqual(opsStream?.heads.map((head) => head.hash), [earlier.hash]);
+    const mine = client(world);
+    assert.deepEqual(recomputeCheckpoint(payloadOf(second), mine.open(), undefined, [payloadOf(kept[0] as SignedCheckpoint)]), { ok: true, mismatches: [] });
+  }));
+
+test('coverage: an entry in a granted cell citing an ungranted cell is not covered, nor anything after it in that log; other writers are', () =>
+  withSigning({}, async (hub, scheduler) => {
+    let intel = '';
+    const { world, officer, ops } = await team(hub, (made) => {
+      intel = made.world.labelCell('intel', [made.world.lead, made.officer]).cell;
+      grantToHub(hub, made.world, made.ops);
+    });
+    // The officer's first ops entry is covered; the next one cites the intel entry, so it and the one after it are not. Its lamport is the
+    // same with or without the dep, so only the dep decides.
+    const opened = note(world, officer, { stream: ops });
+    const secret = note(world, officer, { stream: intel });
+    const citing = note(world, officer, { stream: ops, deps: [secret] });
+    const after = note(world, officer, { stream: ops });
+    const byLead = note(world, world.lead, { stream: ops });
+    await append(hub, world, officer, [opened, secret, citing, after]);
+    await append(hub, world, world.lead, [byLead]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const signed = stored(hub, world.project)[0] as SignedCheckpoint;
+    assert.deepEqual(streamsOf(signed).sort(), [world.project, ops].sort());
+    const opsStream = payloadOf(signed).streams.find((stream) => stream.stream === ops);
+    assert.deepEqual(
+      opsStream?.heads.map((head) => [head.writer, head.hash]),
+      [[world.lead.writer, byLead.hash], [officer.writer, opened.hash]].sort((a, b) => ((a[0] as string) < (b[0] as string) ? -1 : 1)),
+    );
+    assert.equal(opsStream?.count, 2);
+    assert.ok(!streamsOf(signed).includes(intel));
+    const mine = client(world);
+    assert.deepEqual(recomputeCheckpoint(payloadOf(signed), mine.open()), { ok: true, mismatches: [] });
+  }));
+
+test('coverage: an entry a client chain stage refuses (a lamport that is not one more than its past, or a roster older than its past cites) is not covered, nor anything after it', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst, officer } = await team(hub);
+    const fine = note(world, world.lead);
+    const badLamport = note(world, analyst, { lamport: 7 });
+    const afterBad = note(world, analyst);
+    // The officer cites the genesis roster while its dep (the lead's note) cites the current head.
+    const stale = world.write(officer, { kind: 'note.add', data: { text: 'Fictional note' }, roster: world.genesisHash, deps: [{ writer: fine.writer, seq: fine.seq, hash: fine.hash }] });
+    await append(hub, world, world.lead, [fine]);
+    await append(hub, world, analyst, [badLamport, afterBad]);
+    await append(hub, world, officer, [stale]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const signed = stored(hub, world.project)[0] as SignedCheckpoint;
+    const heads = payloadOf(signed).streams[0]?.heads ?? [];
+    assert.deepEqual(heads.map((head) => head.writer), [world.lead.writer]);
+    assert.equal(heads[0]?.hash, fine.hash);
+    const entries = client(world).open();
+    assert.deepEqual(recomputeCheckpoint(payloadOf(signed), entries), { ok: true, mismatches: [] });
+  }));
+
+test('nest: three checkpoints over a history with a late concurrent entry recompute with the earlier ones nested, and no two conflict', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    await append(hub, world, world.lead, [note(world, world.lead)]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    await append(hub, world, world.lead, [note(world, world.lead), note(world, world.lead)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    // The analyst's first entry has lamport 1 and sorts before everything C2 covered, yet arrives after C2.
+    const late = note(world, analyst);
+    assert.equal(late.entry.header.seq, 0);
+    await append(hub, world, analyst, [late]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    const [c1, c2, c3] = stored(hub, world.project) as [SignedCheckpoint, SignedCheckpoint, SignedCheckpoint];
+    assert.ok(c3, 'three checkpoints were not signed');
+    const entries = client(world).open();
+    assert.deepEqual(recomputeCheckpoint(payloadOf(c2), entries, undefined, [payloadOf(c1)]), { ok: true, mismatches: [] });
+    assert.deepEqual(recomputeCheckpoint(payloadOf(c3), entries, undefined, [payloadOf(c1), payloadOf(c2)]), { ok: true, mismatches: [] });
+    // Without nesting the late entry would sort first: the nesting is what the hub signed.
+    assert.equal(recomputeCheckpoint(payloadOf(c3), entries).ok, false);
+    assert.equal(checkpointConflict(c1, c2), undefined);
+    assert.equal(checkpointConflict(c2, c3), undefined);
+    assert.equal(checkpointConflict(c1, c3), undefined);
+  }));
+
+test('debounce: arrivals at 0, 1 and 2 seconds give one checkpoint at 4 seconds and none before', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    for (let second = 0; second < 3; second += 1) {
+      await append(hub, world, analyst, [note(world, analyst)]);
+      if (second < 2) await advance(hub, scheduler, 1000);
+    }
+    await advance(hub, scheduler, DEBOUNCE_MS - 1);
+    assert.equal(hub.store.checkpoints(world.project).length, 0, 'signed before 4 seconds');
+    await advance(hub, scheduler, 1);
+    assert.equal(hub.store.checkpoints(world.project).length, 1);
+    await advance(hub, scheduler, MIN_GAP_MS * 2);
+    assert.equal(hub.store.checkpoints(world.project).length, 1, 'signed again with nothing new');
+  }));
+
+test('debounce: a burst 10 seconds after a checkpoint is signed 60 seconds after that checkpoint, not before, and nothing new signs nothing', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    assert.equal(hub.store.checkpoints(world.project).length, 1);
+    await advance(hub, scheduler, 10_000);
+    for (let index = 0; index < 3; index += 1) await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS - 10_000 - 1);
+    assert.equal(hub.store.checkpoints(world.project).length, 1, 'signed sooner than 60 seconds after the previous checkpoint');
+    await advance(hub, scheduler, 1);
+    assert.equal(hub.store.checkpoints(world.project).length, 2);
+    await advance(hub, scheduler, MIN_GAP_MS * 3);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    assert.equal(hub.store.checkpoints(world.project).length, 2, 'a covered set that did not grow was signed again');
+  }));
+
+test('ask: with new entries signs at once; a second ask 5 seconds later signs nothing; the same ask after 10 seconds signs; every checkpoint is kept', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    const reader = await EventClient.open(hub, world.lead, world.project);
+    const stream = await reader.events();
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    assert.equal(hub.store.checkpoints(world.project).length, 1, 'an ask with new entries did not sign at once');
+
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, 5000);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    assert.equal(hub.store.checkpoints(world.project).length, 1, 'a second ask within 10 seconds signed');
+    await advance(hub, scheduler, ASK_GAP_MS - 5000);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    const kept = stored(hub, world.project);
+    assert.equal(kept.length, 2);
+    await stream.until((item) => item.frames.filter((frame) => frame.event === 'checkpoint').length === 2, 'two checkpoint events');
+    assert.deepEqual(
+      stream.frames.filter((frame) => frame.event === 'checkpoint').map((frame) => (frame.data as { checkpoint: SignedCheckpoint }).checkpoint),
+      kept,
+    );
+    assert.deepEqual((await headsOf(hub, world, analyst)).checkpoint, kept[1]);
+    const entries = client(world).open();
+    assert.deepEqual(recomputeCheckpoint(payloadOf(kept[1] as SignedCheckpoint), entries, undefined, [payloadOf(kept[0] as SignedCheckpoint)]), { ok: true, mismatches: [] });
+
+    // An ask with nothing new signs and sends nothing: the next checkpoint event is the next new checkpoint.
+    await advance(hub, scheduler, ASK_GAP_MS);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    const all = stored(hub, world.project);
+    assert.equal(all.length, 3);
+    await stream.until((item) => item.frames.filter((frame) => frame.event === 'checkpoint').length >= 3, 'the third checkpoint event');
+    assert.deepEqual(
+      stream.frames.filter((frame) => frame.event === 'checkpoint').map((frame) => (frame.data as { checkpoint: SignedCheckpoint }).checkpoint),
+      all,
+    );
+  }));
+
+test('restart: a hub started again on its own database nests its next checkpoint after the ones it signed before', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-hub-checkpoints-'));
+  const tls = makeTlsFixture();
+  const keys = { signing: generateKeyFile('signing'), encryption: generateKeyFile('encryption') };
+  const dir = path.join(root, 'state');
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+    let world: HubWorld | undefined;
+    let analyst: WorldDevice | undefined;
+    await withSigning({ dir, keys, tls }, async (hub, scheduler) => {
+      ({ world, analyst } = await team(hub));
+      await append(hub, world, world.lead, [note(world, world.lead)]);
+      await advance(hub, scheduler, DEBOUNCE_MS);
+    });
+    assert.ok(world && analyst);
+    const w = world;
+    const a = analyst;
+    await withSigning({ dir, keys, tls }, async (hub, scheduler) => {
+      await append(hub, w, a, [note(w, a)]);
+      await advance(hub, scheduler, DEBOUNCE_MS);
+      const kept = stored(hub, w.project);
+      assert.equal(kept.length, 2);
+      assert.equal(hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict' || line.event === 'checkpoint.waiting').length, 0);
+      const entries = client(w).open();
+      assert.deepEqual(recomputeCheckpoint(payloadOf(kept[1] as SignedCheckpoint), entries, undefined, [payloadOf(kept[0] as SignedCheckpoint)]), { ok: true, mismatches: [] });
+      assert.equal(checkpointConflict(kept[0] as SignedCheckpoint, kept[1] as SignedCheckpoint, entries), undefined);
+    });
+  } finally {
+    tls.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('waiting: a restored hub keeps a newer checkpoint handed back, signs nothing while its heads are missing, then nests after it once clients re-push', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-hub-checkpoints-'));
+  const tls = makeTlsFixture();
+  const keys = { signing: generateKeyFile('signing'), encryption: generateKeyFile('encryption') };
+  const dir = path.join(root, 'state');
+  const backup = path.join(root, 'backup');
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+    let world: HubWorld | undefined;
+    let analyst: WorldDevice | undefined;
+    await withSigning({ dir, keys, tls }, async (hub, scheduler) => {
+      ({ world, analyst } = await team(hub));
+      await append(hub, world, world.lead, [note(world, world.lead)]);
+      await advance(hub, scheduler, DEBOUNCE_MS);
+      assert.equal(hub.store.checkpoints(world.project).length, 1);
+    });
+    assert.ok(world && analyst);
+    const w = world;
+    const a = analyst;
+    // The operator's backup, taken while the hub is stopped.
+    cpSync(dir, backup, { recursive: true });
+    const lost = [note(w, w.lead), note(w, w.lead)];
+    let newer: SignedCheckpoint | undefined;
+    let first: SignedCheckpoint | undefined;
+    await withSigning({ dir, keys, tls }, async (hub, scheduler) => {
+      await append(hub, w, w.lead, lost);
+      await advance(hub, scheduler, DEBOUNCE_MS);
+      [first, newer] = stored(hub, w.project);
+    });
+    assert.ok(first && newer, 'the newer checkpoint was not signed');
+    const c1 = first;
+    const c2 = newer;
+
+    // The backup is restored: the hub has C1 and the first note, not the two lost notes nor C2.
+    await withSigning({ dir: backup, keys, tls }, async (hub, scheduler) => {
+      assert.deepEqual(hub.store.checkpoints(w.project).map((record) => record.hash), [checkpointHash(c1)]);
+      const answer = await ask(hub, w, a, [c2]);
+      assert.equal(answer.kept, 1);
+      await settle(hub);
+      const waiting = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.waiting');
+      assert.equal(waiting.length, 1);
+      assert.deepEqual(Object.keys(waiting[0]?.fields ?? {}).sort(), ['kept', 'missingHeads', 'project']);
+      assert.equal(waiting[0]?.fields.project, w.project);
+      assert.equal(typeof waiting[0]?.fields.missingHeads, 'number');
+      assert.equal(typeof waiting[0]?.fields.kept, 'number');
+
+      // Arrivals and asks sign nothing while C2's heads are missing.
+      const meanwhile = note(w, a);
+      await append(hub, w, a, [meanwhile]);
+      await advance(hub, scheduler, MIN_GAP_MS);
+      await ask(hub, w, a);
+      await settle(hub);
+      assert.equal(hub.store.checkpoints(w.project).length, 2);
+      assert.ok(hub.checkpointLogs.filter((line) => line.event === 'checkpoint.waiting').length >= 2);
+
+      // The lead's device re-pushes what the restore lost; the next checkpoint nests after C2.
+      await append(hub, w, w.lead, lost);
+      await advance(hub, scheduler, MIN_GAP_MS);
+      const kept = stored(hub, w.project);
+      assert.equal(kept.length, 3);
+      const c3 = hub.store.latestCheckpoint(w.project);
+      assert.ok(c3);
+      const next = JSON.parse(c3.body) as SignedCheckpoint;
+      assert.notEqual(c3.hash, checkpointHash(c2));
+      const entries = client(w).open();
+      assert.deepEqual(recomputeCheckpoint(payloadOf(next), entries, undefined, [payloadOf(c1), payloadOf(c2)]), { ok: true, mismatches: [] });
+      assert.equal(checkpointConflict(c2, next), undefined);
+      assert.equal(checkpointConflict(c2, next, entries), undefined);
+      assert.deepEqual((await headsOf(hub, w, a)).checkpoint, next);
+    });
+  } finally {
+    tls.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('conflict: two kept checkpoints of this hub that do not nest stop signing for that project and log checkpoint.conflict; another project keeps signing', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    const other = await team(hub, undefined, 'eastwind');
+    const byLead = note(world, world.lead);
+    const byAnalyst = note(world, analyst);
+    await append(hub, world, world.lead, [byLead]);
+    await append(hub, world, analyst, [byAnalyst]);
+    const mine = client(world);
+    const all = mine.open();
+    // Both are honest on their own, and neither covers the other: one without the lead's note, one without the analyst's.
+    const withoutLead = honestCheckpoint(hub, world, mine.view, all.filter((entry) => entry.hash !== byLead.hash));
+    const withoutAnalyst = honestCheckpoint(hub, world, mine.view, all.filter((entry) => entry.hash !== byAnalyst.hash));
+    assert.equal((await ask(hub, world, analyst, [withoutLead, withoutAnalyst])).kept, 2);
+    await settle(hub);
+    const conflicts = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict');
+    assert.equal(conflicts.length, 1);
+    assert.deepEqual(Object.keys(conflicts[0]?.fields ?? {}).sort(), ['kept', 'project', 'reason']);
+    assert.equal(conflicts[0]?.fields.project, world.project);
+    assert.equal(conflicts[0]?.fields.reason, 'not-nested');
+
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await append(hub, other.world, other.analyst, [note(other.world, other.analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    await ask(hub, world, analyst);
+    await settle(hub);
+    assert.equal(hub.store.checkpoints(world.project).length, 2, 'the conflicting project was signed again');
+    assert.equal(hub.store.checkpoints(other.world.project).length, 1, 'the other project stopped signing too');
+    assert.equal(hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict').length, 1);
+  }));
+
+test('conflict: a kept checkpoint of this hub whose order the hub cannot reproduce stops signing with checkpoint.conflict', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const mine = client(world);
+    const honest = payloadOf(honestCheckpoint(hub, world, mine.view, mine.open()));
+    // The same heads with another order hash: a second word of this hub about one prefix.
+    const forged = signCheckpoint(hub.identity.signer, { ...honest, streams: honest.streams.map((stream) => ({ ...stream, orderTip: 'f'.repeat(64) })) });
+    assert.equal((await ask(hub, world, analyst, [forged])).kept, 1);
+    await settle(hub);
+    const conflicts = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict');
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0]?.fields.reason, 'equal-count-tip-mismatch');
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    assert.equal(hub.store.checkpoints(world.project).length, 2);
+  }));
+
+test('conflict: a lone kept checkpoint whose order hash the hub cannot reproduce stops signing with the order-mismatch reason', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const { world, analyst } = await team(hub);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    const mine = client(world);
+    const honest = payloadOf(honestCheckpoint(hub, world, mine.view, mine.open()));
+    const forged = signCheckpoint(hub.identity.signer, { ...honest, streams: honest.streams.map((stream) => ({ ...stream, orderTip: 'e'.repeat(64) })) });
+    assert.equal((await ask(hub, world, analyst, [forged])).kept, 1);
+    await settle(hub);
+    const conflicts = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.conflict');
+    assert.deepEqual(conflicts.map((line) => line.fields.reason), ['order-mismatch']);
+    await append(hub, world, analyst, [note(world, analyst)]);
+    await advance(hub, scheduler, MIN_GAP_MS);
+    assert.equal(hub.store.checkpoints(world.project).length, 1);
+  }));
+
+test('trimmed: granted streams past the size limit are dropped from the end of stream id order; the base cell stream stays and checkpoint.trimmed has counts', () =>
+  withSigning({}, async (hub, scheduler) => {
+    const cells: string[] = [];
+    const { world } = await team(hub, (made) => {
+      for (let index = 0; index < 200; index += 1) {
+        const cell = made.world.labelCell(`sector-${index}`, [made.world.lead]).cell;
+        grantToHub(hub, made.world, cell);
+        cells.push(cell);
+      }
+    });
+    const written = cells.map((cell) => note(world, world.lead, { stream: cell }));
+    await append(hub, world, world.lead, written.slice(0, 100));
+    await append(hub, world, world.lead, written.slice(100));
+    await advance(hub, scheduler, DEBOUNCE_MS);
+    const signed = stored(hub, world.project)[0] as SignedCheckpoint;
+    assert.ok(signed, 'nothing was signed');
+    const listed = streamsOf(signed);
+    assert.ok(listed.includes(world.project), 'the base cell stream was dropped');
+    assert.ok(listed.length < cells.length + 1, 'nothing was dropped');
+    // The streams kept are the granted ones first in stream id order.
+    const keptCells = listed.filter((stream) => stream !== world.project);
+    assert.deepEqual(keptCells, [...cells].sort().slice(0, keptCells.length));
+    const trimmed = hub.checkpointLogs.filter((line) => line.event === 'checkpoint.trimmed');
+    assert.equal(trimmed.length, 1);
+    assert.deepEqual(Object.keys(trimmed[0]?.fields ?? {}).sort(), ['dropped', 'project', 'streams']);
+    assert.equal(trimmed[0]?.fields.dropped, cells.length - keptCells.length);
+    const mine = client(world);
+    assert.ok(verifyCheckpoint(signed, mine.view).ok, 'the trimmed checkpoint does not verify within the size limit');
+    assert.deepEqual(recomputeCheckpoint(payloadOf(signed), mine.open()), { ok: true, mismatches: [] });
+  }));
