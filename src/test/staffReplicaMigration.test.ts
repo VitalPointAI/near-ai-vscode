@@ -942,6 +942,44 @@ test('pins across cells: a product labelled org/Public that pins an org/Internal
   assert.equal(annex.stream, result.cells.find((item) => item.label === PUBLIC)?.cell);
 });
 
+test('CR-02: a product whose ledger lines name a product above its cell keeps them out of its cell import and is listed withheld; the cell\'s other products keep theirs, the lead still sees it whole, and an org/Public member holds no line naming the higher product', async () => {
+  // The annex (org/Public) depends on the concept of operations (org/Internal); the notice (org/Public) depends on nothing.
+  const NOTICE = 'public-notice';
+  const env = await labelled('names-above', [{ product: CONOPS }, { product: ANNEX, label: PUBLIC, dependsOn: [`${CONOPS}@1`] }, { product: NOTICE, label: PUBLIC }]);
+  const original = readFileSync(path.join(env.root, LEDGER_DIR, LEDGER_FILE));
+  const result = await migrate(env);
+  const cell = (label: string): string => result.cells.find((item) => item.label === label)?.cell as string;
+  assert.deepEqual(result.withheld, [{ product: ANNEX, cell: cell(PUBLIC), lines: linesFor(original, [ANNEX]).length, reason: 'names-above-cell' }]);
+  assert.deepEqual(result.unversioned, [{ product: ANNEX, reason: 'pin-above-cell' }]);
+  assert.deepEqual(result.scoped.map((item) => [item.cell, item.lines]).sort(), [[cell(INTERNAL), linesFor(original, [CONOPS]).length], [cell(PUBLIC), linesFor(original, [NOTICE]).length]].sort());
+
+  const input = await projection(env);
+  const scoped = importsOf(input).find((item) => item.scope === 'cell' && item.entry === result.scoped.find((found) => found.cell === cell(PUBLIC))?.entry);
+  assert.ok(scoped !== undefined, 'the org/Public cell holds its products import');
+  const bytes = importedFile(scoped, input.entries);
+  assert.ok(bytes !== undefined, 'its file matches its hash');
+  assert.equal(bytes.toString('utf8'), `${linesFor(original, [NOTICE]).join('\n')}\n`, 'only the notice\'s lines, byte for byte');
+  assert.ok(!bytes.toString('utf8').includes(CONOPS), 'no line of the org/Public cell names the org/Internal product');
+  // The lead holds the whole ledger in the legacy cell, so the annex is shown whole, its dependency included.
+  const leadAnnex = projectLedgerReplay(input).products.get(ANNEX);
+  assert.deepEqual(leadAnnex?.meta.dependsOn, [{ product: CONOPS, version: 1 }]);
+
+  // A member cleared for org/Public: the notice is shown from the cell import with the lead's state; the annex is its live text only.
+  const lead = await leadSeat(env);
+  const plain = await bringIn(lead, 'names-above-public', 'P. Demo', orgClearance('Public'));
+  await syncTo(lead, plain, [cell(PUBLIC)]);
+  const seen = await projectionInputOf(plain.p, plain.at.deps);
+  const replay = projectLedgerReplay(seen);
+  assert.deepEqual([...replay.products.keys()], [NOTICE]);
+  assert.equal(replay.products.get(NOTICE)?.tampered, undefined);
+  assert.equal(foldTextOf(seen, ANNEX), ANNEX_BODY, 'the annex\'s live text is there');
+  for (const [hash, entry] of seen.entries) {
+    const data = entry.data as { file?: unknown };
+    const file = typeof data?.file === 'string' ? Buffer.from(data.file, 'base64url').toString('utf8') : '';
+    assert.ok(!`${JSON.stringify(entry.data)}\n${file}`.includes(CONOPS), `entry ${hash} names no org/Internal product`);
+  }
+});
+
 /** The staff lead's seat over a converted project, for bringing people in with the label cell world. */
 async function leadSeat(env: Env): Promise<Seat> {
   const p = keptProject(await ReplicaProject.open(env.root, env.deps));

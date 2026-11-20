@@ -58,7 +58,7 @@ const PRODUCT = 'logistics-estimate';
 const ROLES = { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuard: 'j4-guard' };
 
 /** product.create, doc.client and doc.update for one product, through appendProductEntry. Returns the doc and the client id used. */
-async function writeProduct(seat: Seat, product: string, label: string, text: string, counter = 0): Promise<{ stream: string; doc: ReturnType<typeof createLocalDoc> }> {
+async function writeProduct(seat: Seat, product: string, label: unknown, text: string, counter = 0): Promise<{ stream: string; doc: ReturnType<typeof createLocalDoc> }> {
   const created = await appendProductEntry(seat.host, 'product.create', { product, section: 'j4', roles: { ...ROLES }, title: `Estimate ${product}` }, { label });
   assert.equal(created.ok, true, `product.create: ${created.ok ? '' : created.message}`);
   if (!created.ok) throw new Error('unreachable');
@@ -250,6 +250,28 @@ test('label-change: product.create of a name kept in another cell is refused, an
   assert.ok(proposed.ok, proposed.ok ? '' : proposed.message);
   const product = (await versionsOf(lead.p)).find((item) => item.product === PRODUCT);
   assert.equal(product?.versions.length, 1);
+});
+
+test('label-change (WR-01): a version header whose compartments or releasability are not its cell\'s is refused, though scale and level match; the header that names the cell\'s whole label applies', async () => {
+  const lead = await leadWith({ clearance: { scale: 'org', level: 'Confidential', compartments: ['KESTREL'], releasability: ['CAN'] } });
+  const plain = await writeProduct(lead, PRODUCT, 'org/Confidential', 'Water for two days.');
+  const kestrel = { scale: 'org', level: 'Confidential', compartments: ['KESTREL'], releasability: [], handling: [] };
+  const marked = await writeProduct(lead, 'kestrel-estimate', kestrel, 'Watchers on the ridge.', 1);
+  assert.notEqual(marked.stream, plain.stream, 'the compartment has its own cell');
+  const before = storeSnapshot(lead);
+  // A plain org/Confidential cell: a caveat the cell does not carry would seal caveated text under a key devices without the caveat hold.
+  refusedWith(await propose(lead, PRODUCT, plain.doc, 'org/Confidential//REL CAN'), 'label-change');
+  refusedWith(await propose(lead, PRODUCT, plain.doc, 'org/Confidential//KESTREL'), 'label-change');
+  // The KESTREL cell: a header that drops the compartment, or one that does not read as a label, is refused too.
+  refusedWith(await propose(lead, 'kestrel-estimate', marked.doc, 'org/Confidential'), 'label-change');
+  refusedWith(await propose(lead, 'kestrel-estimate', marked.doc, 'org/Confidential//'), 'label-change');
+  refusedWith(await propose(lead, 'kestrel-estimate', marked.doc, 'org/Confidential//KESTREL//REL CAN'), 'label-change');
+  assert.equal(storeSnapshot(lead), before, 'nothing was written');
+  const plainVersion = await propose(lead, PRODUCT, plain.doc, 'org/Confidential');
+  assert.ok(plainVersion.ok, plainVersion.ok ? '' : plainVersion.message);
+  const markedVersion = await propose(lead, 'kestrel-estimate', marked.doc, 'org/Confidential//KESTREL');
+  assert.ok(markedVersion.ok, markedVersion.ok ? '' : markedVersion.message);
+  assert.equal(markedVersion.stream, marked.stream);
 });
 
 test('pin-above-cell: a version of an org/Internal product pinning an org/Confidential product is refused with the fold\'s sentence; pinning an org/Public product applies and cites the pinned version', async () => {
