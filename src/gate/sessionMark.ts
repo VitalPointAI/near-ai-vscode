@@ -15,7 +15,8 @@ import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
-import { routingWhileFailedClosed, tierForLabel } from '../domain/gate/routing';
+import { notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { RouteDecision, RouteEventId, RouteFacts, RoutingTable } from '../domain/gate/routing';
 import type { InferTier } from '../domain/gate/vocabulary';
 
@@ -358,6 +359,22 @@ export function notAccreditedRecordFor(route: SessionRoute, decision: RouteDecis
     label: context.label,
     ...(isDefaultMark(context.mark, context.defaultLabel) ? {} : { mark: context.mark })
   });
+}
+
+/**
+ * Coherence review S2 (report mode): when an allowed request carries content at a level that belongs only on an accredited system (Protected C, classified,
+ * NATO Confidential and above), the chat says once that this computer is not recorded as accredited, and the decision log records route.not-accredited
+ * once. Nothing is refused. A notice or record that cannot be made never changes the request (D-21).
+ */
+export function noteNotAccredited(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, model: string | undefined, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable }): void {
+  try {
+    const label = thisComputerOnlyLabelOf(context.mark, context.defaultLabel);
+    if (label === undefined || route.attestation.notAccreditedTold === true) return;
+    route.attestation.notAccreditedTold = true;
+    const reason = notAccreditedText(labelKeyShown(label));
+    try { route.sink?.record(notAccreditedRecordFor(route, decision, facts, model === undefined ? {} : { model }, { ...context, label, reason })); } catch { /* D-21 */ }
+    try { route.onNotice?.(reason); } catch { /* a notice never changes a request */ }
+  } catch { /* D-21 */ }
 }
 
 function clockOf(route: SessionRoute): number {
