@@ -7,12 +7,17 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { BUNDLE_FAILURES, defaultBundlePayload, verifyBundleEnvelope } from '../domain/gate/bundle';
+import { BUNDLE_FAILURES, bundleHash, defaultBundlePayload, inBundleOrder, parseBundle, verifyBundleEnvelope } from '../domain/gate/bundle';
+import { POLICY_SECTIONS, featureForSection } from '../domain/gate/features';
+import { bundleViewOf, documentFromBundle, parsePolicyDocument } from '../domain/gate/policyDocument';
+import { tierForLabel } from '../domain/gate/routing';
+import { ORGANIZATION_RULES_FOLDER } from '../gate/installEvidence';
+import { ORGANIZATION_DIR_NAME, ORGANIZATION_LAYER_FILE } from '../gate/organizationStore';
 import type { BundleFailureReason, PolicyBundle } from '../domain/gate/bundle';
 import { buildDecisionRecord, validateDecisionRecord } from '../domain/gate/record';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { PayloadPurpose } from '../domain/team/signedPayload';
-import { BUNDLE_LOCK_FILE, BundleStoreError, GATE_DIR_NAME, POLICY_BUNDLE_FILE, ensurePolicyBundle, gateDir, loadPolicyBundle, resetPolicyToDefaults } from '../gate/bundleStore';
+import { BUNDLE_LOCK_FILE, BundleStoreError, GATE_DIR_NAME, POLICY_BUNDLE_FILE, applyPolicyDraft, ensurePolicyBundle, gateDir, loadPolicyBundle, resetPolicyToDefaults } from '../gate/bundleStore';
 import type { BundleResult } from '../gate/bundleStore';
 import { LAST_VALID_SECRET, readLastValid, writeLastValid } from '../gate/clockMarker';
 import { DecisionLog, projectLogKey } from '../gate/decisionLog';
@@ -570,5 +575,171 @@ test('two windows starting on a fresh install at the same time end with one iden
     const { json } = await readEnvelope(storage);
     assert.equal(json.payload.issuer.fingerprint, identity.fingerprint);
     assert.equal((await readdir(gateDir(storage))).includes(BUNDLE_LOCK_FILE), false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Phase 41 (41-09): v2 Apply, renewal of the stored payload, the v2 reader and the organization folder as evidence
+
+const PB_CLEARANCE = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [] };
+
+function withoutDates(payload: Record<string, unknown>): Record<string, unknown> {
+  const { issuedAt: _issuedAt, expiresAt: _expiresAt, ...rest } = payload;
+  return rest;
+}
+
+async function storedPayload(storage: string): Promise<Record<string, unknown>> {
+  return (await readEnvelope(storage)).json.payload as unknown as Record<string, unknown>;
+}
+
+// Applies a v2 personal layer at T0 + 1 day: the starting rules with one added clearance.
+async function appliedV2(storage: string): Promise<{ secrets: MemorySecrets; identity: DeviceIdentity; newHash: string; draft: Record<string, unknown> }> {
+  const { secrets, identity, first } = await freshInstall(storage);
+  assert.equal(first.state.state, 'valid');
+  const stored = await storedPayload(storage);
+  const draft = { ...stored, clearances: [...(stored['clearances'] as unknown[]), PB_CLEARANCE] };
+  const result = await applyPolicyDraft(storage, secrets, JSON.stringify(draft), { baseHash: first.state.state === 'valid' ? first.state.hash : '' }, { now: at(T0 + DAY) });
+  assert.equal(result.event, 'policy.edit');
+  return { secrets, identity, newHash: result.newHash, draft };
+}
+
+test('FND-02: Apply writes a v2 personal layer with the draft\'s effect', async () => {
+  await withStorage(async (storage) => {
+    const { secrets, newHash, draft } = await appliedV2(storage);
+    const written = await storedPayload(storage);
+    assert.equal(written['bundleVersion'], 2);
+    assert.equal(written['layer'], 'personal');
+    assert.equal(written['parent'], undefined, 'no organization layer, no parent');
+    const requires = written['requires'] as string[];
+    for (const feature of ['layers@1', 'labels@1', 'agents@1']) assert.ok(requires.includes(feature), feature);
+    for (const section of POLICY_SECTIONS) {
+      const feature = featureForSection(section);
+      if (feature !== undefined && Object.prototype.hasOwnProperty.call(written, section)) assert.ok(requires.includes(feature), `${section} names ${feature}`);
+    }
+    assert.deepEqual([...requires].sort(), requires, 'sorted');
+    const document = parsePolicyDocument(written);
+    assert.equal(document.ok, true, document.ok ? '' : document.message);
+    const owned = parseBundle({ ...(inBundleOrder(draft) as Record<string, unknown>), issuer: written['issuer'], issuedAt: written['issuedAt'], expiresAt: written['expiresAt'] });
+    assert.equal(owned.ok, true, owned.ok ? '' : owned.message);
+    if (document.ok && owned.ok) assert.deepEqual(bundleViewOf(document.value), bundleViewOf(documentFromBundle(owned.value)), 'the same effect as the draft');
+    const next = await ensurePolicyBundle(storage, secrets, { now: at(T0 + 2 * DAY) });
+    assert.equal(next.state.state, 'valid');
+    if (next.state.state === 'valid') {
+      assert.equal(next.state.hash, newHash);
+      assert.ok(next.state.bundle.clearances.some((clearance) => clearance.level === 'Protected B'));
+    }
+  });
+});
+
+test('FND-02: a v1 draft is refused with today\'s messages and paths, and a v2 draft with an unknown section key is refused with the update wording', async () => {
+  await withStorage(async (storage) => {
+    const { secrets, first } = await freshInstall(storage);
+    const baseHash = first.state.state === 'valid' ? first.state.hash : '';
+    const stored = await storedPayload(storage);
+    const bytes = (await readEnvelope(storage)).text;
+    const cases: Array<[string, unknown, RegExp]> = [
+      ['an unknown field', { ...stored, surprise: true }, /^Nothing was changed: the draft is not a policy this version can use\. .*has a field the vocabulary does not have/],
+      ['a level not in its scale', { ...stored, clearances: [{ ...PB_CLEARANCE, level: 'Protected Z' }] }, /not allowed in this place\. \(at clearances\[0\]\.level\)/]
+    ];
+    for (const [name, draft, reason] of cases) {
+      await assert.rejects(applyPolicyDraft(storage, secrets, JSON.stringify(draft), { baseHash }, { now: at(T0 + DAY) }), (error: unknown) => {
+        assert.ok(error instanceof BundleStoreError, name);
+        assert.match(error.message, reason, name);
+        return true;
+      });
+      assert.equal((await readEnvelope(storage)).text, bytes, `${name}: unchanged`);
+    }
+    // A v2 draft: the v2 reading of the stored policy with a section this version does not know.
+    const v2 = JSON.parse(JSON.stringify(documentFromBundle(parseBundle(stored).ok ? (parseBundle(stored) as { value: PolicyBundle }).value : (stored as unknown as PolicyBundle)))) as Record<string, unknown>;
+    await assert.rejects(applyPolicyDraft(storage, secrets, JSON.stringify({ ...v2, futureSection: { v: 1 } }), { baseHash }, { now: at(T0 + DAY) }), (error: unknown) => {
+      assert.ok(error instanceof BundleStoreError);
+      assert.match(error.message, /^Nothing was changed: /);
+      assert.match(error.message, /futureSection/);
+      assert.match(error.message, /update the extension/);
+      return true;
+    });
+    assert.equal((await readEnvelope(storage)).text, bytes);
+    // The same v2 draft without the unknown section is applied (allowed side).
+    const applied = await applyPolicyDraft(storage, secrets, JSON.stringify(v2), { baseHash }, { now: at(T0 + DAY) });
+    assert.equal(applied.state.state, 'valid');
+    assert.equal((await storedPayload(storage))['bundleVersion'], 2);
+  });
+});
+
+test('renewal keeps a v2 personal layer v2 with all its sections', async () => {
+  await withStorage(async (storage) => {
+    const { secrets } = await appliedV2(storage);
+    const before = await storedPayload(storage);
+    const renewed = await ensurePolicyBundle(storage, secrets, { now: at(T0 + DAY + 336 * DAY) });
+    assert.equal(renewed.event, 'policy.renewed');
+    const after = await storedPayload(storage);
+    assert.equal(after['bundleVersion'], 2);
+    assert.deepEqual(withoutDates(after), withoutDates(before));
+    assert.equal(after['issuedAt'], new Date(T0 + DAY + 336 * DAY).toISOString());
+  });
+});
+
+test('D-62: renewing starting rules stored before Phase 41 adds the reserved compartments; renewing an edited policy keeps its routing exactly', async () => {
+  for (const edited of [false, true]) {
+    await withStorage(async (storage) => {
+      const { secrets, identity } = await freshInstall(storage);
+      const payload = JSON.parse(JSON.stringify(defaultFor(identity, T0))) as PolicyBundle & { routing: { compartments: Record<string, string>; levels: Record<string, string> } };
+      payload.routing.compartments = {};
+      if (edited) payload.routing.levels['org/Public'] = 'attested-cloud';
+      await writeEnvelope(storage, signBundle(identity, payload, T0));
+      await writeLastValid(secrets, { at: T0, hash: bundleHash(payload) });
+      const renewed = await ensurePolicyBundle(storage, secrets, { now: at(T0 + 340 * DAY) });
+      assert.equal(renewed.event, 'policy.renewed', edited ? 'edited' : 'unedited');
+      assert.equal(renewed.state.state, 'valid');
+      const after = (await readEnvelope(storage)).json.payload;
+      assert.equal(after.bundleVersion, 1, 'v1 stays v1');
+      if (renewed.state.state !== 'valid') return;
+      const itar = { scale: 'org', level: 'Public', compartments: ['ITAR'], releasability: [], handling: [] };
+      if (edited) {
+        assert.deepEqual(after.routing, payload.routing, 'an edited policy keeps its routing exactly');
+      } else {
+        assert.deepEqual(after.routing.compartments, { CGP: 'local-only', EAR: 'local-only', ITAR: 'local-only' });
+        assert.equal(tierForLabel(itar, renewed.state.bundle.routing), 'local-only', 'an ITAR label stays on this computer');
+      }
+    });
+  }
+});
+
+test('D-13: earlierInstallEvidence counts the organization folder', async () => {
+  assert.equal(ORGANIZATION_RULES_FOLDER, ORGANIZATION_DIR_NAME, 'the copy of the name equals the organization store\'s');
+  await withStorage(async (storage) => {
+    await mkdir(path.join(gateDir(storage), ORGANIZATION_DIR_NAME), { recursive: true });
+    await writeFile(path.join(gateDir(storage), ORGANIZATION_DIR_NAME, ORGANIZATION_LAYER_FILE), '{}\n');
+    const secrets = new MemorySecrets();
+    const result = await ensurePolicyBundle(storage, secrets, { now: at(T0) });
+    assertFailedClosed(result, 'missing');
+    if (result.state.state === 'failed-closed') assert.match(result.state.detail ?? '', /organization/);
+    await assert.rejects(stat(bundleFileOf(storage)), /ENOENT/, 'no default bundle is signed');
+    assert.equal(await loadDeviceIdentity(secrets), undefined, 'and no key is made');
+  });
+  await withStorage(async (storage) => {
+    // An empty organization folder says nothing about an earlier install (allowed side).
+    await mkdir(path.join(gateDir(storage), ORGANIZATION_DIR_NAME), { recursive: true });
+    const result = await ensurePolicyBundle(storage, new MemorySecrets(), { now: at(T0) });
+    assert.equal(result.event, 'policy.created');
+  });
+});
+
+test('FND-02: a v2 personal file verifies through verifyPolicyLayer and a v1 file through today\'s path with the same sentences', async () => {
+  await withStorage(async (storage) => {
+    const { secrets } = await appliedV2(storage);
+    const { json } = await readEnvelope(storage);
+    const payload = json.payload as unknown as { labels: { routing: { levels: Record<string, string> } } };
+    payload.labels.routing.levels['org/Public'] = 'local-only';
+    await writeEnvelope(storage, json);
+    assertFailedClosed(await ensurePolicyBundle(storage, secrets, { now: at(T0 + 2 * DAY) }), 'bad-signature');
+  });
+  await withStorage(async (storage) => {
+    // A v2 layer signed by this install that is valid but not the one it last accepted is refused as replaced, like a v1 file.
+    const { secrets, identity } = await appliedV2(storage);
+    const written = await storedPayload(storage);
+    const other = { ...written, labels: { ...(written['labels'] as Record<string, unknown>), defaultLabel: { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] } } };
+    await writeEnvelope(storage, signPayload(identity, 'policy-bundle', other, { now: () => new Date(String(written['issuedAt'])) }));
+    assertFailedClosed(await ensurePolicyBundle(storage, secrets, { now: at(T0 + 2 * DAY) }), 'replaced');
   });
 });
