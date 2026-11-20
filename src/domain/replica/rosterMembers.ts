@@ -76,6 +76,16 @@ export interface InviteRecord {
   usedBy?: string;
   voidedAt?: number;
 }
+// A hub: a service member whose device may sign checkpoints (D-04, D-12). Its id shares one namespace with member ids.
+export interface HubRecord {
+  hub: string;
+  certPin: string;
+  ceiling: unknown;
+  // The cells granted to the hub (hub.grant), in the order granted.
+  cells: readonly string[];
+  from: number;
+  until?: number;
+}
 export interface MembersState {
   // Versions of each member, oldest first; at most one is in force at a position.
   members: Map<string, MemberRecord[]>;
@@ -84,8 +94,10 @@ export interface MembersState {
   // Every slot ever given, to the writer it was given to. Never shrinks, so a slot is never reused (D-41).
   slots: Map<number, string>;
   invites: Map<string, InviteRecord>;
-  // device.release choices by writer, stream and seq (31-14).
+  // device.release choices by writer, stream and seq: the branch kept at a fork slot (D-20).
   releases: Map<string, string>;
+  // Versions of each hub member, oldest first (D-04, D-12).
+  hubs: Map<string, HubRecord[]>;
 }
 
 // What the driver tells this module about the entry it routes here. position is the position the entry takes when it applies; the roster it cites
@@ -104,7 +116,8 @@ export function createMembersState(anchor: MembersAnchor): MembersState {
     devices: new Map([[writer, [{ writer, member, publicKey, x25519, kind: 'person', from: 0 }]]]),
     slots: new Map(),
     invites: new Map(),
-    releases: new Map()
+    releases: new Map(),
+    hubs: new Map()
   };
 }
 
@@ -149,13 +162,16 @@ export function x25519At(state: MembersState, writer: string, position: number):
   return deviceAt(state, writer, position)?.x25519;
 }
 
-export type InviteStanding = { state: 'open' | 'used' | 'voided'; expiresAt: string; forMember?: string };
+export type InviteStanding = { state: 'open' | 'used' | 'voided' | 'expired'; expiresAt: string; forMember?: string };
 
-// The invitation's standing at the position: open, used or voided. Expiry is decided by the signed time of the entry that uses it, never a clock.
-export function inviteAt(state: MembersState, invite: string, position: number): InviteStanding | undefined {
+// The invitation's standing at the position: used or voided by an entry applied at or before it, otherwise open, or expired when `at` (the signed time
+// of the entry that would use it) is after its expiry. Expiry is decided by signed times only, never a clock (D-17).
+export function inviteAt(state: MembersState, invite: string, position: number, at?: string): InviteStanding | undefined {
   const record = state.invites.get(invite);
   if (record === undefined || record.from > position) return undefined;
-  const standing = record.voidedAt !== undefined && record.voidedAt <= position ? 'voided' : record.usedAt !== undefined && record.usedAt <= position ? 'used' : 'open';
+  const standing = record.voidedAt !== undefined && record.voidedAt <= position ? 'voided'
+    : record.usedAt !== undefined && record.usedAt <= position ? 'used'
+      : at !== undefined && Date.parse(at) > Date.parse(record.expiresAt) ? 'expired' : 'open';
   return record.forMember === undefined ? { state: standing, expiresAt: record.expiresAt } : { state: standing, expiresAt: record.expiresAt, forMember: record.forMember };
 }
 
@@ -210,26 +226,77 @@ function applyInvite(state: MembersState, data: InviteData, ctx: MemberApplyCont
   return { status: 'applied' };
 }
 
+// The refusal for an invitation that cannot be used by an entry signed at `at`, citing the roster at `cited`, or undefined.
+function inviteProblem(state: MembersState, invite: string, cited: number, at: string): MemberRefusal | undefined {
+  const standing = inviteAt(state, invite, cited, at);
+  if (standing === undefined) return 'invite-unknown';
+  if (standing.state === 'voided') return 'invite-voided';
+  if (standing.state === 'used') return 'invite-used';
+  if (standing.state === 'expired') return 'invite-expired';
+  return undefined;
+}
+
+function markUsed(state: MembersState, invite: string, member: string, position: number): void {
+  const record = state.invites.get(invite) as InviteRecord;
+  record.usedAt = position;
+  record.usedBy = member;
+}
+
+function addDevice(state: MembersState, member: string, device: DeviceDescriptor, kind: DeviceRecord['kind'], position: number): void {
+  state.devices.set(device.writer, [{ writer: device.writer, member, publicKey: device.publicKey, x25519: device.x25519, slot: device.slot, kind, from: position }]);
+  state.slots.set(device.slot as number, device.writer);
+}
+
+// member.admit (DESIGN 15.1 join-requested -> active): valid only for an applied invitation that is not voided, not used, not for another member's
+// device, and not expired at the admission's own signed time (D-17).
 function applyAdmit(state: MembersState, entry: VerifiedEntry, data: AdmitData, ctx: MemberApplyContext): MemberApplyOutcome {
   const cited = ctx.position - 1;
-  const invite = state.invites.get(data.invite);
   const standing = inviteAt(state, data.invite, cited);
-  if (invite === undefined || standing === undefined) return refused('invite-unknown');
-  if (standing.state === 'voided') return refused('invite-voided');
-  if (standing.state === 'used') return refused('invite-used');
-  if (invite.forMember !== undefined) return refused('invite-for-device');
-  // Expiry from signed times only: the admission's own time against the invitation's expiry (D-17).
-  if (Date.parse(entry.body.at) > Date.parse(invite.expiresAt)) return refused('invite-expired');
-  if (state.members.has(data.member)) return refused('member-exists');
+  const invite = inviteProblem(state, data.invite, cited, entry.body.at);
+  // Voided and used are told before expiry and before a device invitation, so a reused invitation is always invite-used.
+  if (invite !== undefined && invite !== 'invite-expired') return refused(invite);
+  if (standing?.forMember !== undefined) return refused('invite-for-device');
+  if (invite !== undefined) return refused(invite);
+  if (state.members.has(data.member) || state.hubs.has(data.member)) return refused('member-exists');
   if (data.roles.some((role) => LEAD_ROLES.includes(role))) return refused('lead-role-by-handover-only');
   if (state.devices.has(data.device.writer)) return refused('device-exists');
   const problem = newDeviceProblem(state, data.device);
   if (problem !== undefined) return refused(problem);
   state.members.set(data.member, [{ member: data.member, name: data.name, seat: data.seat, roles: [...data.roles], clearance: data.clearance, agentSeats: [...(data.agentSeats ?? [])], invite: data.invite, from: ctx.position }]);
-  state.devices.set(data.device.writer, [{ writer: data.device.writer, member: data.member, publicKey: data.device.publicKey, x25519: data.device.x25519, slot: data.device.slot, kind: 'person', from: ctx.position }]);
-  state.slots.set(data.device.slot as number, data.device.writer);
-  invite.usedAt = ctx.position;
-  invite.usedBy = data.member;
+  addDevice(state, data.member, data.device, 'person', ctx.position);
+  markUsed(state, data.invite, data.member, ctx.position);
+  return { status: 'applied' };
+}
+
+interface VoidData { invite: string }
+interface DeviceAddData { member: string; device: DeviceDescriptor; invite?: string }
+
+// invite.void (DESIGN 15.1 invited -> cancelled): closes an open invitation. A used one stays used; the admission it made stands.
+function applyVoid(state: MembersState, data: VoidData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const standing = inviteAt(state, data.invite, ctx.position - 1);
+  if (standing === undefined) return refused('invite-unknown');
+  if (standing.state === 'voided') return refused('invite-voided');
+  if (standing.state === 'used') return refused('invite-used');
+  (state.invites.get(data.invite) as InviteRecord).voidedAt = ctx.position;
+  return { status: 'applied' };
+}
+
+// device.add (DESIGN 15.2 (none) -> active): another device for an existing member, written by the lead directly or through Add My Other Machine,
+// whose invitation must be one made for this member's device (D-18) and is then used.
+function applyDeviceAdd(state: MembersState, entry: VerifiedEntry, data: DeviceAddData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const cited = ctx.position - 1;
+  if (memberAt(state, data.member, cited) === undefined) return refused('member-unknown');
+  if (data.invite !== undefined) {
+    const problem = inviteProblem(state, data.invite, cited, entry.body.at);
+    if (problem !== undefined && problem !== 'invite-expired') return refused(problem);
+    if (inviteAt(state, data.invite, cited)?.forMember !== data.member) return refused('invite-wrong-member');
+    if (problem !== undefined) return refused(problem);
+  }
+  if (state.devices.has(data.device.writer)) return refused('device-exists');
+  const problem = newDeviceProblem(state, data.device);
+  if (problem !== undefined) return refused(problem);
+  addDevice(state, data.member, data.device, 'person', ctx.position);
+  if (data.invite !== undefined) markUsed(state, data.invite, data.member, ctx.position);
   return { status: 'applied' };
 }
 
@@ -296,6 +363,10 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
       return applyUpdate(state, entry.data as UpdateData, ctx);
     case 'member.remove':
       return applyRemove(state, entry.data as RemoveData, ctx);
+    case 'invite.void':
+      return applyVoid(state, entry.data as VoidData, ctx);
+    case 'device.add':
+      return applyDeviceAdd(state, entry, entry.data as DeviceAddData, ctx);
     default:
       // member.update, member.remove, device.*, hub.* and invite.void: 31-14 adds their rules.
       return refused('roster-kind-pending');

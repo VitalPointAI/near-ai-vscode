@@ -174,10 +174,103 @@ test('15.1 lead roles: an admit or update naming staff_lead or deputy_lead is re
 test('every member refusal reason is a plain sentence without an em-dash', () => {
   for (const [reason, text] of Object.entries(MEMBER_REFUSALS)) {
     assert.ok(text.length > 20 && text.endsWith('.'), reason);
-    assert.ok(!text.includes('—'), reason);
+    assert.ok(!text.includes('\u2014'), reason);
   }
   for (const reason of ['invite-unknown', 'invite-expired', 'invite-voided', 'invite-used', 'member-exists', 'member-unknown', 'lead-role-by-handover-only', 'lead-not-removable',
     'last-lead-device', 'slot-in-use', 'slot-out-of-range', 'device-limit', 'device-exists', 'bad-binding', 'device-unknown', 'hub-unknown']) {
     assert.ok(Object.prototype.hasOwnProperty.call(MEMBER_REFUSALS, reason), reason);
   }
+});
+
+// ---- invitations (D-17, D-18) ----
+
+const AFTER_EXPIRY = '2026-11-27T00:00:00.000Z';
+
+// A line with Jo admitted at slot 2 through inv-jo.
+function lineWithJo(): { line: Line; jo: RosterDevice; admit: Written } {
+  const line = createLine();
+  const jo = line.world.device('JO', JO);
+  line.next('member.invite', inviteData('inv-jo'));
+  const admit = line.next('member.admit', admitData(JO, 'inv-jo', jo, 2));
+  return { line, jo, admit };
+}
+
+test('15.1 invited -> expired: an admit signed after the expiry is refused invite-expired, decided by signed times only, never a clock', () => {
+  const line = createLine();
+  const jo = line.world.device('JO', JO);
+  line.next('member.invite', inviteData('inv-jo'));
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData(JO, 'inv-jo', jo, 2), { at: AFTER_EXPIRY })), 'invite-expired');
+  // The invitation answers expired for a time past its expiry and open for one before it; with no time it is open (nothing used or voided it).
+  const state = line.fold();
+  assert.equal(inviteAt(state.members, 'inv-jo', 2, AFTER_EXPIRY)?.state, 'expired');
+  assert.equal(inviteAt(state.members, 'inv-jo', 2, INVITE_EXPIRES)?.state, 'open');
+  assert.equal(inviteAt(state.members, 'inv-jo', 2)?.state, 'open');
+  // An admit signed exactly at the expiry is still in time.
+  line.next('member.admit', admitData(JO, 'inv-jo', jo, 2), { at: INVITE_EXPIRES });
+  assert.deepEqual(line.fold().refused, []);
+});
+
+test('15.1 invited -> cancelled: invite.void applies and a later admit is refused invite-voided; a void of an unknown invite is refused invite-unknown', () => {
+  const line = createLine();
+  const jo = line.world.device('JO', JO);
+  const invite = line.next('member.invite', inviteData('inv-jo'));
+  assert.equal(refusalOf(line, line.tryEntry('invite.void', { invite: 'inv-nobody' })), 'invite-unknown');
+  const voided = line.next('invite.void', { invite: 'inv-jo' });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  assert.equal(state.positions[state.positions.length - 1], voided.hash);
+  assert.equal(inviteAt(state.members, 'inv-jo', state.positionOf.get(voided.hash) as number)?.state, 'voided');
+  assert.equal(inviteAt(state.members, 'inv-jo', state.positionOf.get(invite.hash) as number)?.state, 'open');
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData(JO, 'inv-jo', jo, 2))), 'invite-voided');
+  assert.equal(refusalOf(line, line.tryEntry('invite.void', { invite: 'inv-jo' })), 'invite-voided');
+  // A used invitation cannot be voided: the admission it made stands.
+  const used = lineWithJo();
+  assert.equal(refusalOf(used.line, used.line.tryEntry('invite.void', { invite: 'inv-jo' })), 'invite-used');
+});
+
+test('invite-used: a second member.admit for an invitation already used is refused, even when it names another member and device (D-17)', () => {
+  const { line } = lineWithJo();
+  const other = line.world.device('KIM', 'mbr-kim');
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData('mbr-kim', 'inv-jo', other, 3))), 'invite-used');
+  // An admission of a member id the roster already has is refused member-exists, whatever invitation it names.
+  line.next('member.invite', inviteData('inv-kim'));
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData(JO, 'inv-kim', other, 3))), 'member-exists');
+  // An admission naming an invitation the roster does not have is refused invite-unknown.
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData('mbr-kim', 'inv-nobody', other, 3))), 'invite-unknown');
+});
+
+test('Add My Other Machine (D-18): a forMember invite is used by a device.add for that member, then refused invite-used to a member.admit', () => {
+  const { line, jo, admit } = lineWithJo();
+  const laptop = line.world.device('JO-LAPTOP', JO);
+  line.next('member.invite', inviteData('inv-jo-laptop', { forMember: JO }));
+  // A forMember invite cannot admit a new member.
+  const stranger = line.world.device('KIM', 'mbr-kim');
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData('mbr-kim', 'inv-jo-laptop', stranger, 3))), 'invite-for-device');
+  // Signed after the expiry, the device.add is refused like an admission.
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(5), invite: 'inv-jo-laptop' }, { at: AFTER_EXPIRY })), 'invite-expired');
+  const added = line.next('device.add', { member: JO, device: laptop.descriptor(5), invite: 'inv-jo-laptop' });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  const view = rosterView(state);
+  assert.equal(view.isAdmitted(laptop.writer, added.hash), true);
+  assert.equal(view.isAdmitted(laptop.writer, admit.hash), false);
+  assert.equal(view.isAdmitted(jo.writer, added.hash), true);
+  assert.equal(inviteAt(state.members, 'inv-jo-laptop', state.positionOf.get(added.hash) as number)?.state, 'used');
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData('mbr-kim', 'inv-jo-laptop', stranger, 3))), 'invite-used');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: line.world.device('JO-TABLET', JO).descriptor(6), invite: 'inv-jo-laptop' })), 'invite-used');
+});
+
+test('Add My Other Machine (D-18): a device.add naming an invite made for another member, or a new-member invite, is refused invite-wrong-member', () => {
+  const { line } = lineWithJo();
+  const kim = line.world.device('KIM', 'mbr-kim');
+  line.next('member.invite', inviteData('inv-kim'));
+  line.next('member.admit', admitData('mbr-kim', 'inv-kim', kim, 3));
+  line.next('member.invite', inviteData('inv-kim-laptop', { forMember: 'mbr-kim' }));
+  line.next('member.invite', inviteData('inv-new'));
+  const laptop = line.world.device('JO-LAPTOP', JO);
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(5), invite: 'inv-kim-laptop' })), 'invite-wrong-member');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(5), invite: 'inv-new' })), 'invite-wrong-member');
+  assert.equal(refusalOf(line, line.tryEntry('device.add', { member: JO, device: laptop.descriptor(5), invite: 'inv-nobody' })), 'invite-unknown');
+  // A forMember invite for a member the roster does not have is refused when it is written.
+  assert.equal(refusalOf(line, line.tryEntry('member.invite', inviteData('inv-ghost', { forMember: 'mbr-ghost' }))), 'member-unknown');
 });
