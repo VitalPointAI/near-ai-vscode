@@ -60,7 +60,8 @@ const PROJECT_AND_ROSTER: Sample[] = [
   { kind: 'cell.rekey', data: { cell: streamId('cell-2'), epoch: 1, reason: 'member-removed', rosterPrev: PREV }, required: ['cell', 'epoch', 'reason', 'rosterPrev'] },
   { kind: 'lead.handover', data: { to: 'mbr-deputy', reason: 'lead-lost', rosterPrev: PREV }, required: ['to', 'reason', 'rosterPrev'] },
   { kind: 'roster.choose', data: { chosen: HASH('8'), rosterPrev: PREV }, required: ['chosen', 'rosterPrev'] },
-  { kind: 'deputy.name', data: { member: 'mbr-deputy', rosterPrev: PREV }, required: ['member', 'rosterPrev'] }
+  { kind: 'deputy.name', data: { member: 'mbr-deputy', rosterPrev: PREV }, required: ['member', 'rosterPrev'] },
+  { kind: 'invite.void', data: { invite: 'inv-1', rosterPrev: PREV }, required: ['invite', 'rosterPrev'] }
 ];
 
 function reasonOf(kind: string, data: unknown): string {
@@ -71,8 +72,8 @@ function reasonOf(kind: string, data: unknown): string {
 
 // ---- project and roster schemas ----
 
-test('one valid sample per project and roster kind (19 kinds) passes, and a missing field, an extra field and a __proto__ key each fail with a reason naming the path', () => {
-  assert.equal(PROJECT_AND_ROSTER.length, 19);
+test('one valid sample per project and roster kind (20 kinds) passes, and a missing field, an extra field and a __proto__ key each fail with a reason naming the path', () => {
+  assert.equal(PROJECT_AND_ROSTER.length, 20);
   for (const sample of PROJECT_AND_ROSTER) {
     assert.deepEqual(validateData(sample.kind, sample.data), { ok: true }, sample.kind);
     for (const key of sample.required) {
@@ -87,9 +88,9 @@ test('one valid sample per project and roster kind (19 kinds) passes, and a miss
   }
 });
 
-test('every one of the 17 roster kinds requires rosterPrev as a 64-hex hash (DESIGN 7.1)', () => {
+test('every one of the 18 roster kinds requires rosterPrev as a 64-hex hash (DESIGN 7.1)', () => {
   const roster = PROJECT_AND_ROSTER.filter((sample) => !sample.kind.startsWith('project.'));
-  assert.equal(roster.length, 17);
+  assert.equal(roster.length, 18);
   for (const sample of roster) {
     assert.ok(sample.required.includes('rosterPrev'), sample.kind);
     for (const bad of ['1'.repeat(63), '1'.repeat(65), 'G'.repeat(64), 5, null, '', HASH('A')]) {
@@ -178,6 +179,101 @@ test('optional roster fields, every role word and the clearance extras are accep
   assert.ok(reasonOf('project.genesis', { ...genesis, lead: { member: 'mbr-lead' } }).includes('data.lead'));
   assert.ok(reasonOf('project.import', { ledger: 'products', legacyHead: HASH('c'), count: -1 }).includes('data.count'));
   assert.ok(reasonOf('project.import', { ledger: 'Products File', legacyHead: HASH('c'), count: 1 }).includes('data.ledger'));
+});
+
+// ---- D-49: the genesis and roster additions Phase 31 writes (D-07, D-17, D-18, D-41, D-44) ----
+
+test('D-49 genesis: lead.device (with its slot), level and first cells validate, and a Phase 30 genesis still does', () => {
+  const genesis = PROJECT_AND_ROSTER[0].data;
+  const leadDevice = device('lead-1');
+  const lead = { member: 'mbr-lead', writer: leadDevice.writer as string, device: { ...leadDevice, slot: 1 } };
+  const cells = [{ cell: streamId('cell-base'), epoch: 1, grant: HASH('5') }, { cell: streamId('cell-j2'), epoch: 3, grant: HASH('6') }];
+  const full: Data = { ...genesis, lead, level: 'brigade', cells };
+  assert.deepEqual(validateData('project.genesis', full), { ok: true });
+  assert.deepEqual(validateData('project.genesis', genesis), { ok: true });
+  assert.deepEqual(validateData('project.genesis', { ...genesis, lead: { ...lead, device: leadDevice } }), { ok: true });
+  assert.deepEqual(validateData('project.genesis', { ...genesis, level: 'division' }), { ok: true });
+  assert.deepEqual(validateData('project.genesis', { ...genesis, cells: [] }), { ok: true });
+  assert.deepEqual(validateData('project.genesis', { ...full, hub: { writer: HASH('2'), certPin: HASH('3') } }), { ok: true });
+  assert.deepEqual(validateData('project.genesis', { ...genesis, lead: { ...lead, device: { ...leadDevice, slot: 4095 } } }), { ok: true });
+  assert.deepEqual(validateData('project.genesis', { ...genesis, cells: Array.from({ length: 64 }, (_, index) => ({ cell: streamId(`cell-${index}`), epoch: 1, grant: HASH('7') })) }), { ok: true });
+  const other = device('lead-2');
+  const refusals: Array<[Data, string]> = [
+    // The lead's device must be the device the genesis names as the lead's writer.
+    [{ ...full, lead: { ...lead, device: { ...other, slot: 1 } } }, 'data.lead.device.writer'],
+    [{ ...full, lead: { ...lead, writer: HASH('b') } }, 'data.lead.device.writer'],
+    [{ ...full, lead: { ...lead, device: { ...leadDevice, slot: 0 } } }, 'data.lead.device.slot'],
+    [{ ...full, lead: { ...lead, device: { ...leadDevice, slot: 4096 } } }, 'data.lead.device.slot'],
+    [{ ...full, lead: { ...lead, device: { ...leadDevice, slot: 1.5 } } }, 'data.lead.device.slot'],
+    [{ ...full, lead: { ...lead, device: { ...leadDevice, slot: '1' } } }, 'data.lead.device.slot'],
+    [{ ...full, lead: { ...lead, device: { ...leadDevice, extra: 1 } } }, 'data.lead.device.extra'],
+    [{ ...full, lead: { ...lead, device: { ...leadDevice, publicKey: 'AAAA' } } }, 'data.lead.device.publicKey'],
+    [{ ...full, lead: { ...lead, device: 'device' } }, 'data.lead.device'],
+    [{ ...full, lead: { ...lead, extra: 1 } }, 'data.lead'],
+    [{ ...full, level: 'Brigade HQ' }, 'data.level'],
+    [{ ...full, level: 3 }, 'data.level'],
+    [{ ...full, cells: 'cell' }, 'data.cells'],
+    [{ ...full, cells: Array.from({ length: 65 }, (_, index) => ({ cell: streamId(`cell-${index}`), epoch: 1, grant: HASH('7') })) }, 'data.cells'],
+    [{ ...full, cells: [{ ...cells[0], epoch: 0 }] }, 'data.cells[0].epoch'],
+    [{ ...full, cells: [{ ...cells[0], epoch: 1.5 }] }, 'data.cells[0].epoch'],
+    [{ ...full, cells: [cells[0], { ...cells[1], grant: 'abc' }] }, 'data.cells[1].grant'],
+    [{ ...full, cells: [{ ...cells[0], cell: HASH('a') }] }, 'data.cells[0].cell'],
+    [{ ...full, cells: [{ ...cells[0], extra: 1 }] }, 'data.cells[0].extra'],
+    [{ ...full, cells: [{ cell: cells[0].cell, epoch: 1 }] }, 'data.cells[0].grant'],
+    [{ ...full, cells: [cells[0], { ...cells[0], epoch: 2 }] }, 'data.cells[1].cell'],
+    [{ ...full, cells: ['cell'] }, 'data.cells[0]']
+  ];
+  for (const [data, path] of refusals) {
+    const reason = reasonOf('project.genesis', data);
+    assert.ok(reason.startsWith('bad-data:') && reason.includes(path), `should name ${path}: ${reason}`);
+  }
+});
+
+test('D-49 roster: forMember, agentSeats, device slots, the device.add invite, cell epochs and grants, and invite.void validate', () => {
+  const admit = PROJECT_AND_ROSTER.find((sample) => sample.kind === 'member.admit')?.data as Data;
+  const invite = PROJECT_AND_ROSTER.find((sample) => sample.kind === 'member.invite')?.data as Data;
+  const valid: Array<[string, Data]> = [
+    ['member.invite', { ...invite, forMember: 'mbr-bo' }],
+    ['member.admit', { ...admit, agentSeats: ['release-guard'], device: { ...(admit.device as Data), slot: 2 } }],
+    ['member.admit', { ...admit, agentSeats: [] }],
+    ['member.admit', { ...admit, agentSeats: Array.from({ length: 16 }, (_, index) => `seat-${index}`) }],
+    ['member.update', { member: 'mbr-bo', agentSeats: ['release-guard'], rosterPrev: PREV }],
+    ['member.update', { member: 'mbr-bo', agentSeats: [], rosterPrev: PREV }],
+    ['member.update', { member: 'mbr-bo', roles: ['member'], agentSeats: ['tradecraft', 'release-guard'], rosterPrev: PREV }],
+    ['device.add', { member: 'mbr-bo', device: { ...device('bo-2'), slot: 3 }, invite: 'inv-2', rosterPrev: PREV }],
+    ['device.add', { member: 'mbr-bo', device: device('bo-2'), invite: 'inv-2', rosterPrev: PREV }],
+    ['device.rotate', { member: 'mbr-bo', from: HASH('e'), device: { ...device('bo-3'), slot: 4095 }, rosterPrev: PREV }],
+    ['hub.admit', { hub: 'site-hub', device: { ...device('hub-1'), slot: 9 }, certPin: HASH('9'), ceiling: clearance(), rosterPrev: PREV }],
+    ['cell.create', { cell: streamId('cell-2'), epoch: 1, grant: HASH('6'), rosterPrev: PREV }],
+    ['cell.rekey', { cell: streamId('cell-2'), epoch: 2, reason: 'member-removed', grant: HASH('7'), rosterPrev: PREV }],
+    ['invite.void', { invite: 'inv-1', rosterPrev: PREV }]
+  ];
+  for (const [kind, data] of valid) assert.deepEqual(validateData(kind, data), { ok: true }, `${kind} ${JSON.stringify(data).slice(0, 120)}`);
+  const refusals: Array<[string, Data, string]> = [
+    ['member.invite', { ...invite, forMember: 'Mbr Bo' }, 'data.forMember'],
+    ['member.admit', { ...admit, agentSeats: Array.from({ length: 17 }, (_, index) => `seat-${index}`) }, 'data.agentSeats'],
+    ['member.admit', { ...admit, agentSeats: ['Release Guard'] }, 'data.agentSeats[0]'],
+    ['member.admit', { ...admit, agentSeats: ['release-guard', 'release-guard'] }, 'data.agentSeats[1]'],
+    ['member.admit', { ...admit, agentSeats: 'release-guard' }, 'data.agentSeats'],
+    ['member.admit', { ...admit, device: { ...(admit.device as Data), slot: 0 } }, 'data.device.slot'],
+    ['member.admit', { ...admit, device: { ...(admit.device as Data), slot: 4096 } }, 'data.device.slot'],
+    ['member.update', { member: 'mbr-bo', agentSeats: Array.from({ length: 17 }, (_, index) => `seat-${index}`), rosterPrev: PREV }, 'data.agentSeats'],
+    ['member.update', { member: 'mbr-bo', agentSeats: [7], rosterPrev: PREV }, 'data.agentSeats[0]'],
+    ['device.add', { member: 'mbr-bo', device: device('bo-2'), invite: 'inv 2', rosterPrev: PREV }, 'data.invite'],
+    ['device.add', { member: 'mbr-bo', device: { ...device('bo-2'), slot: -1 }, rosterPrev: PREV }, 'data.device.slot'],
+    ['device.rotate', { member: 'mbr-bo', from: HASH('e'), device: { ...device('bo-3'), slot: 4096 }, rosterPrev: PREV }, 'data.device.slot'],
+    ['hub.admit', { hub: 'site-hub', device: { ...device('hub-1'), slot: null }, certPin: HASH('9'), ceiling: clearance(), rosterPrev: PREV }, 'data.device.slot'],
+    ['cell.create', { cell: streamId('cell-2'), epoch: 0, grant: HASH('6'), rosterPrev: PREV }, 'data.epoch'],
+    ['cell.create', { cell: streamId('cell-2'), epoch: 1, grant: 'abc', rosterPrev: PREV }, 'data.grant'],
+    ['cell.create', { cell: streamId('cell-2'), epoch: 1, grant: HASH('G'), rosterPrev: PREV }, 'data.grant'],
+    ['cell.rekey', { cell: streamId('cell-2'), epoch: 2, reason: 'scheduled', grant: 'nope', rosterPrev: PREV }, 'data.grant'],
+    ['invite.void', { invite: 'Inv 1', rosterPrev: PREV }, 'data.invite'],
+    ['invite.void', { invite: 'inv-1', reason: 'not needed', rosterPrev: PREV }, 'data.reason']
+  ];
+  for (const [kind, data, path] of refusals) {
+    const reason = reasonOf(kind, data);
+    assert.ok(reason.startsWith('bad-data:') && reason.includes(path), `${kind} should name ${path}: ${reason}`);
+  }
 });
 
 // ---- the project reducer and kept roster entries ----
@@ -458,8 +554,11 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
   assert.deepEqual(keptOnly.families, baseline.families);
 });
 
-test('the closed kind list still has 50 kinds and the 19 project and roster samples are all of them', () => {
-  const owned = REPLICA_KINDS.filter((kind) => kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy)\./.test(kind));
+test('the closed kind list has 51 kinds and the 20 project and roster samples are all of them', () => {
+  assert.equal(REPLICA_KINDS.length, 51);
+  assert.equal(new Set(REPLICA_KINDS).size, 51);
+  const owned = REPLICA_KINDS.filter((kind) => kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind));
+  assert.equal(owned.length, 20);
   assert.deepEqual([...owned].sort(), PROJECT_AND_ROSTER.map((sample) => sample.kind).sort());
 });
 
