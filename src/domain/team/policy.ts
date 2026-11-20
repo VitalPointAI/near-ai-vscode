@@ -18,6 +18,14 @@ export function defaultTeamPolicy(options: { integrationBranch?: string } = {}):
   };
 }
 
+/**
+ * Team Mode's inputs to a request's private floor (D-37): `teeOnly` and the role's allowed models (an empty list is no filter). Read side only: floorFor
+ * turns them into the floor decideRoute applies. No call site reads Team Mode policy for a model request yet.
+ */
+export function teamRouteInputs(policy: TeamPolicy, role: Role): { readonly teeOnly: boolean; readonly allowedModels: readonly string[] } {
+  return { teeOnly: policy.teeOnly === true, allowedModels: [...(policy.allowedModels[role] ?? [])] };
+}
+
 // Policy validation (D-13, D-30). Every TeamPolicy key has one validator; the Record type makes a missing key a compile error.
 // Reasons are `invalid event body: <path>` where the path starts at the caller-supplied prefix.
 const DISPATCH_WEIGHT_KEYS: readonly DispatchWeight[] = ['roleFit', 'fileAffinity', 'continuity', 'capacity', 'budgetHeadroom', 'criticalPath'];

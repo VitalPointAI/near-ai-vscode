@@ -2,7 +2,8 @@
 // before sending (its route, host, the model's catalogue entry, the binding fact held in memory, the clock), read here so the client's one choke point
 // stays small. No vscode import and no network call: everything here is read from memory.
 import { isNearCloudEndpoint } from '../domain/config';
-import type { ConnectionBindingFact, RouteFacts } from '../domain/gate/routing';
+import { TIER_ORDER } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteFacts, RoutingTier } from '../domain/gate/routing';
 import type { ModelInfo } from '../domain/provider/messages';
 
 /** What the client knows about one content request when its route is decided. */
@@ -17,6 +18,8 @@ export interface RouteFactsInput {
   readonly now: number;
   readonly localModelAvailable: boolean;
   readonly sessionless: boolean;
+  /** Team Mode's allowed models, from the floor (D-37); absent is no filter. */
+  readonly allowedModels?: readonly string[];
 }
 
 /** The RouteFacts of one request, from what the client read (CLAS-06, D-36). */
@@ -32,9 +35,49 @@ export function routeFactsFor(input: RouteFactsInput): RouteFacts {
     binding: attestation === 'unproven' ? { state: 'unknown', host } : fact,
     now,
     localModelAvailable: input.localModelAvailable,
-    sessionless: input.sessionless
+    sessionless: input.sessionless,
+    ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels })
   };
   return facts;
+}
+
+// ---- One private floor (D-37) ----
+
+/** The floor of a request: a tier it must reach at least, and Team Mode's allowed models. Each is absent when nothing asks for it. */
+export interface PrivateFloor {
+  readonly tier?: RoutingTier;
+  readonly allowedModels?: readonly string[];
+}
+
+/** What can ask for private-only work, gathered for floorFor. */
+export interface FloorInputs {
+  /**
+   * privateOnlyNow(): nearAi.privacyMode tee-only, or a private member or agent team (withPrivateOnly, coherence review S4). A setting that cannot be read
+   * already reads as true there (fail closed).
+   */
+  readonly privateOnly?: boolean;
+  /** Team Mode's inputs (teamRouteInputs): teeOnly raises the floor, a non-empty allowedModels list filters the models. */
+  readonly team?: { readonly teeOnly: boolean; readonly allowedModels: readonly string[] };
+}
+
+/**
+ * The one floor every way of asking for private-only work gives (D-37): attested-cloud for privateOnly or Team Mode's teeOnly, so a model counts as private
+ * only when decideRoute's own check passes (verified private hardware over a proven connection, or this computer); Team Mode's allowedModels as a filter,
+ * an empty list being no filter. decideRoute reads the tier as its floor and the list through RouteFacts.allowedModels.
+ */
+export function floorFor(inputs: FloorInputs): PrivateFloor {
+  const tier: RoutingTier | undefined = inputs.privateOnly === true || inputs.team?.teeOnly === true ? 'attested-cloud' : undefined;
+  const allowedModels = inputs.team?.allowedModels ?? [];
+  return Object.freeze({ ...(tier === undefined ? {} : { tier }), ...(allowedModels.length === 0 ? {} : { allowedModels: Object.freeze([...allowedModels]) }) });
+}
+
+/**
+ * Whether a catalogue entry can meet the floor, for a choice made before anything is sent (Team Studio's model, the picker): a tier of attested-cloud or
+ * above admits only TEE and local entries; a list admits only its ids. The client still decides each send with decideRoute.
+ */
+export function floorAllowsModel(floor: PrivateFloor, model: { readonly id: string; readonly privacyBoundary?: string }): boolean {
+  if (floor.tier !== undefined && TIER_ORDER[floor.tier] >= TIER_ORDER['attested-cloud'] && model.privacyBoundary !== 'tee' && model.privacyBoundary !== 'local') return false;
+  return floor.allowedModels === undefined || floor.allowedModels.includes(model.id);
 }
 
 /** The client a run sends every request through: NEAR AI Cloud (with or without checkable attestation) or a local runtime. */

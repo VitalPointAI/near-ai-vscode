@@ -7,7 +7,7 @@ import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
 import { currentSessionRoute, defaultSessionRoute, noteNotAccredited, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
-import { routeFactsFor } from './privateRoute';
+import { floorFor, routeFactsFor } from './privateRoute';
 import type { RouteRecordContext, SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
@@ -1164,7 +1164,9 @@ export class NearAiClient implements ModelEndpoint {
     const now = clockOf(route);
     // The decision reads the fact held now; a missing or old one is checked again out of band for the next request (OFFL-01).
     this.refreshBinding(host, now);
-    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined });
+    // D-37: privacyMode tee-only and a private member or agent team give one floor; decideRoute reads its tier and its allowed models.
+    const floor = floorFor({ privateOnly: privateOnlyNow() });
+    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined, allowedModels: floor.allowedModels });
     let decision: RouteDecision;
     let mark: Mark = [];
     let checkFailed = false;
@@ -1175,9 +1177,8 @@ export class NearAiClient implements ModelEndpoint {
       // D-36: the effective policy of the route's own host; none (or a route without one) decides as the safety patch did. A throw is a failed check.
       const policy = route.routePolicy?.(now);
       policyVersion = policy?.policyVersion;
-      // Coherence review S4: a private team or member, or nearAi.privacyMode tee-only, raises the tier to at least attested-cloud, so a model counts as
-      // private only when the gate's own check passes, never on the catalog's word alone.
-      decision = decideRoute(mark, routing, facts, defaultLabel, privateOnlyNow() ? 'attested-cloud' : undefined, policy);
+      // Coherence review S4: the floor raises the tier to at least attested-cloud, so a model counts as private only when the gate's own check passes.
+      decision = decideRoute(mark, routing, facts, defaultLabel, floor.tier, policy);
     } catch {
       // A policy state, a mark or a routing table that cannot be read means the route cannot be worked out: it is refused with a fixed rule and a plain
       // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
