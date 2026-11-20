@@ -5,16 +5,14 @@
 // Every roster entry carries rosterPrev, the hash of the roster entry it follows (the first roster entry carries 64 zeros), so authority is a line and
 // never needs general state resolution (DESIGN 7.1).
 import { isRecord, isSafeIntegerInRange } from '../../team/validate';
-import { writerIdOf } from '../entry';
 import { ROSTER_ROLE_PATTERNS } from '../rosterView';
-import { invalidAt, isBase64urlBytes, isHash, isIsoTime, isSlug } from './shared';
-import { countCheck, hashCheck, hasOwn, keyProblem, lineCheck, oneOf, slugCheck, streamCheck, timeCheck, validateShape } from './project';
+import { invalidAt, isIsoTime, isSlug } from './shared';
+import { countCheck, deviceProblem, hashCheck, hasOwn, keyProblem, lineCheck, oneOf, slugCheck, streamCheck, timeCheck, validateShape } from './project';
 import type { Check, Shape } from './project';
 
-const ED25519_PUBLIC_BYTES = 32;
-const X25519_PUBLIC_BYTES = 32;
-const ED25519_SIGNATURE_BYTES = 64;
 const MAX_ROLES = 16;
+// The agent seats a member's devices may run (D-12, D-49): seat slugs such as release-guard, each named once.
+const MAX_AGENT_SEATS = 16;
 const MAX_TOKENS = 32;
 // The label words of the Phase 70 gate (src/domain/gate/labels.ts), kept here as plain values so this hub-side file imports nothing from the gate.
 const LABEL_TOKEN = /^[A-Z0-9][A-Z0-9_-]{0,31}$/;
@@ -22,10 +20,6 @@ const LABEL_LEVEL = /^[A-Za-z0-9][A-Za-z0-9 ,_-]{0,63}$/;
 const HANDLING_FLAGS: readonly string[] = ['local-only', 'no-agent-tools'];
 export const CELL_REKEY_REASONS = ['member-removed', 'device-revoked', 'clearance-lowered', 'hub-revoked', 'scheduled'] as const;
 export const HANDOVER_REASONS = ['planned', 'lead-lost'] as const;
-
-function isExactBytes(value: unknown, bytes: number): value is string {
-  return isBase64urlBytes(value, bytes) && Buffer.from(value, 'base64url').length === bytes;
-}
 
 // One role word of the roster (ROSTER_ROLE_PATTERNS), nothing else.
 function isRole(value: unknown): value is string {
@@ -39,6 +33,17 @@ function rolesProblem(value: unknown, path: string): string | undefined {
     const role: unknown = value[index];
     if (!isRole(role) || seen.has(role)) return invalidAt(`${path}[${index}]`);
     seen.add(role);
+  }
+  return undefined;
+}
+
+function agentSeatsProblem(value: unknown, path: string): string | undefined {
+  if (!Array.isArray(value) || value.length > MAX_AGENT_SEATS) return invalidAt(path);
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const seat: unknown = value[index];
+    if (!isSlug(seat) || seen.has(seat)) return invalidAt(`${path}[${index}]`);
+    seen.add(seat);
   }
   return undefined;
 }
@@ -74,31 +79,27 @@ export function clearanceProblem(value: unknown, path: string): string | undefin
   return undefined;
 }
 
-// A device as the roster names it (DESIGN 7.4): the Ed25519 key it signs with, the X25519 key it opens wraps with, and the Ed25519 signature that binds them.
-function deviceProblem(value: unknown, path: string): string | undefined {
-  if (!isRecord(value)) return invalidAt(path);
-  const keys = keyProblem(value, path, ['writer', 'publicKey', 'x25519', 'x25519Sig']);
-  if (keys !== undefined) return keys;
-  if (!isHash(value.writer)) return invalidAt(`${path}.writer`);
-  if (!isExactBytes(value.publicKey, ED25519_PUBLIC_BYTES)) return invalidAt(`${path}.publicKey`);
-  if (!isExactBytes(value.x25519, X25519_PUBLIC_BYTES)) return invalidAt(`${path}.x25519`);
-  if (!isExactBytes(value.x25519Sig, ED25519_SIGNATURE_BYTES)) return invalidAt(`${path}.x25519Sig`);
-  // The writer id of a device is the hash of its signing key, so a descriptor that names another writer is wrong on its face.
-  if (value.writer !== writerIdOf(value.publicKey)) return invalidAt(`${path}.writer`, 'not the hash of the key');
-  return undefined;
-}
+// The device descriptor check (writer, keys, binding signature and the optional D-41 slot) lives in project.ts as deviceProblem, because the genesis
+// lead.device uses it too; every roster kind that names a device (member.admit, device.add, device.rotate, hub.admit) carries the slot the same way.
 
 const nameCheck = lineCheck(120);
 const reasonCheck = lineCheck(200);
 const epochCheck: Check = (value, path) => (isSafeIntegerInRange(value, 1, Number.MAX_SAFE_INTEGER) ? undefined : invalidAt(path));
 
-// The 17 roster kinds. The key order of a record is the order the checks run in, so the first wrong field is the one named.
+// The 18 roster kinds. The key order of a record is the order the checks run in, so the first wrong field is the one named.
+// Phase 31 additions (D-49) are optional on the wire so every Phase 30 sample and vector stays valid; the roster fold requires them where D-41, D-44
+// and D-49 need them:
+// - member.invite forMember: the invite admits another device of an existing member (D-18, Add My Other Machine).
+// - member.admit and member.update agentSeats: the agent seats the member's devices may run (D-12).
+// - device.add invite: the invite the second machine joined with, so the fold can mark it used (D-17 single use).
+// - cell.create epoch and grant, cell.rekey grant: the sha256 of the signed grant object outside the streams (D-44).
+// - invite.void: closes an open invite (D-17).
 const SHAPES: Readonly<Record<string, Shape>> = {
-  'member.invite': { required: { invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, expiresAt: timeCheck, secretHash: hashCheck, rosterPrev: hashCheck } },
-  'member.admit': { required: { member: slugCheck, invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, device: deviceProblem, rosterPrev: hashCheck } },
-  'member.update': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem }, atLeastOneOf: ['name', 'seat', 'roles', 'clearance'] },
+  'member.invite': { required: { invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, expiresAt: timeCheck, secretHash: hashCheck, rosterPrev: hashCheck }, optional: { forMember: slugCheck } },
+  'member.admit': { required: { member: slugCheck, invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, device: deviceProblem, rosterPrev: hashCheck }, optional: { agentSeats: agentSeatsProblem } },
+  'member.update': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, agentSeats: agentSeatsProblem }, atLeastOneOf: ['name', 'seat', 'roles', 'clearance', 'agentSeats'] },
   'member.remove': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
-  'device.add': { required: { member: slugCheck, device: deviceProblem, rosterPrev: hashCheck } },
+  'device.add': { required: { member: slugCheck, device: deviceProblem, rosterPrev: hashCheck }, optional: { invite: slugCheck } },
   'device.rotate': { required: { member: slugCheck, from: hashCheck, device: deviceProblem, rosterPrev: hashCheck } },
   'device.revoke': { required: { member: slugCheck, writer: hashCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
   'device.quarantine': { required: { writer: hashCheck, stream: streamCheck, seq: countCheck, rosterPrev: hashCheck } },
@@ -106,11 +107,12 @@ const SHAPES: Readonly<Record<string, Shape>> = {
   'hub.admit': { required: { hub: slugCheck, device: deviceProblem, certPin: hashCheck, ceiling: clearanceProblem, rosterPrev: hashCheck } },
   'hub.grant': { required: { hub: slugCheck, cell: streamCheck, rosterPrev: hashCheck } },
   'hub.revoke': { required: { hub: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
-  'cell.create': { required: { cell: streamCheck, rosterPrev: hashCheck } },
-  'cell.rekey': { required: { cell: streamCheck, epoch: epochCheck, reason: oneOf(CELL_REKEY_REASONS), rosterPrev: hashCheck } },
+  'cell.create': { required: { cell: streamCheck, rosterPrev: hashCheck }, optional: { epoch: epochCheck, grant: hashCheck } },
+  'cell.rekey': { required: { cell: streamCheck, epoch: epochCheck, reason: oneOf(CELL_REKEY_REASONS), rosterPrev: hashCheck }, optional: { grant: hashCheck } },
   'lead.handover': { required: { to: slugCheck, reason: oneOf(HANDOVER_REASONS), rosterPrev: hashCheck } },
   'roster.choose': { required: { chosen: hashCheck, rosterPrev: hashCheck } },
-  'deputy.name': { required: { member: slugCheck, rosterPrev: hashCheck } }
+  'deputy.name': { required: { member: slugCheck, rosterPrev: hashCheck } },
+  'invite.void': { required: { invite: slugCheck, rosterPrev: hashCheck } }
 };
 
 // Returns a reason, or undefined when the data is valid.

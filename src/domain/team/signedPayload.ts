@@ -23,7 +23,9 @@ import { SecretLeakError, assertNoSecrets } from './secrets';
 
 export const PAYLOAD_DOMAIN = 'near-ai-vscode/signed-payload/v1';
 export const PAYLOAD_VERSION = 1;
-export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica'] as const;
+// Phase 31 (D-49) adds the last four, in order: the lead's invite file, a joining device's answer to it, a cell grant (the wraps of one cell epoch,
+// committed by hash from cell.create and cell.rekey) and the replica store's high-water mark kept in SecretStorage.
+export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark'] as const;
 export type PayloadPurpose = typeof PAYLOAD_PURPOSES[number];
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
 const PUBLIC_KEY_BYTES = 32;

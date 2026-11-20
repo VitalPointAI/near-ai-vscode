@@ -57,6 +57,9 @@ function statusOf(signer: { fingerprint: string; publicKey: string }, state: 'ac
 const ACTIVE = (signer: PayloadSigner): KeyStatusLookup => statusOf(signer, 'active');
 const at = (iso: string) => (): Date => new Date(iso);
 
+// Fixed key-shaped bytes for the Phase 31 samples (fictional; never a real key).
+const bytes64url = (length: number, fill: number): string => Buffer.alloc(length, fill).toString('base64url');
+
 const SAMPLES: Record<PayloadPurpose, unknown> = {
   'policy-bundle': { version: 1, expiresAt: '2027-01-01T00:00:00Z', issuer: 'dev-sample', rules: [] },
   grant: { capability: 'read', until: '2026-12-01T00:00:00Z', budgetNanoUsd: 5_000_000_000 },
@@ -67,7 +70,12 @@ const SAMPLES: Record<PayloadPurpose, unknown> = {
   'staff-ledger': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', run: 'run-1', product: 'intelligence-estimate', section: 'j2', event: { type: 'propose', hash: 'b'.repeat(64) }, actor: { kind: 'agent', member: 'j2-chief' } },
   'staff-ledger-head': { v: 1, count: 1, head: 'c'.repeat(64) },
   'staff-decision': { v: 1, seq: 0, prev: '0'.repeat(64), at: '2026-11-18T00:00:00.000Z', subject: { kind: 'pir', id: 'PIR-1' }, decision: 'approved', wording: 'd'.repeat(64), reasons: [], person: { kind: 'person', name: 'A. Demo', role: 'Commander', deviceFingerprint: 'f'.repeat(16) } },
-  'staff-replica': { v: 2, stream: '1'.repeat(32), writer: 'a'.repeat(64), seq: 0, prev: '0'.repeat(64), epoch: 0, body: { hash: 'b'.repeat(64), size: 128 } }
+  'staff-replica': { v: 2, stream: '1'.repeat(32), writer: 'a'.repeat(64), seq: 0, prev: '0'.repeat(64), epoch: 0, body: { hash: 'b'.repeat(64), size: 128 } },
+  // Phase 31 (D-49): the lead's invite file, the joining device's request, a cell grant and the store's high-water mark.
+  'staff-invite': { v: 1, genesisHash: 'a'.repeat(64), project: '1'.repeat(32), name: 'Operation Example', lead: { member: 'mbr-lead', writer: 'b'.repeat(64), publicKey: bytes64url(32, 1), x25519: bytes64url(32, 2) }, invite: 'inv-1', secret: bytes64url(32, 3), expiresAt: '2026-11-26T12:00:00.000Z' },
+  'staff-join-request': { v: 1, invite: 'inv-1', genesisHash: 'a'.repeat(64), name: 'Bo Chen', publicKey: bytes64url(32, 4), x25519: bytes64url(32, 5), x25519Sig: bytes64url(64, 6), mac: 'c'.repeat(64) },
+  'staff-cell-grant': { v: 1, cell: '2'.repeat(32), epoch: 1, labelSealed: bytes64url(48, 8), wraps: [{ writer: 'd'.repeat(64), wrap: bytes64url(92, 7) }, { writer: 'e'.repeat(64), wrap: bytes64url(92, 9) }] },
+  'staff-replica-mark': { v: 1, rosterHead: 'f'.repeat(64), heads: [{ stream: '3'.repeat(32), writer: 'a'.repeat(64), seq: 12, hash: 'b'.repeat(64) }] }
 };
 
 function failure(verdict: ReturnType<typeof verifyPayload>): PayloadFailureReason | 'ok' {
@@ -124,7 +132,31 @@ test('every purpose round-trips, signed by the device identity and by a plain ag
     assert.equal(failure(agentVerdict), 'ok', purpose);
     if (agentVerdict.ok) assert.deepEqual(agentVerdict.payload, SAMPLES[purpose]);
   }
-  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica']);
+  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark']);
+});
+
+test('D-49: each Phase 31 purpose signs and verifies its own sample, and the same envelope offered for any other purpose is refused wrong-purpose', () => {
+  const agent = agentSigner();
+  const phase31: PayloadPurpose[] = ['staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark'];
+  for (const purpose of phase31) {
+    const envelope = signPayload(agent, purpose, SAMPLES[purpose]);
+    assert.equal(envelope.purpose, purpose);
+    const verdict = verifyPayload(envelope, { purpose, status: ACTIVE(agent) });
+    assert.equal(failure(verdict), 'ok', purpose);
+    if (verdict.ok) assert.deepEqual(verdict.payload, SAMPLES[purpose]);
+    for (const other of PAYLOAD_PURPOSES) {
+      if (other === purpose) continue;
+      assert.equal(failure(verifyPayload(envelope, { purpose: other, status: ACTIVE(agent) })), 'wrong-purpose', `${purpose} offered as ${other}`);
+    }
+    // The purpose is inside the signed bytes: an envelope whose purpose field is edited to another Phase 31 purpose no longer verifies.
+    const swapped = { ...envelope, purpose: phase31[(phase31.indexOf(purpose) + 1) % phase31.length] };
+    assert.equal(failure(verifyPayload(swapped, { purpose: swapped.purpose, status: ACTIVE(agent) })), 'bad-signature', purpose);
+  }
+  // A signature made for an older purpose is not accepted as one of the new ones.
+  const ledgerHead = signPayload(agent, 'staff-ledger-head', SAMPLES['staff-ledger-head']);
+  assert.equal(failure(verifyPayload(ledgerHead, { purpose: 'staff-replica-mark', status: ACTIVE(agent) })), 'wrong-purpose');
+  const replica = signPayload(agent, 'staff-replica', SAMPLES['staff-replica']);
+  assert.equal(failure(verifyPayload(replica, { purpose: 'staff-cell-grant', status: ACTIVE(agent) })), 'wrong-purpose');
 });
 
 test('an envelope with a member id and one without both verify, and the one without has no memberId key at all', () => {
