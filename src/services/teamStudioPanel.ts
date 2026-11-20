@@ -163,21 +163,22 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     updateTeam: (file) => Promise.resolve(vscode.commands.executeCommand('nearAi.updateTeam', file)),
     setUpStaffTeam: () => Promise.resolve(vscode.commands.executeCommand('nearAi.setUpStaffTeam')),
     openStaffRoom: () => Promise.resolve(vscode.commands.executeCommand('nearAi.openStaffRoom')),
-    liveRun: (slug) => sharedActivityFeed().agentStats().some((stat) => stat.team === slug && stat.status === 'running' && stat.agentId === `main-${stat.runId}`),
+    liveRun: (slug) => sharedActivityFeed().teamRunning(slug),
     watchLive: (runId) => Promise.resolve(runId ? vscode.commands.executeCommand('nearAi.openTeamLive', runId) : vscode.commands.executeCommand('nearAi.openTeamLive')),
     // The dashboard (0.4.31): the open project's run history, the team runs going now, and a notification when one starts or ends.
     history: async () => { const root = rootNow(); return root ? new ActivityStore(root).list() : []; },
     runningTeams: () => {
       const feed = sharedActivityFeed();
-      return feed.agentStats().filter((stat) => stat.agentId === `main-${stat.runId}` && stat.status === 'running' && stat.team).map((stat) => {
-        const file = feed.runTeam(stat.runId)?.file;
-        return { runId: stat.runId, ...(stat.team ? { slug: stat.team } : {}), ...(file ? { file } : {}) };
+      return feed.teamRuns().filter((run) => run.status === 'running').map((run) => {
+        const file = feed.runTeam(run.runId)?.file;
+        return { runId: run.runId, slug: run.team, ...(file ? { file } : {}) };
       });
     },
     onDidChangeRuns: (listener) => {
       // Only a team run starting, ending, or having its end saved to the history (its counters persisted) is news here; tokens and tools are not.
       const feed = sharedActivityFeed();
-      const runs = () => feed.agentStats().filter((stat) => stat.agentId === `main-${stat.runId}` && stat.team).map((stat) => `${stat.runId}:${stat.status}:${stat.persisted ? 1 : 0}`).sort().join(',');
+      // Asked on every feed change, so it reads the feed's team runs without copying every agent's counters.
+      const runs = () => feed.teamRuns().map((run) => `${run.runId}:${run.status}:${run.persisted ? 1 : 0}`).sort().join(',');
       let seen = runs();
       const subscription = feed.subscribe(() => { const now = runs(); if (now !== seen) { seen = now; listener(); } });
       return { dispose: () => subscription.dispose() };

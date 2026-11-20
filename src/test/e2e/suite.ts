@@ -690,7 +690,7 @@ async function settleFocus(): Promise<void> {
  * or the time is up. Input boxes the command opens take the same accept, so they keep the value they were opened with. The first accept
  * waits 400 ms so the list has filtered. No text is typed. Focus is settled first (settleFocus).
  *
- * `attempts` above 1 opens the palette again (focus settled each time) when an attempt ends without `done()`: only for a command that is safe to run
+ * `attempts` above 1 opens the palette again (focus settled each time, and a longer wait before the first accept) when an attempt ends without `done()`: only for a command that is safe to run
  * twice and changes nothing when it does not run, which is the control step alone. Every Enable Team Mode run, with the preview off or on, gets one
  * attempt, so a second Enable can never start (PR #67 review). Returns the attempts used.
  */
@@ -700,6 +700,8 @@ async function runFromPalette(label: string, done: () => boolean, timeoutMs: num
     used += 1;
     await settleFocus();
     await vscode.commands.executeCommand('workbench.action.quickOpen', `>${label}`);
+    // A palette opened while the workbench is still busy can take longer to filter its list: each further attempt waits longer before its first accept.
+    await pause(400 * (used - 1));
     const deadline = Date.now() + timeoutMs;
     while (!done() && Date.now() < deadline) {
       await pause(400);
@@ -764,12 +766,22 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       assert.equal(git(workspace, ['log', '-1', '--format=%an']), 'E2E Owner');
 
       // Control: a built-in command with a visible effect works through the palette, so a failure below is the product's and not the harness's.
-      const tabs = () => vscode.window.tabGroups.all.reduce((count, group) => count + group.tabs.length, 0);
-      const tabsBefore = tabs();
-      // Up to three attempts, each with focus settled: opening an untitled file is safe to repeat, and the step only has to show the palette CAN run a
-      // command. A build whose palette cannot be driven at all still fails here, after the third attempt.
-      const controlAttempts = await runFromPalette('File: New Untitled Text File', () => tabs() > tabsBefore, 8_000, 3);
-      assert.ok(tabs() > tabsBefore, `the Command Palette did not run File: New Untitled Text File in ${controlAttempts} attempts, so the harness cannot drive the palette in this VS Code build`);
+      // The effect is a new untitled document, not a higher tab count: tabs earlier tests left (webviews still closing, a restored editor) can close
+      // while the untitled file opens, so a count could stay level although the command ran (CI flake, before any product code ran). The editors are
+      // closed first and the open is heard as an event, so nothing else that opens or closes can hide it or fake it.
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      const untitledBefore = new Set(vscode.workspace.textDocuments.filter((document) => document.uri.scheme === 'untitled').map((document) => document.uri.toString()));
+      let untitledOpened = false;
+      const opened = vscode.workspace.onDidOpenTextDocument((document) => { if (document.uri.scheme === 'untitled' && !untitledBefore.has(document.uri.toString())) untitledOpened = true; });
+      // Up to five attempts, each with focus settled and a longer wait for the list to filter: opening an untitled file is safe to repeat, and the step
+      // only has to show the palette CAN run a command. A build whose palette cannot be driven at all still fails here, after the last attempt.
+      let controlAttempts = 0;
+      try {
+        controlAttempts = await runFromPalette('File: New Untitled Text File', () => untitledOpened, 8_000, 5);
+      } finally {
+        opened.dispose();
+      }
+      assert.ok(untitledOpened, `the Command Palette did not run File: New Untitled Text File in ${controlAttempts} attempts, so the harness cannot drive the palette in this VS Code build`);
       if (controlAttempts > 1) console.log(`  palette control step needed ${controlAttempts} attempts`);
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 

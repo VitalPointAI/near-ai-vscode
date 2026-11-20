@@ -11,15 +11,38 @@
 //   REVIEW_MODEL_API_KEY   a NEAR AI Cloud key
 //   REVIEW_MODEL           the model id to ask
 //
+// A review in parts (scripts/lib/auto-review.mjs) shares one time budget and one pool of retries
+// across its calls, and passes each call its share:
+//   REVIEW_DEADLINE        epoch milliseconds by which this call must have ended, every attempt
+//   REVIEW_MAX_ATTEMPTS    attempts this call may make (1 to MAX_CALL_ATTEMPTS)
+//   REVIEW_ATTEMPTS_FILE   where the number of attempts made is written, so the caller can count them
+//
 // It is deliberately a plain fetch rather than a dependency: this repository keeps its runtime
 // dependency list empty, and one POST to an OpenAI-compatible endpoint needs nothing else.
-import { readFileSync } from 'node:fs';
-import { SYSTEM_PROMPT } from './lib/ci-review.mjs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { MAX_CALL_ATTEMPTS, SYSTEM_PROMPT } from './lib/ci-review.mjs';
 import { fail, parseArgs } from './lib/gh.mjs';
 
 const usage = 'usage: ci-review-call.mjs <prompt.md>';
 
-const MAX_ATTEMPTS = 3;
+function maxAttempts() {
+  const raw = process.env.REVIEW_MAX_ATTEMPTS;
+  if (raw === undefined || raw === '') return MAX_CALL_ATTEMPTS;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > MAX_CALL_ATTEMPTS) fail(`REVIEW_MAX_ATTEMPTS must be a whole number from 1 to ${MAX_CALL_ATTEMPTS}.`);
+  return value;
+}
+
+/** The epoch milliseconds every attempt must end by, or Infinity when no deadline was given. */
+function deadline() {
+  const raw = process.env.REVIEW_DEADLINE;
+  if (raw === undefined || raw === '') return Infinity;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) fail('REVIEW_DEADLINE must be a time in epoch milliseconds.');
+  return value;
+}
+
+const OUT_OF_BUDGET = 'the review ran out of its time budget';
 
 /** The key goes only to https, or to plain http on this machine (tests, a local proxy). */
 function isAllowedEndpoint(value) {
@@ -151,7 +174,9 @@ function describe(error) {
   return detail && error.message === 'fetch failed' ? `fetch failed (${detail})` : error.message;
 }
 
-async function call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds }) {
+async function call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds, endBy = Infinity }) {
+  const left = endBy - Date.now();
+  if (left <= 0) throw new FinalError(OUT_OF_BUDGET);
   const controller = new AbortController();
   let stopped;
   const stop = (error) => { stopped ??= error; controller.abort(error); };
@@ -160,7 +185,10 @@ async function call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds 
     clearTimeout(idle);
     idle = setTimeout(() => stop(new Error(`the model went quiet for ${duration(idleSeconds)} (nothing arrived)`)), idleSeconds * 1000);
   };
-  const total = setTimeout(() => stop(new FinalError(`the review took longer than ${duration(totalSeconds)}, the most it is allowed`)), totalSeconds * 1000);
+  // Whichever comes first: this call's own cap, or the end of the review's shared budget.
+  const total = left < totalSeconds * 1000
+    ? setTimeout(() => stop(new FinalError(OUT_OF_BUDGET)), left)
+    : setTimeout(() => stop(new FinalError(`the review took longer than ${duration(totalSeconds)}, the most it is allowed`)), totalSeconds * 1000);
   alive();
   try {
     return await ask(prompt, { baseUrl, apiKey, model }, controller.signal, alive);
@@ -223,11 +251,21 @@ try {
   const idleSeconds = seconds('REVIEW_IDLE_SECONDS', DEFAULT_IDLE_SECONDS);
   const totalSeconds = seconds('REVIEW_TOTAL_SECONDS', DEFAULT_TOTAL_SECONDS);
 
+  const attempts = maxAttempts();
+  const endBy = deadline();
+  const attemptsFile = process.env.REVIEW_ATTEMPTS_FILE;
+
   const prompt = readFileSync(promptPath, 'utf8');
   let lastError;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  let made = 0;
+  // Written before every attempt, so the caller counts an attempt even if this process dies in it.
+  const count = () => { if (attemptsFile) writeFileSync(attemptsFile, String(made), { mode: 0o600 }); };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      process.stdout.write(`${await call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds })}\n`);
+      if (endBy - Date.now() <= 0) throw new FinalError(OUT_OF_BUDGET);
+      made = attempt;
+      count();
+      process.stdout.write(`${await call(prompt, { baseUrl, apiKey, model, idleSeconds, totalSeconds, endBy })}\n`);
       process.exit(0);
     } catch (error) {
       lastError = new Error(describe(error));
@@ -237,7 +275,7 @@ try {
       // way three times.
       console.error(`attempt ${attempt} failed: ${lastError.message}`);
       if (/HTTP 4\d\d/.test(lastError.message) && !/HTTP (408|429)\b/.test(lastError.message)) break;
-      if (attempt < MAX_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
     }
   }
   fail(`the review model could not produce a review: ${lastError?.message ?? 'unknown error'}`);

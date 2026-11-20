@@ -754,7 +754,8 @@
     const thinking = node.dataset.activity === 'Thinking' || node.dataset.activity === 'Writing';
     node.textContent = node.dataset.activity + (thinking ? ' (' + clock(now - Number(node.dataset.since)) + ')' : '') + (node.dataset.after ? ' after ' + node.dataset.after : '') + ' · ' + clock(now - Number(node.dataset.startedAt)) + ' · ' + node.dataset.counts;
   }
-  function renderAgents(agents) {
+  // `team`: the host says this run leads or works with a team; only then are the team dots and Watch the team shown (a run with no team has none).
+  function renderAgents(agents, team) {
     agentPanel.hidden = !agents.length;
     if (!agents.length) { agentPanel.replaceChildren(); return; }
     const list = el('ul');
@@ -782,7 +783,8 @@
           ? textButton('Resume', () => post({ type: 'agent-control', agentId: agent.id, action: 'resume' }))
           : textButton('Pause', () => post({ type: 'agent-control', agentId: agent.id, action: 'pause' })),
         // 0.4.19: a run waiting on CI or a review can be told to look again now, instead of the person waiting out a poll they can already see is stale.
-        textButton('Check now', () => post({ type: 'agent-control', agentId: agent.id, action: 'nudge' })),
+        // An agent still waiting for a slot has nothing to check yet.
+        ...(agent.state === 'queued' ? [] : [textButton('Check now', () => post({ type: 'agent-control', agentId: agent.id, action: 'nudge' }))]),
         textButton('Stop', () => post({ type: 'agent-control', agentId: agent.id, action: 'stop' }))
       );
       item.append(body, controls);
@@ -790,11 +792,14 @@
     });
     agentClock ??= setInterval(() => { const rows = agentPanel.querySelectorAll('.agent-status'); if (!rows.length) { clearInterval(agentClock); agentClock = undefined; } rows.forEach(updateAgentStatus); }, 1000);
     const title = el('div', 'todo-title');
-    title.append(panelToggle(list, 'agents-list', 'agentsCollapsed', `Agents running · ${agents.length}`, 'running agents'), ' ', textButton('Activity', () => post({ type: 'open-activity' })));
-    agentPanel.replaceChildren(title, teamPulse(agents), list);
+    // Queued agents are listed too (with their own dot), and counted apart from the ones running.
+    const queued = agents.filter((agent) => agent.state === 'queued').length;
+    const running = agents.length - queued;
+    title.append(panelToggle(list, 'agents-list', 'agentsCollapsed', `Agents running · ${running}` + (queued ? ` · ${queued} queued` : ''), 'running agents'), ' ', textButton('Activity', () => post({ type: 'open-activity' })));
+    agentPanel.replaceChildren(...(team ? [title, teamPulse(agents), list] : [title, list]));
   }
 
-  // 0.4.28: a row of state dots, one per running agent (the lead's own state is in the chat itself), and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
+  // 0.4.28: a row of state dots, one per running or queued agent (the lead's own state is in the chat itself), and "Watch the team", which opens Team Live. Each dot has its state in words for a screen reader and
   // as a tooltip; its shape changes with the state, so colour is never the only sign. Nothing moves here.
   // The host sends each agent's state as a word (review of PR 72); the page never reads it back from the activity wording.
   const DOT_WORDS = { paused: 'paused', 'needs-you': 'needs you', queued: 'queued', waiting: 'waiting for helpers', working: 'working' };
@@ -1618,7 +1623,7 @@
       }
       case 'agents':
         status.textContent = /Agents \d+/.test(status.textContent) ? status.textContent.replace(/Agents \d+/, 'Agents ' + m.count) : status.textContent;
-        renderAgents(m.agents || []);
+        renderAgents(m.agents || [], m.team === true);
         break;
       case 'context':
         contextLeft = m.level === 'normal' ? undefined : m.remainingPercent;

@@ -75,12 +75,18 @@
   const SECTIONS = ['j2', 'j5', 'j3', 'j4'];
   const TEAM_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-  /** The host's list, checked before anything is drawn: only the four sections, each in a known state, and team names in the library's form. */
+  /**
+   * The host's list, checked before anything is drawn: only the four sections, each in a known state, and team names in the library's form. A section
+   * not set up keeps only the library teams it could link (`candidates`) that are strings in that form, at most two; anything else in that field (not an
+   * array, a number, a name not in the form) is dropped, so the renderer only ever sees an array of team names.
+   */
   function staffModel(value) {
     if (!value || typeof value !== 'object' || !Array.isArray(value.sections)) return undefined;
     const sections = value.sections.filter((entry) => entry && typeof entry === 'object' && SECTIONS.includes(entry.section)
       && ['ready', 'missing', 'none'].includes(entry.state) && typeof entry.code === 'string' && typeof entry.role === 'string'
-      && (entry.state === 'none' || (typeof entry.team === 'string' && TEAM_NAME.test(entry.team))));
+      && (entry.state === 'none' || (typeof entry.team === 'string' && TEAM_NAME.test(entry.team))))
+      .map((entry) => ({ ...entry, candidates: entry.state === 'none' && Array.isArray(entry.candidates)
+        ? entry.candidates.filter((team) => typeof team === 'string' && TEAM_NAME.test(team)).slice(0, 2) : [] }));
     return { sections, problem: typeof value.problem === 'string' ? value.problem : '' };
   }
 
@@ -122,7 +128,7 @@
     const notSetUp = [];
     for (const entry of model.sections) {
       const name = entry.code + ' ' + entry.role.toLowerCase();
-      if (entry.state === 'none' && !(Array.isArray(entry.candidates) && entry.candidates.length)) { notSetUp.push(entry); continue; }
+      if (entry.state === 'none' && !entry.candidates.length) { notSetUp.push(entry); continue; }
       const item = make('li', 'staff-team s-' + entry.state);
       item.append(make('strong', '', entry.code));
       if (entry.state === 'ready') {
@@ -134,7 +140,7 @@
         item.append(make('span', 'staff-team-name', entry.team), make('span', 'staff-team-missing', STAFF_TEXT.missing));
         item.append(button(STAFF_TEXT.setUpAgain, 'text-button', 'setup-' + entry.section, () => post({ type: 'staff-teams', action: 'set-up', section: entry.section }), 'Set up the ' + name + ' team again'));
       } else {
-        const candidates = entry.candidates.filter((team) => typeof team === 'string' && TEAM_NAME.test(team)).slice(0, 2);
+        const candidates = entry.candidates;
         item.append(make('span', 'staff-team-missing', STAFF_TEXT.found + candidates.join(', ')));
         for (const team of candidates) item.append(button(STAFF_TEXT.link + ' ' + team, 'text-button', 'link-' + entry.section + '-' + team, () => post({ type: 'staff-teams', action: 'link', section: entry.section, team: team }), 'Link ' + team + ' as this project\'s ' + name + ' team'));
         item.append(button(STAFF_TEXT.setUp, 'link', 'setup-' + entry.section, () => post({ type: 'staff-teams', action: 'set-up', section: entry.section }), 'Set up a new ' + name + ' team'));

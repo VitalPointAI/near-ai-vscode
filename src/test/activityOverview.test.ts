@@ -254,3 +254,13 @@ test('0.4.28: Agent Activity\'s "Watch the team" asks for Team Live, and Now sho
   // 0.4.28 (review of PR 72): a started agent names who started it; the run's own agent names nobody.
   assert.deepEqual(nowRows(live).map((row) => row.startedBy), [undefined, 'agent']);
 });
+test('Agent Activity offers Watch the team for a run with a team, even while its lead works alone, and never for a run without one', () => {
+  const main = (runId: string, team?: string) => ({ agentId: `main-${runId}`, agent: 'agent', runId, model: 'm', status: 'running', phase: 'thinking', phaseSince: 0, startedAt: 1, turns: 0, toolCalls: 0, ...(team ? { team } : {}) });
+  // A team run whose lead has not started anyone yet.
+  assert.deepEqual(nowRows([main('run-a', 'web')] as never).map((row) => row.team), [true]);
+  // A run with no team that started a helper.
+  const helper = { agentId: 'gsd-planner-abc123', agent: 'gsd-planner', runId: 'run-b', parentId: 'main-run-b', model: 'm', status: 'running', phase: 'thinking', phaseSince: 0, startedAt: 2, turns: 0, toolCalls: 0 };
+  assert.deepEqual(nowRows([main('run-b'), helper] as never).map((row) => row.team), [undefined, undefined]);
+  const script = readFileSync(path.join(__dirname, '..', '..', 'media', 'activity', 'activity.js'), 'utf8');
+  assert.match(script, /\$\('watch-team'\)\.hidden = !running\.some\(\(agent\) => agent\.team\)/);
+});

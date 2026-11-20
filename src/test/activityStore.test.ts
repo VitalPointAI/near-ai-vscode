@@ -83,6 +83,23 @@ test('activity store persists rich operational metadata without raw runtime outp
   assert.doesNotMatch(serialized, /authorization=secret|raw command output|private prompt/);
 });
 
+test('activity store redacts an Agent call description and role at write time, and again when an older file is read', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-action-'));
+  const store = new ActivityStore(root);
+  const session = await store.start({ sessionId: 'session-action-001', project: 'demo' });
+  const key = 'sk-' + 'a'.repeat(32);
+  await store.append(session.sessionId, { status: 'running', kind: 'agent', agentId: 'researcher-aaa111', agentRole: `researcher api_key=${key}`, action: `Call the API with api_key=${key} and token ${key}`, summary: 'Sub-agent researcher started.' });
+  await store.flush();
+  const file = path.join(root, '.planning', '.near-ai', 'activity.json');
+  const serialized = await readFile(file, 'utf8');
+  assert.doesNotMatch(serialized, new RegExp(key), 'the description is redacted before it is written');
+  assert.match(serialized, /Call the API with api_key=\[REDACTED\]/);
+  // A file written before the fix still holds the raw text: it is redacted when read.
+  await writeFile(file, serialized.replace('Call the API with api_key=[REDACTED]', `Call the API with api_key=${key}`));
+  const reread = await new ActivityStore(root).get(session.sessionId);
+  assert.doesNotMatch(JSON.stringify(reread), new RegExp(key));
+});
+
 test('activity snapshots host attribution and appends provider reconciliation without relabelling history', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-activity-attribution-'));
   const attribution = hostAttribution('project-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'Workspace A', 'profile-company-a', 'Company A');

@@ -235,7 +235,62 @@ test('moving a stray merged copy aside is a byte operation: binary and large str
   const retried = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
   assert.ok(retried.ok, retried.text);
   assert.deepEqual((await readdir(path.dirname(kept))).filter((entry) => entry.startsWith(`${name}.stray-`)), [`${name}.stray-2026-01-01T00-00-00-000Z`], 'no second aside copy');
-  assert.ok(retried.text.includes(`moved to .planning/staff/proposals/cop-threat-layer/merged/${name}.stray-2026-01-01T00-00-00-000Z`), retried.text);
+  // The result says what happened: the older aside copy was reused, not a fresh move to it (#121 review).
+  assert.ok(retried.text.includes(`the same bytes were already kept aside at .planning/staff/proposals/cop-threat-layer/merged/${name}.stray-2026-01-01T00-00-00-000Z (an older aside copy, reused)`), retried.text);
+  assert.doesNotMatch(retried.text, /it was moved to/);
+});
+
+test('moving a stray merged copy aside gives up with a plain refusal after 50 names are taken, and moves nothing', async () => {
+  const made = await world();
+  const proposed = await call(made, J2_TEAM, 'propose', { layer: 'cop-threat-layer', summary: 'Small craft', features: [{ id: 'u-1', kind: 'symbol', name: 'U-1', sidc: '10013000000000000000', at: 'KQ 4142' }] }, 'watch-officer');
+  assert.ok(proposed.ok, proposed.text);
+  const folder = path.join(made.root, '.planning/staff/proposals/cop-threat-layer');
+  const [name] = (await readdir(folder)).filter((entry) => entry.endsWith('.json'));
+  const kept = path.join(folder, 'merged', name);
+  await mkdir(path.dirname(kept), { recursive: true });
+  await writeFile(kept, 'a person\'s copy\n');
+  const stamp = '2026-11-18T12-00-00-000Z';
+  for (let n = 1; n <= 50; n += 1) await writeFile(`${kept}.stray-${stamp}${n === 1 ? '' : `-${n}`}`, `aside ${n}\n`);
+  const refused = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal: name.replace(/\.json$/, '') }, 'threat-analyst');
+  assert.equal(refused.ok, false);
+  assert.match(refused.text, /could not be moved aside: 50 aside copies named .+ are already there, so nothing was moved or overwritten/, refused.text);
+  assert.doesNotMatch(refused.text, /EEXIST/);
+  assert.equal(await readFile(kept, 'utf8'), 'a person\'s copy\n', 'the copy stays as it was');
+  assert.ok((await readdir(folder)).includes(name), 'the proposal stays');
+  assert.equal((await readdir(path.dirname(kept))).filter((entry) => entry.startsWith(`${name}.stray-`)).length, 50, 'no 51st aside copy');
+});
+
+test('a stray copy changed while the merge ran is not restored under the kept name, so the next merge is not blocked by wrong bytes', async () => {
+  const made = await world();
+  const proposed = await call(made, J2_TEAM, 'propose', { layer: 'cop-threat-layer', summary: 'Small craft', features: [{ id: 'u-1', kind: 'symbol', name: 'U-1', sidc: '10013000000000000000', at: 'KQ 4142' }] }, 'watch-officer');
+  assert.ok(proposed.ok, proposed.text);
+  const folder = path.join(made.root, '.planning/staff/proposals/cop-threat-layer');
+  const [name] = (await readdir(folder)).filter((entry) => entry.endsWith('.json'));
+  const proposal = name.replace(/\.json$/, '');
+  const kept = path.join(folder, 'merged', name);
+  const aside = `${kept}.stray-2026-11-18T12-00-00-000Z`;
+  const layerFile = path.join(made.root, layerPath('cop-threat-layer'));
+  await mkdir(path.dirname(kept), { recursive: true });
+  await writeFile(kept, 'an earlier copy\n');
+  // The layer refuses the merge, and while the merge writes its kept copy a person edits the aside copy: the restore finds other bytes than it moved.
+  await mkdir(path.dirname(layerFile), { recursive: true });
+  await writeFile(layerFile, '```geojson\n{ not json\n```\n');
+  let edited = false;
+  setCasProbe(async (point, file) => { if (file === kept && point === 'before-temp' && !edited) { edited = true; await writeFile(aside, 'a person\'s edit of the aside copy\n'); } });
+  let refused;
+  try { refused = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal }, 'threat-analyst'); } finally { setCasProbe(undefined); }
+  assert.equal(refused.ok, false);
+  assert.ok(edited, 'the probe ran');
+  assert.match(refused.text, /which was changed during the merge, so it was not put back under/, refused.text);
+  assert.equal(await readFile(aside, 'utf8'), 'a person\'s edit of the aside copy\n', 'the person\'s bytes are kept');
+  await assert.rejects(readFile(kept), { code: 'ENOENT' }, 'no wrong copy sits under the kept name');
+  assert.deepEqual((await readdir(path.dirname(kept))).filter((entry) => entry.startsWith(`${name}.stray-`)), [path.basename(aside)], 'no duplicate aside copy');
+  // With the layer readable again the next merge goes straight through.
+  await rm(layerFile);
+  const merged = await call(made, J2_TEAM, 'merge', { layer: 'cop-threat-layer', proposal }, 'threat-analyst');
+  assert.ok(merged.ok, merged.text);
+  assert.match(await readFile(kept, 'utf8'), /Small craft/);
+  assert.doesNotMatch(merged.text, /A different copy was already/);
 });
 
 test('feed layers take no features from anyone, and a settings change goes to their settings owner as a proposal', async () => {

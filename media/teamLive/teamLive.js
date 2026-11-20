@@ -113,7 +113,7 @@
     $('empty').hidden = Boolean(view);
     $('stage').hidden = !view;
     $('restored').hidden = !restored;
-    if (!view) { $('card').hidden = true; return; }
+    if (!view) { $('card').hidden = true; stopClock(); return; }
     const ids = new Set(view.nodes.map((item) => item.id));
     for (const [id, card] of cards) if (!ids.has(id)) { card.root.remove(); cards.delete(id); }
     for (const item of view.nodes) updateCard(item);
@@ -144,10 +144,10 @@
   function renderHeader() {
     setText($('title'), view ? view.title : 'Team Live');
     setText($('run-state'), view ? view.summary : '');
-    const live = runs.filter((run) => run.running);
+    // Offered whenever there is another run to show, finished ones too: the last finished run stays reachable while another team run is live.
     const picker = $('run');
-    $('run-picker').hidden = live.length < 2;
-    if (live.length >= 2) {
+    $('run-picker').hidden = runs.length < 2;
+    if (runs.length >= 2) {
       picker.replaceChildren(...runs.map((run) => { const option = el('option', '', run.title + (run.running ? '' : ' (ended)')); option.value = run.runId; option.selected = run.runId === runId; return option; }));
     }
   }
@@ -467,8 +467,10 @@
     announceTimer = setTimeout(() => { announceTimer = undefined; $('announce').textContent = announced.join(' '); announced = []; }, 400);
   }
 
+  function stopClock() { if (clock) { clearInterval(clock); clock = undefined; } }
+
   function tick() {
-    if (!view) return;
+    if (!view) { stopClock(); return; }
     const at = now();
     let running = false;
     for (const item of view.nodes) {
@@ -479,7 +481,7 @@
       else setText(card.elapsed, '');
       if (!ended && item.state !== 'bench') running = true;
     }
-    if (!running && clock) { clearInterval(clock); clock = undefined; }
+    if (!running) stopClock();
   }
 
   window.addEventListener('message', (event) => {
@@ -488,6 +490,8 @@
     if (message.type === 'layout-probe' && window.nearAiLayoutProbe) { vscode.postMessage(window.nearAiLayoutProbe()); return; }
     if (message.type === 'team-live') render(message);
   });
+  // The page going away (closed, or unloaded while hidden) leaves no clock or pending announcement behind.
+  window.addEventListener('pagehide', () => { stopClock(); if (announceTimer) { clearTimeout(announceTimer); announceTimer = undefined; } cancelAll(); });
   applyToggles();
   vscode.postMessage({ type: 'ready' });
 })();

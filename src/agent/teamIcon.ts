@@ -56,9 +56,79 @@ export function looksLikeSvg(bytes: Uint8Array): boolean {
 /** Why a picture chosen with Upload is refused, in plain words, or undefined when the page may turn it into an icon. */
 export function iconSourceProblem(bytes: Uint8Array): string | undefined {
   if (bytes.length > MAX_ICON_SOURCE_BYTES) return 'The image is larger than 2 MB. Choose a smaller one.';
-  if (iconSourceType(bytes)) return undefined;
+  if (iconSourceType(bytes)) return iconPixelProblem(bytes);
   if (looksLikeSvg(bytes)) return 'SVG images can carry scripts, so they are not accepted. Use a PNG, JPEG or WebP image.';
   return 'That file is not an image the studio can use. Use a PNG, JPEG or WebP image.';
+}
+
+/**
+ * The most pixels a picture may have before the page decodes it (createImageBitmap), and the longest side. A few kilobytes of PNG or WebP can describe a
+ * picture of hundreds of millions of pixels, which decoding would turn into gigabytes (a decompression bomb), so the size its header states is checked
+ * here, before the page is ever sent it. A phone photo (4032 x 3024) and an image model's picture (1024 x 1024, 1792 x 1024) are well within it.
+ */
+export const MAX_ICON_SOURCE_PIXELS = 4096 * 4096;
+export const MAX_ICON_SOURCE_SIDE = 8192;
+
+/** Why a PNG, JPEG or WebP picture is too large to decode, or has no size its header states, in plain words; undefined when it may be decoded. */
+export function iconPixelProblem(bytes: Uint8Array): string | undefined {
+  const size = iconSourceSize(bytes);
+  if (!size) return 'The image is damaged: its size cannot be read. Choose another one.';
+  if (size.width > MAX_ICON_SOURCE_SIDE || size.height > MAX_ICON_SOURCE_SIDE || size.width * size.height > MAX_ICON_SOURCE_PIXELS) {
+    return `The image is ${size.width} x ${size.height} pixels, which is too large to make an icon from. Choose one of at most ${MAX_ICON_SOURCE_PIXELS / 1024 / 1024} megapixels.`;
+  }
+  return undefined;
+}
+
+/**
+ * The width and height a PNG, JPEG or WebP picture's header states, or undefined when the header cannot be read (or states a zero size). Read from the
+ * bytes only, without decoding the picture.
+ */
+export function iconSourceSize(bytes: Uint8Array): { width: number; height: number } | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const sized = (width: number, height: number) => (width > 0 && height > 0 ? { width, height } : undefined);
+  const type = iconSourceType(bytes);
+  if (type === 'image/png') {
+    // The first chunk is always IHDR: its width and height are the first eight bytes of its data.
+    if (bytes.length < 24 || ascii(bytes, 12, 16) !== 'IHDR') return undefined;
+    return sized(view.getUint32(16), view.getUint32(20));
+  }
+  if (type === 'image/jpeg') {
+    // Walk the markers to the first start-of-frame (SOF0 to SOF15, except DHT, JPG and DAC), which holds the frame's height then width.
+    let offset = 2;
+    while (offset + 4 <= bytes.length) {
+      if (bytes[offset] !== 0xff) return undefined;
+      const marker = bytes[offset + 1]!;
+      if (marker === 0xff) { offset += 1; continue; }
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { offset += 2; continue; }
+      if (marker === 0xd9 || marker === 0xda) return undefined;
+      const length = view.getUint16(offset + 2);
+      if (length < 2) return undefined;
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        if (offset + 9 > bytes.length || length < 7) return undefined;
+        return sized(view.getUint16(offset + 7), view.getUint16(offset + 5));
+      }
+      offset += 2 + length;
+    }
+    return undefined;
+  }
+  if (type === 'image/webp') {
+    if (bytes.length < 30) return undefined;
+    const chunk = ascii(bytes, 12, 16);
+    // Extended: the canvas size, 24 bits each, stored less one.
+    if (chunk === 'VP8X') return sized(1 + (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16)), 1 + (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16)));
+    // Lossless: a signature byte, then 14 bits each, stored less one.
+    if (chunk === 'VP8L') {
+      if (bytes[20] !== 0x2f) return undefined;
+      const bits = view.getUint32(21, true);
+      return sized(1 + (bits & 0x3fff), 1 + ((bits >>> 14) & 0x3fff));
+    }
+    // Lossy: a key frame's start code, then 14 bits each.
+    if (chunk === 'VP8 ') {
+      if (bytes[23] !== 0x9d || bytes[24] !== 0x01 || bytes[25] !== 0x2a) return undefined;
+      return sized(view.getUint16(26, true) & 0x3fff, view.getUint16(28, true) & 0x3fff);
+    }
+  }
+  return undefined;
 }
 
 // The chunks an icon may hold: the picture itself and notes on how to show its colours. Text, Exif and anything else could carry data the person did

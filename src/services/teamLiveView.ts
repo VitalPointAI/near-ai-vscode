@@ -163,13 +163,15 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
   let previous: TeamLiveView | undefined;
   let lastJson = '';
   let openCard: string | undefined;
+  /** The panel closed: a send still reading the history posts nothing. */
+  let disposed = false;
   let excerpt: { agentId: string; text?: string; at: number } | undefined;
   const teams = new Map<string, TeamDefinition | undefined>();
   const post = (message: Record<string, unknown>) => { teamLiveTap.toView?.(message); void view.webview.postMessage(message); };
   const historyTeam = async (title: string | undefined): Promise<TeamDefinition | undefined> => {
     const slug = title ? TEAM_COMMAND.exec(title)?.[1] : undefined;
     if (!slug) return undefined;
-    if (!teams.has(slug)) teams.set(slug, await new TeamLibrary(teamLibraryDir(homeFolder())).find(slug, root).catch(() => undefined));
+    if (!teams.has(slug)) teams.set(slug, await new TeamLibrary(teamLibraryDir(homeFolder())).findRunTeam(slug, root).catch(() => undefined));
     return teams.get(slug);
   };
   const send = async () => {
@@ -200,9 +202,20 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
     const { message, view: next } = teamLiveMessage({ stats: source, runs, ...(run ? { runId: run.runId } : {}), ...(team ? { team } : {}), previous, ...(openCard && excerpt ? { excerpt } : {}), restored });
     previous = next;
     const json = JSON.stringify({ ...message, now: 0 });
-    if (json === lastJson) return;
+    if (json === lastJson || disposed) return;
     lastJson = json;
     post(message);
+  };
+  // One send at a time (it awaits the history after a reload): a send asked for while one runs is made once that one has posted, so an older picture never
+  // arrives after a newer one and `previous` always matches what the page last drew.
+  let sending: Promise<void> | undefined;
+  let again = false;
+  const sendNow = (): Promise<void> => {
+    if (sending) { again = true; return sending; }
+    sending = (async () => {
+      try { do { again = false; await send(); } while (again && subscription && !disposed); } finally { sending = undefined; }
+    })();
+    return sending;
   };
   // Discrete changes at once (a few milliseconds, so a burst goes as one); the rest at most every STATS_MS.
   const schedule = () => {
@@ -210,14 +223,14 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
     const wait = urgent ? DISCRETE_MS : Math.max(0, STATS_MS - (Date.now() - lastSent));
     if (timer && !urgent) return;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void send(), wait);
+    timer = setTimeout(() => void sendNow(), wait);
   };
   const start = () => {
     if (subscription) return;
     subscription = feed.subscribe(() => schedule());
     previous = undefined;
     lastJson = '';
-    void send();
+    void sendNow();
   };
   const stop = () => {
     subscription?.dispose();
@@ -225,7 +238,7 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
     if (timer) clearTimeout(timer);
     timer = undefined;
   };
-  selectRun = (runId) => { wantedRun = runId; previous = undefined; lastJson = ''; if (subscription) void send(); };
+  selectRun = (runId) => { wantedRun = runId; previous = undefined; lastJson = ''; if (subscription) void sendNow(); };
   // Hidden: stop listening. Shown again: a page VS Code kept alive sends no "ready", so the host restarts the feed itself (review of PR 72).
   view.onDidChangeViewState((event) => { if (!event.webviewPanel.visible) stop(); else start(); }, undefined, context.subscriptions);
   view.webview.onDidReceiveMessage(async (raw: unknown) => {
@@ -234,7 +247,7 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
     if (!message) return;
     if (message.type === 'ready') { stop(); if (view.visible) start(); }
     else if (message.type === 'select-run') selectRun?.(message.runId);
-    else if (message.type === 'open-card') { openCard = message.agentId; excerpt = undefined; if (subscription) void send(); }
+    else if (message.type === 'open-card') { openCard = message.agentId; excerpt = undefined; if (subscription) void sendNow(); }
     else if (message.type === 'agent-control') {
       // As in Agent Activity: the main agent has no pause; stopping it stops its run's own conversation.
       if (message.agentId.startsWith('main-')) { if (message.action === 'stop') { const conversationId = feed.agentStat(message.agentId)?.conversationId; await chat?.request({ type: 'stop', ...(conversationId ? { conversationId } : {}) }); } }
@@ -244,7 +257,8 @@ export function openTeamLive(context: vscode.ExtensionContext, runId?: string): 
     else if (message.type === 'show-in-chat') await vscode.commands.executeCommand('nearAi.openChat');
     else if (message.type === 'open-activity') await vscode.commands.executeCommand('nearAi.openAgentActivity', message.agentId);
   }, undefined, context.subscriptions);
-  view.onDidDispose(() => { stop(); panel = undefined; selectRun = undefined; }, undefined, context.subscriptions);
+  // Closed: no timer is left running and a send still reading the history posts nothing.
+  view.onDidDispose(() => { disposed = true; stop(); panel = undefined; selectRun = undefined; }, undefined, context.subscriptions);
 }
 
 export function teamLiveHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspSource'>, media: vscode.Uri): string {

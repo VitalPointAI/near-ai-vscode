@@ -95,6 +95,7 @@ test('J2 and J5 members get the staff tools by role; no member can be granted a 
         assert.equal(has('submit'), member.name === 'lead-planner', `${member.name}: only the integrator submits`);
         assert.equal(has('step'), member.name === 'lead-planner', `${member.name}: the lead marks the step`);
         assert.equal(has('wargame'), ['lead-planner', 'plans-writer'].includes(member.name), `${member.name}: the controller and the recorder run the wargame ledger`);
+        assert.equal(has('wargame_read'), has('wargame'), `${member.name}: whoever writes the wargame ledger can also read it`);
       }
     }
   }

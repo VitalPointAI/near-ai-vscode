@@ -25,7 +25,7 @@ const PRIORITY: LiveState[] = ['needs-you', 'failed', 'working', 'waiting-agents
 
 /** What the view needs from one agent's statistics (AgentStats, or the same rebuilt from the project's history after a reload). */
 export type LiveAgentStat = Pick<AgentStats, 'agentId' | 'agent' | 'runId' | 'model' | 'status' | 'phase' | 'startedAt' | 'turns' | 'toolCalls' | 'costUsd'> &
-  Partial<Pick<AgentStats, 'parentId' | 'endedAt' | 'boundary' | 'tool' | 'task' | 'member' | 'background' | 'team' | 'waitingKind' | 'coolUntil' | 'coolReason' | 'reportsDelivered' | 'approvals' | 'phaseSince' | 'modelNote' | 'failReason'>> &
+  Partial<Pick<AgentStats, 'parentId' | 'endedAt' | 'boundary' | 'tool' | 'task' | 'member' | 'background' | 'team' | 'waitingKind' | 'coolUntil' | 'coolReason' | 'reportsDelivered' | 'approvals' | 'phaseSince' | 'modelNote' | 'failReason' | 'neverStarted'>> &
   { interrupted?: boolean };
 
 /**
@@ -95,6 +95,8 @@ export interface LiveInstance {
   endedAt?: number;
   /** Whether it handed back a report: finished, failed, or stopped short (turn limit, no progress), not stopped by a person. */
   reports: boolean;
+  /** It was stopped while it waited for a slot, so nothing was ever handed to it. */
+  neverStarted?: boolean;
 }
 
 export interface LiveNode {
@@ -184,7 +186,8 @@ export function buildTeamLive(input: { runId: string; stats: LiveAgentStat[]; te
     const stat = byId.get(agentId);
     if (!stat || seen.has(agentId)) return 'lead';
     seen.add(agentId);
-    const id = members.includes(stat.agent) ? `m:${stat.agent}` : stat.agent === 'general-purpose' ? `g:${stat.agentId}` : `g:${cardOf(stat.parentId, seen)}>${stat.agent}`;
+    // A member's card is for the member: an agent of the same name the feed knows is not one (a project agent that took the name) is a helper.
+    const id = members.includes(stat.agent) && stat.member !== false ? `m:${stat.agent}` : stat.agent === 'general-purpose' ? `g:${stat.agentId}` : `g:${cardOf(stat.parentId, seen)}>${stat.agent}`;
     nodeOf.set(agentId, id);
     return id;
   };
@@ -286,7 +289,7 @@ export function buildTeamLive(input: { runId: string; stats: LiveAgentStat[]; te
 }
 
 function instance(stat: LiveAgentStat, state: LiveState, from: string, reports: boolean): LiveInstance {
-  return { agentId: stat.agentId, state, ...(stat.task ? { task: stat.task } : {}), from, startedAt: stat.startedAt, ...(stat.endedAt ? { endedAt: stat.endedAt } : {}), reports };
+  return { agentId: stat.agentId, state, ...(stat.task ? { task: stat.task } : {}), from, startedAt: stat.startedAt, ...(stat.endedAt ? { endedAt: stat.endedAt } : {}), reports, ...(stat.neverStarted ? { neverStarted: true } : {}) };
 }
 
 /** The fields a card takes from the agents it stands for: the one in the most important state speaks for it; counters add up. */
@@ -376,7 +379,8 @@ export function teamLiveEvents(previous: TeamLiveView | undefined, next: TeamLiv
     for (const item of node.instances) {
       const was = before.get(item.agentId);
       const name = node.name;
-      const started = item.state !== 'queued';
+      // An agent stopped while it waited for a slot never got its task: no hand-off is drawn for it, only that it stopped.
+      const started = item.state !== 'queued' && !item.neverStarted;
       if ((!was || was.state === 'queued') && started) {
         events.push({ kind: 'delegate', from: item.from, to: node.id, agentId: item.agentId, ...(item.task ? { task: item.task } : {}) });
         if (!isTerminal(item.state)) events.push({ kind: 'announce', text: `${nameOf.get(item.from) ?? 'The lead'} handed ${name} ${item.task ? `a task: ${item.task}` : 'a task'}.` });
