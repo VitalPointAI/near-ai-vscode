@@ -2,6 +2,8 @@
 
 Date: 2026-11-18. Status: design with the owner's decisions of 2026-11-18 applied (all twelve questions in section 9.3 accepted as recommended) and terms verified against the owner's reference library (section 2.8). Nothing here is built yet.
 
+**Conforms to the coherence review (2026-11-20):** the agent lists are called the team, never the roster (roster means the signed list of people, Military mode only); the run's lead agent is the "coordinating agent"; the human section lead becomes a position, so `decision_for` and "Reports to" name positions and the team file never names a person (before multi-user the local person holds every position); approvals are signed by the person's device or credential, never "the policy key"; "private" means the gate's verified check through `decideRoute`, with the PRC-origin sentence, and staff templates move to "needs operational-work approval and verified private hardware or this computer" with Phase 74.1; staff setup becomes the staff step of Get Started (no "where may the models run" question, true step counts); exercise on fictional data is the only staff mode until your organization approves a model for operational work, and the exercise flag is a signed project-layer attribute; labels are shown as scale name plus level and ranked by the one label service over the active scale table; the per-server MCP ceiling is the v2 `agents.mcp.labelCeilings` key; the Staff Room is the staff layout of the one run view with the one trust line ("18 of 18 agents verified"); staff commands show only in staff projects; shared staff projects keep their settings on the replica layer; "Doctrine" and "model for the job" replace "doctrine profile" and "tier" on screens. Superseded text is kept with dated notes. See `.planning/research/coherence/REVIEW.md` (conflicts K7, K13, K15, K18, K23, K30, K34, K37, K38, K39; fixes S4, S5, S7, S8) and `GLOSSARY.md`.
+
 Inputs: research notes 00 (the earlier staff-cell prototype), 01 (agent exchange), 02 (J2), 03 (J3 and J4) and 05 (J5) in this folder; the extension's team runtime (`src/agent/teams.ts`, `teamCheck.ts`, `projectTypes.ts`, `teamTemplateHistory.ts`), its MCP client (`src/mcp/`) and the Phase 70 gate (`src/domain/gate/`). Notes 06 to 09 did not exist when this was written; where they land later they extend this design rather than replace it. Two public doctrine texts were read in full for this design and are cited directly: CFJP 5.0, The Canadian Forces Operational Planning Process, Change 2, April 2008 (B-GJ-005-500/FP-000, public on the Government of Canada publications site), and AJP-5, Allied Joint Doctrine for the Planning of Operations, Edition B Version 1 with UK national elements (public on the UK government publishing site). No passage of either is copied beyond short phrases. The owner then supplied a reference library (JP 5-0 of July 2025, a JP 3-0 extract, JP 1 Volume 1, JP 3-14, the Army War College AY26 Campaign Planning Handbook, and Canadian Army publications); section 2.8 lists them by title and edition and records what changed. Section 2.9 lists what they do not settle.
 
 Citations: "02 T12" means note 02, Table 12; "03 A11" means note 03, section A11; "05 T5" means note 05, Table 5; "00 s6" means note 00, section 6; "01 s4" means note 01, section 4. "CFJP 5.0 art. 404" and "AJP-5 3.50" cite the publications by article or paragraph.
@@ -11,11 +13,13 @@ Citations: "02 T12" means note 02, Table 12; "03 A11" means note 03, section A11
 ## 1. Key points first
 
 1. **Three doctrine profiles, not four.** Owner decision (2026-11-18): US Joint (JPP, JP 5-0), US Army (MDMP, FM 5-0) and NATO/Canadian (AJP-5 Edition B at strategic and operational level, APP-28 at tactical level). There is no separate "CAF OPP" profile. CFJP 5.0 (2008) stays as a reference column in the crosswalk for users who still meet it.
-2. **Levels are a second setting** (strategic, operational, tactical). Each profile allows some levels and picks the process: NATO/Canadian at tactical level runs APP-28; US Joint at tactical level is steered to US Army MDMP. Each section template has a roster per level.
-3. **Four section templates first, in demo order J2, J5, J3, J4**, each with 12 members (the hard limit), including one release-guard per team. Every product has exactly one drafting owner. No member has a persona name or a rank, and no member decides: the commander and other named humans approve.
-4. **One shared release state machine for every staff product**: draft, guard-checked, awaiting decision, approved or rejected, released. Only a named human moves a product from awaiting decision to approved. Agents cannot reach that transition at all, because the verb is not exposed as a tool.
-5. **Shared products have a single writer each** (COP layers, CCIR register, synchronization matrix, DST and DSM, RFI tracker, assessment plan). Other sections propose entries; the owner merges. This is the same "separate areas, then merge" rule the extension already gives every team lead.
-6. **Team of teams is a new extension feature.** A team file member may reference another team (`team:`) or borrow one member of another team (`uses:`). The referenced team runs as a nested team under its own lead, in its own worktree branch, with depth, privacy, consent and cost limits. It has its own state machine and tests. This is what makes a 9-section joint staff possible under the 12-member cap.
+2. **Levels are a second setting** (strategic, operational, tactical). Each profile allows some levels and picks the process: NATO/Canadian at tactical level runs APP-28; US Joint at tactical level is steered to US Army MDMP. Each section template has a team variant per level.
+3. **Four section templates first, in demo order J2, J5, J3, J4**, each with 12 agents (the hard limit), including one release-guard per team. Every product has exactly one drafting owner. No agent has a persona name or a rank, and no agent decides: the people posted to the deciding positions (the commander and others) approve.
+4. **One shared release state machine for every staff product**: draft, guard-checked, awaiting decision, approved or rejected, released. Only a person holding the deciding position moves a product from awaiting decision to approved. Agents cannot reach that transition at all, because the verb is not exposed as a tool.
+
+> **Coherence review (2026-11-20):** on screens the doctrine setting is called **Doctrine** (not "doctrine profile"); `staff.profile` and `PROFILE.md` keep their names in code and files, and this design keeps "profile" in its prose. A team's agents are "the team" or "the agents", never "the roster", because in Military mode the roster is the signed list of people. See `.planning/research/coherence/GLOSSARY.md`, section 4.
+5. **Shared products have a single writer each** (COP layers, CCIR register, synchronization matrix, DST and DSM, RFI tracker, assessment plan). Other sections propose entries; the owner merges. This is the same "separate areas, then merge" rule the extension already gives every team's coordinating agent.
+6. **Team of teams is a new extension feature.** A team file member may reference another team (`team:`) or borrow one member of another team (`uses:`). The referenced team runs as a nested team under its own coordinating agent, in its own worktree branch, with depth, privacy, consent and cost limits. It has its own state machine and tests. This is what makes a 9-section joint staff possible under the 12-member cap.
 7. **Tools.** The templates run today on built-in tools. New local tools (staff-products, cop-map with milsymbol, battle-rhythm, orders, intel-workbench, logstat, movement, consumption calculator, guard-scan) make products structured and checkable. Partner tools wait for one small gate change: a label ceiling per MCP server in the signed policy, plus fenced tool descriptions.
 8. **Demo data: TRADOC ODIN's DATE scenarios and the Worldwide Equipment Guide.** They are public and reachable without a login, and a 2021 TRADOC FOIA reply (seen through a secondary summary) says WEG content is approved for public release. No licence or terms page could be read, and ODIN now redirects to a new address. Recommendation: do not bundle ODIN files; link to them and ship our own small fictional starter scenario, until the owner has written confirmation.
 9. **Roadmap: ship as 0.4.x feature releases now, in three drops** (J2 and J5 with the shared mechanisms; J3 and J4 with the tool servers; team of teams and the full staff), before the remaining v0.5.0 governed-platform phases. The templates need none of Phases 71 to 74; partner MCP use waits for the per-server ceiling, which is a small Phase 70 follow-up.
@@ -36,6 +40,8 @@ Citations: "02 T12" means note 02, Table 12; "03 A11" means note 03, section A11
 | `staff.phases` | free list of phase names | Same | empty: the user names phases (03 A2; JP 5-0 2025 says phases are unique to each operation and the commander sets their number) |
 | `staff.planningType` | `campaign`, `contingency`, `crisis` (JP 5-0, 2025) | Same | `contingency`. `crisis` makes the J3 director the planning lead's decision-for role and allows JPP steps to run at the same time |
 
+> **Coherence review (2026-11-20):** on a single computer these settings stay in `project.json`. In a shared staff project they are project-stream entries on the replica layer (with the project label and the organization mode), so every member's computer reads the same signed values instead of an unsigned file carried by git. The exercise flag (section 7, item 9) is not one of these settings: it is a signed project-layer attribute. See `.planning/research/coherence/REVIEW.md`, conflicts K23 and K30.
+
 Valid combinations, and what each selects:
 
 | Profile | Strategic | Operational | Tactical |
@@ -44,7 +50,7 @@ Valid combinations, and what each selects:
 | US Army | Not offered | Not offered (an Army operational-level HQ in a joint fight uses JPP; offered as US Joint) | MDMP, corps to battalion; troop leading procedures below (05 s2) |
 | NATO/Canadian | AJP-5 Ed B with the COPD as procedure; with `ca`, Canadian strategic functions (see 2.5) | AJP-5 Ed B | APP-28 (secondary sources only, see 2.4) |
 
-The profile and level feed three things at run time: the vocabulary file every member reads first (step names, product names, annex letters, J/G/S codes), the roster variant the template uses, and the lead's workflow table. Changing either after work has started is allowed and is recorded; products already approved keep the profile they were approved under (a field in their header), so nothing approved is silently renamed.
+The profile and level feed three things at run time: the vocabulary file every agent reads first (step names, product names, annex letters, J/G/S codes), the team variant the template uses, and the coordinating agent's workflow table. Changing either after work has started is allowed and is recorded; products already approved keep the profile they were approved under (a field in their header), so nothing approved is silently renamed.
 
 ### 2.2 Crosswalk of steps
 
@@ -63,7 +69,7 @@ Rows are the work. CFJP 5.0 is a reference column only (owner decision). "Second
 
 Sources: JP 5-0 (July 2025) figures IV-2 and IV-3 and ch. IV para 3; 05 T1 and s1 to s4; 03 A7, A12; 02 T3 to T5; CFJP 5.0 art. 304, 312, 315, 402 to 406; AJP-5 figure 3.1, 3.15, 3.45, 3.50.
 
-**COA tests per profile** (the J5 lead applies the right list):
+**COA tests per profile** (the J5 `lead-planner` agent applies the right list):
 
 | Profile | Tests |
 |---|---|
@@ -117,7 +123,7 @@ Notes:
 ### 2.5 Canadian items that still apply under the NATO/Canadian profile
 
 - **Names.** The deployable joint HQ is the Canadian Joint Response Force Headquarters, renamed on 10 August 2026; templates never say "1 Cdn Div" (03 A8). CJOC plans, directs and integrates all-domain operations except those run only by CANSOFCOM or NORAD (03 A8). CJOC J3 and J5 internal branch names are not public: describe functions, never invent branch names (03 A8 gap; 05 s3).
-- **Authorities.** The Chief of Defence Intelligence has functional authority over defence intelligence; Commander CJOC leads defence intelligence requirements for joint operations (02 s3.3). The CDS's critical intelligence requirements and friendly force information requirements exist at strategic level (CFJP 5.0 art. 118), so the strategic J2 roster answers CDS CIRs.
+- **Authorities.** The Chief of Defence Intelligence has functional authority over defence intelligence; Commander CJOC leads defence intelligence requirements for joint operations (02 s3.3). The CDS's critical intelligence requirements and friendly force information requirements exist at strategic level (CFJP 5.0 art. 118), so the strategic J2 team answers CDS CIRs.
 - **Domestic operations.** At strategic level in domestic operations, PIRs are usually replaced by a statement of the intelligence problem that drives the threat assessment (CFJP 5.0, CDS directive format). Collection on persons in Canada is legally restricted (02 Pitfall 11). A domestic switch in the template turns on both rules and the "assistance to civil authorities" framing.
 - **Support structure.** Four lines of support, the JTF Support Component, and the CJOC J4 weekly logistics and ammunition reports replace a US-style daily LOGSTAT as the headline report (03 B6, B12 item 9).
 - **Doctrine order.** Canada puts NATO doctrine first, then the five-nation multilateral doctrine (02 s3.3). This is why the Canadian templates use NATO terms.
@@ -153,9 +159,9 @@ The research was written before CFJP 5.0 had been read and before the owner's NA
 | 02 T3, 10 (earlier draft) | NATO/Canadian profile names the preparation step JIPB | JIPOE at joint level, IPB at tactical level; "battlespace" is obsolete in Canadian Army usage | CADN 16-01; Land Operations (2008) |
 | 03 A5, 10 (earlier draft) | Canadian vocabulary is "information operations" | Canadian Army land planning uses influence activities; Annex O keeps its CFJP 5.0 title | CADN 16-01 |
 
-### 2.7 Levels and roster scaling
+### 2.7 Levels and team scaling
 
-Every section template ships three roster variants. The full tables are in section 3 per team; the pattern is:
+Every section template ships three team variants. The full tables are in section 3 per team; the pattern is:
 
 | Level | What changes in every team |
 |---|---|
@@ -212,6 +218,23 @@ Documents that would settle the remaining best guesses, by title only:
 - ATP 3-35 (2023): the US Army RSOI term.
 - TRADOC written reply on WEG and DATE release: bundling demo data (section 8, Q5).
 
+### 2.10 How a person sets up a staff project (added 2026-11-20, coherence review)
+
+Staff setup is the **staff step of Get Started**, not its own command (`EXPERIENCE.md`, section 1; conflicts K13, K16, K39). "Set Up a Staff Team" stays as a hidden alias that opens Get Started at this step for two minor releases.
+
+| Setting | Where it comes from |
+|---|---|
+| Section (J2, J3, J4, J5, full staff) | Get Started question 1, "kind of work". An invitation file for a shared staff project opens Get Started with it already set to the person's section |
+| Doctrine and level | Your organization's rules (`directives.doctrine`) when they set them; otherwise asked once, with the defaults in 2.1 |
+| Echelon or variant | The only staff question always asked |
+| Where the agents' models may run | **Not asked.** The project label and your organization's rules decide, through `decideRoute`. The earlier question "Where may the members' models run?" is removed |
+| Who decides | The positions in the team file (`decision_for`, "Reports to"). Before the project is shared, the local person holds every position; in a shared project the people posted to them decide (assigned positions design, 3.1; Phase 33.1) |
+| Exercise or operational | Exercise on fictional data is the only choice offered until your organization approves a model for operational work (section 7, item 9). The options screen says why |
+
+Step counts shown are true ("Step 2 of 3"), never a fixed "of 6". The step never lands a person on a surface with no allowed model: it runs the viability and model approval check first, and a refusal card is never the first screen.
+
+> **Superseded 2026-11-20 (coherence review):** the setup flow shipped in 0.4.x (`staffSetupCommand.ts`) asks where the members' models may run and shows "Step 6 of 6" for four questions, and it calls the agent list "the roster" ("check the roster"). Those stay until Phase 32.1 folds the flow into Get Started; the copy says "check the team" from the next patch. The decisions it carries (profile, level, nation, horizons) are unchanged.
+
 ---
 
 ## 3. The section templates
@@ -220,17 +243,19 @@ Documents that would settle the remaining best guesses, by title only:
 
 **Team file.** Standard format (`src/agent/teams.ts`): frontmatter `name`, `description`, `privacy: private`; then one `## slug` per member with `role`, `model`, `reports-to`, `tools`, `privacy` (last), then instructions. Every instruction stays under the 1,200-word warning (`teamCheck.ts`), says what the member owns and must not touch, and ends with what it hands back, so `teamCheck` shows no `no-deliverable`, `no-separate-areas` or `no-integration` findings.
 
-**Who leads.** The run's lead agent coordinates (spawns members, starts parallel lanes in one turn, merges), as `teamLeadPrompt` already requires. The section chief member is the section's integrator and author of its estimate and annex: it merges the members' products into the section's deliverables. The lead's workflow per step (tables below) goes into the team description and the project guidance (AGENTS.md block), the way `RESEARCH_WORKFLOW` does today.
+> **Coherence review (2026-11-20):** `privacy: private` keeps its file syntax but means the gate's verified check: `decideRoute` runs with a floor of verified private hardware or this computer, so a stale or unproven connection is refused rather than trusted from the catalogue (fix S4). The team file shows it as "Private models only", followed by the PRC-origin sentence (section 7). With Phase 74.1 the staff templates change from `privacy: private` to "needs operational-work approval and verified private hardware or this computer", so a staff team asks for a model your organization approved for operational work rather than any private one (conflict K7). A team file names positions (`decision_for`, the "Reports to" column), never a person. See `.planning/research/coherence/REVIEW.md`.
 
-**The lead's tools (decided 0.4.35, after the owner's D-48 J2 run).** Tools offered equal tools allowed: every agent is offered exactly the tools its grants let it call (`AgentTool.offeredTo`, `offeredTools`), and the call-time checks stay as the second line. The lead gets no read access to the picture: the grant-gated servers (intel-workbench, observations, cop-map, logistics, orders, battle-rhythm) stay the members', because the lead coordinates and the section chief integrates, so the lead learns the picture from the members' reports. From staff-products and guard-scan the lead keeps what the host lets it call (status, list, register_read, wargame read, step, lint, scan); propose, verdict, submit, withdraw and register are offered to members only. A staff lead's prompt adds a section (`staffLeadNote`): it names the integrator, says not to do the members' reading, and says to mark the step and start that step's lanes within its first two turns. The lead keeps the chat's model (the person's choice); members run on their own tiers.
+**Who leads.** The run's coordinating agent (called the lead agent in code and in this design's tables) coordinates (spawns members, starts parallel lanes in one turn, merges), as `teamLeadPrompt` already requires. The section chief member is the section's integrator and author of its estimate and annex: it merges the members' products into the section's deliverables. The coordinating agent's workflow per step (tables below) goes into the team description and the project guidance (AGENTS.md block), the way `RESEARCH_WORKFLOW` does today. On screens it is always the "coordinating agent"; "lead" for people is the mode word for who decides membership (in Military mode, the staff lead position).
+
+**The coordinating agent's tools (decided 0.4.35, after the owner's D-48 J2 run).** Tools offered equal tools allowed: every agent is offered exactly the tools its grants let it call (`AgentTool.offeredTo`, `offeredTools`), and the call-time checks stay as the second line. The lead gets no read access to the picture: the grant-gated servers (intel-workbench, observations, cop-map, logistics, orders, battle-rhythm) stay the members', because the lead coordinates and the section chief integrates, so the lead learns the picture from the members' reports. From staff-products and guard-scan the lead keeps what the host lets it call (status, list, register_read, wargame read, step, lint, scan); propose, verdict, submit, withdraw and register are offered to members only. A staff lead's prompt adds a section (`staffLeadNote`): it names the integrator, says not to do the members' reading, and says to mark the step and start that step's lanes within its first two turns. The coordinating agent keeps the chat's model (the person's choice); members run on their own model for the job (fast, standard or deep, the column "Model for the job" below).
 
 **Every member's instructions open with the same four lines** (a shared preamble, kept short):
 1. Read `.planning/staff/PROFILE.md` first (profile, level, nation, vocabulary, annex letters, horizons). Use its terms only.
 2. Exercise and fictional data only. Never load or write classified material, real unit identifiers or current-operations content. Stop and report if you see any.
-3. You recommend; a named human decides. Mark every decision you identify as `DECISION FOR: <role of the human>` with options and risk. Never write "approved", "selected" or "released" about your own work.
+3. You recommend; the person posted to a position decides. Mark every decision you identify as `DECISION FOR: <position>` with options and risk. Never write "approved", "selected" or "released" about your own work.
 4. Your area is the files listed under "Owns". Propose changes to anyone else's product as an entry in `.planning/staff/proposals/`, never by editing it. If you are waiting on another section, write `WAITING ON <section>: <what>` and carry on with what does not depend on it (00 s5).
 
-**Tool groups** used below: READ = Read, Glob, Grep, TodoWrite, Recall, Remember. WRITE = Write, Edit. DOCS = CreateDocument, CreatePdf, CreatePresentation, RenderSvg. WEB = WebSearch, WebFetch, CheckCitations. STAFF = `mcp:staff-products` (new, section 4.1: read registers, propose state changes, never approve). Other `mcp:` names are the new local servers in section 6. A team marked private writes `privacy: private` on every member.
+**Tool groups** used below: READ = Read, Glob, Grep, TodoWrite, Recall, Remember. WRITE = Write, Edit. DOCS = CreateDocument, CreatePdf, CreatePresentation, RenderSvg. WEB = WebSearch, WebFetch, CheckCitations. STAFF = `mcp:staff-products` (new, section 4.1: read registers, propose state changes, never approve). Other `mcp:` names are the new local servers in section 6. A team marked private writes `privacy: private` on every member (meaning the gate's verified check, see the note under "Team file").
 
 **Products** are Markdown files at `products/<section>/<product>.md` with a header block (section 4.1) and fixed headings. Structured registers (PIR register, CCIR register, sync matrix, LOGSTAT) are JSON or CSV beside them, written through the tools so the gates can check them mechanically (02 s3.5).
 
@@ -245,11 +270,11 @@ Documents that would settle the remaining best guesses, by title only:
 
 Based on 02 T8, T9, T12, T13 and s3.6, with the prototype's release officer merged into the shared release-guard.
 
-**Roster (operational level, 12)**
+**Team (operational level, 12 agents)**
 
-| # | Slug | Role | Tier | Tools | MCP grants | Reports to |
+| # | Slug | Job | Model for the job | Tools | MCP grants | Reports to |
 |---|---|---|---|---|---|---|
-| 1 | `j2-chief` | J2 integrator: intelligence estimate, J-2 staff estimate, intelligence annex | deep | READ, WRITE, DOCS, CheckCitations, STAFF | `mcp:intel-workbench` | (section lead) |
+| 1 | `j2-chief` | J2 integrator: intelligence estimate, J-2 staff estimate, intelligence annex | deep | READ, WRITE, DOCS, CheckCitations, STAFF | `mcp:intel-workbench` | (the person posted to the J2 position) |
 | 2 | `requirements-manager` | PIR, IR and RFI management | standard | READ, WRITE, STAFF | `mcp:intel-workbench` | j2-chief |
 | 3 | `collection-manager` | Collection plan and requests (recommends, never tasks) | standard | READ, WRITE | `mcp:intel-workbench`; later partner imagery search (read-only) | j2-chief |
 | 4 | `jipoe-analyst` | JIPOE steps 1 and 2 (IPB steps 1 and 2 at tactical level) | deep | READ, WEB, WRITE, RenderSvg | `mcp:cop-map` (read, terrain layer write) | j2-chief |
@@ -297,7 +322,7 @@ Profile differences: US Joint uses the six-category intelligence process; NATO/C
 | Level | Members | Changes |
 |---|---|---|
 | Strategic | 9: j2-chief, requirements-manager, collection-manager (national and partner requests), jipoe-analyst (theatre systems view), threat-analyst, warning-analyst (replaces watch-officer: emerging and enduring warning problems; with the Canadian nation setting, answers CDS critical intelligence requirements), red-cell, tradecraft-reviewer, release-guard | Drops target-analyst and geoint-analyst (folded into jipoe-analyst); horizons in months and years |
-| Operational | 12 (the roster above) | Full JIPOE, annex, collection plan, targeting support, INTSUM cycle |
+| Operational | 12 (the team above) | Full JIPOE, annex, collection plan, targeting support, INTSUM cycle |
 | Tactical, brigade or division | 7: s2-lead, ipb-analyst (all four IPB steps, OAKOC, MCOO), collection-manager (information collection plan), watch-officer, target-analyst (HPTL inputs), tradecraft-reviewer, release-guard | IPB and MDMP or APP-28 names; hours, not days |
 | Tactical, battalion | 5: s2-lead, ipb-analyst, watch-officer, tradecraft-reviewer, release-guard | Finished products for company troop leading procedures (02 T4) |
 
@@ -315,11 +340,11 @@ The guard is never dropped.
 
 Based on 05 T3 to T6, with one change to fit the release-guard in 12: assessment is drafted by the design planner during planning and owned by the J3 assessment analyst in execution (shared product, section 4.3). This matches JTF J5 duties (recommend MOEs and MOPs, coordinate their adjustment with the J3) (05 T3).
 
-**Roster (operational level, 12)**
+**Team (operational level, 12 agents)**
 
-| # | Slug | Role | Tier | Tools | MCP grants | Reports to |
+| # | Slug | Job | Model for the job | Tools | MCP grants | Reports to |
 |---|---|---|---|---|---|---|
-| 1 | `lead-planner` | Chief of plans; planning group lead; wargame chief controller | deep | READ, WRITE, DOCS, STAFF | `mcp:orders`, `mcp:wargame` (in `mcp:staff-products`) | (section lead; human J5 director and COS above) |
+| 1 | `lead-planner` | Chief of plans; planning group lead; wargame chief controller | deep | READ, WRITE, DOCS, STAFF | `mcp:orders`, `mcp:wargame` (in `mcp:staff-products`) | (the person posted to the J5 director position; the COS position above) |
 | 2 | `policy-planner` | Strategy and policy; political-military analysis; interagency inputs; limitations with legal | deep | READ, WEB, WRITE | none | lead-planner |
 | 3 | `design-planner` | Operational design (ADM at tactical level); assessment framework draft | deep | READ, WRITE, RenderSvg | none | lead-planner |
 | 4 | `coa-cell-a` | COA development cell A | standard | READ, WRITE, RenderSvg | `mcp:cop-map` (read; plans layer write) | lead-planner |
@@ -367,11 +392,11 @@ Based on 05 T3 to T6, with one change to fit the release-guard in 12: assessment
 
 Based on 03 A9 to A12. Two changes: ROE requests are drafted by the j3-director with legal review (the prototype's separate ROE officer did not fit; legal interpretation is a human legal adviser's, 00 s2); the battle rhythm calendar is the joc-chief's in a standalone J3 and the chief of staff's in the full staff.
 
-**Roster (operational level, 12)**
+**Team (operational level, 12 agents)**
 
-| # | Slug | Role | Tier | Tools | MCP grants | Reports to |
+| # | Slug | Job | Model for the job | Tools | MCP grants | Reports to |
 |---|---|---|---|---|---|---|
-| 1 | `j3-director` | J3 integrator: running estimate, CCIR proposals, operations annex, ROE request drafts | deep | READ, WRITE, DOCS, STAFF | `mcp:orders`, `mcp:cop-map` (read) | (section lead) |
+| 1 | `j3-director` | J3 integrator: running estimate, CCIR proposals, operations annex, ROE request drafts | deep | READ, WRITE, DOCS, STAFF | `mcp:orders`, `mcp:cop-map` (read) | (the person posted to the J3 director position) |
 | 2 | `joc-chief` | Current operations: COP, event log, shift brief, battle drills, battle rhythm (standalone) | standard | READ, WRITE, STAFF | `mcp:cop-map` (operations layer write, merge), `mcp:joc-log`, `mcp:battle-rhythm` | j3-director |
 | 3 | `watch-officer` | Logs reports, checks against CCIR and DSM triggers (may run as two instances) | fast | READ | `mcp:joc-log` (append), `mcp:cop-map` (read) | joc-chief |
 | 4 | `future-ops-planner` | J35: branches, FRAGO drafts, DST and DSM in execution, sync matrix in execution | deep | READ, WRITE | `mcp:orders`, `mcp:staff-products` (sync matrix, DSM) | j3-director |
@@ -381,7 +406,7 @@ Based on 03 A9 to A12. Two changes: ROE requests are drafted by the j3-director 
 | 8 | `cyber-space-planner` | Cyber and space support requests, lead times, convergence windows | standard | READ, WRITE | none | j3-director |
 | 9 | `airspace-maritime-liaison` | Airspace and maritime coordination needs and conflicts | standard | READ, WRITE | `mcp:cop-map` (read) | j3-director |
 | 10 | `assessment-analyst` | Assessment cell: MOE and MOP register, data plan, assessment brief | deep | READ, WRITE, RenderSvg | none | j3-director |
-| 11 | `liaison-coordinator` | LNO roster, shared RFI tracker, suspense dates | fast | READ, WRITE | `mcp:staff-products` (RFI tracker) | j3-director |
+| 11 | `liaison-coordinator` | LNO list, shared RFI tracker, suspense dates | fast | READ, WRITE | `mcp:staff-products` (RFI tracker) | j3-director |
 | 12 | `release-guard` | Blocking release gate | standard | READ, Write (guard report only), STAFF | `mcp:guard-scan` | j3-director |
 
 **Instruction outlines**
@@ -420,11 +445,11 @@ Based on 03 A9 to A12. Two changes: ROE requests are drafted by the j3-director 
 
 Based on 03 B2, B7 to B10. Seven core functions, one member each (03 Summary 3).
 
-**Roster (operational level, 12)**
+**Team (operational level, 12 agents)**
 
-| # | Slug | Role | Tier | Tools | MCP grants | Reports to |
+| # | Slug | Job | Model for the job | Tools | MCP grants | Reports to |
 |---|---|---|---|---|---|---|
-| 1 | `j4-director` | J4 integrator: logistics running estimate, concept of support, logistics annex | deep | READ, WRITE, DOCS, STAFF | `mcp:orders` | (section lead) |
+| 1 | `j4-director` | J4 integrator: logistics running estimate, concept of support, logistics annex | deep | READ, WRITE, DOCS, STAFF | `mcp:orders` | (the person posted to the J4 director position) |
 | 2 | `log-plans-officer` | Theatre logistics overview, logistics estimate, supportability per COA, logistics decision points | deep | READ, WRITE | `mcp:logistics` (calculator, movement read) | j4-director |
 | 3 | `jloc-chief` | Logistics current operations: LOGSTAT consolidation, LOGCOP layer, logistics sync matrix | standard | READ, WRITE, STAFF | `mcp:logistics` (logstat), `mcp:cop-map` (logistics layer write) | j4-director |
 | 4 | `supply-planner` | Classes of supply, days of supply, forecasts, critical items | standard | READ, WRITE | `mcp:logistics` (calculator, logstat read) | j4-director |
@@ -487,8 +512,8 @@ profile: us-joint          # profile and level it was written under
 level: operational
 version: 3
 state: awaiting-decision
-label: org/Internal        # from the Phase 70 label map; exercise data only
-decision_for: commander    # the human role; the named person is recorded on approval
+label: org/Internal        # from the Phase 70 label map; exercise data only; shown as "Organization: Internal"
+decision_for: commander    # a position; the person posted to it is recorded on approval
 depends_on: [jipoe-steps-1-2@2, adversary-coas@4]
 guard: { verdict: CLEARED, at: 2026-11-18T14:02Z, report: guard/intelligence-estimate-v3.md }
 ```
@@ -500,9 +525,9 @@ guard: { verdict: CLEARED, at: 2026-11-18T14:02Z, report: guard/intelligence-est
 | (none) | draft | Owner writes the first version | The owning member, through `staff-products.propose` | Writer is the product's owner |
 | draft | guard-checked | Release-guard verdict `CLEARED` (and for J2, tradecraft `SIGN-OFF` first) | Release-guard member through `staff-products.verdict` | Verdict refers to this exact version hash |
 | draft | draft (held) | Guard verdict `HOLD` or tradecraft `NOT READY` | Guard or tradecraft member | Reasons recorded |
-| guard-checked | awaiting-decision | Owner or section lead submits for decision | Owner or section lead | Product names `decision_for` |
+| guard-checked | awaiting-decision | Owner or the section's integrator submits for decision | Owner, the section integrator, or the person holding the section's position | Product names `decision_for` (a position) |
 | guard-checked or awaiting-decision | draft | Any edit to the file | Anyone (detected by hash) | Version incremented; earlier verdicts void |
-| awaiting-decision | approved | A person approves | **Only a named human, through the UI or a command** | Person identified by the device key that signs the policy bundle; name and role recorded; not callable as a tool |
+| awaiting-decision | approved | A person approves | **Only a named human, through the UI or a command** | The person holds the `decision_for` position (before the project is shared, the local person holds every position); signed by that person's device key, or credential from Phase 71; person, position and name recorded; not callable as a tool. *Superseded 2026-11-20 (coherence review): this cell first read "Person identified by the device key that signs the policy bundle", which breaks once your organization signs the policy (K34).* |
 | awaiting-decision | rejected | A person rejects, with reasons | Only a named human | Reasons required |
 | rejected | draft | Owner revises | Owner | Rejection reasons linked |
 | approved | released | A person releases (may be the same act as approval for products marked "release on approval") | Only a named human | Approved version hash unchanged |
@@ -513,6 +538,8 @@ Rules:
 - The approve, reject and release verbs exist only as VS Code commands and UI actions. `staff-products` exposes `propose`, `verdict`, `submit`, `withdraw`, `status` and `list` to agents; its capability manifest declares no `approve`. A test proves an agent run cannot reach them through any tool, MCP server or shell command that edits the header (the header is checked against the decision log, so a hand-edited `state: approved` without a matching signed record reads as `draft (tampered)`).
 - Every transition is a record in the existing decision log (`src/domain/gate/record.ts`) with product, version hash, from, to, actor (member or person) and reason. Approvals are signed with the person's device key. Until Phase 71, the identity is self-declared and the UI says so with the existing `CLEARANCE_SELF_ASSERTED_TEXT` wording.
 - Downstream products that depend on a product whose approved version changes get a "source changed" mark and drop back to draft only when their owner accepts the change (00 s1, product lifecycle). Dependency propagation is what keeps a figure from going stale when a fact changes (the research team's derived-values rule).
+
+> **Coherence review (2026-11-20):** records follow the two families of ADR-011. In a shared staff project every transition and every approval is a replica entry signed by the writer's device key; on a single computer the transition goes to the local audit record (hash-chained, with periodic signed heads once that lands) and the approval itself carries the person's device signature, as decided in Q10. Who may approve is read from the position, not from a role string: `decision_for` names a position, and the approval is valid only if the signer is posted to it when signing (positions and the one delegation rule from Phase 33.1). Approve, Reject and Release stay commands for security reasons but appear only in staff projects (`when: nearAi.staffProject`). See `.planning/research/coherence/REVIEW.md`, conflicts K18, K21, K25 and K35.
 
 **Tests** (WP-SHARED): one test per row of the table (allowed transition succeeds and is recorded), one per forbidden transition (agent approve, approve without guard, release without approval, approval of a stale hash, edit after approval, tradecraft skipped for J2, rejected without reasons, guard verdict for another version), tamper detection, reload persistence, and dependency propagation.
 
@@ -526,6 +553,8 @@ Common instructions (each team adds a short variant):
 - Boundary: "Your output is a verdict and reasons; you never release and you never fix."
 
 `guard-scan` is deterministic and local (section 6.2), so the guard is not a single point of model judgement. The model review covers what rules cannot (implicit decisions, compilation).
+
+> **Coherence review (2026-11-20):** every check that compares a label (the guard's markings, the product's label against the template ceiling, the observation checks) ranks it with the one label service (`dominates`, `join`, `atLeast`) over the active policy's scale table, never the shipped `SCALE_PRESETS`; the presets are only the fallback when the policy failed closed. Labels in guard reports are shown as scale name plus level ("Canada, Classified: Confidential", never a bare "Confidential"), and the organization scale's Confidential level is displayed as "Sensitive" (id unchanged). See `.planning/research/coherence/REVIEW.md`, fixes S7 and S8, and owner question Q8.
 
 ### 4.3 Shared products and owners
 
@@ -562,12 +591,14 @@ NATO/Canadian profile: same gate; the grading table follows AJP-2.1 (the older C
 
 Screens belong to the separate UX concept. The UI needs these read models and events, all written to the project state so they survive reloads and are available to Team Live and Agent Activity:
 
+> **Coherence review (2026-11-20):** there is one run view. The Staff Room is its staff layout (the command reads "Watch the Run"), and Agent Activity stays as history and export, so the read models below feed one view, not three. Every agent card, product row and count uses the one trust line (Runs on, Verified, Allowed) from `TrustFacts`: the Staff Room's "18 of 18" reads "18 of 18 agents verified". The decision queue shows the `decision_for` position and, once the project is shared, the person posted to it. Every staff screen shows whether the project is an exercise (section 7, item 9). See `.planning/research/coherence/EXPERIENCE.md`, sections 3 and 6.
+
 | Read model | Fields |
 |---|---|
-| Staff run | run id, team or team-of-teams tree, profile, level, nation, current crosswalk step per section, started, cost so far |
+| Staff run | run id, team or team-of-teams tree, profile, level, nation, exercise flag, current crosswalk step per section, started, cost so far |
 | Step board | per section: step, lanes (member, status, product), merge status, gate status |
 | Product registry | product, section, owner, version, state, label, decision_for, depends_on, guard and tradecraft verdicts, source-changed flag |
-| Decision queue | product, version, decision_for role, options with risk, dissent (red team), requested at, deadline from the timeline |
+| Decision queue | product, version, decision_for position (and the person posted to it), options with risk, dissent (red team), requested at, deadline from the timeline |
 | Shared registers | CCIR, RFI tracker, sync matrix, DSM, assumptions ledger, annex tracker |
 | COP | layers, owners, last update, event log tail |
 
@@ -634,11 +665,11 @@ pin: 77ab01c3e9f0d211
 | Size | Each team still has at most 12 members; a reference counts as one |
 | Cycles | A reference graph with a cycle is refused at parse and at run |
 | Consent | A referenced team must be one of the person's teams or an approved import (`libraryTeamAllowed`); an unapproved one asks first; a declined one refuses the reference, and the parent run continues without that section |
-| Privacy | Strictest wins: a private parent makes every nested team private; a private nested team stays private under a parent that is not |
+| Privacy | Strictest wins: a private parent makes every nested team private; a private nested team stays private under a parent that is not. "Private" is the gate's verified floor in `decideRoute` for every nested run (coherence review, S4) |
 | Cost | `nearAi.agent.maxRunCostUsd` and the daily limit apply to the whole tree; each nested run shows its own spend |
 | Concurrency | The existing "waiting for a free slot" queue applies across the tree; a new setting caps nested teams running at once (default 4) |
 | Unattended | Nested team runs follow the gate contexts of the parent; MCP tools in nested runs still need `unattendedMcp` |
-| Worktrees | Each nested team works on its own branch `staff/<run>/<section>`; its members' worktrees merge into that branch first (two-level merge); the staff lead merges sections one at a time, conflicts to the owning section |
+| Worktrees | Each nested team works on its own branch `staff/<run>/<section>`; its members' worktrees merge into that branch first (two-level merge); the parent run's coordinating agent merges sections one at a time, conflicts to the owning section |
 | Gate | The Agent tool's manifest gains an effect for a team reference (`spawn` with agent `team:<slug>`) so every nested start is recorded |
 
 ### 5.4 State machine for one team reference
@@ -647,7 +678,7 @@ pin: 77ab01c3e9f0d211
 |---|---|---|---|
 | (none) | requested | Parent lead calls Agent with a reference member | Event `staff.team.nested` |
 | requested | resolving | Always | Look up team, check pin, depth, cycle, privacy |
-| resolving | refused | Missing team, cycle, depth exceeded, private member needed but no private model | Terminal; parent told why and continues |
+| resolving | refused | Missing team, cycle, depth exceeded, private member needed but no model passes the verified check and your organization's rules for this use | Terminal; parent told why in the refusal sentence ("Nothing was sent. {What}. {Why}. {What you can do}. {Who to ask}.") and continues |
 | resolving | awaiting-consent | Unapproved import, or pin differs | Person asked once |
 | awaiting-consent | ready | Person approves | Pin updated |
 | awaiting-consent | refused | Person declines | Terminal |
@@ -680,7 +711,7 @@ No state can wait forever: `waiting` has the timeline's suspense as a deadline a
 
 ## 6. Skills, tools and MCP
 
-**Label ceiling** below means the highest label a call to the tool may carry under the default policy. Staff templates carry a **template ceiling** on top of everything: exercise and fictional data at org/Internal, NATO Unclassified or Protected A at most, and nothing higher whatever the device allows, because labels are not accreditation (`LABELS_NOT_ACCREDITATION_TEXT`).
+**Label ceiling** below means the highest label a call to the tool may carry under the default policy. Staff templates carry a **template ceiling** on top of everything: exercise and fictional data at Organization: Internal, NATO: Unclassified or Canada, Protected: Protected A at most, and nothing higher whatever the device allows, because labels are not accreditation (`LABELS_NOT_ACCREDITATION_TEXT`). The ceiling is compared with the one label service over the active scale table (coherence review, S7).
 
 ### 6.1 Tools that exist today
 
@@ -726,7 +757,7 @@ None is in a default template. Each needs the per-server label ceiling (WP-GATE)
 | Logistics systems of record and TPFDD tooling | J4 | Government | Out of scope (03 B8) |
 | Another organization's staff agents through A2A | Any | Exchange mandates and signed cards (01 s1, s2) | Set by the exchange's listing level |
 
-Rules until the per-server ceiling and fenced descriptions exist (01 s4, "minimum for staff teams"): remote servers only; every tool declared in a restrictive manifest; scoped to named members, never the whole team; never unattended; ask before every call that sends data; every labelled level routed `local-only` so a labelled chat cannot reach a partner; least-scope tokens per partner; results reviewed by a person before they enter a product.
+Rules until the per-server ceiling and fenced descriptions exist (01 s4, "minimum for staff teams"): remote servers only; every tool declared in a restrictive manifest; scoped to named members, never the whole team; never unattended; ask before every call that sends data; every labelled level kept off partner servers by `decideRoute` (the per-server ceiling below, and from Phase 41 each partner as an `endpoints[]` entry with its own `maxLabel`), so a labelled chat cannot reach a partner; least-scope tokens per partner; results reviewed by a person before they enter a product.
 
 ---
 
@@ -734,14 +765,17 @@ Rules until the per-server ceiling and fenced descriptions exist (01 s4, "minimu
 
 > **Coherence review (2026-11-20):** "private" here means the gate's verified check (a fresh, bound connection to private hardware, or this computer), not the catalogue's claim. The private models NEAR AI offers today all come from developers in the People's Republic of China, which the model provenance decision forbids for operational work, so staff teams say so plainly and run on fictional or exercise material until your organization approves a model for that use. See `.planning/research/coherence/REVIEW.md`, section 8 (S4, S5).
 
-1. **Unclassified templates, private by default.** Every staff team ships with `privacy: private` (NEAR TEE or local model only). Templates, skills and demo data are unclassified and fictional. The project guidance says real operational plans belong on accredited systems (05 s6).
+1. **Unclassified templates, private models only, exercise first.** Every staff team ships with `privacy: private`, which the gate enforces as a floor: the agents' models run only on NEAR AI private hardware that passed the verified check on a fresh, bound connection, or on this computer (`decideRoute`, fix S4). The team file and the last setup screen add: "The private models NEAR AI offers today come from developers in the People's Republic of China. Use this team only on fictional or exercise material until your organization approves a model for operational work." (fix S5). Templates, skills and demo data are unclassified and fictional. The project guidance says real operational plans belong on accredited systems (05 s6). With Phase 74.1 the templates move from `privacy: private` to "needs operational-work approval and verified private hardware or this computer" (conflict K7).
+
+   > **Superseded 2026-11-20 (coherence review):** this item first read "Unclassified templates, private by default. Every staff team ships with `privacy: private` (NEAR TEE or local model only)." That trusted the catalogue's claim of private hardware and implied the models were fit for operational work; the owner's decision to ship private teams stands, with the meaning and sentence above.
 2. **Human decision authority.** Every approval is a human transition in the release state machine (4.1). Agents write `DECISION FOR`, never "approved". This matches doctrine (the planning responsibility is inherent in command: 05 s1 point 7; CFJP 5.0 art. 404.12 "the Commander selects") and the DND/CAF AI strategy's traceability requirement (05 s6). Targeting packages carry commander-or-delegate and legal review marks; nothing appears to automate target nomination (03 Summary 7).
 3. **Compilation risk.** A staff team compiles by design. The release-guard checks compilation on every product; the project shows an aggregation warning when real-looking unit, location or capability data accumulates; partner tools see only what one call needs, and nothing yet tracks what one partner received over time, so partner use stays Public-only (01 s5 item 3).
 4. **Partner MCP rules** until the per-server ceiling and fenced tool descriptions ship: section 6.3.
 5. **Support roles assist humans.** `legal-support`, `health-services-planner`, the special-staff supports and `services-mortuary-planner` draft for qualified people. Their products carry `LEGAL REVIEW REQUIRED` or `SURGEON REVIEW REQUIRED`, which the guard checks for, and their instructions say they never give legal or medical advice.
 6. **No collection on own-nation persons, no real targeting, no personal data** (02 Pitfalls 11 and 12; 03 B12 item 8).
 7. **Restricted doctrine.** No text from CAC-only or unreleased publications is pasted into templates; they are cited by title and edition only (03 A14 item 3). The guard's restricted-title list enforces it for products.
-8. **Labels are not accreditation**, and clearances are self-declared until Phase 71: the setup screen for a staff project shows both existing sentences.
+8. **Labels are not accreditation**, and clearances are self-declared until Phase 71: the staff step of Get Started shows both existing sentences. Effective clearance is the lower of the person's own declared clearance and the roster's clearance for this project. A chat labelled classified or Protected C on a computer with no accreditation record gets one notice per chat and a `route.not-accredited` record now, and is refused once your organization's rules exist (fix S2, owner question Q6).
+9. **Exercise first, and a signed exercise flag** (added 2026-11-20, coherence review, conflicts K15 and K30, owner question Q10). Staff projects are operational work (use T3 in the model provenance design). Until your organization approves a model for operational work, the staff step of Get Started offers only "exercise on fictional data" and says why; it never lands a person on a staff surface with no allowed model. The exercise flag, which lets a staff project run at the lower use level, is a project-layer attribute of the signed policy: set at genesis or by the person in the staff lead position with a reason, recorded like a label lowering, and shown on every staff screen ("Exercise: fictional data only"). It is never a plain project setting.
 
 ---
 
@@ -773,7 +807,7 @@ WP-0 lands first because every other package imports its schema; everything afte
 
 | WP | Scope | Worktree | Depends on | Tests |
 |---|---|---|---|---|
-| WP-0 Contract | Profile data (`us-joint`, `us-army`, `nato-ca`) with steps, COA tests, annex letters, codes; level validity; planning type (crisis switches the planning lead to the J3); product header schema; member preamble; `staff` project type skeleton with settings in `project.json` | `feat/staff-contract` | None | Profile tables parse; every profile and level combination valid or refused as in 2.1; annex letters per profile (joint D logistics, N assessments, Army D fires, NATO/Canadian D intelligence, R logistics); US Joint COA tests start with "suitable", never "adequate"; JP 3-14 retired space terms are rejected by the vocabulary lint; planning type `crisis` names the J3 director and the transition; schema round trip |
+| WP-0 Contract | Profile data (`us-joint`, `us-army`, `nato-ca`) with steps, COA tests, annex letters, codes; level validity; planning type (crisis switches the planning lead to the J3); product header schema; member preamble; `staff` project type skeleton with settings in `project.json` (project-stream entries once the project is shared; coherence review, K23) | `feat/staff-contract` | None | Profile tables parse; every profile and level combination valid or refused as in 2.1; annex letters per profile (joint D logistics, N assessments, Army D fires, NATO/Canadian D intelligence, R logistics); US Joint COA tests start with "suitable", never "adequate"; JP 3-14 retired space terms are rejected by the vocabulary lint; planning type `crisis` names the J3 director and the transition; schema round trip |
 | WP-J2 | J2 template, three level variants, skills (`icd203-standards`, `source-grading`), project guidance, template history entry | `feat/staff-j2` | WP-0 | `parseTeam` passes for every variant; 12-member cap; `checkTeam` has no warnings and no parallel-work advice; every product in 3.2 has exactly one owner; instructions contain the boundary sentence and a deliverable; vocabulary switch (JIPOE versus IPB, Annex B versus D); red-team prompts from the earlier prototype's authority tests (J2 must not task collection, approve PIRs or decide) produce refusals in a scripted run |
 | WP-J5 | J5 template, variants (including MDO and tactical), skills (planning templates, wargame ledger, COG, assessment framework) | `feat/staff-j5` | WP-0 | As WP-J2; COA cells have distinct themes and areas (no `overlap` finding); red-team has no write access to plan files; COA tests per profile; agents never write "selected" in a scripted run |
 | WP-J3 | J3 template and variants | `feat/staff-j3` | WP-0 | As WP-J2; watch-officer has no Write; FRAGO drafts go through the state machine; fires packages carry both review marks |
@@ -784,7 +818,7 @@ WP-0 lands first because every other package imports its schema; everything afte
 | WP-ORD | `orders` and `battle-rhythm` | `feat/staff-orders` | WP-0 | Annex assembly per profile; consistency check catches a wrong letter and a missing owner; `.ics` round trip |
 | WP-LOG | `logistics` server (logstat, calculator, movement) | `feat/staff-logistics` | WP-0 | Plausibility rules; formula shown on every result; no factor tables shipped; routing with no network |
 | WP-INT | `intel-workbench` | `feat/intel-workbench` | WP-0 | Source register grades separate; origin-based independence; PIR to decision point rule; INTSUM skeleton |
-| WP-GATE | Label ceiling per MCP server in the signed policy bundle; fenced and length-limited MCP tool descriptions; notice when a server's tools or descriptions change (01 s4) | `feat/gate-mcp-ceiling` | None (Phase 70 follow-up) | Call refused when the chat mark is above the server's ceiling at every routing tier; bundle parse rejects unknown levels; description fencing; change notice |
+| WP-GATE | Label ceiling per MCP server in the signed policy bundle (from bundle v2, the `agents.mcp.labelCeilings` key, named in `requires`; coherence review, POLICY-SCHEMA section 2); fenced and length-limited MCP tool descriptions; notice when a server's tools or descriptions change (01 s4) | `feat/gate-mcp-ceiling` | None (Phase 70 follow-up) | Call refused when the chat mark is above the server's ceiling at every routing tier; bundle parse rejects unknown levels; description fencing; change notice |
 | WP-DEMO | Starter fictional scenario, scenario import, demo scripts per section, acceptance fixtures (required headings, terms, citations per profile, after the earlier prototype's validation fixtures, 00 s5) | `feat/staff-demo` | WP-0 | Fixtures pass on the starter scenario with each template |
 | Integration | Merge in order WP-SHARED, WP-GATE, servers, section templates, WP-TOT; joint staff and planning group templates; README Teams and Team Studio text; template history; one full verification run; UAT script per demo | `feat/staff-integration` | All | Full suite once; end-to-end J2 then J5 demo on the starter scenario; team-of-teams planning group run |
 
@@ -796,6 +830,8 @@ Recommendation: **yes, ship as 0.4.x feature releases before the remaining v0.5.
 3. **Drop 3:** WP-TOT, the joint staff and planning group templates, then the further sections.
 
 Why: the owner's demo priority; the templates need nothing from Phases 71 to 74 (identities, broker, contracts), only the Phase 70 gate already on main plus one small ceiling change; and the earlier owner decision that v0.5.0 Stage 1 phases ship in 0.4.x as they land means a 0.4.x feature line is the normal vehicle. What waits for v0.5.0: verified approver identities (Phase 71; until then approval is device-key signed and self-declared, said plainly), partner identity and tokens (Phases 71 and 73), and run contracts for unattended staff loops (Phase 74). Fine-tuning of staff specialists comes from the v0.6.0 model factory, which can use the approved product history and gate verdicts as training signals; nothing in this design blocks that.
+
+> **Coherence review (2026-11-20):** the three drops stand. Later staff work lands on the shared foundations instead of its own: staff setup folds into Get Started (Phase 32.1), decision authority moves onto positions with the one delegation rule (Phase 33.1), shared staff projects use the replica layer (Phases 31 to 35), the per-server MCP ceiling and the exercise flag live in policy bundle v2 (Phase 41), and the templates' model requirement changes with Phase 74.1. Staff commands get `when: nearAi.staffProject` so they leave the palette in other projects. See `.planning/research/coherence/REVIEW.md`, section 9.
 
 ### 9.3 Owner decisions on the open questions
 
@@ -815,3 +851,12 @@ The owner accepted every recommendation below on 2026-11-18. Every term is state
 | Q10 | Should approval of a staff product require the Phase 69 signed identity (device key) now, or a simple named confirmation until Phase 71 | Owner | Device-key signed, with the self-declared notice | Accepted (owner, 2026-11-18) |
 | Q11 | Red team under the NATO/Canadian profile (UK national element, not NATO doctrine) | Owner and Canadian SME | Keep it, labelled optional, on by default | Accepted (owner, 2026-11-18) |
 | Q12 | Which later sections come next after the first four (J6 and J1, or the special staff) | Owner | Special staff next (legal, political, public affairs supports), because every planning demo touches them | Accepted (owner, 2026-11-18) |
+
+### 9.4 Open questions from the coherence rewrite (2026-11-20)
+
+The coherence review settled the vocabulary, positions, the exercise flag and the private meaning. These two points it did not settle; each has a recommended default and nothing is built until the owner answers.
+
+| # | Question | Recommended default | Why |
+|---|---|---|---|
+| Q13 | Agent slugs that use words the glossary keeps off main screens (`red-cell-seat`, `future-ops-seat`, `sustainment-seat`, `coa-cell-a`, `coa-cell-b`): rename the slugs? | Keep the slugs (they are ids in saved team files and template history); show the job text on screens ("J2 view in the planning group", "COA development cell A"). "Red cell" and "COA cell" stay as doctrine words, allowed by the copy lint in Military mode only | Renaming ids breaks saved teams and imports for no gain in meaning; "cell" here is doctrine, not the key-group meaning the glossary removes |
+| Q14 | Should the staff step of Get Started prefer a model on this computer when one answers (the open part of review Q3)? | Yes: offer this computer first for exercise work when a local model answers, still exercise only until your organization approves a model for operational work | Keeps exercise data on the computer, and avoids the PRC-origin models for people who have a local one; it does not lift the operational-work rule |

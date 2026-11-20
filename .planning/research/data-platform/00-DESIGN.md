@@ -4,6 +4,7 @@
 **Inputs:** the four research reports in this folder: 01 (connectors, extraction, ETL), 02 (classification, tagging, data-centric security, requests, holds, personal mark), 03 (context graph, search, analytics, knowledge layer), 04 (model factory and opportunity agent). Citations below take the form "01 §1.2".
 **Meets:** the owner's decided requirements of 2026-11-18 (R1 to R11 below).
 **Status:** accepted by the owner on 2026-11-18. Decisions 1 to 13 and the 32 settled-in-design choices as recommended; decision 14 changed to one-click connection; collectors that are simple to install added (section 3.7). The plan of record is now `.planning/ROADMAP.md` (milestone "v0.6.0 Data platform", Phases 85 to 101; versions set by the owner on 2026-11-18) and `.planning/REQUIREMENTS.md`; the draft milestone `01-DRAFT-MILESTONE.md` is kept as the record of the proposal.
+**Conforms to the coherence review (2026-11-20):** governance facts ride the replica layer as entries and the host is a client of your organization's sync hub plus its own store (no revived Phase 13 log); the policy wizard and source connections become administrator steps of Get Started that end on the one policy editor and write proposals; policy keys move into bundle v2 sections named in `requires` (`labels.classification`, `labels.sourceLabels`, `labels.feedDefaults`, `labels.aggregation`, `data.personalMark`, `data.regimes`, `limits.trainingTargets`); organization rules come from the organization layer (Phase 41), shown as "self-signed on this computer" until it exists; label lowerings and officer overrides use the one authorization record shape with inner signatures; aggregation has one evaluator in `domain/gate` (Phase 38, extended here in Phase 93); officer functions are positions (Phase 33.1) backed by Phase 71 credentials; label checks use the one label service over the active scale table and routing goes through `decideRoute` with the trust line on every answer; local and specialist models are `endpoints[]` entries of class `local` behind `ModelEndpoint` and `LocalServerAdmin`; screens say "Personal: keep out of the catalogue" (not "personal mark"), show scale name plus level and show the organization's Confidential level as "Sensitive"; "relay" means messaging only. Superseded text is kept with dated notes; open questions raised by the rewrite are in section 10.4. See `.planning/research/coherence/REVIEW.md`.
 
 ---
 
@@ -11,13 +12,13 @@
 
 **What it is.** Once installed, the platform finds your organization's data on its machines, file shares, Microsoft 365 and Google Workspace. It reads everything once, from the beginning, and then keeps up with every change as it happens, the way a blockchain indexer first reads the whole chain and then follows new blocks. Every item gets a full description card: what it is, where it came from, who may see it, how sensitive it is, how long to keep it and whether it may be used for training. People then search it, ask questions about it, see reports and a map of connections, and turn it into small specialist models trained on your organization's own machines.
 
-**Where the data lives.** Originals stay where they are. A central host (one always-on machine your organization owns, first a Strix Halo box) keeps the catalog, the extracted text, the search indexes and the graph. Everything there inherits the source's permissions and labels and is deleted when the source item is deleted. Copies of originals are made only for three documented reasons: a capped, encrypted re-extraction cache for scans, images and audio; a write-once hold store for sources that cannot hold data themselves; and none at all for training, because training sets are rebuildable lists of items rather than frozen copies (01 §3.3).
+**Where the data lives.** Originals stay where they are. A central host (one always-on machine your organization owns, first a Strix Halo box; people see it as part of "your organization's server") keeps the catalog, the extracted text, the search indexes and the graph. Everything there inherits the source's permissions and labels and is deleted when the source item is deleted. Copies of originals are made only for three documented reasons: a capped, encrypted re-extraction cache for scans, images and audio; a write-once hold store for sources that cannot hold data themselves; and none at all for training, because training sets are rebuildable lists of items rather than frozen copies (01 §3.3).
 
-**How it stays safe.** It extends the gate you already have. Detectors only *propose* facts; your organization's signed policy turns facts into a label; every automatic step can only raise a label; only a person lowers one, with a signed reason (02 §1.2). To read anything, a person or agent needs both the label check and the source system's own permission. Everything derived from an item (text, chunks, embeddings, graph edges, summaries, datasets, trained models) carries the highest label of its inputs. Search, graph, dashboards and answers never show, count or hint at anything the asker cannot see (03 §2.3). Everything runs locally; unlabelled content is never sent to a cloud model to find out what it is.
+**How it stays safe.** It extends the gate you already have. Detectors only *propose* facts; your organization's rules (the organization layer of the signed policy, from Phase 41) turn facts into a label; every automatic step can only raise a label; only a person lowers one, with a signed reason (02 §1.2). To read anything, a person or agent needs both the label check and the source system's own permission. Everything derived from an item (text, chunks, embeddings, graph edges, summaries, datasets, trained models) carries the highest label of its inputs. Search, graph, dashboards and answers never show, count or hint at anything the asker cannot see (03 §2.3). Everything runs locally; unlabelled content is never sent to a cloud model to find out what it is.
 
-**People only on exceptions.** Policy is set once in a wizard: pick label scales, map existing Microsoft 365 and Google labels, choose the strict default for new items, accept the shipped rules after a simulation shows what they would do. After that, people see only real exceptions: lowering a label, a raise that would lock out current users, conflicting signals, unmapped labels, special-category personal data with no covering purpose (02 §7.1). These arrive as a weekly batch per data steward, not one prompt per file.
+**People only on exceptions.** Policy is set once, in an administrator step of Get Started that ends on the policy editor (it proposes the change; nothing is written until it is applied or, under an organization layer, sent to your organization's security contact): pick label scales, map existing Microsoft 365 and Google labels, choose the strict default for new items, accept the shipped rules after a simulation shows what they would do. After that, people see only real exceptions: lowering a label, a raise that would lock out current users, conflicting signals, unmapped labels, special-category personal data with no covering purpose (02 §7.1). These arrive as a weekly batch per data steward, not one prompt per file.
 
-**Personal data, requests and holds.** Anyone can mark their own items personal; the platform then keeps only a bare existence record (no content, no title, no readable path). Officers can override only with two signatures, a case, a scope and notice to the person (02 §10). Access-to-information and subject requests, and legal holds, are first-class cases with deadline clocks, a signed chain of custody and an honest statement of what was and was not searched (02 §9).
+**Personal data, requests and holds.** Anyone can set their own items to "Personal: keep out of the catalogue"; the platform then keeps only a bare existence record (no content, no title, no readable path). Officers (people posted to the privacy or access officer position) can override only with two signatures, a case, a scope and notice to the person (02 §10). Access-to-information and subject requests, and legal holds, are first-class cases with deadline clocks, a signed chain of custody and an honest statement of what was and was not searched (02 §9).
 
 **The model factory.** An always-on agent watches how the system is used, starting from metadata only (cost, counts, edits), finds narrow repeated expensive tasks, and proposes a specialist on a one-click card. It also notices when a training goal lacks data and plans how to get it. Training is LoRA on small open-weight models, only on machines your organization controls, then tested against the current model, run in shadow, then on a small share of traffic, with one-click rollback (04 §2).
 
@@ -45,35 +46,39 @@
  |  Collector feed,  Extraction workers (sandboxed, no network): Tika, Docling, OCR tiers,    |
  |  share reader     whisper.cpp  --> content-addressed derivatives (encrypted blob store)    |
  |                                                  |                                         |
- |                    Classification: tier 0 rules, tier 1 small models, tier 2 local LLM     |
+ |                    Classification: pass 0 rules, pass 1 small models, pass 2 local LLM     |
  |                    --> proposals --> signed policy (gate) --> label (raise only)           |
  |                                                  |                                         |
  |  Governed store: Postgres + pgvector + BM25, RLS = label dominance AND source ACL           |
- |    items, cards, chunks, vectors, mentions, evidence, links, cases, holds, marks          |
- |  Analytics: DuckLake/DuckDB over label-cell Parquet (query service only)                   |
- |  Hold store (write-once)   Governance log (signed, from paused Phase 13)                   |
+ |    items, cards, chunks, vectors, mentions, evidence, links, cases, holds, opt-outs       |
+ |  Analytics: DuckLake/DuckDB over Parquet partitioned by label (query service only)         |
+ |  Hold store (write-once)   Item label Merkle roots per sync batch                          |
+ |  Hub client: governance facts as replica entries (labels, lowerings, holds, erasures)      |
  |  Collector enrolment codes and signed collector updates                                    |
  |                                                  |                                         |
  |  Query service (TypeScript engine + the same gate code): search, graph walk, SQL over      |
  |  views, ask, reports. Gate-signed clearance token per transaction.                         |
  |                                                  |                                         |
  |  Model factory: opportunity agent, dataset builder, trainer worker (GPU, capped),         |
- |  evaluator, registrar; llama.cpp serving specialists as `local` models                     |
+ |  evaluator, registrar; llama.cpp serving specialists as `local` endpoints                  |
  +---------------------------------------------^----------------------------------------------+
         ^  mutually authenticated, device-key signed (Phase 69), credentials (Phase 71)
-        |                                         |
+        |                                         |      governance facts <--> your organization's
+        |                                         |      sync hub (replica streams, Phases 31 to 35)
  +------+-----------------------+      +----------+--------------------------------------------+
  | ENDPOINT COLLECTORS (Rust)   |      | VS CODE EXTENSION (control panel, no data processing) |
- | signed native packages (MSI, |      | one-click source connection, setup and policy         |
- | pkg, deb, rpm) pushed by     |      | wizards, source catalog and status, data map,         |
- | device management; enrol by  |      | exception queue, cases and holds, personal mark,      |
+ | signed native packages (MSI, |      | Get Started admin steps (one-click connection), the   |
+ | pkg, deb, rpm) pushed by     |      | policy editor, source catalog and status, data map,   |
+ | device management; enrol by  |      | exception queue, cases and holds, personal opt-out,   |
  | code; auto-update from host; |      | knowledge base views (search, entity, graph,          |
  | Windows USN, macOS FSEvents, |      | timeline, ask, dashboards), factory cards             |
  | Linux fanotify; skip cloud   |      |                                                       |
  | placeholders; local notice;  |      |                                                       |
- | personal mark before fetch   |      |                                                       |
+ | personal opt-out before fetch|      |                                                       |
  +------------------------------+      +-------------------------------------------------------+
 ```
+
+> **Superseded 2026-11-20 (coherence review):** the diagram's "Governance log (signed, from paused Phase 13)" box is replaced by the hub client line above (governance facts as replica entries carried by your organization's sync hub) plus the item label Merkle roots kept on the host. "Label-cell Parquet" now reads "partitioned by label", because "cell" is reserved for key groups. Classification "tiers" are called passes in this design so they are not confused with use tiers or routing tiers; research report 02 keeps its own word. "Personal mark" is shown to people as "Personal: keep out of the catalogue" and called the personal opt-out in prose; the policy key stays `data.personalMark`.
 
 ---
 
@@ -86,7 +91,7 @@
 | R3 | Hybrid storage; raw copies only for documented reasons | §5.2 storage rules; decision 10.1-5 |
 | R4 | Full metadata on every item | §5 schema |
 | R5 | Data-centric security extending the Phase 70 gate | §6 |
-| R6 | Personal mark, existence record, signed officer override | §4.5, §6.6 |
+| R6 | Personal mark (shown as "Personal: keep out of the catalogue"), existence record, signed officer override | §4.5, §6.6 |
 | R7 | Access requests, subject requests, legal holds | §4.3, §4.4 |
 | R8 | Analytics, reporting, context graph, ask-anything; the former v0.5.0 KB as the interaction layer | §3.5, KB phases 96, 97 |
 | R9 | Model factory, always-watching agent, data-gap planning, own hardware only | §3.6, §4.6, FAC and OPP phases 98, 99 |
@@ -104,23 +109,24 @@
 | Component | Runs on | Responsibility | Source |
 |---|---|---|---|
 | Connector runtime | Host | Runs first-party and manifest connectors under one contract (`RECORD`, `STATE`, `DELETE`, `ACL`, `LOG` messages); per-partition cursors; throttle budgets; live sync pre-empts backfill | 01 §1.2, §5 |
-| Endpoint collector | Each Windows, macOS and Linux machine, as a small signed native package (not a container); optional on a file server for faster change detection | Fast enumeration (MFT, directory walk), native change journal with a durable cursor, ACL capture, hashes; skips OS folders and cloud placeholders; honours personal marks before fetching; enrols with a code from device management, updates itself from the host, shows a local notice | 01 §4.1, §3.3 point 5; §3.7 |
+| Endpoint collector | Each Windows, macOS and Linux machine, as a small signed native package (not a container); optional on a file server for faster change detection | Fast enumeration (MFT, directory walk), native change journal with a durable cursor, ACL capture, hashes; skips OS folders and cloud placeholders; honours personal opt-outs before fetching; enrols with a code from device management, updates itself from the host, shows a local notice | 01 §4.1, §3.3 point 5; §3.7 |
 | Connection setup | Host, with one administrator sign-in | One-click connection for Microsoft 365, Google Workspace and file shares: creates your organization's own app registration or service account, a credential generated on the host and held in the broker, admin consent; re-runnable, self-rotating, undone only on the administrator's confirmation | §3.7 |
 | File-share reader | Host | Reads SMB and NFS shares with nothing installed on the file servers; change notifications as hints, snapshot diffs as the feed | 01 §4.2; §3.7 |
 | Collector enrolment and update service | Host | Issues scoped, expiring enrolment codes; binds each enrolled collector to a device credential (Phase 71); serves signed, staged collector updates | §3.7 |
 | Item ledger and cursor store | Host, Postgres | Identity key `(source, item)`, version key, idempotent upserts, cursor advanced in the same transaction as the batch, outbox for side effects | 01 §1.4 |
 | Extraction workers | Host, sandboxed containers with no network | Tika (breadth, forked parsers), Docling (layout, tables), tiered OCR, whisper.cpp; derivative key `(content hash, extractor, version, options)` | 01 §2.2 |
-| Classification workers | Host | Tier 0 rules and detectors; tier 1 span models; tier 2 local LLM only where needed | 02 §1.5 |
-| Gate (policy decision point) | Host query service and extension, same pure TypeScript code | Labels, dominance, join, classification rules, source-ACL layer, routing, decision records | 02 §1.4 |
-| Governed store | Host, Postgres with RLS | Items, cards, chunks, vectors, mentions, evidence, links, cases, holds, marks; every row labelled | 03 §1.4, §2.3 |
-| Analytics store | Host, DuckLake (Parquet, Postgres catalog) | Analytical tables written per label cell; only the query service reads it | 01 §2.3, 03 §3.1 |
+| Classification workers | Host | Pass 0 rules and detectors; pass 1 span models; pass 2 local LLM only where needed | 02 §1.5 |
+| Gate (policy decision point) | Host query service, the hub and the extension, same pure TypeScript code | The one label service (`dominates`, `join`, `atLeast` over the active policy's scale table, never its own ranking), classification rules, source-ACL layer, routing through `decideRoute`, `TrustFacts`, decision records | 02 §1.4; coherence `POLICY-SCHEMA.md` 6 |
+| Governed store | Host, Postgres with RLS | Items, cards, chunks, vectors, mentions, evidence, links, cases, holds, personal opt-outs; every row labelled | 03 §1.4, §2.3 |
+| Analytics store | Host, DuckLake (Parquet, Postgres catalog) | Analytical tables written per label partition; only the query service reads it | 01 §2.3, 03 §3.1 |
 | Blob store and caches | Host, encrypted, content-addressed | Derivatives, bounded re-extraction cache | 01 §3.3 point 2 |
 | Hold store | Host, write-once | Originals from sources with no hold feature, with signed manifests | 02 §9.7 |
-| Governance log | Host | Signed append-only record of labels, lowerings, links, holds, marks, erasures (paused Phase 13 log, envelope v2) | 03 §4 row 13 |
+| Governance facts | Host as a client of your organization's sync hub, plus its own store | Labels set by people, lowerings, holds, personal opt-outs, overrides and erasures are replica entries on the data platform's streams, signed by the person's device key or credential and carried by the hub like any shared fact; the host keeps the item label store with a signed Merkle root per sync batch and its own encrypted snapshots | coherence K24, K25; ADR-011 |
+| Governance log (superseded) | Host | Signed append-only record of labels, lowerings, links, holds, marks, erasures (paused Phase 13 log, envelope v2). **Superseded 2026-11-20 (coherence review):** replaced by the governance facts row above; the Phase 13 log is not revived | 03 §4 row 13 |
 | Query service | Host | Hybrid search, graph walk, NL-to-SQL over curated views, ask agent tools, reports; sets the clearance through a gate-signed token | 03 §2.2, §3.2 |
 | Model factory | Host (trainer on GPU) | Dataset builder, trainer worker, evaluator, registrar, serving | 04 §2.2 |
 | Opportunity agent | Host, under a run contract | Signals, clustering, scoring, proposals, data-gap plans | 04 §7 |
-| Extension | Each person's editor | Control panel only: wizards, status, data map, queues, cases, KB views, cards; renders capped, host-built results under a strict CSP | 03 §3.3 |
+| Extension | Each person's editor | Control panel only: administrator steps of Get Started, the policy editor, status, data map, queues, cases, KB views, cards; renders capped, host-built results through the webview kit under its one CSP; every answer carries the trust line | 03 §3.3; coherence `EXPERIENCE.md` 1, 3 |
 
 ### 3.2 Discovery and connectors (R1, R2)
 
@@ -131,7 +137,7 @@ First-party connectors for Microsoft 365, Google Workspace, endpoints and shares
 - **File shares:** read from the host over SMB and NFS with nothing installed on the file servers (agentless, owner 2026-11-18); SMB change notifications are hints only, snapshot diffs are the feed (01 §4.2); a collector on a file server is optional, for faster change detection.
 - **Endpoints:** the collector, installed and enrolled through device management (§3.7), for files that live only on a machine.
 - **Notifications:** poll by default (no public endpoint needed); push is an optional low-latency mode (01 §4.3).
-- **Easy new sources:** a source catalog with plain descriptions and exact scopes, one-click connection per cloud (§3.7), a scope picker, an inventory-only dry run first; declarative manifests for REST sources; agent-written connectors run sandboxed with broker-injected credentials and must pass a conformance suite and a person's approval (01 §5).
+- **Easy new sources:** connecting a source is an administrator step registered with Get Started (`{ id, title, state(), viability(), run() }`), never its own setup command; a source catalog with plain descriptions and exact scopes, one-click connection per cloud (§3.7), a scope picker, an inventory-only dry run first; declarative manifests for REST sources; agent-written connectors run sandboxed with broker-injected credentials and must pass a conformance suite and a person's approval (01 §5).
 
 ### 3.3 Extraction (R1)
 
@@ -139,21 +145,23 @@ Tika 4 for breadth (including MSG and PST without GPL code), Docling for structu
 
 ### 3.4 Classification and tagging (R4, R5)
 
-Three tiers (02 §1.5): tier 0 for every item (format, hashes, source label, source ACL, retention label, secret rules, checksum-backed PII patterns including Canadian identifiers we write ourselves, 02 §2.1); tier 1 for every text item (union of spans from GLiNER and a second small Apache-2.0 privacy classifier, language, near-duplicate signature, embedding); tier 2 only for unsettled items, audit samples and items about to be used (local LLM, three samples, majority vote, constrained JSON, policy never in the prompt). Owner and steward are never guessed by a model (02 §2.3).
+Three passes (02 §1.5 calls them tiers; this design says passes so the word is not confused with use tiers or routing, and no screen shows either): pass 0 for every item (format, hashes, source label, source ACL, retention label, secret rules, checksum-backed PII patterns including Canadian identifiers we write ourselves, 02 §2.1); pass 1 for every text item (union of spans from GLiNER and a second small Apache-2.0 privacy classifier, language, near-duplicate signature, embedding); pass 2 only for unsettled items, audit samples and items about to be used (local LLM, three samples, majority vote, constrained JSON, policy never in the prompt). Owner and steward are never guessed by a model (02 §2.3). The local models these passes use are `endpoints[]` entries of class `local` on the host, reached through `ModelEndpoint` and installed and hash-checked through `LocalServerAdmin` (ADR-005, ADR-006); the rules that turn facts into labels live in the `labels.classification` section (section 6.2).
 
 ### 3.5 Knowledge layer (R8)
 
-Evidence rows over the governed store, not a separate graph database (03 Summary). Entities and edges have no stored attributes; they are computed at read time from the rows the reader may see. Tier 0 for everything (chunks, embeddings, small-model entity tags, noun-phrase co-occurrence); LLM relation extraction with quote-verified spans only on priority items, under the spend governor; graph reasoning at question time inside the asker's clearance (LazyGraphRAG pattern). Entity resolution is proposals with undo, never destructive merges (03 §1.3). Hybrid search is BM25 plus vectors fused by reciprocal rank with pgvector iterative scans (03 §2.2). Dashboards are native webview components fed by host-built, label-filtered results (03 §3). Day-one views: estate map, one search box, entity pages, ask, suggested insights; graph, map and timeline from search results (03 §5.2).
+Evidence rows over the governed store, not a separate graph database (03 Summary). Entities and edges have no stored attributes; they are computed at read time from the rows the reader may see. A cheap first pass for everything (chunks, embeddings, small-model entity tags, noun-phrase co-occurrence); LLM relation extraction with quote-verified spans only on priority items, under the spend governor; graph reasoning at question time inside the asker's clearance (LazyGraphRAG pattern). Entity resolution is proposals with undo, never destructive merges (03 §1.3). Hybrid search is BM25 plus vectors fused by reciprocal rank with pgvector iterative scans (03 §2.2). Dashboards are native webview components fed by host-built, label-filtered results (03 §3). Day-one views: estate map, one search box, entity pages, ask, suggested insights; graph, map and timeline from search results (03 §5.2).
 
 ### 3.6 Model factory and opportunity agent (R9)
 
-LoRA adapters on 4B to 14B Apache-2.0 or MIT bases, Unsloth core plus TRL/PEFT in a pinned container, served by llama.cpp through the existing local and hybrid provider so a specialist appears as a `local` model (04 §2.1 D1 to D5). The trainer is a separate worker on the host, never Python in the extension host (D6). The opportunity agent reads metadata first and content only after an approval whose clearance dominates the data (D7). Dataset and model labels are joins (D8). Deletion is honoured by retraining from the manifest (D10). Training happens only on your organization's own machines or hardware endpoints it controls, each listed as a training target in the signed policy (owner, 2026-11-18); no training service is used.
+LoRA adapters on 4B to 14B Apache-2.0 or MIT bases, Unsloth core plus TRL/PEFT in a pinned container, served by llama.cpp as an `endpoints[]` entry of class `local` behind the `ModelEndpoint` interface, so a specialist appears under "Models by job" and its answers read "Runs on your organization's server" in the trust line (04 §2.1 D1 to D5). (The earlier wording "through the existing local and hybrid provider" predates the provider interface; superseded 2026-11-20 by the coherence review, ADR-005.) The trainer is a separate worker on the host, never Python in the extension host (D6). The opportunity agent reads metadata first and content only after an approval whose clearance dominates the data (D7). Dataset and model labels are joins (D8). Deletion is honoured by retraining from the manifest (D10). Training happens only on your organization's own machines or hardware endpoints it controls, each listed as a training target in the signed policy (owner, 2026-11-18; the list is `limits.trainingTargets` in bundle v2, naming endpoint ids); no training service is used. A specialist is used only for the uses its model approval covers (the `models` section from Phase 41, model provenance design), like any other model.
 
-**Data-gap planning (R9, added here).** For an approved goal the agent computes the feasibility gates of 04 §7.3. When the *examples* or *labels* gate fails, it writes a data plan instead of a dead end: which catalog facets already hold candidate items (by document type, function, topic, training suitability), which known but unconnected sources might (from discovery and the coverage inventory), how many items are blocked by `no-train`, unknown rights or personal marks (counts only), and the cheapest ways to close the gap (connect a source, ask stewards to confirm rights on a collection, collect accept or edit signals for N more weeks, build a golden set of 50 items, or synthesize from labelled documents). Each option is a proposal card; acquiring data never bypasses rights, marks or labels.
+**Data-gap planning (R9, added here).** For an approved goal the agent computes the feasibility gates of 04 §7.3. When the *examples* or *labels* gate fails, it writes a data plan instead of a dead end: which catalog facets already hold candidate items (by document type, function, topic, training suitability), which known but unconnected sources might (from discovery and the coverage inventory), how many items are blocked by `no-train`, unknown rights or personal opt-outs (counts only), and the cheapest ways to close the gap (connect a source, ask stewards to confirm rights on a collection, collect accept or edit signals for N more weeks, build a golden set of 50 items, or synthesize from labelled documents). Each option is a proposal card; acquiring data never bypasses rights, personal opt-outs or labels.
 
 ### 3.7 One-click connection and collector install (owner, 2026-11-18)
 
 Decision 14 as the owner changed it ("easy from the start"), and the owner's direction that collectors be super simple to install.
+
+Where it lives (coherence review, 2026-11-20): each "Connect ..." flow below is an administrator step of Get Started, also reachable from the data map, and it ends on the policy editor. Connecting a source changes no policy by itself; anything it needs in the policy (the source label map in `labels.sourceLabels`, feed defaults in `labels.feedDefaults`, the source's scopes) arrives as a proposal with its effect in plain words, applied on a personal layer or sent to your organization's security contact under an organization layer.
 
 **Connecting a source.**
 - **Microsoft 365.** One-click "Connect Microsoft 365". An administrator signs in once. Setup then creates your organization's own app registration in its own tenant, uploads a certificate generated on the host (the private key never leaves the host and is held in the credential broker), and grants admin consent for exactly the permissions the wizard listed, each with its reason. The administrator's sign-in is used only during setup, held in memory and dropped when setup ends. The app adds its next certificate itself before the current one expires, with no new sign-in. `Sites.Selected` and Exchange RBAC for Applications scoping stay available for administrators who want narrower access (mail is off by default, decision 6).
@@ -167,7 +175,7 @@ Decision 14 as the owner changed it ("easy from the start"), and the owner's dir
 - **Endpoint collectors are not containers.** They are small signed native packages: an MSI for Windows, pushed silently by Intune or Group Policy; a signed and notarized pkg for macOS, pushed by Jamf or Intune together with the Full Disk Access profile; .deb and .rpm packages for Linux; and, for a machine without device management, a one-line install that checks the package signature first.
 - **Zero-config enrolment.** Your organization's device-management tools deliver an enrolment code issued by the host (an MSI property, a managed configuration profile, or an install argument). On first start the collector creates its own device key, enrols with the code and receives a device binding credential (Phase 71). Nobody types anything on the machine. Codes are scoped to a device group, limited in number, expiring and revocable, and every new device appears in the source list.
 - **Automatic updates.** Signed updates are served by the host, staged, with rollback; the host refuses collectors below a minimum version. An update never widens what is collected; that takes a policy change.
-- **A local notice** on each machine says in plain words what is collected, what is excluded and who can see it, with Mark as Personal one click away.
+- **A local notice** on each machine says in plain words what is collected, what is excluded and who can see it, with "Personal: keep out of the catalogue" one click away.
 - **Small and removable.** Low CPU, memory and network budgets, paused on battery and metered connections by default. Revoking the device or removing it in device management stops collection at its next contact; uninstalling removes the collector and its local state.
 - **Agentless where possible.** Microsoft 365, Google Workspace and SMB or NFS shares are read from the host with no software on endpoints or file servers. Collectors are needed only for files that live only on endpoints.
 
@@ -201,7 +209,7 @@ Merged from 01 §1.3 to §1.5 and 02 §1.3:
 
 ```
 discovered --> fetched --> extracted --> scanned --> proposed --+--> labelled --> indexed
-   |  (personal mark known)                                      |       |   (chunks, vectors, graph)
+   |  (personal opt-out known)                                    |       |   (chunks, vectors, graph)
    v                                                             v       v
 personal (existence record only)                              exception  stale --> proposed (rescan, never lowers)
                                                                  |
@@ -221,7 +229,7 @@ From 02 §9.7:
 
 | State | Leaves when |
 |---|---|
-| `draft` (custodians, sources, dates, topics) | Signed by an authorized hold role (Phase 71 credential) |
+| `draft` (custodians, sources, dates, topics) | Signed by the person posted to the hold administrator position (Phase 33.1), with a Phase 71 credential once that exists |
 | `issuing` (applied per source; each shows `pending` until confirmed; M365 can take 24 hours) | All confirm: `active`; any fails or has no hold feature: `partial` |
 | `partial` (write-once copy running or a source failed; visible warning; never times out silently) | Fixed: `active` |
 | `active` (preserved; change monitoring; custodian notices and acknowledgments; derivatives held along lineage; CleanUp never-touch) | Release proposed: `release-proposed` |
@@ -234,22 +242,30 @@ Designed here from 02 §9.1 to §9.6:
 
 | State | Meaning | Leaves when |
 |---|---|---|
-| `received` | Regime chosen; clock starts per the regime's rule in the signed bundle | Officer accepts: `scoping`; out of scope: `closed` with reason |
+| `received` | Regime chosen; clock starts per the regime's rule in the signed policy (`data.regimes`) | Officer accepts: `scoping`; out of scope: `closed` with reason |
 | `scoping` | Subject resolved to identifiers, or topic defined; recusal check; request-scoped, time-boxed grant issued | `searching` |
 | `searching` | Our indexes plus live source searches; cursor age recorded; lineage followed to derivatives and models | `reviewing` |
 | `clock-stopped` | Only where the regime allows (fee, clarification) | Answer received: back to the prior state |
 | `extended` | Extension recorded *after* its notice is sent, within the allowed window | Back to the prior state with the new due date |
 | `reviewing` | Relevance, exemptions; two-person rule above the officer's clearance | `redacting` |
 | `redacting` | Proposed redactions confirmed one by one with exemption codes; burned in | `release-proposed` |
-| `release-proposed` | Package label is the join of its contents | Signed package declassification: `released` |
+| `release-proposed` | Package label is the join of its contents | Signed package declassification (a `declassify` authorization record, below): `released` |
 | `released` | Package, manifest root signed, custody log, coverage statement | `closed` |
 | `closed` | Grant expires, case derivatives destroyed unless held | (end) |
 
 Deadline warnings at 50, 80 and 95 percent of time used. A late case shows `overdue` as a flag on whatever state it is in, never as a silent state.
 
-### 4.5 Personal mark and override lifecycle
+### 4.5 Personal opt-out ("Personal: keep out of the catalogue") and override lifecycle
 
-Mark: `unmarked` to `marked` (person signs; refused at once if policy forbids the place) to `unmarked` (re-enters at the ingest default, label never lower than before). Override (02 §10.4): `filed` (officer, case, basis, scope, duration) to `approved` (second officer; both sign with role credentials) to `notice-pending` or `notice-sent` (default: notice at override time; delay only with a recorded reason and a latest date, visible to the privacy officer) to `expired` (case derivatives destroyed unless held).
+People see one control, **Personal: keep out of the catalogue**, and its undo, "Put back in the catalogue". The policy key stays `data.personalMark` and the state names below are internal; no screen says "mark".
+
+Opt-out: `unmarked` to `marked` (the person signs with their device key; refused at once if the policy forbids the place) to `unmarked` (re-enters at the ingest default, label never lower than before). Each change is a replica entry on the data platform's governance stream.
+
+Override (02 §10.4): `filed` (officer, case, basis, scope, duration) to `approved` (second officer; both sign) to `notice-pending` or `notice-sent` (default: notice at override time; delay only with a recorded reason and a latest date, visible to the privacy officer) to `expired` (case derivatives destroyed unless held). The officers are the people posted to the privacy officer and access officer positions (Phase 33.1); they sign with their device keys now and their Phase 71 credentials later. The approved override uses the one authorization record shape (`POLICY-SCHEMA.md` 2): subject the item or scope, the case as evidence, an expiry, and an inner signature from each of the two named people, whose keys the organization layer lists. Until an organization layer exists every such record is shown as "self-signed on this computer". Which kind and where the records live is open question 10.4-1.
+
+Lowering a label is the same shape with kind `declassify` (one named person, a reason, the item as subject), shown as "Lowered by {name} on {date}: {reason}" in "Why this label".
+
+> **Superseded 2026-11-20 (coherence review):** "both sign with role credentials" assumed Phase 71 role credentials as the only authority. Authority now lives on the position (one delegation rule, Phase 33.1), with the credential wrapping it from Phase 71; the two-signature rule itself is unchanged.
 
 ### 4.6 Specialist lifecycle
 
@@ -259,9 +275,9 @@ As 04 §2.3: `candidate`, `proposed`, `approved`, `building-dataset`, `dataset-r
 
 ## 5. Metadata schema (merged and concise)
 
-One **item card** per item; the card carries the item's label, so titles, summaries and entities are never shown to someone who cannot see the item (02 §8). Marks: A automatic, A/H automatic with a person on exception, H person only. Full field tables: 02 §8.1 to §8.7; storage tables: 03 §1.4; ledger: 01 §1.2.
+One **item card** per item; the card carries the item's label, so titles, summaries and entities are never shown to someone who cannot see the item (02 §8). Set by: A automatic, A/H automatic with a person on exception, H person only. Full field tables: 02 §8.1 to §8.7; storage tables: 03 §1.4; ledger: 01 §1.2. Labels on the card are shown as scale name plus level ("Organization: Internal"; the organization's Confidential level is shown as "Sensitive", id unchanged).
 
-| Layer | Fields (concise) | Mark |
+| Layer | Fields (concise) | Set by |
 |---|---|---|
 | Identity | `id` (hash of system, tenant, source item id), `source.{system, tenant, container, path, url}`, `sourceItemId` (stable across rename), `version`, `contentHash` | A |
 | Descriptive | `title`, `summary`, `topics[]` (organization taxonomy), `entities.{people, customers, products, projects}` as graph ids, `language`, `documentType` (closed list), `businessFunction`, `businessProcess`, `owner`, `steward`, `created`, `modified` | A; function, process, owner, steward A/H |
@@ -272,7 +288,7 @@ One **item card** per item; the card carries the item's label, so titles, summar
 | Privacy | `personalData`, `categories[]`, `specialCategories[]`, `dataSubjectTypes[]`, `subjectCountEstimate` (bucketed), `identifiability`, `jurisdictions[]`, `sourceResidency`, `processingActivityRef`, `retentionClassRef`, `assessmentRefs[]`, `evidence`, `fingerprints[]` (salted, local), `reviewedBy` | A; special categories, processing activity A/H. Facts about personal data, never the data itself (02 §3.2) |
 | Lifecycle | `retentionClass`, `retainUntil`, `holds[]`, `rot.{redundant, obsolete, trivial}`, `disposition` | class A/H; disposition H only |
 | Training | `training.{rights, allowed, quality, taskFit[], dedupCluster, inheritedModelLabel}`; `rights.basis = unknown` means not allowed | A/H; `allowed` computed |
-| Personal | `personalMark.{scope, markedAt, markSig, overrides[]}`; a marked item keeps only the existence record of 02 §10.3 | H (the person) |
+| Personal | `personalMark.{scope, markedAt, markSig, overrides[]}` (field names internal; screens say "Personal: keep out of the catalogue"); an opted-out item keeps only the existence record of 02 §10.3 | H (the person) |
 
 Standards borrowed, not adopted as systems: DCAT 3 and Dublin Core terms for descriptive fields, PROV and OpenLineage facets for lineage, Croissant and ODRL for training rights, TDMRep for opt-outs, OpenMetadata's mutually exclusive classifications and tag mapping, DataHub's split of tags, glossary terms and typed properties (02 §5).
 
@@ -285,7 +301,9 @@ Standards borrowed, not adopted as systems: DCAT 3 and Dublin Core terms for des
 - Originals stay in the source. The central layer is treated with the same controls as a raw copy, because extracted text is a copy for legal and privacy purposes (01 §3.3 point 1): disk encryption, ACL inheritance, holds, erasure.
 - Raw copies only: (a) a bounded, encrypted, content-addressed **re-extraction cache** for scans, images and audio, with a size cap and TTL, deleted with the source; (b) the write-once **hold store**; (c) a raw training snapshot only as a rare exception with explicit approval. Training sets are **manifests** (item ids, versions, hashes, extractor and code versions); an erasure publishes a new dataset version and revokes the old one (01 §3.3 points 2 and 3).
 - Endpoint-only files (not in a synced cloud folder) are indexed like any source, flagged in coverage as "may disappear", and are not copied except under a hold (01 §3.3 point 4).
-- The signed governance log holds governance events and content-addressed encrypted snapshots, not all content; the query store is a disposable materialization (03 open question 1).
+- Governance events are replica entries carried by your organization's sync hub; the host keeps content-addressed encrypted snapshots and the item label Merkle roots in its own store, not all content; the query store is a disposable materialization (03 open question 1).
+
+> **Superseded 2026-11-20 (coherence review):** the line above used to read "The signed governance log holds governance events and content-addressed encrypted snapshots". The decision it records (10.2-2: governance events plus encrypted snapshots, sources stay the system of record) stands; only the carrier changed from a revived Phase 13 log to replica entries (ADR-011).
 
 ---
 
@@ -295,6 +313,8 @@ Standards borrowed, not adopted as systems: DCAT 3 and Dublin Core terms for des
 
 Detectors propose facts; signed policy turns facts into a label; automatic steps only raise; only a person lowers, signed; access needs both the label check and the source permission (02 §1.2).
 
+The signed policy is policy bundle v2 (`POLICY-SCHEMA.md`). The data platform's rules sit in the organization layer, signed by your organization's pinned issuer (Phase 41); a person's personal layer and a project's layer can only narrow them. Until an organization layer exists the rules are this computer's own and every screen that cites them says "self-signed on this computer", as the interim rule requires. Every section this design adds is named in `requires`, so an older extension says "update" rather than failing or suggesting a Reset.
+
 ### 6.2 Gate changes
 
 > **Coherence review (2026-11-20):** aggregation rules have one evaluator in `src/domain/gate/`, built by Phase 38 (portfolio) and extended by Phase 93, with one schema carrying `effect` and `remedy`; a chat label raised by a count rule is a routing input and is recorded. See `.planning/research/coherence/REVIEW.md`, conflict K27.
@@ -303,25 +323,32 @@ All in the pure gate core, so the extension and the host run the same code (02 �
 
 | Change | Purpose |
 |---|---|
-| Classification rules in the signed bundle (`facts -> minimum label`), new pure `classify.ts` | Policy set once; detectors replaceable |
-| Source label map in the bundle (explicit per label id; unmapped, unreadable and double-key encrypted map to the strictest level) | Read Purview and Drive labels and never lower them |
-| Item label store with a signed Merkle root per sync batch | Millions of items, tamper evidence without a signature per row |
+| Classification rules in the `labels.classification` section of bundle v2 (`facts -> minimum label`, `requires: classification@1`), new pure `classify.ts` | Policy set once; detectors replaceable |
+| Source label map in `labels.sourceLabels` (explicit per label id; unmapped, unreadable and double-key encrypted map to the strictest level) and ingest defaults in `labels.feedDefaults` | Read Purview and Drive labels and never lower them |
+| Item label store with a signed Merkle root per sync batch, kept on the host | Millions of items, tamper evidence without a signature per row |
 | Label v2 handling flags `no-train` and `no-summarize-down` (beside v1, D-22) | Training is a new use |
-| `source.acl` layer in `decide` after labels; agent access = agent clearance ∩ person clearance ∩ person's source ACL | Intersection, never union |
+| Every dominance and join check calls the one label service (`dominates`, `join`, `atLeast` over the active policy's scale table, `src/domain/gate/labels.ts`); no data platform module ranks labels itself or imports `SCALE_PRESETS` (architecture test) | One label algebra (ADR-004, REVIEW S7) |
+| `source.acl` layer in `decide` after labels; agent access = agent clearance ∩ person clearance ∩ person's source ACL, where person clearance is the meet of the personal-layer clearance and the roster clearance for that project | Intersection, never union |
 | `derived.ts`: every derivative takes the join of its inputs | Chunks, vectors, summaries, edges, datasets, models |
-| Aggregation rules on indexes, exports, datasets and a chat's running count of distinct items | Many Internal items can be Confidential together (02 §11.3) |
+| Aggregation rules on indexes, exports, datasets and a chat's running count of distinct items, in `labels.aggregation`, each with an `effect` and a `remedy`, run by the one aggregation evaluator in `src/domain/gate/` that Phase 38 builds and Phase 93 extends; a chat label raised by a count rule is recorded and feeds routing | Many "Organization: Internal" items can be "Organization: Sensitive" together (02 §11.3) |
+| Personal opt-out rules in `data.personalMark`; request and erasure regimes in `data.regimes` | §4.4, §4.5, §6.6 |
+| Lowerings and overrides as authorization records with inner signatures (§4.5) | One exception record |
 | `cases.ts`, `holds.ts`, `personalMark.ts`; hold check in every deletion path including CleanUp | §4.3 to §4.5 |
-| New event ids named before they ship (D-49): `label.auto-raised`, `label.source-mapped`, `label.exception-queued`, `label.exception-resolved`, `label.could-be-lower`, `mark.personal-set`, `mark.override`, `hold.applied`, `hold.change-observed`, `hold.released`, `case.release` | Every automatic raise has a decision record |
+| New event ids named before they ship (D-49): `label.auto-raised`, `label.source-mapped`, `label.exception-queued`, `label.exception-resolved`, `label.could-be-lower`, `personal.opt-out-set`, `personal.override`, `hold.applied`, `hold.change-observed`, `hold.released`, `case.release` | Every automatic raise has a decision record |
+
+> **Superseded 2026-11-20 (coherence review):** the event ids `mark.personal-set` and `mark.override` are renamed `personal.opt-out-set` and `personal.override` before they ship, because "mark" now means nothing on its own (glossary, section 4). Nothing has shipped under the old ids. "Classification rules in the signed bundle", "source label map in the bundle" and the aggregation row above were written as new v1 keys; they become the v2 sections named in each row.
 
 ### 6.3 Enforcement points
 
 - **Host database:** Postgres RLS on every table with `FORCE ROW LEVEL SECURITY`; the application role owns nothing and has no bypass; the clearance is set only through a `SECURITY DEFINER` function that verifies a short-lived token signed by the gate, never by plain `SET`; views are `security_invoker`; only `LEAKPROOF` functions in predicates (03 §2.3).
-- **Filter inside the index scan:** the label and ACL predicate is part of every vector and keyword query (pgvector iterative scans; partitions per routing tier); never post-filter (02 §6.4, 03 §2.3 rule 4).
+- **Filter inside the index scan:** the label and ACL predicate is part of every vector and keyword query (pgvector iterative scans; partitions per label routing level); never post-filter (02 §6.4, 03 §2.3 rule 4).
 - **No side channels:** no raw SQL connections for people or agents, no `EXPLAIN`, no pre-filter totals, no "N results hidden", caches keyed by clearance, no cross-label precomputed summaries (03 §2.3 rules 5 and 6).
 - **Model-written SQL** is parsed to a SELECT over curated views with a row limit and timeout and still runs under RLS, so a wrong query can be wrong but never wider (03 §3.2).
-- **DuckDB has no RLS:** only the query service opens analytics files, written per label cell (02 §6.3).
-- **Routing:** the session high-water mark of everything read decides which model may see the result (Phase 70 routing tiers).
-- **Crypto below, RLS above:** devices that store data receive only the label cells they hold keys for (later, with L5); the shared host relies on RLS (03 §2.3 rule 8).
+- **DuckDB has no RLS:** only the query service opens analytics files, written per label partition (02 §6.3).
+- **Routing:** the chat's label (the highest label of everything read, which only goes up unless a person lowers it with a reason) goes into the one decision function, `decideRoute(label, use, endpoint, authorizations, residency, passport, clearance)`, which decides which model may see the result; the extension, the host query service and the hub run the same function. Every answer carries the trust line (Runs on, Verified, Allowed), and "Why this label" shows the items and rules that raised the chat's label.
+- **Crypto below, RLS above:** devices that store data receive only the label key groups they hold keys for (later, with L5 hub federation); the shared host relies on RLS (03 §2.3 rule 8).
+
+> **Superseded 2026-11-20 (coherence review):** the routing line used to read "the session high-water mark of everything read decides which model may see the result (Phase 70 routing tiers)". The rule is unchanged; it is now worded with the glossary's "chat's label" and runs through `decideRoute` (Phase 41) instead of the Phase 70 tier lookup alone.
 
 ### 6.4 Source ACLs
 
@@ -329,15 +356,17 @@ Stored as principal ids; groups expanded at query time from a directory snapshot
 
 ### 6.5 Exceptions only (R10)
 
-What reaches a person and how (02 §7): the list in §1 above, ordered by impact (people who would lose access × uncertainty × level), grouped by steward into a weekly batch, with bulk actions on near-duplicate clusters. Every new or changed rule runs first in shadow mode over a sample ("would raise N items, would block M people from K items") before anyone can sign it in. A weekly stratified blind sample measures precision and recall per level; targets: recall at least 0.95 at Confidential and above, precision at least 0.80 on levels that block access; a missed target widens the review band automatically (02 §7.3).
+What reaches a person and how (02 §7): the list in §1 above, ordered by impact (people who would lose access × uncertainty × level), grouped by steward into a weekly batch, with bulk actions on near-duplicate clusters. Every new or changed rule is a proposal in the policy editor and runs first in shadow mode over a sample ("would raise N items, would block M people from K items"), shown as the proposal's effect, before anyone can apply it. A weekly stratified blind sample measures precision and recall per level; targets: recall at least 0.95 at "Organization: Sensitive" (id `org/Confidential`) and the equivalent levels of other scales and above, precision at least 0.80 on levels that block access; a missed target widens the review band automatically (02 §7.3).
 
-### 6.6 Personal mark
+### 6.6 Personal opt-out ("Personal: keep out of the catalogue")
 
-Only the person sets it; agents cannot. Allowed only in the person's own areas, bounded by bundle policy (`allowed, scopes, locationOnly, quotas, forbiddenContainers, overrideRoles, notice defaults`). The mark changes processing, never protection: the item keeps its label, tier and ACL. Abuse is detected from existence records and metadata only (volume, timing after a hold notice, sharing, origin, hash match), with escalation from a private notice to counts for the privacy officer to sampling only under an override (02 §10.5).
+Only the person sets it; agents cannot. Allowed only in the person's own areas, bounded by the `data.personalMark` section of the policy (`allowed, scopes, locationOnly, quotas, forbiddenContainers, overrideRoles, notice defaults`; `overrideRoles` names positions, not people). The opt-out changes processing, never protection: the item keeps its label, where it may be routed, and its ACL. Abuse is detected from existence records and metadata only (volume, timing after a hold notice, sharing, origin, hash match), with escalation from a private notice to counts for the privacy officer to sampling only under an override (02 §10.5).
 
 ### 6.7 Clearances
 
 Stage 1 delivers verified clearances and roles (Phase 71), so this platform does not ship on self-declared clearances. Officer roles (access officer, privacy officer, hold administrator, model owner) are Phase 71 credentials. Until a role credential exists for a person, that function runs in the source system's own tools and our layer shows metadata and coverage only (02 §9.6, §11.8).
+
+Coherence review (2026-11-20): the officer functions are **positions** on the people list of your organization's data platform project (Phase 33.1), with the mode word for each from `term()`; a person is posted to a position and the Phase 71 credential wraps that posting. Standing delegations (for example a data owner's delegation per compartment, 10.2-25) follow the one delegation rule: a subset of what the delegator holds, with scope, expiry and depth. Effective clearance is the meet of the personal-layer clearance and the roster clearance, and is shown in "Why this label". The rule that the platform does not ship on self-declared clearances is unchanged.
 
 ---
 
@@ -383,21 +412,33 @@ Only Apache, MIT, BSD, PostgreSQL, ISC, and LGPL dynamically linked; a licence c
 
 | Phase | What the platform needs from it |
 |---|---|
-| 69 Team Mode reconciliation | Device keys that sign marks, lowerings, overrides, acknowledgments and hold or case decisions; the signed-payload interface (TMR-05) |
-| 70 Gate, manifests, labels | Labels, scales, dominance, join, `SessionMark`, `lowerByPerson`, routing tiers, signed bundle, decision records, label maps, D-22 versioning, D-49 event naming; the platform's tools (`catalog.*`, `dataset.assemble`, `query_data`) declare manifests |
+| 69 (device keys and signed payloads; the phase's historical name used "Team Mode", which is retired from user copy) | Device keys that sign personal opt-outs, lowerings, overrides, acknowledgments and hold or case decisions; the signed-payload interface (TMR-05) |
+| 70 Gate, manifests, labels | Labels, scales, dominance, join, the chat label (`SessionMark` in code), `lowerByPerson`, routing, signed bundle, decision records, label maps, D-22 versioning, D-49 event naming; the platform's tools (`catalog.*`, `dataset.assemble`, `query_data`) declare manifests |
 | 71 Identities and credentials | Verified clearances, compartments and officer roles; delegation that narrows for the opportunity agent and connector agents; two-person signatures; device binding credentials for enrolled collectors |
 | 72 Execution backends | Sandboxes for extraction workers, agent-written connectors and the trainer; network fences |
 | 73 Credential broker | Holds the Microsoft 365 certificate generated on the host, the Google credential, the file-share account and database credentials; connectors see only broker-signed requests; secret scanning of tool output |
-| 74 Run contracts | Caps on cost, time, tool calls for unattended runs: tier 2 classification, LLM extraction, the opportunity agent, training jobs |
+| 74 Run contracts | Caps on cost, time, tool calls for unattended runs: pass 2 classification, LLM extraction, the opportunity agent, training jobs |
 | 28 Secure workflow setup | None (parallel) |
 | 29 CleanUp tool | Never-touch list gains held items and personal existence records; the hold check lives inside the tool |
 
+Added by the coherence review (2026-11-20), on the 0.4.x line before this milestone:
+
+| Phase | What the platform needs from it |
+|---|---|
+| 31 to 35 Shared staff projects and the sync hub | The replica layer and the hub that carry the governance facts; the host enrols as a hub client; the hub loads the organization layer and runs the same gate core |
+| 32.1 Get Started | The step registry that the source connections and the policy setup register with as administrator steps; the checklist |
+| 33.1 Assigned positions | Officer positions, postings and the one delegation rule |
+| 38 Portfolio drop 1 | The one aggregation evaluator in `src/domain/gate/` that Phase 93 extends |
+| 41 Organization policy foundation | Bundle v2 sections and `requires`; the organization layer and its pinned issuer; `endpoints[]`; the one authorization record; the label service and `decideRoute`; `TrustFacts`; `ModelEndpoint` and `LocalServerAdmin`; the policy editor that receives proposals; the hash-chained local audit record |
+
 ### 8.2 On the later milestones
 
-- **L1 (pulled forward in part).** The platform needs the always-on host now: the Compose stack, amd64 images on Strix Halo, ROCm and Vulkan passthrough, the local inference service exposed through the hybrid provider, and an offline start. It does **not** need Theia, the relay or OpenShell. Recommendation: split L1 into "L1a host and local inference" (inside this milestone, phase 85 and the host parts of 88) and "L1b Theia appliance" (stays later). Decided: the split (owner, 2026-11-18, decision 10.1-1).
-- **L2:** not needed. Multi-person use works through verified clearances and source ACLs on one host.
-- **L4:** optional later: anchor package manifest roots, hold manifests and governance-log roots (roots only).
-- **L5:** catalog federation between edge and HQ, per-label-cell keys for edge devices (03 open question 6), pooled compute for extraction and training.
+- **L1 (pulled forward in part).** The platform needs the always-on host now: the Compose stack, amd64 images on Strix Halo, ROCm and Vulkan passthrough, the local inference service exposed through the hybrid provider, and an offline start. It does **not** need Theia, the messaging relay or OpenShell. Local models on the host are reached through `ModelEndpoint` as `local` endpoints, not through the hybrid provider. Recommendation: split L1 into "L1a host and local inference" (inside this milestone, phase 85 and the host parts of 88) and "L1b Theia appliance" (stays later). Decided: the split (owner, 2026-11-18, decision 10.1-1).
+- **L2:** not needed. Multi-person use works through verified clearances and source ACLs on one host, with governance facts on the replica layer that Phases 31 to 35 already deliver.
+- **L4:** optional later: anchor package manifest roots, hold manifests and the governance streams' signed heads (roots only).
+- **L5 (hub federation):** catalog federation between edge and HQ as hub-to-hub federation of the same streams, per-label key groups for edge devices (03 open question 6), pooled compute for extraction and training.
+
+> **Superseded 2026-11-20 (coherence review):** L4 used to anchor "governance-log roots" and L5 used "per-label-cell keys"; the meaning is unchanged, the words follow the replica layer and the glossary ("cell" is a key group in prose, and is never shown).
 - **L6:** learned skills can be proposed by the same opportunity agent.
 
 ---
@@ -486,6 +527,7 @@ Each decision below carries the owner's answer. Decisions 1 to 13 were accepted 
    - Recommendation: allowed in a person's own areas only. Quota of 5 GB and 20,000 items per person. Location-only mode off. Notice at override time, with any delay capped at 90 days and recorded.
    - Reason: the cap bounds abuse, and these defaults are easy to defend as proportionate (02 §10). Counsel should confirm.
    - **Decided (owner, 2026-11-18):** the recommended defaults, with counsel to confirm them as the recommendation said.
+   - Note 2026-11-20 (coherence review): the decision stands; people see the control as "Personal: keep out of the catalogue", and the defaults live in the `data.personalMark` policy section.
 
 **D. Legal positions (with counsel)**
 
@@ -507,6 +549,7 @@ Each decision below carries the owner's answer. Decisions 1 to 13 were accepted 
     - Recommendation: (b).
     - Reason: R9 forbids third-party *training*. Teacher inference in an attested TEE is the same route your organization already allows for that label. Training itself always runs on your organization's hardware (04 §4).
     - **Decided (owner, 2026-11-18):** (b), as recommended. Training itself runs only on your organization's own machines or hardware endpoints it controls (FAC-09).
+    - Note 2026-11-20 (coherence review): the decision stands, and teacher calls now pass the same checks as any other call: `decideRoute` with the data's label, the `nearai-tee` endpoint, residency and the teacher model's approval for the use. Under the model provenance defaults the private models NEAR AI offers today may not be approved for operational use, so a teacher on organization data may be refused until your organization approves one; see open question 10.4-2.
 12. **Going live.**
     - Options: (a) one click approves a specialist up to shadow, and a second click is needed for canary unless policy allows auto-promotion; (b) fully automatic once gates pass; (c) a person at every step.
     - Recommendation: (a), with auto-promotion off by default.
@@ -527,7 +570,7 @@ Each decision below carries the owner's answer. Decisions 1 to 13 were accepted 
     - Reason: it keeps what made (a) right (your organization's own app, the credential on your own host, nothing of ours in the tenant) and removes the manual work that made (a) hard; the convenience of (b) is not worth one credential that could reach every customer.
 
 **Also decided by the owner on 2026-11-18** (not among the 14):
-- **Collectors are super simple to install.** The host is a container stack; endpoint collectors are small signed native packages pushed by device management, with zero-config enrolment by a code, automatic updates and a local notice with the personal mark; agentless where possible (§3.7; COLL-01 to COLL-06).
+- **Collectors are super simple to install.** The host is a container stack; endpoint collectors are small signed native packages pushed by device management, with zero-config enrolment by a code, automatic updates and a local notice with the personal opt-out ("Personal: keep out of the catalogue"); agentless where possible (§3.7; COLL-01 to COLL-06).
 - **Fine-tuning runs only on your organization's own machines or hardware endpoints it controls** (§3.6; FAC-09).
 
 ### 10.2 Decided in design (accepted by the owner, 2026-11-18)
@@ -537,7 +580,7 @@ The owner accepted all 32 on 2026-11-18. Since then file shares are read from th
 | # | Decision | Reason | Source |
 |---|---|---|---|
 | 1 | Ingestion runs on the host plus endpoint collectors; the extension is the control panel only | Long jobs, GPU and cgroup caps, survives editor reloads | 02 OQ1, 04 D6 |
-| 2 | Signed governance log holds governance events and encrypted snapshots; sources stay the system of record | Matches R3 | 03 OQ1 |
+| 2 | Signed governance log holds governance events and encrypted snapshots; sources stay the system of record. Note 2026-11-20 (coherence review): the governance events are replica entries carried by the hub rather than a separate log; the decision is otherwise unchanged | Matches R3 | 03 OQ1 |
 | 3 | First-party connectors for Microsoft 365, Google, endpoints and shares; no ELv2 platform | Licence and fidelity | 01 §2.1 |
 | 4 | Poll change feeds by default; push optional | No public endpoint on an appliance | 01 §4.3 |
 | 5 | Teams chat messages deferred | Protected API approval | 01 §1.1 |
@@ -548,7 +591,7 @@ The owner accepted all 32 on 2026-11-18. Since then file shares are read from th
 | 10 | Privacy categories are facts that raise levels; your organization may map them to compartments (HR, HEALTH) in the bundle | Compartments need verified clearances to mean anything, which Phase 71 gives; keep the default simple | 02 OQ2 |
 | 11 | Label v2 adds `no-train` and `no-summarize-down`; "existence only" lives in decision 10.1-7 | Training is a new use | 02 OQ3 |
 | 12 | Classifier: tiered pipeline; a fine-tuned local sensitivity model later, trained by the factory on audited labels on your organization's host | Audit loop produces the data | 02 OQ5 |
-| 13 | Aggregation thresholds ship with defaults (for example 100 distinct people, or 500 items in one compartment, raise one level), adjustable in the wizard with simulation | Policy once | 02 OQ6 |
+| 13 | Aggregation thresholds ship with defaults (for example 100 distinct people, or 500 items in one compartment, raise one level), adjustable with simulation as a proposal in the policy editor (written 2026-11-18 as "in the wizard"); each rule carries `effect` and `remedy` and runs in the one evaluator from Phase 38 | Policy once | 02 OQ6 |
 | 14 | Hold store is our own write-once store with signed manifests; an S3 Object Lock compatible target is optional; no bundled AGPL object store | Licence | 02 §9.7 |
 | 15 | ACL staleness limit 24 hours, fail closed; group expansion from Entra ID, Google directory or LDAP per connector | Security | 02 OQ7 |
 | 16 | ROT is reported only; disposition is always a person's decision, guided flow later | Deletion needs a person | 02 OQ8 |
@@ -558,17 +601,28 @@ The owner accepted all 32 on 2026-11-18. Since then file shares are read from th
 | 20 | Superset not offered inside the panel; maybe an "open in browser" add-on later | Second enforcement point | 03 OQ8 |
 | 21 | First views: data map, search, entity pages, ask, insights; then graph, timeline; globe and forecasts deferred | Early value | 03 OQ4 |
 | 22 | Admiralty grading optional, for intelligence projects only | Enterprise data uses quality scores | 03 OQ5 |
-| 23 | Keys for multi-compartment cells deferred to L5 edge work; the host relies on RLS | No device copies in this milestone | 03 OQ6 |
+| 23 | Keys for multi-compartment cells (key groups, in the glossary's prose word) deferred to L5 edge work; the host relies on RLS | No device copies in this milestone | 03 OQ6 |
 | 24 | First specialist scope: per project or team, never organization-wide from mixed compartments | Per-compartment labels | 04 OQ4 |
-| 25 | Model owner role defaults to your organization's administrator credential; data owners give a standing delegation per compartment in the wizard | No security team needed | 04 OQ5 |
+| 25 | Model owner role defaults to your organization's administrator credential; data owners give a standing delegation per compartment in the wizard. Note 2026-11-20 (coherence review): model owner is a position, held by default by the person posted as administrator; the standing delegation follows the one delegation rule and is set in the Get Started administrator step | No security team needed | 04 OQ5 |
 | 26 | Content clustering on data at your organization's lowest level runs under a standing signed policy; above it, after approval | Policy once | 04 OQ6 |
 | 27 | Value formula cost inputs default from the host profile; editable | No required setup | 04 OQ7 |
 | 28 | Process mining implemented in TypeScript (directly-follows graph, variants); no AGPL dependency | Licence | 04 OQ9 |
 | 29 | MoE students and vLLM multi-LoRA wait for GB10 | ROCm immaturity | 04 OQ8 |
-| 30 | NEAR AI TEE *serving* of specialists is out of scope until NEAR's offering is documented; training never leaves your organization's hardware | R9 | 04 §9 F |
+| 30 | NEAR AI private hardware *serving* of specialists is out of scope until NEAR's offering is documented; training never leaves your organization's hardware | R9 | 04 §9 F |
 | 31 | No per-person productivity scoring anywhere; usage is aggregated to groups | Monitoring law | 02 §8.4, 04 §10 |
 | 32 | Requirement prefix `DSEC-` (not `SEC-`, which is already used by SEC-01 to SEC-04) | ID collision | roadmap |
 
 ### 10.3 Questions for spikes, not the owner
 
 ACL fidelity without full control, delta token expiry over multi-day backfills, `immutableId` with delta (phase 86); real throughput of Docling, OCR tiers, whisper.cpp, embeddings and LoRA on Strix Halo under ROCm and Vulkan (phases 85 and 87); Google quota figures and keyless service-account credentials on an on-premises host (phase 90 research); exact ROCm and PyTorch pairing for the host (phase 85); Mosaic and Splink licences (phase 96 research). Added 2026-11-18: the one-click Microsoft 365 sequence, its public client and certificate self-rotation (phase 86); which Google setup steps have APIs (phase 90 research); enrolment code scoping, code signing and notarization per operating system, the MSI build tool's licence and terms, and the collector update client (phase 91 research).
+
+### 10.4 Open after the coherence review (2026-11-20)
+
+The coherence review settled the carrier, the policy sections, the front door and the words. Three points it did not settle; each has a recommended default, used in this design until the owner says otherwise.
+
+1. **Where per-item exception records live, and the override's kind.** The one authorization record (`POLICY-SCHEMA.md` 2) lists the kinds protected-b, t1-risk, accredited-device, residency-exception and declassify, all inside the policy bundle. A personal opt-out override is none of those, and label lowerings and overrides happen per item, at a volume the policy bundle should not carry.
+   - Recommended default: add a kind `personal-override` (two inner signatures, maximum duration taken from `data.personalMark`), and carry per-item `declassify` and `personal-override` records as replica entries on the governance stream in the same record shape, with the signers' keys listed in the organization layer. Standing exceptions (for example "this collection may be lowered by its steward") stay in the bundle's `authorizations[]`.
+2. **Which use a teacher call counts as (decision 10.1-11).** Writing training targets from organization data with a NEAR AI private hardware model is not chat a person reviews; under the model provenance defaults it would need an approval for agent work or operational work, which no private model on NEAR AI has today.
+   - Recommended default: a teacher call counts as "agent work" (T2 internally); until your organization approves a model for that use, the factory uses local teachers only and its card says why.
+3. **Who signs the data platform's project layer.** The policy schema has project layers signed by a project's lead. The data platform is organization-wide, not one project.
+   - Recommended default: the data platform's rules live only in the organization layer (and, without one, the administrator's personal layer, "self-signed on this computer"); the data platform has no project layer of its own, and per-source settings are endpoint and section entries proposed through the policy editor.
