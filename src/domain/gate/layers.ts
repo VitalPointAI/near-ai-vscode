@@ -30,8 +30,11 @@ export interface NarrowingRule {
   readonly order?: readonly string[];
   /** boolean-safe: the value that is never wider. */
   readonly safe?: boolean;
-  /** What a key your organization's layer leaves out means: no limit (`weakest`) or nothing allowed (`strictest`, the default). */
-  readonly absent?: 'weakest' | 'strictest';
+  /**
+   * What a key your organization's layer leaves out means: no limit (`weakest`), nothing allowed (`strictest`, the default), or the parser's default
+   * (`default`: a boolean-safe key keeps a personal safe value, and any other personal value goes without being listed, so the default applies).
+   */
+  readonly absent?: 'weakest' | 'strictest' | 'default';
   /** The rule covers every key below this one. */
   readonly subtree?: true;
 }
@@ -44,12 +47,18 @@ function rule(direction: NarrowingDirection, extra: Omit<NarrowingRule, 'directi
 const TIERS = Object.freeze(['any-cloud', 'attested-cloud', 'local-only', 'deny']);
 /** Agent modes, weakest first: the reverse of decide.ts's order for effectiveMode, whose lowest is approve-risky. */
 const MODES = Object.freeze(['fully-autonomous', 'auto', 'mostly-autonomous', 'approve-risky']);
-/** Model use tiers, weakest first (provenance design: T0 is the strictest). */
-const MODEL_TIERS = Object.freeze(['T3', 'T2', 'T1', 'T0']);
+/**
+ * Model use tiers a request is raised to, weakest first (models.ts USE_TIERS): useTierFor only raises, and a higher tier needs a more trusted model, so the
+ * higher tier is the narrower one.
+ */
+const MODEL_TIERS = Object.freeze(['T0', 'T1', 'T2', 'T3']);
 
 const ONLY = rule('organization-only');
 const ONLY_TREE = rule('organization-only', { subtree: true });
 const FALSE_SAFE = rule('boolean-safe', { safe: false });
+/** A people.organization permission: left out by your organization it is the mode's own behaviour, which a personal `true` cannot go past. */
+const FALSE_SAFE_OR_MODE = rule('boolean-safe', { safe: false, absent: 'default' });
+const MODEL_TIER = rule('tier-stricter', { order: MODEL_TIERS, absent: 'weakest' });
 const LOWER = rule('number-lower');
 const LOWER_OR_NONE = rule('number-lower', { absent: 'weakest' });
 
@@ -78,14 +87,58 @@ export const NARROWING: Readonly<Record<string, NarrowingRule>> = Object.freeze(
   'endpoints[].maxLabel': rule('ceiling-dominated'),
   // D-31: a personal entry counts only when its signer is one your organization lists in people.signers.
   'authorizations[]': ONLY_TREE,
-  'models.mode': rule('tier-stricter', { order: ['report', 'enforce'] }),
-  'models.unknownMaxTier': ONLY,
-  'models.tierByLevel.*': rule('tier-stricter', { order: MODEL_TIERS }),
-  'models.tierByProject.*': rule('tier-stricter', { order: MODEL_TIERS }),
-  'models.passports': ONLY_TREE,
-  'models.defaults': ONLY_TREE,
-  'models.localCatalogue': ONLY_TREE,
-  'models.order': ONLY_TREE,
+  // D-42. A section that leaves `mode` out is report mode, the weakest; `unknownMaxTier` has one value, T0, declared so a later value has a rule.
+  'models.mode': rule('tier-stricter', { order: ['report', 'enforce'], absent: 'weakest' }),
+  'models.unknownMaxTier': rule('tier-stricter', { order: ['T0'] }),
+  'models.tierByLevel.*': MODEL_TIER,
+  'models.tierByProject.*': MODEL_TIER,
+  // Passports are your organization's: a personal layer can neither add one (a model with no passport is T0, and a passport replaces a shipped one by id)
+  // nor drop, raise or lower one (without it, or with it lower, another matching passport can become the stricter one that applies, with wider hosting).
+  // Only `hosting` narrows: which passport applies never depends on it, so fewer hosting classes is always narrower.
+  'models.passports[]': ONLY,
+  'models.passports[].id': ONLY,
+  'models.passports[].match': ONLY,
+  'models.passports[].developer': ONLY,
+  'models.passports[].origin': ONLY,
+  'models.passports[].lineage.family': ONLY,
+  'models.passports[].lineage.base': ONLY,
+  'models.passports[].lineage.teachers': ONLY,
+  'models.passports[].lineage.teachers[].model': ONLY,
+  'models.passports[].lineage.teachers[].origin': ONLY,
+  'models.passports[].lineage.teachers[].method': ONLY,
+  'models.passports[].lineage.method': ONLY,
+  'models.passports[].licence.id': ONLY,
+  'models.passports[].licence.obligations': ONLY,
+  'models.passports[].licence.inherited': ONLY,
+  'models.passports[].legal.coveredByUsLaw': ONLY,
+  'models.passports[].legal.entityList': ONLY,
+  'models.passports[].legal.removalOrders': ONLY,
+  'models.passports[].hosting': rule('subset'),
+  'models.passports[].artifact.format': ONLY,
+  'models.passports[].artifact.sha256': ONLY,
+  'models.passports[].artifact.quantization': ONLY,
+  'models.passports[].artifact.remoteCode': ONLY,
+  'models.passports[].evaluation.report': ONLY,
+  'models.passports[].evaluation.sha256': ONLY,
+  'models.passports[].evaluation.at': ONLY,
+  'models.passports[].maxTier': ONLY,
+  'models.passports[].issuedAt': ONLY,
+  'models.passports[].expiresAt': ONLY,
+  'models.passports[].reevaluateOn': ONLY,
+  'models.defaults.*': ONLY,
+  // Fewer entries means fewer weights the local model manager may fetch; each entry is your organization's as written.
+  'models.localCatalogue': rule('subset'),
+  'models.localCatalogue[].passport': ONLY,
+  'models.localCatalogue[].artifacts': ONLY,
+  'models.localCatalogue[].artifacts[].format': ONLY,
+  'models.localCatalogue[].artifacts[].quantization': ONLY,
+  'models.localCatalogue[].artifacts[].source': ONLY,
+  'models.localCatalogue[].artifacts[].sha256': ONLY,
+  'models.localCatalogue[].artifacts[].sizeBytes': ONLY,
+  'models.localCatalogue[].artifacts[].licence.id': ONLY,
+  'models.localCatalogue[].artifacts[].licence.url': ONLY,
+  'models.localCatalogue[].minFitBand': ONLY,
+  'models.order': ONLY,
   'agents.maxMode.*': rule('tier-stricter', { order: MODES }),
   'agents.contexts.*': rule('subset'),
   'agents.mcp.unattended': rule('subset'),
@@ -98,12 +151,12 @@ export const NARROWING: Readonly<Record<string, NarrowingRule>> = Object.freeze(
   'people.organization.mode': rule('subset'),
   'people.organization.allowedModes': ONLY,
   'people.organization.projectMayChoose': FALSE_SAFE,
-  'people.organization.settings.mayDecline': FALSE_SAFE,
-  'people.organization.settings.acting': FALSE_SAFE,
-  'people.organization.settings.temporary': FALSE_SAFE,
-  'people.organization.settings.dualHatting': FALSE_SAFE,
-  'people.organization.settings.guests': FALSE_SAFE,
-  'people.organization.settings.enrolAtReport': rule('boolean-safe', { safe: true }),
+  'people.organization.settings.mayDecline': FALSE_SAFE_OR_MODE,
+  'people.organization.settings.acting': FALSE_SAFE_OR_MODE,
+  'people.organization.settings.temporary': FALSE_SAFE_OR_MODE,
+  'people.organization.settings.dualHatting': FALSE_SAFE_OR_MODE,
+  'people.organization.settings.guests': FALSE_SAFE_OR_MODE,
+  'people.organization.settings.enrolAtReport': rule('boolean-safe', { safe: true, absent: 'default' }),
   'people.organization.settings.overdueDays': LOWER,
   'people.organization.settings.maxDelegationDepth': LOWER,
   'onboarding.contacts': ONLY_TREE,
@@ -472,6 +525,7 @@ function composeByRule(found: NarrowingRule, pattern: string, segments: readonly
   if (mine === undefined) return org;
   if (org === undefined) {
     if (found.direction === 'superset' || found.absent === 'weakest') return mine;
+    if (found.absent === 'default') return found.direction === 'boolean-safe' && mine === found.safe ? mine : undefined;
     if (found.direction === 'boolean-safe') {
       if (mine === found.safe) return mine;
       widen(context, pattern, key, mine, found.safe, segments);
@@ -517,7 +571,8 @@ const SPECIAL: Readonly<Record<string, (org: unknown, mine: unknown, context: Co
   'people.clearances': composeClearances,
   'people.organization': composeOrganizationBlock,
   'people.organization.mode': composeOrganizationMode,
-  'exportControl.officials': composeOfficials
+  'exportControl.officials': composeOfficials,
+  'models.passports': composePassports
 });
 
 function compose(pattern: string, segments: readonly string[], org: unknown, mine: unknown, context: Context): unknown {
@@ -665,6 +720,35 @@ function composeOfficials(org: unknown, mine: unknown, context: Context): unknow
   if (!sameValue(onTheirs, theirs)) widen(context, 'exportControl.officials', 'exportControl.officials', onTheirs, theirs);
   const out = [...organization, ...mine.filter((official) => !regimes.includes(field(official, 'regime')))];
   out.sort((a, b) => { const left = String(field(a, 'regime')); const right = String(field(b, 'regime')); return left < right ? -1 : left > right ? 1 : 0; });
+  return org === undefined && out.length === 0 ? undefined : out;
+}
+
+/**
+ * models.passports (D-42): your organization's passports, all of them, each as written except `hosting`, which a personal layer may narrow to fewer
+ * classes. A personal passport your organization lacks is dropped and listed; any other changed field is listed and your organization's stands.
+ */
+function composePassports(org: unknown, mine: unknown, context: Context): unknown {
+  if (!Array.isArray(mine)) return org;
+  const organization = listOf(org);
+  const out = organization.map((passport) => {
+    const id = field(passport, 'id');
+    const yours = mine.find((other) => field(other, 'id') === id);
+    if (yours === undefined || !isRecord(passport)) return passport;
+    const key = `models.passports[${String(id)}]`;
+    const result = copyOf(passport);
+    for (const name of new Set([...Object.keys(passport), ...(isRecord(yours) ? Object.keys(yours) : [])])) {
+      const theirs = ownValue(passport, name);
+      const wanted = field(yours, name);
+      if (wanted === undefined || sameValue(wanted, theirs)) continue;
+      if (name === 'hosting' && Array.isArray(wanted) && wanted.length > 0 && isSubset(wanted, listOf(theirs))) result[name] = wanted;
+      else widen(context, `models.passports[].${name}`, `${key}.${name}`, wanted, theirs);
+    }
+    return result;
+  });
+  for (const passport of mine) {
+    const id = field(passport, 'id');
+    if (!organization.some((other) => field(other, 'id') === id)) widen(context, 'models.passports[]', `models.passports[${String(id)}]`, id, undefined);
+  }
   return org === undefined && out.length === 0 ? undefined : out;
 }
 

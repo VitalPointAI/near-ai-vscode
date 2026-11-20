@@ -16,7 +16,8 @@ import type { ActionPolicyMode } from '../domain/policy';
 import { bundleViewOf, parsePolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import {
-  DAY_MS, FIXED_NOW, authorizationFor, deviceKey, fixtureEndpoints, fullDocumentFor, issuerKey, policyDocumentFor, signAuthorization, signerEntry
+  DAY_MS, FIXED_NOW, FIXTURE_PASSPORT_ID, authorizationFor, deviceKey, fixtureEndpoints, fixtureModelsSection, fixtureOrganizationBlock, fixturePassport,
+  fullDocumentFor, issuerKey, policyDocumentFor, signAuthorization, signerEntry
 } from './helpers/policyFixtures';
 
 type Loose = any; // a document under edit: each test changes the values it is about
@@ -620,4 +621,233 @@ test('D-60: a project layer may add export regimes and never remove one', () => 
   const refused = parseProjectLayer({ v: 1, regimes: ['ITAR', 'NOFORN'] }, SCALE_PRESETS);
   assert.ok(!refused.ok);
   assert.equal(refused.path, 'regimes[1]');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Wave 2 merge: the models section (41-05, D-42) and people.organization (41-06, D-40)
+
+/** The fixtures' models section with one edit applied, added to a plain document. */
+function withModels(doc: Loose, edit: (models: Loose) => void = () => undefined): void {
+  const models = plain(fixtureModelsSection());
+  edit(models);
+  withSection(doc, 'models', models, 'models@1');
+}
+
+const PASSPORT_KEY = `models.passports[${FIXTURE_PASSPORT_ID}]`;
+
+test('D-42: every models key the walk holds has the direction its meaning needs', () => {
+  const parsed = parsePolicyDocument(fullyFilled());
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  const paths = walk(parsed.value);
+  const expected: Record<string, string> = {
+    'models.mode': 'tier-stricter',
+    'models.unknownMaxTier': 'tier-stricter',
+    'models.tierByLevel.*': 'tier-stricter',
+    'models.tierByProject.*': 'tier-stricter',
+    'models.passports[].hosting': 'subset',
+    'models.passports[].maxTier': 'organization-only',
+    'models.passports[].match': 'organization-only',
+    'models.passports[].lineage.teachers[].origin': 'organization-only',
+    'models.passports[].artifact.remoteCode': 'organization-only',
+    'models.passports[].evaluation.report': 'organization-only',
+    'models.passports[].legal.entityList': 'organization-only',
+    'models.defaults.*': 'organization-only',
+    'models.localCatalogue[].minFitBand': 'organization-only',
+    'models.localCatalogue[].artifacts[].licence.url': 'organization-only',
+    'models.order': 'organization-only',
+    'people.organization.mode': 'subset',
+    'people.organization.allowedModes': 'organization-only',
+    'people.organization.settings.mayDecline': 'boolean-safe',
+    'people.organization.settings.overdueDays': 'number-lower'
+  };
+  for (const [key, direction] of Object.entries(expected)) {
+    assert.ok(paths.has(key), `${key} is walked`);
+    assert.equal(directionOf(key)?.direction, direction, key);
+  }
+  // The lists themselves (the walk goes into their items): catalogue membership narrows to fewer entries, passport membership is your organization's.
+  assert.equal(directionOf('models.localCatalogue')?.direction, 'subset');
+  assert.equal(directionOf(PASSPORT_KEY)?.direction, 'organization-only');
+  // A request raised to a higher use tier needs a more trusted model, so the higher tier is the narrower one (useTierFor only raises).
+  assert.deepEqual(NARROWING['models.tierByLevel.*']?.order, ['T0', 'T1', 'T2', 'T3']);
+  assert.equal(NARROWING['models.tierByLevel.*']?.absent, 'weakest');
+  // No entry under models covers a whole subtree: each key is declared on its own.
+  assert.deepEqual(Object.keys(NARROWING).filter((key) => key.startsWith('models.') && NARROWING[key]?.subtree === true), []);
+});
+
+interface ModelsRow {
+  readonly name: string;
+  readonly key: string;
+  readonly organization: (models: Loose) => void;
+  readonly narrower: (models: Loose) => void;
+  readonly wider: (models: Loose) => void;
+  readonly read: (doc: PolicyDocument) => unknown;
+  readonly narrowerValue: unknown;
+  readonly organizationValue: unknown;
+}
+
+const MODELS_ROWS: readonly ModelsRow[] = [
+  {
+    name: 'mode report to enforce', key: 'models.mode',
+    organization: (models) => { models.mode = 'enforce'; }, narrower: (models) => { models.mode = 'enforce'; }, wider: (models) => { models.mode = 'report'; },
+    read: (doc) => doc.models?.mode, narrowerValue: 'enforce', organizationValue: 'enforce'
+  },
+  {
+    name: 'a level raised to a higher use tier', key: 'models.tierByLevel.org/Internal',
+    organization: (models) => { models.tierByLevel = { 'org/Internal': 'T1' }; },
+    narrower: (models) => { models.tierByLevel = { 'org/Internal': 'T2' }; },
+    wider: (models) => { models.tierByLevel = { 'org/Internal': 'T0' }; },
+    read: (doc) => doc.models?.tierByLevel?.['org/Internal'], narrowerValue: 'T2', organizationValue: 'T1'
+  },
+  {
+    name: 'a project kind raised to a higher use tier', key: 'models.tierByProject.staff',
+    organization: (models) => { models.tierByProject = { staff: 'T2' }; },
+    narrower: (models) => { models.tierByProject = { staff: 'T3' }; },
+    wider: (models) => { models.tierByProject = { staff: 'T1' }; },
+    read: (doc) => doc.models?.tierByProject?.['staff'], narrowerValue: 'T3', organizationValue: 'T2'
+  },
+  {
+    name: 'a passport on fewer kinds of hosting', key: `${PASSPORT_KEY}.hosting`,
+    organization: () => undefined,
+    narrower: (models) => { models.passports[0].hosting = ['local']; },
+    wider: (models) => { models.passports[0].hosting = ['closed-api', 'local', 'org-plain']; },
+    read: (doc) => doc.models?.passports?.[0]?.hosting, narrowerValue: ['local'], organizationValue: ['local', 'org-plain']
+  },
+  {
+    name: 'fewer local catalogue entries', key: 'models.localCatalogue',
+    organization: () => undefined,
+    narrower: (models) => { models.localCatalogue = []; },
+    wider: (models) => { models.localCatalogue[0].minFitBand = 'phone-4gb'; },
+    read: (doc) => doc.models?.localCatalogue?.map((entry) => entry.minFitBand), narrowerValue: [], organizationValue: ['laptop-16gb']
+  },
+  {
+    name: 'your organization\'s preference order', key: 'models.order',
+    organization: (models) => { models.passports = [fixturePassport(), fixturePassport({ id: 'example-model-8b', match: ['example/model-8b'] })]; models.order = [FIXTURE_PASSPORT_ID, 'example-model-8b']; },
+    narrower: (models) => { models.passports = [fixturePassport(), fixturePassport({ id: 'example-model-8b', match: ['example/model-8b'] })]; models.order = [FIXTURE_PASSPORT_ID, 'example-model-8b']; },
+    wider: (models) => { models.passports = [fixturePassport(), fixturePassport({ id: 'example-model-8b', match: ['example/model-8b'] })]; models.order = ['example-model-8b', FIXTURE_PASSPORT_ID]; },
+    read: (doc) => doc.models?.order, narrowerValue: [FIXTURE_PASSPORT_ID, 'example-model-8b'], organizationValue: [FIXTURE_PASSPORT_ID, 'example-model-8b']
+  }
+];
+
+test('D-42: each models direction composes both ways', () => {
+  for (const row of MODELS_ROWS) {
+    const org = organization((doc) => withModels(doc, row.organization));
+    const kept = composeLayers({ organization: org, personal: personal((doc) => withModels(doc, (models) => { row.organization(models); row.narrower(models); })) });
+    assert.deepEqual(row.read(kept.effective), row.narrowerValue, `${row.name}: the narrower personal value stays`);
+    assert.deepEqual(kept.ignored, [], `${row.name}: nothing is listed`);
+    const clamped = composeLayers({ organization: org, personal: personal((doc) => withModels(doc, (models) => { row.organization(models); row.wider(models); })) });
+    assert.deepEqual(row.read(clamped.effective), row.organizationValue, `${row.name}: the wider personal value is replaced`);
+    assert.deepEqual(keysOf(clamped.ignored), [row.key], `${row.name}: the wider value is listed`);
+    assert.ok(parsePolicyDocument(plain(clamped.effective)).ok, `${row.name}: the effective policy parses`);
+  }
+});
+
+test('D-42: a personal layer can neither add a passport nor drop, raise or lower one of your organization\'s', () => {
+  const org = organization((doc) => withModels(doc, (models) => { models.passports[0].maxTier = 'T2'; }));
+  // Added: a personal passport would give a model with no passport (T0) a tier, or replace a shipped passport by id. It is dropped and listed.
+  const added = composeLayers({
+    organization: org,
+    personal: personal((doc) => withModels(doc, (models) => {
+      models.passports[0].maxTier = 'T2';
+      models.passports.push(fixturePassport({ id: 'example-model-9b', match: ['example/model-9b'] }));
+    }))
+  });
+  assert.deepEqual(added.effective.models?.passports?.map((passport) => passport.id), [FIXTURE_PASSPORT_ID]);
+  assert.deepEqual(keysOf(added.ignored), ['models.passports[example-model-9b]']);
+  // Dropped: without your organization's passport, a shipped passport with its id, or a looser one that matches the same model, would take its place.
+  const dropped = composeLayers({
+    organization: org, personal: personal((doc) => withModels(doc, (models) => { models.passports = []; delete models.defaults; delete models.localCatalogue; delete models.order; }))
+  });
+  assert.deepEqual(dropped.effective.models?.passports?.map((passport) => passport.id), [FIXTURE_PASSPORT_ID]);
+  // Raised and lowered: a lower tier changes which matching passport is the stricter and so which hosting applies; both stay your organization's.
+  for (const tier of ['T3', 'T1']) {
+    // A T1 passport cannot be the default for a job that needs T2, so that personal layer names no defaults (your organization's then apply).
+    const changed = composeLayers({
+      organization: org, personal: personal((doc) => withModels(doc, (models) => { models.passports[0].maxTier = tier; if (tier === 'T1') delete models.defaults; }))
+    });
+    assert.equal(changed.effective.models?.passports?.[0]?.maxTier, 'T2', tier);
+    assert.deepEqual(changed.ignored, [{ key: `${PASSPORT_KEY}.maxTier`, layer: 'personal', yours: tier, allowed: 'T2' }], tier);
+  }
+  // Under your organization's empty models section, the personal passports, defaults, catalogue and order all go, and the result parses.
+  const empty = composeLayers({ organization: organization((doc) => withSection(doc, 'models', { v: 1 }, 'models@1')), personal: personal((doc) => withModels(doc)) });
+  assert.ok(parsePolicyDocument(plain(empty.effective)).ok);
+  assert.deepEqual(empty.effective.models?.passports, []);
+  assert.equal(empty.effective.models?.defaults, undefined);
+  assert.deepEqual(keysOf(empty.ignored), [PASSPORT_KEY, 'models.defaults.standard', 'models.localCatalogue', 'models.order']);
+  assert.ok(!empty.ignored.some((entry) => entry.key === 'personal layer'));
+});
+
+test('D-42: narrowingOf judges models changes by their rules', () => {
+  assert.equal(narrowingOf('models.tierByLevel.org/Internal', 'T1', 'T2'), 'narrows');
+  assert.equal(narrowingOf('models.tierByLevel.org/Internal', 'T2', 'T1'), 'widens');
+  assert.equal(narrowingOf('models.tierByLevel.org/Internal', undefined, 'T1'), 'narrows');
+  assert.equal(narrowingOf('models.mode', 'report', 'enforce'), 'narrows');
+  assert.equal(narrowingOf(`${PASSPORT_KEY}.hosting`, ['local', 'org-plain'], ['local']), 'narrows');
+  assert.equal(narrowingOf(`${PASSPORT_KEY}.hosting`, ['local'], ['closed-api', 'local']), 'widens');
+  assert.equal(narrowingOf(`${PASSPORT_KEY}.maxTier`, 'T3', 'T1'), undefined);
+  assert.equal(narrowingOf('models.order', ['a'], ['b']), undefined);
+});
+
+/** A personal layer with its own people.organization block, one edit applied. */
+function personalBlock(edit: (block: Loose) => void): PolicyDocument {
+  return personal((doc) => {
+    const block = plain(fixtureOrganizationBlock());
+    edit(block);
+    doc.people.organization = block;
+  });
+}
+
+test('D-40: people.organization composes under your organization\'s block', () => {
+  const org = organization((doc) => { doc.people.organization = plain(fixtureOrganizationBlock()); });
+  // Allowed: a mode your organization allows, a shorter overdue time, less delegation, a permission turned off, a duty turned on.
+  const narrower = composeLayers({
+    organization: org,
+    personal: personalBlock((block) => {
+      block.mode = 'military'; block.allowedModes = ['military']; block.projectMayChoose = false;
+      block.settings = { ...block.settings, overdueDays: 1, maxDelegationDepth: 0 };
+    })
+  });
+  const kept = narrower.effective.people?.organization;
+  assert.equal(kept?.mode, 'military');
+  assert.deepEqual(kept?.allowedModes, ['corporate', 'military']);
+  assert.equal(kept?.projectMayChoose, false);
+  assert.equal(kept?.settings.overdueDays, 1);
+  assert.equal(kept?.settings.maxDelegationDepth, 0);
+  assert.deepEqual(keysOf(narrower.ignored), ['people.organization.allowedModes']);
+  // Refused: a mode your organization does not allow, a project choice it turned off, more delegation, a later overdue time, a permission it turned off.
+  const wider = composeLayers({
+    organization: organization((doc) => { doc.people.organization = { ...plain(fixtureOrganizationBlock()), projectMayChoose: false }; }),
+    personal: personalBlock((block) => {
+      block.mode = 'capital'; block.allowedModes = ['capital']; block.projectMayChoose = true;
+      block.settings = { ...block.settings, overdueDays: 9, maxDelegationDepth: 2, acting: true };
+    })
+  });
+  const clamped = wider.effective.people?.organization;
+  assert.equal(clamped?.mode, 'corporate');
+  assert.equal(clamped?.projectMayChoose, false);
+  assert.equal(clamped?.settings.overdueDays, 3);
+  assert.equal(clamped?.settings.maxDelegationDepth, 1);
+  assert.equal(clamped?.settings.acting, false);
+  assert.deepEqual(keysOf(wider.ignored).sort(), [
+    'people.organization.allowedModes', 'people.organization.mode', 'people.organization.projectMayChoose', 'people.organization.settings.acting',
+    'people.organization.settings.maxDelegationDepth', 'people.organization.settings.overdueDays'
+  ]);
+  assert.ok(parsePolicyDocument(plain(wider.effective)).ok);
+});
+
+test('D-40: a permission your organization leaves to the mode is never turned on by the personal layer, and a personal block with no organization block goes', () => {
+  // Your organization writes no acting setting (the mode decides) and allows corporate, which does not offer acting.
+  const org = organization((doc) => {
+    const block = plain(fixtureOrganizationBlock());
+    delete block.settings.acting;
+    doc.people.organization = block;
+  });
+  const on = composeLayers({ organization: org, personal: personalBlock((block) => { block.mode = 'military'; block.allowedModes = ['military']; block.settings.acting = true; }) });
+  assert.equal(on.effective.people?.organization?.settings.acting, undefined, 'the mode decides, as your organization left it');
+  assert.ok(!keysOf(on.ignored).includes('people.organization.settings.acting'));
+  assert.ok(!on.ignored.some((entry) => entry.key === 'personal layer'), 'the effective policy parses without the fallback');
+  const off = composeLayers({ organization: org, personal: personalBlock((block) => { block.settings.acting = false; }) });
+  assert.equal(off.effective.people?.organization?.settings.acting, false, 'turning a permission off stays');
+  const none = composeLayers({ organization: organization(), personal: personalBlock(() => undefined) });
+  assert.equal(none.effective.people?.organization, undefined);
+  assert.deepEqual(keysOf(none.ignored), ['people.organization']);
 });
