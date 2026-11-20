@@ -191,7 +191,7 @@ test('the hub-side closure, following type-only imports too, contains no replica
 test('32-15: the hub file and session module is hub-side, and its closure reaches no Yjs, no doc.ts and nothing outside src/domain (D-27)', () => {
   const closure = hubSideClosure();
   assert.ok(closure.includes('domain/replica/hubFile.ts'), 'hubFile.ts is in the hub-side closure');
-  assert.ok(isHubSide('domain/replica/hubFile'), 'hubFile is listed as hub-side');
+  assert.ok(isHubSide(stemOf('domain/replica/hubFile.ts')), 'hubFile is listed as hub-side');
   assert.ok(!closure.includes(DOC_FILE));
   assert.deepEqual(replicaBoundaryViolations('domain/replica/hubFile.ts', read('domain/replica/hubFile.ts')), []);
   assert.deepEqual(closure.filter((file) => importsOf(read(file)).some((ref) => ref.specifier === 'yjs')), []);

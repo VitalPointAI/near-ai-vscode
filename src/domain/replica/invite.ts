@@ -17,7 +17,7 @@
 //   new device. Everything in it is already signed; the joining device checks the genesis against the hash it pinned from the invite.
 // - Hub join (D-48, purpose staff-hub-join), signed by the joining device: the hub's writer id, the project, the invite id, the sha256 hex of the
 //   canonical signed join request and hubMac = HMAC-SHA256 under the hub check key over { hub, project, invite, request }. The check key is
-//   HKDF-SHA256(secret, info near-ai/hub-join/v1 followed by the invite id): the lead's device registers it with the hub and the joining device derives it
+//   HKDF-SHA256(secret, info HUB_JOIN_INFO followed by the invite id): the lead's device registers it with the hub and the joining device derives it
 //   from the invitation, so the hub checks a join request without ever holding the join secret or its roster hash. The joining device still sends the
 //   Phase 31 MAC, which only the lead's device checks, with the real secret, before Admit.
 // Files arrive by any channel and are read as hostile input: text is size-capped before it is parsed, fields are read as own properties only, and
