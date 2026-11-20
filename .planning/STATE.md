@@ -41,6 +41,8 @@ Phase 31 (Staff roster, cell keys and migration; drop A; MUS-04..06): planned 20
 
 Phase 31 executed 2026-11-20 on `feat/phase-31-staff-roster`: all 23 plans in 10 waves, plus a code review (2 critical, 9 major findings, all fixed with regression tests) and a fix for random key wraps being mistaken for tokens. Verification is human_needed (two-install UAT, the six words read aloud, owner decisions on labelled products in Make Multi-User). Commands stay behind `nearAi.staff.multiUserPreview`, off by default.
 
+Phase 32 (Your organization's sync hub; drop A; MUS-07, MUS-08): planned 2026-11-20 on `docs/phase-32-plan`, 28 plans in 14 waves. Part A (32-01..32-07) fixes the PR #130 review findings carried over, Part B (32-08..32-13) keeps each product in the cell for its label so Make Multi-User converts labelled projects, then Part C (32-14..32-28) builds the `hub/` service, its Compose profile and CI job, append checks, TLS-bound sessions, live events and presence, signed checkpoints, joining through the hub, the client transport, the malicious-hub harness and the operator section. Decisions D-01..D-71 are in 32-CONTEXT.md, with the ones for the owner to confirm listed there. Execution branches `feat/phase-32-NN-<slug>` into `feat/phase-32-sync-hub`.
+
 Next, in order (owner, 2026-11-18):
 1. Finish 0.4.33: the release PR from `release/0.4.33` (Phase 70's part 4e, the trust badge, and the new team's icon fix), then publishing once the owner approves that version.
 2. The follow-up patch: the review follow-ups carried from Phase 70's part 4 PRs (#87 rounds 4 to 6, #89 review 2, #95 review 4), so Stage 1 continues on a clean gate.
