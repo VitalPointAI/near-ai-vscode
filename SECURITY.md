@@ -1445,7 +1445,9 @@ USB stick), and there is no server to trust.
 - **Only the lead or the deputy changes who is in the project.** Inviting, admitting, removing a
   person or a device, changing a clearance, naming the deputy and handing over the lead are roster
   changes, and the roster accepts them only from a device of the staff lead or the deputy lead.
-  Removing someone or lowering their clearance moves the affected cells to new keys.
+  Invitations are made, and their join requests admitted, only on the computer that created the
+  shared project, because the joining computer trusts that computer's keys and the join secret is
+  kept there. Removing someone or lowering their clearance moves the affected cells to new keys.
 - **People and clearances are declared, not verified.** Until verified credentials arrive, every
   multi-user result says: "People and clearances in this project are declared by the staff lead,
   not verified." The six words check that the right device joined; they do not check who the
