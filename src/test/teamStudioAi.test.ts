@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PrivateRoute } from '../services/agentSession';
 import type { AgentMessage, ModelInfo } from '../services/nearAiClient';
-import { chooseTeamModel, teamModelCall, type TeamAiDeps } from '../services/teamStudioAi';
+import { chooseTeamModel, teamImageCall, teamModelCall, type TeamAiDeps } from '../services/teamStudioAi';
+import { privateOnlyNow } from '../gate/sessionMark';
 
 // 0.4.27: every Team Studio model call (drafting a team, Improve with AI) passes the same outbound check as chat, and a call that needs a private model
 // gets a NEAR TEE model on an attested route or a local model, or does not happen.
@@ -95,3 +96,18 @@ test('model choice skips image-only models and says so when the key has no chat 
   assert.match(none.ok ? '' : none.reason, /no chat models/);
 });
 
+
+// Coherence review S4: a private Team Studio call (a private team's review, drafting in a project with a knowledge base, a private team's icon) is sent with
+// the private floor on, so the gate's own check at the client decides, not the catalog's word. A call that does not need privacy carries no floor.
+test('S4: a private Team Studio call and a private icon are sent with the private floor on; an ordinary call is not', async () => {
+  const floors: boolean[] = [];
+  const d = deps({ complete: async () => { floors.push(privateOnlyNow()); return { text: '{"ok":true}', finishReason: 'stop' }; } });
+  assert.equal((await teamModelCall(d, { ...call, need: 'private' })).ok, true);
+  assert.equal((await teamModelCall(d, call)).ok, true);
+  assert.deepEqual(floors, [true, false]);
+  const images: boolean[] = [];
+  const art = deps({ models: [{ ...IMAGE, attestationSupported: true }], generateImage: async () => { images.push(privateOnlyNow()); return { bytes: new Uint8Array([1]) }; } });
+  assert.equal((await teamImageCall(art, { need: 'private', prompt: 'an owl' })).ok, true);
+  assert.equal((await teamImageCall(art, { need: 'any', prompt: 'an owl' })).ok, true);
+  assert.deepEqual(images, [true, false]);
+});

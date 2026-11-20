@@ -7,6 +7,7 @@
 // cannot place). The staff-products tool refuses a CLEARED verdict while a `hold` finding stands on the exact version, so a guard cannot clear past it.
 // What the scan cannot see (implicit decisions, compilation) is the guard model's review, and its HOLD is the answer to a doubt.
 import { SCALE_PRESETS } from '../gate/labels';
+import { activeScales, labelKeyAtLeast } from '../gate/labelAlgebra';
 import { findSecrets } from '../team/secrets';
 import { RESTRICTED_PUBLICATION_TITLES } from './doctrine';
 import type { StaffSectionId } from './doctrine';
@@ -82,14 +83,22 @@ function levelPattern(level: string): RegExp {
   return /NATO|Cosmic|Protected/i.test(level) ? new RegExp(`\\b${words}\\b`, 'i') : new RegExp(`\\b${words.toUpperCase()}\\b`);
 }
 
-/** Every level above the template ceiling on every shipped scale, as the marking it would be written as. */
+/**
+ * Every level above the template ceiling on every shipped scale and on every scale of the active policy (coherence review S7), as the marking it would be
+ * written as. A level on both lists is looked for once; the policy's scales only add markings, never remove a shipped one.
+ */
 function scaleMarkings(): Array<{ pattern: RegExp; name: string }> {
   const out: Array<{ pattern: RegExp; name: string }> = [];
-  for (const [id, scale] of Object.entries(SCALE_PRESETS)) {
-    const ceiling = Object.prototype.hasOwnProperty.call(TEMPLATE_CEILING, id) ? scale.levels.indexOf(TEMPLATE_CEILING[id]) : -1;
-    scale.levels.forEach((level, index) => {
-      if (index > ceiling) out.push({ pattern: levelPattern(level), name: `${scale.name}: ${level}` });
-    });
+  const seen = new Set<string>();
+  for (const table of [SCALE_PRESETS, activeScales()]) {
+    for (const [id, scale] of Object.entries(table)) {
+      const ceiling = Object.prototype.hasOwnProperty.call(TEMPLATE_CEILING, id) ? scale.levels.indexOf(TEMPLATE_CEILING[id]) : -1;
+      scale.levels.forEach((level, index) => {
+        if (index <= ceiling || seen.has(`${id}/${level}`)) return;
+        seen.add(`${id}/${level}`);
+        out.push({ pattern: levelPattern(level), name: `${scale.name}: ${level}` });
+      });
+    }
   }
   return out;
 }
@@ -239,8 +248,8 @@ export function guardScan(input: GuardInput): GuardScanResult {
   if (input.header) {
     const [scale, level] = input.header.label.split('/');
     const ceiling = Object.prototype.hasOwnProperty.call(TEMPLATE_CEILING, scale) ? TEMPLATE_CEILING[scale] : undefined;
-    const levels = Object.prototype.hasOwnProperty.call(SCALE_PRESETS, scale) ? SCALE_PRESETS[scale].levels : undefined;
-    const allowed = ceiling !== undefined && levels !== undefined && levels.includes(level) && levels.indexOf(level) <= levels.indexOf(ceiling);
+    // Ranked on the active policy's scales, the same ranking the gate uses (coherence review S7); an unknown level is never allowed.
+    const allowed = ceiling !== undefined && level !== undefined && labelKeyAtLeast(`${scale}/${ceiling}`, `${scale}/${level}`);
     if (!allowed) add('label-ceiling', 'hold', 0, input.header.label, `The product is labelled ${input.header.label}, above what a staff template may carry (org/Internal, NATO Unclassified or Protected A at most). Staff templates are for exercise and fictional data only.`);
   }
 

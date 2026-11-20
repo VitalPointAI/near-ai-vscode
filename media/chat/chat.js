@@ -1446,7 +1446,7 @@
           model.title = '';
           break;
         }
-        const groups = [['local', 'Local · runs on this machine'], ['tee', 'Private · runs in NEAR TEE'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
+        const groups = [['local', 'Local · runs on this machine'], ['tee', 'Private · NEAR AI private hardware, checked each time it is used'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
         model.replaceChildren(...groups.map(([kind, label]) => {
           const group = el('optgroup');
           group.label = label;

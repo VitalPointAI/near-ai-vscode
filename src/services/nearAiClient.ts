@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { AttestationReportCache, NOT_CHECKED_IN_EDITOR, sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { bindingReason, decideRoute, isBindingFresh, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
+import { bindingReason, decideRoute, isBindingFresh, notAccreditedText, routeCheckFailed, routingWhileFailedClosed, thisComputerOnlyLabelOf } from '../domain/gate/routing';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
-import { currentSessionRoute, defaultSessionRoute, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, notAccreditedRecordFor, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
@@ -1272,7 +1273,9 @@ export class NearAiClient {
     try {
       ({ routing, defaultLabel, bundleHash } = routingOf(route));
       mark = route.markOf();
-      decision = decideRoute(mark, routing, facts, defaultLabel);
+      // Coherence review S4: a private team or member, or nearAi.privacyMode tee-only, raises the tier to at least attested-cloud, so a model counts as
+      // private only when the gate's own check passes, never on the catalog's word alone.
+      decision = decideRoute(mark, routing, facts, defaultLabel, privateOnlyNow() ? 'attested-cloud' : undefined);
     } catch {
       // A policy state, a mark or a routing table that cannot be read means the route cannot be worked out: it is refused with a fixed rule and a plain
       // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
@@ -1294,6 +1297,7 @@ export class NearAiClient {
       } catch { /* see above */ }
     };
     write(false);
+    if (decision.allowed && !checkFailed) this.noteNotAccredited(route, decision, facts, model, { mark, defaultLabel, bundleHash, routing });
     let fellBackRecorded = false;
     const recordFallback = (): void => { if (!fellBackRecorded) { fellBackRecorded = true; write(true); } };
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
@@ -1306,6 +1310,22 @@ export class NearAiClient {
       ...(pinned === undefined ? {} : { pinned }),
       ...(optionalPin === undefined ? {} : { optionalPin, recordFallback })
     };
+  }
+
+  /**
+   * Coherence review S2 (report mode): when an allowed request carries content at a level that belongs only on an accredited system (Protected C, classified,
+   * NATO Confidential and above), the chat says once that this computer is not recorded as accredited, and the decision log records route.not-accredited
+   * once. Nothing is refused. A notice or record that cannot be made never changes the request (D-21).
+   */
+  private noteNotAccredited(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, model: string | undefined, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable }): void {
+    try {
+      const label = thisComputerOnlyLabelOf(context.mark, context.defaultLabel);
+      if (label === undefined || route.attestation.notAccreditedTold === true) return;
+      route.attestation.notAccreditedTold = true;
+      const reason = notAccreditedText(labelKeyShown(label));
+      try { route.sink?.record(notAccreditedRecordFor(route, decision, facts, model === undefined ? {} : { model }, { ...context, label, reason })); } catch { /* D-21 */ }
+      try { route.onNotice?.(reason); } catch { /* a notice never changes a request */ }
+    } catch { /* D-21 */ }
   }
 
   /**

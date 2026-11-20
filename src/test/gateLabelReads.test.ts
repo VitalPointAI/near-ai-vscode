@@ -72,7 +72,7 @@ async function run(root: string, calls: ToolCall[], gate: GateRuntime = testGate
   return { outputs, cards, transcript: JSON.stringify(result.messages) };
 }
 
-const PB_REFUSAL = /^Not allowed: This file is labelled ca-protected\/Protected B, and your policy gives you no clearance on that scale\./;
+const PB_REFUSAL = /^Not allowed: This file is labelled Canada, Protected: Protected B, and your policy gives you no clearance on that scale\./;
 
 test('Grep over a folder never returns a line from a file above the clearances and says how many lines it hid; Glob leaves the path out the same way', async () => {
   const root = project();

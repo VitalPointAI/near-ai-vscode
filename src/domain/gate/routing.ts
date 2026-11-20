@@ -168,6 +168,14 @@ function tableTier(table: Readonly<Record<string, RoutingTier>>, key: string): R
  * `no-agent-tools` is not a routing key and never changes a tier.
  */
 export function tierForLabel(label: Label, routing: RoutingTable): RoutingTier {
+  const tier = tableTierForLabel(label, routing);
+  // Owner rule (coherence review S1 and S2, PR #143 review): no cloud is accredited for classified work today, so a level that must stay on this computer is
+  // at least local-only whatever the policy's table says. Every check that reads a tier (routing, network calls at a mark, records) sees the same floor.
+  return isThisComputerOnly(label) ? stricter(tier, 'local-only') : tier;
+}
+
+/** The tier the policy's own table gives one label, before the this-computer rule: used only to say why a classified request was kept here. */
+function tableTierForLabel(label: Label, routing: RoutingTable): RoutingTier {
   let tier: RoutingTier = tableTier(routing.levels, labelKey(label)) ?? 'deny';
   for (const compartment of label.compartments) {
     const entry = tableTier(routing.compartments, compartment);
@@ -233,6 +241,75 @@ export function isLocalRouteHost(host: string, localHosts: readonly HostPattern[
     const pattern = given.toLowerCase();
     return pattern.startsWith('*.') ? name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1 : name === pattern;
   });
+}
+
+/**
+ * The levels whose content never leaves this computer, whatever host the policy names as local, and that belong only on an accredited system: Protected C,
+ * every Canadian classified level, and NATO Confidential and above (coherence review S1 and S2). Keyed `scale/level` on the shipped scales, whose ids and
+ * level names never change in place. A level on any other scale is judged by its routing tier alone.
+ */
+export const THIS_COMPUTER_ONLY_LEVELS: readonly string[] = Object.freeze([
+  'ca-protected/Protected C',
+  'ca-classified/Confidential',
+  'ca-classified/Secret',
+  'ca-classified/Top Secret',
+  'nato/NATO Confidential',
+  'nato/NATO Secret',
+  'nato/Cosmic Top Secret'
+]);
+
+/** True when the label's level is one of THIS_COMPUTER_ONLY_LEVELS. */
+export function isThisComputerOnly(label: { readonly scale: string; readonly level: string }): boolean {
+  return THIS_COMPUTER_ONLY_LEVELS.includes(labelKey(label));
+}
+
+/** The first label of the mark (or the default label, for an empty mark) whose level is one of THIS_COMPUTER_ONLY_LEVELS; undefined when none is. */
+export function thisComputerOnlyLabelOf(mark: Mark, defaultLabel?: Label): Label | undefined {
+  const labels: readonly Label[] = mark.length === 0 && defaultLabel !== undefined ? [defaultLabel] : mark;
+  return labels.find((label) => isThisComputerOnly(label));
+}
+
+/** How an endpoint matches the local hosts: this computer, an exact entry, only a `*.` pattern entry, or nothing. */
+export type LocalHostMatch = 'loopback' | 'exact' | 'pattern' | 'none';
+
+/** Like isLocalRouteHost, but says how the host matched, so a stricter level can refuse a pattern match. An exact entry wins over a pattern. */
+export function localHostMatch(host: string, localHosts: readonly HostPattern[]): LocalHostMatch {
+  const name = hostnameOf(host);
+  if (name === undefined) return 'none';
+  if (isLoopbackHost(name)) return 'loopback';
+  const patterns = localHosts.map((given) => given.toLowerCase());
+  if (patterns.some((pattern) => !pattern.startsWith('*.') && name === pattern)) return 'exact';
+  return patterns.some((pattern) => pattern.startsWith('*.') && name.endsWith(pattern.slice(1)) && name.length > pattern.length - 1) ? 'pattern' : 'none';
+}
+
+/** True only for an endpoint written as an https URL. A bare host says nothing about its scheme, so it is not https (fail closed). */
+export function usesHttps(host: string): boolean {
+  const text = host.trim();
+  if (!/^https:\/\//i.test(text)) return false;
+  try {
+    return new URL(text).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** The local-hosts entries that are `*.` patterns: from this version they no longer count as local for local-only levels (coherence review S1). */
+export function patternLocalHosts(routing: Pick<RoutingTable, 'localHosts'>): readonly string[] {
+  return routing.localHosts.filter((entry) => entry.startsWith('*.'));
+}
+
+/**
+ * The one notice a policy whose local hosts hold a `*.` pattern gets (coherence review S1): what changed, and how to fix the entry. Shown, never recorded, so
+ * it may name the entries.
+ */
+export function localHostPatternNotice(patterns: readonly string[]): string {
+  const named = patterns.slice(0, 5).join(', ');
+  return `Your policy names ${named} as local. From this version, content at a local-only level (Protected B, org Restricted and NATO Restricted by default) goes to a host other than this computer only when the policy names that exact host and the runtime uses https, and Protected C, classified and NATO Confidential and above never leave this computer. To keep using a host, replace the pattern with its exact name in the policy's local hosts (NEAR AI: Edit Policy).`;
+}
+
+/** What a chat says once, and the record keeps, when classified work runs on a computer not recorded as accredited (coherence review S2). */
+export function notAccreditedText(shownLabel: string): string {
+  return `This computer is not recorded as accredited for ${shownLabel}. Nothing stops you yet; your organization may require an accredited system.`;
 }
 
 /**
@@ -317,16 +394,19 @@ export const ROUTE_RULES = Object.freeze([
   'route.attestation-failed',
   'route.no-session',
   'route.default-session',
-  'route.connection-not-bound'
+  'route.connection-not-bound',
+  'route.local-host-not-exact',
+  'route.this-computer-only'
 ] as const);
 export type RouteRule = (typeof ROUTE_RULES)[number];
 export type RefusingRouteRule = Exclude<RouteRule, 'route.any-cloud' | 'route.attested-cloud' | 'route.local-only' | 'route.default-session'>;
 
 /**
  * Events about a session's routing that are recorded but decide nothing themselves: the answer check after a response at an attested-cloud level, and a
- * person's Check again that clears a failed one (plan 25). Named now so a record written by a later version is never one this version cannot name (D-49).
+ * person's Check again that clears a failed one (plan 25), and classified work running on a computer not recorded as accredited (coherence review S2,
+ * recorded once per chat, refusing nothing yet). Named now so a record written by a later version is never one this version cannot name (D-49).
  */
-export const ROUTE_EVENT_IDS = Object.freeze(['route.attestation-checked', 'route.attestation-cleared'] as const);
+export const ROUTE_EVENT_IDS = Object.freeze(['route.attestation-checked', 'route.attestation-cleared', 'route.not-accredited'] as const);
 export type RouteEventId = (typeof ROUTE_EVENT_IDS)[number];
 
 /** One plain sentence per refusing rule: nothing was sent, and what to do about it. */
@@ -337,11 +417,13 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.not-tee': 'Nothing was sent. This chat has read content that may only go to a model running in private hardware on NEAR AI Cloud\'s own endpoint, and this model or endpoint is not confirmed to do that. Choose a private model on NEAR AI Cloud or a local model, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.attestation-failed': 'Nothing was sent. The private hardware check of an earlier answer in this chat failed, so NEAR AI Cloud\'s models cannot count as private for this chat now. Use Check again under that answer, switch to a local model, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, choose a local model, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
-  'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven, so it stays on this computer. Choose a local model for this chat, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
+  'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven, so it stays on this computer. Choose a local model for this chat, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
+  'route.local-host-not-exact': 'Nothing was sent. From this version, content at this level goes to a host other than this computer only when your organization\'s policy names that exact host, not a *. pattern, and the runtime uses https. Name the exact host in the policy, use https, run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
+  'route.this-computer-only': 'Nothing was sent. This chat has read content at Protected C, a classified level or NATO Confidential or above, which never leaves this computer: no cloud and no other host is accredited for it, whatever your organization\'s policy names. Run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
 });
 
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
-export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window or run NEAR AI: Reset Policy to Defaults.';
+export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window, or run NEAR AI: Show Policy to see whether your policy needs attention.';
 
 export interface RouteDecision {
   readonly allowed: boolean;
@@ -365,10 +447,23 @@ function refuse(tier: RoutingTier, rule: RefusingRouteRule): RouteDecision {
   return { allowed: false, tier, rule, reason: ROUTE_REFUSALS[rule] };
 }
 
-/** `undefined` when a local client, on a local host, serves a model the catalog marks local; otherwise the rule that says which part fails. */
-function whyNotLocal(facts: RouteFacts, routing: RoutingTable): 'route.no-local-model' | 'route.local-host-not-local' | undefined {
+/**
+ * How strictly a host must be local: `named` takes any local-hosts entry (attested-cloud levels, as before); `exact-https` takes a non-loopback host only
+ * through an exact entry and over https (local-only levels, coherence review S1); `this-computer` takes loopback only (THIS_COMPUTER_ONLY_LEVELS).
+ */
+type LocalStrictness = 'named' | 'exact-https' | 'this-computer';
+
+type NotLocalRule = 'route.no-local-model' | 'route.local-host-not-local' | 'route.local-host-not-exact' | 'route.this-computer-only';
+
+/** `undefined` when a local client, on a host local enough for the level, serves a model the catalog marks local; otherwise the rule that says which part fails. */
+function whyNotLocal(facts: RouteFacts, routing: RoutingTable, strictness: LocalStrictness = 'named'): NotLocalRule | undefined {
   if (facts.clientRoute !== 'local') return 'route.no-local-model';
-  if (!isLocalRouteHost(facts.host, routing.localHosts)) return 'route.local-host-not-local';
+  const match = localHostMatch(facts.host, routing.localHosts);
+  if (match !== 'loopback') {
+    if (strictness === 'this-computer') return 'route.this-computer-only';
+    if (match === 'none') return 'route.local-host-not-local';
+    if (strictness === 'exact-https' && (match !== 'exact' || !usesHttps(facts.host))) return 'route.local-host-not-exact';
+  }
   return facts.model?.privacyBoundary === 'local' ? undefined : 'route.no-local-model';
 }
 
@@ -390,10 +485,13 @@ export function bindingReason(cause: BindingRefusalCause, rule: 'route.connectio
   return `${BINDING_REFUSALS[cause]} ${ROUTE_REFUSALS[rule].replace(/^Nothing was sent\. /, '')}`;
 }
 
-function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFacts): RouteDecision {
-  // A local model on a local host is stricter than attested cloud, so it satisfies this tier too.
-  if (whyNotLocal(facts, routing) === undefined) return allow(tier, 'route.attested-cloud', facts);
+function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFacts, privateFloor = false): RouteDecision {
+  // A local model on a local host is stricter than attested cloud, so it satisfies this tier too. Under the private floor (PR #143 review) a host other than
+  // this computer counts only as S1's Protected B rule allows: an exact local-hosts entry over https, never a *. pattern or plain http.
+  const why = whyNotLocal(facts, routing, privateFloor ? 'exact-https' : 'named');
+  if (why === undefined) return allow(tier, 'route.attested-cloud', facts);
   if (facts.clientRoute === 'local') {
+    if (why === 'route.local-host-not-exact') return refuse(tier, why);
     return refuse(tier, isLocalRouteHost(facts.host, routing.localHosts) ? 'route.not-tee' : 'route.local-host-not-local');
   }
   // Judged before sending (D-36): the TEE flag and NEAR's own endpoint, because a forwarded model cannot be attested.
@@ -408,21 +506,41 @@ function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFa
 
 /**
  * Whether a request may go, from the session's mark, the bundle's routing table and the local facts of the request (CLAS-05, CLAS-06, D-30, D-36, D-37).
- * `deny` refuses. `local-only` needs a local client on a loopback host or a host the table names, serving a model the catalog marks local. `attested-cloud`
+ * `deny` refuses. `local-only` needs a local client serving a model the catalog marks local, on a loopback host, or on a host the table names exactly and
+ * reached over https; a mark holding one of THIS_COMPUTER_ONLY_LEVELS needs a loopback host (coherence review S1). `attested-cloud`
  * needs a TEE model on NEAR AI Cloud's own endpoint with no failed attestation this session and a fresh bound connection fact for that host (D-50), or a
  * local model as above. `any-cloud` allows everything. An unknown model counts as not private for every tier above any-cloud. A refusal always carries a
- * plain sentence that says nothing was sent. An allowed request decided outside any session (`facts.sessionless`) is `route.default-session`.
+ * plain sentence that says nothing was sent. An allowed request decided outside any session (`facts.sessionless`) is `route.default-session`. `floor`
+ * raises the tier to at least that tier (attested-cloud for a private member or team, or nearAi.privacyMode tee-only), so a model counts as private only
+ * when the same check the labels use passed (coherence review S4).
  */
-export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label): RouteDecision {
-  const tier = tierForMark(mark, routing, defaultLabel);
+export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label, floor?: RoutingTier): RouteDecision {
+  const marked = tierForMark(mark, routing, defaultLabel);
+  // A floor (a private member or team, or nearAi.privacyMode tee-only) only ever raises the tier, never lowers it (coherence review S4).
+  const tier = floor === undefined ? marked : stricter(marked, floor);
+  const privateFloor = floor !== undefined && TIER_ORDER[floor] >= TIER_ORDER['attested-cloud'];
+  const decision = decideAtTier(tier, mark, routing, facts, defaultLabel, privateFloor);
+  // A this-computer-only level the policy's own table would have sent to a cloud: the refusal says it never leaves this computer, not that a model is missing.
+  const kept = thisComputerOnlyLabelOf(mark, defaultLabel);
+  if (!decision.allowed && kept !== undefined && decision.rule === 'route.no-local-model' && TIER_ORDER[tableTierForLabel(kept, routing)] < TIER_ORDER['local-only']) {
+    return refuse(decision.tier, 'route.this-computer-only');
+  }
+  if (decision.allowed || tier === marked || decision.reason === undefined) return decision;
+  return { ...decision, reason: `Nothing was sent. ${PRIVATE_FLOOR_TEXT} ${decision.reason.replace(/^Nothing was sent\. /, '')}` };
+}
+
+/** Said first in a refusal that only the private floor caused: why a request at a lower label still needed the check. */
+export const PRIVATE_FLOOR_TEXT = 'This run may use only verified private hardware or this computer (a private team or member, or nearAi.privacyMode set to tee-only), and that check did not pass.';
+
+function decideAtTier(tier: RoutingTier, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, privateFloor: boolean): RouteDecision {
   if (tier === 'any-cloud') return allow(tier, 'route.any-cloud', facts);
   if (tier === 'deny') return refuse(tier, 'route.deny');
   if (facts.clientRoute === undefined) return refuse(tier, 'route.no-session');
   if (tier === 'local-only') {
-    const why = whyNotLocal(facts, routing);
+    const why = whyNotLocal(facts, routing, thisComputerOnlyLabelOf(mark, defaultLabel) === undefined ? 'exact-https' : 'this-computer');
     return why === undefined ? allow(tier, 'route.local-only', facts) : refuse(tier, why);
   }
-  return decideAttested(tier, routing, facts);
+  return decideAttested(tier, routing, facts, privateFloor);
 }
 
 /**

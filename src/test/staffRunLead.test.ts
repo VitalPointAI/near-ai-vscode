@@ -17,6 +17,7 @@ import type { TeamDefinition } from '../agent/teams';
 import { offeredTools } from '../agent/tools';
 import type { AgentTool, ToolContext } from '../agent/tools';
 import { defaultStaffSettings } from '../domain/staff/profiles';
+import { STAFF_PRIVATE_MODELS_TEXT } from '../domain/staff/products';
 import { ActivityStore } from '../services/activityStore';
 import type { AgentMessage, CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { TranscriptStore } from '../services/transcripts';
@@ -200,4 +201,28 @@ test('a J2 run: the lead is offered only what it may call, an unoffered call is 
   assert.ok(watch.some((name) => name.startsWith(OBSERVATIONS_WATCH.slice(0, -1))) && !osint.some((name) => name.startsWith(OBSERVATIONS_WATCH.slice(0, -1))), 'the watch tools only by their own grant');
   const saved = (await store.get(session.sessionId))!;
   assert.equal(saved.agents.deployed, 2, 'two members were tasked');
+});
+
+// Coherence review S5: a staff team is marked private, and every private model NEAR AI offers today is from PRC developers. A chat that runs a staff team
+// says so once; a chat that runs another team never does. Nothing about where the work is sent changes.
+test('S5: a staff team run says once per chat that its private models come from PRC developers and to use fictional or exercise material only', { timeout: 30_000 }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-j2-notice-'));
+  const posts: Array<{ type?: string; text?: string }> = [];
+  const conversation = newTestConversation(root, (post: unknown) => { posts.push(post as { type?: string; text?: string }); }, path.join(root, '.ckpt'), undefined, new TranscriptStore(path.join(root, '.store'), root));
+  const client = {
+    async *streamCompletion(): AsyncGenerator<CompletionEvent> { yield reply('Noted.'); },
+    async actualCostsUsd() { return undefined; }
+  };
+  const send = (team?: TeamDefinition) => conversation.send({ text: 'Status', client: client as never, model: 'm', privacy: 'x', policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, ...(team ? { team } : {}) });
+  try {
+    await send();
+    assert.equal(posts.filter((post) => post.type === 'notice' && post.text === STAFF_PRIVATE_MODELS_TEXT).length, 0, 'no staff team, no notice');
+    await send(j2Team(root));
+    await send(j2Team(root));
+  } finally {
+    conversation.dispose();
+  }
+  assert.equal(posts.filter((post) => post.type === 'notice' && post.text === STAFF_PRIVATE_MODELS_TEXT).length, 1, 'said once per chat');
+  assert.match(STAFF_PRIVATE_MODELS_TEXT, /People's Republic of China/);
+  assert.match(STAFF_PRIVATE_MODELS_TEXT, /only on fictional or exercise material until your organization approves a model for operational work/);
 });

@@ -78,6 +78,11 @@ export interface PolicyBundle {
   readonly statusLists: readonly StatusListRef[];
   /** Reserved (D-12): `scale/level` to whole seconds, validated for shape and ignored. Empty in the default bundle. */
   readonly maxOfflineAge: Readonly<Record<string, number>>;
+  /**
+   * The features a client must know to apply this policy (coherence review S6). Optional and absent in the default bundle. A client that does not know one
+   * of them fails closed and says to update the extension, never to reset the policy, which would discard your organization's rules.
+   */
+  readonly requires?: readonly string[];
 }
 
 /** A reserved anchor: a 64 character lowercase hex root and at most 64 hex inclusion proof steps. */
@@ -96,6 +101,32 @@ const BUNDLE_FIELDS = [
   'bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'ceiling', 'scales', 'mappings', 'clearances', 'routing', 'defaultLabel',
   'anchorRoots', 'statusLists', 'maxOfflineAge'
 ] as const;
+
+/**
+ * The policy features this version knows (coherence review S6). A bundle's `requires` may name only these; none exists yet, so any named feature means the
+ * policy was written for a newer version. A feature is added here, with its meaning, in the release that implements it.
+ */
+export const KNOWN_BUNDLE_FEATURES: readonly string[] = Object.freeze([]);
+/** A feature id: a lowercase name with an optional `@N` version (`endpoints@1`), as the policy schema names them. */
+const FEATURE_ID_PATTERN = /^[a-z][a-z0-9.-]{0,63}(@[1-9][0-9]{0,3})?$/;
+const MAX_REQUIRES = 32;
+
+/**
+ * Reads `requires`: a list of feature ids. A list that is not one is `wrong-type`; a feature this version does not know is refused as `unknown-version` at
+ * `requires[i]`, which shapeReason turns into `needs-update`. Undefined when the bundle has no `requires`.
+ */
+function checkRequires(value: Record<string, unknown>, path: string): Refusal | undefined {
+  if (!Object.prototype.hasOwnProperty.call(value, 'requires')) return undefined;
+  const list = ownValue(value, 'requires');
+  const where = childPath(path, 'requires');
+  if (!Array.isArray(list) || list.length > MAX_REQUIRES) return refused('wrong-type', where);
+  for (let index = 0; index < list.length; index += 1) {
+    const entry: unknown = list[index];
+    if (typeof entry !== 'string' || !FEATURE_ID_PATTERN.test(entry)) return refused('wrong-type', `${where}[${String(index)}]`);
+    if (!KNOWN_BUNDLE_FEATURES.includes(entry)) return refused('unknown-version', `${where}[${String(index)}]`);
+  }
+  return undefined;
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A self-signed bundle lives this long (D-14). */
@@ -496,7 +527,10 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
   if (typeof version === 'number' && version !== BUNDLE_VERSION) return refused('unknown-version', childPath(path, 'bundleVersion'));
   const vocabulary = ownValue(value, 'vocabulary');
   if (typeof vocabulary === 'number' && vocabulary !== GATE_VOCABULARY_VERSION) return refused('unknown-version', childPath(path, 'vocabulary'));
-  const keys = checkKeys(value, path, BUNDLE_FIELDS);
+  // A feature this version does not know is said before an unknown key, so a newer policy reads as "update the extension" (coherence review S6).
+  const requires = checkRequires(value, path);
+  if (requires !== undefined) return requires;
+  const keys = checkKeys(value, path, BUNDLE_FIELDS, ['requires']);
   if (keys !== undefined) return keys;
   if (version !== BUNDLE_VERSION) return refused('wrong-type', childPath(path, 'bundleVersion'));
   if (vocabulary !== GATE_VOCABULARY_VERSION) return refused('wrong-type', childPath(path, 'vocabulary'));
@@ -552,7 +586,8 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
       defaultLabel: defaultLabel.value,
       anchorRoots: anchorRoots.value,
       statusLists: statusLists.value,
-      maxOfflineAge: maxOfflineAge.value
+      maxOfflineAge: maxOfflineAge.value,
+      ...(Object.prototype.hasOwnProperty.call(value, 'requires') ? { requires: Object.freeze([...(ownValue(value, 'requires') as string[])]) } : {})
     })
   };
 }
@@ -561,6 +596,11 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
 // Failing closed (OFFL-02, D-13)
 
 const RESET_FIX = 'Run NEAR AI: Reset Policy to Defaults to sign a fresh one.';
+/**
+ * The fix for a policy written for a newer version (coherence review S6): update. Never Reset, which would sign a fresh default policy and discard every rule
+ * your organization or you set.
+ */
+const UPDATE_FIX = 'Update the NEAR AI extension to use it. Until then only reading and planning run, and your policy file is left as it is.';
 
 /**
  * Every reason a bundle is not usable, each with one plain sentence that names the cause and the fix. The first group is the verifier's own closed list
@@ -571,7 +611,7 @@ export const BUNDLE_FAILURES = {
   missing: `NEAR AI has no policy file to read. ${RESET_FIX}`,
   unparseable: `Your policy file could not be read as a policy. ${RESET_FIX}`,
   malformed: `Your policy file is not a signed policy this version can read. ${RESET_FIX}`,
-  'unsupported-version': `Your policy file was made by a newer version of NEAR AI. Update the extension, or run NEAR AI: Reset Policy to Defaults to sign a fresh one.`,
+  'unsupported-version': `Your policy file was made by a newer version of NEAR AI. ${UPDATE_FIX}`,
   'unknown-purpose': `Your policy file is a signed item made for something this version does not know, not a policy. ${RESET_FIX}`,
   'wrong-purpose': `Your policy file is a signed item made for a different use, not a policy. ${RESET_FIX}`,
   'too-large': `Your policy file is larger than the allowed size. ${RESET_FIX}`,
@@ -582,8 +622,9 @@ export const BUNDLE_FAILURES = {
   'key-revoked': `The key that signed your policy file was revoked, so nothing it signed is accepted. ${RESET_FIX}`,
   'key-rotated': `The key that signed your policy file was replaced by a newer one, and the file was signed at or after the replacement. ${RESET_FIX}`,
   expired: `Your policy file has expired. ${RESET_FIX}`,
-  'vocabulary-unknown': `Your policy file uses a list of actions this version does not know. Update the extension, or run NEAR AI: Reset Policy to Defaults to sign a fresh one.`,
-  'unknown-field': `Your policy file has a setting this version does not know. ${RESET_FIX}`,
+  'vocabulary-unknown': `Your policy file uses a list of actions this version does not know. ${UPDATE_FIX}`,
+  'unknown-field': 'Your policy file has a setting this version does not know, so only reading and planning run. If a newer version of NEAR AI wrote it, update the extension. If you changed your own policy by hand, NEAR AI: Show Policy says how to go back.',
+  'needs-update': `Your policy file needs a feature this version of NEAR AI does not have. ${UPDATE_FIX}`,
   'wrong-type': `Your policy file has a setting that is missing or is not the right kind of value. ${RESET_FIX}`,
   'signer-mismatch': `Your policy file names a different signer than the one that signed it. ${RESET_FIX}`,
   'clock-behind': 'This computer\'s clock is earlier than the time your policy file was signed. Set the clock to the right time, then reload the window.',
@@ -594,12 +635,15 @@ export const BUNDLE_FAILURES = {
 } as const;
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 
+/** The reasons whose fix is updating the extension (coherence review S6): no surface offers Reset Policy to Defaults as their fix. */
+export const UPDATE_REASONS: ReadonlySet<BundleFailureReason> = new Set<BundleFailureReason>(['unsupported-version', 'vocabulary-unknown', 'needs-update']);
+
 /** Besides the floor, a failed-closed gate still allows these and nothing else (D-13). */
 export const FAILED_CLOSED_VERBS: readonly CapabilityVerb[] = Object.freeze(['read', 'plan'] as const);
 
 export type BundleState =
   | { readonly state: 'valid'; readonly bundle: PolicyBundle; readonly hash: string; readonly signer: PayloadSignerRef; readonly expiresAt: string; readonly renewDue: boolean }
-  | { readonly state: 'failed-closed'; readonly reason: BundleFailureReason; readonly sentence: string; readonly detail?: string };
+  | { readonly state: 'failed-closed'; readonly reason: BundleFailureReason; readonly sentence: string; readonly detail?: string; readonly ownPolicy?: true };
 
 /** The failed-closed state for one reason. `detail` is a diagnostic for logs (never shown as the sentence). */
 export function failedClosed(reason: BundleFailureReason, detail?: string): Extract<BundleState, { state: 'failed-closed' }> {
@@ -619,7 +663,10 @@ function payloadReason(reason: PayloadFailureReason): BundleFailureReason {
 }
 
 function shapeReason(refusal: Refusal): BundleFailureReason {
-  if (refusal.reason === 'unknown-version') return refusal.path.startsWith('bundleVersion') ? 'unsupported-version' : 'vocabulary-unknown';
+  if (refusal.reason === 'unknown-version') {
+    if (refusal.path.startsWith('requires')) return 'needs-update';
+    return refusal.path.startsWith('bundleVersion') ? 'unsupported-version' : 'vocabulary-unknown';
+  }
   if (refusal.reason === 'unknown-field' || refusal.reason === 'unknown-verb') return 'unknown-field';
   return 'wrong-type';
 }
@@ -631,6 +678,11 @@ export interface VerifyBundleOptions {
   readonly now: number;
   /** Epoch milliseconds of the last time this install saw a valid bundle, or undefined when it never has. */
   readonly lastValidAt?: number;
+  /**
+   * True when `status` knows only this install's own keys (the bundle store's local key history). A file whose signature verifies but whose content this
+   * version cannot read is then the person's own policy, so Show Policy may offer Reset for it; a policy signed by any other key never gets that offer.
+   */
+  readonly ownKeysOnly?: boolean;
 }
 
 /**
@@ -682,7 +734,10 @@ export function verifyBundleEnvelope(envelope: unknown, options: VerifyBundleOpt
   const verdict = verifyPayload<unknown>(envelope, { purpose: 'policy-bundle', status: options.status });
   if (!verdict.ok) return failedClosed(payloadReason(verdict.reason));
   const parsed = parseBundle(verdict.payload);
-  if (!parsed.ok) return failedClosed(shapeReason(parsed), parsed.message);
+  if (!parsed.ok) {
+    const failed = failedClosed(shapeReason(parsed), parsed.message);
+    return options.ownKeysOnly === true ? { ...failed, ownPolicy: true } : failed;
+  }
   const bundle = parsed.value;
   // The payload repeats the signer and the signing time on purpose (D-12), so a copy that says something else is refused, character for character.
   if (bundle.issuer.fingerprint !== verdict.signer.fingerprint || bundle.issuer.publicKey !== verdict.signer.publicKey || bundle.issuedAt !== verdict.signedAt) {

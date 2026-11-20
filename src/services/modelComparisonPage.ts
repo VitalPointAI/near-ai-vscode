@@ -44,7 +44,7 @@ export interface PageState {
   problem?: string;
 }
 
-const PRIVACY_TEXT: Record<CatalogEntry['privacy'], string> = { tee: 'Private: runs in NEAR’s TEE', local: 'Local: runs on this machine', forwarded: 'Forwarded: not private', unknown: 'Privacy unknown' };
+const PRIVACY_TEXT: Record<CatalogEntry['privacy'], string> = { tee: 'Private: NEAR AI private hardware, checked each time it is used', local: 'Local: runs on this machine', forwarded: 'Forwarded: not private', unknown: 'Privacy unknown' };
 
 export function privacyText(privacy: CatalogEntry['privacy'], forwardedTo?: string): string {
   return privacy === 'forwarded' && forwardedTo ? `Forwarded to ${forwardedTo}: not private` : PRIVACY_TEXT[privacy];

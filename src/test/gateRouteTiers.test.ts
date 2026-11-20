@@ -19,7 +19,7 @@ import { TranscriptStore } from '../services/transcripts';
 import { labelledProject } from './helpers/markFixtures';
 import type { ActorRef } from '../domain/gate/decide';
 import type { BundleState } from '../domain/gate/bundle';
-import { sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { privateOnlyNow, sessionRouteFrom, setPrivateOnlySetting, withPrivateOnly, withSessionRoute } from '../gate/sessionMark';
 import { validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
 import type { ConnectionBindingSource } from '../services/connectionBinding';
@@ -224,7 +224,7 @@ test('a chat raised to Restricted by a read, with no local model, is refused wit
 
 test('each refusal at a strict label, and label.network-at-mark, names Lower This Chat\'s Label, and none says to start a new chat', () => {
   // PR #87 review: route.attestation-failed and route.no-session name it too, as SECURITY.md says every refusal at a strict label does.
-  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound', 'route.attestation-failed', 'route.no-session'] as const) {
+  for (const rule of ['route.deny', 'route.no-local-model', 'route.local-host-not-local', 'route.not-tee', 'route.connection-not-bound', 'route.attestation-failed', 'route.no-session', 'route.local-host-not-exact', 'route.this-computer-only'] as const) {
     assert.ok(ROUTE_REFUSALS[rule].includes(LOWER), rule);
     assert.ok(!/start a new chat/i.test(ROUTE_REFUSALS[rule]), rule);
   }
@@ -593,4 +593,122 @@ test('review 89 minor 3: a failure no longer kept for Check again keeps the stop
   assert.match(CHECK_AGAIN_NEW_CHAT_TEXT, /Start a new chat/);
   chat.conversation.reset();
   assert.equal(chat.conversation.routeAttestation.failed, false, 'a new chat clears it');
+});
+
+// ---- Coherence review S1, S2 and S4 through the client ----
+
+const SECRET = label('ca-classified', 'Secret');
+
+/** A route that keeps its records and its chat notices, sharing `attestation` the way one chat's routes do. */
+function recordingRoute(markOf: () => Mark, state: BundleState = stateWith(), attestation = { failed: false }): { route: SessionRoute; records: DecisionRecord[]; notices: string[] } {
+  const records: DecisionRecord[] = [];
+  const notices: string[] = [];
+  const route: SessionRoute = { markOf, bundleState: () => state, actor: ACTOR, attestation, sink: { record: (record) => records.push(record) }, onNotice: (text) => notices.push(text) };
+  return { route, records, notices };
+}
+
+test('S1 through the client: Protected B to a host only a *. pattern names is refused before fetch, and the exact name over https is sent', async () => {
+  const remote = await localClient('https://models.example.org/v1');
+  await assert.rejects(() => withSessionRoute(routeAt(() => [PROTECTED_B], stateWith(['*.example.org'])), () => ask(remote.client, 'local-model')), refusedWith('route.local-host-not-exact'));
+  assert.equal(remote.content.length, 0, 'nothing reached the host');
+  assert.equal((await withSessionRoute(routeAt(() => [PROTECTED_B], stateWith(['models.example.org'])), () => ask(remote.client, 'local-model'))).text, 'ok');
+  assert.equal(remote.content.length, 1);
+});
+
+test('S1 through the client: Secret never goes to a named host, even an exact one over https, and still runs on this computer', async () => {
+  const remote = await localClient('https://models.example.org/v1');
+  await assert.rejects(() => withSessionRoute(routeAt(() => [SECRET], stateWith(['models.example.org'])), () => ask(remote.client, 'local-model')), refusedWith('route.this-computer-only'));
+  assert.equal(remote.content.length, 0);
+  const loopback = await localClient('http://127.0.0.1:11434/v1');
+  assert.equal((await withSessionRoute(routeAt(() => [SECRET], stateWith(['models.example.org'])), () => ask(loopback.client, 'local-model'))).text, 'ok');
+});
+
+test('S2: classified work on this computer is allowed, says once per chat that this computer is not recorded as accredited, and records route.not-accredited once', async () => {
+  const loopback = await localClient('http://127.0.0.1:11434/v1');
+  const chat = { failed: false };
+  const first = recordingRoute(() => [SECRET], stateWith(), chat);
+  assert.equal((await withSessionRoute(first.route, () => ask(loopback.client, 'local-model'))).text, 'ok');
+  assert.equal((await withSessionRoute(first.route, () => ask(loopback.client, 'local-model'))).text, 'ok', 'nothing is refused');
+  // A sub-agent's route shares the chat's state: still one notice.
+  const helper = recordingRoute(() => [SECRET], stateWith(), chat);
+  assert.equal((await withSessionRoute(helper.route, () => ask(loopback.client, 'local-model'))).text, 'ok');
+  assert.deepEqual(first.notices, ['This computer is not recorded as accredited for Canada, Classified: Secret. Nothing stops you yet; your organization may require an accredited system.']);
+  assert.deepEqual(helper.notices, []);
+  const events = [...first.records, ...helper.records].filter((record) => record.authorizations[0]?.policy.name === 'route.not-accredited');
+  assert.equal(events.length, 1, 'recorded once per chat');
+  assert.equal(validateDecisionRecord(events[0]).ok, true);
+  assert.equal(events[0]?.status_detail, first.notices[0]);
+  assert.equal(loopback.content.length, 3);
+  // A new chat says it again.
+  const next = recordingRoute(() => [SECRET]);
+  await withSessionRoute(next.route, () => ask(loopback.client, 'local-model'));
+  assert.equal(next.notices.length, 1);
+});
+
+test('S2: Protected B and an unclassified chat say nothing, and a refused classified request says nothing either', async () => {
+  const loopback = await localClient('http://127.0.0.1:11434/v1');
+  const protectedB = recordingRoute(() => [PROTECTED_B]);
+  await withSessionRoute(protectedB.route, () => ask(loopback.client, 'local-model'));
+  assert.deepEqual(protectedB.notices, []);
+  assert.ok(!protectedB.records.some((record) => record.authorizations[0]?.policy.name === 'route.not-accredited'));
+  const near = await nearClient();
+  const refused = recordingRoute(() => [SECRET]);
+  await assert.rejects(() => withSessionRoute(refused.route, () => ask(near.client, 'tee-model')), refusedWith('route.no-local-model'));
+  assert.deepEqual(refused.notices, []);
+  assert.ok(!refused.records.some((record) => record.authorizations[0]?.policy.name === 'route.not-accredited'));
+});
+
+/** A NEAR client whose binding source holds a bound fact for NEAR AI Cloud, fresh or `ageMs` old. */
+async function boundNearClient(ageMs: number): Promise<{ client: NearAiClient; content: string[] }> {
+  const fake = fakeFetch({ tee: ['tee-model'] });
+  const binding: ConnectionBindingSource = {
+    current: () => ({ state: 'bound', host: NEAR, checkedAt: Date.now() - ageMs, fingerprint: 'ab'.repeat(32) }),
+    refresh: async () => ({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: 'ab'.repeat(32) }),
+    markNotBound: () => undefined,
+    fetchFor: () => fake.fetchFn
+  };
+  const client = new NearAiClient({ baseUrl: NEAR, apiKey: 'test-key', fetchFn: fake.fetchFn, route: 'near', binding });
+  await client.listModels();
+  return { client, content: fake.content };
+}
+
+test('S4: a private run at org Public goes to a NEAR TEE model only over a fresh bound connection; a stale proof, no proof or a forwarded model is refused before fetch', async () => {
+  const publicChat = () => routeAt(() => [label('org', 'Public')]);
+  const fresh = await boundNearClient(60_000);
+  assert.equal((await withPrivateOnly(() => withSessionRoute(publicChat(), () => ask(fresh.client, 'tee-model')))).text, 'ok');
+  assert.equal(fresh.content.length, 1);
+  const stale = await boundNearClient(11 * 60_000);
+  await assert.rejects(() => withPrivateOnly(() => withSessionRoute(publicChat(), () => ask(stale.client, 'tee-model'))), refusedWith('route.no-local-model', 'Nothing was sent. This run may use only verified private hardware or this computer'));
+  assert.equal(stale.content.length, 0);
+  const unproven = await nearClient();
+  await assert.rejects(() => withPrivateOnly(() => withSessionRoute(publicChat(), () => ask(unproven.client, 'tee-model'))), refusedWith('route.no-local-model'));
+  await assert.rejects(() => withPrivateOnly(() => withSessionRoute(publicChat(), () => ask(fresh.client, 'cloud-model'))), refusedWith('route.not-tee'));
+  assert.equal(unproven.content.length + fresh.content.length, 1, 'nothing more was sent');
+  // Without the floor, today's behaviour: org Public goes to any model.
+  assert.equal((await withSessionRoute(publicChat(), () => ask(unproven.client, 'tee-model'))).text, 'ok');
+  // A model on this computer always counts as private.
+  const loopback = await localClient('http://127.0.0.1:11434/v1');
+  assert.equal((await withPrivateOnly(() => withSessionRoute(publicChat(), () => ask(loopback.client, 'local-model')))).text, 'ok');
+});
+
+test('S4: TEE-only mode puts the floor on every request; a setting that cannot be read keeps it on, and clearing it restores today\'s behaviour', async () => {
+  const unproven = await nearClient();
+  const publicChat = routeAt(() => [label('org', 'Public')]);
+  let clear = setPrivateOnlySetting(() => true);
+  try {
+    assert.equal(privateOnlyNow(), true);
+    await assert.rejects(() => withSessionRoute(publicChat, () => ask(unproven.client, 'tee-model')), refusedWith('route.no-local-model'));
+  } finally { clear(); }
+  clear = setPrivateOnlySetting(() => { throw new Error('unreadable'); });
+  try {
+    assert.equal(privateOnlyNow(), true, 'fail closed');
+  } finally { clear(); }
+  clear = setPrivateOnlySetting(() => false);
+  try {
+    assert.equal(privateOnlyNow(), false);
+    assert.equal(withPrivateOnly(() => privateOnlyNow()), true, 'a private member keeps the floor whatever the setting');
+    assert.equal((await withSessionRoute(publicChat, () => ask(unproven.client, 'tee-model'))).text, 'ok');
+  } finally { clear(); }
+  assert.equal(privateOnlyNow(), false);
+  assert.equal(unproven.content.length, 1);
 });

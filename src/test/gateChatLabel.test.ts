@@ -84,7 +84,7 @@ test('tracer: a chat raised to Confidential saves that label, keeps it when reop
   for (let wait = 0; wait < 50 && markOf((await store.meta(chat.id))!).join() !== 'org/Confidential'; wait += 1) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(markOf((await store.meta(chat.id))!), ['org/Confidential'], 'ThreadMeta.label holds the mark');
   const shown = posts.filter((post) => post.type === 'chat-label').at(-1);
-  assert.equal(shown?.text, 'org/Confidential');
+  assert.equal(shown?.text, 'Organization: Sensitive');
   const reopened = await chatIn(root, store);
   assert.ok(await reopened.restore(chat.id));
   assert.deepEqual(keys(reopened.mark!.current()), ['org/Confidential'], 'a reopened chat starts at the stored mark');
@@ -210,7 +210,7 @@ test('Lower This Chat\'s Label offers only labels below the chat\'s mark, down t
   const chat = viewOf(root, [RESTRICTED]);
   resetUi();
   assert.equal(await gateCommands.lowerChatLabel(host, chat), false, 'dismissed: nothing changes');
-  assert.deepEqual(stub.quickPickRequests[0]?.items.map((item) => item.label), ['org/Confidential', 'org/Internal']);
+  assert.deepEqual(stub.quickPickRequests[0]?.items.map((item) => item.label), ['Organization: Sensitive', 'Organization: Internal']);
   assert.deepEqual(keys(chat.session.current()), ['org/Restricted']);
   assert.deepEqual(gateCommands.lowerChoices([RESTRICTED], [label('org', 'Restricted')], SCALE_PRESETS), [], 'never below the project');
 });
@@ -224,13 +224,13 @@ test('with an empty reason nothing changes and nothing is recorded; with a reaso
   assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted']);
   const chat: ChatInView = { id: conversation.id, root, mark: () => conversation.mark, defaultLabel: () => conversation.chatDefaultLabel, prepareLowering: (signed) => conversation.prepareLowering(signed) };
   resetUi();
-  stub.quickPickAnswers.push('org/Internal');
+  stub.quickPickAnswers.push('Organization: Internal');
   stub.inputAnswers.push('   ');
   assert.equal(await gateCommands.lowerChatLabel(host, chat), false);
   assert.deepEqual(keys(conversation.mark!.current()), ['org/Restricted']);
   assert.equal((await recordsOf(host, storage, root)).filter((record) => record.authorizations[0]?.policy.name === 'label.declassify').length, 0);
   resetUi();
-  stub.quickPickAnswers.push('org/Internal');
+  stub.quickPickAnswers.push('Organization: Internal');
   stub.inputAnswers.push('Reviewed: the plan was published last week.');
   assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
   assert.deepEqual(keys(conversation.mark!.current()), ['org/Internal']);
@@ -252,8 +252,8 @@ test('with an empty reason nothing changes and nothing is recorded; with a reaso
 test('gateStatusText shows the chat in view\'s label above the default, and nothing for it at the default or with no chat; showing another chat changes it', () => {
   const state = undefined;
   const plain = statusBar.gateStatusText(state, 0);
-  assert.equal(statusBar.gateStatusText(state, 0, { mark: [CONFIDENTIAL], defaultLabel: PUBLIC }).text, `${plain.text} · org/Confidential`);
-  assert.match(statusBar.gateStatusText(state, 0, { mark: [CONFIDENTIAL], defaultLabel: PUBLIC }).tooltip, /The chat in view is labelled org\/Confidential/);
+  assert.equal(statusBar.gateStatusText(state, 0, { mark: [CONFIDENTIAL], defaultLabel: PUBLIC }).text, `${plain.text} · Organization: Sensitive`);
+  assert.match(statusBar.gateStatusText(state, 0, { mark: [CONFIDENTIAL], defaultLabel: PUBLIC }).tooltip, /The chat in view is labelled Organization: Sensitive/);
   assert.equal(statusBar.gateStatusText(state, 0, { mark: [PUBLIC], defaultLabel: PUBLIC }).text, plain.text);
   assert.equal(statusBar.gateStatusText(state, 0, undefined).text, plain.text);
   let told = 0;
@@ -462,7 +462,7 @@ test('review 3.4: the person\'s lowering and a lowering applied by a merge write
   const { host, storage } = await labelHost(root);
   const chat = viewOf(root, [RESTRICTED], 'conv-shape-person-1');
   resetUi();
-  stub.quickPickAnswers.push('org/Internal');
+  stub.quickPickAnswers.push('Organization: Internal');
   stub.inputAnswers.push('reviewed');
   assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
   const signed = await host.signChatLowering({ chatId: CHAT, from: [RESTRICTED], to: [PUBLIC], reason: 'reviewed and cleared', at: AT });
@@ -546,7 +546,7 @@ test('review 4.6: the person\'s lowering records the strictest label of the new 
   // Lowered to Public on the org scale while Protected B stays: the record's label is Protected B (local-only), not the first label of the mark.
   const chat = viewOf(root, [RESTRICTED, label('ca-protected', 'Protected B')], 'conv-strictest-1');
   resetUi();
-  stub.quickPickAnswers.push('org/Public, ca-protected/Protected B');
+  stub.quickPickAnswers.push('Organization: Public, Canada, Protected: Protected B');
   stub.inputAnswers.push('reviewed');
   assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
   const record = (await recordsOf(host, storage, root)).find((each) => each.authorizations[0]?.policy.name === 'label.declassify');
@@ -670,7 +670,7 @@ test('review 89.6: lowering a file\'s label with Set Label tells the chat in vie
     stub.inputAnswers.push('', 'the budget was published');
     // The first message is "conf.md is labelled ..."; the second is the chat's notice, answered with its button.
     stub.messageAnswers.push(undefined, gateCommands.LOWER_CHAT_LABEL_ACTION);
-    stub.quickPickAnswers.push('org/Internal');
+    stub.quickPickAnswers.push('Organization: Internal');
     stub.inputAnswers.push('it only read the published budget');
     assert.equal(await gateCommands.setLabel(host, { root, path: 'conf.md' }), true);
     const index = stub.notifications.findIndex((entry) => entry.message === gateCommands.CHAT_KEEPS_LABEL_TEXT);
