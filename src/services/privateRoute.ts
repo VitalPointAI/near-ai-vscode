@@ -4,7 +4,9 @@
 import { isNearCloudEndpoint } from '../domain/config';
 import { ConnectionNotBoundError, NEAR_TLS_FINGERPRINT_KIND, pinnedFetch } from './connectionBinding';
 import { TIER_ORDER } from '../domain/gate/routing';
-import type { ConnectionBindingFact, RouteFacts, RoutingTier } from '../domain/gate/routing';
+import type { ConnectionBindingFact, RouteDecision, RouteFacts, RoutingTier } from '../domain/gate/routing';
+import { trustFactsFor } from '../domain/gate/trust';
+import type { TrustContext, TrustFacts } from '../domain/gate/trust';
 import type { ModelInfo } from '../domain/provider/messages';
 
 /** What the client knows about one content request when its route is decided. */
@@ -40,6 +42,19 @@ export function routeFactsFor(input: RouteFactsInput): RouteFacts {
     ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels })
   };
   return facts;
+}
+
+/**
+ * The TrustFacts of an allowed request (D-38), for the answer's badge: `{ trust }`, or nothing when they cannot be worked out, which never changes the
+ * request (the badge then says what allowed it was not recorded).
+ */
+export function requestTrust(decision: RouteDecision, facts: RouteFacts, context: TrustContext, forwardedTo: string | undefined): { readonly trust?: TrustFacts } {
+  if (!decision.allowed) return {};
+  try {
+    return { trust: trustFactsFor(decision, facts, context, forwardedTo === undefined ? undefined : { forwardedTo }) };
+  } catch {
+    return {};
+  }
 }
 
 // ---- A connection held to your organization's pins (D-26) ----

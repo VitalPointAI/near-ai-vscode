@@ -33,6 +33,8 @@ export function answerFactsOf(request: Pick<AgentTurnRequest, 'client' | 'model'
     ...(named.forwardedTo ? { forwardedTo: named.forwardedTo } : {}),
     hasEvidence: usage?.evidence !== undefined,
     ...(usage?.connection === undefined ? {} : { connection: usage.connection }),
-    connectionFresh: usage?.connectionPinned === true
+    connectionFresh: usage?.connectionPinned === true,
+    // D-38: the TrustFacts of the request that answered, read by the badge's trust line.
+    ...(usage?.trust === undefined ? {} : { trust: usage.trust })
   };
 }

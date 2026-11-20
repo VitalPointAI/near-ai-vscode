@@ -7,7 +7,8 @@ import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
 import { currentSessionRoute, defaultSessionRoute, endpointPinRefusal, noteNotAccredited, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
-import { floorFor, pinnedFetchAny, routeFactsFor } from './privateRoute';
+import { floorFor, pinnedFetchAny, requestTrust, routeFactsFor } from './privateRoute';
+import type { TrustFacts } from '../domain/gate/trust';
 import type { RouteRecordContext, SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
@@ -183,6 +184,8 @@ interface RouteCheck {
   readonly recordFallback?: () => void;
   /** The TLS pins of your organization's server the send is held to (D-26): a level that needs a pin, allowed there. */
   readonly pinTo?: readonly string[];
+  /** The TrustFacts of the allowed request (D-38), kept per response for the answer's badge. */
+  readonly trust?: TrustFacts;
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
@@ -365,6 +368,8 @@ export class NearAiClient implements ModelEndpoint {
   private readonly streams = new WeakMap<Response, { abort: () => void; release: () => void }>();
   /** The binding fact the route check read for each content response, when the client has a binding source; its usage carries it. */
   private readonly connections = new WeakMap<Response, ConnectionBindingFact>();
+  /** The TrustFacts of each content response's request (D-38); its usage carries them to the answer's badge. */
+  private readonly trusts = new WeakMap<Response, TrustFacts>();
   /** The content responses that came over a connection pinned to a fresh bound fact's key; their usage says so. */
   private readonly pinnedResponses = new WeakSet<Response>();
   /** The binding refresh running for each host, at most one: a route check that finds the fact missing or old starts one, never waits for it (OFFL-01). */
@@ -1218,7 +1223,8 @@ export class NearAiClient implements ModelEndpoint {
       ...(this.options.binding === undefined ? {} : { connection: fact }),
       ...(pinned === undefined ? {} : { pinned }),
       ...(optionalPin === undefined ? {} : { optionalPin, recordFallback }),
-      ...(decision.pinTo === undefined ? {} : { pinTo: decision.pinTo })
+      ...(decision.pinTo === undefined ? {} : { pinTo: decision.pinTo }),
+      ...requestTrust(decision, facts, context, model === undefined ? undefined : this.models.get(model)?.forwardedTo)
     };
   }
 
@@ -1271,7 +1277,8 @@ export class NearAiClient implements ModelEndpoint {
   /** The usage a response starts with: its headers, and the binding fact the route check read when there is one. */
   private usageStart(response: Response, started: number): UsageMetadata {
     const connection = this.connections.get(response);
-    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }), ...(this.pinnedResponses.has(response) ? { connectionPinned: true as const } : {}) };
+    const trust = this.trusts.get(response);
+    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }), ...(this.pinnedResponses.has(response) ? { connectionPinned: true as const } : {}), ...(trust === undefined ? {} : { trust }) };
   }
 
   private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean } = {}): Promise<Response> {
@@ -1365,6 +1372,7 @@ export class NearAiClient implements ModelEndpoint {
         if (response.ok) {
           if (model) this.cooling.delete(model);
           if (connection !== undefined) this.connections.set(response, connection);
+          if (check?.trust !== undefined) this.trusts.set(response, check.trust);
           if (check?.pinned !== undefined) { this.attestedAnswers.set(response, check.route); this.pinnedResponses.add(response); }
           if (optionalPin) this.pinnedResponses.add(response);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');

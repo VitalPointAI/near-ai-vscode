@@ -3,9 +3,14 @@
 // its best. Pure: no vscode, no network, nothing outside src/domain.
 import { createHash } from 'node:crypto';
 import type { ConnectionBindingFact } from './routing';
+import type { TrustFacts, TrustLine, TrustPlace } from './trust';
 
 export const TRUST_BADGE_STATES = Object.freeze(['verified-private', 'model-verified', 'not-verified'] as const);
 export type TrustBadgeState = (typeof TRUST_BADGE_STATES)[number];
+
+// trust.ts reads TRUST_BADGE_STATES when it loads, and this file calls its trustLine: these imports come after the states, so either file can load first.
+import { activeScales } from './labelAlgebra';
+import { TRUST_LINE_TEXT, trustLine } from './trust';
 
 /** The owner's three titles (CLAS-08). SECURITY.md and README carry them word for word, and a test keeps them equal. */
 export const TRUST_BADGE_TITLES: Readonly<Record<TrustBadgeState, string>> = Object.freeze({
@@ -52,7 +57,11 @@ export const TRUST_BADGE_TEXT = Object.freeze({
   fullCheck: 'For a full check use cloud.near.ai/verify or NEAR’s nearai-cloud-verifier.',
   keptWhileOpen: 'The full attestation is kept only while the window that checked it is open.',
   notKept: 'This answer can no longer be checked again from the editor: only the last 20 answers of this window are kept.',
-  replayed: 'This shows the check made when the answer arrived.'
+  replayed: 'This shows the check made when the answer arrived.',
+  // The trust line's words when the request that answered left no record of what allowed it (D-38).
+  allowedNotRecorded: 'What allowed it was not recorded',
+  allowedNotKept: 'What allowed it is not kept for an answer shown again',
+  placeNotKept: 'Where it ran is not kept for an answer shown again'
 });
 
 /** How far a badge's check got: the outcomes of the client's check, written out because src/domain may not import src/services. */
@@ -82,6 +91,8 @@ export interface TrustBadgeFacts {
   readonly earlierCheckFailed: boolean;
   /** One of those failures is no longer kept for Check again, so only a new chat clears it (PR #89 review). */
   readonly earlierCheckLost?: boolean;
+  /** The TrustFacts the route check of the request that answered produced (D-38). Absent on an older path or a test client. */
+  readonly trust?: TrustFacts;
 }
 
 export interface TrustBadge {
@@ -95,6 +106,8 @@ export interface TrustBadge {
   readonly notChecked?: readonly string[];
   /** A badge shown again for a reopened chat: it has no Check again and no full attestation (plan 27). */
   readonly replayed?: true;
+  /** The trust line (D-38): "Runs on {place} · {verified} · {allowed}", its verified part always this badge's own state. */
+  readonly line?: TrustLine;
 }
 
 /** 0 for Not verified, 1 for Model verified, connection not proven, 2 for Verified private model: a stronger state has a higher rank. */
@@ -152,7 +165,26 @@ export function trustBadgeFor(facts: TrustBadgeFacts): TrustBadge | undefined {
     state = 'model-verified';
     reasons.push(withCause(TRUST_BADGE_TEXT.connectionNotProven, connectionCause(facts)));
   }
-  return { state, title: TRUST_BADGE_TITLES[state], explanation: TRUST_BADGE_TEXT.explanation[state], reasons, helpers: TRUST_BADGE_TEXT.helpers };
+  return { state, title: TRUST_BADGE_TITLES[state], explanation: TRUST_BADGE_TEXT.explanation[state], reasons, helpers: TRUST_BADGE_TEXT.helpers, line: badgeLine(facts, state) };
+}
+
+/** A line of three parts, joined as trustLine joins them. */
+function lineOf(runsOn: string, verified: string, allowed: string): TrustLine {
+  return Object.freeze({ runsOn, verified, allowed, text: [runsOn, verified, allowed].filter((part) => part !== '').join(TRUST_LINE_TEXT.partSeparator) });
+}
+
+/**
+ * The trust line of a badge (D-38): from the request's TrustFacts with the verified part set to the badge's state, so the line never says more than the
+ * badge proved (T-41-135). Without TrustFacts the place comes from the badge facts (NEAR AI Cloud's endpoint with a TEE model: its private hardware; a
+ * forwarded model: the outside provider; another endpoint: a place your rules do not name) and the allowed part says it was not recorded.
+ */
+function badgeLine(facts: TrustBadgeFacts, state: TrustBadgeState): TrustLine {
+  if (facts.trust !== undefined) return trustLine({ ...facts.trust, verification: state }, activeScales());
+  const place: TrustPlace = !facts.nearEndpoint
+    ? { class: 'unknown', region: 'unstated' }
+    : facts.boundary === 'tee' ? { class: 'nearai-tee', region: 'unstated' } : { class: 'forwarded', region: 'unstated', ...(facts.forwardedTo === undefined ? {} : { forwardedTo: facts.forwardedTo }) };
+  const derived = trustLine({ place, verification: state, allowedBy: [], wouldRefuse: [] }, activeScales());
+  return lineOf(derived.runsOn, derived.verified, TRUST_BADGE_TEXT.allowedNotRecorded);
 }
 
 
@@ -254,6 +286,12 @@ export function trustBadgeFromRecord(record: TrustRecord): TrustBadge {
     // A reason that speaks of a check still to come is about the window that checked it, never true on replay: it is reworded or left out.
     reasons: [...record.reasons.flatMap((reason) => reason === TRUST_BADGE_TEXT.timedOut ? [TRUST_BADGE_TEXT.timedOutReplayed] : reason === TRUST_BADGE_TEXT.checking ? [] : [reason]), TRUST_BADGE_TEXT.replayed],
     helpers: TRUST_BADGE_TEXT.helpers,
-    replayed: true
+    replayed: true,
+    // A record proves where only for the two states whose check showed NEAR AI's private hardware; what allowed the answer is never kept in it.
+    line: lineOf(
+      record.state === 'not-verified' ? TRUST_BADGE_TEXT.placeNotKept : `${TRUST_LINE_TEXT.runsOn} ${TRUST_LINE_TEXT.places['nearai-tee']}`,
+      TRUST_LINE_TEXT.verified[record.state],
+      TRUST_BADGE_TEXT.allowedNotKept
+    )
   };
 }
