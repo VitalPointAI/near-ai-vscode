@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.35
+
+The COP map now looks like the ground: photo-like imagery with 3D terrain by default, a
+topographic map one choice away, a globe on NASA Blue Marble imagery that you can spin, and a
+military map margin, with the layers in a drawer so the map gets the room. A staff project now
+knows its staff teams, so the chat offers to task them, and a staff run carries on when a NEAR AI
+model is overloaded. Staff projects that several people work on from their own computers are here
+as a preview behind a setting, off by default. Version 0.4.34 was never published to the
+Marketplace, so this release also brings everything in its notes below: the military staff teams.
 
 ### Staff collaboration (preview)
 

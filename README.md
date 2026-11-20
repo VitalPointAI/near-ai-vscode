@@ -278,9 +278,12 @@ section, and each section card in the Staff Room has **Task in chat**. A team
 file deleted or renamed in your teams shows as missing with **Set up again**. A
 project set up before this was recorded is offered the matching teams already in
 your teams to **Link**, after you confirm. Staff projects work on one machine
-for now: several people and machines on one staff project are not supported
-yet, because the signed ledgers trust only this computer's key. Multi-user
-staff workspaces are planned. **NEAR AI: Update Team…** recognises a
+by default. Several people on their own computers sharing one staff project is
+a preview: turn on `nearAi.staff.multiUserPreview` to try the invite, join and
+admit commands, **Make This Staff Project Multi-User** and **Make a
+Single-Machine Copy**. Projects with products labelled above `org/Public` are
+not converted yet, and the shared project cannot yet be synced between
+computers; that comes in a later release. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
