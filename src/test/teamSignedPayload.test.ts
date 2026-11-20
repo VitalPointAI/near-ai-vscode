@@ -508,3 +508,32 @@ test('a key record made of keys and hashes in the shapes the history writes is n
     assert.doesNotThrow(() => signPayload(signer, 'key-record', record, { now: () => new Date('2026-03-01T10:00:00.000Z') }), `record ${i} is signed`);
   }
 });
+
+test('generated random fields of the Phase 31 purposes are not mistaken for tokens, and nothing else is let through', () => {
+  const agent = agentSigner();
+  // Random base64url that happens to contain a token shape: the chance match that made grants, admissions and rekeys fail at random.
+  const lookalike = `${randomBytes(9).toString('base64url')}-rt_${randomBytes(12).toString('base64url')}`;
+  const pkcs8 = `MC4CAQAwBQYDK2VwBCIEI${randomBytes(24).toString('base64url')}`;
+  const cases: Array<[PayloadPurpose, (value: string) => unknown, string]> = [
+    ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: value, wraps: [] }), '$.labelSealed'],
+    ['staff-cell-grant', (value) => ({ cell: 'c', labelSealed: '', wraps: [{ writer: 'w', wrap: 'x' }, { writer: 'v', wrap: value }] }), '$.wraps[1].wrap'],
+    ['staff-invite', (value) => ({ invite: 'i', secret: value }), '$.secret'],
+    ['staff-invite', (value) => ({ invite: 'i', lead: { member: 'm', x25519: value } }), '$.lead.x25519'],
+    ['staff-join-request', (value) => ({ invite: 'i', x25519: value }), '$.x25519'],
+    ['staff-join-request', (value) => ({ invite: 'i', x25519Sig: value }), '$.x25519Sig'],
+    ['staff-join-request', (value) => ({ invite: 'i', mac: value }), '$.mac']
+  ];
+  for (const [purpose, build, where] of cases) {
+    // At its own path the random value signs.
+    assert.equal(failure(verifyPayload(signPayload(agent, purpose, build(lookalike)), { purpose, status: ACTIVE(agent) })), 'ok', `${purpose} ${where}`);
+    // Private key material at the same path is still refused.
+    throwsPlain(() => signPayload(agent, purpose, build(pkcs8)), new RegExp(`secret-like value at ${where.replace(/[$.[\]]/g, '\\$&')}`));
+    // Text that is not pure base64url at the same path gets the full check.
+    throwsPlain(() => signPayload(agent, purpose, build(`bearer ${lookalike}`)), /secret-like value/);
+    // The same random value under another purpose, or in another field of the same purpose, is still refused.
+    throwsPlain(() => signPayload(agent, 'grant', build(lookalike)), /secret-like value/);
+  }
+  throwsPlain(() => signPayload(agent, 'staff-cell-grant', { cell: 'c', labelSealed: '', wraps: [], note: lookalike }), /secret-like value at \$\.note/);
+  throwsPlain(() => signPayload(agent, 'staff-invite', { invite: 'i', name: lookalike }), /secret-like value at \$\.name/);
+  throwsPlain(() => signPayload(agent, 'staff-join-request', { invite: 'i', wraps: [{ wrap: lookalike }] }), /secret-like value/);
+});

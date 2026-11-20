@@ -28,6 +28,16 @@ export const PAYLOAD_VERSION = 1;
 export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark'] as const;
 export type PayloadPurpose = typeof PAYLOAD_PURPOSES[number];
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
+
+// The fields of a payload, per purpose, that hold freshly generated random bytes as base64url: a cell grant's key wraps and sealed label, the invite's
+// one-time join secret and the lead's X25519 key, and a join request's X25519 key, its binding signature and its MAC. Random base64url can match a
+// token pattern by chance (about 5 in 100,000 wraps), which would refuse an admission or a rekey at random. Only these exact paths skip the token
+// patterns, and only for pure base64url text; private key material is still refused everywhere.
+const GENERATED_PATHS: Partial<Record<PayloadPurpose, RegExp>> = {
+  'staff-cell-grant': /^\$\.(?:labelSealed|wraps\[\d+\]\.wrap)$/,
+  'staff-invite': /^\$\.(?:secret|lead\.x25519)$/,
+  'staff-join-request': /^\$\.(?:x25519|x25519Sig|mac)$/
+};
 const PUBLIC_KEY_BYTES = 32;
 
 export interface PayloadSigner { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer): string }
@@ -113,7 +123,8 @@ export function signPayload<T>(signer: PayloadSigner, purpose: PayloadPurpose, p
     throw error;
   }
   try {
-    assertNoSecrets(payload, 'signed payload');
+    const generated = GENERATED_PATHS[purpose];
+    assertNoSecrets(payload, 'signed payload', generated === undefined ? undefined : (path) => generated.test(path));
   } catch (error) {
     if (error instanceof SecretLeakError) throw new PayloadError(`Nothing was signed: the payload has a secret-like value at ${error.paths[0] ?? '$'}.`);
     throw error;

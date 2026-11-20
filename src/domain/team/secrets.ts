@@ -53,7 +53,13 @@ function isExemptKeyMaterial(key: string | undefined, text: string): boolean {
   return (key === 'publicKey' && PUBLIC_KEY_SHAPE.test(text)) || (key === 'sig' && SIGNATURE_SHAPE.test(text));
 }
 
-function stringIsFinding(key: string | undefined, text: string): boolean {
+// A caller that writes freshly generated random bytes (ciphertext, key wraps, MACs, join secrets) names those exact paths. A value at such a path that
+// is pure base64url skips the token patterns, which random text can match by chance, but is still checked for private key material.
+export type GeneratedPaths = (path: string) => boolean;
+const BASE64URL_TEXT = /^[A-Za-z0-9_-]*$/;
+
+function stringIsFinding(key: string | undefined, text: string, path: string, generated: GeneratedPaths | undefined): boolean {
+  if (generated !== undefined && BASE64URL_TEXT.test(text) && generated(path)) return isPrivateKeyMaterial(text);
   return isExemptKeyMaterial(key, text) ? isPrivateKeyMaterial(text) : looksSecret(text);
 }
 
@@ -62,7 +68,7 @@ interface Frame { value: unknown; path: string; key: string | undefined; depth: 
 // Returns JSON-style paths of every string, or object key, that looks like a secret. Never returns the matched text.
 // A key that looks like a secret is reported as "<parent> key name" and its children use "[key]" so the key text
 // is not repeated in any path.
-export function findSecrets(value: unknown): string[] {
+export function findSecrets(value: unknown, generated?: GeneratedPaths): string[] {
   const findings: string[] = [];
   const stack: Frame[] = [{ value, path: '$', key: undefined, depth: 0 }];
   while (stack.length > 0) {
@@ -70,7 +76,7 @@ export function findSecrets(value: unknown): string[] {
     if (frame === undefined) { break; }
     const current = frame.value;
     if (typeof current === 'string') {
-      if (stringIsFinding(frame.key, current)) { findings.push(frame.path); }
+      if (stringIsFinding(frame.key, current, frame.path, generated)) { findings.push(frame.path); }
       continue;
     }
     if (typeof current !== 'object' || current === null) { continue; }
@@ -100,8 +106,8 @@ export function findSecrets(value: unknown): string[] {
   return findings;
 }
 
-export function assertNoSecrets(value: unknown, what: string): void {
-  const paths = findSecrets(value);
+export function assertNoSecrets(value: unknown, what: string, generated?: GeneratedPaths): void {
+  const paths = findSecrets(value, generated);
   if (paths.length === 0) { return; }
   throw new SecretLeakError(`${what} contains a secret-like value at ${paths[0]}; nothing was written.`, paths);
 }
