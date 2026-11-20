@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import type { TLSSocket } from 'node:tls';
 import type { SessionExpectation, SessionRead } from '@ext/domain/replica/hubFile';
 import { RosterCache } from './append/rosterCache';
+import { Checkpointer, type CheckpointLog } from './checkpoints';
 import { loadConfig, type HubConfig } from './config';
 import { HUB_FILE_DAYS, hubIdentityOf, issueHubFile, type HubIdentity } from './enrol';
 import { HealthRegistry } from './health';
 import { createRoutes, type RouteDeps } from './http/routes';
 import { createHubServer, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
 import { SessionRegistry } from './http/session';
-import { EventHub, type Scheduler } from './live/events';
+import { EventHub, realScheduler, type Scheduler } from './live/events';
 import { PresenceHub } from './live/presence';
 import { RateLimits, type RateLimitOptions } from './limits';
 import { openHubStore, StoreError, type HubStore } from './store/hubStore';
@@ -26,8 +27,9 @@ import { prepareStateDir, StateDirError } from './stateDir';
 declare const __HUB_VERSION__: string;
 
 // Composition root, built to dist/app.mjs. Startup order: settings, plain-secret refusal, state directory, secrets, keys, TLS pair, store, the
-// hub's identity (keys and certificate pin), roster cache, sessions, routes, server. composeHub is the one place the parts are wired, and the tests'
-// in-process hub (test/helpers/hubHarness.ts) calls it too, so what the tests run is what the binary runs.
+// hub's identity (keys and certificate pin), roster cache, sessions, routes, the checkpoint signer (32-22, listening on the event channel), server.
+// composeHub is the one place the parts are wired, and the tests' in-process hub (test/helpers/hubHarness.ts) calls it too, so what the tests run
+// is what the binary runs.
 //
 // --hub-file <days> (D-41, default 7) prints one signed hub file for the operator to give the staff lead, and nothing else on stdout: no info line
 // before or after it, only a hub.start_refused line when it cannot.
@@ -148,6 +150,10 @@ export interface HubParts {
   onEquivocation?: RouteDeps['onEquivocation'];
   onFailure?: RouteDeps['onFailure'];
   onRejected?: (route: RejectedRoute, method: string, status: number) => void;
+  /** Signed checkpoints (32-22): on unless a test turns them off. */
+  signCheckpoints?: boolean;
+  /** The checkpointer's log lines (project id, counts and a reason word). */
+  onCheckpointLog?: CheckpointLog;
 }
 
 export interface ComposedHub {
@@ -157,6 +163,8 @@ export interface ComposedHub {
   limits: RateLimits;
   events: EventHub;
   presence: PresenceHub;
+  /** The checkpoint signer, listening on the events channel; undefined when turned off. */
+  checkpoints: Checkpointer | undefined;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -189,6 +197,18 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.onEquivocation === undefined ? {} : { onEquivocation: parts.onEquivocation }),
     ...(parts.onFailure === undefined ? {} : { onFailure: parts.onFailure }),
   });
+  const checkpoints =
+    parts.signCheckpoints === false
+      ? undefined
+      : new Checkpointer({
+          store,
+          cache,
+          identity,
+          events,
+          scheduler: parts.scheduler ?? realScheduler,
+          now,
+          ...(parts.onCheckpointLog === undefined ? {} : { log: parts.onCheckpointLog }),
+        }).listen(events.channel);
   parts.health.setStoreProbe(async () => {
     if (store.damaged() !== undefined) return 'down';
     store.schemaVersion();
@@ -201,7 +221,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits, events, presence };
+  return { server, sessions, cache, limits, events, presence, checkpoints };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
@@ -369,6 +389,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       tls,
       health,
       onFailure: (route, error) => logger.error('http.failed', { route, name: error instanceof Error ? error.name : 'NonError' }),
+      onCheckpointLog: (level, event, fields) => logger[level](event, fields),
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);

@@ -10,7 +10,7 @@ import type { KeyObject } from 'node:crypto';
 import { buildGrant, grantHash, unwrapEpochKey, wrapEpochKey, x25519BindingBytes, x25519PrivateFromSeed, x25519PublicRaw } from '@ext/domain/replica/cellKeys';
 import type { CellGrant } from '@ext/domain/replica/cellKeys';
 import { GENESIS_PREV, buildEntry, writerIdOf } from '@ext/domain/replica/entry';
-import type { Actor, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
+import type { Actor, Dep, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
 import { enrolmentMac, spkiPin } from '@ext/domain/replica/hubFile';
 import type { HubFilePayload } from '@ext/domain/replica/hubFile';
 import { ORIGIN_ROSTER } from '@ext/domain/replica/roster';
@@ -91,6 +91,10 @@ export interface WriteOptions {
   /** An explicit place: the chain is not advanced (a second header at a used seq, or a gap). */
   seq?: number;
   prev?: string;
+  /** The body's deps (none when absent). */
+  deps?: Dep[];
+  /** The body's lamport; when absent the world's counter, or with causalLamport one more than the largest of prev and deps. */
+  lamport?: number;
 }
 
 export interface RosterOptions { rosterPrev?: string; advance?: boolean; at?: string; actor?: Actor }
@@ -124,7 +128,8 @@ export interface HubWorld {
   enrolRequest(file: Pick<HubFilePayload, 'enrolment' | 'enrolmentSecret' | 'hub'>, options?: Partial<EnrolRequest>): EnrolRequest;
 }
 
-export function createHubWorld(options: { projectLabel?: string; leadLabel?: string } = {}): HubWorld {
+/** causalLamport (32-22): every lamport is one more than the largest of its prev and deps, as the chain stage of a client's fold requires. */
+export function createHubWorld(options: { projectLabel?: string; leadLabel?: string; causalLamport?: boolean } = {}): HubWorld {
   const project = streamOf(options.projectLabel ?? 'northwind');
   const lead = worldDevice(options.leadLabel ?? 'LEAD', 'mbr-lead');
   const entries: SealedEntry[] = [];
@@ -132,6 +137,7 @@ export function createHubWorld(options: { projectLabel?: string; leadLabel?: str
   const blobs = new Map<string, SealedBlob>();
   const chains = new Map<string, { seq: number; prev: string }>();
   let lamport = 0;
+  const lamports = new Map<string, number>();
   let nextSlot = 2;
   let inviteCount = 0;
   const keyOf = (cell: string, epoch: number): Buffer => sha256(`hub-world/epoch/${cell}/${epoch}`);
@@ -145,6 +151,9 @@ export function createHubWorld(options: { projectLabel?: string; leadLabel?: str
     const seq = writeOptions.seq ?? chain.seq + 1;
     const prev = writeOptions.prev ?? (explicit ? (seq === 0 ? GENESIS_PREV : chain.prev) : chain.prev);
     lamport += 1;
+    const deps = writeOptions.deps ?? [];
+    const causal = 1 + Math.max(0, ...[prev, ...deps.map((dep) => dep.hash)].map((hash) => lamports.get(hash) ?? 0));
+    const own = writeOptions.lamport ?? (options.causalLamport === true ? causal : lamport);
     const built = buildEntry({
       signer: device.signer,
       key: writeOptions.key ?? keyOf(stream, epoch),
@@ -152,9 +161,10 @@ export function createHubWorld(options: { projectLabel?: string; leadLabel?: str
       seq,
       prev,
       epoch,
-      body: { deps: [], roster: writeOptions.roster ?? world.head, lamport, at: writeOptions.at ?? WORLD_AT, actor: writeOptions.actor ?? { kind: 'person' }, kind: writeOptions.kind, data: writeOptions.data }
+      body: { deps, roster: writeOptions.roster ?? world.head, lamport: own, at: writeOptions.at ?? WORLD_AT, actor: writeOptions.actor ?? { kind: 'person' }, kind: writeOptions.kind, data: writeOptions.data }
     });
     if (!explicit) chains.set(chainKey, { seq, prev: built.hash });
+    lamports.set(built.hash, own);
     entries.push(built.entry);
     for (const blob of built.blobs) blobs.set(blob.hash, blob);
     return { entry: built.entry, hash: built.hash, stream, writer: device.writer, seq, blobs: built.blobs };
