@@ -5,7 +5,14 @@ import { buildSessionAnswer } from '@ext/domain/replica/hubFile';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
 import type { Scheduler, Timer } from '../../src/live/events';
 import type { HubConnection, HubResponse } from './hubClient';
-import type { Hub } from './hubHarness';
+
+/** What a reader needs of a hub: the in-process test hub (hubHarness.ts) or a hub process the test reaches by port and pin. */
+export interface HubEndpoint {
+  port: number;
+  /** Milliseconds; the time a session answer is signed at. */
+  now(): number;
+  connect(): Promise<HubConnection>;
+}
 
 // The event stream as a device reads it (32-21), over the same pinned TLS connection its session was opened on. Every request here is written
 // straight onto that one socket (no agent pools it), with connection: keep-alive, so a stream that ends leaves the connection usable for the next
@@ -176,13 +183,13 @@ export class EventStream {
 /** A device's connection with a session, opened with requests written straight on its socket. */
 export class EventClient {
   private constructor(
-    readonly hub: Hub,
+    readonly hub: HubEndpoint,
     readonly connection: HubConnection,
     readonly token: string,
     readonly project: string,
   ) {}
 
-  static async open(hub: Hub, device: { signer: PayloadSigner }, project: string): Promise<EventClient> {
+  static async open(hub: HubEndpoint, device: { signer: PayloadSigner }, project: string): Promise<EventClient> {
     const connection = await hub.connect();
     const challenge = await callOn(connection, hub.port, 'POST', '/v1/session', { json: { project } });
     assert.equal(challenge.status, 200, challenge.text);

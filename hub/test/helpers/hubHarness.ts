@@ -14,6 +14,7 @@ import { generateKeyFile, readEncryptionKey, readSigningKey } from '../../src/ke
 import type { RateLimitOptions } from '../../src/limits';
 import type { RosterCache } from '../../src/append/rosterCache';
 import type { EventHub, Scheduler } from '../../src/live/events';
+import type { PresenceHub } from '../../src/live/presence';
 import { composeHub, sweepBlobsOnce } from '../../src/main';
 import { listen } from '../../src/http/server';
 import { openHubStore } from '../../src/store/hubStore';
@@ -57,6 +58,8 @@ export interface Hub {
   server: https.Server;
   /** The open event streams (32-21). */
   events: EventHub;
+  /** Presence in memory (32-21). */
+  presence: PresenceHub;
   /** The injected clock, in milliseconds. */
   now(): number;
   advance(ms: number): void;
@@ -117,6 +120,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     cache: composed.cache,
     server: composed.server,
     events: composed.events,
+    presence: composed.presence,
     now: () => clock,
     advance: (ms) => {
       clock += ms;
@@ -159,6 +163,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     sweep: () => sweepBlobsOnce(store, clock),
     async close() {
       composed.events.closeAll();
+      composed.presence.close();
       for (const connection of connections) connection.close();
       composed.sessions.close();
       composed.server.closeAllConnections();

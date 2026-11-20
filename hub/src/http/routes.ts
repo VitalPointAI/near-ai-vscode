@@ -1,5 +1,5 @@
 // The hub's /v1 routes (D-34 to D-39, D-41, D-43, D-44, D-46, D-69): session, enrol, heads, append, entries and blobs (32-20), and the event
-// stream and the checkpoint ask (32-21). Checkpoint signing and join requests extend this table in 32-22 and 32-25; the client transport (32-23)
+// stream, presence and the checkpoint ask (32-21). Checkpoint signing and join requests extend this table in 32-22 and 32-25; the client transport (32-23)
 // speaks exactly these shapes.
 //
 // Wire rules. Every JSON answer is application/json with cache-control no-store. An error is {error: id, message: one plain sentence}, with a
@@ -34,6 +34,7 @@ import type { ProjectRoster, RosterCache } from '../append/rosterCache';
 import { enrolProject } from '../enrol';
 import type { EnrolRefusal, HubIdentity } from '../enrol';
 import { EventHub } from '../live/events';
+import { PresenceHub } from '../live/presence';
 import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
 import { StoreError } from '../store/hubStore';
@@ -53,6 +54,8 @@ export interface RouteDeps {
   now: () => number;
   /** The open event streams; a registry of its own when absent. */
   events?: EventHub;
+  /** Presence in memory; one of its own, publishing through events, when absent. */
+  presence?: PresenceHub;
   /** Called after COMMIT with the entries the hub now has from an append, after the hub's own events are published. */
   onAccepted?: (project: string, accepted: readonly string[], rosterChanged: boolean) => void;
   /** Called after COMMIT with the equivocation proofs an append recorded, after the hub's own events are published. */
@@ -61,7 +64,7 @@ export interface RouteDeps {
   onFailure?: (route: RouteId, error: unknown) => void;
 }
 
-export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get' | 'events' | 'checkpoint';
+export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get' | 'events' | 'presence' | 'checkpoint';
 
 export const ROUTE_ERRORS = {
   'not-found': 'There is nothing at this address on the hub.',
@@ -72,6 +75,7 @@ export const ROUTE_ERRORS = {
   'blob-mismatch': 'The uploaded bytes do not have the hash the address names. Upload the blob again.',
   'pending-quota': 'This device has uploaded too many blobs that no entry uses yet. Send the entries that use them first.',
   'too-many-streams': 'This device or address already has as many event streams open as the hub allows. Close one, or wait the time the hub gives.',
+  forbidden: 'This device is not on the access list of that part of the project.',
   'checkpoint-refused': 'A checkpoint handed back is not one this hub signed for this project, so none of them was kept.',
   internal: 'The hub could not answer this request. Try again later.',
 } as const;
@@ -181,7 +185,8 @@ interface RouteEntry {
 /** The handler for the /v1 routes, given to createHubServer. */
 export function createRoutes(deps: RouteDeps): HubHandler {
   const { store, cache, sessions, limits, identity } = deps;
-  const events = deps.events ?? new EventHub();
+  const events = deps.events ?? new EventHub({ now: deps.now });
+  const presence = deps.presence ?? new PresenceHub(events, { now: deps.now, accessList: async (project, cell) => (await cache.get(project)).accessList(cell) });
 
   const addressOf = (req: http.IncomingMessage): string => req.socket.remoteAddress ?? 'unknown';
 
@@ -387,6 +392,41 @@ export function createRoutes(deps: RouteDeps): HubHandler {
   };
 
   /**
+   * POST /v1/projects/:p/presence {cell, sealed} or {cell, leave: true} (D-38): at most 2 KiB, refused 413 before it is parsed; the cell id is
+   * checked, then the pushing device's token bucket (the same one appends take), then the device's place on the cell's access list. The sealed
+   * value is passed on as it came, never opened, never stored and never logged.
+   */
+  const presencePost: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    const auth = await authenticate(req, res, project);
+    if (auth === undefined) return;
+    const body = await readJson(req, res, LIMITS.presenceBytes);
+    if (body === undefined) return;
+    const value = body.value;
+    const keys = isRecord(value) ? Object.keys(value).sort().join(',') : '';
+    const cell = isRecord(value) ? value.cell : undefined;
+    const beat = keys === 'cell,sealed' && isRecord(value) && typeof value.sealed === 'string' && /^[A-Za-z0-9_-]+$/.test(value.sealed);
+    const leaving = keys === 'cell,leave' && isRecord(value) && value.leave === true;
+    if (typeof cell !== 'string' || !STREAM_ID_PATTERN.test(cell) || (!beat && !leaving)) {
+      sendError(res, 400, 'malformed');
+      return;
+    }
+    const taken = limits.takeWriter(auth.writer, 1, deps.now());
+    if (!taken.ok) {
+      sendError(res, 429, 'rate-limited', { 'retry-after': String(taken.retryAfterSeconds) });
+      return;
+    }
+    const roster = await cache.get(project);
+    if (roster.accessList(cell)?.includes(auth.writer) !== true) {
+      sendError(res, 403, 'forbidden');
+      return;
+    }
+    if (beat) presence.heartbeat(project, cell, auth.writer, (value as { sealed: string }).sealed);
+    else presence.leave(project, cell, auth.writer);
+    sendJson(res, 200, JSON.stringify({ project, cell }));
+  };
+
+  /**
    * POST /v1/projects/:p/checkpoint {known?: [signed checkpoints]}: asks the hub for a checkpoint, handing back the hub's own checkpoints the client
    * holds (D-46, D-54, D-70: a restored hub may have lost them). Every one must verify as signed by this hub's key for this project at a roster
    * position the hub knows; one that does not refuses the whole request 400 and nothing is kept. Verified ones the store lacks are kept as
@@ -542,6 +582,7 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     { path: ['v1', 'projects', ':project', 'append'], methods: { POST: { id: 'append', handler: append } } },
     { path: ['v1', 'projects', ':project', 'entries'], methods: { GET: { id: 'entries', handler: entries } } },
     { path: ['v1', 'projects', ':project', 'events'], methods: { GET: { id: 'events', handler: eventStream } } },
+    { path: ['v1', 'projects', ':project', 'presence'], methods: { POST: { id: 'presence', handler: presencePost } } },
     { path: ['v1', 'projects', ':project', 'checkpoint'], methods: { POST: { id: 'checkpoint', handler: checkpoint } } },
     { path: ['v1', 'blobs', ':hash'], methods: { PUT: { id: 'blob-put', handler: blobPut }, GET: { id: 'blob-get', handler: blobGet } } },
   ];
