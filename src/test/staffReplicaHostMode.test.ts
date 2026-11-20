@@ -141,7 +141,7 @@ async function cloneOf(source: Env, label: string): Promise<Env> {
 }
 
 async function migrate(env: Env): Promise<void> {
-  const result = await makeMultiUser(env.root, env.deps, { name: 'Exercise Northwind' });
+  const result = await makeMultiUser(env.root, env.deps, { name: 'Exercise Northwind' , leadClearance: { scale: 'org', level: 'Internal', compartments: [], releasability: [] } });
   assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
 }
 

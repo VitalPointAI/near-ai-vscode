@@ -108,7 +108,7 @@ async function releasedProduct(world: StaffWorld): Promise<void> {
 async function migrated(label: string): Promise<Env> {
   const env = await freshEnv(label);
   await releasedProduct(worldOf(env));
-  const result = await makeMultiUser(env.root, env.deps, { name: NAME });
+  const result = await makeMultiUser(env.root, env.deps, { name: NAME , leadClearance: { scale: 'org', level: 'Internal', compartments: [], releasability: [] } });
   assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
   return env;
 }
@@ -609,7 +609,7 @@ function fourLedgers(): Promise<FourLedgers> {
     must(await callLogistics(world, J4_TEAM, 'calc_run', FUEL_CALC, 'log-plans-officer'), 'calc_run');
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__wargame', { action: 'record', phase: TURN }, 'plans-writer'), 'wargame');
     const deps = { ...env.deps, staffKeyStatus: async () => both(env.signer) };
-    const result = await makeMultiUser(env.root, deps, { name: NAME });
+    const result = await makeMultiUser(env.root, deps, { name: NAME , leadClearance: { scale: 'org', level: 'Internal', compartments: [], releasability: [] } });
     assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
     return { env: { ...env, deps }, other };
   })();
