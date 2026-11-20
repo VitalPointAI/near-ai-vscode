@@ -330,6 +330,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.organization.addRules",
+        "title": "Add Your Organization's Rules",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.approveProduct",
         "title": "Staff: Approve a Product",
         "category": "NEAR AI"

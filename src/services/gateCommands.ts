@@ -32,6 +32,7 @@ import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routin
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
 import type { GateStatusTimers } from './gateStatusBar';
+import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules } from './organizationRules';
 import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
@@ -325,6 +326,9 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
         tell('NEAR AI could not open your policy.');
       }
     }));
+  });
+  attempt("Add Your Organization's Rules", () => {
+    keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell })));
   });
   attempt('Reset Policy to Defaults', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
