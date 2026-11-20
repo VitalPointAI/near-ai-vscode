@@ -622,7 +622,7 @@ export const BUNDLE_FAILURES = {
   'key-rotated': `The key that signed your policy file was replaced by a newer one, and the file was signed at or after the replacement. ${RESET_FIX}`,
   expired: `Your policy file has expired. ${RESET_FIX}`,
   'vocabulary-unknown': `Your policy file uses a list of actions this version does not know. ${UPDATE_FIX}`,
-  'unknown-field': `Your policy file has a setting this version does not know, so it was written for a newer version of NEAR AI. ${UPDATE_FIX}`,
+  'unknown-field': 'Your policy file has a setting this version does not know, so only reading and planning run. If a newer version of NEAR AI wrote it, update the extension. If you changed your own policy by hand, NEAR AI: Show Policy says how to go back.',
   'needs-update': `Your policy file needs a feature this version of NEAR AI does not have. ${UPDATE_FIX}`,
   'wrong-type': `Your policy file has a setting that is missing or is not the right kind of value. ${RESET_FIX}`,
   'signer-mismatch': `Your policy file names a different signer than the one that signed it. ${RESET_FIX}`,
@@ -635,14 +635,14 @@ export const BUNDLE_FAILURES = {
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 
 /** The reasons whose fix is updating the extension (coherence review S6): no surface offers Reset Policy to Defaults as their fix. */
-export const UPDATE_REASONS: ReadonlySet<BundleFailureReason> = new Set<BundleFailureReason>(['unsupported-version', 'vocabulary-unknown', 'unknown-field', 'needs-update']);
+export const UPDATE_REASONS: ReadonlySet<BundleFailureReason> = new Set<BundleFailureReason>(['unsupported-version', 'vocabulary-unknown', 'needs-update']);
 
 /** Besides the floor, a failed-closed gate still allows these and nothing else (D-13). */
 export const FAILED_CLOSED_VERBS: readonly CapabilityVerb[] = Object.freeze(['read', 'plan'] as const);
 
 export type BundleState =
   | { readonly state: 'valid'; readonly bundle: PolicyBundle; readonly hash: string; readonly signer: PayloadSignerRef; readonly expiresAt: string; readonly renewDue: boolean }
-  | { readonly state: 'failed-closed'; readonly reason: BundleFailureReason; readonly sentence: string; readonly detail?: string };
+  | { readonly state: 'failed-closed'; readonly reason: BundleFailureReason; readonly sentence: string; readonly detail?: string; readonly ownPolicy?: true };
 
 /** The failed-closed state for one reason. `detail` is a diagnostic for logs (never shown as the sentence). */
 export function failedClosed(reason: BundleFailureReason, detail?: string): Extract<BundleState, { state: 'failed-closed' }> {
@@ -677,6 +677,11 @@ export interface VerifyBundleOptions {
   readonly now: number;
   /** Epoch milliseconds of the last time this install saw a valid bundle, or undefined when it never has. */
   readonly lastValidAt?: number;
+  /**
+   * True when `status` knows only this install's own keys (the bundle store's local key history). A file whose signature verifies but whose content this
+   * version cannot read is then the person's own policy, so Show Policy may offer Reset for it; a policy signed by any other key never gets that offer.
+   */
+  readonly ownKeysOnly?: boolean;
 }
 
 /**
@@ -728,7 +733,10 @@ export function verifyBundleEnvelope(envelope: unknown, options: VerifyBundleOpt
   const verdict = verifyPayload<unknown>(envelope, { purpose: 'policy-bundle', status: options.status });
   if (!verdict.ok) return failedClosed(payloadReason(verdict.reason));
   const parsed = parseBundle(verdict.payload);
-  if (!parsed.ok) return failedClosed(shapeReason(parsed), parsed.message);
+  if (!parsed.ok) {
+    const failed = failedClosed(shapeReason(parsed), parsed.message);
+    return options.ownKeysOnly === true ? { ...failed, ownPolicy: true } : failed;
+  }
   const bundle = parsed.value;
   // The payload repeats the signer and the signing time on purpose (D-12), so a copy that says something else is refused, character for character.
   if (bundle.issuer.fingerprint !== verdict.signer.fingerprint || bundle.issuer.publicKey !== verdict.signer.publicKey || bundle.issuedAt !== verdict.signedAt) {

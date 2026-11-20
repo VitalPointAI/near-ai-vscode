@@ -274,7 +274,9 @@ test('S5: the staff setup\'s model step and its last message say the same senten
   try {
     const command = await import('../services/staffSetupCommand');
     assert.ok(command.readyMessage('J2 intelligence', 'j2', false).includes(STAFF_PRIVATE_MODELS_TEXT));
-    const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'staffSetupCommand.ts'), 'utf8');
-    assert.match(source, /label: 'NEAR AI Cloud', detail: `Private models in NEAR's TEE; members that research may use the web tools\. \$\{STAFF_PRIVATE_MODELS_TEXT\}`/);
+    // The model step's items, built by the code the command shows them with (PR #143 review: behaviour, not the source text).
+    const choices = command.localityChoices();
+    assert.deepEqual(choices.map((choice) => choice.value), ['cloud', 'local']);
+    assert.equal(choices[0]?.detail, `Private models in NEAR's TEE; members that research may use the web tools. ${STAFF_PRIVATE_MODELS_TEXT}`);
   } finally { uninstall(); }
 });

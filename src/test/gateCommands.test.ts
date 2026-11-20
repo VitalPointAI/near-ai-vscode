@@ -188,6 +188,17 @@ test('S6: Show Policy for a policy written for a newer version says to update an
   assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset Policy to Defaults/);
 });
 
+test('S6 (PR #143 review): an unknown setting in the person\'s own policy names both ways on, update or Reset with what it discards; another signer\'s never offers Reset', () => {
+  const own = gateCommands.policyDocumentText({ ...failedClosed('unknown-field'), ownPolicy: true }, 0);
+  assert.match(own, /If a newer version of NEAR AI wrote it, update the extension/);
+  assert.match(own, /NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded/);
+  const other = gateCommands.policyDocumentText(failedClosed('unknown-field'), 0);
+  assert.match(other, /update the extension/);
+  assert.ok(!/Reset Policy to Defaults/.test(other));
+  // A policy written for a newer version is never offered Reset, even the person's own.
+  assert.ok(!/Reset Policy to Defaults/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
+});
+
 test('policyDocumentText lists each MCP server\'s label ceiling, and says when none is set (WP-GATE)', () => {
   const issuer = { fingerprint: 'device-test', publicKey: 'A'.repeat(43) };
   const stateFor = (ceilings: unknown): BundleState => {

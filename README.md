@@ -797,9 +797,10 @@ until it runs out aren't shown.
   member), then the most capable other private model. `privacy: any`, or no
   line, lets the member use any model the run may use. The picker's word only
   chooses the model: each request a private member sends goes only when the
-  same check the labels use passes (a model on this computer, or NEAR AI Cloud
-  over a connection proven to end inside its private hardware), and is refused
-  before anything is sent otherwise. The extension always
+  same check the labels use passes (a model on this computer, a model on a
+  host your organization names exactly and reaches over https, or NEAR AI
+  Cloud over a connection proven to end inside its private hardware), and is
+  refused before anything is sent otherwise. The extension always
   writes `privacy:` as the member's last line before its instructions, so an
   older version that does not know it still reads the member's tools
   correctly; if you write it by hand, put it after `tools:` too.
@@ -1479,7 +1480,7 @@ copy of Open-GSD to a project that doesn't already have one.
   A host your organization names as local serves Protected B and the other
   local-only levels only when the policy names that exact host and it uses
   https, and Protected C, classified and NATO Confidential and above never
-  leave this computer. Classified work on this computer says once per chat that
+  leave this computer, whatever tier a policy gives them. Classified work on this computer says once per chat that
   the computer is not recorded as accredited. Labels show the scale's name with
   the level ("Organization: Internal"); the organization's Confidential level
   reads "Sensitive".
@@ -1559,7 +1560,7 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.sync.keepKeyInProject` | `true` | Keep the project's chat key in a private file (mode 0600) in the project's ignored state folder, so every editor on this computer can open the chats and use the NEAR AI key with no set-up. Off: each new editor or browser asks for the recovery code. |
 | `nearAi.sync.intervalMinutes` | `10` | How often, in minutes, a project with sync turned on syncs in the background while idle. 0 turns the background sync off (0 to 1440). Sync itself runs only after you turn it on. |
 | `nearAi.baseUrl` | NEAR AI Cloud | OpenAI-compatible endpoint (HTTPS, or HTTP on localhost). |
-| `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers, and sends a request only when it runs on this computer or over a connection proven to end inside NEAR AI Cloud's private hardware. |
+| `nearAi.privacyMode` | `standard` | `tee-only` blocks models NEAR forwards to other providers, and sends a request only when it runs on this computer, on a host your organization names exactly over https, or over a connection proven to end inside NEAR AI Cloud's private hardware. |
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount: the larger of NEAR's own total for the key (with a usage reporting token) and this computer's spend ledger. |
 | `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
 | `nearAi.spend.useNearUsageTotal` | `true` | With a usage reporting token set, show NEAR's own total (and check the daily limit against it). Its description links to **Set usage reporting token** and **Clear**; the token itself lives in secret storage. |

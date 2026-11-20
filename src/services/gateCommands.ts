@@ -129,12 +129,17 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   const usable = problem === undefined && state.state === 'valid';
   // Edit Policy works only on a policy that can be trusted, so a failed one names only the reset (D-41).
   // A policy written for a newer version is fixed by updating, never by a reset that would discard its rules (coherence review S6).
-  const needsUpdate = state.state === 'failed-closed' && UPDATE_REASONS.has(state.reason);
+  // An unknown setting in a policy only this install's keys signed may be the person's own hand edit (PR #143 review): it names both ways on, and Reset only
+  // for that own policy, saying what it discards. A policy any other key signed is never offered Reset.
+  const needsUpdate = state.state === 'failed-closed' && (UPDATE_REASONS.has(state.reason) || (state.reason === 'unknown-field' && state.ownPolicy !== true));
+  const ownUnknownField = state.state === 'failed-closed' && state.reason === 'unknown-field' && state.ownPolicy === true;
   lines.push(usable
     ? 'This view only shows your policy. Editing it changes nothing. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults.'
-    : needsUpdate
-      ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of NEAR AI: update the extension. Resetting it would discard every rule it holds.'
-      : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
+    : ownUnknownField
+      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded.'
+      : needsUpdate
+        ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of NEAR AI: update the extension. Resetting it would discard every rule it holds.'
+        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
   if (!usable || state.state !== 'valid') {
     lines.push('State: not usable, so only reading and planning are allowed');
     // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
@@ -262,7 +267,7 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   void host.state().then((state) => {
     const patterns = state.state === 'valid' ? patternLocalHosts(state.bundle.routing) : [];
     if (patterns.length > 0) tell(localHostPatternNotice(patterns));
-  }, () => undefined);
+  }).catch(() => undefined);
   // D-58: every thread merge in this window judges signed lowerings with this host's key sources, and each is recorded once.
   try { context.subscriptions?.push({ dispose: host.registerLabelLowerings() }); } catch { /* with no judge every lowering from another copy is rejected */ }
   try { context.subscriptions?.push({ dispose: clearDefaultRoute }); } catch { /* an editor that cannot take it still replaces the route at the next activation */ }

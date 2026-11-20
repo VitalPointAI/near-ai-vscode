@@ -653,3 +653,11 @@ test('safety patch: SECURITY.md and README say what S1, S2, S4, S5, S6 and S8 en
   assert.ok(!security.includes(EM_DASH));
   for (const text of [security, readme]) assert.ok(!/NEAR organization/.test(text));
 });
+
+test('PR #143 review: SECURITY.md says classified levels stay here whatever tier a policy gives them, the private floor takes only exact https named hosts, and Reset is offered only for the person\'s own policy', () => {
+  const security = flat(SECURITY);
+  assert.match(security, /This holds whatever tier the policy gives those levels: no cloud and no other host is accredited for them today/);
+  assert.match(security, /A model on a host your organization names as local counts only when the policy names that exact host and it is reached over https; a `\*\.` pattern or plain http does not\./);
+  assert.match(security, /only for a policy signed by this computer's own key, \*\*NEAR AI: Show Policy\*\* offers Reset/);
+  assert.match(flat(README), /a host your organization names exactly and reaches over https/);
+});

@@ -168,6 +168,14 @@ function tableTier(table: Readonly<Record<string, RoutingTier>>, key: string): R
  * `no-agent-tools` is not a routing key and never changes a tier.
  */
 export function tierForLabel(label: Label, routing: RoutingTable): RoutingTier {
+  const tier = tableTierForLabel(label, routing);
+  // Owner rule (coherence review S1 and S2, PR #143 review): no cloud is accredited for classified work today, so a level that must stay on this computer is
+  // at least local-only whatever the policy's table says. Every check that reads a tier (routing, network calls at a mark, records) sees the same floor.
+  return isThisComputerOnly(label) ? stricter(tier, 'local-only') : tier;
+}
+
+/** The tier the policy's own table gives one label, before the this-computer rule: used only to say why a classified request was kept here. */
+function tableTierForLabel(label: Label, routing: RoutingTable): RoutingTier {
   let tier: RoutingTier = tableTier(routing.levels, labelKey(label)) ?? 'deny';
   for (const compartment of label.compartments) {
     const entry = tableTier(routing.compartments, compartment);
@@ -411,7 +419,7 @@ export const ROUTE_REFUSALS: Readonly<Record<RefusingRouteRule, string>> = Objec
   'route.no-session': 'Nothing was sent. This request did not say which route it uses, so no model can be confirmed private. Start the run again from the chat, choose a local model, or use NEAR AI: Lower This Chat\'s Label if what this chat read allows it.',
   'route.connection-not-bound': 'Nothing was sent. Content at this level may go to NEAR AI Cloud only over a connection proven to end inside its private hardware, and this connection is not proven, so it stays on this computer. Choose a local model for this chat, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
   'route.local-host-not-exact': 'Nothing was sent. From this version, content at this level goes to a host other than this computer only when your organization\'s policy names that exact host, not a *. pattern, and the runtime uses https. Name the exact host in the policy, use https, run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.',
-  'route.this-computer-only': 'Nothing was sent. This chat has read content at Protected C, a classified level or NATO Confidential or above, which never leaves this computer, even for a host your organization names as local. Run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
+  'route.this-computer-only': 'Nothing was sent. This chat has read content at Protected C, a classified level or NATO Confidential or above, which never leaves this computer: no cloud and no other host is accredited for it, whatever your organization\'s policy names. Run the model on this computer, or use NEAR AI: Lower This Chat\'s Label if what it read allows it.'
 });
 
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
@@ -477,10 +485,13 @@ export function bindingReason(cause: BindingRefusalCause, rule: 'route.connectio
   return `${BINDING_REFUSALS[cause]} ${ROUTE_REFUSALS[rule].replace(/^Nothing was sent\. /, '')}`;
 }
 
-function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFacts): RouteDecision {
-  // A local model on a local host is stricter than attested cloud, so it satisfies this tier too.
-  if (whyNotLocal(facts, routing) === undefined) return allow(tier, 'route.attested-cloud', facts);
+function decideAttested(tier: RoutingTier, routing: RoutingTable, facts: RouteFacts, privateFloor = false): RouteDecision {
+  // A local model on a local host is stricter than attested cloud, so it satisfies this tier too. Under the private floor (PR #143 review) a host other than
+  // this computer counts only as S1's Protected B rule allows: an exact local-hosts entry over https, never a *. pattern or plain http.
+  const why = whyNotLocal(facts, routing, privateFloor ? 'exact-https' : 'named');
+  if (why === undefined) return allow(tier, 'route.attested-cloud', facts);
   if (facts.clientRoute === 'local') {
+    if (why === 'route.local-host-not-exact') return refuse(tier, why);
     return refuse(tier, isLocalRouteHost(facts.host, routing.localHosts) ? 'route.not-tee' : 'route.local-host-not-local');
   }
   // Judged before sending (D-36): the TEE flag and NEAR's own endpoint, because a forwarded model cannot be attested.
@@ -507,7 +518,13 @@ export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts
   const marked = tierForMark(mark, routing, defaultLabel);
   // A floor (a private member or team, or nearAi.privacyMode tee-only) only ever raises the tier, never lowers it (coherence review S4).
   const tier = floor === undefined ? marked : stricter(marked, floor);
-  const decision = decideAtTier(tier, mark, routing, facts, defaultLabel);
+  const privateFloor = floor !== undefined && TIER_ORDER[floor] >= TIER_ORDER['attested-cloud'];
+  const decision = decideAtTier(tier, mark, routing, facts, defaultLabel, privateFloor);
+  // A this-computer-only level the policy's own table would have sent to a cloud: the refusal says it never leaves this computer, not that a model is missing.
+  const kept = thisComputerOnlyLabelOf(mark, defaultLabel);
+  if (!decision.allowed && kept !== undefined && decision.rule === 'route.no-local-model' && TIER_ORDER[tableTierForLabel(kept, routing)] < TIER_ORDER['local-only']) {
+    return refuse(decision.tier, 'route.this-computer-only');
+  }
   if (decision.allowed || tier === marked || decision.reason === undefined) return decision;
   return { ...decision, reason: `Nothing was sent. ${PRIVATE_FLOOR_TEXT} ${decision.reason.replace(/^Nothing was sent\. /, '')}` };
 }
@@ -515,7 +532,7 @@ export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts
 /** Said first in a refusal that only the private floor caused: why a request at a lower label still needed the check. */
 export const PRIVATE_FLOOR_TEXT = 'This run may use only verified private hardware or this computer (a private team or member, or nearAi.privacyMode set to tee-only), and that check did not pass.';
 
-function decideAtTier(tier: RoutingTier, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel?: Label): RouteDecision {
+function decideAtTier(tier: RoutingTier, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, privateFloor: boolean): RouteDecision {
   if (tier === 'any-cloud') return allow(tier, 'route.any-cloud', facts);
   if (tier === 'deny') return refuse(tier, 'route.deny');
   if (facts.clientRoute === undefined) return refuse(tier, 'route.no-session');
@@ -523,7 +540,7 @@ function decideAtTier(tier: RoutingTier, mark: Mark, routing: RoutingTable, fact
     const why = whyNotLocal(facts, routing, thisComputerOnlyLabelOf(mark, defaultLabel) === undefined ? 'exact-https' : 'this-computer');
     return why === undefined ? allow(tier, 'route.local-only', facts) : refuse(tier, why);
   }
-  return decideAttested(tier, routing, facts);
+  return decideAttested(tier, routing, facts, privateFloor);
 }
 
 /**

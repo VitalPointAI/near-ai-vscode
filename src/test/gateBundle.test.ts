@@ -536,6 +536,11 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
       assert.match(state.sentence, /Reload the window to try again\.$/);
     } else if (reason === 'clock-behind') {
       assert.match(state.sentence, /Set the clock to the right time, then reload the window\.$/);
+    } else if (reason === 'unknown-field') {
+      // PR #143 review: a newer version's setting and a hand edit look alike here, so the sentence names both ways on and points at Show Policy, which
+      // offers Reset only for the person's own policy.
+      assert.match(state.sentence, /If a newer version of NEAR AI wrote it, update the extension\. If you changed your own policy by hand, NEAR AI: Show Policy says how to go back\.$/);
+      assert.ok(!/Reset/.test(state.sentence), state.sentence);
     } else if (UPDATE_REASONS.has(reason)) {
       // Coherence review S6: a policy written for a newer version is fixed by updating; Reset would discard an organization's rules, so it is never offered.
       assert.match(state.sentence, /Update the NEAR AI extension to use it\. Until then only reading and planning run, and your policy file is left as it is\.$/);
@@ -693,6 +698,7 @@ test('S6: an unknown required feature fails closed as needs-update, before an un
   // An unknown key alone is still refused (fail closed: it is never ignored or applied), with the update sentence.
   const unknown = check(signBundle(signer, edited(signer, (p) => { p.organization = { id: 'x' }; })), signer);
   assert.equal(failedWith(unknown), 'unknown-field');
+  assert.match(unknown.state === 'failed-closed' ? unknown.sentence : '', /update the extension/);
   for (const reason of UPDATE_REASONS) {
     assert.match(BUNDLE_FAILURES[reason], /Update the NEAR AI extension/);
     assert.ok(!/Reset/.test(BUNDLE_FAILURES[reason]), reason);
@@ -707,4 +713,22 @@ test('S6: a requires list that is not a list of feature ids is wrong-type, never
     assert.equal(failedWith(check(signBundle(signer, edited(signer, (p) => { p.requires = value; })), signer)), 'wrong-type', JSON.stringify(value));
   }
   assert.equal(parseBundle({ ...defaultFor(signer), requires: ['org-layer'] }).ok, false);
+});
+
+test('S6 (PR #143 review): a policy whose content cannot be read is marked as the person\'s own only when verified against this install\'s own keys', () => {
+  const signer = makeSigner();
+  const envelope = signBundle(signer, edited(signer, (p) => { p.typo = true; }));
+  const status = activeFor(signer);
+  const own = verifyBundleEnvelope(envelope, { status, now: NOW, ownKeysOnly: true });
+  assert.equal(own.state === 'failed-closed' && own.reason, 'unknown-field');
+  assert.equal(own.state === 'failed-closed' && own.ownPolicy, true);
+  // Without the store's word that the keys are this install's own (an organization's key later), it is never marked as the person's own.
+  const other = verifyBundleEnvelope(envelope, { status, now: NOW });
+  assert.equal(other.state === 'failed-closed' && other.ownPolicy, undefined);
+  // A signature that does not verify is never the person's own, whatever the store says.
+  const tampered = clone(envelope) as Loose;
+  tampered.payload.typo = false;
+  const bad = verifyBundleEnvelope(tampered, { status, now: NOW, ownKeysOnly: true });
+  assert.equal(bad.state === 'failed-closed' && bad.reason, 'bad-signature');
+  assert.equal(bad.state === 'failed-closed' && bad.ownPolicy, undefined);
 });

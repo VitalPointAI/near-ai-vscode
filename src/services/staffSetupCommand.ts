@@ -45,6 +45,17 @@ export function rosterItems(plan: StaffSetupPlan): vscode.QuickPickItem[] {
   ];
 }
 
+/**
+ * The setup's "where may the members' models run" step. The cloud choice says where its private models come from (coherence review S5): the team stays
+ * private and nothing about routing changes.
+ */
+export function localityChoices(): Array<Choice<'cloud' | 'local'>> {
+  return [
+    { value: 'cloud', label: 'NEAR AI Cloud', detail: `Private models in NEAR's TEE; members that research may use the web tools. ${STAFF_PRIVATE_MODELS_TEXT}` },
+    { value: 'local', label: 'Local runtime only', detail: 'Models on this machine; the team is made without web tools.' }
+  ];
+}
+
 /** Where "Task it now" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
 export interface StaffSetupChat { prefill(text: string): Promise<void> }
 
@@ -82,10 +93,7 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   if (questions.variant && !variant) return undefined;
   const redTeam = questions.redTeam ? await pick(title, 'Include the independent red team?', questions.redTeam, 6, steps) : undefined;
   if (questions.redTeam && redTeam === undefined) return undefined;
-  const where = await pick(title, 'Where may the members\' models run?', [
-    { value: 'cloud' as const, label: 'NEAR AI Cloud', detail: `Private models in NEAR's TEE; members that research may use the web tools. ${STAFF_PRIVATE_MODELS_TEXT}` },
-    { value: 'local' as const, label: 'Local runtime only', detail: 'Models on this machine; the team is made without web tools.' }
-  ], 6, steps);
+  const where = await pick(title, 'Where may the members\' models run?', localityChoices(), 6, steps);
   if (!where) return undefined;
   const options: StaffTemplateOptions = { settings, locality: where, ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
 

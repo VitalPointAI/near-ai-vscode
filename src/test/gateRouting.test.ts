@@ -452,3 +452,50 @@ test('S4: a private floor raises any-cloud to attested-cloud, so a private model
   // A floor below the mark's tier changes nothing.
   assert.deepEqual(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE, undefined, 'any-cloud'), decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE));
 });
+
+// ---- PR #143 review: the class behind S1 and S4, closed ----
+
+function routingWith(levels: Record<string, string>, ...hosts: string[]): RoutingTable {
+  const parsed = parseRouting({ levels: { ...DEFAULT_ROUTING.levels, ...levels }, handling: { ...DEFAULT_ROUTING.handling }, compartments: {}, localHosts: hosts }, SCALE_PRESETS);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) throw new Error('unreachable');
+  return parsed.value;
+}
+
+test('PR #143 review: under the private floor a named local host counts only as an exact https entry; a *. pattern or plain http is refused, loopback and exact https go', () => {
+  const floor = 'attested-cloud' as const;
+  const pattern = withLocalHosts('*.example.org');
+  const exact = withLocalHosts('models.example.org');
+  const viaPattern = decideRoute(markOf(org('Public')), pattern, LOCAL_REMOTE, undefined, floor);
+  assert.deepEqual({ allowed: viaPattern.allowed, rule: viaPattern.rule }, { allowed: false, rule: 'route.local-host-not-exact' });
+  assert.match(viaPattern.reason ?? '', /^Nothing was sent\. This run may use only verified private hardware/);
+  assert.equal(decideRoute(markOf(org('Public')), exact, { ...LOCAL_REMOTE, host: 'http://models.example.org' }, undefined, floor).rule, 'route.local-host-not-exact');
+  assert.equal(decideRoute(markOf(org('Internal')), pattern, LOCAL_REMOTE, undefined, floor).rule, 'route.local-host-not-exact', 'an attested mark under the floor too');
+  assert.equal(decideRoute(markOf(org('Public')), exact, LOCAL_REMOTE, undefined, floor).rule, 'route.attested-cloud');
+  assert.equal(decideRoute(markOf(org('Public')), pattern, LOCAL_OK, undefined, floor).rule, 'route.attested-cloud');
+  // Without the floor nothing changes for attested-cloud levels: a pattern still counts as local there.
+  assert.equal(decideRoute(markOf(org('Internal')), pattern, LOCAL_REMOTE).rule, 'route.attested-cloud');
+});
+
+test('PR #143 review: a policy that routes a this-computer-only level to a cloud still keeps it on this computer, on every path; unclassified levels are unchanged', () => {
+  const lax = routingWith({ 'ca-classified/Secret': 'any-cloud', 'ca-protected/Protected C': 'attested-cloud', 'nato/NATO Secret': 'any-cloud' });
+  for (const held of [label('ca-classified', 'Secret'), label('ca-protected', 'Protected C'), label('nato', 'NATO Secret')]) {
+    assert.equal(tierForLabel(held, lax), 'local-only', `${held.scale}/${held.level}`);
+    for (const facts of [NEAR_CLOUD, NEAR_TEE, NEAR_TEE_BOUND]) {
+      const sent = decideRoute(markOf(held), lax, facts);
+      assert.deepEqual({ allowed: sent.allowed, rule: sent.rule }, { allowed: false, rule: 'route.this-computer-only' }, `${held.scale}/${held.level}`);
+      assert.match(sent.reason ?? '', /never leaves this computer: no cloud and no other host is accredited for it/);
+    }
+    assert.equal(decideRoute(markOf(held), lax, LOCAL_REMOTE).rule, 'route.this-computer-only');
+    assert.equal(decideRoute(markOf(held), lax, LOCAL_OK).rule, 'route.local-only', 'this computer still works');
+    // As the default label of an empty mark too.
+    assert.equal(decideRoute([], lax, NEAR_CLOUD, held).rule, 'route.this-computer-only');
+  }
+  // Nothing else moves: org Public goes anywhere, Internal and Protected A still go to a proven private cloud, Protected B keeps its policy tier.
+  assert.equal(decideRoute(markOf(org('Public')), lax, NEAR_CLOUD).rule, 'route.any-cloud');
+  assert.equal(decideRoute(markOf(org('Internal')), lax, NEAR_TEE_BOUND).rule, 'route.attested-cloud');
+  assert.equal(decideRoute(markOf(label('ca-protected', 'Protected A')), lax, NEAR_TEE_BOUND).rule, 'route.attested-cloud');
+  assert.equal(decideRoute(markOf(label('ca-protected', 'Protected B')), routingWith({ 'ca-protected/Protected B': 'attested-cloud' }), NEAR_TEE_BOUND).rule, 'route.attested-cloud');
+  // With the shipped table (already local-only) the refusal keeps its own words.
+  assert.equal(decideRoute(markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, NEAR_TEE).rule, 'route.no-local-model');
+});

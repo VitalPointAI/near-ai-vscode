@@ -60,7 +60,10 @@ model. Where a model must be private (a team or member marked
 same check the labels use passes, each time it is sent: a model on this
 computer, or a private model on NEAR AI Cloud's own endpoint over a connection
 proven to end inside its private hardware (see "Attested cloud in this
-version" below). Otherwise nothing is sent, and the refusal says so. Set
+version" below). A model on a host your organization names as local counts
+only when the policy names that exact host and it is reached over https; a
+`*.` pattern or plain http does not. Otherwise nothing is sent, and the
+refusal says so. Set
 `nearAi.privacyMode` to `tee-only` to hold every request to that check.
 
 **Where private models come from.** Military staff teams are marked private,
@@ -364,10 +367,15 @@ is what that file and the records beside it do in this version.
   expired, only reading and planning run until you run **NEAR AI: Reset Policy
   to Defaults**, and the project's key folder stays off limits in every case.
   A policy written for a newer version (one that names a feature in its
-  `requires` list, or a setting, version or action this version does not know)
+  `requires` list, or a version or action list this version does not know)
   is never applied in part and never ignored: only reading and planning run, and
   the sentence says to update the extension. It never offers Reset as the fix,
-  because a reset would discard every rule the policy holds.
+  because a reset would discard every rule the policy holds. A setting this
+  version does not know is refused the same way, and the sentence names both
+  ways on: update the extension if a newer version wrote it, or, only for a
+  policy signed by this computer's own key, **NEAR AI: Show Policy** offers
+  Reset, saying it keeps the old file and discards every change made to the
+  policy. A policy signed by any other key is never offered Reset.
   The status bar says "Policy: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
   missing counts as a changed one. A file signed by a key this computer does
@@ -571,7 +579,10 @@ when the policy names that exact host, not a `*.` pattern, and the runtime is
 reached over https; otherwise it is refused with `route.local-host-not-exact`.
 Content at Protected C, any Canadian classified level, or NATO Confidential and
 above never leaves this computer, even for an exact named host, and is refused
-with `route.this-computer-only`. A pattern or plain http still counts as local
+with `route.this-computer-only`. This holds whatever tier the policy gives
+those levels: no cloud and no other host is accredited for them today, so a
+policy that routes one of them to attested-cloud or any-cloud still keeps it
+here, and every check that reads a tier treats them as local-only. A pattern or plain http still counts as local
 for levels whose tier is attested-cloud. A policy whose local hosts hold a
 `*.` pattern is told so, naming the entry, each time the window starts.
 
