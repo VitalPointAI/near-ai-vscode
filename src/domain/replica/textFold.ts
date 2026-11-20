@@ -9,7 +9,9 @@ import { attributeText } from './attribution';
 import type { AttributionProof, AuthorSpan } from './attribution';
 import { blobBytesHash, openBlob } from './entry';
 import type { Actor, Dep } from './entry';
-import { applyUpdate, attributionRuns, buildFromCompaction, cloneDoc, createFoldDoc, docText, inspectUpdate, pendingState, stateVectorOf, textHashOf } from './doc';
+import { applyUpdate, attributionRuns, buildFromCompaction, cloneDoc, createFoldDoc, docText, inspectState, inspectUpdate, pendingState, stateVectorOf, textHashOf } from './doc';
+import { MAX_STATE_BYTES } from './kindSchemas/doc';
+import { sealedBlobWithin } from './updateGuard';
 import type { CrdtDoc, InspectError } from './doc';
 import type { FamilyReducer, FoldView, ReduceOutcome } from './reducers';
 import type { VerifiedEntry } from './verify';
@@ -78,7 +80,7 @@ export const TEXT_REFUSALS = {
   'foreign-client': 'The update inserts text under a client id registered to another device, so it is refused as forged attribution.',
   'forbidden-content': 'The update carries something other than plain text, such as an embed, a format, a map or a nested type, or an unreadable gap, so it is refused.',
   'clock-overlap': 'The update claims text positions that an earlier update from the same device already used, so it is refused.',
-  'too-large': 'The update is larger than the allowed size, or one part of it claims too many text positions.',
+  'too-large': 'The update or the compaction\'s full state is larger than the allowed size, or one part of it claims too many text positions.',
   'compact-mismatch': 'The compaction does not match the updates it says it covers, or does not match itself, so it is refused.',
   'compact-unregistered-client': 'The compaction holds text under a client id that no device has registered, so it is refused.',
   'too-many': 'This device has registered too many client ids for this product, or compacted it again before enough new text arrived.',
@@ -259,9 +261,14 @@ function applyCompaction(state: TextState, entry: VerifiedEntry, data: CompactDa
   if (key === undefined) return held('missing-key');
   const blob = view.ctx.blobs(data.stateBlob);
   if (blob === undefined || blobBytesHash(blob) !== data.stateBlob) return held('missing-blob');
+  // The size gate (31-RESEARCH new defect 1, D-43): a state blob whose sealed length is over the state limit is refused from its base64url length,
+  // before it is decrypted or decoded. The blob matched its name above, so it is the compaction's own state and the refusal does not depend on
+  // which copy this machine holds.
+  if (!sealedBlobWithin(blob, MAX_STATE_BYTES)) return refused('too-large');
   const plain = openBlob(key, stream, epoch, blob);
   if (plain === undefined) return refused('malformed-update');
-  const inspection = inspectUpdate(plain);
+  // A full state may be larger than any one update, so it is held to the state limit (31-03), not the update limit.
+  const inspection = inspectState(plain);
   if ('error' in inspection) return inspectionRefusal(inspection.error);
   if (inspection.structs.some((struct) => !struct.parentOk)) return refused('forbidden-content');
   const stored = buildFromCompaction(plain, []);

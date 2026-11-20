@@ -18,7 +18,7 @@ import type { Pin, ProductVersions, VersionView } from '../domain/replica/versio
 import { transition } from '../domain/staff/release';
 import type { ProductRecord, StaffActor } from '../domain/staff/release';
 import { createWorld, fixedSigner, permutations } from './helpers/replicaWorld';
-import type { Editor, Written, World } from './helpers/replicaWorld';
+import type { Editor, WorldMemberSpec, Written, World } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
 const REDUCERS = [textReducer, versionsReducer];
@@ -53,7 +53,8 @@ interface Fixture {
   fold(entries?: readonly SealedEntry[], ctx?: ReplicaContext, options?: FoldOptions): FoldResult;
 }
 
-function fixture(): Fixture {
+// tradecraft: the main product also has a tradecraft gate. members: extra members (plan 31-07 adds gate seat holders this way).
+function fixture(options: { tradecraft?: boolean; members?: readonly WorldMemberSpec[] } = {}): Fixture {
   const world = createWorld({
     members: [
       { member: 'mbr-lead', roles: ['member', 'staff_lead'], devices: ['LEAD'] },
@@ -64,7 +65,8 @@ function fixture(): Fixture {
       { member: 'mbr-f', name: 'Col Eff', roles: ['member', `decision_for:${COMMANDER}`], devices: ['F'] },
       { member: 'mbr-e', name: 'Maj Eee', roles: ['member', 'decision_for:other'], devices: ['E'] },
       { member: 'mbr-x', roles: ['member'], devices: ['X'], agentSeats: ['j2-chief'] },
-      { member: 'mbr-h', roles: ['member'], devices: ['H'] }
+      { member: 'mbr-h', roles: ['member'], devices: ['H'] },
+      ...(options.members ?? [])
     ]
   });
   const hub = fixedSigner('H');
@@ -72,8 +74,9 @@ function fixture(): Fixture {
   const spec = { ...world.rosterSpec, rosters: world.rosterSpec.rosters.map((roster) => ({ ...roster, checkpointSigners: [hub.writer] })) };
   const ctx = world.ctx({ roster: staticRosterView(spec) });
   const roles = { owner: 'j2-chief', sectionLead: 'j2-lead', releaseGuard: 'release-guard' };
-  const kitOf = (product: string, clientId: number, title: string): Kit => {
-    const create = world.write('LEAD', { kind: 'product.create', data: { product, section: 'j2', roles, title } });
+  const kitOf = (product: string, clientId: number, title: string, withTradecraft = false): Kit => {
+    const productRoles = withTradecraft ? { ...roles, tradecraftReviewer: 'tradecraft' } : roles;
+    const create = world.write('LEAD', { kind: 'product.create', data: { product, section: 'j2', roles: productRoles, title } });
     const editor = world.editor('P', product, clientId);
     const reg = editor.register({ deps: [create] });
     const typed = editor.insert(0, 'Hello world', { deps: [reg] });
@@ -86,7 +89,7 @@ function fixture(): Fixture {
   };
   return {
     world,
-    kit: kitOf(PRODUCT, 101, 'Intel estimate'),
+    kit: kitOf(PRODUCT, 101, 'Intel estimate', options.tradecraft === true),
     hub,
     ctx,
     extraKit: (product, clientId) => kitOf(product, clientId, product),
@@ -368,4 +371,84 @@ test('F9 a decision whose role was removed concurrently stays pending-confirmati
     assert.equal(productOf(result).records[0].release.rejection, undefined);
     assert.deepEqual(productOf(result).refusals, []);
   }
+});
+
+// ---- WR-01 (plan 31-07, D-12): only a member allowed to run a gate seat moves a version through that gate -------------------------------------------
+
+const TRADECRAFT: Actor = { kind: 'agent', member: 'tradecraft', run: 'r-t' };
+// A member whose devices may run both gate seats, and one who may run only the release guard.
+const GATE_HOLDER: WorldMemberSpec = { member: 'mbr-t', roles: ['member'], devices: ['T'], agentSeats: ['release-guard', 'tradecraft'] };
+const GUARD_ONLY: WorldMemberSpec = { member: 'mbr-g', roles: ['member'], devices: ['G'], agentSeats: ['release-guard'] };
+
+const gateVerdict = (hash: string, gate: 'guard' | 'tradecraft', word: string): Record<string, unknown> => ({ product: PRODUCT, hash, gate, verdict: word, reasons: [] });
+
+// The version proposed by the owner agent, then SIGN-OFF labelled as the tradecraft reviewer and CLEARED labelled as the release guard after it,
+// both written on one device.
+function gateRun(f: Fixture, writer: string): { propose: Written; signOff: Written; cleared: Written; hash: string } {
+  const propose = f.propose(f.kit, 'P', OWNER, [f.kit.typed]);
+  const hash = replicaVersionHash(f.kit.textNow(), []);
+  const signOff = f.act(writer, TRADECRAFT, 'version.verdict', gateVerdict(hash, 'tradecraft', 'SIGN-OFF'), [propose]);
+  const cleared = f.act(writer, GUARD, 'version.verdict', gateVerdict(hash, 'guard', 'CLEARED'), [signOff]);
+  return { propose, signOff, cleared, hash };
+}
+
+test('WR-01 a plain member without a gate seat cannot push a version through either gate: both verdicts are refused not-gate-member in every order', () => {
+  const f = fixture({ tradecraft: true, members: [GATE_HOLDER] });
+  assert.equal(f.ctx.roster.canRunAgent?.('mbr-x', 'release-guard', f.world.rosterHash), false);
+  assert.equal(f.ctx.roster.canRunAgent?.('mbr-x', 'tradecraft', f.world.rosterHash), false);
+  const run = gateRun(f, 'X');
+  const result = foldAll(f, [run.signOff, run.cleared]);
+  assert.equal(refusalOf(result, run.signOff), 'not-gate-member');
+  assert.equal(refusalOf(result, run.cleared), 'not-gate-member');
+  const view = versionsOf(result)[0];
+  assert.deepEqual([view.state, view.held, view.verdictConflict], ['draft', undefined, undefined]);
+  // Without a tradecraft gate, a guard CLEARED from the same device is refused the same way and the version stays a draft.
+  const g = fixture();
+  const propose = g.propose(g.kit, 'P', OWNER, [g.kit.typed]);
+  const hash = replicaVersionHash(g.kit.textNow(), []);
+  const cleared = g.act('X', GUARD, 'version.verdict', gateVerdict(hash, 'guard', 'CLEARED'), [propose]);
+  const submit = g.act('P', OWNER, 'version.submit', { product: PRODUCT, hash, decisionFor: COMMANDER }, [cleared]);
+  const plain = foldAll(g, [cleared, submit]);
+  assert.equal(refusalOf(plain, cleared), 'not-gate-member');
+  assert.equal(refusalOf(plain, submit), 'wrong-state');
+  assert.equal(versionsOf(plain)[0].state, 'draft');
+});
+
+test('WR-01 the same verdicts from a member whose seats list both gates are accepted and the version reaches guard-checked as in Phase 30', () => {
+  const f = fixture({ tradecraft: true, members: [GATE_HOLDER] });
+  const run = gateRun(f, 'T');
+  const result = foldAll(f, [run.signOff, run.cleared]);
+  assert.deepEqual(productOf(result).refusals, []);
+  assert.equal(versionsOf(result)[0].state, 'guard-checked');
+});
+
+test('WR-01 a member who may run only the release guard cannot give the tradecraft verdict, so a CLEARED after it still finds no sign-off', () => {
+  const f = fixture({ tradecraft: true, members: [GUARD_ONLY] });
+  assert.equal(f.ctx.roster.canRunAgent?.('mbr-g', 'release-guard', f.world.rosterHash), true);
+  const run = gateRun(f, 'G');
+  const result = foldAll(f, [run.signOff, run.cleared]);
+  assert.equal(refusalOf(result, run.signOff), 'not-gate-member');
+  assert.equal(refusalOf(result, run.cleared), 'tradecraft-required');
+  assert.equal(versionsOf(result)[0].state, 'draft');
+  // With a real sign-off from a tradecraft seat holder before it, the guard-only member's CLEARED counts.
+  const g = fixture({ tradecraft: true, members: [GUARD_ONLY, GATE_HOLDER] });
+  const propose = g.propose(g.kit, 'P', OWNER, [g.kit.typed]);
+  const hash = replicaVersionHash(g.kit.textNow(), []);
+  const signOff = g.act('T', TRADECRAFT, 'version.verdict', gateVerdict(hash, 'tradecraft', 'SIGN-OFF'), [propose]);
+  const cleared = g.act('G', GUARD, 'version.verdict', gateVerdict(hash, 'guard', 'CLEARED'), [signOff]);
+  const mixed = foldAll(g, [signOff, cleared]);
+  assert.deepEqual(productOf(mixed).refusals, []);
+  assert.equal(versionsOf(mixed)[0].state, 'guard-checked');
+});
+
+test('WR-01 default deny: a roster view that cannot answer canRunAgent accepts no gate verdict, even from the seat holder', () => {
+  const f = fixture({ tradecraft: true, members: [GATE_HOLDER] });
+  const { canRunAgent: _ignored, ...rest } = f.ctx.roster;
+  void _ignored;
+  const ctx = f.world.ctx({ roster: rest });
+  const run = gateRun(f, 'T');
+  const result = foldAll(f, [run.signOff, run.cleared], ctx);
+  assert.equal(refusalOf(result, run.signOff), 'not-gate-member');
+  assert.equal(refusalOf(result, run.cleared), 'not-gate-member');
+  assert.equal(versionsOf(result)[0].state, 'draft');
 });

@@ -2,16 +2,19 @@
 // text never in the document"), numbering and "changes since" are fold outputs, and the gate chain up to awaiting-decision runs per version through
 // release.ts (15.4 rows 1 to 5). Tests pass the reducer list explicitly; plan 30-12 registers versionsReducer.
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { canonicalBytes } from '../domain/team/canonical';
 import { docText, snapshotOf } from '../domain/replica/doc';
 import { sealBlob } from '../domain/replica/entry';
+import { MAX_STATE_BYTES } from '../domain/replica/kindSchemas/doc';
+import * as stateKeys from '../domain/state/keys';
 import type { Actor } from '../domain/replica/entry';
-import { foldEntries } from '../domain/replica/fold';
+import { addEntries, createFoldState, foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
 import { validateData } from '../domain/replica/kinds';
-import { OWNER_PROMPT_THRESHOLD, replicaVersionHash, versionsReducer } from '../domain/replica/versions';
-import type { Pin, ProductVersions, VersionView } from '../domain/replica/versions';
+import { MAX_ACTS_PER_WRITER_VERSION, MAX_PROPOSALS_PER_WRITER_PRODUCT, OWNER_PROMPT_THRESHOLD, replicaVersionHash, versionsReducer } from '../domain/replica/versions';
+import type { Pin, ProductVersions, VersionsState, VersionView } from '../domain/replica/versions';
+import type { AnyReducer } from '../domain/replica/reducers';
 import { textReducer } from '../domain/replica/textFold';
 import { createWorld, permutations, rng, shuffled, streamId } from './helpers/replicaWorld';
 import type { Editor, Written, World } from './helpers/replicaWorld';
@@ -477,4 +480,156 @@ test('regression: an unrelated stream changes no recorded act position, because 
   const positions = (result: FoldResult): number[] => productsOf(result).flatMap((product) => product.records.flatMap((record) => record.acts.map((act) => act.position)));
   assert.ok(positions(before).length >= 1);
   assert.deepEqual(positions(after), positions(before));
+});
+
+// ---- plan 31-07: one inspection per proposal, proposal and act caps (WR-05 versions part, WR-06 cap) ---------------------------------------------
+
+// The versions reducer with its working state captured at finish, to read the test-only counters.
+function capturingVersions(): { reducers: AnyReducer[]; state(): VersionsState } {
+  let captured: VersionsState | undefined;
+  const wrapped: AnyReducer = {
+    ...versionsReducer,
+    finish(state, view) {
+      captured = state as VersionsState;
+      return versionsReducer.finish(state as VersionsState, view);
+    }
+  };
+  return {
+    reducers: [textReducer, wrapped],
+    state: () => {
+      assert.ok(captured !== undefined, 'the versions reducer finished');
+      return captured;
+    }
+  };
+}
+
+// Folded whole and delivered in chunks, the result is the same; returns the whole fold.
+function incrementalAgrees(f: Fixture, chunks: number): FoldResult {
+  const ctx = f.world.ctx();
+  const fresh = foldEntries(f.world.entries, ctx, { reducers: REDUCERS });
+  let state = createFoldState(ctx, { reducers: REDUCERS });
+  const size = Math.ceil(f.world.entries.length / chunks);
+  for (let start = 0; start < f.world.entries.length; start += size) state = addEntries(state, f.world.entries.slice(start, start + size));
+  assert.deepEqual(state.result.families, fresh.families, 'families');
+  assert.deepEqual(state.result.digests, fresh.digests, 'digests');
+  assert.deepEqual(state.result.refused, fresh.refused, 'refused');
+  assert.deepEqual(state.result.held, fresh.held, 'held');
+  return fresh;
+}
+
+test('WR-05: a proposal costs one snapshot inspection, and finishing the fold costs none, with versions and attribution as before', () => {
+  const f = fixture();
+  const v1 = f.propose('P', OWNER, [f.typed]);
+  const more = f.editor.insert(11, '!', { deps: [v1] });
+  const v2 = f.propose('P', OWNER, [more]);
+  const more2 = f.editor.insert(12, '?', { deps: [v2] });
+  f.propose('SL', { kind: 'person' }, [more2]);
+  const capture = capturingVersions();
+  const result = foldEntries(f.world.entries, f.world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual([result.refused, result.held], [[], []]);
+  assert.deepEqual(versionsOf(result).map((version) => version.hash), ['Hello world', 'Hello world!', 'Hello world!?'].map((text) => replicaVersionHash(text, [])));
+  // Every character is the person on P's device, whose registration is a person registration.
+  for (const version of versionsOf(result)) assert.deepEqual(version.attribution.map((row) => [row.member, row.actor, row.characters]), [['mbr-p', 'person', version.number === 1 ? 11 : version.number === 2 ? 12 : 13]]);
+  const product = capture.state().products.get(`${f.world.stream}/${PRODUCT}`);
+  assert.equal(product?.snapshotReports, 3);
+  assert.deepEqual(incrementalAgrees(f, 4).digests, result.digests);
+});
+
+test('WR-05: the 201st proposal by one writer on one product is refused too-many before its blob is read; another writer still proposes', () => {
+  assert.equal(MAX_PROPOSALS_PER_WRITER_PRODUCT, 200);
+  const f = fixture();
+  const first = f.propose('P', OWNER, [f.typed]);
+  // 199 more of the same text: each passes the owner check and is refused no-change, so each counts.
+  let last: Written = first;
+  for (let index = 1; index < MAX_PROPOSALS_PER_WRITER_PRODUCT; index += 1) last = f.propose('P', OWNER, [last]);
+  const edit = f.editor.insert(11, '!', { deps: [last] });
+  const over = f.propose('P', OWNER, [edit]);
+  const other = f.propose('SL', { kind: 'person' }, [over]);
+  const capture = capturingVersions();
+  const result = foldEntries(f.world.entries, f.world.ctx(), { reducers: capture.reducers });
+  const reasons = new Map(result.refused.map((item) => [item.hash, item.reason]));
+  assert.equal(result.refused.length, MAX_PROPOSALS_PER_WRITER_PRODUCT);
+  assert.equal([...reasons.values()].filter((reason) => reason === 'no-change').length, MAX_PROPOSALS_PER_WRITER_PRODUCT - 1);
+  assert.equal(reasons.get(over.hash), 'too-many');
+  assert.deepEqual(versionsOf(result).map((version) => [version.number, version.entry]), [[1, first.hash], [2, other.hash]]);
+  // Only the two proposals that reached the snapshot check built a scratch document.
+  const product = capture.state().products.get(`${f.world.stream}/${PRODUCT}`);
+  assert.equal(product?.snapshotReports, 2);
+  assert.equal(product?.proposalCounts.get(f.world.writerOf('P')), MAX_PROPOSALS_PER_WRITER_PRODUCT);
+  incrementalAgrees(f, 5);
+});
+
+test('WR-05: a held proposal does not count toward the cap, and is counted once it is judged', () => {
+  const f = fixture();
+  const proposal = f.propose('P', OWNER, [f.typed]);
+  const blobs = new Map(f.world.blobs);
+  f.world.blobs.clear();
+  const capture = capturingVersions();
+  const heldResult = foldEntries(f.world.entries, f.world.ctx(), { reducers: capture.reducers });
+  assert.deepEqual(heldResult.held.map((item) => [item.hash, item.reason]), [[proposal.hash, 'missing-blob']]);
+  assert.equal(capture.state().products.get(`${f.world.stream}/${PRODUCT}`)?.proposalCounts.size, 0);
+  for (const [hash, blob] of blobs) f.world.blobs.set(hash, blob);
+  const later = capturingVersions();
+  foldEntries(f.world.entries, f.world.ctx(), { reducers: later.reducers });
+  assert.equal(later.state().products.get(`${f.world.stream}/${PRODUCT}`)?.proposalCounts.get(f.world.writerOf('P')), 1);
+});
+
+test('WR-06: the 33rd act by one writer on one version is refused too-many-acts; another writer\'s act on it still counts', () => {
+  assert.equal(MAX_ACTS_PER_WRITER_VERSION, 32);
+  const f = fixture({ tradecraft: false });
+  const proposal = f.propose('P', OWNER, [f.typed]);
+  const hash = replicaVersionHash('Hello world', []);
+  let last = proposal;
+  const holds: Written[] = [];
+  for (let index = 0; index < MAX_ACTS_PER_WRITER_VERSION; index += 1) {
+    last = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'HOLD', [`reason ${index}`]), [last]);
+    holds.push(last);
+  }
+  const overCleared = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [last]);
+  const result = foldEntries(f.world.entries, f.world.ctx(), { reducers: REDUCERS });
+  assert.deepEqual(result.refused, [{ hash: overCleared.hash, reason: 'too-many-acts', family: 'versions' }]);
+  assert.deepEqual([versionsOf(result)[0].state, versionsOf(result)[0].held?.reasons], ['draft', [`reason ${MAX_ACTS_PER_WRITER_VERSION - 1}`]]);
+  assert.equal(productsOf(result)[0].records[0].acts.length, MAX_ACTS_PER_WRITER_VERSION);
+  // The section lead's device runs the release guard too; its CLEARED, made after every HOLD, clears the version.
+  const cleared = f.act('SL', GUARD, 'version.verdict', verdict(PRODUCT, hash, 'guard', 'CLEARED'), [overCleared]);
+  const after = incrementalAgrees(f, 4);
+  assert.deepEqual(after.refused, [{ hash: overCleared.hash, reason: 'too-many-acts', family: 'versions' }]);
+  assert.equal(versionsOf(after)[0].state, 'guard-checked');
+  assert.ok(after.applied.includes(cleared.hash));
+  // The cap is per version: the same device's first act on another version hash is applied (and refused stale-version in finish, as before).
+  const elsewhere = f.act('P', GUARD, 'version.verdict', verdict(PRODUCT, OTHER_HASH, 'guard', 'CLEARED'), [cleared]);
+  const third = f.fold();
+  assert.ok(third.applied.includes(elsewhere.hash));
+  assert.ok(gateRefusals(third).some(([entry, reason]) => entry === elsewhere.hash && reason === 'stale-version'));
+  assert.equal(holds.length, MAX_ACTS_PER_WRITER_VERSION);
+});
+
+// ---- plan 31-07: the proposal text blob is size-gated before it is opened (31-RESEARCH new defect 1) ---------------------------------------------
+
+test('new defect 1: a proposal whose text blob is over MAX_STATE_BYTES is refused too-large without being decrypted; an honest one is opened', () => {
+  const f = fixture();
+  const honest = f.propose('P', OWNER, [f.typed]);
+  const more = f.editor.insert(11, '!', { deps: [honest] });
+  // The blob holds a correct { text, header } whose text is over the limit; the hash in the entry even matches it.
+  const text = 'y'.repeat(MAX_STATE_BYTES + 1);
+  const oversized = f.propose('P', OWNER, [more], { text });
+  const blobs = [...f.world.blobs.values()];
+  const ivs = new Map(blobs.map((blob) => [Buffer.from(blob.bytes, 'base64url').subarray(0, 12).toString('hex'), blob]));
+  const opens = mock.method(stateKeys, 'openRaw');
+  let result: FoldResult;
+  let opened: string[];
+  try {
+    result = f.fold();
+    opened = opens.mock.calls.map((call) => (call.arguments[1] as { iv: Buffer }).iv.toString('hex'));
+  } finally {
+    opens.mock.restore();
+  }
+  assert.deepEqual(result.refused, [{ hash: oversized.hash, reason: 'too-large', family: 'versions' }]);
+  assert.deepEqual(versionsOf(result).map((version) => version.entry), [honest.hash]);
+  const openedBlobs = opened.map((iv) => ivs.get(iv)).filter((blob) => blob !== undefined);
+  const big = blobs.filter((blob) => blob.bytes.length > MAX_STATE_BYTES);
+  assert.equal(big.length, 1);
+  assert.equal(openedBlobs.includes(big[0]), false);
+  // The honest proposal's text blob is opened, so the spy sees opens.
+  assert.ok(openedBlobs.some((blob) => blob !== big[0] && blob.bytes.length < 1000));
 });
