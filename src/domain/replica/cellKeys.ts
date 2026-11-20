@@ -12,6 +12,10 @@
 // A grant is a signed object outside the streams (purpose staff-cell-grant): { cell, epoch, roster, labelSealed, wraps }. The roster entry that
 // founds an epoch (project.genesis cells, cell.create, cell.rekey) commits to the founding grant by grantHash; a later grant of an existing epoch is
 // valid when a roster writer at the roster it names signed it (checked by the roster fold, not here).
+//
+// The cell's label is sealed inside each grant under a key derived from the epoch key (sealLabel), so only a device that opens a wrap learns what the
+// cell is (DESIGN 4.1, 8.2). planRekey turns a removal, a revocation or a lowered clearance into one new epoch per affected cell (D-23), and
+// earlierEpochGrants gives a device admitted later the epochs before it, so history stays readable (D-45).
 import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url } from '../team/canonical';
@@ -20,6 +24,7 @@ import { signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, writerIdOf } from './entry';
+import { CELL_REKEY_REASONS } from './kindSchemas/roster';
 
 export const CELL_WRAP_INFO = 'near-ai/cell-wrap/v1';
 // The text a device signs with its Ed25519 key to bind its X25519 key to itself (D-19). The roster entry that admits the device carries the signature.
@@ -31,8 +36,11 @@ const TAG_BYTES = 16;
 export const WRAP_BYTES = X25519_KEY_BYTES + IV_BYTES + TAG_BYTES + EPOCH_KEY_BYTES;
 // One wrap per device; slots are capped at 4095, so a grant never names more devices than that.
 export const MAX_GRANT_WRAPS = 4095;
-// The cell label sealed under the epoch key (31-15 fills it), as base64url; empty when the grant carries no label.
+// The cell label sealed under the epoch key (sealLabel), as base64url; empty when the grant carries no label.
 const MAX_LABEL_SEALED_CHARS = 8192;
+export const CELL_LABEL_INFO = 'near-ai/cell-label/v1';
+// The largest label sealLabel accepts, so the sealed form (iv, tag, ciphertext as base64url) always fits MAX_LABEL_SEALED_CHARS.
+export const MAX_LABEL_BYTES = Math.floor((MAX_LABEL_SEALED_CHARS * 3) / 4) - 12 - 16;
 
 // DER prefixes of a raw X25519 key: SubjectPublicKeyInfo for the public key, PKCS8 for the 32-byte private seed.
 const SPKI_X25519_PREFIX = Buffer.from('302a300506032b656e032100', 'hex');
@@ -196,4 +204,124 @@ export function readGrant(value: unknown): GrantRead {
     // Hostile input never throws out of the reader.
     return { ok: false, reason: 'malformed' };
   }
+}
+
+// ---- the cell label (DESIGN 4.1, 8.2) ----
+
+function labelInfo(cell: string, epoch: number): Buffer {
+  if (!STREAM_ID_PATTERN.test(cell)) throw new Error('A cell id is 32 lowercase hex characters.');
+  if (!isSafeIntegerInRange(epoch, 1, Number.MAX_SAFE_INTEGER)) throw new Error('A cell epoch is a whole number from 1.');
+  return Buffer.from(`${CELL_LABEL_INFO}\0${cell}\0${epoch}`, 'utf8');
+}
+
+// The label key is derived from the epoch key (HKDF-SHA256, info = CELL_LABEL_INFO NUL cell NUL epoch), so the label and the entries sealed under the
+// same epoch key never share a key.
+function labelKey(epochKey: Buffer, info: Buffer): Buffer {
+  if (epochKey.length !== EPOCH_KEY_BYTES) throw new Error('An epoch key must be 32 bytes.');
+  return Buffer.from(hkdfSync('sha256', epochKey, Buffer.alloc(0), info, 32));
+}
+
+// Seals a cell's label (any value canonicalBytes accepts, normally a Phase 70 label) for the grant's labelSealed field: AES-256-GCM under the label
+// key, with the cell and epoch as associated data. Wire form: iv (12) | tag (16) | ciphertext, as base64url. Throws on a label over MAX_LABEL_BYTES.
+export function sealLabel(epochKey: Buffer, cell: string, epoch: number, label: unknown): string {
+  const info = labelInfo(cell, epoch);
+  const plain = canonicalBytes(label);
+  if (plain.length > MAX_LABEL_BYTES) throw new Error('A cell label is too long to seal in a grant.');
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv('aes-256-gcm', labelKey(epochKey, info), iv);
+  cipher.setAAD(info);
+  const sealed = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), sealed]).toString('base64url');
+}
+
+// The label, or undefined for any failure: another epoch key, another cell or epoch, a changed byte, an empty or malformed field. Never throws. The
+// caller checks the value with the Phase 70 label reader before it trusts its shape.
+export function openLabel(epochKey: Buffer, cell: string, epoch: number, sealed: string): unknown {
+  try {
+    if (sealed.length === 0 || !/^[A-Za-z0-9_-]+$/.test(sealed)) return undefined;
+    const wire = Buffer.from(sealed, 'base64url');
+    if (wire.length < IV_BYTES + TAG_BYTES || wire.toString('base64url') !== sealed) return undefined;
+    const info = labelInfo(cell, epoch);
+    const decipher = createDecipheriv('aes-256-gcm', labelKey(epochKey, info), wire.subarray(0, IV_BYTES));
+    decipher.setAAD(info);
+    decipher.setAuthTag(wire.subarray(IV_BYTES, IV_BYTES + TAG_BYTES));
+    const opened = Buffer.concat([decipher.update(wire.subarray(IV_BYTES + TAG_BYTES)), decipher.final()]);
+    return JSON.parse(opened.toString('utf8')) as unknown;
+  } catch {
+    // A label that does not open under this key, cell and epoch has one answer: none.
+    return undefined;
+  }
+}
+
+// ---- rekey planning (D-23) ----
+
+// What the lead is told, in the command result and the confirmation, whenever a rekey leaves someone out (D-23, DESIGN 8.3).
+export const REKEY_KEEP_TEXT = 'They keep what they already received. They will not receive anything new.';
+
+export type RekeyReason = (typeof CELL_REKEY_REASONS)[number];
+
+// One cell.rekey to write: the new epoch's key goes to recipients only. dropped are the devices that held the current epoch and will not hold the
+// next one; they keep the epochs they already had.
+export interface RekeyPlan { cell: string; reason: RekeyReason; recipients: string[]; dropped: string[]; text: string }
+
+export interface RekeyInput {
+  // writers: the devices the change is about (the removed member's devices, the revoked device or hub device, the devices of the member whose
+  // clearance was lowered). Empty for a scheduled rekey.
+  change: { kind: RekeyReason; writers: readonly string[] };
+  // For each cell: the devices holding its current epoch (cellGrantees) and the devices cleared for it now, which the host computes with Phase 70
+  // dominance at write time (the fold never recomputes it).
+  cells: ReadonlyArray<{ cell: string; grantees: readonly string[]; clearedNow: readonly string[] }>;
+}
+
+// Turns one change into one plan per affected cell, sorted by cell (D-23). The recipients are the current grantees that are still cleared and are
+// not named by the change, so the new key is never wrapped to a device that is not cleared for the cell (P-31-20). A removal, a revocation or a hub
+// revocation always drops the named devices; a lowered clearance drops a named device only from the cells it is no longer cleared for. A cell the
+// change drops nobody from gets no plan, except a scheduled rekey, which plans every cell given with the same cleared recipients. Throws on a reason
+// outside CELL_REKEY_REASONS. An empty recipients list means nobody cleared is left: the host must not write that rekey.
+export function planRekey(input: RekeyInput): RekeyPlan[] {
+  const kind = input.change.kind;
+  if (!(CELL_REKEY_REASONS as readonly string[]).includes(kind)) throw new Error('A rekey reason must be one of the closed list.');
+  const named = new Set(input.change.writers);
+  const plans: RekeyPlan[] = [];
+  for (const item of input.cells) {
+    const cleared = new Set(item.clearedNow);
+    const grantees = [...new Set(item.grantees)].sort();
+    const leaves = (writer: string): boolean => !cleared.has(writer) || (kind !== 'clearance-lowered' && named.has(writer));
+    const dropped = grantees.filter(leaves);
+    const touched = kind === 'scheduled' || dropped.some((writer) => named.has(writer));
+    if (!touched) continue;
+    plans.push({ cell: item.cell, reason: kind, recipients: grantees.filter((writer) => !leaves(writer)), dropped, text: REKEY_KEEP_TEXT });
+  }
+  return plans.sort((a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0));
+}
+
+// ---- earlier epochs for a device admitted later (D-45) ----
+
+export interface EarlierEpochInput {
+  cell: string;
+  // Every epoch of the cell the device is cleared for, with its key, oldest first (the host reads them from its own key ring and epochsAt).
+  epochs: ReadonlyArray<{ epoch: number; key: Buffer }>;
+  // The roster the grants are valid at: normally the one that admitted the device. It must not be the roster an epoch's founding entry cites
+  // (only the founding grant is valid there); when the current epoch was founded at the admission roster, put the device in the founding grant.
+  roster: string;
+  // The receiving device's writer id and X25519 public key.
+  writer: string;
+  recipient: Buffer | string;
+  // The cell's label, sealed into each grant under that epoch's key, when given.
+  label?: unknown;
+}
+
+// One signed grant per epoch, each wrapping that epoch's key to the one device, so a device admitted later can open the cell's history (D-45). The
+// roster fold accepts each grant when the signer is a roster writer at the named roster and the device is admitted there. Throws on a bad key, cell,
+// epoch, roster or recipient, and on an empty or repeated epoch list.
+export function earlierEpochGrants(signer: PayloadSigner, input: EarlierEpochInput): Array<SignedPayload<CellGrant>> {
+  if (input.epochs.length === 0) throw new Error('Name at least one epoch to grant.');
+  const seen = new Set<number>();
+  return input.epochs.map(({ epoch, key }) => {
+    if (seen.has(epoch)) throw new Error('Each epoch is granted once.');
+    seen.add(epoch);
+    const wrap = wrapEpochKey({ cell: input.cell, epoch, writer: input.writer, recipient: input.recipient, epochKey: key });
+    const labelSealed = input.label === undefined ? '' : sealLabel(key, input.cell, epoch, input.label);
+    return buildGrant(signer, { cell: input.cell, epoch, roster: input.roster, labelSealed, wraps: [{ writer: input.writer, wrap }] });
+  });
 }
