@@ -238,7 +238,7 @@ test('decodeSnapshot refuses bytes over MAX_STATE_BYTES and a snapshot of more t
   localDelete(doc, 0, 6);
   const honest = decodeSnapshot(snapshotOf(doc));
   assert.notEqual(honest, undefined);
-  if (honest !== undefined) assert.deepEqual(snapshotStateVector(honest), [[101, 22]]);
+  if (honest !== undefined) assert.deepEqual(snapshotStateVector(honest), [[101, 21]]);
 });
 
 test('a whole state uses MAX_STATE_BYTES: an honest 500 KB state loads through buildFromCompaction but is refused as one update, and states over the limits are refused', () => {

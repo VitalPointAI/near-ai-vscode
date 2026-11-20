@@ -6,8 +6,8 @@
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import type * as YTypes from 'yjs';
-import { MAX_STRUCTS, MAX_UPDATE_BYTES } from './kindSchemas/doc';
-import { skimUpdate } from './updateGuard';
+import { MAX_STATE_BYTES, MAX_STRUCTS, MAX_UPDATE_BYTES } from './kindSchemas/doc';
+import { skimSnapshot, skimUpdate } from './updateGuard';
 
 type YjsApi = typeof YTypes;
 export type CrdtDoc = YTypes.Doc;
@@ -44,16 +44,22 @@ export function createFoldDoc(): CrdtDoc {
   return doc;
 }
 
-// False on any failure, including a size over the limit.
-export function applyUpdate(doc: CrdtDoc, bytes: Uint8Array): boolean {
+// Every Yjs decode of outside bytes passes here or through decodeSnapshot: the byte limit for its use, then the skim (struct and range counts,
+// allowed content), and only then Yjs (D-05, D-43, WR-07). False on any failure.
+function applyWithin(doc: CrdtDoc, bytes: Uint8Array, maxBytes: number): boolean {
+  if (bytes.length > maxBytes || !skimUpdate(bytes).ok) return false;
   try {
-    if (bytes.length > MAX_UPDATE_BYTES) return false;
     loadYjs().applyUpdate(doc, bytes, REMOTE);
     return true;
   } catch {
     // A hostile update that Yjs cannot decode or apply is refused, never thrown.
     return false;
   }
+}
+
+// Applies one doc.update: false on any failure, including a size over MAX_UPDATE_BYTES or a skim refusal, both found before Yjs decodes anything.
+export function applyUpdate(doc: CrdtDoc, bytes: Uint8Array): boolean {
+  return applyWithin(doc, bytes, MAX_UPDATE_BYTES);
 }
 
 export function docText(doc: CrdtDoc): string {
@@ -111,15 +117,10 @@ export function localDelete(doc: CrdtDoc, index: number, length: number): Uint8A
   return localUpdate(doc, () => { doc.getText(TEXT_NAME).delete(index, length); });
 }
 
-// Applies another writer's update to a local document; the remote origin keeps it out of the local update capture.
+// Applies another writer's update, or a peer's whole state, to a local document; the remote origin keeps it out of the local update capture. The
+// same gates as applyUpdate with the state limit, since a peer may send its whole document.
 export function applyRemote(doc: CrdtDoc, bytes: Uint8Array): boolean {
-  try {
-    loadYjs().applyUpdate(doc, bytes, REMOTE);
-    return true;
-  } catch {
-    // Same answer as applyUpdate: a bad update is false, not an exception.
-    return false;
-  }
+  return applyWithin(doc, bytes, MAX_STATE_BYTES);
 }
 
 // A new fold-style document (garbage collection off, client id 0) holding the same state.
@@ -140,10 +141,11 @@ export function snapshotOf(doc: CrdtDoc): Uint8Array {
   return Y.encodeSnapshot(Y.snapshot(doc));
 }
 
-// undefined for anything that is not exactly one snapshot: unreadable bytes, bytes over the size limit, or trailing bytes after the snapshot.
+// undefined for anything that is not exactly one snapshot: unreadable bytes, bytes over MAX_STATE_BYTES, more than MAX_STRUCTS delete ranges or
+// state vector clients, or trailing bytes after the snapshot. The size and the skim are checked before Yjs decodes anything.
 export function decodeSnapshot(bytes: Uint8Array): CrdtSnapshot | undefined {
+  if (bytes.length === 0 || bytes.length > MAX_STATE_BYTES || !skimSnapshot(bytes).ok) return undefined;
   try {
-    if (bytes.length === 0 || bytes.length > MAX_UPDATE_BYTES) return undefined;
     const Y = loadYjs();
     const decoded = Y.decodeSnapshot(bytes);
     // Re-encoding must give the same bytes: a snapshot that does not round-trip is not one this code would have made.
@@ -160,10 +162,11 @@ export function snapshotStateVector(snapshot: CrdtSnapshot): Array<[number, numb
 }
 
 // A scratch document with garbage collection off holding the given updates. createDocFromSnapshot needs garbage collection off and writes to the
-// document it reads, so it is only ever called on a scratch document and never on a fold document.
+// document it reads, so it is only ever called on a scratch document and never on a fold document. A scratch load may start from a whole state, so
+// each input is held to MAX_STATE_BYTES and the skim.
 function scratchDocWith(updates: readonly Uint8Array[]): CrdtDoc | undefined {
   const scratch = createFoldDoc();
-  for (const update of updates) if (!applyUpdate(scratch, update)) return undefined;
+  for (const update of updates) if (!applyWithin(scratch, update, MAX_STATE_BYTES)) return undefined;
   return scratch;
 }
 
@@ -279,11 +282,8 @@ function inspectDecoded(bytes: Uint8Array): UpdateInspection | { error: InspectE
   return { structs, deletes, clients: [...spans.values()].sort((a, b) => sameNumber(a.client, b.client)) };
 }
 
-// Reads an update without applying it. The byte size and then the skim (updateGuard.ts: struct and range counts, allowed content) are checked
-// before anything is decoded, so a hostile update is refused by counting before Yjs allocates for it (WR-07); any failure to decode is
-// { error: 'malformed' } and never an exception.
-export function inspectUpdate(bytes: Uint8Array): UpdateInspection | { error: InspectError } {
-  if (bytes.length > MAX_UPDATE_BYTES) return { error: 'too-large' };
+function inspectWithin(bytes: Uint8Array, maxBytes: number): UpdateInspection | { error: InspectError } {
+  if (bytes.length > maxBytes) return { error: 'too-large' };
   const skim = skimUpdate(bytes);
   if (!skim.ok) return { error: skim.error };
   try {
@@ -292,6 +292,19 @@ export function inspectUpdate(bytes: Uint8Array): UpdateInspection | { error: In
     // RangeError from a nested update, or any decoder error: the update is refused, not thrown.
     return { error: 'malformed' };
   }
+}
+
+// Reads an update without applying it. The byte size (MAX_UPDATE_BYTES) and then the skim (updateGuard.ts: struct and range counts, allowed
+// content) are checked before anything is decoded, so a hostile update is refused by counting before Yjs allocates for it (WR-07); any failure to
+// decode, including the stack overflow a deeply nested hostile update causes, is { error: 'malformed' } and never an exception.
+export function inspectUpdate(bytes: Uint8Array): UpdateInspection | { error: InspectError } {
+  return inspectWithin(bytes, MAX_UPDATE_BYTES);
+}
+
+// inspectUpdate for a whole state (a doc.compact state blob): the same checks with MAX_STATE_BYTES, since a 30-page state is larger than any one
+// update may be.
+export function inspectState(bytes: Uint8Array): UpdateInspection | { error: InspectError } {
+  return inspectWithin(bytes, MAX_STATE_BYTES);
 }
 
 // What a peer is missing: the structs and deletions the document has beyond the given state vector (sorted [client, clock] pairs).

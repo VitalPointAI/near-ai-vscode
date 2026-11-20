@@ -14,6 +14,8 @@
 //   delete set varuint clients; each: varuint client, varuint ranges, each range varuint clock and varuint length
 //   snapshot   a delete set, then a state vector: varuint clients; each: varuint client, varuint clock
 // Every other content ref, including Skip (10), is refused: the fold refuses it after decoding anyway (D-35), so refusing it first costs nothing.
+import { SEALED_OVERHEAD } from './entry';
+import type { SealedBlob } from './entry';
 import { MAX_STRUCTS } from './kindSchemas/doc';
 
 export type SkimError = 'malformed' | 'too-large' | 'forbidden-content';
@@ -144,4 +146,25 @@ export function skimUpdate(bytes: Uint8Array, maxStructs: number = MAX_STRUCTS):
   if (typeof ranges !== 'number') return { ok: false, error: ranges };
   if (!cursor.done()) return { ok: false, error: 'malformed' };
   return { ok: true, structs, ranges };
+}
+
+// Skims one v1 snapshot: its delete ranges and its state vector clients are each capped at maxRanges, and nothing may follow the state vector.
+export function skimSnapshot(bytes: Uint8Array, maxRanges: number = MAX_STRUCTS): SkimResult {
+  const cursor = new Cursor(bytes, 0);
+  const ranges = skimDeleteSet(cursor, maxRanges);
+  if (typeof ranges !== 'number') return { ok: false, error: ranges };
+  if (!cursor.uint()) return { ok: false, error: 'malformed' };
+  const clients = cursor.value;
+  if (clients > maxRanges) return { ok: false, error: 'too-large' };
+  if (!cursor.uints(2 * clients)) return { ok: false, error: 'malformed' };
+  if (!cursor.done()) return { ok: false, error: 'malformed' };
+  return { ok: true, structs: 0, ranges };
+}
+
+// Could this sealed blob open to at most maxPlainBytes of plaintext? Arithmetic on the base64url length only: nothing is decoded or opened, so an
+// oversized blob is refused before any buffer of its size exists (new defect 1 in 31-RESEARCH.md; used by the reducers from plan 31-07).
+export function sealedBlobWithin(blob: SealedBlob, maxPlainBytes: number): boolean {
+  if (typeof blob.bytes !== 'string' || !Number.isSafeInteger(maxPlainBytes) || maxPlainBytes < 0) return false;
+  // Unpadded base64url: n characters decode to at most floor(3n / 4) bytes.
+  return Math.floor((blob.bytes.length * 3) / 4) <= maxPlainBytes + SEALED_OVERHEAD;
 }
