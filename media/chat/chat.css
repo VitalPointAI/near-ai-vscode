@@ -456,7 +456,9 @@ body.vscode-high-contrast #sync:hover, body.vscode-high-contrast-light #sync:hov
 
 /* The trust badge under a cloud answer (CLAS-08): theme colours only, the state also in words and an icon, a border in high contrast. */
 .trust { margin-top: 4px; font-size: 0.9em; }
-.trust-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; cursor: pointer; }
+.trust-badge { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; text-align: left; cursor: pointer; }
+/* The three-part trust line wraps between its parts, and a long part (an authorization with its holder and date) wraps inside itself, so nothing is clipped at narrow widths. */
+.trust-badge > span { min-width: 0; overflow-wrap: anywhere; }
 .trust-badge:hover { background: var(--vscode-toolbar-hoverBackground); }
 .trust-badge:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .trust-badge[data-state="verified-private"] { color: var(--vscode-testing-iconPassed); }
