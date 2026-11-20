@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as v8 from 'node:v8';
 import * as vm from 'node:vm';
-import { MAX_STRUCTS as DOC_MAX_STRUCTS, createLocalDoc, inspectUpdate, localDelete, localInsert } from '../domain/replica/doc';
+import { MAX_STRUCTS as DOC_MAX_STRUCTS, applyUpdate, buildFromCompaction, createFoldDoc, createLocalDoc, decodeSnapshot, docText, encodeFullState, inspectUpdate, localDelete, localInsert, snapshotOf, snapshotStateVector, stateVectorOf } from '../domain/replica/doc';
+import { SEALED_OVERHEAD, sealBlob } from '../domain/replica/entry';
 import { MAX_STATE_BYTES, MAX_STRUCTS, MAX_UPDATE_BYTES } from '../domain/replica/kindSchemas/doc';
-import { readVaruint, skimUpdate } from '../domain/replica/updateGuard';
+import { readVaruint, sealedBlobWithin, skimSnapshot, skimUpdate } from '../domain/replica/updateGuard';
 import { embedUpdate, foreignFullState, formatUpdate, mapUpdate, nestedArrayUpdate, nestedTypeUpdate, skipUpdate, testYjs } from './helpers/replicaYjs';
 
 // A forced collection, so heap numbers are not dominated by garbage still waiting (the pattern in scripts/crdt-spike.mjs).
@@ -55,6 +56,20 @@ function gcProbe(count: number, client = 31): Uint8Array {
     out[at] = 0;
     out[at + 1] = 1;
     at += 2;
+  }
+  at = writeVaruint(out, at, 0);
+  return out.slice(0, at);
+}
+
+// A snapshot whose delete set holds `count` one-clock ranges of one client, and an empty state vector.
+function rangesSnapshot(count: number, client = 31): Uint8Array {
+  const out = new Uint8Array(32 + 16 * count);
+  let at = writeVaruint(out, 0, 1);
+  at = writeVaruint(out, at, client);
+  at = writeVaruint(out, at, count);
+  for (let index = 0; index < count; index += 1) {
+    at = writeVaruint(out, at, 2 * index);
+    at = writeVaruint(out, at, 1);
   }
   at = writeVaruint(out, at, 0);
   return out.slice(0, at);
@@ -165,4 +180,108 @@ test('inspectUpdate refuses bytes over MAX_UPDATE_BYTES as too-large without rea
   assert.deepEqual(measured.value, { error: 'too-large' });
   t.diagnostic(`120000-struct probe (${probe.length} bytes) through inspectUpdate: heap growth ${(measured.grew / MB).toFixed(2)} MB`);
   assert.ok(measured.grew < 8 * MB, `heap grew ${(measured.grew / MB).toFixed(1)} MB`);
+});
+
+// ---- Task 2: the same gates on applyUpdate, snapshots and states -----------------------------------------------------------------------------
+
+test('applyUpdate refuses, before decoding, every probe inspectUpdate refuses, and the fold document is left as it was', (t) => {
+  const doc = createFoldDoc();
+  assert.equal(applyUpdate(doc, localInsert(createLocalDoc(31), 0, 'kept')), true);
+  const vector = stateVectorOf(doc);
+  const probes: Array<[string, Uint8Array]> = [
+    ['over the byte limit', new Uint8Array(MAX_UPDATE_BYTES + 1)], ['one struct over the cap', gcProbe(MAX_STRUCTS + 1)],
+    ['embed', embedUpdate(32)], ['skip', skipUpdate(32, 0, 4)], ['random bytes', Uint8Array.from(Array.from({ length: 24 }, () => 255))]
+  ];
+  for (const [name, bytes] of probes) {
+    assert.equal(applyUpdate(doc, bytes), false, name);
+    assert.deepEqual(stateVectorOf(doc), vector, name);
+  }
+  assert.equal(docText(doc), 'kept');
+  const probe = gcProbe(120_000);
+  const measured = heapGrowth(() => applyUpdate(doc, probe));
+  assert.equal(measured.value, false);
+  t.diagnostic(`120000-struct probe through applyUpdate: heap growth ${(measured.grew / MB).toFixed(2)} MB`);
+  assert.ok(measured.grew < 8 * MB, `heap grew ${(measured.grew / MB).toFixed(1)} MB`);
+});
+
+test('skimSnapshot counts the delete ranges Yjs reads, refuses one range over the cap as too-large, and refuses a short or overlong snapshot as malformed', () => {
+  const doc = createLocalDoc(101);
+  localInsert(doc, 0, 'one two three four five six');
+  localDelete(doc, 4, 4);
+  localDelete(doc, 0, 2);
+  const honest = snapshotOf(doc);
+  const decoded = testYjs().decodeSnapshot(honest);
+  let ranges = 0;
+  for (const list of decoded.ds.clients.values()) ranges += list.length;
+  assert.equal(ranges, 2);
+  assert.deepEqual(skimSnapshot(honest), { ok: true, structs: 0, ranges });
+  assert.deepEqual(skimSnapshot(rangesSnapshot(MAX_STRUCTS)), { ok: true, structs: 0, ranges: MAX_STRUCTS });
+  assert.deepEqual(skimSnapshot(rangesSnapshot(MAX_STRUCTS + 1)), { ok: false, error: 'too-large' });
+  assert.deepEqual(skimSnapshot(rangesSnapshot(5), 4), { ok: false, error: 'too-large' });
+  const withTrailing = new Uint8Array(honest.length + 1);
+  withTrailing.set(honest);
+  assert.deepEqual(skimSnapshot(withTrailing), { ok: false, error: 'malformed' });
+  assert.deepEqual(skimSnapshot(honest.slice(0, honest.length - 1)), { ok: false, error: 'malformed' });
+  assert.deepEqual(skimSnapshot(new Uint8Array(0)), { ok: false, error: 'malformed' });
+});
+
+test('decodeSnapshot refuses bytes over MAX_STATE_BYTES and a snapshot of more than MAX_STRUCTS ranges before decoding, and still decodes an honest snapshot', (t) => {
+  assert.equal(decodeSnapshot(new Uint8Array(MAX_STATE_BYTES + 1)), undefined);
+  const hostile = rangesSnapshot(MAX_STRUCTS + 1);
+  assert.ok(hostile.length < MAX_STATE_BYTES);
+  const measured = heapGrowth(() => decodeSnapshot(hostile));
+  assert.equal(measured.value, undefined);
+  t.diagnostic(`${MAX_STRUCTS + 1}-range snapshot (${hostile.length} bytes) through decodeSnapshot: heap growth ${(measured.grew / MB).toFixed(2)} MB`);
+  assert.ok(measured.grew < 8 * MB, `heap grew ${(measured.grew / MB).toFixed(1)} MB`);
+  const doc = createLocalDoc(101);
+  localInsert(doc, 0, 'typed text that stays');
+  localDelete(doc, 0, 6);
+  const honest = decodeSnapshot(snapshotOf(doc));
+  assert.notEqual(honest, undefined);
+  if (honest !== undefined) assert.deepEqual(snapshotStateVector(honest), [[101, 22]]);
+});
+
+test('a whole state uses MAX_STATE_BYTES: an honest 500 KB state loads through buildFromCompaction but is refused as one update, and states over the limits are refused', () => {
+  const author = createLocalDoc(31);
+  const fold = createFoldDoc();
+  for (let chunk = 0; chunk < 10; chunk += 1) {
+    const update = localInsert(author, chunk * 50_000, String.fromCharCode(97 + chunk).repeat(50_000));
+    assert.equal(applyUpdate(fold, update), true);
+  }
+  const state = encodeFullState(fold);
+  assert.ok(state.length > 500_000 && state.length > MAX_UPDATE_BYTES && state.length < MAX_STATE_BYTES, `state is ${state.length} bytes`);
+  const loaded = buildFromCompaction(state, []);
+  assert.notEqual(loaded, undefined);
+  if (loaded !== undefined) assert.equal(docText(loaded), docText(fold));
+  assert.equal(applyUpdate(createFoldDoc(), state), false);
+  assert.equal(buildFromCompaction(new Uint8Array(MAX_STATE_BYTES + 1), []), undefined);
+  assert.equal(buildFromCompaction(gcProbe(MAX_STRUCTS + 1), []), undefined);
+  assert.equal(buildFromCompaction(state, [embedUpdate(32)]), undefined);
+});
+
+test('sealedBlobWithin answers from the base64url length alone: a real sealed blob of n bytes is within n, one byte more is not', () => {
+  const key = Buffer.alloc(32, 7);
+  const stream = 'a'.repeat(32);
+  for (const size of [0, 1, 2, 3, 1000, 65_536]) {
+    const blob = sealBlob(key, stream, 1, Buffer.alloc(size, 1));
+    assert.equal(Buffer.from(blob.bytes, 'base64url').length, size + SEALED_OVERHEAD);
+    assert.equal(sealedBlobWithin(blob, size), true, `size ${size}`);
+    if (size > 0) assert.equal(sealedBlobWithin(blob, size - 1), false, `size ${size} against ${size - 1}`);
+  }
+  const oversized = { hash: '0'.repeat(64), bytes: 'A'.repeat(Math.ceil(((MAX_STATE_BYTES + SEALED_OVERHEAD + 1) * 4) / 3)) };
+  assert.equal(sealedBlobWithin(oversized, MAX_STATE_BYTES), false);
+  assert.equal(sealedBlobWithin({ hash: '0'.repeat(64), bytes: 42 as unknown as string }, MAX_STATE_BYTES), false);
+  assert.equal(sealedBlobWithin({ hash: '0'.repeat(64), bytes: '' }, -1), false);
+});
+
+test('heap ceiling (D-43): the 2 000 000-GC-struct 4 000 007-byte probe grows the heap by under 64 MB through inspectUpdate and through the skim itself', (t) => {
+  const probe = gcProbe(2_000_000);
+  assert.equal(probe.length, 4_000_007);
+  const inspected = heapGrowth(() => inspectUpdate(probe));
+  assert.deepEqual(inspected.value, { error: 'too-large' });
+  const skimmed = heapGrowth(() => skimUpdate(probe));
+  assert.deepEqual(skimmed.value, { ok: false, error: 'too-large' });
+  t.diagnostic(`2000000-struct probe: heap growth ${(inspected.grew / MB).toFixed(2)} MB through inspectUpdate, ${(skimmed.grew / MB).toFixed(2)} MB through skimUpdate (old code +191 MB)`);
+  assert.ok(inspected.grew < 64 * MB, `inspectUpdate grew the heap ${(inspected.grew / MB).toFixed(1)} MB`);
+  assert.ok(skimmed.grew < 64 * MB, `skimUpdate grew the heap ${(skimmed.grew / MB).toFixed(1)} MB`);
 });
