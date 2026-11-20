@@ -6,7 +6,8 @@
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import type * as YTypes from 'yjs';
-import { MAX_UPDATE_BYTES } from './kindSchemas/doc';
+import { MAX_STRUCTS, MAX_UPDATE_BYTES } from './kindSchemas/doc';
+import { skimUpdate } from './updateGuard';
 
 type YjsApi = typeof YTypes;
 export type CrdtDoc = YTypes.Doc;
@@ -16,10 +17,10 @@ const REMOTE = 'remote';
 const REF_DELETED = 1;
 const REF_STRING = 4;
 const REF_GC = 0;
-// Most clock positions one struct may claim, and most structs and delete ranges one update may hold (D-35). A GC struct is only a few bytes on the
-// wire but moves a client's clock by its length, so the length needs a cap of its own.
+// Most clock positions one struct may claim (D-35). A GC struct is only a few bytes on the wire but moves a client's clock by its length, so the
+// length needs a cap of its own. The struct and delete-range cap lives with the byte limits in kindSchemas/doc.ts and is re-exported here.
 export const MAX_STRUCT_LENGTH = 1_000_000;
-export const MAX_STRUCTS = 100_000;
+export { MAX_STRUCTS };
 let yjs: YjsApi | undefined;
 
 function loadYjs(): YjsApi {
@@ -278,10 +279,13 @@ function inspectDecoded(bytes: Uint8Array): UpdateInspection | { error: InspectE
   return { structs, deletes, clients: [...spans.values()].sort((a, b) => sameNumber(a.client, b.client)) };
 }
 
-// Reads an update without applying it. The byte size is checked before anything is decoded; any failure to decode, including the stack overflow a
-// deeply nested hostile update causes, is { error: 'malformed' } and never an exception.
+// Reads an update without applying it. The byte size and then the skim (updateGuard.ts: struct and range counts, allowed content) are checked
+// before anything is decoded, so a hostile update is refused by counting before Yjs allocates for it (WR-07); any failure to decode is
+// { error: 'malformed' } and never an exception.
 export function inspectUpdate(bytes: Uint8Array): UpdateInspection | { error: InspectError } {
   if (bytes.length > MAX_UPDATE_BYTES) return { error: 'too-large' };
+  const skim = skimUpdate(bytes);
+  if (!skim.ok) return { error: skim.error };
   try {
     return inspectDecoded(bytes);
   } catch {

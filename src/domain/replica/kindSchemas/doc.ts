@@ -3,8 +3,15 @@
 import { isRecord, isSafeIntegerInRange } from '../../team/validate';
 import { exactKeys, invalidAt, isActor, isBase64urlBytes, isDep, isHash, isSlug } from './shared';
 
-// The most bytes one update may carry once decoded. doc.ts imports this, never the reverse.
-export const MAX_UPDATE_BYTES = 4 * 1024 * 1024;
+// Byte and struct limits of the doc family (D-05 as refined by D-43). They live here, hub-side, so the hub refuses the same bytes the fold refuses.
+// doc.ts and updateGuard.ts import them, never the reverse.
+// The most bytes one doc.update may carry once decoded: about 65 times the largest update of the Phase 30 spike, enough for a 100 000-character
+// paste in one update.
+export const MAX_UPDATE_BYTES = 256 * 1024;
+// The most bytes of a whole state (a doc.compact state blob, a scratch load) or a snapshot: about 3.8 times the largest 30-page full state.
+export const MAX_STATE_BYTES = 2 * 1024 * 1024;
+// Most structs and most delete ranges one update or state may hold, checked by updateGuard.ts before Yjs decodes anything (D-35, D-43).
+export const MAX_STRUCTS = 100_000;
 export const MAX_CLIENT_ID = 4294967295;
 // A compaction names the heads it covers (at most this many) and the state vector of its full state (at most this many clients).
 export const MAX_COMPACT_COVERS = 64;
