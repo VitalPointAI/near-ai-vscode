@@ -333,3 +333,206 @@ test('the result lists the notices every multi-user result shows, the imports an
   assert.deepEqual(result.moved, LEGACY_LEDGERS.map((item) => item.legacyPath));
   assert.deepEqual(result.products, [ANNEX, CONOPS]);
 });
+
+// ---- Task 2: all four ledgers ----------------------------------------------------------------------------------------------------------------------
+
+test('all four ledgers: four imports; decisions and calculator heads are their last entry digests, the wargame head is the file hash and its count the readable lines; only products is marked', async () => {
+  const env = await cloneOf(await full(), 'four');
+  const host = worldOf(env).host;
+  const status = trusting(env.signer);
+  const bytes = (relative: string): Buffer => readFileSync(path.join(env.root, ...relative.split('/')));
+  const decisions = replayPersonDecisions(ledgerLinesOf(bytes(LEGACY_LEDGERS[1].path)), (envelope) => verifyPayload(envelope, { purpose: 'staff-decision', status }));
+  const calculator = replayCalcLedger(ledgerLinesOf(bytes(LEGACY_LEDGERS[2].path)), (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status }));
+  const wargame = bytes(LEGACY_LEDGERS[3].path);
+  const turns = (await host.wargameEntries()).length;
+  assert.equal(turns, 1);
+  assert.equal(wargame.toString('utf8').split('\n').filter(Boolean).length, 2, 'the wargame file also holds a damaged line');
+
+  await migrate(env);
+  const imports = importsOf(await projection(env));
+  assert.equal(imports.length, 4);
+  const by = new Map(imports.map((item) => [item.ledger, item]));
+  assert.equal(by.get('decisions')?.legacyHead, decisions.head);
+  assert.equal(by.get('decisions')?.count, decisions.entries);
+  assert.equal(by.get('calculator')?.legacyHead, calculator.head);
+  assert.equal(by.get('calculator')?.count, calculator.entries);
+  assert.equal(by.get('wargame')?.legacyHead, sha256(wargame));
+  assert.equal(by.get('wargame')?.count, turns);
+  assert.deepEqual(imports.filter((item) => item.marked).map((item) => item.ledger), ['products']);
+  for (const item of imports) assert.ok(item.fileHash !== undefined, `${item.ledger} carries its whole file`);
+});
+
+test('re-verification: every import, opened from the fold, verifies with today\'s verifier and key status and ends at its legacy head', async () => {
+  const env = await cloneOf(await full(), 'reverify');
+  const before = await todaysAnswers(env);
+  await migrate(env);
+  const input = await projection(env);
+  const status: KeyStatusLookup = trusting(env.signer);
+  for (const record of importsOf(input)) {
+    const bytes = importedFile(record, input.entries);
+    assert.ok(bytes !== undefined, `${record.ledger}: the file opens from the fold and matches its hash`);
+    const lines = ledgerLinesOf(bytes);
+    switch (record.ledger) {
+      case 'products': {
+        const markText = (input.entries.get(record.entry)?.data as { mark: string }).mark;
+        const markVerdict = verifyPayload(JSON.parse(markText) as unknown, { purpose: 'staff-ledger-head', status });
+        assert.ok(markVerdict.ok, 'the carried head mark verifies with today\'s key status');
+        const mark = parseLedgerHeadMark(markVerdict.payload);
+        const replay = replayLedger(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status }), mark);
+        assert.equal(replay.broken, undefined);
+        assert.equal(replay.head, record.legacyHead);
+        assert.equal(replay.entries, record.count);
+        assert.deepEqual(replay.products, before.replay.products);
+        break;
+      }
+      case 'decisions': {
+        const replay = replayPersonDecisions(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-decision', status }));
+        assert.equal(replay.broken, undefined);
+        assert.equal(replay.head, record.legacyHead);
+        assert.deepEqual(replay.decisions, before.decisions);
+        break;
+      }
+      case 'calculator': {
+        const replay = replayCalcLedger(lines, (envelope) => verifyPayload(envelope, { purpose: 'staff-ledger', status }));
+        assert.equal(replay.broken, undefined);
+        assert.equal(replay.head, record.legacyHead);
+        assert.equal(replay.entries, record.count);
+        break;
+      }
+      case 'wargame': {
+        assert.equal(sha256(bytes), record.legacyHead);
+        // Today's reader over the imported bytes gives the same turns as before.
+        const elsewhere = await freshEnv('wargame-read');
+        await mkdir(path.join(elsewhere.root, WARGAME_DIR), { recursive: true });
+        await writeFile(path.join(elsewhere.root, WARGAME_DIR, WARGAME_FILE), bytes);
+        assert.deepEqual(await worldOf(elsewhere).host.wargameEntries(), before.wargame);
+        break;
+      }
+      default:
+        assert.fail(`unexpected import ${record.ledger}`);
+    }
+    // A key this computer does not trust fails the same import: the check is real.
+    if (record.ledger !== 'wargame') {
+      const untrusted: KeyStatusLookup = () => ({ state: 'unknown' });
+      const verdict = verifyPayload(lines[0], { purpose: record.ledger === 'decisions' ? 'staff-decision' : 'staff-ledger', status: untrusted });
+      assert.equal(verdict.ok, false, `${record.ledger}: an untrusted key does not verify`);
+    }
+  }
+});
+
+test('decisions, calculator and wargame ledgers are written back byte for byte at their usual paths, and today\'s readers answer as before', async () => {
+  const env = await cloneOf(await full(), 'passthrough');
+  const before = await todaysAnswers(env);
+  const originals = new Map(PASSTHROUGH_LEDGERS.map((ledger) => [ledger.path, readFileSync(path.join(env.root, ...ledger.path.split('/')))]));
+  const result = await migrate(env);
+  for (const [relative, bytes] of originals) {
+    assert.deepEqual(readFileSync(path.join(env.root, ...relative.split('/'))), bytes, `${relative} at its usual path`);
+    const legacy = LEGACY_LEDGERS.find((item) => item.path === relative)?.legacyPath as string;
+    assert.deepEqual(readFileSync(path.join(env.root, ...legacy.split('/'))), bytes, `${legacy} kept`);
+    assert.ok(result.projections?.written.includes(relative), `${relative} was written back`);
+  }
+  const after = await todaysAnswers(env);
+  assert.deepEqual(after.decisions, before.decisions);
+  assert.deepEqual(after.wargame, before.wargame);
+  assert.deepEqual(after.calculator, before.calculator);
+  assert.ok(after.calculator.verified.includes('fuel-phase-1'), 'the calculator record is still vouched for');
+});
+
+test('a project missing some ledgers imports only the ones present', async () => {
+  const env = await freshEnv('partial');
+  const world = worldOf(env);
+  await writeBody(env.root, 'j5', CONOPS, CLEAN_BODY);
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan' }, 'lead-planner'), 'propose');
+  await otherLedgers(world, { wargame: true });
+  const result = await migrate(env);
+  assert.deepEqual(result.imported.map((item) => item.ledger), ['products', 'wargame']);
+  const imports = importsOf(await projection(env));
+  assert.deepEqual(imports.map((item) => item.ledger).sort(), ['products', 'wargame']);
+  assert.deepEqual(result.moved, [LEGACY_LEDGERS[0].legacyPath, LEGACY_LEDGERS[3].legacyPath]);
+  assert.equal(existsSync(path.join(env.root, LEGACY_DIR, 'ledger', 'decisions.jsonl')), false);
+});
+
+/** Changes one byte of the first ledger line, inside its signed payload (a digit of the genesis prev). */
+async function breakOneByte(file: string): Promise<void> {
+  const text = await readFile(file, 'utf8');
+  const at = text.indexOf('"prev":"') + '"prev":"'.length + 5;
+  assert.ok(at > 20 && text[at] === '0', 'the first line chains to the genesis');
+  await writeFile(file, `${text.slice(0, at)}1${text.slice(at + 1)}`);
+}
+
+async function refusedWithNothingWritten(env: Env): Promise<MigrationRefused> {
+  const files = tree(env.root, true);
+  const keys = [...env.secrets.values.keys()].sort();
+  const globalFiles = existsSync(env.global) ? readdirSync(env.global, { recursive: true }).map(String).sort() : [];
+  const refused = await makeMultiUser(env.root, env.deps, { name: NAME });
+  assert.ok(isMigrationRefused(refused), 'the conversion is refused');
+  assert.deepEqual(tree(env.root, true), files, 'no file written, moved or changed');
+  assert.equal(existsSync(path.join(env.root, REPLICA_DIR)), false, 'no replica folder');
+  assert.deepEqual([...env.secrets.values.keys()].sort(), keys, 'no secret storage key added');
+  assert.deepEqual(existsSync(env.global) ? readdirSync(env.global, { recursive: true }).map(String).sort() : [], globalFiles, 'nothing pinned');
+  return refused;
+}
+
+test('a broken product ledger (one changed byte) stops the conversion at verify: nothing written, today\'s wording with the Set Aside way out', async () => {
+  const env = await cloneOf(await full(), 'broken-products');
+  await breakOneByte(path.join(env.root, LEDGER_DIR, LEDGER_FILE));
+  const refused = await refusedWithNothingWritten(env);
+  assert.equal(refused.refused, 'ledger-broken');
+  assert.equal(refused.ledger, 'products');
+  // Today's host refuses a write to the same ledger with the same sentence.
+  const world = worldOf(env);
+  await writeBody(env.root, 'j5', 'annex-z', CLEAN_BODY);
+  const today = await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: 'annex-z', kind: 'annex' }, 'lead-planner');
+  assert.match(today.text, /^The staff ledger cannot be trusted from entry 1:/);
+  assert.equal(refused.message, `${MIGRATION_REFUSALS['ledger-broken']} ${today.text}`);
+  assert.match(refused.message, /Set Aside the Product Ledger/);
+});
+
+test('a broken decision log stops the conversion at verify too, with today\'s wording, and nothing is written', async () => {
+  const env = await cloneOf(await full(), 'broken-decisions');
+  await breakOneByte(path.join(env.root, LEDGER_DIR, 'decisions.jsonl'));
+  const refused = await refusedWithNothingWritten(env);
+  assert.equal(refused.refused, 'ledger-broken');
+  assert.equal(refused.ledger, 'decisions');
+  const today = await worldOf(env).host.signWatchDecision(worldOf(env).person(), { watch: 'watch-ford', decision: 'approved', wording: sha256('ford'), reasons: [] });
+  assert.equal(today.ok, false);
+  assert.equal(refused.message, `${MIGRATION_REFUSALS['ledger-broken']} ${today.ok ? '' : today.message}`);
+});
+
+test('a product ledger cut short against its head mark is refused with the Use This Branch\'s Ledger way out first', async () => {
+  const env = await cloneOf(await full(), 'truncated');
+  const file = path.join(env.root, LEDGER_DIR, LEDGER_FILE);
+  const lines = (await readFile(file, 'utf8')).split('\n').filter(Boolean);
+  await writeFile(file, `${lines.slice(0, -1).join('\n')}\n`);
+  const refused = await refusedWithNothingWritten(env);
+  assert.match(refused.message, /Use This Branch's Ledger[\s\S]*Otherwise: A person can set it aside/);
+});
+
+test('observations are not imported, and registers, calculator records, gate reports, proposals and settings stay unchanged where they are', async () => {
+  const env = await cloneOf(await full(), 'untouched');
+  const ledgers = new Set(LEGACY_LEDGERS.map((item) => item.path));
+  const productFiles = new Set([productPath('j5', CONOPS), productPath('j5', ANNEX)]);
+  const kept = (files: Map<string, string>) => new Map([...files].filter(([file]) => !ledgers.has(file) && !productFiles.has(file) && !file.startsWith(LEGACY_DIR)));
+  const before = kept(tree(env.root));
+  assert.ok([...before.keys()].some((file) => file.startsWith('.planning/staff/calculator/')), 'a calculator record is among them');
+  for (const relative of Object.keys(UNTOUCHED)) assert.ok(before.has(relative), relative);
+  await migrate(env);
+  assert.deepEqual(kept(tree(env.root)), before);
+  // Only the conversion's own kinds are in the store: no observation, register or watch entry.
+  const project = await opened(env);
+  try {
+    const kinds = new Set<string>();
+    for (const kind of REPLICA_KINDS) await project.findOwn(kind, () => { kinds.add(kind); return false; });
+    assert.deepEqual([...kinds].sort(), ['doc.client', 'doc.update', 'member.update', 'product.create', 'project.genesis', 'project.import', 'version.propose']);
+  } finally {
+    await project.close();
+  }
+});
+
+test('a folder with no staff project is refused no-staff-project and nothing is written', async () => {
+  const env = await freshEnv('empty');
+  const refused = await makeMultiUser(env.root, env.deps);
+  assert.ok(isMigrationRefused(refused));
+  assert.equal(refused.refused, 'no-staff-project');
+  assert.equal(existsSync(path.join(env.root, '.planning')), false);
+});
