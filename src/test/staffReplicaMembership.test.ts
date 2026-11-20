@@ -3,24 +3,25 @@
 // refused in plain words; removing a member or a device, or lowering a clearance, moves the affected cells to new keys; and the lead and the deputy
 // keep the roster whole through a split, a deputy and a handover.
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test, { after } from 'node:test';
 import type { ScaleTable } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, sealLabel, wrapEpochKey } from '../domain/replica/cellKeys';
-import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
+import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import { MEMBER_REFUSALS, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, leadAt, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { epochAt } from '../domain/replica/rosterCells';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
+import { canonicalBytes } from '../domain/team/canonical';
 import type { SecretStorageLike } from '../services/auth';
 import { JOIN_SECRET_PREFIX } from '../staff/replica/keyring';
 import {
-  MEMBERSHIP_REFUSALS, addMyOtherMachine, admitJoinRequest, cellOrderHook, chooseRosterBranch, handOverLead, inviteToProject, joinFromInvite, nameDeputy,
-  openWelcome, removeFromProject, reviewJoinRequest, updateMember, voidInvite
+  MEMBERSHIP_REFUSALS, addMyOtherMachine, admitJoinRequest, cellOrderHook, chooseRosterBranch, finishRekeys, handOverLead, inviteToProject, joinFromInvite, nameDeputy,
+  openWelcome, pendingInvitationsDir, remakeWelcome, removeFromProject, reviewJoinRequest, unfinishedRekeys, updateMember, voidInvite
 } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
@@ -212,15 +213,20 @@ test('two installs: B joins from the invite file with its own keys and gets a .n
   const joined = ok(await joinFromInvite(b.root, b.deps, file(invited).text, { name: 'Jo Analyst' }), 'join');
   assert.equal(file(joined).name, `join-${invited.invite as string}${JOIN_REQUEST_FILE_EXTENSION}`);
   assert.equal(joined.safetyWords?.length, 6);
-  // B pinned the genesis the invite names.
-  const pin = JSON.parse(readFileSync(genesisPinFile(b.global, lead.p.projectId), 'utf8')) as { anchor: { genesisHash: string } };
-  assert.equal(pin.anchor.genesisHash, lead.p.anchor.genesisHash);
+  // Changed for MN-01: B used to pin the genesis here. It now keeps the invitation's anchor and inviter outside the project until the welcome arrives,
+  // and pins nothing yet, so a bogus invitation can never block the real one.
+  assert.equal(existsSync(genesisPinFile(b.global, lead.p.projectId)), false, 'nothing pinned before the welcome');
+  const kept = readdirSync(pendingInvitationsDir(b.global, lead.p.projectId));
+  assert.equal(kept.length, 1);
+  const pending = JSON.parse(readFileSync(path.join(pendingInvitationsDir(b.global, lead.p.projectId), kept[0]), 'utf8')) as { anchor: { genesisHash: string }; inviter: { writer: string } };
+  assert.equal(pending.anchor.genesisHash, lead.p.anchor.genesisHash);
+  assert.equal(pending.inviter.writer, lead.p.deviceWriter);
   const reviewed = ok(await reviewJoinRequest(lead.host, file(joined).text), 'review');
   assert.deepEqual(reviewed.safetyWords, joined.safetyWords);
   // The words come from the invite and both devices' keys (31-16): computed independently on A's side.
   const read = readInvite(file(invited).text, NOW);
   assert.ok(read.ok);
-  const request = JSON.parse(file(joined).text) as { payload: { publicKey: string; x25519: string } };
+  const request = JSON.parse(file(joined).text) as { payload: { publicKey: string; x25519: string; nonce: string } };
   assert.deepEqual(inviteSafetyCode(read.invite, request.payload), joined.safetyWords);
   // Reviewing writes nothing.
   assert.equal((await head(lead.p)).roster.members.members.size, 1);
@@ -720,6 +726,218 @@ test('nameDeputy writes deputy.name; the deputy cannot name a deputy; a planned 
   // The lead can hand over for any reason; naming the lead or an unknown member is refused.
   assert.equal((await handOverLead(t.lead.host, { to: 'mbr-lead', reason: 'planned' })).reason, 'names-the-lead');
   assert.equal((await nameDeputy(t.lead.host, 'mbr-nobody')).reason, 'member-unknown');
+});
+
+// ---- review fixes: who may invite (MJ-05), the safety code (MJ-01), the pin (MN-01), the lost welcome (MJ-02), unfinished rekeys (MJ-03) ----------
+
+test('MJ-05: the lead\'s second computer invites and admits a new person, who joins; the invitation names the founding lead as the anchor and that computer as the inviter', async () => {
+  const lead = await founded();
+  const second = await addMachine(lead, 'mbr-lead', 'a2', 'Lee Lead');
+  const p = await bringIn(second, 'p', 'Pat Planner', OFFICIAL);
+  const [invited, joined, admitted] = p.results;
+  const read = readInvite(file(invited).text, NOW);
+  assert.ok(read.ok);
+  assert.equal(read.invite.lead.writer, lead.p.deviceWriter, 'the anchor is the founding device');
+  assert.equal(read.invite.inviter.writer, second.writer, 'the inviter is the second computer');
+  // Both screens show the same words, and they cover the inviter's keys: the same request under an invitation naming the founding device as inviter
+  // would give other words.
+  assert.deepEqual(admitted.safetyWords, joined.safetyWords);
+  const request = (JSON.parse(file(joined).text) as { payload: { publicKey: string; x25519: string; nonce: string } }).payload;
+  assert.notDeepEqual(inviteSafetyCode({ ...read.invite, inviter: read.invite.lead }, request), joined.safetyWords);
+  const atP = await head(p.p);
+  assert.ok(rosterView(atP.roster).isAdmitted(p.writer, atP.hash));
+  assert.equal(atP.roster.anchor.lead.writer, lead.p.deviceWriter, 'the new person pinned the founding anchor');
+});
+
+test('MJ-05: after the deputy cuts off the founding device and takes over the lead, the new lead invites, admits and the person joins', async () => {
+  const t = await team();
+  const d = await bringIn(t.lead, 'd', 'Dee Deputy', CLEARED_X);
+  ok(await nameDeputy(t.lead.host, d.member), 'name the deputy');
+  await sync(t.lead, d);
+  ok(await removeFromProject(d.host, { member: 'mbr-lead', writer: t.lead.p.deviceWriter }), 'the deputy revokes the founding device');
+  ok(await handOverLead(d.host, { to: d.member, reason: 'lead-lost' }), 'the deputy takes over the lead');
+  const p = await bringIn(d, 'p', 'Pat Planner', OFFICIAL);
+  const atP = await head(p.p);
+  assert.ok(rosterView(atP.roster).isAdmitted(p.writer, atP.hash));
+  assert.equal(rosterView(atP.roster).isAdmitted(t.lead.p.deviceWriter, atP.hash), false, 'the founding device stays revoked');
+  assert.equal(leadAt(atP.roster, atP.position), d.member);
+  const base = t.lead.p.projectId;
+  assert.ok(p.p.keys.epochKey(base, epochAt(atP.roster.cells, base, atP.position) as number) !== undefined, 'the person holds the current base key');
+});
+
+test('MJ-05: a welcome whose roster shows the invitation written by another device than the one the invitation names is refused, and nothing is kept; the real invitation then joins with the same welcome', async () => {
+  const lead = await founded();
+  const second = await addMachine(lead, 'mbr-lead', 'a2', 'Lee Lead');
+  const b = install('b');
+  const invited = ok(await inviteToProject(lead.host, { name: 'Jo Analyst', seat: 'j2-chief', clearance: OFFICIAL }), 'invite');
+  const read = readInvite(file(invited).text, NOW);
+  assert.ok(read.ok);
+  // The same invitation and secret, re-signed by the second computer naming itself as the inviter: the founding device wrote the member.invite entry.
+  const secondSelf = (await head(second.p)).roster.members.devices.get(second.writer)?.[0];
+  assert.ok(secondSelf);
+  const forged = buildInvite(second.p.signer, {
+    genesisHash: read.invite.genesisHash, project: read.invite.project, name: read.invite.name,
+    lead: { member: read.invite.lead.member, x25519: read.invite.lead.x25519, publicKey: read.invite.lead.publicKey }, inviter: { member: 'mbr-lead', x25519: secondSelf.x25519 },
+    invite: read.invite.invite, secret: read.invite.secret, expiresAt: read.invite.expiresAt, now: NOW
+  });
+  const joined = ok(await joinFromInvite(b.root, b.deps, JSON.stringify(forged), { name: 'Jo Analyst' }), 'join from the re-signed invitation');
+  // The six words catch it: the lead's screen covers the founding device as inviter, the joiner's the second computer.
+  const reviewed = ok(await reviewJoinRequest(lead.host, file(joined).text), 'review');
+  assert.notDeepEqual(reviewed.safetyWords, joined.safetyWords);
+  // The lead admits anyway; the joining computer refuses the welcome and keeps no pin and no project.json.
+  const admitted = ok(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true }), 'admit');
+  const refusedWelcome = await openWelcome(b.root, b.deps, file(admitted).text);
+  assert.equal(refusedWelcome.reason, 'welcome-not-for-invitation');
+  assert.equal(refusedWelcome.message, MEMBERSHIP_REFUSALS['welcome-not-for-invitation']);
+  assert.equal(refusedWelcome.project, undefined);
+  assert.equal(existsSync(genesisPinFile(b.global, lead.p.projectId)), false, 'the pin was set aside');
+  assert.equal(existsSync(path.join(b.root, ...REPLICA_DIR.split('/'), 'project.json')), false, 'project.json was set aside');
+  // Opening the real invitation keeps its anchor and inviter; the same welcome then joins.
+  ok(await joinFromInvite(b.root, b.deps, file(invited).text, { name: 'Jo Analyst' }), 'join from the real invitation');
+  const welcomed = ok(await openWelcome(b.root, b.deps, file(admitted).text), 'welcome');
+  const joinedProject = project(welcomed.project);
+  const atB = await head(joinedProject);
+  assert.ok(rosterView(atB.roster).isAdmitted(joinedProject.deviceWriter, atB.hash));
+});
+
+test('MN-01: opening a bogus invitation for a known project pins nothing, so the real invitation and its welcome still join', async () => {
+  const lead = await founded();
+  const b = install('b');
+  const mallory = install('mallory');
+  const fake = await ReplicaProject.localDevice(mallory.deps);
+  const bogus = buildInvite(fake.signer, {
+    genesisHash: lead.p.anchor.genesisHash, project: lead.p.projectId, name: 'Exercise Northwind', lead: { member: 'mbr-lead', x25519: fake.x25519 },
+    invite: 'inv-bogus', secret: newJoinSecret(), expiresAt: new Date(NOW.getTime() + DAY_MS).toISOString(), now: NOW
+  });
+  ok(await joinFromInvite(b.root, b.deps, JSON.stringify(bogus), { name: 'Jo Analyst' }), 'the bogus invitation is answered');
+  assert.equal(existsSync(genesisPinFile(b.global, lead.p.projectId)), false, 'nothing pinned');
+  const invited = ok(await inviteToProject(lead.host, { name: 'Jo Analyst', seat: 'j2-chief', clearance: OFFICIAL }), 'the real invitation');
+  const joined = ok(await joinFromInvite(b.root, b.deps, file(invited).text, { name: 'Jo Analyst' }), 'the real invitation is answered');
+  assert.equal(readdirSync(pendingInvitationsDir(b.global, lead.p.projectId)).length, 2, 'both invitations are kept until a welcome arrives');
+  const admitted = ok(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true }), 'admit');
+  const welcomed = ok(await openWelcome(b.root, b.deps, file(admitted).text), 'welcome');
+  const joinedProject = project(welcomed.project);
+  assert.equal(joinedProject.anchor.lead.writer, lead.p.deviceWriter, 'the real anchor is pinned');
+  const pin = JSON.parse(readFileSync(genesisPinFile(b.global, lead.p.projectId), 'utf8')) as { anchor: { lead: { writer: string } } };
+  assert.equal(pin.anchor.lead.writer, lead.p.deviceWriter);
+  // A welcome on a computer that opened no invitation for that project is refused plainly.
+  const nobody = install('nobody');
+  const lost = await openWelcome(nobody.root, nobody.deps, file(admitted).text);
+  assert.equal(lost.reason, 'no-invitation-opened');
+  assert.equal(existsSync(genesisPinFile(nobody.global, lead.p.projectId)), false);
+});
+
+test('MJ-02: a welcome file lost after admission is made again from the same join request, with nothing written and no join secret, and it opens', async () => {
+  const lead = await founded();
+  const { at: b, invited, joined } = await invitedAndJoined(lead);
+  const id = invited.invite as string;
+  const admitted = ok(await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true }), 'admit');
+  assert.equal(lead.at.secrets.values.has(JOIN_SECRET_PREFIX + id), false, 'the join secret is forgotten at admission');
+  // The welcome file was never saved. Review the same request again: the person is already in, and only the welcome can be made again.
+  const before = await head(lead.p);
+  const reviewed = ok(await reviewJoinRequest(lead.host, file(joined).text), 'review again');
+  assert.equal(reviewed.alreadyAdmitted, true);
+  assert.equal(reviewed.safetyWords, undefined);
+  const again = ok(await remakeWelcome(lead.host, file(joined).text), 'make the welcome again');
+  assert.equal(file(again).name, `welcome-${id}${WELCOME_FILE_EXTENSION}`);
+  assert.equal(again.member, admitted.member);
+  assert.equal((await head(lead.p)).hash, before.hash, 'nothing written');
+  assert.deepEqual(again.notices, multiUserNoticeLines());
+  const welcomed = ok(await openWelcome(b.root, b.deps, file(again).text), 'the remade welcome opens');
+  const bp = project(welcomed.project);
+  const atB = await head(bp);
+  assert.ok(rosterView(atB.roster).isAdmitted(bp.deviceWriter, atB.hash));
+  assert.ok(bp.keys.epochKey(lead.p.projectId, 1) !== undefined);
+  // Forbidden: admitting it again is still invite-used; another device's request for the used invitation is invite-used; a request whose
+  // invitation admitted nobody yet is not-admitted-yet; a member's computer is not a roster writer.
+  assert.equal((await admitJoinRequest(lead.host, file(joined).text, { codeMatched: true })).reason, 'invite-used');
+  const other = install('other');
+  const stranger = ok(await joinFromInvite(other.root, other.deps, file(invited).text, { name: 'Someone Else' }), 'a second answer');
+  assert.equal((await remakeWelcome(lead.host, file(stranger).text)).reason, 'invite-used');
+  const open = await invitedAndJoined(lead, 'c');
+  const notYet = await remakeWelcome(lead.host, file(open.joined).text);
+  assert.equal(notYet.reason, 'not-admitted-yet');
+  assert.equal(notYet.message, MEMBERSHIP_REFUSALS['not-admitted-yet']);
+  assert.equal((await remakeWelcome(hostOf(bp, b), file(joined).text)).reason, 'not-a-roster-writer');
+});
+
+test('MJ-02: a grant file that does not read, dropped in the lead\'s grants folder, does not stop the welcome', async () => {
+  const lead = await founded();
+  const junk = { not: 'a grant' };
+  const name = `1-${createHash('sha256').update(canonicalBytes(junk)).digest('hex')}.json`;
+  const dir = path.join(lead.at.root, ...REPLICA_DIR.split('/'), 'grants', lead.p.projectId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, name), JSON.stringify(junk));
+  const b = await bringIn(lead, 'b', 'Jo Analyst', OFFICIAL);
+  const admitted = b.results[2];
+  assert.doesNotMatch(admitted.message, /could not be put in the welcome file/);
+  assert.ok(b.p.keys.epochKey(lead.p.projectId, 1) !== undefined, 'the welcome carried the base cell');
+});
+
+test('MJ-03: a removal interrupted after member.remove is found from the roster and finished: each cell the member held moves to a new key without them; finishing again is nothing-to-finish', async () => {
+  const t = await team();
+  const base = t.lead.p.projectId;
+  // The removal is written, then the window dies before any cell moves to a new key.
+  const written = await t.lead.p.appendOwn('member.remove', { member: t.m.member });
+  assert.ok('ok' in written);
+  const cut = await head(t.lead.p);
+  assert.equal(memberAt(cut.roster.members, t.m.member, cut.position), undefined, 'removed');
+  assert.equal(epochAt(cut.roster.cells, base, cut.position), 1);
+  assert.equal(epochAt(cut.roster.cells, t.x, cut.position), 1, 'the cells it held are still on the key it holds');
+  assert.equal(await unfinishedRekeys(t.lead.host), 2);
+  // Running Remove again cannot name the member any more; a member's computer can neither see nor finish it.
+  await sync(t.lead, t.n);
+  assert.equal(await unfinishedRekeys(t.n.host), 0);
+  assert.equal((await finishRekeys(t.n.host)).reason, 'not-a-roster-writer');
+  const finished = ok(await finishRekeys(t.lead.host), 'finish');
+  assert.deepEqual([...(finished.rekeyed ?? [])].sort(), [base, t.x].sort());
+  assert.ok(finished.message.includes(REKEY_KEEP_TEXT));
+  assert.deepEqual(finished.notices, multiUserNoticeLines());
+  const after = await head(t.lead.p);
+  assert.equal(epochAt(after.roster.cells, base, after.position), 2);
+  assert.equal(epochAt(after.roster.cells, t.x, after.position), 2);
+  const view = rosterView(after.roster);
+  assert.deepEqual(view.cellGrantees?.(base, after.hash), [t.lead.p.deviceWriter, t.n.writer].sort());
+  assert.deepEqual(view.cellGrantees?.(t.x, after.hash), [t.lead.p.deviceWriter]);
+  assert.equal((await head(t.lead.p)).roster.cells.cells.get(t.z)?.epochs.length, 1, 'a cell the member never held is not touched');
+  // Nothing left: refused, and nothing written.
+  const again = await finishRekeys(t.lead.host);
+  assert.equal(again.reason, 'nothing-to-finish');
+  assert.equal(again.message, MEMBERSHIP_REFUSALS['nothing-to-finish']);
+  assert.equal((await head(t.lead.p)).hash, after.hash);
+  assert.equal(await unfinishedRekeys(t.lead.host), 0);
+});
+
+test('MJ-03: the next roster flow finishes an interrupted removal first: an admission rekeys before it grants, and removing the member again says it finished', async () => {
+  const t = await team();
+  const base = t.lead.p.projectId;
+  assert.ok('ok' in (await t.lead.p.appendOwn('member.remove', { member: t.m.member })));
+  const p = await bringIn(t.lead, 'p', 'Pat Planner', OFFICIAL);
+  assert.match(p.results[2].message, /A removal or clearance change left unfinished was finished first: 2 parts of the project were moved to a new key\./);
+  const atLead = await head(t.lead.p);
+  assert.equal(epochAt(atLead.roster.cells, base, atLead.position), 2);
+  const grantees = rosterView(atLead.roster).cellGrantees?.(base, atLead.hash) ?? [];
+  assert.ok(grantees.includes(p.writer) && !grantees.includes(t.m.writer));
+  assert.ok(p.p.keys.epochKey(base, 2) !== undefined, 'the new person holds the new key');
+  // Another interrupted removal, finished by running Remove for the same member again.
+  const u = await team();
+  assert.ok('ok' in (await u.lead.p.appendOwn('member.remove', { member: u.n.member })));
+  const removedAgain = ok(await removeFromProject(u.lead.host, { member: u.n.member }), 'remove again');
+  assert.deepEqual(removedAgain.rekeyed, [u.lead.p.projectId]);
+  assert.match(removedAgain.message, /left unfinished is now finished/);
+  assert.equal((await removeFromProject(u.lead.host, { member: u.n.member })).reason, 'member-unknown', 'with nothing left, the member is unknown as before');
+});
+
+test('MJ-03: a clearance change interrupted after member.update is finished: the cell the member is no longer cleared for moves to a new key without them', async () => {
+  const t = await team();
+  assert.ok('ok' in (await t.lead.p.appendOwn('member.update', { member: t.m.member, clearance: OFFICIAL })));
+  assert.equal(await unfinishedRekeys(t.lead.host), 1);
+  const finished = ok(await finishRekeys(t.lead.host), 'finish');
+  assert.deepEqual(finished.rekeyed, [t.x]);
+  const after = await head(t.lead.p);
+  assert.deepEqual(rosterView(after.roster).cellGrantees?.(t.x, after.hash), [t.lead.p.deviceWriter]);
+  assert.deepEqual(rosterView(after.roster).cellGrantees?.(t.lead.p.projectId, after.hash), [t.lead.p.deviceWriter, t.m.writer, t.n.writer].sort(), 'the base cell is not touched');
+  assert.equal((await finishRekeys(t.lead.host)).reason, 'nothing-to-finish');
 });
 
 test('SECURITY.md has the invitations subsection inside the multi-user section, with no em-dash', () => {

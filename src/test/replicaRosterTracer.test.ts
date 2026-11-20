@@ -105,16 +105,16 @@ test('15.1 invited -> join-requested: the joining device reads the invite file a
 test('both sides compute the same six-word safety code from the invite and the request, and the secret is not an input', () => {
   const joined = joinScenario();
   const { invitePayload } = joined;
-  const request = (joined.request as { payload: { publicKey: string; x25519: string } }).payload;
-  // The lead's side reads the joiner's keys from the request; the joiner's side uses its own keys.
-  const leadSide = safetyCode({ invite: invitePayload.invite, genesisHash: invitePayload.genesisHash, lead: invitePayload.lead, joiner: { publicKey: request.publicKey, x25519: request.x25519 } });
-  const joinerSide = safetyCode({ invite: invitePayload.invite, genesisHash: invitePayload.genesisHash, lead: { publicKey: invitePayload.lead.publicKey, x25519: invitePayload.lead.x25519 }, joiner: { publicKey: joined.joiner.publicKey, x25519: joined.joiner.x25519 } });
+  const request = (joined.request as { payload: { publicKey: string; x25519: string; nonce: string } }).payload;
+  // The lead's side reads the joiner's keys and nonce from the request; the joiner's side uses its own keys and the nonce it drew.
+  const leadSide = safetyCode({ invite: invitePayload.invite, genesisHash: invitePayload.genesisHash, lead: invitePayload.lead, inviter: invitePayload.inviter, joiner: { publicKey: request.publicKey, x25519: request.x25519 }, nonce: request.nonce });
+  const joinerSide = safetyCode({ invite: invitePayload.invite, genesisHash: invitePayload.genesisHash, lead: { publicKey: invitePayload.lead.publicKey, x25519: invitePayload.lead.x25519 }, inviter: { publicKey: invitePayload.inviter.publicKey, x25519: invitePayload.inviter.x25519 }, joiner: { publicKey: joined.joiner.publicKey, x25519: joined.joiner.x25519 }, nonce: request.nonce });
   assert.equal(leadSide.length, 6);
   assert.deepEqual(leadSide, joinerSide);
   assert.equal(safetyCodeText(leadSide), leadSide.join(' '));
   // A substituted joining key gives other words.
   const other = joined.world.device('MALLORY', 'mbr-mallory');
-  const substituted = safetyCode({ invite: invitePayload.invite, genesisHash: invitePayload.genesisHash, lead: invitePayload.lead, joiner: { publicKey: other.publicKey, x25519: other.x25519 } });
+  const substituted = safetyCode({ invite: invitePayload.invite, genesisHash: invitePayload.genesisHash, lead: invitePayload.lead, inviter: invitePayload.inviter, joiner: { publicKey: other.publicKey, x25519: other.x25519 }, nonce: request.nonce });
   assert.notDeepEqual(substituted, leadSide);
 });
 

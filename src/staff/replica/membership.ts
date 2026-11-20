@@ -7,12 +7,24 @@
 //   lead:    reviewJoinRequest (shows the six words) -> admitJoinRequest { codeMatched: true } -> (sends the .near-staff-welcome file)
 //   joiner:  openWelcome     -> the project opens on the joiner's computer
 // Add My Other Machine is the same flow with a short invitation for an existing member (addMyOtherMachine), admitted as device.add. An invitation that
-// is no longer wanted is closed with voidInvite.
+// is no longer wanted is closed with voidInvite. A welcome file that was lost or never saved is made again from the same join request with
+// remakeWelcome (MJ-02): the device is already in the roster, and the welcome is of use to that device only.
+//
+// Who may invite (MJ-05): any device of the lead or the deputy. The invitation names the project's anchor (the founding lead, which the joining
+// device pins) and, apart from it, the inviter (the signing device). The joining device keeps both in a pending record outside the project until the
+// welcome arrives (MN-01: opening an invitation pins nothing), and joins only when the roster folded from the anchor shows that the inviter, a roster
+// writer there, wrote the invitation that admitted it. The safety code covers the anchor's, the inviter's and the joining device's keys.
 //
 // The invitation's state machine (the roster fold is the authority; these flows refuse before they write so a person is told plainly):
 //   open --admit or device.add--> used        open --invite.void--> voided        open --signed time past expiresAt--> expired (refused at use)
 // The join secret lives in this computer's secret storage from the invitation until a roster entry records its outcome (used or voided), and is then
 // forgotten (P-31-28). Nothing else is ever deleted.
+//
+// A removal or a clearance change and its rekeys (MJ-03): the roster entry is written first, then one cell.rekey per affected cell. Which cells still
+// need a new key is computed from the roster, not remembered: a cell whose current key is held by a device no longer admitted, or by a member no
+// longer cleared for it, while someone cleared is left on it. Every flow that writes or hands out keys (remove, change a member, admit) finishes such
+// cells first, and finishRekeys does it on its own, so an interrupted removal is always finished by the next one.
+//   removed (roster entry written) --each cell.rekey--> finished        removed --interrupted--> unfinished --finishRekeys or the next flow--> finished
 //
 // Clearance is decided here, by the writing host at write time (D-22, 31-RESEARCH.md): a cell's label is opened from its grant with the epoch key this
 // device holds and compared with the member's declared clearance by Phase 70 dominance, with the host clock and the project's scale table. The fold
@@ -21,34 +33,37 @@
 //
 // No result, message, file name or error holds a join secret, a MAC or a key (P-31-23). The invitation file holds the secret by design, inside its
 // signed payload, and the join request file holds the MAC by design; nothing else does.
-import { randomBytes } from 'node:crypto';
-import { lstat } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { lstat, mkdir, readdir, rename } from 'node:fs/promises';
 import * as path from 'node:path';
 import { dominates } from '../../domain/gate/dominance';
 import type { DominanceContext } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseClearance, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT, buildGrant, earlierEpochGrants, grantHash, newEpochKey, openLabel, planRekey, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, buildGrant, earlierEpochGrants, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import type { RekeyPlan, RekeyReason } from '../../domain/replica/cellKeys';
+import { entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
+import type { SealedEntry } from '../../domain/replica/entry';
 import {
-  INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, checkJoinRequest,
-  inviteAnchor, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite
+  INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest,
+  checkAdmittedRequest, checkJoinRequest, inviteAnchor, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite, readWelcome
 } from '../../domain/replica/invite';
-import type { InvitePayload, InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
+import type { InviteLead, InvitePayload, InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
 import type { ProjectOutput } from '../../domain/replica/projectFold';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt } from '../../domain/replica/roster';
-import type { RosterState } from '../../domain/replica/roster';
+import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
 import type { MemberRecord } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
+import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { MULTI_USER_DECLARED_TEXT, multiUserNoticeLines } from '../../domain/staff/multiUser';
-import { readWhole } from '../staffFiles';
+import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
 import { forgetJoinSecret, joinSecret, storeJoinSecret } from './keyring';
 import type { DeviceKeyRing } from './keyring';
-import { PROJECT_REFUSALS_HOST, ReplicaProject, ReplicaProjectError, anchorOf, isProjectRefused, projectFile } from './replicaProject';
+import { PROJECT_REFUSALS_HOST, ReplicaProject, ReplicaProjectError, anchorOf, genesisPinFile, isProjectRefused, projectFile, sameAnchor } from './replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from './replicaProject';
 
 /** How long an invitation is open when the lead does not say (D-14). */
@@ -76,7 +91,10 @@ export const MEMBERSHIP_REFUSALS = {
   'member-unknown': 'That person is not a member of this project, so nothing was changed. Check the name and try again.',
   'no-grant-key': 'This computer does not hold every key this change needs, so nothing was changed. Make the change on the staff lead\'s computer that holds the project\'s keys.',
   'no-join-secret': 'This computer does not hold the secret of that invitation, so the join request cannot be checked here and nobody was admitted. Admit the person on the computer that made the invitation.',
-  'not-founding-device': 'Invitations are made on the computer that created this shared project, so no invitation was made. Make the invitation there.',
+  'not-admitted-yet': 'Nobody was admitted with this join request yet, so there is no welcome file to make again. Nothing was changed. Admit the person with Staff: Admit to Staff Project.',
+  'no-invitation-opened': 'This computer has not opened an invitation for this project, so the welcome file was not used and nothing was changed. Open the staff lead\'s invitation with Staff: Join Staff Project first, then open the welcome file.',
+  'welcome-not-for-invitation': 'This welcome file does not admit this computer through an invitation it opened, so the project was not joined and nothing was kept. Check that you chose the right file, or ask the staff lead for a new welcome file.',
+  'nothing-to-finish': 'No removal or clearance change was left unfinished, so no part of the project needed a new key. Nothing was changed.',
   'roster-split': `${ROSTER_SPLIT_TEXT} Nothing else can change the roster until a branch is chosen, so nothing was changed.`,
   'no-split': 'The roster is not split, so there is nothing to choose. Nothing was changed.',
   'not-a-branch': 'That is not one of the roster changes waiting for a choice, so nothing was chosen. Pick one of the changes shown.',
@@ -104,6 +122,8 @@ export interface MembershipResult {
   invite?: string;
   member?: string;
   writer?: string;
+  /** reviewJoinRequest: the request's device was already admitted by its invitation, so only its welcome file can be made again (remakeWelcome). */
+  alreadyAdmitted?: boolean;
 }
 /** openWelcome returns the joined project too; the caller closes it. */
 export interface OpenWelcomeResult extends MembershipResult { project?: ReplicaProject }
@@ -301,6 +321,12 @@ async function append(shared: SharedProjectHost, kind: string, data: unknown, ro
 
 const isResult = (value: unknown): value is MembershipResult => isRecord(value) && typeof value.ok === 'boolean' && typeof value.message === 'string';
 
+/** This device as the roster has it at the position: its member and keys, as an invitation names its inviter. */
+function selfAt(shared: SharedProjectHost, roster: RosterState, position: number): InviteLead | undefined {
+  const device = deviceAt(roster.members, shared.project.deviceWriter, position);
+  return device === undefined ? undefined : { member: device.member, writer: device.writer, publicKey: device.publicKey, x25519: device.x25519 };
+}
+
 // ---- invite (D-14, D-18) -------------------------------------------------------------------------------------------------------------------------
 
 export interface InviteInput {
@@ -324,9 +350,10 @@ async function writeInvite(shared: SharedProjectHost, input: InviteInput & { for
   const { roster, fold } = await project.state();
   const problem = writerProblem(shared, roster);
   if (problem !== undefined) return problem;
-  // The joining device pins the lead named in the invitation, and the invitation names the device that signs it, so only the device that founded
-  // the project can make one a joiner can use (31-16 invite format).
-  if (project.deviceWriter !== project.anchor.lead.writer) return refuse('not-founding-device');
+  // Any device of the lead or the deputy invites (MJ-05): the invitation names the project's anchor for the joining device to pin, and this device as
+  // the inviter, which the joining device checks against the roster folded from that anchor.
+  const inviter = selfAt(shared, roster, headOf(roster).position);
+  if (inviter === undefined) return refuse('not-a-roster-writer');
   const at = now(deps);
   const days = input.days ?? INVITE_DEFAULT_DAYS;
   if (!Number.isFinite(days) || days <= 0 || days > 366) throw new Error('An invitation stays open for 1 to 366 days.');
@@ -345,7 +372,8 @@ async function writeInvite(shared: SharedProjectHost, input: InviteInput & { for
   await storeJoinSecret(deps.secrets, invite, secret);
   const signed = buildInvite(project.signer, {
     genesisHash: project.anchor.genesisHash, project: project.projectId, name: projectName(fold, project.projectId),
-    lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519 }, invite, secret, expiresAt, now: at,
+    lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519, publicKey: project.anchor.lead.publicKey },
+    inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt, now: at,
     ...(input.forMember === undefined ? {} : { forMember: input.forMember })
   });
   const when = expiresAt.slice(0, 10);
@@ -425,20 +453,153 @@ export interface JoinInput {
   name: string;
 }
 
+// ---- what a joining computer keeps from an invitation (MN-01, MJ-05) ---------------------------------------------------------------------------
+
+/** The folder under a project's pin folder that holds the invitations this computer answered and has not joined by yet. */
+export const PENDING_INVITATIONS_FOLDER = 'invitations';
+const PENDING_FILE = /^[0-9a-f]{64}\.json$/;
+const ANCHOR_FILE_MAX_BYTES = 64 * 1024;
+const BASE64URL_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+/** An invitation this computer answered: the anchor to pin and the inviter to check once the welcome arrives. Ids and public keys only. */
+export interface PendingInvitation { invite: string; anchor: RosterAnchor; inviter: InviteLead; expiresAt: string }
+
+export function pendingInvitationsDir(globalStorageDir: string, project: string): string {
+  return path.join(path.dirname(genesisPinFile(globalStorageDir, project)), PENDING_INVITATIONS_FOLDER);
+}
+
+function inviteDeviceOf(value: unknown): InviteLead | undefined {
+  if (!isRecord(value) || Object.keys(value).sort().join(',') !== 'member,publicKey,writer,x25519') return undefined;
+  const { member, writer, publicKey, x25519 } = value;
+  if (typeof member !== 'string' || !SLUG.test(member) || typeof publicKey !== 'string' || !BASE64URL_KEY.test(publicKey)) return undefined;
+  if (typeof x25519 !== 'string' || !BASE64URL_KEY.test(x25519) || typeof writer !== 'string' || writer !== writerIdOf(publicKey)) return undefined;
+  return { member, writer, publicKey, x25519 };
+}
+
 /**
- * The joining person's side (D-15, D-16): reads the invitation, refuses a folder that holds another staff project, pins the project's genesis on this
- * computer, makes or reuses this install's keys, and returns the signed .near-staff-join file and the six words to read to the lead.
+ * Keeps the invitation this computer answered, in extension storage outside the project, under a name that is the hash of its content: a second
+ * invitation, even one naming the same invitation id, never replaces it.
+ */
+async function keepPending(deps: ReplicaProjectDeps, invite: InvitePayload): Promise<void> {
+  const record = { v: 1, invite: invite.invite, anchor: inviteAnchor(invite), inviter: { ...invite.inviter }, expiresAt: invite.expiresAt };
+  const dir = pendingInvitationsDir(deps.globalStorageDir, invite.project);
+  await mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${createHash('sha256').update(canonicalBytes(record)).digest('hex')}.json`);
+  if (await exists(file)) return;
+  if (!(await writeIfUnchanged(file, await snapshotOf(file), `${JSON.stringify(record, null, 2)}\n`))) throw new Error('The join request was not made: the invitation could not be kept on this computer.');
+}
+
+/** The invitations this computer answered for a project, read as untrusted files; one that does not read is left out. */
+async function pendingFor(deps: ReplicaProjectDeps, project: string): Promise<PendingInvitation[]> {
+  const dir = pendingInvitationsDir(deps.globalStorageDir, project);
+  let names: string[];
+  try {
+    names = (await readdir(dir)).filter((name) => PENDING_FILE.test(name)).sort();
+  } catch {
+    return [];
+  }
+  const found: PendingInvitation[] = [];
+  for (const name of names) {
+    const read = await readWhole(path.join(dir, name), ANCHOR_FILE_MAX_BYTES);
+    if (read.kind !== 'text') continue;
+    try {
+      const value = JSON.parse(read.text) as unknown;
+      if (!isRecord(value) || value.v !== 1 || typeof value.invite !== 'string' || !SLUG.test(value.invite) || typeof value.expiresAt !== 'string') continue;
+      const anchor = anchorOf(value.anchor);
+      const inviter = inviteDeviceOf(value.inviter);
+      if (anchor === undefined || inviter === undefined || anchor.project !== project) continue;
+      found.push({ invite: value.invite, anchor, inviter, expiresAt: value.expiresAt });
+    } catch {
+      continue;
+    }
+  }
+  return found;
+}
+
+type PinRead = { kind: 'missing' } | { kind: 'anchor'; anchor: RosterAnchor } | { kind: 'damaged' };
+
+/** The project's pin on this computer, read the way replicaProject reads it (a link or a file that does not read is damaged). */
+async function readPin(deps: ReplicaProjectDeps, project: string): Promise<PinRead> {
+  const file = genesisPinFile(deps.globalStorageDir, project);
+  try {
+    if ((await lstat(file)).isSymbolicLink()) return { kind: 'damaged' };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'damaged' };
+  }
+  const read = await readWhole(file, ANCHOR_FILE_MAX_BYTES);
+  if (read.kind === 'missing') return { kind: 'missing' };
+  if (read.kind !== 'text') return { kind: 'damaged' };
+  try {
+    const value = JSON.parse(read.text) as unknown;
+    const anchor = isRecord(value) && value.v === 1 ? anchorOf(value.anchor) : undefined;
+    return anchor === undefined ? { kind: 'damaged' } : { kind: 'anchor', anchor };
+  } catch {
+    return { kind: 'damaged' };
+  }
+}
+
+const hostRefusal = (reason: keyof typeof PROJECT_REFUSALS_HOST): MembershipResult => refused(reason, PROJECT_REFUSALS_HOST[reason]);
+
+/** The genesis a welcome file names, read only to find the invitations it may answer; readWelcome and the roster fold check everything. */
+function welcomeGenesis(file: unknown): { project: string; hash: string; writer: string } | undefined {
+  try {
+    const value: unknown = typeof file === 'string' ? (Buffer.byteLength(file, 'utf8') <= WELCOME_MAX_BYTES ? JSON.parse(file) : undefined) : file;
+    if (!isRecord(value) || !isRecord(value.genesis)) return undefined;
+    const shape = parseHeaderShape(value.genesis.header);
+    return shape.ok ? { project: shape.header.stream, hash: entryHash(shape.header), writer: shape.header.writer } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Moves a file this join wrote out of the way after the join was refused. Never deletes: the file is renamed beside itself. */
+async function setAside(file: string, existedBefore: boolean): Promise<void> {
+  if (existedBefore || !(await exists(file))) return;
+  await rename(file, `${file}.not-joined-${Date.now()}`);
+}
+
+/**
+ * Did one of the invitations this computer answered admit it, written by its inviter while the inviter was a roster writer (MJ-05)? Read from the
+ * roster folded from the pinned anchor: this device is admitted at the head, by that invitation, whose member.invite entry the inviter's device
+ * wrote, and that device had the inviter's member and keys there.
+ */
+async function admittedThrough(joined: ReplicaProject, candidates: readonly PendingInvitation[], welcomeText: unknown): Promise<boolean> {
+  const { roster } = await joined.state();
+  const head = headOf(roster).position;
+  const self = deviceAt(roster.members, joined.deviceWriter, head);
+  const first = roster.members.devices.get(joined.deviceWriter)?.[0];
+  if (self === undefined || first === undefined) return false;
+  const read = readWelcome(welcomeText, { genesisHash: joined.anchor.genesisHash, writer: joined.deviceWriter });
+  if (!read.ok) return false;
+  for (const candidate of candidates) {
+    const record = roster.members.invites.get(candidate.invite);
+    if (record === undefined || record.usedBy !== self.member || record.usedAt !== first.from) continue;
+    const cited = record.from - 1;
+    const entry = read.entries.find((item) => entryHash(item.header) === roster.positions[record.from]);
+    const device = deviceAt(roster.members, candidate.inviter.writer, cited);
+    if (entry === undefined || entry.header.writer !== candidate.inviter.writer || device === undefined || !isRosterWriterAt(roster, device.writer, cited)) continue;
+    if (device.member === candidate.inviter.member && device.publicKey === candidate.inviter.publicKey && device.x25519 === candidate.inviter.x25519) return true;
+  }
+  return false;
+}
+
+/**
+ * The joining person's side (D-15, D-16): reads the invitation, refuses a folder that holds another staff project and a project this computer pinned
+ * with another anchor, keeps the invitation's anchor and inviter outside the project until the welcome arrives (nothing is pinned yet, MN-01), makes
+ * or reuses this install's keys, and returns the signed .near-staff-join file and the six words to read to the lead.
  */
 export async function joinFromInvite(root: string, deps: ReplicaProjectDeps, inviteText: unknown, input: JoinInput): Promise<MembershipResult> {
   const read = readInvite(inviteText, now(deps));
   if (!read.ok) return fromInvite(read.reason);
   const invite = read.invite;
   if (await folderHasOtherProject(root, invite.project)) return refuse('folder-has-staff-project');
-  const pinned = await ReplicaProject.pinAnchor(deps, inviteAnchor(invite));
-  if (isProjectRefused(pinned)) return fromProject(pinned);
+  const pin = await readPin(deps, invite.project);
+  if (pin.kind === 'damaged') return hostRefusal('pin-damaged');
+  if (pin.kind === 'anchor' && !sameAnchor(pin.anchor, inviteAnchor(invite))) return hostRefusal('pin-mismatch');
+  await keepPending(deps, invite);
   const device = await ReplicaProject.localDevice(deps);
   const request = buildJoinRequest(device.signer, invite, { name: input.name, x25519: device.x25519, now: now(deps) });
-  const safetyWords = inviteSafetyCode(invite, { publicKey: device.publicKey, x25519: device.x25519 });
+  const safetyWords = inviteSafetyCode(invite, request.payload);
   const where = invite.forMember === undefined ? `to join ${invite.name}` : `to add this computer to ${invite.name}`;
   return done(`Your request ${where} is ready. Send the file back to the staff lead any way you like, then read these six words to them out loud or in person: ${safetyWords.join(' ')}. They admit you only if the words match.`, {
     file: { name: `join-${invite.invite}${JOIN_REQUEST_FILE_EXTENSION}`, text: JSON.stringify(request) }, safetyWords, invite: invite.invite, writer: device.writer
@@ -446,19 +607,54 @@ export async function joinFromInvite(root: string, deps: ReplicaProjectDeps, inv
 }
 
 /**
- * The joining person's last step: opens the .near-staff-welcome file the lead returned, against the genesis this computer pinned from the
- * invitation, and joins the shared project in `root`. The result carries the opened project, which the caller closes.
+ * The joining person's last step: opens the .near-staff-welcome file the lead returned and joins the shared project in `root`. The welcome is tried
+ * against the anchors of the invitations this computer answered for its project (or the pin, for a project this computer already joined), and kept
+ * only when the roster folded from that anchor shows this computer admitted through one of them by its inviter (admittedThrough). A refused attempt
+ * sets aside the pin and project.json it wrote, so a wrong file never blocks the right one. The result carries the opened project, which the caller
+ * closes.
  */
 export async function openWelcome(root: string, deps: ReplicaProjectDeps, welcomeText: unknown): Promise<OpenWelcomeResult> {
   for (const ledger of TODAY_LEDGERS) if (await exists(path.join(path.resolve(root), ...ledger.split('/')))) return refuse('folder-has-staff-project');
-  const joined = await ReplicaProject.joinFromWelcome(root, deps, welcomeText);
-  if (isProjectRefused(joined)) return joined.refused === 'pin-mismatch' && (await exists(projectFile(root))) ? refuse('folder-has-staff-project') : fromProject(joined);
-  return { ...done(`You joined the shared staff project. ${MULTI_USER_DECLARED_TEXT}`), project: joined };
+  const genesis = welcomeGenesis(welcomeText);
+  const pin = genesis === undefined ? undefined : await readPin(deps, genesis.project);
+  const pending = genesis === undefined ? [] : await pendingFor(deps, genesis.project);
+  const matching = genesis === undefined || pin === undefined || pin.kind === 'damaged' ? [] : pending.filter((item) => item.anchor.genesisHash === genesis.hash
+    && item.anchor.lead.writer === genesis.writer && (pin.kind !== 'anchor' || sameAnchor(pin.anchor, item.anchor)));
+  if (matching.length === 0) {
+    // A project this computer joined before any invitation was kept this way: the pin alone decides, as before. Anything else is refused plainly.
+    if (genesis !== undefined && pin?.kind === 'missing') return refuse(pending.length === 0 ? 'no-invitation-opened' : 'welcome-not-for-invitation');
+    const joined = await ReplicaProject.joinFromWelcome(root, deps, welcomeText);
+    if (isProjectRefused(joined)) return joined.refused === 'pin-mismatch' && (await exists(projectFile(root))) ? refuse('folder-has-staff-project') : fromProject(joined);
+    return { ...done(`You joined the shared staff project. ${MULTI_USER_DECLARED_TEXT}`), project: joined };
+  }
+  const anchors: RosterAnchor[] = [];
+  for (const item of matching) if (!anchors.some((anchor) => sameAnchor(anchor, item.anchor))) anchors.push(item.anchor);
+  let last: MembershipResult = refuse('welcome-not-for-invitation');
+  for (const anchor of anchors) {
+    const pinFile = genesisPinFile(deps.globalStorageDir, anchor.project);
+    const pinBefore = await exists(pinFile);
+    const localBefore = await exists(projectFile(root));
+    const joined = await ReplicaProject.joinFromWelcome(root, deps, welcomeText, anchor);
+    if (isProjectRefused(joined)) {
+      await setAside(pinFile, pinBefore);
+      last = joined.refused === 'pin-mismatch' && localBefore ? refuse('folder-has-staff-project') : fromProject(joined);
+      continue;
+    }
+    if (await admittedThrough(joined, matching.filter((item) => sameAnchor(item.anchor, anchor)), welcomeText)) {
+      return { ...done(`You joined the shared staff project. ${MULTI_USER_DECLARED_TEXT}`), project: joined };
+    }
+    await joined.close();
+    await setAside(projectFile(root), localBefore);
+    await setAside(pinFile, pinBefore);
+    last = refuse('welcome-not-for-invitation');
+  }
+  return last;
 }
 
 // ---- admit (D-16, D-18, D-22, D-45) --------------------------------------------------------------------------------------------------------------
 
-interface CheckedRequest { request: JoinRequestPayload; writer: string; invite: InvitePayload; secret: string; safetyWords: string[]; resume: boolean }
+/** resume: the invitation admitted this device and its secret is still kept. remake: it admitted this device and the secret is forgotten (no MAC). */
+interface CheckedRequest { request: JoinRequestPayload; writer: string; invite: InvitePayload; secret: string; safetyWords: string[]; resume: boolean; remake: boolean }
 
 /** The invitation id a request names, read without trusting anything else in it (checkJoinRequest checks everything). */
 function requestedInvite(text: unknown): string | undefined {
@@ -474,8 +670,10 @@ function requestedInvite(text: unknown): string | undefined {
 
 /**
  * Every check of a join request before anything is written: the invitation's standing in the roster and by the host clock, the secret this computer
- * kept, the request's signature, binding and MAC (checkJoinRequest), and the six words. A request whose admission this device already wrote but did
- * not finish (the secret is still kept) is resumed instead of refused invite-used.
+ * kept, the request's signature, binding and MAC (checkJoinRequest), and the six words. The inviter in the words is this device: only the device that
+ * made an invitation holds its secret. A request whose admission this device already wrote but did not finish (the secret is still kept) is resumed
+ * instead of refused invite-used. A request whose invitation already admitted that very device, with the same keys, after its secret was forgotten
+ * is marked remake (MJ-02): its signature and binding are checked but no MAC, and it can only make that device's welcome file again.
  */
 async function checkRequest(shared: SharedProjectHost, roster: RosterState, requestText: unknown): Promise<CheckedRequest | MembershipResult> {
   const { project, deps } = shared;
@@ -488,25 +686,40 @@ async function checkRequest(shared: SharedProjectHost, roster: RosterState, requ
   if (standing.state === 'voided') return refuse('invite-voided');
   const secret = await joinSecret(deps.secrets, id);
   const usedBy = record.usedBy;
-  if (standing.state === 'used' && secret === undefined) return refuse('invite-used');
+  const forMember = record.forMember === undefined ? {} : { forMember: record.forMember };
+  // The device a used invitation admitted, with the keys of the request: anything else is refused invite-used.
+  const admittedHere = (writer: string, request: JoinRequestPayload): boolean => {
+    const device = deviceAt(roster.members, writer, head.position);
+    return usedBy !== undefined && device?.member === usedBy && device.publicKey === request.publicKey && device.x25519 === request.x25519;
+  };
+  if (standing.state === 'used' && secret === undefined) {
+    const checked = checkAdmittedRequest(requestText, { invite: { genesisHash: project.anchor.genesisHash, invite: id, ...forMember } });
+    if (!checked.ok) return fromInvite(checked.reason);
+    if (!admittedHere(checked.writer, checked.request)) return refuse('invite-used');
+    const invite: InvitePayload = { genesisHash: project.anchor.genesisHash, project: project.projectId, name: 'Staff project', lead: { ...project.anchor.lead }, inviter: { ...project.anchor.lead }, invite: id, secret: '', expiresAt: record.expiresAt, ...forMember };
+    return { request: checked.request, writer: checked.writer, invite, secret: '', safetyWords: [], resume: true, remake: true };
+  }
   if (secret === undefined) return refuse('no-join-secret');
+  const inviter = selfAt(shared, roster, head.position);
+  if (inviter === undefined) return refuse('not-a-roster-writer');
   const at = now(deps);
   const invite: InvitePayload = {
-    genesisHash: project.anchor.genesisHash, project: project.projectId, name: 'Staff project', lead: { ...project.anchor.lead }, invite: id, secret,
-    expiresAt: record.expiresAt, ...(record.forMember === undefined ? {} : { forMember: record.forMember })
+    genesisHash: project.anchor.genesisHash, project: project.projectId, name: 'Staff project', lead: { ...project.anchor.lead }, inviter, invite: id, secret,
+    expiresAt: record.expiresAt, ...forMember
   };
   const checked = checkJoinRequest(requestText, { invite, secret, ...(standing.state === 'used' ? {} : { now: at, rosterInvite: { state: 'open' as const } }) });
   if (!checked.ok) return fromInvite(checked.reason);
   // A used invitation is resumed only when it was this very device that it admitted (a crash before the welcome); otherwise it is used.
   const resume = standing.state === 'used';
-  if (resume && (usedBy === undefined || deviceAt(roster.members, checked.writer, head.position)?.member !== usedBy)) return refuse('invite-used');
-  const safetyWords = inviteSafetyCode(invite, { publicKey: checked.request.publicKey, x25519: checked.request.x25519 });
-  return { request: checked.request, writer: checked.writer, invite, secret, safetyWords, resume };
+  if (resume && !admittedHere(checked.writer, checked.request)) return refuse('invite-used');
+  const safetyWords = inviteSafetyCode(invite, checked.request);
+  return { request: checked.request, writer: checked.writer, invite, secret, safetyWords, resume, remake: false };
 }
 
 /**
  * The lead's first look at a join request: every check, and the six words to compare with the person, with nothing written. The command shows the
- * words and asks the lead to confirm they matched before it calls admitJoinRequest.
+ * words and asks the lead to confirm they matched before it calls admitJoinRequest. A request whose device its invitation already admitted, after the
+ * join secret was forgotten, has no words: the result says alreadyAdmitted, and the command offers remakeWelcome instead (MJ-02).
  */
 export function reviewJoinRequest(shared: SharedProjectHost, requestText: unknown): Promise<MembershipResult> {
   return guarded(async () => {
@@ -516,6 +729,11 @@ export function reviewJoinRequest(shared: SharedProjectHost, requestText: unknow
     const checked = await checkRequest(shared, roster, requestText);
     if (isResult(checked)) return checked;
     const who = checked.invite.forMember === undefined ? checked.request.name : `${checked.request.name}'s other computer`;
+    if (checked.remake) {
+      return done(`${who} was already admitted with this join request. Their welcome file can be made again; it is of use on their computer only.`, {
+        invite: checked.invite.invite, writer: checked.writer, alreadyAdmitted: true
+      });
+    }
     return done(`Compare these six words with ${who} out loud or in person: ${checked.safetyWords.join(' ')}. Admit them only if every word matches.`, {
       safetyWords: checked.safetyWords, invite: checked.invite.invite, writer: checked.writer
     });
@@ -570,7 +788,8 @@ export interface AdmitInput {
 }
 
 /**
- * Admits the device that answered an invitation (D-16, D-18, D-22, D-45). Refused unless the lead confirmed the six words matched. Then: member.admit
+ * Admits the device that answered an invitation (D-16, D-18, D-22, D-45). Refused unless the lead confirmed the six words matched. A removal or
+ * clearance change left unfinished is finished first (MJ-03), so the new device is never given a key a removed device still holds. Then: member.admit
  * (or device.add for Add My Other Machine) with the next free slot, the invitation's seat, roles and clearance; a grant for every epoch of every cell
  * the member's declared clearance dominates; the join secret is forgotten once the roster has recorded the admission; and the .near-staff-welcome
  * file for that device alone is returned.
@@ -579,11 +798,19 @@ export function admitJoinRequest(shared: SharedProjectHost, requestText: unknown
   return guarded(async () => {
     if (input.codeMatched !== true) return refuse('code-not-confirmed');
     const { project, deps } = shared;
-    let { roster } = await project.state();
-    const problem = writerProblem(shared, roster);
+    const before = await project.state();
+    const problem = writerProblem(shared, before.roster);
     if (problem !== undefined) return problem;
-    const checked = await checkRequest(shared, roster, requestText);
+    const checkedFirst = await checkRequest(shared, before.roster, requestText);
+    if (isResult(checkedFirst)) return checkedFirst;
+    if (checkedFirst.remake) return refuse('invite-used');
+    // The admission gives the newest keys of the cells: a removal left unfinished is finished first, so no key a removed device holds is handed on.
+    const finished = await finishPending(shared);
+    if (isResult(finished)) return finished;
+    let { roster } = await project.state();
+    const checked = finished.rekeyed.length === 0 ? checkedFirst : await checkRequest(shared, roster, requestText);
     if (isResult(checked)) return checked;
+    if (checked.remake) return refuse('invite-used');
     const gate = gateOf(shared);
     const id = checked.invite.invite;
     const record = roster.members.invites.get(id);
@@ -638,15 +865,64 @@ export function admitJoinRequest(shared: SharedProjectHost, requestText: unknown
     await forgetJoinSecret(deps.secrets, id);
     const cleared = all.map((plan) => plan.cell);
     let welcome: string;
+    let missing: number;
     try {
-      welcome = JSON.stringify(await project.welcomeFor(device.writer, cleared));
+      const made = await project.welcomeFor(device.writer, cleared);
+      missing = missingCells(made.grants, cleared);
+      welcome = JSON.stringify(made);
     } catch {
       return { ...refuse('welcome-too-large'), member };
     }
     const who = forMember === undefined ? record.name : `${record.name}'s other computer`;
-    return done(`${who} was admitted. Send them the welcome file any way you like; when they open it, the project opens on their computer.`, {
+    return done(`${finishedNote(finished)}${who} was admitted. Send them the welcome file any way you like; when they open it, the project opens on their computer.${missingNote(missing)}`, {
       file: { name: `welcome-${id}${WELCOME_FILE_EXTENSION}`, text: welcome }, safetyWords: checked.safetyWords, granted: plans.map((plan) => plan.cell),
       invite: id, member, writer: device.writer
+    });
+  });
+}
+
+/** How many of the cleared cells have no grant in the welcome (a grant file that did not read was left out of it, MJ-02). */
+function missingCells(grants: readonly unknown[], cleared: readonly string[]): number {
+  const carried = new Set<string>();
+  for (const grant of grants) {
+    const read = readGrant(grant);
+    if (read.ok) carried.add(read.grant.cell);
+  }
+  return cleared.filter((cell) => !carried.has(cell)).length;
+}
+
+function missingNote(missing: number): string {
+  if (missing === 0) return '';
+  return ` ${missing === 1 ? 'One part' : `${missing} parts`} of the project they are cleared for could not be put in the welcome file, because its key file on this computer does not read. They can open the project, and that part reaches them once it is given to them again.`;
+}
+
+/**
+ * Makes the welcome file again for a device its invitation already admitted (MJ-02): the welcome of the first admission was lost, never saved, or
+ * failed to build. Nothing is written: the device is in the roster and holds its grants, and the welcome carries only grants every wrap of which names
+ * that device, so it is of use on that device only. Any device of the lead or the deputy may do it, and no join secret is needed. A request for an
+ * invitation that admitted nobody yet is refused not-admitted-yet.
+ */
+export function remakeWelcome(shared: SharedProjectHost, requestText: unknown): Promise<MembershipResult> {
+  return guarded(async () => {
+    const { project } = shared;
+    const { roster } = await project.state();
+    const head = headOf(roster);
+    if (!isRosterWriterAt(roster, project.deviceWriter, head.position)) return refuse('not-a-roster-writer');
+    const checked = await checkRequest(shared, roster, requestText);
+    if (isResult(checked)) return checked;
+    if (!checked.resume) return refuse('not-admitted-yet');
+    const id = checked.invite.invite;
+    const record = roster.members.invites.get(id);
+    if (record?.usedBy === undefined) return refuse('not-admitted-yet');
+    let welcome: string;
+    try {
+      welcome = JSON.stringify(await project.welcomeFor(checked.writer, [...roster.cells.cells.keys()].sort()));
+    } catch {
+      return refuse('welcome-too-large');
+    }
+    const who = record.forMember === undefined ? record.name : `${record.name}'s other computer`;
+    return done(`The welcome file for ${who} was made again. Send it to them any way you like; when they open it, the project opens on their computer.`, {
+      file: { name: `welcome-${id}${WELCOME_FILE_EXTENSION}`, text: welcome }, invite: id, member: record.usedBy, writer: checked.writer
     });
   });
 }
@@ -717,6 +993,90 @@ function rekeyMessage(first: string, outcome: RekeyOutcome): string {
   return `${first}${moved}${left} ${REKEY_KEEP_TEXT}`;
 }
 
+/** The kind of rekey a cell needs because of the devices that left it: a removed member, a revoked device, or a revoked hub device. */
+function leftReason(roster: RosterState, gone: readonly string[], position: number): RekeyReason {
+  const reasons = gone.map((writer): RekeyReason => {
+    const versions = roster.members.devices.get(writer);
+    const last = versions?.[versions.length - 1];
+    if (last?.kind === 'hub') return 'hub-revoked';
+    return last !== undefined && memberAt(roster.members, last.member, position) !== undefined ? 'device-revoked' : 'member-removed';
+  });
+  return (['member-removed', 'device-revoked', 'hub-revoked'] as const).find((reason) => reasons.includes(reason)) ?? 'member-removed';
+}
+
+/**
+ * The cells that still need a new key, computed from the roster at the head (MJ-03): a cell whose current key is held by a device that is no longer
+ * admitted, or by a person device whose member is no longer cleared for it (by the host's clearance check, as at write time, D-22), and on which
+ * someone cleared is left. The recipients are the admitted holders that are still cleared. A cell whose label this device cannot read is judged on
+ * removals only. A cell nobody cleared is left on needs nothing: nobody receives anything new in it.
+ */
+function pendingRekeys(shared: SharedProjectHost, roster: RosterState, gate: Gate): { plans: RekeyPlan[]; cells: Map<string, CellInfo> } {
+  const head = headOf(roster);
+  const admitted = (writer: string): boolean => deviceAt(roster.members, writer, head.position) !== undefined;
+  const infos = cellsAt(roster, shared.project.keys, head.position, gate.scales);
+  const plans: RekeyPlan[] = [];
+  for (const info of infos) {
+    const holders = granteesAt(roster.cells, info.cell, head.position, () => true);
+    if (holders === undefined) continue;
+    const gone = holders.filter((writer) => !admitted(writer));
+    const live = holders.filter(admitted);
+    const cleared = info.known ? new Set(clearedDevices(roster, info, head.position, gate)) : undefined;
+    const uncleared = cleared === undefined ? [] : live.filter((writer) => !cleared.has(writer) && deviceAt(roster.members, writer, head.position)?.kind === 'person');
+    if (gone.length === 0 && uncleared.length === 0) continue;
+    const recipients = live.filter((writer) => !uncleared.includes(writer));
+    if (recipients.length === 0) continue;
+    const reason = gone.length > 0 ? leftReason(roster, gone, head.position) : 'clearance-lowered';
+    plans.push({ cell: info.cell, reason, recipients, dropped: [...gone, ...uncleared].sort(), text: REKEY_KEEP_TEXT });
+  }
+  return { plans, cells: new Map(infos.map((info) => [info.cell, info])) };
+}
+
+/** Finishes the rekeys an interrupted removal or clearance change left (MJ-03). Nothing to do is an empty outcome. */
+async function finishPending(shared: SharedProjectHost): Promise<RekeyOutcome | MembershipResult> {
+  const { roster } = await shared.project.state();
+  const problem = writerProblem(shared, roster);
+  if (problem !== undefined) return problem;
+  const pending = pendingRekeys(shared, roster, gateOf(shared));
+  if (pending.plans.length === 0) return { rekeyed: [], skipped: [] };
+  return writeRekeys(shared, pending.plans, pending.cells);
+}
+
+/** The sentence a flow puts first when it finished an earlier change before its own. */
+function finishedNote(outcome: RekeyOutcome): string {
+  const count = outcome.rekeyed.length;
+  if (count === 0) return '';
+  return `A removal or clearance change left unfinished was finished first: ${count === 1 ? 'one part of the project was' : `${count} parts of the project were`} moved to a new key. `;
+}
+
+/** How many cells an interrupted removal or clearance change left on an old key; 0 when this device cannot change the roster now. Writes nothing. */
+export async function unfinishedRekeys(shared: SharedProjectHost): Promise<number> {
+  try {
+    const { roster } = await shared.project.state();
+    return writerProblem(shared, roster) === undefined ? pendingRekeys(shared, roster, gateOf(shared)).plans.length : 0;
+  } catch (error) {
+    if (error instanceof ReplicaProjectError) return 0;
+    throw error;
+  }
+}
+
+/**
+ * Finishes a removal, a device revocation or a lowered clearance whose rekeys were interrupted (MJ-03): every cell still on a key a removed device or
+ * a member no longer cleared holds moves to a new key for the devices still cleared (D-23). Refused nothing-to-finish when nothing is left, and
+ * not-a-roster-writer or roster-split as every roster change is.
+ */
+export function finishRekeys(shared: SharedProjectHost): Promise<MembershipResult> {
+  return guarded(async () => {
+    const { roster } = await shared.project.state();
+    const problem = writerProblem(shared, roster);
+    if (problem !== undefined) return problem;
+    const pending = pendingRekeys(shared, roster, gateOf(shared));
+    if (pending.plans.length === 0) return refuse('nothing-to-finish');
+    const outcome = await writeRekeys(shared, pending.plans, pending.cells);
+    if (isResult(outcome)) return outcome;
+    return done(rekeyMessage('The removal or clearance change left unfinished is now finished.', outcome), { rekeyed: outcome.rekeyed });
+  });
+}
+
 export type RemoveInput = { member: string } | { member: string; writer: string };
 
 /**
@@ -727,11 +1087,15 @@ export type RemoveInput = { member: string } | { member: string; writer: string 
 export function removeFromProject(shared: SharedProjectHost, input: RemoveInput): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
+    const finished = await finishPending(shared);
+    if (isResult(finished)) return finished;
     const { roster } = await project.state();
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
     const head = headOf(roster);
     const record = memberAt(roster.members, input.member, head.position);
+    // Removing again the member whose removal was left unfinished finishes it, and says so.
+    if (record === undefined && finished.rekeyed.length > 0) return done(rekeyMessage('The removal or clearance change left unfinished is now finished.', finished), { rekeyed: finished.rekeyed });
     if (record === undefined) return refuse('member-unknown');
     const lead = leadAt(roster, head.position);
     const gate = gateOf(shared);
@@ -761,7 +1125,7 @@ export function removeFromProject(shared: SharedProjectHost, input: RemoveInput)
     const outcome = await writeRekeys(shared, planned.plans, planned.cells);
     if (isResult(outcome)) return outcome;
     const first = 'writer' in input ? `That device of ${record.name} was removed from the project.` : `${record.name} was removed from the project.`;
-    return done(rekeyMessage(first, outcome), { rekeyed: outcome.rekeyed, member: input.member, ...('writer' in input ? { writer: input.writer } : {}) });
+    return done(`${finishedNote(finished)}${rekeyMessage(first, outcome)}`, { rekeyed: [...finished.rekeyed, ...outcome.rekeyed], member: input.member, ...('writer' in input ? { writer: input.writer } : {}) });
   });
 }
 
@@ -774,6 +1138,8 @@ export interface UpdateMemberInput { member: string; name?: string; seat?: strin
 export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
+    const finished = await finishPending(shared);
+    if (isResult(finished)) return finished;
     const { roster } = await project.state();
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
@@ -815,7 +1181,7 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
     const first = `${input.name ?? record.name} was changed.`;
     const gave = granted.size === 0 ? '' : ` ${granted.size === 1 ? 'One part of the project was' : `${granted.size} parts of the project were`} shared with them.`;
     const message = outcome.rekeyed.length > 0 || outcome.skipped.length > 0 ? rekeyMessage(`${first}${gave}`, outcome) : `${first}${gave}`;
-    return done(message, { rekeyed: outcome.rekeyed, granted: [...granted].sort(), member: input.member });
+    return done(`${finishedNote(finished)}${message}`, { rekeyed: [...finished.rekeyed, ...outcome.rekeyed], granted: [...granted].sort(), member: input.member });
   });
 }
 
@@ -847,6 +1213,63 @@ export function chooseRosterBranch(shared: SharedProjectHost, branch: string): P
       return found === undefined ? refuse('change-not-applied') : refused(found.reason, foldMessage(found.reason));
     }
     return done('The roster branch was chosen. The other change at the same point stays unapplied.');
+  });
+}
+
+/** One branch of a roster split as the lead sees it (MN-03): what the change does, who wrote it and when, by the change's own signed fields. */
+export interface RosterBranchView { branch: string; summary: string; by?: string; at?: string }
+
+/** A plain sentence for what a roster change does, with the names the roster had at the split point. */
+function branchSummary(kind: string, data: unknown, nameOf: (member: string) => string): string {
+  const field = (key: string): string | undefined => (isRecord(data) && typeof data[key] === 'string' ? data[key] as string : undefined);
+  const member = field('member');
+  const who = member === undefined ? 'a member' : nameOf(member);
+  switch (kind) {
+    case 'member.invite': return field('forMember') === undefined ? `Invites ${field('name') ?? 'a person'}` : `Invites another computer of ${nameOf(field('forMember') as string)}`;
+    case 'member.admit': return `Admits ${field('name') ?? 'a person'}`;
+    case 'member.update': return `Changes the details of ${who}`;
+    case 'member.remove': return `Removes ${who}`;
+    case 'device.add': return `Adds a computer of ${who}`;
+    case 'device.revoke': return `Removes a computer of ${who}`;
+    case 'invite.void': return 'Cancels an invitation';
+    case 'cell.create': return 'Adds a part of the project';
+    case 'cell.rekey': return 'Moves a part of the project to a new key';
+    case 'lead.handover': return `Hands the staff lead to ${field('to') === undefined ? 'a member' : nameOf(field('to') as string)}`;
+    case 'deputy.name': return `Names ${who} deputy lead`;
+    default: return 'Changes the roster';
+  }
+}
+
+/**
+ * The branches of the first roster split, each opened with this device's key and described (MN-03): the kind of change and whom it names, the member
+ * whose device wrote it and when it was signed. A branch this device cannot open is described as such. Writes nothing.
+ */
+export async function describeRosterBranches(shared: SharedProjectHost): Promise<RosterBranchView[]> {
+  const { project } = shared;
+  const { roster } = await project.state();
+  const split = roster.pending[0];
+  if (split === undefined) return [];
+  const position = roster.positionOf.get(split.at) ?? headOf(roster).position;
+  let entries: SealedEntry[] = [];
+  try {
+    entries = (await project.welcomeFor(project.deviceWriter, [])).roster;
+  } catch {
+    entries = [];
+  }
+  const nameOf = (member: string): string => memberAt(roster.members, member, position)?.name ?? member;
+  return split.branches.map((branch) => {
+    const entry = entries.find((item) => entryHash(item.header) === branch);
+    const key = entry === undefined ? undefined : project.keys.epochKey(entry.header.stream, entry.header.epoch);
+    const plain = entry === undefined || key === undefined ? undefined : openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+    let body: unknown;
+    try {
+      body = plain === undefined ? undefined : JSON.parse(plain.toString('utf8')) as unknown;
+    } catch {
+      body = undefined;
+    }
+    if (entry === undefined || !isRecord(body) || typeof body.kind !== 'string') return { branch, summary: 'A roster change this computer cannot read' };
+    const by = deviceAt(roster.members, entry.header.writer, position)?.member;
+    return { branch, summary: branchSummary(body.kind, body.data, nameOf), ...(by === undefined ? {} : { by: nameOf(by) }), ...(typeof body.at === 'string' ? { at: body.at } : {}) };
   });
 }
 

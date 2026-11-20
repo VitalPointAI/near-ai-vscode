@@ -1,13 +1,16 @@
 // The invite file and the join request file (D-14, D-15, D-16, D-17). Hub-side and pure: node:crypto and src/domain only, no clock (the caller
 // passes now), no I/O. The host reads and writes the files; this module builds and checks their content.
 //
-// - Invite (purpose staff-invite), signed by the lead's device: the pinned genesis hash, the project id and name, the lead's member id and keys, the
-//   invite id, the one-time join secret (32 random bytes), the expiry and, for Add My Other Machine (D-18), forMember: the existing member whose
-//   other machine may answer it. The roster entry member.invite carries only sha256 of the secret.
+// - Invite (purpose staff-invite), signed by the inviting device: the pinned genesis hash, the project id and name, lead (the project's anchor: the
+//   founding lead's member id and keys, which the joining device pins), inviter (the member id and keys of the device that signs the invitation, any
+//   device of the lead or the deputy, MJ-05), the invite id, the one-time join secret (32 random bytes), the expiry and, for Add My Other Machine
+//   (D-18), forMember: the existing member whose other machine may answer it. The roster entry member.invite carries only sha256 of the secret. An
+//   invitation made before inviter existed has none and was signed by the founding lead's device; it is read with the inviter equal to the lead.
 // - Join request (purpose staff-join-request), signed by the joining device: the invite id, the genesis hash, the person's name, the device's
-//   Ed25519 and X25519 public keys, the X25519 binding signature, member (only when answering a forMember invite), and mac = HMAC-SHA256 under the
-//   secret over the canonical bytes of { invite, genesisHash, name, publicKey, x25519, member? }. The MAC proves the request came from someone holding
-//   the invite file; the safety code is what catches a key swapped in transit, because a stolen invite file lets anyone make a valid MAC.
+//   Ed25519 and X25519 public keys, the X25519 binding signature, a fresh random nonce (an input of the safety code, see safetyCode.ts), member (only
+//   when answering a forMember invite), and mac = HMAC-SHA256 under the secret over the canonical bytes of { invite, genesisHash, name, publicKey,
+//   x25519, nonce, member? }. The MAC proves the request came from someone holding the invite file; the safety code is what catches a key swapped in
+//   transit, because a stolen invite file lets anyone make a valid MAC. A request made before the nonce existed is refused malformed.
 // - Welcome (no signature of its own, D-49 adds no purpose): the genesis entry, every roster entry and blob, and the signed grants addressed to the
 //   new device. Everything in it is already signed; the joining device checks the genesis against the hash it pinned from the invite.
 // Files arrive by any channel and are read as hostile input: text is size-capped before it is parsed, fields are read as own properties only, and
@@ -35,12 +38,15 @@ const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_NAME_CHARS = 120;
 const INVITE_KEYS = ['genesisHash', 'project', 'name', 'lead', 'invite', 'secret', 'expiresAt'] as const;
-const JOIN_KEYS = ['invite', 'genesisHash', 'name', 'publicKey', 'x25519', 'x25519Sig', 'mac'] as const;
+const JOIN_KEYS = ['invite', 'genesisHash', 'name', 'publicKey', 'x25519', 'x25519Sig', 'nonce', 'mac'] as const;
+/** The bytes of the joining device's nonce (an input of the safety code). */
+export const JOIN_NONCE_BYTES = 16;
 
 export interface InviteLead { member: string; writer: string; publicKey: string; x25519: string }
-export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string }
-export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; mac: string; member?: string }
-export interface JoinMacFields { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; member?: string }
+/** lead is the project's anchor (the founding lead); inviter is the device that signed the invitation (equal to lead for an invitation without one). */
+export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; inviter: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string }
+export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; nonce: string; mac: string; member?: string }
+export interface JoinMacFields { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; nonce: string; member?: string }
 
 export const INVITE_REFUSALS = {
   malformed: 'This is not an invitation, join request or welcome file this version can read. Ask the person who sent it for a new file.',
@@ -88,10 +94,10 @@ export function joinSecretHash(secret: string): string {
   return createHash('sha256').update(Buffer.from(secret, 'base64url')).digest('hex');
 }
 
-// HMAC-SHA256 under the secret over the canonical bytes of the five fields, as base64url.
-// member is covered only when present, so a request for a new person's invite has the same MAC input as before forMember existed.
+// HMAC-SHA256 under the secret over the canonical bytes of the six fields, as base64url.
+// member is covered only when present, so a request for a new person's invite names no member.
 export function joinMac(secret: string, fields: JoinMacFields): string {
-  const covered: Record<string, string> = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519 };
+  const covered: Record<string, string> = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, nonce: fields.nonce };
   if (fields.member !== undefined) covered.member = fields.member;
   const message = canonicalBytes(covered);
   return createHmac('sha256', Buffer.from(secret, 'base64url')).update(message).digest('base64url');
@@ -106,34 +112,44 @@ const hasKeys = (value: Record<string, unknown>, required: readonly string[], op
   return required.every((key) => present.includes(key)) && present.every((key) => required.includes(key) || optional.includes(key));
 };
 
+/** A device named by an invitation (lead or inviter) read from hostile input: exact keys, the writer id derived from the signing key. */
+function inviteDeviceOf(value: unknown): InviteLead | undefined {
+  if (!isRecord(value) || !hasKeys(value, ['member', 'writer', 'publicKey', 'x25519'])) return undefined;
+  const [member, writer, publicKey, x25519] = ['member', 'writer', 'publicKey', 'x25519'].map((key) => own(value, key));
+  if (typeof member !== 'string' || !SLUG.test(member)) return undefined;
+  if (!isKey(publicKey, ED25519_PUBLIC_BYTES) || !isKey(x25519, X25519_KEY_BYTES)) return undefined;
+  if (typeof writer !== 'string' || writer !== writerIdOf(publicKey)) return undefined;
+  return { member, writer, publicKey, x25519 };
+}
+
 function invitePayloadOf(value: unknown): InvitePayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, INVITE_KEYS, ['forMember'])) return undefined;
-  const [genesisHash, project, name, lead, invite, secret, expiresAt] = INVITE_KEYS.map((key) => own(value, key));
+  if (!isRecord(value) || !hasKeys(value, INVITE_KEYS, ['forMember', 'inviter'])) return undefined;
+  const [genesisHash, project, name, leadIn, invite, secret, expiresAt] = INVITE_KEYS.map((key) => own(value, key));
   const forMember = own(value, 'forMember');
+  const inviterIn = own(value, 'inviter');
   if (typeof genesisHash !== 'string' || !HASH_PATTERN.test(genesisHash)) return undefined;
   if (typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
   if (!isLine(name) || typeof invite !== 'string' || !SLUG.test(invite) || !isKey(secret, JOIN_SECRET_BYTES) || !isTime(expiresAt)) return undefined;
   if (forMember !== undefined && (typeof forMember !== 'string' || !SLUG.test(forMember))) return undefined;
-  if (!isRecord(lead) || !hasKeys(lead, ['member', 'writer', 'publicKey', 'x25519'])) return undefined;
-  const [member, writer, publicKey, x25519] = ['member', 'writer', 'publicKey', 'x25519'].map((key) => own(lead, key));
-  if (typeof member !== 'string' || !SLUG.test(member)) return undefined;
-  if (!isKey(publicKey, ED25519_PUBLIC_BYTES) || !isKey(x25519, X25519_KEY_BYTES)) return undefined;
-  if (typeof writer !== 'string' || writer !== writerIdOf(publicKey)) return undefined;
-  const payload: InvitePayload = { genesisHash, project, name, lead: { member, writer, publicKey, x25519 }, invite, secret, expiresAt };
+  const lead = inviteDeviceOf(leadIn);
+  // An invitation without inviter was made by the founding lead's device, which signed it: its inviter is the lead.
+  const inviter = inviterIn === undefined ? lead : inviteDeviceOf(inviterIn);
+  if (lead === undefined || inviter === undefined) return undefined;
+  const payload: InvitePayload = { genesisHash, project, name, lead, inviter: { ...inviter }, invite, secret, expiresAt };
   if (forMember !== undefined) payload.forMember = forMember;
   return payload;
 }
 
 function joinPayloadOf(value: unknown): JoinRequestPayload | undefined {
   if (!isRecord(value) || !hasKeys(value, JOIN_KEYS, ['member'])) return undefined;
-  const [invite, genesisHash, name, publicKey, x25519, x25519Sig, mac] = JOIN_KEYS.map((key) => own(value, key));
+  const [invite, genesisHash, name, publicKey, x25519, x25519Sig, nonce, mac] = JOIN_KEYS.map((key) => own(value, key));
   const member = own(value, 'member');
   if (member !== undefined && (typeof member !== 'string' || !SLUG.test(member))) return undefined;
   if (typeof invite !== 'string' || !SLUG.test(invite)) return undefined;
   if (typeof genesisHash !== 'string' || !HASH_PATTERN.test(genesisHash)) return undefined;
   if (!isLine(name) || !isKey(publicKey, ED25519_PUBLIC_BYTES) || !isKey(x25519, X25519_KEY_BYTES)) return undefined;
-  if (!isKey(x25519Sig, ED25519_SIGNATURE_BYTES) || !isKey(mac, MAC_BYTES)) return undefined;
-  const payload: JoinRequestPayload = { invite, genesisHash, name, publicKey, x25519, x25519Sig, mac };
+  if (!isKey(x25519Sig, ED25519_SIGNATURE_BYTES) || !isKey(nonce, JOIN_NONCE_BYTES) || !isKey(mac, MAC_BYTES)) return undefined;
+  const payload: JoinRequestPayload = { invite, genesisHash, name, publicKey, x25519, x25519Sig, nonce, mac };
   if (member !== undefined) payload.member = member;
   return payload;
 }
@@ -141,16 +157,37 @@ function joinPayloadOf(value: unknown): JoinRequestPayload | undefined {
 // The envelope's signer must be the key the payload names, so the status lookup answers active for that key only.
 const onlyKey = (publicKey: string): KeyStatusLookup => (key) => ({ state: key.publicKey === publicKey ? 'active' : 'unknown' });
 
-export interface BuildInviteInput { genesisHash: string; project: string; name: string; lead: { member: string; x25519: string }; invite: string; secret: string; expiresAt: string; now: Date; forMember?: string }
+/**
+ * lead: the project's anchor, the founding lead's member id and X25519 key, and its signing key when the signer is another device. inviter: the
+ * signing device's member id and X25519 key; absent when the signer is the founding lead's device itself.
+ */
+export interface BuildInviteInput {
+  genesisHash: string;
+  project: string;
+  name: string;
+  lead: { member: string; x25519: string; publicKey?: string };
+  inviter?: { member: string; x25519: string };
+  invite: string;
+  secret: string;
+  expiresAt: string;
+  now: Date;
+  forMember?: string;
+}
 
-// Signs an invite with the lead's device. With forMember it is the short invite of Add My Other Machine (D-18): only that member's other machine may
-// answer it, and its admission is a device.add. Throws when the content is not a valid invite.
+// Signs an invite with the inviting device (the founding lead's, or any device of the lead or the deputy, MJ-05). With forMember it is the short
+// invite of Add My Other Machine (D-18): only that member's other machine may answer it, and its admission is a device.add. Throws when the content is
+// not a valid invite, or when another device signs without naming itself as the inviter.
 export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): SignedPayload<InvitePayload> {
+  const leadKey = input.lead.publicKey ?? signer.publicKey;
+  if (input.inviter === undefined && leadKey !== signer.publicKey) throw new Error('The invitation was not made: a device other than the founding lead\'s must name itself as the inviter.');
+  const lead: InviteLead = { member: input.lead.member, writer: writerIdOf(leadKey), publicKey: leadKey, x25519: input.lead.x25519 };
+  const inviter: InviteLead = input.inviter === undefined ? { ...lead } : { member: input.inviter.member, writer: writerIdOf(signer.publicKey), publicKey: signer.publicKey, x25519: input.inviter.x25519 };
   const payload: InvitePayload = {
     genesisHash: input.genesisHash,
     project: input.project,
     name: input.name,
-    lead: { member: input.lead.member, writer: writerIdOf(signer.publicKey), publicKey: signer.publicKey, x25519: input.lead.x25519 },
+    lead,
+    inviter,
     invite: input.invite,
     secret: input.secret,
     expiresAt: input.expiresAt
@@ -162,7 +199,9 @@ export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): Sig
 
 export type InviteRead = { ok: true; invite: InvitePayload } | InviteFailure;
 
-// Reads an invite file (its JSON text or its parsed content) at time now. Checks the shape, that the lead's own key signed it, and the expiry. Never throws.
+// Reads an invite file (its JSON text or its parsed content) at time now. Checks the shape, that the inviter's own key signed it (the lead's for an
+// invitation that names no inviter), and the expiry. Whether the inviter may invite is the roster's answer, checked when the welcome arrives. Never
+// throws.
 export function readInvite(file: unknown, now: Date): InviteRead {
   try {
     const parsed = fileValue(file, MAX_PAYLOAD_BYTES);
@@ -170,7 +209,7 @@ export function readInvite(file: unknown, now: Date): InviteRead {
     const value = parsed.value;
     const payload = isRecord(value) ? invitePayloadOf(own(value, 'payload')) : undefined;
     if (payload === undefined) return refuse('malformed');
-    const verdict = verifyPayload<unknown>(value, { purpose: 'staff-invite', status: onlyKey(payload.lead.publicKey) });
+    const verdict = verifyPayload<unknown>(value, { purpose: 'staff-invite', status: onlyKey(payload.inviter.publicKey) });
     if (!verdict.ok) return refuse(verdict.reason === 'bad-signature' || verdict.reason === 'unknown-key' ? 'bad-signature' : 'malformed');
     if (now.getTime() > Date.parse(payload.expiresAt)) return refuse('invite-expired');
     return { ok: true, invite: payload };
@@ -184,13 +223,14 @@ export function readInvite(file: unknown, now: Date): InviteRead {
 // machine names none.
 export interface BuildJoinRequestInput { name: string; x25519: string; now: Date; member?: string }
 
-// Signs a join request with the joining device for the invite it read. The X25519 binding signature is made by the same signer.
+// Signs a join request with the joining device for the invite it read. The X25519 binding signature is made by the same signer. The nonce is drawn
+// fresh here, after the invite was read, which is what makes the safety code cost a second preimage (safetyCode.ts).
 export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, input: BuildJoinRequestInput): SignedPayload<JoinRequestPayload> {
   const writer = writerIdOf(signer.publicKey);
   const member = input.member ?? invite.forMember;
-  const fields: JoinMacFields = { invite: invite.invite, genesisHash: invite.genesisHash, name: input.name, publicKey: signer.publicKey, x25519: input.x25519 };
+  const fields: JoinMacFields = { invite: invite.invite, genesisHash: invite.genesisHash, name: input.name, publicKey: signer.publicKey, x25519: input.x25519, nonce: randomBytes(JOIN_NONCE_BYTES).toString('base64url') };
   if (member !== undefined) fields.member = member;
-  const payload: JoinRequestPayload = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, x25519Sig: signer.sign(x25519BindingBytes(input.x25519, writer)), mac: joinMac(invite.secret, fields) };
+  const payload: JoinRequestPayload = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, x25519Sig: signer.sign(x25519BindingBytes(input.x25519, writer)), nonce: fields.nonce, mac: joinMac(invite.secret, fields) };
   if (member !== undefined) payload.member = member;
   if (joinPayloadOf(payload) === undefined) throw new Error('The join request was not made: one of its fields is not valid.');
   return signPayload(signer, 'staff-join-request', payload, { now: () => input.now });
@@ -207,6 +247,21 @@ export interface JoinRequestExpectation { invite: InvitePayload; secret: string;
 // checks run in this order and the first failure is the answer: shape and size, signature, project, invitation id, invitation state (voided, used,
 // then expired when now is given), key binding, MAC, member. Reading or checking writes nothing. Never throws.
 export function checkJoinRequest(file: unknown, expected: JoinRequestExpectation): JoinRequestCheck {
+  return checkRequestFile(file, expected, true);
+}
+
+/** What the lead knows of an invitation that already admitted a device: no secret is needed or used. */
+export interface AdmittedRequestExpectation { invite: Pick<InvitePayload, 'genesisHash' | 'invite' | 'forMember'> }
+
+// The check of a join request for an invitation the roster shows as used, so the welcome file can be made again for the device it admitted (MJ-02):
+// shape and size, signature, project, invitation id, key binding and member, in that order, and no MAC (the join secret may be forgotten by now). The
+// caller must also check that the request's device is the one the invitation admitted, with the same keys; a welcome is only of use to that device.
+// Never throws.
+export function checkAdmittedRequest(file: unknown, expected: AdmittedRequestExpectation): JoinRequestCheck {
+  return checkRequestFile(file, { invite: { ...expected.invite } as InvitePayload, secret: '' }, false);
+}
+
+function checkRequestFile(file: unknown, expected: JoinRequestExpectation, withMac: boolean): JoinRequestCheck {
   try {
     const parsed = fileValue(file, MAX_PAYLOAD_BYTES);
     if (!parsed.ok) return parsed;
@@ -222,9 +277,11 @@ export function checkJoinRequest(file: unknown, expected: JoinRequestExpectation
     if (expected.now !== undefined && expected.now.getTime() > Date.parse(expected.invite.expiresAt)) return refuse('invite-expired');
     const writer = writerIdOf(payload.publicKey);
     if (!verifySignature(x25519BindingBytes(payload.x25519, writer), payload.x25519Sig, payload.publicKey)) return refuse('bad-binding');
-    const want = Buffer.from(joinMac(expected.secret, payload), 'base64url');
-    const got = Buffer.from(payload.mac, 'base64url');
-    if (want.length !== got.length || !timingSafeEqual(want, got)) return refuse('wrong-secret');
+    if (withMac) {
+      const want = Buffer.from(joinMac(expected.secret, payload), 'base64url');
+      const got = Buffer.from(payload.mac, 'base64url');
+      if (want.length !== got.length || !timingSafeEqual(want, got)) return refuse('wrong-secret');
+    }
     // A member's invite is answered only by that member's machine, and a new person's invite by a machine that names no member.
     if (payload.member !== expected.invite.forMember) return refuse('wrong-device');
     return { ok: true, request: payload, writer };
@@ -235,17 +292,20 @@ export function checkJoinRequest(file: unknown, expected: JoinRequestExpectation
 }
 
 
-export interface SafetyCodeKeys { publicKey: string; x25519: string }
+/** The joining device's keys and the nonce of its join request. */
+export interface SafetyCodeKeys { publicKey: string; x25519: string; nonce: string }
 
-// The six safety code words for an invite and the joining device's keys (D-16). The lead passes the checked request (it carries the joiner's keys); the
-// joining device passes its own keys. Both read the lead's keys, the invite id and the genesis hash from the invite, so the two screens agree exactly
-// when no key was swapped in transit. The join secret is not an input.
-export function inviteSafetyCode(invite: InvitePayload, joiner: SafetyCodeKeys): string[] {
+// The six safety code words for an invite and a join request (D-16). Both sides pass the join request (the lead the checked one it received, the
+// joining device the one it made). Both read the anchor's and the inviter's keys, the invite id and the genesis hash from the invite, so the two
+// screens agree exactly when no key was swapped in transit. The join secret is not an input.
+export function inviteSafetyCode(invite: Pick<InvitePayload, 'invite' | 'genesisHash' | 'lead' | 'inviter'>, joiner: SafetyCodeKeys): string[] {
   return safetyCode({
     invite: invite.invite,
     genesisHash: invite.genesisHash,
     lead: { publicKey: invite.lead.publicKey, x25519: invite.lead.x25519 },
-    joiner: { publicKey: joiner.publicKey, x25519: joiner.x25519 }
+    inviter: { publicKey: invite.inviter.publicKey, x25519: invite.inviter.x25519 },
+    joiner: { publicKey: joiner.publicKey, x25519: joiner.x25519 },
+    nonce: joiner.nonce
   });
 }
 
@@ -271,9 +331,10 @@ export interface BuildWelcomeInput { genesis: SealedEntry; roster: readonly Seal
 
 const copyEntry = (entry: SealedEntry): SealedEntry => JSON.parse(JSON.stringify({ header: entry.header, body: entry.body })) as SealedEntry;
 
-// Builds the welcome the lead returns after Admit. The input is the lead's own store, so a grant that does not read or an entry outside the roster stream
-// is a fault of the caller: it throws a plain error instead of leaving it out silently.
-export function buildWelcome(input: BuildWelcomeInput): WelcomeFile {
+// Builds the welcome the lead returns after Admit. An entry outside the roster stream is a fault of the caller: it throws a plain error. A grant that
+// does not read is left out and counted in `skipped` when given (MJ-02): the grants folder is a folder anyone with the project can drop a file into, so
+// one bad file must never stop a welcome. The caller tells the lead when a cleared cell has no grant in the welcome.
+export function buildWelcome(input: BuildWelcomeInput, skipped?: { grants: number }): WelcomeFile {
   const stream = input.genesis.header.stream;
   const genesisHash = entryHash(input.genesis.header);
   const roster: SealedEntry[] = [];
@@ -284,7 +345,10 @@ export function buildWelcome(input: BuildWelcomeInput): WelcomeFile {
   const grants: unknown[] = [];
   for (const signed of input.grants) {
     const read = readGrant(signed);
-    if (!read.ok) throw new Error('The welcome file was not made: one of the cell grants does not read.');
+    if (!read.ok) {
+      if (skipped !== undefined) skipped.grants += 1;
+      continue;
+    }
     if (input.cells.includes(read.grant.cell) && read.grant.wraps.every((wrap) => wrap.writer === input.writer)) grants.push(JSON.parse(JSON.stringify(signed)) as unknown);
   }
   const welcome: WelcomeFile = { v: WELCOME_VERSION, genesis: copyEntry(input.genesis), roster, blobs: input.blobs.map((blob) => ({ hash: blob.hash, bytes: blob.bytes })), grants };

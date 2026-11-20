@@ -2,17 +2,19 @@
 // text from any channel. One named test per refusal, the invited -> join-requested transition (DESIGN 15.1), the safety code on both screens, and the
 // welcome file that lets a new device catch up on the roster with only the grants addressed to it.
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import test from 'node:test';
 import { sealBlob } from '../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { grantHash } from '../domain/replica/cellKeys';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import {
-  INVITE_REFUSALS, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest, buildWelcome, checkJoinRequest, inviteAnchor, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite,
+  INVITE_REFUSALS, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest, buildWelcome, checkAdmittedRequest, checkJoinRequest, inviteAnchor, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite,
   readWelcome
 } from '../domain/replica/invite';
 import type { InvitePayload, JoinRequestPayload, WelcomeFile } from '../domain/replica/invite';
 import { foldRoster } from '../domain/replica/roster';
+import { canonicalBytes } from '../domain/team/canonical';
 import { MAX_PAYLOAD_BYTES, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_NOW, createRosterWorld } from './helpers/replicaRosterWorld';
@@ -86,7 +88,7 @@ test('15.1 invited -> join-requested: the invite and the join request travel as 
   assert.equal(accepted.request.invite, INVITE_ID);
   // The lead's screen (from its invite and the request) and the joiner's screen (from the invite it read and its own keys) show the same words.
   const leadWords = inviteSafetyCode(state.invite, accepted.request);
-  const joinerWords = inviteSafetyCode(joinerInvite, { publicKey: state.joiner.publicKey, x25519: state.joiner.x25519 });
+  const joinerWords = inviteSafetyCode(joinerInvite, { publicKey: state.joiner.publicKey, x25519: state.joiner.x25519, nonce: requestOf(requestText).payload.nonce });
   assert.equal(leadWords.length, 6);
   assert.deepEqual(leadWords, joinerWords);
   // Nothing was written to the roster or the grants by reading or checking (D-15): admission is a separate, confirmed step.
@@ -109,7 +111,7 @@ test('a request re-signed with a swapped X25519 key but the old binding signatur
   const original = requestOf(answer(state)).payload;
   const mallory = state.world.device('MALLORY', 'mbr-mallory');
   // Whoever holds the invite file can make a valid MAC, so only the binding signature stops this swap.
-  const fields = { invite: original.invite, genesisHash: original.genesisHash, name: original.name, publicKey: original.publicKey, x25519: mallory.x25519 };
+  const fields = { invite: original.invite, genesisHash: original.genesisHash, name: original.name, publicKey: original.publicKey, x25519: mallory.x25519, nonce: original.nonce };
   const payload: JoinRequestPayload = { ...fields, x25519Sig: original.x25519Sig, mac: joinMac(state.secret, fields) };
   const resigned = signPayload(state.joiner.signer, 'staff-join-request', payload, { now: () => NOW });
   const checked = checkJoinRequest(asFile(resigned), { invite: state.invite, secret: state.secret });
@@ -119,15 +121,106 @@ test('a request re-signed with a swapped X25519 key but the old binding signatur
 test('a request fully re-made by another device with a stolen invite file checks, but its safety code differs from the joiner\'s (D-16)', () => {
   const state = invited();
   const mallory = state.world.device('MALLORY', 'mbr-mallory');
+  const own = requestOf(answer(state)).payload;
   const stolen = checkJoinRequest(answer(state, mallory), { invite: state.invite, secret: state.secret });
   assert.equal(reasonOf(stolen), 'ok');
   const leadWords = inviteSafetyCode(state.invite, (stolen as { ok: true; request: JoinRequestPayload }).request);
-  const joinerWords = inviteSafetyCode(state.invite, { publicKey: state.joiner.publicKey, x25519: state.joiner.x25519 });
+  const joinerWords = inviteSafetyCode(state.invite, { publicKey: state.joiner.publicKey, x25519: state.joiner.x25519, nonce: own.nonce });
   assert.equal(leadWords.length, 6);
   assert.notDeepEqual(leadWords, joinerWords);
-  // Only the X25519 key substituted (the signing key kept) also changes the words.
-  const halfSwap = inviteSafetyCode(state.invite, { publicKey: state.joiner.publicKey, x25519: mallory.x25519 });
+  // Only the X25519 key substituted (the signing key and even the nonce kept) also changes the words.
+  const halfSwap = inviteSafetyCode(state.invite, { publicKey: state.joiner.publicKey, x25519: mallory.x25519, nonce: own.nonce });
   assert.notDeepEqual(halfSwap, joinerWords);
+});
+
+test('MJ-01: the joining device draws a fresh nonce after it reads the invite, so its words cannot be predicted when the invite is chosen; the words cover the inviter', () => {
+  const state = invited();
+  const first = requestOf(answer(state)).payload;
+  const second = requestOf(answer(state)).payload;
+  // Same invite, same device, same keys: a new nonce each time, so other words each time.
+  assert.equal(Buffer.from(first.nonce, 'base64url').length, 16);
+  assert.notEqual(first.nonce, second.nonce);
+  assert.equal(first.publicKey, second.publicKey);
+  assert.notDeepEqual(inviteSafetyCode(state.invite, first), inviteSafetyCode(state.invite, second));
+  // Each request checks, and its nonce is covered by its MAC and its signature.
+  for (const request of [first, second]) {
+    const checked = checkJoinRequest(asFile(signPayload(state.joiner.signer, 'staff-join-request', request, { now: () => NOW })), { invite: state.invite, secret: state.secret });
+    assert.equal(reasonOf(checked), 'ok');
+  }
+  const swapped = signPayload(state.joiner.signer, 'staff-join-request', { ...first, nonce: second.nonce }, { now: () => NOW });
+  refusedAs(checkJoinRequest(asFile(swapped), { invite: state.invite, secret: state.secret }), 'wrong-secret');
+  // An invitation whose inviter is another device gives other words for the same request: a swapped inviter key is caught.
+  const mallory = state.world.device('MALLORY', 'mbr-mallory');
+  const otherInviter = { ...state.invite, inviter: { member: 'mbr-mallory', writer: mallory.writer, publicKey: mallory.publicKey, x25519: mallory.x25519 } };
+  assert.notDeepEqual(inviteSafetyCode(otherInviter, first), inviteSafetyCode(state.invite, first));
+});
+
+test('MJ-01: a join request without a nonce (the format before it) is refused malformed, in plain words', () => {
+  const state = invited();
+  const request = JSON.parse(answer(state)) as { payload: Record<string, unknown> };
+  const { nonce: _nonce, ...old } = request.payload;
+  const fields = { invite: old.invite, genesisHash: old.genesisHash, name: old.name, publicKey: old.publicKey, x25519: old.x25519 };
+  const oldMac = createHmac('sha256', Buffer.from(state.secret, 'base64url')).update(canonicalBytes(fields)).digest('base64url');
+  const resigned = signPayload(state.joiner.signer, 'staff-join-request', { ...old, mac: oldMac }, { now: () => NOW });
+  refusedAs(checkJoinRequest(asFile(resigned), { invite: state.invite, secret: state.secret }), 'malformed');
+  assert.match(INVITE_REFUSALS.malformed, /Ask the person who sent it for a new file/);
+});
+
+test('MJ-05: any roster writer\'s device signs an invitation naming itself as the inviter and the founding lead as the anchor; it reads, and the inviter\'s key is what signs it', () => {
+  const state = invited();
+  const deputy = state.world.device('DEPUTY', 'mbr-dee');
+  const signed = buildInvite(deputy.signer, {
+    genesisHash: state.genesis.hash, project: state.world.project, name: state.world.projectName,
+    lead: { member: state.world.lead.member, x25519: state.world.lead.x25519, publicKey: state.world.lead.publicKey }, inviter: { member: 'mbr-dee', x25519: deputy.x25519 },
+    invite: 'inv-by-deputy', secret: newJoinSecret(), expiresAt: INVITE_EXPIRES, now: NOW
+  });
+  const read = readInvite(asFile(signed), NOW);
+  assert.equal(reasonOf(read), 'ok');
+  const invite = (read as { ok: true; invite: InvitePayload }).invite;
+  assert.equal(invite.lead.writer, state.world.lead.writer, 'the anchor is the founding lead');
+  assert.equal(invite.inviter.writer, deputy.writer);
+  assert.equal(invite.inviter.member, 'mbr-dee');
+  assert.deepEqual(inviteAnchor(invite).lead, { member: state.world.lead.member, writer: state.world.lead.writer, publicKey: state.world.lead.publicKey, x25519: state.world.lead.x25519 });
+  // The inviter is covered by the signature: naming another inviter, or the lead's key signing it, is refused.
+  const renamed = clone(signed) as unknown as { payload: { inviter: Json } };
+  renamed.payload.inviter.x25519 = state.joiner.x25519;
+  refusedAs(readInvite(asFile(renamed), NOW), 'bad-signature');
+  const byLead = signPayload(state.world.lead.signer, 'staff-invite', signed.payload, { now: () => NOW });
+  refusedAs(readInvite(asFile(byLead), NOW), 'bad-signature');
+  // A device other than the founding lead's cannot make an invitation that does not name it as the inviter.
+  assert.throws(() => buildInvite(deputy.signer, { ...{ genesisHash: state.genesis.hash, project: state.world.project, name: state.world.projectName, invite: 'inv-x', secret: newJoinSecret(), expiresAt: INVITE_EXPIRES, now: NOW }, lead: { member: state.world.lead.member, x25519: state.world.lead.x25519, publicKey: state.world.lead.publicKey } }), /inviter/);
+  // The joining device answers it, and both screens agree on words that cover the deputy's keys.
+  const request = buildJoinRequest(state.joiner.signer, invite, { name: 'Jo Analyst', x25519: state.joiner.x25519, now: NOW });
+  assert.deepEqual(inviteSafetyCode(signed.payload, request.payload), inviteSafetyCode(invite, request.payload));
+  assert.notDeepEqual(inviteSafetyCode({ ...invite, inviter: invite.lead }, request.payload), inviteSafetyCode(invite, request.payload));
+});
+
+test('MJ-05: an invitation made before inviter existed (signed by the founding lead, no inviter field) is still read, with the lead as its inviter', () => {
+  const state = invited();
+  const { inviter: _inviter, ...old } = state.invite;
+  const signed = signPayload(state.world.lead.signer, 'staff-invite', old, { now: () => NOW });
+  const read = readInvite(asFile(signed), NOW);
+  assert.equal(reasonOf(read), 'ok');
+  assert.deepEqual((read as { ok: true; invite: InvitePayload }).invite.inviter, state.invite.lead);
+  // Without an inviter, only the lead's own key can sign it.
+  const mallory = state.world.device('MALLORY', 'mbr-mallory');
+  refusedAs(readInvite(asFile(signPayload(mallory.signer, 'staff-invite', old, { now: () => NOW })), NOW), 'bad-signature');
+});
+
+test('MJ-02: checkAdmittedRequest checks the signature, project, invitation and binding of a request without its secret, and refuses what checkJoinRequest refuses for them', () => {
+  const state = invited();
+  const text = answer(state);
+  const expected = { invite: { genesisHash: state.invite.genesisHash, invite: state.invite.invite } };
+  const checked = checkAdmittedRequest(text, expected);
+  assert.equal(reasonOf(checked), 'ok');
+  assert.equal((checked as { ok: true; writer: string }).writer, state.joiner.writer);
+  const changed = JSON.parse(text) as { payload: Json };
+  changed.payload.name = 'Someone Else';
+  refusedAs(checkAdmittedRequest(asFile(changed), expected), 'bad-signature');
+  refusedAs(checkAdmittedRequest(text, { invite: { ...expected.invite, genesisHash: 'e'.repeat(64) } }), 'wrong-project');
+  refusedAs(checkAdmittedRequest(text, { invite: { ...expected.invite, invite: 'inv-other' } }), 'unknown-invite');
+  refusedAs(checkAdmittedRequest(text, { invite: { ...expected.invite, forMember: JOINER_MEMBER } }), 'wrong-device');
+  refusedAs(checkAdmittedRequest('not json', expected), 'malformed');
 });
 
 // ---- Task 2: every refusal by name (D-17, D-37) ----
@@ -182,7 +275,8 @@ test('bad-signature: an invite or a join request with any changed field is refus
     (payload) => { payload.genesisHash = 'e'.repeat(64); },
     (payload) => { payload.project = 'f'.repeat(32); },
     (payload) => { payload.lead.member = 'mbr-other'; },
-    (payload) => { payload.lead.x25519 = state.world.device('MALLORY', 'mbr-mallory').x25519; }
+    (payload) => { payload.lead.x25519 = state.world.device('MALLORY', 'mbr-mallory').x25519; },
+    (payload) => { (payload.inviter as Json).member = 'mbr-other'; }
   ];
   for (const change of inviteChanges) {
     const copy = clone(invite) as Json & { payload: Json & { lead: Json } };
@@ -205,7 +299,8 @@ test('bad-signature: an invite or a join request with any changed field is refus
     (payload) => { payload.publicKey = mallory.publicKey; },
     (payload) => { payload.x25519 = mallory.x25519; },
     (payload) => { payload.x25519Sig = mallory.x25519Sig; },
-    (payload) => { payload.mac = joinMac(newJoinSecret(), { invite: INVITE_ID, genesisHash: state.genesis.hash, name: 'Jo Analyst', publicKey: state.joiner.publicKey, x25519: state.joiner.x25519 }); }
+    (payload) => { payload.nonce = Buffer.alloc(16, 7).toString('base64url'); },
+    (payload) => { payload.mac = joinMac(newJoinSecret(), { invite: INVITE_ID, genesisHash: state.genesis.hash, name: 'Jo Analyst', publicKey: state.joiner.publicKey, x25519: state.joiner.x25519, nonce: payload.nonce as string }); }
   ];
   for (const change of requestChanges) {
     const copy = clone(request);
@@ -438,10 +533,18 @@ test('readWelcome reads hostile input: oversized, malformed, a changed grant, an
   assert.equal(({} as Json).polluted, undefined);
 });
 
-test('buildWelcome refuses to make a welcome from an unreadable grant or a roster entry of another stream', () => {
+// Changed for MJ-02: buildWelcome used to throw on an unreadable grant, so one bad file anyone can drop in the grants folder stopped every welcome after
+// the person was admitted. It now leaves the grant out and counts it; a roster entry of another stream is still the caller's fault and throws.
+test('buildWelcome leaves out and counts an unreadable grant, keeps every readable one, and refuses a roster entry of another stream', () => {
   const admitted = admittedWorld();
   const { world, genesis, joiner } = admitted;
-  assert.throws(() => buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [], grants: [{ not: 'a grant' }], writer: joiner.writer, cells: [world.project] }), /welcome/i);
+  const honest = buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [], grants: world.grants, writer: joiner.writer, cells: [world.project] });
+  const skipped = { grants: 0 };
+  const withBad = buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [], grants: [{ not: 'a grant' }, ...world.grants, 'text'], writer: joiner.writer, cells: [world.project] }, skipped);
+  assert.equal(skipped.grants, 2);
+  assert.deepEqual(withBad, honest);
+  assert.ok(honest.grants.length > 0);
+  assert.doesNotThrow(() => buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [], grants: [{ not: 'a grant' }], writer: joiner.writer, cells: [world.project] }));
   const foreign = { header: { ...genesis.entry.header, stream: 'f'.repeat(32) }, body: genesis.entry.body };
   assert.throws(() => buildWelcome({ genesis: genesis.entry, roster: [...world.entries, foreign], blobs: [], grants: [], writer: joiner.writer, cells: [world.project] }), /welcome/i);
 });
