@@ -76,17 +76,6 @@ export function stateVectorOf(doc: CrdtDoc): Array<[number, number]> {
   return [...Y.decodeStateVector(Y.encodeStateVector(doc)).entries()].sort((a, b) => a[0] - b[0]);
 }
 
-// Client ids of the structs an update inserts, sorted; undefined when the update cannot be read or is over the size limit.
-export function updateClients(bytes: Uint8Array): number[] | undefined {
-  try {
-    if (bytes.length > MAX_UPDATE_BYTES) return undefined;
-    return [...loadYjs().parseUpdateMeta(bytes).from.keys()].sort((a, b) => a - b);
-  } catch {
-    // An update that cannot be read has no clients to name.
-    return undefined;
-  }
-}
-
 // A local editor document, as a person's editor or an agent run would hold it. Used by tests and, later, the editor binding.
 export function createLocalDoc(clientId: number): CrdtDoc {
   const doc = new (loadYjs().Doc)();
@@ -170,16 +159,36 @@ function scratchDocWith(updates: readonly Uint8Array[]): CrdtDoc | undefined {
   return scratch;
 }
 
-// Is every deleted range of the snapshot also deleted in the scratch document?
-function deletesCovered(snapshot: CrdtSnapshot, scratch: CrdtDoc): boolean {
-  const have = loadYjs().snapshot(scratch).ds.clients;
-  for (const [client, wanted] of snapshot.ds.clients) {
-    const held = have.get(client) ?? [];
-    for (const range of wanted) {
-      if (!held.some((candidate) => candidate.clock <= range.clock && candidate.clock + candidate.len >= range.clock + range.len)) return false;
+// One deleted range of one client, as a Yjs delete set holds it.
+export interface ClockRange { clock: number; len: number }
+
+const byClock = (a: ClockRange, b: ClockRange): number => a.clock - b.clock;
+
+// Does every wanted range lie inside one held range of the same client? A merge walk (WR-07): both lists sorted by clock, and for each wanted range
+// in order the held ranges that start at or before it are passed once, keeping the furthest end among them; a held range containing the wanted one
+// exists exactly when that furthest end reaches the wanted end. Linear after sorting, where scanning every held range per wanted range was quadratic.
+// Sorting copies, so ranges a hostile snapshot sends out of order give the same answer.
+export function rangesCovered(wanted: ReadonlyMap<number, readonly ClockRange[]>, held: ReadonlyMap<number, readonly ClockRange[]>): boolean {
+  for (const [client, wantedRanges] of wanted) {
+    if (wantedRanges.length === 0) continue;
+    const want = [...wantedRanges].sort(byClock);
+    const have = [...(held.get(client) ?? [])].sort(byClock);
+    let next = 0;
+    let reach = Number.NEGATIVE_INFINITY;
+    for (const range of want) {
+      while (next < have.length && have[next].clock <= range.clock) {
+        reach = Math.max(reach, have[next].clock + have[next].len);
+        next += 1;
+      }
+      if (reach < range.clock + range.len) return false;
     }
   }
   return true;
+}
+
+// Is every deleted range of the snapshot also deleted in the scratch document?
+function deletesCovered(snapshot: CrdtSnapshot, scratch: CrdtDoc): boolean {
+  return rangesCovered(snapshot.ds.clients, loadYjs().snapshot(scratch).ds.clients);
 }
 
 // The decoded snapshot and the scratch document, and whether the updates fall short of the snapshot: a client clock above theirs, or a deletion
@@ -194,23 +203,40 @@ function inspectSnapshot(updates: readonly Uint8Array[], snapshotBytes: Uint8Arr
   return { snapshot, scratch, missing: short || !deletesCovered(snapshot, scratch) };
 }
 
+// What one snapshot inspection answers (WR-05): whether the updates fall short of the snapshot, and when they do not, the text and the attribution
+// runs as they were at the snapshot. text and runs are undefined when missing is true, and when Yjs cannot honour the snapshot.
+export interface SnapshotReport { missing: boolean; text: string | undefined; runs: AttributionRun[] | undefined }
+
+// One scratch build answers all three questions about a snapshot. undefined when the snapshot cannot be decoded or an update cannot be applied.
+export function snapshotReport(updates: readonly Uint8Array[], snapshotBytes: Uint8Array): SnapshotReport | undefined {
+  let found: ReturnType<typeof inspectSnapshot>;
+  try {
+    found = inspectSnapshot(updates, snapshotBytes);
+  } catch {
+    // Hostile bytes the gates let through but Yjs cannot read name nothing.
+    return undefined;
+  }
+  if (found === undefined) return undefined;
+  if (found.missing) return { missing: true, text: undefined, runs: undefined };
+  try {
+    const at = loadYjs().createDocFromSnapshot(found.scratch, found.snapshot);
+    return { missing: false, text: docText(at), runs: runsOf(at) };
+  } catch {
+    // createDocFromSnapshot throws on a snapshot it cannot honour; that is "no text and no runs", not a crash.
+    return { missing: false, text: undefined, runs: undefined };
+  }
+}
+
 // True when the snapshot covers something the supplied updates do not reach, so some update the snapshot covers is absent. False when the snapshot
-// cannot be decoded (it names nothing) and when an update cannot be applied.
+// cannot be decoded (it names nothing) and when an update cannot be applied. A thin wrapper over snapshotReport.
 export function snapshotMissing(updates: readonly Uint8Array[], snapshotBytes: Uint8Array): boolean {
-  return inspectSnapshot(updates, snapshotBytes)?.missing === true;
+  return snapshotReport(updates, snapshotBytes)?.missing === true;
 }
 
 // The text the snapshot names, rebuilt on a scratch document from the supplied updates. undefined when the snapshot cannot be decoded, an update
-// cannot be applied, or the updates do not cover the snapshot (snapshotMissing tells the last case apart).
+// cannot be applied, or the updates do not cover the snapshot (snapshotMissing tells the last case apart). A thin wrapper over snapshotReport.
 export function textAtSnapshot(updates: readonly Uint8Array[], snapshotBytes: Uint8Array): string | undefined {
-  try {
-    const found = inspectSnapshot(updates, snapshotBytes);
-    if (found === undefined || found.missing) return undefined;
-    return docText(loadYjs().createDocFromSnapshot(found.scratch, found.snapshot));
-  } catch {
-    // createDocFromSnapshot throws on a snapshot it cannot honour; that is "no text", not a crash.
-    return undefined;
-  }
+  return snapshotReport(updates, snapshotBytes)?.text;
 }
 
 
@@ -358,13 +384,7 @@ export function attributionRuns(doc: CrdtDoc): AttributionRun[] {
 }
 
 // The runs of the text as it was at a snapshot, rebuilt on a scratch document like textAtSnapshot; undefined where textAtSnapshot gives undefined.
+// A thin wrapper over snapshotReport.
 export function attributionAtSnapshot(updates: readonly Uint8Array[], snapshotBytes: Uint8Array): AttributionRun[] | undefined {
-  try {
-    const found = inspectSnapshot(updates, snapshotBytes);
-    if (found === undefined || found.missing) return undefined;
-    return runsOf(loadYjs().createDocFromSnapshot(found.scratch, found.snapshot));
-  } catch {
-    // Same answer as textAtSnapshot: a snapshot that cannot be honoured has no runs.
-    return undefined;
-  }
+  return snapshotReport(updates, snapshotBytes)?.runs;
 }
