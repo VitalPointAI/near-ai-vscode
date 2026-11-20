@@ -1,6 +1,7 @@
-// Your organization's hub as a member of the roster (D-22, D-40, D-41, D-64; DESIGN 10.2). The host flows behind the hub roster steps; the commands
-// (Phase 33) only show dialogs and call these, and enrolment with the hub over the network is 32-25, which reads the hub file again. Node I/O through
-// ReplicaProject and the membership flows only; never imports vscode.
+// Your organization's hub as a member of the roster (D-22, D-40, D-41, D-64; DESIGN 10.2), and the flows that talk to it (D-41, D-47, D-48; 32-25):
+// connecting a project to the hub (admission and enrolment in one step), invitations the hub knows, join requests sent and fetched through it. The
+// commands (Phase 33) only show dialogs and call these. Node I/O through ReplicaProject, the membership flows and the hub transport only; never
+// imports vscode.
 //
 // The hub's standing, as the roster has it (the fold is the authority; these flows refuse before they write so the lead is told plainly):
 //   (absent) --admitHub: hub.admit, hub.grant for the base cell, base cell grants--> admitted, holding the base cell
@@ -12,9 +13,23 @@
 // The hub reads the base cell (the roster) always, so it can check appends (D-40), and a cell more only when the lead gives it one after reading the
 // trade-off. It is never given the lead-only legacy cell (D-20, D-64). No result or message holds a key, a binding signature or the hub file's
 // enrolment secret, and this module stores neither the hub file nor its secret.
+//
+// Connecting a project (D-41): admitHub, then POST /v1/enrol with the genesis, every roster entry, their blobs, every grant this device holds and the
+// enrolment MAC. The hub file is read again on each call, so an enrolment the hub could not take (unreachable) is finished by calling again: the hub
+// is already admitted, so admitHub's hub-already-admitted is the resume case and no second hub.admit is written.
+//   not admitted --connect--> admitted --enrol--> on the hub        admitted --enrol, hub unreachable--> admitted (call again)
+//   admitted --enrol refused used, expired or unknown--> admitted (the operator issues a new hub file; connect again with it)
+// Invitations and join requests through the hub (D-47, D-48): the hub never holds a join secret. inviteThroughHub writes member.invite exactly as
+// inviteToProject does, then gives the file the hub field and registers the invitation with the hub check key only. The joining person's request
+// travels with a second MAC under that key; the hub's acceptance admits nobody, and the lead's device still checks the Phase 31 MAC with the real
+// secret (reviewJoinRequest, admitJoinRequest) and the six words before anyone is admitted. When the hub cannot be told or reached, everything still
+// works by file, and the sentence says so.
 import { parseClearance } from '../../domain/gate/labels';
 import { REKEY_KEEP_TEXT, earlierEpochGrants } from '../../domain/replica/cellKeys';
-import { HUB_FILE_REFUSALS, readHubFile } from '../../domain/replica/hubFile';
+import { HUB_FILE_REFUSALS, isHubAddress, readHubFile } from '../../domain/replica/hubFile';
+import { INVITE_REFUSALS, buildHubJoin, buildInvite, checkJoinRequest, hubJoinCheckKey, hubJoinMac, inviteSafetyCode, joinRequestHash, readInvite } from '../../domain/replica/invite';
+import type { InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
+import type { SignedPayload } from '../../domain/team/signedPayload';
 import type { HubFilePayload } from '../../domain/replica/hubFile';
 import type { RosterState } from '../../domain/replica/roster';
 import type { FoldResult } from '../../domain/replica/fold';
@@ -25,12 +40,21 @@ import { MEMBER_REFUSALS, devicesOfMemberAt, hubAt } from '../../domain/replica/
 import { MAX_SLOT } from '../../domain/replica/clientIds';
 import { isRecord } from '../../domain/team/validate';
 import { multiUserNoticeLines } from '../../domain/staff/multiUser';
-import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, unfinishedRekeys, writerProblem } from './membership';
-import type { Gate, MembershipResult, SharedProjectHost } from './membership';
-import { ReplicaProjectError, isProjectRefused } from './replicaProject';
+import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, inviteToProject, unfinishedRekeys, writerProblem } from './membership';
+import type { Gate, InviteInput, MembershipResult, SharedProjectHost } from './membership';
+import { HubTransport, HubTransportError, enrolmentRequest } from './hubTransport';
+import type { HubTransportOptions } from './hubTransport';
+import { joinSecret } from './keyring';
+import { ReplicaProject, ReplicaProjectError, isProjectRefused, syncLocalOf } from './replicaProject';
+import type { ReplicaProjectDeps } from './replicaProject';
 
 /** Shown to the lead at each grant of a cell to the hub (DESIGN 10.2), word for word; the lead confirms it before anything is written. */
 export const HUB_GRANT_TRADE_OFF = 'The hub will be able to read everything in this cell. Anyone who takes over the hub server can read it too. Grant only cells whose watches must run when nobody is at a computer.';
+
+/** The ending of every sentence that tells a joining person their request did not go through the hub. */
+const SEND_FILE_TEXT = 'Send your join request file to the staff lead any way you like.';
+/** inviteThroughHub, when the hub could not be told: the invitation is made and works by file only. */
+export const HUB_NOT_TOLD_TEXT = 'Your organization\'s hub could not be told about it, so it works by file only: the person sends their join request file back to you any way they like.';
 
 /** The hub flows' own refusals, one plain sentence each (D-37). None names a key, a secret or a hash, and none uses a dash as punctuation. */
 export const HUB_MEMBERSHIP_REFUSALS = {
@@ -49,12 +73,35 @@ export const HUB_MEMBERSHIP_REFUSALS = {
   'hub-file-differs': 'This hub is already in the project with another key or certificate than this hub file names, so nothing was changed. Ask the hub operator which hub file is current.',
   'ceiling-invalid': 'The highest clearance chosen for the hub is not one this project\'s scales know, so the hub was not admitted. Choose a clearance from the project\'s scales.',
   // D-22, word for word: a project the 0.4.35 preview made shared keeps its products where the hub must read.
-  'base-cell-held-products': 'This project was made shared by an earlier preview, and its products sit in the part of the project the hub must read. Make a single-machine copy and make that copy multi-user again; the new shared project keeps each product in its own part.'
+  'base-cell-held-products': 'This project was made shared by an earlier preview, and its products sit in the part of the project the hub must read. Make a single-machine copy and make that copy multi-user again; the new shared project keeps each product in its own part.',
+  // 32-25: connecting a project, and invitations and join requests through the hub.
+  'hub-address-invalid': 'That is not an address this computer can reach a hub at, so nothing was changed. Give the name and port the hub operator published, such as hub.example.org:8443.',
+  'hub-unreachable': 'Your organization\'s hub could not be reached, so nothing was asked of it. Try again when this computer is online.',
+  'hub-session-refused': 'Your organization\'s hub did not accept this computer for the project yet. Sync the project with the hub, then try again.',
+  'hub-refused': 'Your organization\'s hub refused the call, so nothing was asked of it. Try again later, or ask the hub operator to check the hub.',
+  'enrol-refused': 'The hub did not take the project with this hub file, because it was already used, has expired or was not made for this hub. Ask the hub operator for a new hub file, then connect the project again with it.',
+  'enrol-unreachable': 'Your organization\'s hub was admitted to the project, but it could not be reached to take the project. Connect the project to the hub again when this computer is online; the hub is not admitted a second time.',
+  'enrol-not-taken': 'The hub did not take the project. Connect the project to the hub again from this computer, and if it is refused again ask the hub operator to check the hub.',
+  'no-hub-in-invitation': `This invitation does not name your organization's hub, so nothing was sent. ${SEND_FILE_TEXT}`,
+  'hub-unknown-invite': `Your organization's hub does not know this invitation, so the join request did not reach the staff lead. ${SEND_FILE_TEXT}`,
+  'hub-invite-expired': `The hub says this invitation has expired, so it did not take the join request. Ask the staff lead for a new invitation, or ask whether they still take this one by file. ${SEND_FILE_TEXT}`,
+  'hub-invite-used': `The hub says this invitation was already used to join the project, so it did not take the join request. Ask the staff lead whether a new invitation is needed. ${SEND_FILE_TEXT}`,
+  'hub-invite-voided': `The hub says the staff lead cancelled this invitation, so it did not take the join request. Ask the staff lead for a new invitation if you still need one. ${SEND_FILE_TEXT}`,
+  'hub-invite-locked': `The hub takes no more join requests for this invitation, because too many did not match it. Ask the staff lead for a new invitation. ${SEND_FILE_TEXT}`,
+  'hub-busy': `Your organization's hub asked this computer to wait before another join request, so this one was not sent. ${SEND_FILE_TEXT}`,
+  'hub-join-refused': `Your organization's hub did not take this join request. ${SEND_FILE_TEXT}`,
+  'hub-join-unreachable': `Your organization's hub could not be reached, so the join request was not sent. ${SEND_FILE_TEXT}`
 } as const;
 export type HubMembershipRefusal = keyof typeof HUB_MEMBERSHIP_REFUSALS;
 
-/** What every hub flow returns: a membership result, with the hub's id (hub- and 16 hex) and its device's writer id when one is named. */
-export interface HubMembershipResult extends MembershipResult { hub?: string }
+/** A join request your organization's hub kept: the invitation it answers and its text, for reviewJoinRequest and admitJoinRequest. */
+export interface HubJoinRequest { invite: string; text: string; receivedAt: string }
+
+/**
+ * What every hub flow returns: a membership result, with the hub's id (hub- and 16 hex) and its device's writer id when one is named; registered
+ * (inviteThroughHub) when the hub was told of the invitation; requests (fetchJoinRequests) the join requests the hub kept.
+ */
+export interface HubMembershipResult extends MembershipResult { hub?: string; registered?: boolean; requests?: HubJoinRequest[] }
 
 const done = (message: string, extra: Partial<HubMembershipResult> = {}): HubMembershipResult => ({ ok: true, message, notices: multiUserNoticeLines(), ...extra });
 const refused = (reason: string, message: string): HubMembershipResult => ({ ok: false, reason, message, notices: multiUserNoticeLines() });
@@ -349,4 +396,204 @@ export async function hubStanding(shared: SharedProjectHost): Promise<HubStandin
     found.push({ hub, ...(writer === undefined ? {} : { writer }), certPin: record.certPin, ceiling: JSON.parse(JSON.stringify(record.ceiling)) as unknown, cells: [...record.cells], standing: current === undefined ? 'revoked' : 'admitted' });
   }
   return found;
+}
+
+// ---- 32-25: talking to the hub (D-41, D-47, D-48) -------------------------------------------------------------------------------------------------
+
+/** Where the lead's device reaches the hub: the address the operator published (the roster keeps the pin and the writer id, not the address), and
+ *  which hub when the project has more than one in force. */
+export interface HubEndpoint { address: string; hub?: string }
+
+/** The calls these flows make; a test may hand in transports with a short connect limit or another address. */
+export type HubCalls = Pick<HubTransport, 'registerInvite' | 'postJoin' | 'joinRequests' | 'enrol' | 'close'>;
+export type OpenHub = (options: HubTransportOptions) => HubCalls;
+export const openHubTransport: OpenHub = (options) => new HubTransport(options);
+
+/** A refusal with the hub named, as connectProjectToHub returns it. */
+const refuseWith = (reason: HubMembershipRefusal, extra: Partial<HubMembershipResult>): HubMembershipResult => ({ ...refuse(reason), ...extra });
+
+/** The hub in force for a lead flow, with its pin from the roster, checked before anything is written or sent. */
+async function hubForLead(shared: SharedProjectHost, endpoint: HubEndpoint): Promise<{ hub: HubInForce; certPin: string } | HubMembershipResult> {
+  const { roster } = await shared.project.state();
+  const problem = writerProblem(shared, roster);
+  if (problem !== undefined) return problem;
+  const at = headOf(roster);
+  const hub = hubOf(roster, at.position, endpoint.hub);
+  if (isResult(hub)) return hub;
+  const certPin = hubAt(roster.members, hub.hub, at.position)?.certPin;
+  if (certPin === undefined) return refuse('hub-revoked');
+  if (!isHubAddress(endpoint.address)) return refuse('hub-address-invalid');
+  return { hub, certPin };
+}
+
+/** A transport failure of a lead flow as its plain refusal. */
+function leadFailure(error: unknown): HubMembershipResult {
+  if (!(error instanceof HubTransportError)) throw error;
+  if (error.failure === 'unreachable' || error.failure === 'rate-limited') return refuse('hub-unreachable');
+  if (error.failure === 'session-refused') return refuse('hub-session-refused');
+  return refuse('hub-refused');
+}
+
+/**
+ * Invites one person to a project on your organization's hub (D-47, D-48): writes member.invite exactly as inviteToProject does, then gives the file
+ * the hub field (address, certificate pin and writer id) from the same roster record and kept secret, the same capability in one file, and registers
+ * the invitation with the hub: its id, its expiry and the hub check key derived from the secret, never the secret. When the hub cannot be told, the
+ * invitation is still made and returned without the hub field, so it works by file exactly as in Phase 31, and the result says so (registered false).
+ * Refused before anything is written as every roster change, and with no hub in force.
+ */
+export function inviteThroughHub(shared: SharedProjectHost, input: InviteInput, endpoint: HubEndpoint, open: OpenHub = openHubTransport): Promise<HubMembershipResult> {
+  return guarded(async () => {
+    const { project, deps } = shared;
+    const found = await hubForLead(shared, endpoint);
+    if (isResult(found)) return found;
+    const invited = await inviteToProject(shared, input);
+    if (!invited.ok || invited.file === undefined || invited.invite === undefined) return invited;
+    const read = readInvite(invited.file.text, now(shared));
+    const secret = await joinSecret(deps.secrets, invited.invite);
+    if (!read.ok || secret === undefined || secret !== read.invite.secret) return refuseMembership('invite-not-remade');
+    const payload = read.invite;
+    const when = payload.expiresAt.slice(0, 10);
+    const what = payload.forMember === undefined ? `The invitation for ${input.name} is ready.` : `The invitation for ${input.name}'s other computer is ready.`;
+    const rest = `Send the file to them any way you like. It works once and expires on ${when}. When their join request comes back, compare the six words with them out loud or in person before you admit them.`;
+    let registered = false;
+    let transport: HubCalls | undefined;
+    try {
+      transport = open({ address: endpoint.address, project: project.projectId, hub: found.hub.writer, trust: { pin: found.certPin }, signer: project.signer, now: () => now(shared) });
+      await transport.registerInvite({ invite: payload.invite, expiresAt: payload.expiresAt, checkKey: hubJoinCheckKey(secret, payload.invite) });
+      registered = true;
+    } catch {
+      // The invitation is in the roster and its file is made: a hub that cannot be told leaves it working by file.
+    } finally {
+      transport?.close();
+    }
+    if (!registered) return done(`${what} ${HUB_NOT_TOLD_TEXT} ${rest}`, { file: invited.file, invite: payload.invite, registered: false, hub: found.hub.hub });
+    const signed = buildInvite(project.signer, {
+      genesisHash: payload.genesisHash, project: payload.project, name: payload.name,
+      lead: { member: payload.lead.member, x25519: payload.lead.x25519, publicKey: payload.lead.publicKey },
+      inviter: { member: payload.inviter.member, x25519: payload.inviter.x25519 }, invite: payload.invite, secret, expiresAt: payload.expiresAt, now: now(shared),
+      ...(payload.forMember === undefined ? {} : { forMember: payload.forMember }),
+      hub: { address: endpoint.address, certPin: found.certPin, writer: found.hub.writer }
+    });
+    return done(`${what} Your organization's hub knows it, so their join request can come back through the hub. ${rest}`, {
+      file: { name: invited.file.name, text: JSON.stringify(signed) }, invite: payload.invite, registered: true, hub: found.hub.hub
+    });
+  });
+}
+
+const HUB_JOIN_REFUSAL: Readonly<Record<string, HubMembershipRefusal>> = {
+  'unknown-invite': 'hub-unknown-invite',
+  'invite-expired': 'hub-invite-expired',
+  'invite-used': 'hub-invite-used',
+  'invite-voided': 'hub-invite-voided',
+  'invite-locked': 'hub-invite-locked'
+};
+
+const inviteRefused = (reason: InviteRefusal): HubMembershipResult => refused(reason, Object.hasOwn(MEMBERSHIP_REFUSALS, reason) ? MEMBERSHIP_REFUSALS[reason as keyof typeof MEMBERSHIP_REFUSALS] : INVITE_REFUSALS[reason]);
+
+/**
+ * The joining person's side through the hub (D-48): reads the invitation, refuses one without a hub field (no-hub-in-invitation, nothing sent), checks
+ * that the join request is this computer's own answer to this invitation (the person holds the secret, so the whole Phase 31 check runs here first),
+ * makes the hub MAC under the check key derived from the invitation's secret and the envelope signed by this device (invite.ts), and posts both to the
+ * hub the invitation names, trusted by its pin. The result tells the person to read the six words to the staff lead; every refusal ends with sending
+ * the join request file to the staff lead any way they like.
+ */
+export async function sendJoinRequestThroughHub(inviteText: unknown, requestText: unknown, deps: ReplicaProjectDeps, open: OpenHub = openHubTransport): Promise<HubMembershipResult> {
+  const at = deps.now?.() ?? new Date();
+  const read = readInvite(inviteText, at);
+  if (!read.ok) return inviteRefused(read.reason);
+  const invite = read.invite;
+  const hub = invite.hub;
+  if (hub === undefined) return refuse('no-hub-in-invitation');
+  const checked = checkJoinRequest(requestText, { invite, secret: invite.secret, now: at });
+  if (!checked.ok) return inviteRefused(checked.reason);
+  const device = await ReplicaProject.localDevice(deps);
+  if (device.publicKey !== checked.request.publicKey) return inviteRefused('wrong-device');
+  let request: SignedPayload<JoinRequestPayload>;
+  try {
+    request = (typeof requestText === 'string' ? JSON.parse(requestText) : requestText) as SignedPayload<JoinRequestPayload>;
+  } catch {
+    return inviteRefused('malformed');
+  }
+  const fields = { hub: hub.writer, project: invite.project, invite: invite.invite, request: joinRequestHash(request) };
+  const join = buildHubJoin(device.signer, { hub: hub.writer, project: invite.project, request, hubMac: hubJoinMac(hubJoinCheckKey(invite.secret, invite.invite), fields), now: at });
+  let transport: HubCalls | undefined;
+  try {
+    transport = open({ address: hub.address, project: invite.project, hub: hub.writer, trust: { pin: hub.certPin }, signer: device.signer, now: () => deps.now?.() ?? new Date() });
+    await transport.postJoin({ join, request });
+  } catch (error) {
+    if (!(error instanceof HubTransportError)) throw error;
+    if (error.failure === 'unreachable') return refuse('hub-join-unreachable');
+    if (error.failure === 'rate-limited') return refuse('hub-busy');
+    const mapped = error.failure === 'hub-error' && error.reason !== undefined ? HUB_JOIN_REFUSAL[error.reason] : undefined;
+    return refuse(mapped ?? 'hub-join-refused');
+  } finally {
+    transport?.close();
+  }
+  const safetyWords = inviteSafetyCode(invite, checked.request);
+  return done(`Your join request reached your organization's hub, and the staff lead's computer hears of it at once. Read these six words to the staff lead out loud or in person: ${safetyWords.join(' ')}. They admit you only if the words match.`, {
+    safetyWords, invite: invite.invite, writer: device.writer
+  });
+}
+
+/**
+ * The join requests your organization's hub kept for this project in the last 7 days, for a device of the lead or the deputy (D-48). Each text is
+ * untrusted until reviewJoinRequest and admitJoinRequest check it with the real secret and the six words; fetching admits nobody and writes nothing.
+ */
+export function fetchJoinRequests(shared: SharedProjectHost, endpoint: HubEndpoint, open: OpenHub = openHubTransport): Promise<HubMembershipResult> {
+  return guarded(async () => {
+    const found = await hubForLead(shared, endpoint);
+    if (isResult(found)) return found;
+    let transport: HubCalls | undefined;
+    let requests: HubJoinRequest[];
+    try {
+      transport = open({ address: endpoint.address, project: shared.project.projectId, hub: found.hub.writer, trust: { pin: found.certPin }, signer: shared.project.signer, now: () => now(shared) });
+      requests = (await transport.joinRequests()).map((item) => ({ invite: item.invite, text: item.request, receivedAt: item.receivedAt }));
+    } catch (error) {
+      return leadFailure(error);
+    } finally {
+      transport?.close();
+    }
+    const count = requests.length;
+    const message = count === 0
+      ? 'No join request is waiting at your organization\'s hub.'
+      : `${count === 1 ? 'One join request is' : `${count} join requests are`} waiting at your organization's hub. Check each one and compare the six words with the person before you admit them.`;
+    return done(message, { requests, hub: found.hub.hub });
+  });
+}
+
+/**
+ * Connects the project to your organization's hub in one step (D-41): admits the hub from the operator's hub file (admitHub; a hub already admitted
+ * with the same key and pin is the resume case), then enrols the project: the genesis and every roster entry, the blobs they cite, every signed grant
+ * this device holds and the enrolment MAC under the hub file's secret (enrolmentRequest). An unreachable hub leaves the hub admitted and a second call
+ * finishes the enrolment; a used, expired or unknown enrolment is refused with the sentence asking the operator for a new hub file.
+ */
+export function connectProjectToHub(shared: SharedProjectHost, hubFileText: unknown, input: AdmitHubInput, open: OpenHub = openHubTransport): Promise<HubMembershipResult> {
+  return guarded(async () => {
+    const read = readHubFile(hubFileText, now(shared));
+    if (!read.ok) return refused(read.reason, HUB_FILE_REFUSALS[read.reason]);
+    const file = read.hubFile;
+    const admitted = await admitHub(shared, hubFileText, input);
+    if (!admitted.ok && admitted.reason !== 'hub-already-admitted') return admitted;
+    const { project } = shared;
+    const { roster } = await project.state();
+    const body = await enrolmentRequest(syncLocalOf(project), { enrolment: file.enrolment, enrolmentSecret: file.enrolmentSecret, hub: file.hub }, {
+      genesisHash: project.anchor.genesisHash, rosterHead: headOf(roster).hash
+    });
+    const named = { hub: file.hub, writer: file.writer };
+    let transport: HubCalls | undefined;
+    try {
+      transport = open({ address: file.address, project: project.projectId, hub: file.writer, trust: { pin: file.certPin }, signer: project.signer, now: () => now(shared) });
+      await transport.enrol(body);
+    } catch (error) {
+      if (!(error instanceof HubTransportError)) throw error;
+      if (error.failure === 'unreachable' || error.failure === 'rate-limited') return refuseWith('enrol-unreachable', named);
+      const reason = error.failure === 'hub-error' ? error.reason : undefined;
+      if (reason === 'project-exists') return done(`${hubName(file)} already holds this project, so it is connected. Nothing more was sent.`, named);
+      if (reason === 'enrolment-used' || reason === 'enrolment-expired' || reason === 'enrolment-unknown' || reason === 'bad-mac') return refuseWith('enrol-refused', named);
+      return refuseWith('enrol-not-taken', named);
+    } finally {
+      transport?.close();
+    }
+    return done(`${hubName(file)} now holds the project. Every computer of the project can sync with it, and it reads the roster and nothing else until you give it a part of the project.`, named);
+  });
 }

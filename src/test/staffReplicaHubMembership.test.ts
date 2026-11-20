@@ -3,21 +3,29 @@
 // and each refusal has a test. The hub's keys come from a label (rosterDevice), the address is fictional and every person is fictional.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import * as net from 'node:net';
 import * as path from 'node:path';
 import test, { mock } from 'node:test';
 import { REKEY_KEEP_TEXT, openLabel, readGrant, unwrapEpochKey } from '../domain/replica/cellKeys';
 import { signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint } from '../domain/replica/checkpoint';
-import { HUB_FILE_REFUSALS, buildHubFile } from '../domain/replica/hubFile';
+import { HUB_FILE_REFUSALS, buildHubFile, certPinOf, enrolmentMac } from '../domain/replica/hubFile';
+import { entryHash } from '../domain/replica/entry';
+import type { SealedEntry } from '../domain/replica/entry';
+import { checkHubJoinMac, hubJoinCheckKey, joinSecretHash, readHubJoin, readInvite } from '../domain/replica/invite';
 import { PREVIEW_WAY_FORWARD_TEXT, baseCellHeldProducts } from '../domain/replica/productCells';
 import { rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { epochsAt } from '../domain/replica/rosterCells';
 import { hubAt, hubCellsAt, hubSignerAt } from '../domain/replica/rosterMembers';
-import { admitJoinRequest, finishRekeys, inviteToProject, joinFromInvite, nameDeputy, removeFromProject, updateMember } from '../staff/replica/membership';
+import { admitJoinRequest, finishRekeys, inviteToProject, joinFromInvite, nameDeputy, removeFromProject, reviewJoinRequest, updateMember } from '../staff/replica/membership';
 import type { MembershipResult } from '../staff/replica/membership';
 import { signPayload } from '../domain/team/signedPayload';
-import { HUB_GRANT_TRADE_OFF, HUB_MEMBERSHIP_REFUSALS, admitHub, grantCellToHub, hubStanding, revokeHub } from '../staff/replica/hubMembership';
+import { HUB_GRANT_TRADE_OFF, HUB_MEMBERSHIP_REFUSALS, HUB_NOT_TOLD_TEXT, admitHub, connectProjectToHub, fetchJoinRequests, grantCellToHub, hubStanding, inviteThroughHub, revokeHub, sendJoinRequestThroughHub } from '../staff/replica/hubMembership';
+import { HubTransport, enrolmentRequest } from '../staff/replica/hubTransport';
+import type { HubTransportOptions } from '../staff/replica/hubTransport';
+import { FIXTURE_CERT, FakeHubServer } from './helpers/fakeHubServer';
+import type { FakeAnswer, FakeRequest } from './helpers/fakeHubServer';
 import { appendProductEntry, ensureLabelCell, ensureLegacyCell } from '../staff/replica/labelCells';
 import { WORLD_NOW, bringIn, grantsOn, install, leadWith, ok, orgClearance, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Install, Seat } from './helpers/labelCellWorld';
@@ -562,4 +570,411 @@ test('no secret: no message, notice, reason or result field holds the enrolment 
   const files = [...filesUnder(lead.at.root), ...filesUnder(lead.at.global), ...lead.at.secrets.values.values()];
   assert.ok(files.length > 0);
   for (const file of files) assert.equal(file.includes(hub.enrolmentSecret), false, 'the enrolment secret is not kept');
+});
+
+// ---- 32-25: invitations and join requests through the hub, and connecting a project (enrolment) --------------------------------------------------
+
+const FAKE_PIN = certPinOf(FIXTURE_CERT);
+const ENROLMENT = 'enr-00112233aabbccdd';
+
+/** A hub file for the scripted hub on 127.0.0.1: its address and the fixture certificate's pin. */
+function fakeHubFile(address: string, options: { expiresAt?: string; label?: string } = {}): TestHub & { address: string } {
+  const device = rosterDevice(options.label ?? 'HUB-NORTH', 'hub');
+  const enrolmentSecret = Buffer.alloc(32, 9).toString('base64url');
+  const signed = buildHubFile(device.signer, {
+    address, certPin: FAKE_PIN, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: ENROLMENT, enrolmentSecret,
+    expiresAt: options.expiresAt ?? new Date(WORLD_NOW.getTime() + 7 * DAY_MS).toISOString(), now: WORLD_NOW
+  });
+  return { device, text: JSON.stringify(signed), enrolmentSecret, certPin: FAKE_PIN, address };
+}
+
+interface JoinHub {
+  fake: FakeHubServer;
+  /** Registrations by invite id: the exact body the lead's device sent. */
+  registered: Map<string, Record<string, unknown>>;
+  /** Join posts the scripted hub accepted, as the hub keeps them. */
+  kept: Array<{ invite: string; request: string }>;
+  enrols: unknown[];
+  /** A scripted refusal of the next join posts, or of enrolment. */
+  joinRefusal?: { status: number; error: string };
+  enrolRefusal?: { status: number; error: string };
+}
+
+/** A scripted hub that checks join posts as the real hub does (readHubJoin and checkHubJoinMac with the registered check key). */
+async function startJoinHub(project: string, hubWriter: string): Promise<JoinHub> {
+  const state: Omit<JoinHub, 'fake'> & { fake?: FakeHubServer } = { registered: new Map(), kept: [], enrols: [] };
+  const base = `/v1/projects/${project}`;
+  const join = (req: FakeRequest): FakeAnswer => {
+    if (state.joinRefusal !== undefined) return { status: state.joinRefusal.status, json: { error: state.joinRefusal.error, message: 'Refused.' } };
+    const body = req.json() as { join: unknown; request: unknown };
+    const read = readHubJoin(body.join, body.request);
+    if (!read.ok) return { status: 403, json: { error: read.reason, message: 'Refused.' } };
+    const record = state.registered.get(read.join.invite);
+    if (record === undefined) return { status: 404, json: { error: 'unknown-invite', message: 'Unknown.' } };
+    if (read.join.hub !== hubWriter || read.join.project !== project) return { status: 403, json: { error: 'wrong-hub', message: 'Refused.' } };
+    if (!checkHubJoinMac(record.checkKey as string, { hub: hubWriter, project, invite: read.join.invite, request: read.join.request }, read.join.hubMac)) {
+      return { status: 403, json: { error: 'wrong-secret', message: 'Refused.' } };
+    }
+    state.kept.push({ invite: read.join.invite, request: JSON.stringify(body.request) });
+    return { status: 202, json: { project, invite: read.join.invite, held: false } };
+  };
+  const fake = await FakeHubServer.start({
+    project,
+    hub: hubWriter,
+    tokenCheck: (req) => (req.path === '/v1/join' && req.method === 'POST' ? join(req) : undefined),
+    handle: (req) => {
+      if (req.path === '/v1/enrol') {
+        state.enrols.push(req.json());
+        if (state.enrolRefusal !== undefined) return { status: state.enrolRefusal.status, json: { error: state.enrolRefusal.error, message: 'Refused.' } };
+        const body = req.json() as { rosterHead: string };
+        return { status: 201, json: { project, rosterHead: body.rosterHead, hub: `hub-${hubWriter.slice(0, 16)}` } };
+      }
+      if (req.method === 'POST' && req.path === `${base}/invites`) {
+        const body = req.json() as Record<string, unknown>;
+        const held = state.registered.has(body.invite as string);
+        state.registered.set(body.invite as string, body);
+        return { status: held ? 200 : 201, json: { project, invite: body.invite, held } };
+      }
+      if (req.method === 'GET' && req.path === `${base}/join-requests`) {
+        return { json: { project, requests: state.kept.map((item) => ({ invite: item.invite, request: item.request, receivedAt: WORLD_NOW.toISOString() })) } };
+      }
+      return { status: 404, json: { error: 'not-found', message: 'Nothing here.' } };
+    }
+  });
+  state.fake = fake;
+  return state as JoinHub;
+}
+
+/** Transports to the scripted hub, with a short connect limit. */
+const openFake = (options: HubTransportOptions): HubTransport => new HubTransport({ ...options, connectTimeoutMs: 2_000 });
+
+/** An address nothing listens on. */
+async function closedAddress(): Promise<string> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return `127.0.0.1:${port}`;
+}
+const openUnreachable = (address: string) => (options: HubTransportOptions): HubTransport => new HubTransport({ ...options, address, connectTimeoutMs: 1_000 });
+
+/** A lead with the scripted hub admitted (the hub file names the scripted hub's address and pin). */
+async function leadOnHub(): Promise<{ lead: Seat; hub: TestHub & { address: string }; joinHub: JoinHub }> {
+  const lead = await leadWith();
+  const device = rosterDevice('HUB-NORTH', 'hub');
+  const joinHub = await startJoinHub(lead.p.projectId, device.writer);
+  const hub = fakeHubFile(joinHub.fake.address);
+  ok(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), 'admit the hub');
+  return { lead, hub, joinHub };
+}
+
+const PERSON = { name: 'Rowan Analyst', seat: 'j4-planner', clearance: orgClearance('Internal') };
+const SEND_FILE_END = 'Send your join request file to the staff lead any way you like.';
+
+test('inviteThroughHub: member.invite as inviteToProject writes it, a file whose hub field names the hub, and the hub told the check key only', async () => {
+  const { lead, hub, joinHub } = await leadOnHub();
+  try {
+    const result = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite through the hub');
+    assert.equal(result.registered, true);
+    assert.match(result.message, /your organization's hub knows it/i);
+    const file = result.file as { name: string; text: string };
+    const read = readInvite(file.text, WORLD_NOW);
+    assert.ok(read.ok, 'the file reads as an invitation');
+    assert.deepEqual(read.invite.hub, { address: joinHub.fake.address, certPin: FAKE_PIN, writer: hub.device.writer });
+    const { roster } = await lead.p.state();
+    const record = roster.members.invites.get(read.invite.invite);
+    assert.ok(record !== undefined, 'the roster has member.invite');
+    assert.equal(record.secretHash, joinSecretHash(read.invite.secret));
+    assert.equal(record.name, PERSON.name);
+    const sent = joinHub.registered.get(read.invite.invite);
+    assert.deepEqual(sent, { invite: read.invite.invite, expiresAt: read.invite.expiresAt, checkKey: hubJoinCheckKey(read.invite.secret, read.invite.invite) });
+    assert.equal(JSON.stringify(joinHub.fake.requests.map((req) => req.body.toString('utf8'))).includes(read.invite.secret), false, 'the join secret never went to the hub');
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('inviteThroughHub unreachable: the invitation is made and works by file only, and the result says the hub was not told', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  await joinHub.fake.close();
+  const result = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openUnreachable(await closedAddress())), 'invite with the hub unreachable');
+  assert.equal(result.registered, false);
+  assert.ok(result.message.includes(HUB_NOT_TOLD_TEXT), result.message);
+  const read = readInvite((result.file as { text: string }).text, WORLD_NOW);
+  assert.ok(read.ok);
+  assert.equal(read.invite.hub, undefined, 'a file the hub does not know names no hub, so the person sends their request by file');
+  assert.ok((await lead.p.state()).roster.members.invites.has(read.invite.invite), 'the invitation is in the roster all the same');
+});
+
+test('inviteThroughHub: with no hub admitted it is refused no-hub and writes nothing', async () => {
+  const lead = await leadWith();
+  const before = storeCounts(lead.at, lead.p.projectId);
+  const result = await inviteThroughHub(lead.host, PERSON, { address: '127.0.0.1:9' }, openFake);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'no-hub');
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
+});
+
+test('sendJoinRequestThroughHub: no-hub-in-invitation for an invitation without a hub field, and nothing is sent', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const invited = ok(await inviteToProject(lead.host, PERSON), 'invite by file');
+    const joiner = install('joiner');
+    const joined = ok(await joinFromInvite(joiner.root, joiner.deps, (invited.file as { text: string }).text, { name: PERSON.name }), 'join by file');
+    const before = joinHub.fake.connections;
+    const result = await sendJoinRequestThroughHub((invited.file as { text: string }).text, (joined.file as { text: string }).text, joiner.deps, openFake);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'no-hub-in-invitation');
+    assert.equal(result.message, HUB_MEMBERSHIP_REFUSALS['no-hub-in-invitation']);
+    assert.equal(joinHub.fake.connections, before, 'no connection was made');
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('sendJoinRequestThroughHub: the request reaches the hub, which checks the hub MAC, and the person is told to read the six words to the staff lead', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const invited = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite through the hub');
+    const inviteText = (invited.file as { text: string }).text;
+    const joiner = install('joiner');
+    const joined = ok(await joinFromInvite(joiner.root, joiner.deps, inviteText, { name: PERSON.name }), 'make the join request');
+    const sent = ok(await sendJoinRequestThroughHub(inviteText, (joined.file as { text: string }).text, joiner.deps, openFake), 'send through the hub');
+    assert.match(sent.message, /reached your organization's hub/);
+    assert.deepEqual(sent.safetyWords, joined.safetyWords, 'the same six words');
+    assert.ok(sent.message.includes((joined.safetyWords as string[]).join(' ')));
+    assert.match(sent.message, /staff lead/);
+    assert.equal(joinHub.kept.length, 1, 'the scripted hub kept the request after checking the hub MAC');
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('sendJoinRequestThroughHub: each hub refusal (unknown, expired, used, voided, locked) is a plain sentence that ends with sending the join request file', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const invited = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite through the hub');
+    const inviteText = (invited.file as { text: string }).text;
+    const joiner = install('joiner');
+    const requestText = (ok(await joinFromInvite(joiner.root, joiner.deps, inviteText, { name: PERSON.name }), 'join').file as { text: string }).text;
+    const cases: Array<[string, number, string]> = [
+      ['unknown-invite', 404, 'hub-unknown-invite'], ['invite-expired', 403, 'hub-invite-expired'], ['invite-used', 403, 'hub-invite-used'],
+      ['invite-voided', 403, 'hub-invite-voided'], ['invite-locked', 403, 'hub-invite-locked'], ['wrong-secret', 403, 'hub-join-refused'], ['rate-limited', 429, 'hub-busy']
+    ];
+    const messages = new Set<string>();
+    for (const [error, status, reason] of cases) {
+      joinHub.joinRefusal = { status, error };
+      const result = await sendJoinRequestThroughHub(inviteText, requestText, joiner.deps, openFake);
+      assert.equal(result.ok, false);
+      assert.equal(result.reason, reason, error);
+      assert.equal(result.message, HUB_MEMBERSHIP_REFUSALS[reason as keyof typeof HUB_MEMBERSHIP_REFUSALS]);
+      assert.ok(result.message.endsWith(SEND_FILE_END), result.message);
+      messages.add(result.message);
+    }
+    assert.equal(messages.size, cases.length, 'each refusal has its own sentence');
+    assert.equal(joinHub.kept.length, 0);
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('sendJoinRequestThroughHub unreachable: the person is told the hub could not be reached and to send the join request file', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  const invited = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite through the hub');
+  await joinHub.fake.close();
+  const inviteText = (invited.file as { text: string }).text;
+  const joiner = install('joiner');
+  const requestText = (ok(await joinFromInvite(joiner.root, joiner.deps, inviteText, { name: PERSON.name }), 'join').file as { text: string }).text;
+  const result = await sendJoinRequestThroughHub(inviteText, requestText, joiner.deps, openUnreachable(await closedAddress()));
+  assert.equal(result.reason, 'hub-join-unreachable');
+  assert.ok(result.message.endsWith(SEND_FILE_END));
+});
+
+test('sendJoinRequestThroughHub: a join request made from another invitation is refused before anything is sent', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const first = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'first invitation');
+    const second = ok(await inviteThroughHub(lead.host, { ...PERSON, name: 'Sasha Analyst' }, { address: joinHub.fake.address }, openFake), 'second invitation');
+    const joiner = install('joiner');
+    const requestText = (ok(await joinFromInvite(joiner.root, joiner.deps, (first.file as { text: string }).text, { name: PERSON.name }), 'join').file as { text: string }).text;
+    const before = joinHub.fake.connections;
+    const result = await sendJoinRequestThroughHub((second.file as { text: string }).text, requestText, joiner.deps, openFake);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'unknown-invite');
+    assert.equal(joinHub.fake.connections, before);
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('fetchJoinRequests: the lead gets the request texts; the hub\'s acceptance admits nobody, and review and admit work as in Phase 31', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const invited = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite through the hub');
+    const inviteText = (invited.file as { text: string }).text;
+    const joiner = install('joiner');
+    const joined = ok(await joinFromInvite(joiner.root, joiner.deps, inviteText, { name: PERSON.name }), 'join');
+    ok(await sendJoinRequestThroughHub(inviteText, (joined.file as { text: string }).text, joiner.deps, openFake), 'send through the hub');
+    const membersBefore = [...(await lead.p.state()).roster.members.members.keys()];
+
+    const fetched = ok(await fetchJoinRequests(lead.host, { address: joinHub.fake.address }, openFake), 'fetch');
+    assert.equal(fetched.requests?.length, 1);
+    assert.match(fetched.message, /One join request is waiting/);
+    assert.deepEqual([...(await lead.p.state()).roster.members.members.keys()], membersBefore, 'the hub\'s acceptance admitted nobody');
+    const text = (fetched.requests as Array<{ text: string }>)[0]?.text as string;
+
+    const reviewed = ok(await reviewJoinRequest(lead.host, text), 'review');
+    assert.deepEqual(reviewed.safetyWords, joined.safetyWords, 'the lead sees the same six words');
+    assert.equal((await admitJoinRequest(lead.host, text, { codeMatched: false })).reason, 'code-not-confirmed');
+    const admitted = ok(await admitJoinRequest(lead.host, text, { codeMatched: true }), 'admit');
+    assert.equal((await lead.p.state()).roster.members.members.has(admitted.member as string), true);
+    // A request whose Phase 31 MAC is wrong is refused by the lead's own check, whatever the hub said.
+    const forged = JSON.parse(text) as { payload: { mac: string } };
+    forged.payload.mac = Buffer.alloc(32, 3).toString('base64url');
+    assert.notEqual((await reviewJoinRequest(lead.host, JSON.stringify(forged))).ok, true);
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('fetchJoinRequests: a member\'s device is refused not-a-roster-writer and asks the hub nothing; an unreachable hub is said plainly', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const member = await bringIn(lead, 'member', 'Nell Planner', orgClearance('Internal'));
+    await syncTo(lead, member);
+    const before = joinHub.fake.connections;
+    const refused = await fetchJoinRequests(member.host, { address: joinHub.fake.address }, openFake);
+    assert.equal(refused.reason, 'not-a-roster-writer');
+    assert.equal(joinHub.fake.connections, before);
+  } finally {
+    await joinHub.fake.close();
+  }
+  const unreachable = await fetchJoinRequests(lead.host, { address: joinHub.fake.address }, openUnreachable(await closedAddress()));
+  assert.equal(unreachable.reason, 'hub-unreachable');
+  assert.equal(unreachable.message, HUB_MEMBERSHIP_REFUSALS['hub-unreachable']);
+});
+
+test('enrol: connectProjectToHub admits the hub and enrols in one call; the hub gets the genesis, every roster entry, the grants and the enrolment MAC', async () => {
+  const lead = await leadWith();
+  const device = rosterDevice('HUB-NORTH', 'hub');
+  const joinHub = await startJoinHub(lead.p.projectId, device.writer);
+  try {
+    const hub = fakeHubFile(joinHub.fake.address);
+    const result = ok(await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openFake), 'connect');
+    assert.equal(result.hub, hubIdOfDevice(device));
+    assert.match(result.message, /now holds the project/);
+    assert.equal(joinHub.enrols.length, 1);
+    const body = joinHub.enrols[0] as { enrolment: string; project: string; entries: SealedEntry[]; grants: unknown[]; blobs: unknown[]; rosterHead: string; mac: string };
+    const { roster } = await lead.p.state();
+    const rosterHead = head(roster).hash;
+    assert.deepEqual(Object.keys(body).sort(), ['blobs', 'enrolment', 'entries', 'grants', 'mac', 'project', 'rosterHead']);
+    assert.equal(body.enrolment, ENROLMENT);
+    assert.equal(body.project, lead.p.projectId);
+    assert.equal(body.rosterHead, rosterHead);
+    const hashes = body.entries.map((entry) => entryHash(entry.header));
+    assert.ok(hashes.includes(lead.p.anchor.genesisHash), 'the genesis is sent');
+    assert.deepEqual(new Set(hashes), new Set(streamEntries(lead.at, lead.p.projectId).map((entry) => entryHash(entry.header))), 'every roster entry is sent');
+    assert.ok(roster.positions.slice(1).every((hash) => hashes.includes(hash)), 'every applied roster entry is among them (position 0 is the origin)');
+    assert.equal(body.grants.length, grantsOn(lead.at).length, 'every grant this device holds');
+    assert.deepEqual(body.blobs, [], 'the roster entries here cite no blob');
+    assert.equal(body.mac, enrolmentMac(hub.enrolmentSecret, { enrolment: ENROLMENT, hub: hubIdOfDevice(device), project: lead.p.projectId, genesisHash: lead.p.anchor.genesisHash, rosterHead }));
+    assert.equal(JSON.stringify(body).includes(hub.enrolmentSecret), false, 'the enrolment secret is in the MAC only');
+    assert.ok(hubAt(roster.members, hubIdOfDevice(device), head(roster).position) !== undefined, 'the hub is admitted');
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('enrol: enrolmentRequest sends the blobs the roster entries cite, read from the replica', async () => {
+  const blob = { hash: 'e'.repeat(64), bytes: Buffer.from('sealed bytes').toString('base64url') };
+  const genesis = { header: { stream: 'p'.repeat(32), writer: 'a'.repeat(64), seq: 0 }, body: '' } as unknown as SealedEntry;
+  const source = {
+    project: 'p'.repeat(32),
+    heads: async () => [{ stream: 'p'.repeat(32), heads: [{ writer: 'a'.repeat(64), seq: 0, hash: 'f'.repeat(64) }] }],
+    entriesAfter: async () => [genesis],
+    blobsCitedBy: async () => [{ entry: 'f'.repeat(64), blob: blob.hash }],
+    blob: async (hash: string) => (hash === blob.hash ? blob : undefined),
+    grants: async () => [{ hash: '1'.repeat(64), signed: { granted: true } }]
+  };
+  const body = await enrolmentRequest(source, { enrolment: ENROLMENT, enrolmentSecret: Buffer.alloc(32, 9).toString('base64url'), hub: 'hub-0011223344556677' }, { genesisHash: 'f'.repeat(64), rosterHead: 'f'.repeat(64) });
+  assert.deepEqual(body.blobs, [blob]);
+  assert.deepEqual(body.grants, [{ granted: true }]);
+  assert.equal(body.entries.length, 1);
+});
+
+test('enrol unreachable: the hub stays admitted, and a second call enrols without a second hub.admit', async () => {
+  const lead = await leadWith();
+  const device = rosterDevice('HUB-NORTH', 'hub');
+  const joinHub = await startJoinHub(lead.p.projectId, device.writer);
+  try {
+    const hub = fakeHubFile(joinHub.fake.address);
+    const first = await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openUnreachable(await closedAddress()));
+    assert.equal(first.ok, false);
+    assert.equal(first.reason, 'enrol-unreachable');
+    assert.equal(first.message, HUB_MEMBERSHIP_REFUSALS['enrol-unreachable']);
+    const afterFirst = await lead.p.state();
+    assert.ok(hubAt(afterFirst.roster.members, hubIdOfDevice(device), head(afterFirst.roster).position) !== undefined, 'the hub stays admitted');
+    const admits = (): number => streamEntries(lead.at, lead.p.projectId).length;
+    const entriesBefore = admits();
+    ok(await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openFake), 'connect again');
+    assert.equal(admits(), entriesBefore, 'no second hub.admit, nor any other roster entry');
+    assert.equal(joinHub.enrols.length, 1);
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('enrol: a used or expired enrolment is refused enrol-refused with the sentence asking the operator for a new hub file', async () => {
+  const lead = await leadWith();
+  const device = rosterDevice('HUB-NORTH', 'hub');
+  const joinHub = await startJoinHub(lead.p.projectId, device.writer);
+  try {
+    const hub = fakeHubFile(joinHub.fake.address);
+    for (const error of ['enrolment-used', 'enrolment-expired']) {
+      joinHub.enrolRefusal = { status: 403, error };
+      const result = await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openFake);
+      assert.equal(result.ok, false);
+      assert.equal(result.reason, 'enrol-refused', error);
+      assert.equal(result.message, HUB_MEMBERSHIP_REFUSALS['enrol-refused']);
+      assert.match(result.message, /hub operator for a new hub file/);
+    }
+    joinHub.enrolRefusal = { status: 409, error: 'project-exists' };
+    const held = ok(await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openFake), 'a hub that already holds the project');
+    assert.match(held.message, /already holds/);
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('no secret: no result, message, notice or file name of the hub join and enrol flows holds a join secret, a check key, a MAC or the enrolment secret', async () => {
+  const { lead, hub, joinHub } = await leadOnHub();
+  try {
+    const results: unknown[] = [];
+    const invited = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite');
+    const read = readInvite((invited.file as { text: string }).text, WORLD_NOW);
+    assert.ok(read.ok);
+    results.push({ ...invited, file: { name: invited.file?.name } });
+    const joiner = install('joiner');
+    const joined = ok(await joinFromInvite(joiner.root, joiner.deps, (invited.file as { text: string }).text, { name: PERSON.name }), 'join');
+    results.push(await sendJoinRequestThroughHub((invited.file as { text: string }).text, (joined.file as { text: string }).text, joiner.deps, openFake));
+    joinHub.joinRefusal = { status: 403, error: 'invite-locked' };
+    results.push(await sendJoinRequestThroughHub((invited.file as { text: string }).text, (joined.file as { text: string }).text, joiner.deps, openFake));
+    const fetched = await fetchJoinRequests(lead.host, { address: joinHub.fake.address }, openFake);
+    results.push({ ...fetched, requests: fetched.requests?.map((item) => item.invite) });
+    results.push(await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openFake));
+    joinHub.enrolRefusal = { status: 403, error: 'enrolment-used' };
+    results.push(await connectProjectToHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }, openFake));
+    const secret = read.invite.secret;
+    const checkKey = hubJoinCheckKey(secret, read.invite.invite);
+    const request = JSON.parse((joined.file as { text: string }).text) as { payload: { mac: string } };
+    const hubMacs = joinHub.fake.requests.filter((req) => req.path === '/v1/join').map((req) => (req.json() as { join: { payload: { hubMac: string } } }).join.payload.hubMac);
+    const enrolMac = (joinHub.enrols[0] as { mac: string }).mac;
+    const text = JSON.stringify(results);
+    for (const value of [secret, Buffer.from(secret, 'base64url').toString('hex'), checkKey, request.payload.mac, ...hubMacs, enrolMac, hub.enrolmentSecret]) {
+      assert.equal(text.includes(value), false, 'a result holds a secret, a key or a MAC');
+    }
+    assert.ok(hubMacs.length >= 2 && enrolMac.length > 0);
+  } finally {
+    await joinHub.fake.close();
+  }
 });

@@ -7,7 +7,8 @@ import type { SealedEntry } from '@ext/domain/replica/entry';
 import { buildHubJoin, buildInvite, buildJoinRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac, joinRequestHash, joinSecretHash, newJoinSecret, readHubJoin } from '@ext/domain/replica/invite';
 import type { InvitePayload, JoinRequestPayload } from '@ext/domain/replica/invite';
 import type { SignedPayload } from '@ext/domain/team/signedPayload';
-import { HubTransport, HubTransportError } from '@ext/staff/replica/hubTransport';
+import { HubTransport, HubTransportError, enrolmentRequest } from '@ext/staff/replica/hubTransport';
+import { issueHubFile } from '../src/enrol';
 import { JoinDesk } from '../src/join';
 import type { JoinChecks } from '../src/join';
 import type { HubConnection } from './helpers/hubClient';
@@ -15,6 +16,7 @@ import { withHub } from './helpers/hubHarness';
 import type { Hub, StartOptions } from './helpers/hubHarness';
 import { DEMO_CLEARANCE, HUB_ADDRESS, INVITE_EXPIRES, createHubWorld } from './helpers/hubWorld';
 import type { HubWorld, WorldDevice } from './helpers/hubWorld';
+import { memoryReplica } from './helpers/memoryReplica';
 import { EventClient, ManualScheduler } from './helpers/sseReader';
 
 // Phase 32, plan 25 (D-37, D-39, D-47, D-48, D-58, D-60): join requests through your organization's hub. The lead's device registers an invitation
@@ -633,6 +635,47 @@ test('log lines of the join desk carry the project id, the invite id and a reaso
       const text = JSON.stringify(line);
       for (const value of [invite.secret, invite.checkKey, post.request.payload.mac, post.request.payload.publicKey, post.request.payload.name]) assert.equal(text.includes(value), false);
     }
+  }));
+
+// ---- Task 3: connecting a project, the enrolment the lead's computer builds, against the real hub -----------------------------------------------
+
+/** The enrolment connectProjectToHub sends, built by the client's enrolmentRequest over a replica of the lead's device, posted by the transport. */
+async function enrolAsClient(hub: Hub, world: HubWorld, file: { enrolment: string; enrolmentSecret: string; hub: string }): Promise<unknown> {
+  const body = await enrolmentRequest(memoryReplica(world, world.lead), file, { genesisHash: world.genesisHash, rosterHead: world.head });
+  const transport = transportFor(hub, world, world.lead);
+  try {
+    return await transport.enrol(body);
+  } finally {
+    transport.close();
+  }
+}
+
+test('enrol: the enrolment the client builds is accepted by the real hub, and a second project with the same hub file is refused enrolment-used', () =>
+  withJoinHub({}, async (hub) => {
+    const issued = issueHubFile(hub.store, hub.identity, { days: 7, now: new Date(hub.now()) });
+    assert.ok(issued.ok);
+    const world = createHubWorld();
+    world.admitHub(hub.identity);
+    world.admitMember(world.device('MEMBER-B', 'mbr-b'));
+    assert.deepEqual(await enrolAsClient(hub, world, issued.file.payload), { project: world.project, rosterHead: world.head, hub: hub.identity.hub });
+    assert.equal(hub.store.project(world.project)?.genesisHash, world.genesisHash);
+    assert.equal((await hub.cache.get(world.project)).head, world.head, 'the hub folded the roster to the head the client claimed');
+
+    const second = createHubWorld({ projectLabel: 'second-exercise', leadLabel: 'LEAD-2' });
+    second.admitHub(hub.identity);
+    await assert.rejects(enrolAsClient(hub, second, issued.file.payload), (error: unknown) => error instanceof HubTransportError && error.reason === 'enrolment-used');
+    assert.equal(hub.store.project(second.project), undefined);
+  }));
+
+test('enrol: a hub file past its expiry is refused enrolment-expired through the client transport, and nothing is stored', () =>
+  withJoinHub({}, async (hub) => {
+    const issued = issueHubFile(hub.store, hub.identity, { days: 1, now: new Date(hub.now()) });
+    assert.ok(issued.ok);
+    hub.advance(DAY_MS + 1);
+    const world = createHubWorld();
+    world.admitHub(hub.identity);
+    await assert.rejects(enrolAsClient(hub, world, issued.file.payload), (error: unknown) => error instanceof HubTransportError && error.reason === 'enrolment-expired');
+    assert.equal(hub.store.project(world.project), undefined);
   }));
 
 function flipFirst(text: string): string {
