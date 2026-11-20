@@ -17,7 +17,9 @@ import { channelHandling, channelLabel } from './feeds';
 import { frameBox, gridToWgs84 } from './frame';
 import type { ExerciseFrame } from './frame';
 import type { ChannelDescriptor, FeedDescriptor, FeedFormat, FeedSourceEvent, FeedSourceState } from './feeds';
-import { labelAtLeast, observationId, OBSERVATION_SCHEMA, parseObservation, readGeometry, segmentId } from './observation';
+import { belowOnScale } from '../../gate/dominance';
+import { activeScales } from '../../gate/labelAlgebra';
+import { observationId, OBSERVATION_SCHEMA, parseObservation, readGeometry, segmentId } from './observation';
 import { reading } from './read';
 import type { Observation, ObservationGeometry, Position } from './observation';
 import { AIS_PROBLEMS, readAisLog } from './codecs/ais';
@@ -243,7 +245,8 @@ export function clampImportLabel(chosen: string, feed: FeedDescriptor): { readon
   }
   const channel = feed.channels.find((entry) => entry.id === IMPORT_CHANNEL) ?? feed.channels[0];
   const floor = channelLabel(feed, channel);
-  if (chosen.split('/')[0] === floor.split('/')[0] && !labelAtLeast(chosen, floor)) return { ok: true, label: floor, raised: true };
+  // Ranked by the label module on the active policy's scales (D-35): raised when it is below the channel's label on the same scale.
+  if (belowOnScale(chosen, floor, activeScales())) return { ok: true, label: floor, raised: true };
   return { ok: true, label: chosen, raised: false };
 }
 

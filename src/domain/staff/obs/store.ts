@@ -5,12 +5,14 @@
 // Rows are appended to one NDJSON segment per feed, channel and hour (segmentId), never rewritten. A segment, the manifest or the feed registry that is
 // there but cannot be read whole is `unreadable`, never empty: an empty read would hide rows from every answer and let the next append start a file again
 // on top of the old one (the rule of drop 1's ledger).
+import { belowOnScale } from '../../gate/dominance';
+import { activeScales } from '../../gate/labelAlgebra';
 import { labelKey } from '../../gate/labels';
 import type { Label } from '../../gate/labels';
 import { FEED_SOURCE_STATES, channelHandling, channelLabel, parseFeedDescriptor } from './feeds';
 import type { FeedClass, FeedDescriptor, FeedSourceState } from './feeds';
 import { layersFor } from './layers';
-import { labelAtLeast, segmentId } from './observation';
+import { segmentId } from './observation';
 import type { Observation } from './observation';
 import { TRACK_STATES } from './tracks';
 import type { TrackState } from './tracks';
@@ -254,7 +256,8 @@ export function rowFits(row: Observation, feed: RegisteredFeed | undefined): Sto
   if (row.simulated !== descriptor.simulated) return 'simulated-mismatch';
   if (row.discipline !== channel.discipline) return 'discipline-mismatch';
   const stamped = channelLabel(descriptor, channel);
-  if (stamped.split('/')[0] === row.label.split('/')[0] && !labelAtLeast(row.label, stamped)) return 'label-too-low';
+  // Ranked by the label module on the active policy's scales (D-35).
+  if (belowOnScale(row.label, stamped, activeScales())) return 'label-too-low';
   if (channelHandling(descriptor, channel).some((flag) => !row.handling.includes(flag))) return 'handling-missing';
   if (row.segment !== segmentId(row.feed, row.channel, row.knownAt)) return 'not-a-row';
   return undefined;

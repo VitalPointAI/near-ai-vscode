@@ -4,8 +4,9 @@
 // Every check that ranks a level reads the active signed policy's scales, never the shipped presets on its own: the gate host registers its policy as the
 // source (setActiveScaleSource), and the presets are used only while no policy has been read or the policy failed closed, which is what the gate itself uses
 // then (GateHost.labelPolicy). Labels are still stored by id (`org/Confidential`); only what a person reads changes.
-import { SCALE_PRESETS, levelIndex, scaleOf } from './labels';
-import type { ScaleTable } from './labels';
+import { atLeast, joinLabels } from './dominance';
+import { SCALE_PRESETS, exportMarkingsShown, labelKey, levelIndex, parseLabelKey, scaleOf, splitLabelKey } from './labels';
+import type { Label, ScaleTable } from './labels';
 
 let source: (() => ScaleTable) | undefined;
 
@@ -29,11 +30,8 @@ export function activeScales(): ScaleTable {
   }
 }
 
-/** A `scale/level` text split at its first `/`; undefined when there is none. */
-export function splitLabelKey(text: string): { readonly scale: string; readonly level: string } | undefined {
-  const at = text.indexOf('/');
-  return at <= 0 ? undefined : { scale: text.slice(0, at), level: text.slice(at + 1) };
-}
+// The one splitter lives in the label module (D-35); re-exported so its importers here compile unchanged.
+export { splitLabelKey } from './labels';
 
 /** The rank of a `scale/level` text on its scale in `scales`, or -1 when the scale or the level is unknown. */
 export function labelKeyRank(text: string, scales: ScaleTable = activeScales()): number {
@@ -43,12 +41,9 @@ export function labelKeyRank(text: string, scales: ScaleTable = activeScales()):
 
 /** Whether `label` is on the same scale as `floor` and at least as high, both known on `scales`. An unknown level is never at least anything. */
 export function labelKeyAtLeast(label: string, floor: string, scales: ScaleTable = activeScales()): boolean {
-  const a = splitLabelKey(label);
-  const b = splitLabelKey(floor);
-  if (a === undefined || b === undefined || a.scale !== b.scale) return false;
-  const rank = labelKeyRank(label, scales);
-  const floorRank = labelKeyRank(floor, scales);
-  return floorRank >= 0 && rank >= floorRank;
+  const read = parseLabelKey(label, scales);
+  const least = parseLabelKey(floor, scales);
+  return read !== undefined && least !== undefined && atLeast(read, least, scales);
 }
 
 /**
@@ -56,10 +51,14 @@ export function labelKeyAtLeast(label: string, floor: string, scales: ScaleTable
  * unknown level or an empty list gives undefined and the caller refuses what it was deriving.
  */
 export function joinLabelKeys(labels: readonly string[], scales: ScaleTable = activeScales()): string | undefined {
-  if (labels.length === 0) return undefined;
-  const scale = splitLabelKey(labels[0] as string)?.scale;
-  if (scale === undefined || labels.some((label) => splitLabelKey(label)?.scale !== scale || labelKeyRank(label, scales) < 0)) return undefined;
-  return labels.reduce((highest, label) => (labelKeyRank(label, scales) > labelKeyRank(highest, scales) ? label : highest));
+  let joined: Label | undefined;
+  for (const text of labels) {
+    const read = parseLabelKey(text, scales);
+    if (read === undefined) return undefined;
+    joined = joined === undefined ? read : joinLabels(joined, read, scales);
+    if (joined === undefined) return undefined;
+  }
+  return joined === undefined ? undefined : labelKey(joined);
 }
 
 /**
@@ -84,4 +83,12 @@ export function labelKeyShown(label: { readonly scale: string; readonly level: s
   const split = typeof label === 'string' ? splitLabelKey(label) : label;
   if (split === undefined) return typeof label === 'string' ? label : '';
   return `${scaleShown(split.scale, scales)}: ${levelShown(split.scale, split.level)}`;
+}
+
+/**
+ * A label as a person reads it with its export markings (D-62): the scale's name and the level, then the shown words of each reserved export compartment
+ * ("Organization: Internal · ITAR"). The one helper label displays call (41-14's labelShown, 41-10's trust line); the tokens stay what records hold.
+ */
+export function labelKeyShownWithMarkings(label: { readonly scale: string; readonly level: string; readonly compartments: readonly string[] }, scales: ScaleTable = activeScales()): string {
+  return exportMarkingsShown(labelKeyShown(label, scales), label.compartments);
 }
