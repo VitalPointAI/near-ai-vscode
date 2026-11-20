@@ -626,8 +626,10 @@ export class HubTransport implements ReplicaTransport {
     try {
       await this.openSession(connection);
       const { response, abort } = await connection.stream(`/v1/projects/${this.project}/events`, connection.token as string);
-      const reader = new HubEventReader(this.project, connection, response, abort, () => this.readers.delete(reader));
-      this.readers.add(reader);
+      const holder: { reader?: HubEventReader } = {};
+      const reader = new HubEventReader(this.project, connection, response, abort, () => { if (holder.reader !== undefined) this.readers.delete(holder.reader); });
+      holder.reader = reader;
+      if (!reader.done) this.readers.add(reader);
       return reader;
     } catch (error) {
       connection.close();
@@ -840,6 +842,11 @@ class HubEventReader implements EventReader {
 
   public close(): void {
     if (!this.ended) this.finish();
+  }
+
+  /** True once the stream has ended (its reports may still be waiting to be read). */
+  public get done(): boolean {
+    return this.ended;
   }
 
   private report(item: EventReport): void {
