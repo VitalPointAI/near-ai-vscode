@@ -31,9 +31,9 @@ function relation(pairs: readonly (readonly [string, string])[]): (a: string, b:
   return (a, b) => reach(a, b, new Set([a]));
 }
 
-interface RunOptions { pairs?: readonly (readonly [string, string])[]; known?: readonly string[] }
+interface RunOptions { pairs?: readonly (readonly [string, string])[]; known?: readonly string[]; strict?: boolean }
 
-/** Resolves the acts in every order and asserts one result; returns it. */
+/** Resolves the acts in every order and asserts one result; returns it. Strict by default (IN-01): a precedence cycle throws instead of passing silently. */
 function resolveAll(acts: readonly DecisionAct[], options: RunOptions = {}): DecisionResult {
   const before = relation(options.pairs ?? []);
   const ids = new Set([...acts.map((a) => a.id), ...(options.known ?? [])]);
@@ -41,7 +41,7 @@ function resolveAll(acts: readonly DecisionAct[], options: RunOptions = {}): Dec
   assert.ok(orders.length <= 720, 'a row has at most 6 acts');
   let first: DecisionResult | undefined;
   for (const order of orders) {
-    const result = resolveDecisions({ versionHash: HASH, acts: order, before, isKnownEntry: (id) => ids.has(id) });
+    const result = resolveDecisions({ versionHash: HASH, acts: order, before, isKnownEntry: (id) => ids.has(id), strict: options.strict ?? true });
     if (first === undefined) first = result;
     else assert.deepEqual(result, first, `order ${order.map((a) => a.id).join(',')} gave another result`);
   }
@@ -236,8 +236,54 @@ test('D24 an act whose decisionsSeen names an unknown entry is held until that e
   const arrived = resolveAll([unknown], { known: ['ghost'] });
   assert.equal(arrived.status, 'effective');
   assert.deepEqual(arrived.held, []);
+  // WR-09: an act that saw the held act names no unknown id, so it is not held with it.
   const chained = resolveAll([unknown, act('y', 'reject', { seen: ['x'] })]);
-  assert.deepEqual(chained.held.map((h) => h.id), ['x', 'y']);
+  assert.deepEqual(chained.held.map((h) => h.id), ['x']);
+  assert.equal(chained.outcome, 'REJECT');
+});
+
+test('WR-09 a withdraw naming a bogus id is held alone, and the honest approve that saw it is effective', () => {
+  const result = resolveAll([act('w', 'withdraw', { by: 'Owner', seen: ['bogus'] }), act('a', 'approve', { by: 'Ada', seen: ['w'] })]);
+  assert.deepEqual(result.held, [{ id: 'w', reason: 'unknown-decision-seen' }]);
+  assert.equal(result.status, 'effective');
+  assert.equal(result.outcome, 'APPROVE');
+  assert.deepEqual(result.effective, ['a']);
+  assert.equal(result.terminal, false);
+  // The same honest approve is still contested by a concurrent reject: not holding it does not make it win.
+  const contested = resolveAll([act('w', 'withdraw', { seen: ['bogus'] }), act('a', 'approve', { seen: ['w'] }), act('r', 'reject')]);
+  assert.deepEqual(contested.held.map((h) => h.id), ['w']);
+  assert.equal(contested.status, 'contested');
+  assert.deepEqual(contested.contested, ['a', 'r']);
+});
+
+test('WR-09 in a chain of three honest acts each seeing the previous, only the first, which names a bogus id, is held', () => {
+  const result = resolveAll([act('x1', 'approve', { seen: ['bogus'] }), act('x2', 'reject', { seen: ['x1'] }), act('x3', 'approve', { seen: ['x2'] })]);
+  assert.deepEqual(result.held, [{ id: 'x1', reason: 'unknown-decision-seen' }]);
+  assert.equal(result.status, 'effective');
+  assert.equal(result.outcome, 'APPROVE');
+  assert.deepEqual(result.effective, ['x3']);
+  assert.deepEqual(result.superseded, ['x2']);
+  // Once the bogus id becomes known, nothing is held and the chain is the same.
+  const known = resolveAll([act('x1', 'approve', { seen: ['bogus'] }), act('x2', 'reject', { seen: ['x1'] }), act('x3', 'approve', { seen: ['x2'] })], { known: ['bogus'] });
+  assert.deepEqual(known.held, []);
+  assert.deepEqual(known.effective, ['x3']);
+  assert.deepEqual(known.superseded, ['x1', 'x2']);
+});
+
+test('IN-01 a precedence cycle throws in strict mode, naming the acts on the cycle, and is held as before without strict', () => {
+  const cycle = [act('a', 'approve', { seen: ['b'] }), act('b', 'reject', { seen: ['a'] }), act('c', 'approve')];
+  for (const order of permutations(cycle)) {
+    assert.throws(
+      () => resolveDecisions({ versionHash: HASH, acts: order, before: () => false, isKnownEntry: () => false, strict: true }),
+      (error: unknown) => error instanceof Error && /precedence cycle/.test(error.message) && error.message.endsWith(': a, b'),
+    );
+  }
+  const loose = resolveAll(cycle, { strict: false });
+  assert.deepEqual(loose.held, [{ id: 'a', reason: 'precedence-cycle' }, { id: 'b', reason: 'precedence-cycle' }]);
+  assert.deepEqual(loose.effective, ['c']);
+  // Leaving strict out is the production default: the hold, never a throw.
+  const unset = resolveDecisions({ versionHash: HASH, acts: cycle, before: () => false, isKnownEntry: () => false });
+  assert.deepEqual(unset, loose);
 });
 
 test('supersede concurrent with a withdraw is contested', () => {
@@ -314,7 +360,7 @@ test('swapping every name between acts changes neither status nor outcome nor wh
 test('the function is total: duplicate ids, a precedence cycle and unknown outcomes never throw and stay order independent', () => {
   const dup = resolveAll([act('a', 'approve'), act('a', 'approve'), act('r', 'reject')]);
   assert.equal(dup.status, 'contested');
-  const cycle = resolveAll([act('a', 'approve', { seen: ['b'] }), act('b', 'reject', { seen: ['a'] }), act('c', 'approve')]);
+  const cycle = resolveAll([act('a', 'approve', { seen: ['b'] }), act('b', 'reject', { seen: ['a'] }), act('c', 'approve')], { strict: false });
   assert.deepEqual(cycle.held, [{ id: 'a', reason: 'precedence-cycle' }, { id: 'b', reason: 'precedence-cycle' }]);
   assert.deepEqual(cycle.effective, ['c']);
   const hostile = resolveAll([act('a', 'approve'), { ...act('h', 'approve'), outcome: 'constructor' as DecisionOutcome }]);

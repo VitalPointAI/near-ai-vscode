@@ -35,6 +35,11 @@ export interface DecisionInput {
   before(a: string, b: string): boolean;
   /** True when the entry id is known to the caller at all (a decision seen that is not known holds the act). */
   isKnownEntry(id: string): boolean;
+  /**
+   * When true, a precedence cycle throws instead of being held (IN-01). A cycle cannot happen with real entries, since an entry can only name or
+   * follow entries that existed before it; tests set strict so that one can never pass silently. Production leaves it unset and keeps the hold.
+   */
+  strict?: boolean;
 }
 
 export interface DecisionResult {
@@ -95,16 +100,10 @@ export function resolveDecisions(input: DecisionInput): DecisionResult {
     else active.push(act);
   }
 
-  // A decision seen that nobody knows holds the act; an act that saw a held act is held with it.
+  // A decision seen that nobody knows holds the act that names it, and only that act (WR-09): an act that saw a held act names a known id, so one
+  // bogus id cannot hold every honest act made after it.
   const ids = new Set(unique.map((act) => act.id));
-  const heldIds = new Set<string>();
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const act of active) {
-      if (heldIds.has(act.id)) continue;
-      if (act.seen.some((id) => heldIds.has(id) || !(ids.has(id) || input.isKnownEntry(id)))) { heldIds.add(act.id); changed = true; }
-    }
-  }
+  const heldIds = new Set(active.filter((act) => act.seen.some((id) => !(ids.has(id) || input.isKnownEntry(id)))).map((act) => act.id));
   for (const id of [...heldIds].sort(compareText)) held.push({ id, reason: 'unknown-decision-seen' });
   active = active.filter((act) => !heldIds.has(act.id));
 
@@ -129,6 +128,7 @@ export function resolveDecisions(input: DecisionInput): DecisionResult {
   let closure = closureOf(active);
   const cyclic = active.filter((act) => closure.get(act.id)?.has(act.id) ?? false).map((act) => act.id);
   if (cyclic.length > 0) {
+    if (input.strict === true) throw new Error(`Decision precedence cycle on version ${input.versionHash}: ${[...cyclic].sort(compareText).join(', ')}`);
     for (const id of cyclic.sort(compareText)) held.push({ id, reason: 'precedence-cycle' });
     active = active.filter((act) => !cyclic.includes(act.id));
     closure = closureOf(active);
