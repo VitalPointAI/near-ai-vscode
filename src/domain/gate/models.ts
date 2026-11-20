@@ -5,13 +5,14 @@
 // stays `{ v: 1 }`; any other section has `mode` (report) and `unknownMaxTier` (T0) filled, so a parsed section is its own wire form.
 // Report mode only in Phase 41: nothing here refuses a request. 41-10's passport step of decideRoute calls these helpers and records `wouldRefuse`.
 // This file imports nothing from bundle.ts: 41-10's routing.ts imports it, and bundle.ts imports routing.ts, which would make a load-time cycle.
-// ENDPOINT_CLASSES is used only inside functions, never at module load.
+// ENDPOINT_CLASSES and SHIPPED_PASSPORTS are used only inside functions, never at module load; shippedPassports.ts imports types only from here.
 import { createHash } from 'node:crypto';
 import { canonicalBytes } from '../team/canonical';
 import { ENDPOINT_CLASSES } from './endpoints';
 import type { EndpointClass } from './endpoints';
 import { levelIndex } from './labels';
 import type { ScaleTable } from './labels';
+import { SHIPPED_PASSPORTS } from './shippedPassports';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 
@@ -647,7 +648,7 @@ export function passportHash(passport: Passport): string {
 }
 
 function shippedCandidates(): readonly Passport[] {
-  return [];
+  return SHIPPED_PASSPORTS;
 }
 
 /**
@@ -676,4 +677,39 @@ function stricter(tier: UseTier, expires: number, id: string, than: { tier: UseT
   if (tierRank(tier) !== tierRank(than.tier)) return tierRank(tier) < tierRank(than.tier);
   if (expires !== than.expires) return expires < than.expires;
   return id < than.passport.id;
+}
+
+/** Why a passport does not cover a request (provenance 12.2): the ids 41-10 records as `wouldRefuse` and 74.1 turns into refusals. */
+export type PassportGap = 'unknown' | 'expired' | 'tier-exceeded' | 'hosting-mismatch' | 'acceptance-missing';
+
+export interface PassportCoverInput {
+  /** resolvePassport's answer for the model. */
+  readonly resolved: ResolvedPassport | undefined;
+  /** useTierFor's answer for the request. */
+  readonly use: UseTier;
+  /** The class of the endpoint the request would go to. */
+  readonly endpointClass: EndpointClass;
+  /** A valid `t1-risk` authorization covers this model, project and label (authorizationCovers, 41-01). */
+  readonly t1RiskCovers: boolean;
+  readonly now: number;
+}
+
+/**
+ * Whether the passport covers the request, in the order of provenance 12.2: status (no passport and an expired one allow only T0), then the tier (T1 above
+ * a T0 passport needs a t1-risk authorization in scope, never more than T1), then the hosting class. Pure; it refuses nothing itself.
+ */
+export function passportCovers(input: PassportCoverInput): { readonly covers: true } | { readonly covers: false; readonly why: PassportGap } {
+  const use = input.use;
+  const resolved = input.resolved;
+  if (resolved === undefined) return use === 'T0' ? { covers: true } : { covers: false, why: 'unknown' };
+  const passport = resolved.passport;
+  const expired = !(input.now < parseIsoMillis(passport.expiresAt));
+  if (expired && use !== 'T0') return { covers: false, why: 'expired' };
+  const tier = effectiveMaxTier(passport, input.now);
+  if (tierRank(use) > tierRank(tier)) {
+    if (!(use === 'T1' && tier === 'T0' && !expired)) return { covers: false, why: 'tier-exceeded' };
+    if (!input.t1RiskCovers) return { covers: false, why: 'acceptance-missing' };
+  }
+  if (!passport.hosting.includes(input.endpointClass)) return { covers: false, why: 'hosting-mismatch' };
+  return { covers: true };
 }

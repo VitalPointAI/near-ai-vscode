@@ -5,10 +5,12 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { bundleHash } from '../domain/gate/bundle';
-import { MAX_PASSPORTS, effectiveMaxTier, matchesModelPattern, parseModelsSection, passportHash, resolvePassport } from '../domain/gate/models';
+import { MAX_PASSPORTS, effectiveMaxTier, matchesModelPattern, parseModelsSection, passportCovers, passportHash, resolvePassport } from '../domain/gate/models';
 import type { ModelsSection, Passport } from '../domain/gate/models';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { parsePolicyDocument } from '../domain/gate/policyDocument';
+import { SHIPPED_PASSPORTS, SHIPPED_TIER_BY_LEVEL, SHIPPED_TIER_BY_PROJECT } from '../domain/gate/shippedPassports';
+import { USE_TIER_WORDS, raiseUseTier, useTierFor } from '../domain/gate/useTier';
 import { DAY_MS, FIXED_NOW, deviceKey, policyDocumentFor } from './helpers/policyFixtures';
 
 type Loose = any; // a section under edit: each test breaks one value on purpose
@@ -378,4 +380,182 @@ test('matchesModelPattern: anchored pieces in order, never overlapping, case-sen
   assert.equal(matchesModelPattern('example/a', 'example/a'), true);
   assert.equal(matchesModelPattern('example/a', 'example/ab'), false);
   assert.equal(matchesModelPattern(`${'a*'.repeat(60)}b`, 'a'.repeat(5000)), false, 'a hostile pattern ends quickly');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Task 3: shipped passports, useTierFor and passportCovers
+
+test('the shipped passports pass the same parser, sorted by id, and come back unchanged', () => {
+  const result = parseModelsSection({ v: 1, mode: 'report', unknownMaxTier: 'T0', passports: SHIPPED_PASSPORTS }, SCALE_PRESETS);
+  assert.ok(result.ok, result.ok ? '' : `${result.reason} ${result.path}`);
+  if (!result.ok) return;
+  assert.deepEqual(result.value.passports, SHIPPED_PASSPORTS);
+  assert.ok(deepFrozen(SHIPPED_PASSPORTS));
+  assert.ok(SHIPPED_PASSPORTS.length >= 15);
+});
+
+test('no shipped passport claims T3 or carries an evaluation; every PRC-origin row is T0; each lives at most 365 days', () => {
+  for (const passport of SHIPPED_PASSPORTS) {
+    assert.notEqual(passport.maxTier, 'T3', passport.id);
+    assert.equal(passport.evaluation, undefined, passport.id);
+    if (passport.origin === 'CN') assert.equal(passport.maxTier, 'T0', passport.id);
+    assert.ok(Date.parse(passport.expiresAt) - Date.parse(passport.issuedAt) <= 365 * DAY_MS, passport.id);
+    assert.equal(passport.artifact, undefined, `${passport.id}: only your organization's own passport names exact weights`);
+    assert.ok(!passport.hosting.some((endpointClass) => endpointClass === 'org-tee' || endpointClass === 'org-plain' || endpointClass === 'local'), passport.id);
+  }
+  const origins = new Set(SHIPPED_PASSPORTS.map((passport) => passport.origin));
+  assert.ok(origins.has('CN') && origins.has('US') && origins.has('CA') && origins.has('DE'));
+});
+
+test('resolvePassport without a section uses the shipped rows: PRC models at T0, Whisper at T2, OpenReasoning-Nemotron by origin', () => {
+  const cases: Array<[string, string, string]> = [
+    ['deepseek-ai/DeepSeek-V3.2', 'deepseek-ai/deepseek', 'T0'],
+    ['Qwen/Qwen3.6-35B-A3B-FP8', 'qwen/qwen', 'T0'],
+    ['Qwen/Qwen3-Embedding-0.6B', 'qwen/qwen', 'T0'],
+    ['moonshotai/kimi-k3', 'moonshotai/kimi', 'T0'],
+    ['z-ai/glm-5.3', 'z-ai/glm', 'T0'],
+    ['zai-org/GLM-4.6', 'z-ai/glm', 'T0'],
+    ['openai/whisper-large-v3', 'openai/whisper-large-v3', 'T2'],
+    ['black-forest-labs/FLUX.2-klein-4B', 'black-forest-labs/flux.2-klein-4b', 'T2'],
+    ['nvidia/OpenReasoning-Nemotron-7B', 'nvidia/openreasoning-nemotron', 'T0'],
+    ['nvidia/Llama-3.3-Nemotron-Super-49B-v1', 'nvidia/llama-nemotron', 'T2'],
+    ['nvidia/NVIDIA-Nemotron-3-Super-120B', 'nvidia/nemotron-3-super', 'T2'],
+    ['openai/gpt-oss-120b', 'openai/gpt-oss', 'T2'],
+    ['openai/gpt-6.1-sol', 'openai/gpt', 'T2'],
+    ['anthropic/claude-sonnet-5-5', 'anthropic/claude', 'T2'],
+    ['cohere/command-a-plus', 'cohere/command-a-plus', 'T2']
+  ];
+  for (const [model, id, tier] of cases) {
+    const resolved = resolvePassport(undefined, model, FIXED_NOW);
+    assert.equal(resolved?.passport.id, id, model);
+    assert.equal(resolved?.maxTier, tier, model);
+    assert.equal(resolved?.source, 'shipped', model);
+  }
+  assert.equal(resolvePassport(undefined, 'nvidia/OpenReasoning-Nemotron-7B', FIXED_NOW)?.passport.origin, 'CN', 'the name says Nemotron; the origin is the base');
+  for (const model of ['somevendor/unknown-model', 'cohere/command-a-plus-08', 'openai/whisper-large-v3-turbo', 'deepseek-ai', 'qwen/qwen3-8b']) {
+    assert.equal(resolvePassport(undefined, model, FIXED_NOW), undefined, model);
+  }
+  assert.ok(resolvePassport(undefined, 'openai/gpt-oss-20b', FIXED_NOW)?.passport.hosting.includes('nearai-tee'), 'gpt-oss is never read as the closed API');
+});
+
+test('your organization\'s passport replaces a shipped one by id; shipped rows still serve other models', () => {
+  const whisper = examplePassport({ id: 'openai/whisper-large-v3', match: ['openai/whisper-large-v3'], developer: 'OpenAI', origin: 'US', maxTier: 'T1' });
+  const models = parsed(section([whisper]));
+  const resolved = resolvePassport(models, 'openai/whisper-large-v3', FIXED_NOW);
+  assert.equal(resolved?.source, 'policy');
+  assert.equal(resolved?.maxTier, 'T1');
+  assert.equal(resolvePassport(models, 'deepseek-ai/DeepSeek-V3.2', FIXED_NOW)?.source, 'shipped');
+  assert.equal(resolvePassport(models, 'example/Western-Chat-8B', FIXED_NOW), undefined, 'the replaced passport is the policy one, matching only its own pattern');
+});
+
+test('a policy passport overlapping a shipped one: the stricter of the two still wins', () => {
+  const broad = examplePassport({ id: 'example/any-qwen', match: ['Qwen/*'], developer: 'Example Labs', origin: 'CA', maxTier: 'T2' });
+  assert.equal(resolvePassport(parsed(section([broad])), 'Qwen/Qwen3.6-35B-A3B-FP8', FIXED_NOW)?.passport.id, 'qwen/qwen', 'a broader policy row cannot lift a shipped T0 row');
+});
+
+test('the shipped tier tables name levels of the shipped scales and parse as a section\'s own tables', () => {
+  assert.equal(refusalOf(section(undefined, { tierByLevel: plain(SHIPPED_TIER_BY_LEVEL), tierByProject: plain(SHIPPED_TIER_BY_PROJECT) })), 'ok');
+  assert.equal(SHIPPED_TIER_BY_LEVEL['ca-protected/Protected B'], 'T2');
+  assert.equal(SHIPPED_TIER_BY_LEVEL['nato/NATO Confidential'], 'T3');
+  assert.equal(SHIPPED_TIER_BY_PROJECT['staff'], 'T3');
+  assert.equal(SHIPPED_TIER_BY_PROJECT['staff-exercise'], 'T2');
+});
+
+test('useTierFor: plain chat is T1; tools, an unattended, relay, routine or sub-agent context, writing to files and a checking job are T2', () => {
+  assert.equal(useTierFor({}), 'T1');
+  assert.equal(useTierFor({ context: 'interactive' }), 'T1');
+  assert.equal(useTierFor({ tools: true }), 'T2');
+  assert.equal(useTierFor({ tools: false }), 'T1');
+  for (const context of ['unattended', 'relay', 'routine', 'sub-agent'] as const) assert.equal(useTierFor({ context }), 'T2', context);
+  assert.equal(useTierFor({ writesFiles: true }), 'T2');
+  assert.equal(useTierFor({ checkingJob: true }), 'T2');
+});
+
+test('useTierFor: the label raises by the shipped table', () => {
+  const at = (scale: string, level: string): string => useTierFor({ mark: [{ scale, level }] });
+  assert.equal(at('org', 'Public'), 'T1');
+  assert.equal(at('org', 'Internal'), 'T1');
+  assert.equal(at('org', 'Restricted'), 'T2');
+  assert.equal(at('ca-protected', 'Protected A'), 'T1');
+  assert.equal(at('ca-protected', 'Protected B'), 'T2');
+  assert.equal(at('ca-protected', 'Protected C'), 'T2');
+  assert.equal(at('ca-classified', 'Confidential'), 'T3');
+  assert.equal(at('ca-classified', 'Secret'), 'T3');
+  assert.equal(at('nato', 'NATO Restricted'), 'T1');
+  assert.equal(at('nato', 'NATO Confidential'), 'T3');
+  assert.equal(useTierFor({ mark: [{ scale: 'org', level: 'Internal' }, { scale: 'ca-classified', level: 'Secret' }] }), 'T3', 'the highest mark wins');
+  assert.equal(useTierFor({ mark: [{ scale: '__proto__', level: 'x' }, { scale: 'constructor', level: '' }] }), 'T1');
+});
+
+test('useTierFor: a staff project is T3, and T2 with the signed exercise attribute', () => {
+  assert.equal(useTierFor({ project: { kind: 'staff' } }), 'T3');
+  assert.equal(useTierFor({ project: { kind: 'staff', exercise: true } }), 'T2');
+  assert.equal(useTierFor({ project: { kind: 'staff', exercise: false } }), 'T3');
+  assert.equal(useTierFor({ project: { kind: 'software' } }), 'T1');
+  assert.equal(useTierFor({ project: { kind: 'staff', exercise: true }, mark: [{ scale: 'ca-classified', level: 'Secret' }] }), 'T3', 'the label still raises an exercise');
+});
+
+test('useTierFor: the research lane, cyber and a synthetic comparison are T0 whatever else is set', () => {
+  const everything = { tools: true, context: 'unattended' as const, writesFiles: true, checkingJob: true, mark: [{ scale: 'ca-classified', level: 'Secret' }], project: { kind: 'staff' }, inherited: 'T3' as const };
+  assert.equal(useTierFor({ lane: 'research', ...everything }), 'T0');
+  assert.equal(useTierFor({ cyber: true, ...everything }), 'T0');
+  assert.equal(useTierFor({ compare: 'synthetic', ...everything }), 'T0');
+  assert.equal(useTierFor({ cyber: false }), 'T1');
+});
+
+test('useTierFor: Compare Models on project tasks is T2; vision keeps the inherited tier; embedding and reranking are at least T1', () => {
+  assert.equal(useTierFor({ compare: 'project' }), 'T2');
+  assert.equal(useTierFor({ inherited: 'T2' }), 'T2');
+  assert.equal(useTierFor({ inherited: 'T3' }), 'T3');
+  assert.equal(useTierFor({ feature: 'embedding' }), 'T1');
+  assert.equal(useTierFor({ feature: 'rerank', inherited: 'T0' }), 'T1');
+  assert.equal(useTierFor({ feature: 'embedding', inherited: 'T2' }), 'T2');
+});
+
+test('useTierFor: a policy tierByLevel and tierByProject only raise the shipped values', () => {
+  const models = parsed(section(undefined, { tierByLevel: { 'ca-protected/Protected B': 'T1', 'org/Internal': 'T2' }, tierByProject: { staff: 'T1', software: 'T2' } }));
+  assert.equal(useTierFor({ mark: [{ scale: 'ca-protected', level: 'Protected B' }] }, models), 'T2', 'a lower policy value never lowers');
+  assert.equal(useTierFor({ mark: [{ scale: 'org', level: 'Internal' }] }, models), 'T2');
+  assert.equal(useTierFor({ project: { kind: 'staff' } }, models), 'T3');
+  assert.equal(useTierFor({ project: { kind: 'software' } }, models), 'T2');
+  assert.equal(useTierFor({ mark: [{ scale: 'ca-protected', level: 'Protected B' }] }, parsed({ v: 1 })), 'T2', 'the empty section keeps the shipped table');
+});
+
+test('raiseUseTier never lowers, and the use words follow the glossary', () => {
+  assert.equal(raiseUseTier('T2', 'T1'), 'T2');
+  assert.equal(raiseUseTier('T1', 'T3'), 'T3');
+  assert.equal(raiseUseTier('T0', 'T0'), 'T0');
+  assert.deepEqual({ ...USE_TIER_WORDS }, { T0: 'research only (in the research workspace)', T1: 'chat you review', T2: 'agent work', T3: 'operational work' });
+});
+
+test('passportCovers: a T2 passport covers T2 on a class it lists; T3 exceeds it; an unlisted class is a hosting mismatch', () => {
+  const resolved = resolvePassport(parsed(section()), 'example/Western-Chat-8B', FIXED_NOW);
+  const covers = (use: 'T0' | 'T1' | 'T2' | 'T3', endpointClass: 'nearai-tee' | 'closed-api', now = FIXED_NOW): unknown => passportCovers({ resolved, use, endpointClass, t1RiskCovers: false, now });
+  assert.deepEqual(covers('T2', 'nearai-tee'), { covers: true });
+  assert.deepEqual(covers('T1', 'nearai-tee'), { covers: true });
+  assert.deepEqual(covers('T3', 'nearai-tee'), { covers: false, why: 'tier-exceeded' });
+  assert.deepEqual(covers('T2', 'closed-api'), { covers: false, why: 'hosting-mismatch' });
+  assert.deepEqual(covers('T0', 'closed-api'), { covers: false, why: 'hosting-mismatch' });
+});
+
+test('passportCovers: no passport and an expired one allow only T0', () => {
+  const none = (use: 'T0' | 'T1' | 'T2'): unknown => passportCovers({ resolved: undefined, use, endpointClass: 'nearai-tee', t1RiskCovers: true, now: FIXED_NOW });
+  assert.deepEqual(none('T2'), { covers: false, why: 'unknown' });
+  assert.deepEqual(none('T1'), { covers: false, why: 'unknown' }, 'a t1-risk authorization needs a passport to name');
+  assert.deepEqual(none('T0'), { covers: true });
+  const later = Date.parse('2027-07-01T00:00:00.000Z');
+  const resolved = resolvePassport(parsed(section()), 'example/Western-Chat-8B', FIXED_NOW);
+  assert.deepEqual(passportCovers({ resolved, use: 'T2', endpointClass: 'nearai-tee', t1RiskCovers: false, now: later }), { covers: false, why: 'expired' });
+  assert.deepEqual(passportCovers({ resolved, use: 'T1', endpointClass: 'nearai-tee', t1RiskCovers: true, now: later }), { covers: false, why: 'expired' });
+  assert.deepEqual(passportCovers({ resolved, use: 'T0', endpointClass: 'nearai-tee', t1RiskCovers: false, now: later }), { covers: true });
+});
+
+test('passportCovers: a T0 passport reaches T1 only with a t1-risk authorization in scope, and never T2', () => {
+  const resolved = resolvePassport(undefined, 'z-ai/glm-5.3', FIXED_NOW);
+  assert.equal(resolved?.maxTier, 'T0');
+  const covers = (use: 'T0' | 'T1' | 'T2', t1RiskCovers: boolean): unknown => passportCovers({ resolved, use, endpointClass: 'nearai-tee', t1RiskCovers, now: FIXED_NOW });
+  assert.deepEqual(covers('T1', true), { covers: true });
+  assert.deepEqual(covers('T1', false), { covers: false, why: 'acceptance-missing' });
+  assert.deepEqual(covers('T2', true), { covers: false, why: 'tier-exceeded' });
+  assert.deepEqual(covers('T0', false), { covers: true });
 });
