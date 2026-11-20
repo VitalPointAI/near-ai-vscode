@@ -15,7 +15,7 @@ import type { HubFindingKind, WitnessState } from '@ext/domain/replica/hubWitnes
 import { foldRoster, rosterView } from '@ext/domain/replica/roster';
 import { verifyEntry } from '@ext/domain/replica/verify';
 import { jsonAnswer, keptHub, readAnswer, withJson, wrapHarnessHub } from './helpers/faultProxy';
-import type { FaultAnswer, FaultLayer, FaultPlan, KeptHub } from './helpers/faultProxy';
+import type { FaultAnswer, FaultLayer, FaultPlan, HubInstance } from './helpers/faultProxy';
 import { startHub } from './helpers/hubHarness';
 import type { Hub } from './helpers/hubHarness';
 import { NOW_MS, createHubWorld, worldDevice } from './helpers/hubWorld';
@@ -247,25 +247,6 @@ async function withScene(body: (scene: Scene) => Promise<void>): Promise<void> {
   }
 }
 
-/** A hub kept across instances (rollback, fork): each instance with its own hand-moved scheduler. */
-interface Instance {
-  hub: Hub;
-  advance(ms: number): Promise<void>;
-}
-
-async function instanceOf(kept: KeptHub, dir: string): Promise<Instance> {
-  const scheduler = new ManualScheduler();
-  const hub = await kept.start(dir, { scheduler });
-  scheduler.onAdvance = (ms) => hub.advance(ms);
-  return {
-    hub,
-    advance: async (ms) => {
-      scheduler.advance(ms);
-      await hub.checkpoints?.settled();
-    },
-  };
-}
-
 /** The roster as a client folds it and every entry opened with every key of the world: what a lead's computer recomputes checkpoints from. */
 function openedEntries(world: HubWorld): CheckpointEntry[] {
   const keys = (stream: string, epoch: number): Buffer => world.keyOf(stream, epoch);
@@ -492,8 +473,8 @@ const rows: Row[] = [
     run: async () => {
       const kept = keptHub();
       const dir = kept.folder('state');
-      let current: Instance | undefined = await instanceOf(kept, dir);
-      let rolled: Instance | undefined;
+      let current: HubInstance | undefined = await kept.instance(dir);
+      let rolled: HubInstance | undefined;
       try {
         const { world } = team(current.hub, { ungranted: false });
         assert.equal((await current.hub.enrolProject(world))?.status, 201);
@@ -508,7 +489,7 @@ const rows: Row[] = [
         // The operator's older copy, taken after a clean stop.
         const older = kept.copy(dir, 'older');
 
-        current = await instanceOf(kept, dir);
+        current = await kept.instance(dir);
         const newer = note(world, world.lead, { text: 'Fictional second report' });
         assert.ok(a.replica.add(newer.entry));
         await sync(current.hub, world, a);
@@ -522,7 +503,7 @@ const rows: Row[] = [
         await current.hub.close();
         current = undefined;
 
-        rolled = await instanceOf(kept, FAULTS_OFF ? dir : older);
+        rolled = await kept.instance(FAULTS_OFF ? dir : older);
         const shown = signedOf(rolled.hub.store.latestCheckpoint(world.project));
         assert.ok(shown);
         // Through the checkpoint: the hub's latest, given to the witness A held before this exchange, is below the newest A kept.
@@ -550,8 +531,8 @@ const rows: Row[] = [
     run: async () => {
       const kept = keptHub();
       const dir = kept.folder('state');
-      let current: Instance | undefined = await instanceOf(kept, dir);
-      let rolled: Instance | undefined;
+      let current: HubInstance | undefined = await kept.instance(dir);
+      let rolled: HubInstance | undefined;
       try {
         const { world, ungranted } = team(current.hub);
         assert.equal((await current.hub.enrolProject(world))?.status, 201);
@@ -563,7 +544,7 @@ const rows: Row[] = [
         current = undefined;
         const older = kept.copy(dir, 'older');
 
-        current = await instanceOf(kept, dir);
+        current = await kept.instance(dir);
         const newer = note(world, world.lead, { stream: ungranted, text: 'Fictional second cell report' });
         assert.ok(a.replica.add(newer.entry));
         const pushed = await sync(current.hub, world, a);
@@ -572,7 +553,7 @@ const rows: Row[] = [
         await current.hub.close();
         current = undefined;
 
-        rolled = await instanceOf(kept, FAULTS_OFF ? dir : older);
+        rolled = await kept.instance(FAULTS_OFF ? dir : older);
         const report = await sync(rolled.hub, world, a);
         const found = findingOf(report, 'rolled-back');
         assert.ok(found, JSON.stringify(report.findings));
@@ -597,17 +578,17 @@ const rows: Row[] = [
     run: async () => {
       const kept = keptHub();
       const dir = kept.folder('state');
-      const opened: Instance[] = [];
+      const opened: HubInstance[] = [];
       try {
-        const setup = await instanceOf(kept, dir);
+        const setup = await kept.instance(dir);
         opened.push(setup);
         const { world, member } = team(setup.hub, { ungranted: false });
         assert.equal((await setup.hub.enrolProject(world))?.status, 201);
         await setup.hub.close();
         opened.pop();
-        const x = await instanceOf(kept, kept.copy(dir, 'x'));
+        const x = await kept.instance(kept.copy(dir, 'x'));
         opened.push(x);
-        const y = await instanceOf(kept, kept.copy(dir, 'y'));
+        const y = await kept.instance(kept.copy(dir, 'y'));
         opened.push(y);
         const layer = wrapHarnessHub(x.hub);
 

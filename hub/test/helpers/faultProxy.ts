@@ -6,6 +6,7 @@ import path from 'node:path';
 import { generateKeyFile } from '../../src/keys';
 import { startHub } from './hubHarness';
 import type { Hub, StartOptions } from './hubHarness';
+import { ManualScheduler } from './sseReader';
 import { makeTlsFixture } from './tlsFixture';
 import type { TlsFixture } from './tlsFixture';
 
@@ -249,8 +250,18 @@ export interface KeptHub {
   restore(backup: string, into: string): void;
   /** Starts this hub on a state folder, with its own keys and certificate. */
   start(dir: string, options?: Omit<StartOptions, 'dir' | 'keys' | 'tls'>): Promise<Hub>;
+  /** Starts this hub on a state folder with a hand-moved scheduler that moves the hub's clock with it. */
+  instance(dir: string): Promise<HubInstance>;
   /** Removes the root and the certificate files. Close every instance first. */
   cleanup(): void;
+}
+
+/** A hub instance whose timers and clock a test moves by hand. */
+export interface HubInstance {
+  hub: Hub;
+  scheduler: ManualScheduler;
+  /** Moves the clock and timers, then lets any checkpoint signing they started finish. */
+  advance(ms: number): Promise<void>;
 }
 
 export function keptHub(): KeptHub {
@@ -281,6 +292,19 @@ export function keptHub(): KeptHub {
     },
     start(dir, options = {}) {
       return startHub({ ...options, dir, keys, tls });
+    },
+    async instance(dir) {
+      const scheduler = new ManualScheduler();
+      const hub = await startHub({ dir, keys, tls, scheduler });
+      scheduler.onAdvance = (ms) => hub.advance(ms);
+      return {
+        hub,
+        scheduler,
+        async advance(ms) {
+          scheduler.advance(ms);
+          await hub.checkpoints?.settled();
+        },
+      };
     },
     cleanup() {
       rmSync(root, { recursive: true, force: true });
