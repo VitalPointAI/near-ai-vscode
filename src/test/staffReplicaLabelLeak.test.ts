@@ -5,16 +5,28 @@
 // as UTF-8 and as base64 and base64url at each of the three byte offsets, everywhere a member below a cell can look; positive controls show the same
 // search finds them where they belong. Fictional exercise data only.
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import test from 'node:test';
 import { readGrant } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, docText, localInsert, snapshotOf } from '../domain/replica/doc';
+import { entryHash, openBlob, openBody } from '../domain/replica/entry';
+import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
 import type { Label } from '../domain/gate/labels';
+import { baseCellAllows } from '../domain/replica/productCells';
 import { rosterView } from '../domain/replica/roster';
 import { epochsAt } from '../domain/replica/rosterCells';
+import { REPLICA_DIR } from '../domain/staff/multiUser';
 import { appendProductEntry, ensureLabelCell, proposeVersion } from '../staff/replica/labelCells';
-import { bringIn, grantsOn, leadWith, syncTo } from './helpers/labelCellWorld';
+import { isProjectRefused } from '../staff/replica/replicaProject';
+import { makeSingleMachineCopy } from '../staff/replica/singleCopy';
+import { StaffHost } from '../staff/staffHost';
+import type { StaffCaller } from '../staff/staffHost';
+import { bringIn, grantsOn, leadWith, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Seat } from './helpers/labelCellWorld';
+import { J4_TEAM, trusting } from './helpers/staffFixtures';
 
 // ---- the scene -------------------------------------------------------------------------------------------------------------------------------------
 
@@ -163,4 +175,248 @@ test('Y never receives cell A: no grant, wrap or welcome file of A reaches Y, an
 test('X never receives cell B: no grant, wrap or welcome file of B reaches X, and after the grant path X holds A\'s key and no key of B', async () => {
   const s = await scene();
   await assertBelow(s, s.x, s.b, s.a);
+});
+
+// ---- the byte search -------------------------------------------------------------------------------------------------------------------------------
+
+/** The canaries of a cell, by what they are. */
+function canariesOf(plan: CellPlan, kinds: readonly string[] = ['name', 'title', 'text', 'token', 'reason']): Array<{ what: string; value: string }> {
+  const all: Record<string, string> = { name: plan.product, title: plan.title, text: plan.text, token: plan.token, reason: plan.reason };
+  return kinds.map((what) => ({ what: `${plan.token} ${what}`, value: all[what] }));
+}
+
+/**
+ * The forms a canary takes in bytes: its UTF-8, and its base64 and base64url encodings at each of the three byte offsets it can start at inside a
+ * longer encoded value (only the characters fully decided by the canary's own bytes are kept, so the form matches wherever the canary sits).
+ */
+function formsOf(value: string): Buffer[] {
+  const bytes = Buffer.from(value, 'utf8');
+  const forms = [bytes];
+  for (const encoding of ['base64', 'base64url'] as const) {
+    for (let offset = 0; offset < 3; offset += 1) {
+      const encoded = Buffer.concat([Buffer.alloc(offset), bytes]).toString(encoding).replace(/=+$/, '');
+      const first = Math.ceil((8 * offset) / 6);
+      const last = Math.floor((8 * (offset + bytes.length) - 6) / 6);
+      forms.push(Buffer.from(encoded.slice(first, last + 1), 'ascii'));
+    }
+  }
+  return forms;
+}
+
+/** The canaries found in some bytes, by what they are. */
+function found(bytes: Buffer, canaries: ReadonlyArray<{ what: string; value: string }>): string[] {
+  return canaries.filter((canary) => formsOf(canary.value).some((form) => bytes.includes(form))).map((canary) => canary.what);
+}
+
+/** Every file under a folder (recursing), by path from the folder, with its bytes. A folder that does not exist has none. */
+function filesUnder(dir: string): Array<{ name: string; bytes: Buffer }> {
+  const out: Array<{ name: string; bytes: Buffer }> = [];
+  const walk = (at: string): void => {
+    for (const name of readdirSync(at).sort()) {
+      const file = path.join(at, name);
+      if (statSync(file).isDirectory()) walk(file);
+      else out.push({ name: path.relative(dir, file), bytes: readFileSync(file) });
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return out;
+}
+
+/** The canaries found in every file name and every byte under a folder, each with the file it was found in. */
+function foundInTree(dir: string, canaries: ReadonlyArray<{ what: string; value: string }>): string[] {
+  const files = filesUnder(dir);
+  assert.ok(files.length > 0, `${dir} holds files to search`);
+  return files.flatMap((file) => found(Buffer.concat([Buffer.from(file.name, 'utf8'), Buffer.from('\n'), file.bytes]), canaries).map((what) => `${what} in ${file.name}`));
+}
+
+/** A value as text, Maps, Sets and byte arrays included. */
+function asText(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => {
+    if (item instanceof Map) return [...item.entries()];
+    if (item instanceof Set) return [...item.values()];
+    if (item instanceof Uint8Array) return Buffer.from(item).toString('base64url');
+    return item;
+  });
+}
+
+// ---- what a member can look at ---------------------------------------------------------------------------------------------------------------------
+
+const storeDir = (seat: Seat): string => path.join(seat.at.root, ...REPLICA_DIR.split('/'));
+
+/** Every blob in an install's store, read from disk. */
+function blobsOn(seat: Seat): SealedBlob[] {
+  const dir = path.join(storeDir(seat), 'blobs');
+  return existsSync(dir) ? readdirSync(dir).sort().map((hash) => ({ hash, bytes: readFileSync(path.join(dir, hash)).toString('base64url') })) : [];
+}
+
+/** Every stream in an install's store. */
+function streamsOn(seat: Seat): string[] {
+  const dir = path.join(storeDir(seat), 'streams');
+  return existsSync(dir) ? readdirSync(dir).sort() : [];
+}
+
+interface Relayed { waiting: Array<{ hash: string; reason: string }>; handed: Map<string, SealedEntry[]> }
+
+/** A mistaken relay: every entry of every stream, every blob and every grant on the lead's disk, handed to the member. */
+async function relayEverything(lead: Seat, member: Seat): Promise<Relayed> {
+  const handed = new Map(streamsOn(lead).map((stream) => [stream, streamEntries(lead.at, stream)] as const));
+  const stored = await member.p.putGrants(grantsOn(lead.at).map((item) => item.signed));
+  assert.ok(!isProjectRefused(stored), 'the grants are taken');
+  const result = await member.p.ingestForeign([...handed.values()].flat(), blobsOn(lead));
+  assert.ok(!isProjectRefused(result), 'the entries are taken');
+  return { waiting: result.waiting, handed };
+}
+
+const caller = (seat: Seat): StaffCaller => ({ member: 'j4-director', run: 'run-label-leak', root: seat.at.root, team: J4_TEAM });
+
+/** Every text a staff host over the member's folder gives: the replay, the snapshot, the list, and the status of each product it lists. */
+async function hostTexts(seat: Seat): Promise<string> {
+  let clock = Date.parse('2026-11-21T08:00:00.000Z');
+  const host = new StaffHost({
+    root: seat.at.root, signer: async () => seat.p.signer, keyStatus: async () => trusting(seat.p.signer), headStore: seat.at.secrets,
+    now: () => { clock += 1000; return clock; }, replica: { globalStorageDir: seat.at.global }
+  });
+  try {
+    const replay = await host.replay();
+    const texts = [asText(replay), asText(await host.snapshot()), asText(await host.list(caller(seat), { all: true }))];
+    for (const product of replay.products.keys()) texts.push(asText(await host.status(caller(seat), product)), asText(await host.productState(product)));
+    return texts.join('\n');
+  } finally {
+    await host.close();
+  }
+}
+
+/** A single-machine copy made by the member into a new folder: the result and the folder. */
+async function copyOf(seat: Seat, name: string): Promise<{ result: string; folder: string }> {
+  const folder = path.join(mkdtempSync(path.join(tmpdir(), `near-ai-label-leak-copy-${name}-`)), 'copy');
+  const result = await makeSingleMachineCopy(seat.at.root, folder, { ...seat.at.deps, copier: { name, role: 'j4-planner' } });
+  assert.ok(result.ok, result.ok ? '' : result.message);
+  return { result: asText(result), folder };
+}
+
+/** Every secret name and value of an install. */
+const secretsText = (seat: Seat): Buffer => Buffer.from([...seat.at.secrets.values.entries()].map(([name, value]) => `${name}\n${value}`).join('\n'), 'utf8');
+
+const foldFamilies = async (seat: Seat): Promise<Buffer> => Buffer.from(asText((await seat.p.state()).fold.families), 'utf8');
+
+/** The relayed scene: the grant path for both members, then everything on the lead's disk handed to each. Made once. */
+interface RelayedScene extends Scene { toY: Relayed; toX: Relayed }
+let relayedOnce: Promise<RelayedScene> | undefined;
+function relayed(): Promise<RelayedScene> {
+  relayedOnce ??= (async () => {
+    const s = await scene();
+    await deliverOwn(s.lead, s.y, s.b.cell);
+    await deliverOwn(s.lead, s.x, s.a.cell);
+    return { ...s, toY: await relayEverything(s.lead, s.y), toX: await relayEverything(s.lead, s.x) };
+  })();
+  return relayedOnce;
+}
+
+/** The member's key ring, awaiting-key list and fold lists after the relay, for the cell it is below. */
+async function assertWaits(member: Seat, below: Written, handed: Relayed, epochs: readonly number[]): Promise<void> {
+  const name = below.plan.token;
+  for (const epoch of epochs) assert.equal(member.p.keys.epochKey(below.cell, epoch), undefined, `still no key of the ${name} cell, epoch ${epoch}`);
+  const entries = handed.handed.get(below.cell) ?? [];
+  assert.ok(entries.length >= 5, `the ${name} cell's entries were handed over (${entries.length})`);
+  const hashes = entries.map((entry) => entryHash(entry.header));
+  const waiting = new Map(handed.waiting.map((item) => [item.hash, item.reason]));
+  for (const hash of hashes) assert.equal(waiting.get(hash), 'awaiting-key', `${hash} waits for a key`);
+  const { fold } = await member.p.state();
+  const lists = asText({ held: fold.held, refused: fold.refused, kept: fold.kept, rejected: fold.rejected, quarantined: fold.quarantined });
+  for (const hash of hashes) {
+    assert.ok(!fold.order.includes(hash), 'not in the fold order');
+    assert.ok(!fold.applied.includes(hash), 'not applied');
+    assert.ok(!lists.includes(hash), 'not held, refused, kept, rejected or quarantined');
+  }
+  assert.equal(fold.digests[below.cell], undefined, `the fold has no digest of the ${name} cell`);
+}
+
+// ---- Task 2: a mistaken relay hands the member everything --------------------------------------------------------------------------------------
+
+test('mistaken relay: with every entry, blob and grant of the lead handed to Y, Y holds no key of A, every A entry waits awaiting-key, and Y\'s fold lists name none', async () => {
+  const s = await relayed();
+  await assertWaits(s.y, s.a, s.toY, await epochsOf(s.lead, s.a.cell));
+});
+
+test('mistaken relay: with everything of the lead handed to X, X holds no key of B, every B entry waits awaiting-key, and X\'s fold lists name none', async () => {
+  const s = await relayed();
+  await assertWaits(s.x, s.b, s.toX, await epochsOf(s.lead, s.b.cell));
+});
+
+/** No canary of the cell below in the member's fold output, staff host texts, project folder (the store included), global storage or secrets. */
+async function assertNothingOf(member: Seat, below: Written): Promise<void> {
+  const canaries = canariesOf(below.plan);
+  assert.deepEqual(found(await foldFamilies(member), canaries), [], 'fold families');
+  assert.deepEqual(found(Buffer.from(await hostTexts(member), 'utf8'), canaries), [], 'staff host texts');
+  assert.deepEqual(foundInTree(member.at.root, canaries), [], 'the project folder, the store included');
+  assert.deepEqual(foundInTree(member.at.global, canaries), [], 'global storage');
+  assert.deepEqual(found(secretsText(member), canaries), [], 'secret names and values');
+}
+
+test('mistaken relay: no A canary (name, title, text, label token, reason) is in Y\'s fold output, staff host texts, project folder, store, global storage or secrets', async () => {
+  const s = await relayed();
+  await assertNothingOf(s.y, s.a);
+});
+
+test('mistaken relay: no B canary is in X\'s fold output, staff host texts, project folder, store, global storage or secrets', async () => {
+  const s = await relayed();
+  await assertNothingOf(s.x, s.b);
+});
+
+test('single-machine copy: Y\'s copy, every file name and byte and its result, holds no A canary; X\'s holds no B canary', async () => {
+  const s = await relayed();
+  for (const [member, below, name] of [[s.y, s.a, 'Yan Planner'], [s.x, s.b, 'Xan Analyst']] as const) {
+    const copy = await copyOf(member, name);
+    const canaries = canariesOf(below.plan);
+    assert.deepEqual(foundInTree(copy.folder, canaries), [], `${name}'s copy folder`);
+    assert.deepEqual(found(Buffer.from(copy.result, 'utf8'), canaries), [], `${name}'s copy result`);
+  }
+});
+
+test('positive control: the same searches find B\'s canaries in Y\'s fold output, host texts and copy, and A\'s in X\'s; and A\'s and B\'s in the lead\'s fold', async () => {
+  const s = await relayed();
+  const all = ['name', 'title', 'text', 'token', 'reason'];
+  for (const [member, own, name] of [[s.y, s.b, 'Yan Planner'], [s.x, s.a, 'Xan Analyst']] as const) {
+    assert.deepEqual(found(await foldFamilies(member), canariesOf(own.plan)), canariesOf(own.plan, all).map((item) => item.what), `${name}'s fold names every canary of its own cell`);
+    assert.ok(found(Buffer.from(await hostTexts(member), 'utf8'), canariesOf(own.plan, ['name'])).length === 1, `${name}'s host texts name its own cell's product`);
+    const copy = await copyOf(member, `${name} again`);
+    const inCopy = new Set(foundInTree(copy.folder, canariesOf(own.plan, ['name', 'text'])).map((item) => item.split(' in ')[0]));
+    assert.deepEqual([...inCopy].sort(), canariesOf(own.plan, ['name', 'text']).map((item) => item.what).sort(), `${name}'s copy carries its own cell's product and text`);
+  }
+  const lead = await foldFamilies(s.lead);
+  for (const plan of [PLAN_A, PLAN_B]) assert.deepEqual(found(lead, canariesOf(plan)), canariesOf(plan, all).map((item) => item.what), `the lead's fold names every canary of ${plan.token}`);
+});
+
+test('base cell: opened with the base key on the lead, every base entry is the genesis or a kind the base cell allows, and no name, title, text or reason of A or B is in any base body or blob', async () => {
+  const s = await relayed();
+  const base = s.lead.p.projectId;
+  const entries = streamEntries(s.lead.at, base);
+  assert.ok(entries.length > 0);
+  // Label tokens are not searched here: declared clearances are roster data every member reads by design (the D-13 notice).
+  const canaries = [...canariesOf(PLAN_A, ['name', 'title', 'text', 'reason']), ...canariesOf(PLAN_B, ['name', 'title', 'text', 'reason'])];
+  const blobs = new Map(blobsOn(s.lead).map((blob) => [blob.hash, blob]));
+  const plain: Buffer[] = [];
+  for (const entry of entries) {
+    const key = s.lead.p.keys.epochKey(base, entry.header.epoch);
+    assert.ok(key !== undefined, 'the lead holds the base key');
+    const opened = openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+    assert.ok(opened !== undefined, 'the base entry opens');
+    plain.push(opened);
+    const body = JSON.parse(opened.toString('utf8')) as { kind: string; blob?: string; data?: Record<string, unknown> };
+    assert.ok(baseCellAllows(body.kind), `${body.kind} may be in the base cell`);
+    for (const hash of [body.blob, body.data?.textBlob, body.data?.stateBlob]) {
+      if (typeof hash !== 'string') continue;
+      const blob = blobs.get(hash);
+      assert.ok(blob !== undefined, 'a blob a base entry names is on the lead\'s disk');
+      const inner = openBlob(key, base, entry.header.epoch, blob);
+      assert.ok(inner !== undefined, 'the blob opens with the base key');
+      plain.push(inner);
+    }
+  }
+  assert.deepEqual(found(Buffer.concat(plain), canaries), [], 'no product canary in the base cell');
+  // The control: the same search over cell A and cell B, opened with their keys, finds their canaries.
+  for (const written of [s.a, s.b]) {
+    const inCell = streamEntries(s.lead.at, written.cell).map((entry) => openBody(s.lead.p.keys.epochKey(written.cell, entry.header.epoch) as Buffer, entry.header, Buffer.from(entry.body, 'base64url')) as Buffer);
+    assert.ok(found(Buffer.concat(inCell), canariesOf(written.plan, ['name', 'title', 'reason'])).length === 3, `the search finds ${written.plan.token}'s canaries in its own cell`);
+  }
 });
