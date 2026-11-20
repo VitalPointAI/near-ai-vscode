@@ -12,6 +12,8 @@ import { HealthRegistry } from './health';
 import { createRoutes, type RouteDeps } from './http/routes';
 import { createHubServer, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
 import { SessionRegistry } from './http/session';
+import { EventHub, type Scheduler } from './live/events';
+import { PresenceHub } from './live/presence';
 import { RateLimits, type RateLimitOptions } from './limits';
 import { openHubStore, StoreError, type HubStore } from './store/hubStore';
 import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
@@ -140,6 +142,8 @@ export interface HubParts {
   deadlineMs?: number;
   rateLimits?: RateLimitOptions;
   readAnswer?: (answer: unknown, expected: SessionExpectation) => SessionRead;
+  /** The timers of the event streams; real timers unless a test moves time by hand. */
+  scheduler?: Scheduler;
   onAccepted?: RouteDeps['onAccepted'];
   onEquivocation?: RouteDeps['onEquivocation'];
   onFailure?: RouteDeps['onFailure'];
@@ -151,6 +155,8 @@ export interface ComposedHub {
   sessions: SessionRegistry;
   cache: RosterCache;
   limits: RateLimits;
+  events: EventHub;
+  presence: PresenceHub;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -167,6 +173,9 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.deadlineMs === undefined ? {} : { deadlineMs: parts.deadlineMs }),
     ...(parts.readAnswer === undefined ? {} : { readAnswer: parts.readAnswer }),
   });
+  const scheduler = parts.scheduler === undefined ? {} : { scheduler: parts.scheduler };
+  const events = new EventHub({ now, ...scheduler });
+  const presence = new PresenceHub(events, { now, ...scheduler, accessList: async (project, cell) => (await cache.get(project)).accessList(cell) });
   const routes = createRoutes({
     store,
     cache,
@@ -174,6 +183,8 @@ export function composeHub(parts: HubParts): ComposedHub {
     limits,
     identity,
     now,
+    events,
+    presence,
     ...(parts.onAccepted === undefined ? {} : { onAccepted: parts.onAccepted }),
     ...(parts.onEquivocation === undefined ? {} : { onEquivocation: parts.onEquivocation }),
     ...(parts.onFailure === undefined ? {} : { onFailure: parts.onFailure }),
@@ -190,7 +201,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits };
+  return { server, sessions, cache, limits, events, presence };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
@@ -372,6 +383,8 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
   const openServer = composed.server;
   const sessions = composed.sessions;
+  const liveEvents = composed.events;
+  const livePresence = composed.presence;
   let port: number;
   try {
     port = await listen(openServer, config.host, config.port);
@@ -411,6 +424,9 @@ export async function main(argv: readonly string[]): Promise<void> {
     }, SHUTDOWN_GRACE_MS).unref();
     // The relay's order: no new sessions, then the server, then the store once the last request has finished.
     clearInterval(sweep);
+    // Open event streams would hold the server open: they end first, then the server stops taking requests.
+    liveEvents.closeAll();
+    livePresence.close();
     sessions.close();
     openServer.close(() => {
       openStore.close();

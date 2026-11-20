@@ -1,5 +1,6 @@
-// The hub's /v1 routes, first half (D-34, D-35, D-36, D-39, D-41, D-44, D-69): session, enrol, heads, append, entries and blobs. Events, presence,
-// checkpoints and join requests extend this table in 32-21, 32-22 and 32-25; the client transport (32-23) speaks exactly these shapes.
+// The hub's /v1 routes (D-34 to D-39, D-41, D-43, D-44, D-46, D-69): session, enrol, heads, append, entries and blobs (32-20), and the event
+// stream, presence and the checkpoint ask (32-21). Checkpoint signing and join requests extend this table in 32-22 and 32-25; the client transport (32-23)
+// speaks exactly these shapes.
 //
 // Wire rules. Every JSON answer is application/json with cache-control no-store. An error is {error: id, message: one plain sentence}, with a
 // reason for session and token refusals, and never echoes the request: no path, no token, no challenge, no body. Request bodies are read with a
@@ -11,18 +12,29 @@
 // of those cells. entries answers 404 for a stream the device may not read, exactly as for one that does not exist. A blob or a grant the device may
 // not read answers exactly like one the hub does not hold.
 //
+// Live push (D-37, D-43). After an append's COMMIT the hub first ends the streams of every device the batch left revoked or quarantined, then
+// sends roster to every admitted device when the roster head moved, one heads event per stream the batch added to (to that stream's access list,
+// the pushing device left out), and equivocation to the stream's access list and the lead's and deputy's devices. Every audience is read from the
+// roster cache at that moment. A stream request whose token is unknown, expired, from another connection, or whose device is revoked or
+// quarantined is answered 204 with no body, so a browser-style client stops reconnecting; one with no token at all is 401.
+//
 // Grants travel in append and are listed in heads because they live outside the streams and the hub needs them for access lists; append names the
 // blobs its entries use because the hub cannot read which blob a sealed body names (D-69).
 import { createHash } from 'node:crypto';
+import { CHECKPOINT_MAX_BYTES, readCheckpoint, verifyCheckpoint } from '@ext/domain/replica/checkpoint';
+import type { Checkpoint } from '@ext/domain/replica/checkpoint';
+import { canonicalize } from '@ext/domain/team/canonical';
 import type http from 'node:http';
 import type { TLSSocket } from 'node:tls';
 import { HASH_PATTERN, STREAM_ID_PATTERN } from '@ext/domain/replica/entry';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
 import { APPEND_REFUSALS, appendBatch } from '../append/checks';
-import type { AppendRefusal } from '../append/checks';
+import type { AppendRefusal, AppendResult } from '../append/checks';
 import type { ProjectRoster, RosterCache } from '../append/rosterCache';
 import { enrolProject } from '../enrol';
 import type { EnrolRefusal, HubIdentity } from '../enrol';
+import { EventHub } from '../live/events';
+import { PresenceHub } from '../live/presence';
 import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
 import { StoreError } from '../store/hubStore';
@@ -40,15 +52,19 @@ export interface RouteDeps {
   identity: HubIdentity;
   /** Milliseconds; the clock for buckets, appends, enrolment and uploads. */
   now: () => number;
-  /** Called after COMMIT with the entries the hub now has from an append (no-op until 32-21). */
+  /** The open event streams; a registry of its own when absent. */
+  events?: EventHub;
+  /** Presence in memory; one of its own, publishing through events, when absent. */
+  presence?: PresenceHub;
+  /** Called after COMMIT with the entries the hub now has from an append, after the hub's own events are published. */
   onAccepted?: (project: string, accepted: readonly string[], rosterChanged: boolean) => void;
-  /** Called after COMMIT with the equivocation proofs an append recorded (no-op until 32-21). */
+  /** Called after COMMIT with the equivocation proofs an append recorded, after the hub's own events are published. */
   onEquivocation?: (project: string, proofs: readonly EquivocationProof[]) => void;
   /** A route that failed with 500, by route id and error name only. */
   onFailure?: (route: RouteId, error: unknown) => void;
 }
 
-export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get';
+export type RouteId = 'session' | 'enrol' | 'heads' | 'append' | 'entries' | 'blob-put' | 'blob-get' | 'events' | 'presence' | 'checkpoint';
 
 export const ROUTE_ERRORS = {
   'not-found': 'There is nothing at this address on the hub.',
@@ -58,6 +74,9 @@ export const ROUTE_ERRORS = {
   'rate-limited': 'Too many calls came from this address. Wait the time the hub gives, then try again.',
   'blob-mismatch': 'The uploaded bytes do not have the hash the address names. Upload the blob again.',
   'pending-quota': 'This device has uploaded too many blobs that no entry uses yet. Send the entries that use them first.',
+  'too-many-streams': 'This device or address already has as many event streams open as the hub allows. Close one, or wait the time the hub gives.',
+  forbidden: 'This device is not on the access list of that part of the project.',
+  'checkpoint-refused': 'A checkpoint handed back is not one this hub signed for this project, so none of them was kept.',
   internal: 'The hub could not answer this request. Try again later.',
 } as const;
 export type RouteError = keyof typeof ROUTE_ERRORS;
@@ -132,6 +151,15 @@ async function readJson(req: http.IncomingMessage, res: http.ServerResponse, cap
   }
 }
 
+/** One presented checkpoint: at most the checkpoint size limit plus room for its envelope (version, purpose, signer, time and signature). */
+const CHECKPOINT_ENVELOPE_BYTES = 4 * 1024;
+/** At most this many checkpoints in one ask. */
+export const CHECKPOINTS_PER_ASK = 16;
+const CHECKPOINT_BODY_BYTES = CHECKPOINTS_PER_ASK * (CHECKPOINT_MAX_BYTES + CHECKPOINT_ENVELOPE_BYTES) + 1024;
+
+/** How much of the project a checkpoint covers: the entries it counts in all its streams. An honest hub's later checkpoints cover more. */
+const coverageOf = (checkpoint: Checkpoint): number => checkpoint.streams.reduce((total, stream) => total + stream.count, 0);
+
 const ENROL_STATUS: Readonly<Partial<Record<EnrolRefusal, number>>> = { 'rate-limited': 429, malformed: 400, 'project-exists': 409 };
 const APPEND_STATUS: Readonly<Partial<Record<AppendRefusal, number>>> = {
   'malformed-batch': 400,
@@ -157,6 +185,8 @@ interface RouteEntry {
 /** The handler for the /v1 routes, given to createHubServer. */
 export function createRoutes(deps: RouteDeps): HubHandler {
   const { store, cache, sessions, limits, identity } = deps;
+  const events = deps.events ?? new EventHub({ now: deps.now });
+  const presence = deps.presence ?? new PresenceHub(events, { now: deps.now, accessList: async (project, cell) => (await cache.get(project)).accessList(cell) });
 
   const addressOf = (req: http.IncomingMessage): string => req.socket.remoteAddress ?? 'unknown';
 
@@ -267,6 +297,7 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     }
     // Answered only now, after COMMIT: everything in accepted is on disk.
     const result = outcome.result;
+    const announce = (): Promise<void> => publishAppend(project, auth.writer, result);
     sendJson(
       res,
       200,
@@ -280,11 +311,169 @@ export function createRoutes(deps: RouteDeps): HubHandler {
       }),
     );
     try {
+      await announce();
+    } catch {
+      // Publishing never changes what the hub stored or answered.
+    }
+    try {
       if (result.accepted.length > 0 || result.rosterChanged) deps.onAccepted?.(project, result.accepted, result.rosterChanged);
       if (result.equivocations.length > 0) deps.onEquivocation?.(project, result.equivocations);
     } catch {
       // A failing hook never changes what the hub stored or answered.
     }
+  };
+
+  /** After COMMIT: standing first, then roster, heads and equivocation events, each to the audience the roster gives now (see the header). */
+  const publishAppend = async (project: string, pusher: string, result: AppendResult): Promise<void> => {
+    const roster = await cache.get(project);
+    if (result.rosterChanged || result.equivocations.length > 0) {
+      // A device the batch revoked or quarantined hears nothing more. Its next call, a new stream included, is refused by the session check.
+      events.end((owner) => owner.project === project && roster.standing(owner.writer) !== 'admitted');
+    }
+    if (result.rosterChanged) events.publish(project, (writer) => roster.standing(writer) === 'admitted', 'roster', { project, head: roster.head });
+
+    const touched = new Map<string, Set<string>>();
+    for (const entry of result.stored) {
+      const writers = touched.get(entry.stream) ?? new Set<string>();
+      writers.add(entry.writer);
+      touched.set(entry.stream, writers);
+    }
+    for (const [stream, writers] of touched) {
+      const access = roster.accessList(stream);
+      if (access === undefined) continue;
+      const heads = [...writers]
+        .sort()
+        .flatMap((writer) => {
+          const head = store.headOf(project, stream, writer);
+          return head === undefined ? [] : [{ writer, seq: head.seq, hash: head.hash }];
+        });
+      if (heads.length === 0) continue;
+      events.publish(project, (writer) => writer !== pusher && access.includes(writer), 'heads', { project, stream, heads });
+    }
+
+    for (const proof of result.equivocations) {
+      const { stream, writer, seq } = proof.a;
+      const access = roster.accessList(stream) ?? [];
+      events.publish(project, (device) => access.includes(device) || roster.isRosterWriter(device), 'equivocation', {
+        project,
+        stream,
+        writer,
+        seq,
+        proof: { a: proof.a, b: proof.b, publicKey: proof.publicKey },
+      });
+    }
+    if (result.stored.length > 0) events.channel.emit('entries', project);
+  };
+
+  /** GET /v1/projects/:p/events: the stream stays open on this connection until the device, the roster or the hub ends it. */
+  const eventStream: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    req.resume();
+    const auth = await sessions.authenticate(req, project);
+    if (!auth.ok) {
+      // 204 tells a browser-style client to stop reconnecting: its token or its device's standing will not pass again (D-37).
+      if (auth.status === 401 && auth.reason !== 'no-token') {
+        res.writeHead(204, { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        res.end();
+      } else {
+        sendJson(res, auth.status, JSON.stringify({ error: auth.status === 401 ? 'unauthenticated' : 'forbidden', reason: auth.reason, message: auth.message }));
+      }
+      return;
+    }
+    const writer = auth.session.writer;
+    const opened = events.open(res, {
+      project,
+      writer,
+      address: addressOf(req),
+      expiresAt: auth.session.expiresAt,
+      allowed: () => (cache.peek(project)?.standing(writer) ?? 'admitted') === 'admitted',
+    });
+    if (!opened.ok) sendError(res, 429, 'too-many-streams', { 'retry-after': String(opened.retryAfterSeconds) });
+  };
+
+  /**
+   * POST /v1/projects/:p/presence {cell, sealed} or {cell, leave: true} (D-38): at most 2 KiB, refused 413 before it is parsed; the cell id is
+   * checked, then the pushing device's token bucket (the same one appends take), then the device's place on the cell's access list. The sealed
+   * value is passed on as it came, never opened, never stored and never logged.
+   */
+  const presencePost: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    const auth = await authenticate(req, res, project);
+    if (auth === undefined) return;
+    const body = await readJson(req, res, LIMITS.presenceBytes);
+    if (body === undefined) return;
+    const value = body.value;
+    const keys = isRecord(value) ? Object.keys(value).sort().join(',') : '';
+    const cell = isRecord(value) ? value.cell : undefined;
+    const beat = keys === 'cell,sealed' && isRecord(value) && typeof value.sealed === 'string' && /^[A-Za-z0-9_-]+$/.test(value.sealed);
+    const leaving = keys === 'cell,leave' && isRecord(value) && value.leave === true;
+    if (typeof cell !== 'string' || !STREAM_ID_PATTERN.test(cell) || (!beat && !leaving)) {
+      sendError(res, 400, 'malformed');
+      return;
+    }
+    const taken = limits.takeWriter(auth.writer, 1, deps.now());
+    if (!taken.ok) {
+      sendError(res, 429, 'rate-limited', { 'retry-after': String(taken.retryAfterSeconds) });
+      return;
+    }
+    const roster = await cache.get(project);
+    if (roster.accessList(cell)?.includes(auth.writer) !== true) {
+      sendError(res, 403, 'forbidden');
+      return;
+    }
+    if (beat) presence.heartbeat(project, cell, auth.writer, (value as { sealed: string }).sealed);
+    else presence.leave(project, cell, auth.writer);
+    sendJson(res, 200, JSON.stringify({ project, cell }));
+  };
+
+  /**
+   * POST /v1/projects/:p/checkpoint {known?: [signed checkpoints]}: asks the hub for a checkpoint, handing back the hub's own checkpoints the client
+   * holds (D-46, D-54, D-70: a restored hub may have lost them). Every one must verify as signed by this hub's key for this project at a roster
+   * position the hub knows; one that does not refuses the whole request 400 and nothing is kept. Verified ones the store lacks are kept as
+   * evidence, placed in the signing order by how much they cover, so one covering less than a checkpoint the hub holds never becomes the latest.
+   * The answer carries the latest checkpoint; the checkpoint channel hears the ask (32-22 signs).
+   */
+  const checkpoint: Handler = async (req, res, params) => {
+    const project = params.project as string;
+    const auth = await authenticate(req, res, project);
+    if (auth === undefined) return;
+    const body = await readJson(req, res, CHECKPOINT_BODY_BYTES);
+    if (body === undefined) return;
+    const value = body.value;
+    if (!isRecord(value) || Object.keys(value).some((key) => key !== 'known') || (value.known !== undefined && !Array.isArray(value.known))) {
+      sendError(res, 400, 'malformed');
+      return;
+    }
+    const known = (value.known ?? []) as unknown[];
+    if (known.length > CHECKPOINTS_PER_ASK) {
+      sendError(res, 413, 'too-large');
+      return;
+    }
+    const roster = await cache.get(project);
+    const verified: Array<{ hash: string; text: string; coverage: number }> = [];
+    for (const item of known) {
+      const verdict = verifyCheckpoint(item, roster.view);
+      if (!verdict.ok || verdict.checkpoint.signer !== identity.writer || verdict.checkpoint.project !== project) {
+        sendError(res, 400, 'checkpoint-refused');
+        return;
+      }
+      verified.push({ hash: verdict.hash, text: canonicalize(item), coverage: coverageOf(verdict.checkpoint) });
+    }
+    const now = deps.now();
+    let kept = 0;
+    for (const item of verified.sort((a, b) => a.coverage - b.coverage)) {
+      const held = store.checkpoints(project).map((record) => {
+        const payload = readCheckpoint((JSON.parse(record.body) as { payload?: unknown }).payload);
+        return { hash: record.hash, signedAt: record.signedAt, coverage: payload === undefined ? 0 : coverageOf(payload) };
+      });
+      if (held.some((record) => record.hash === item.hash)) continue;
+      // Below every held checkpoint that covers at least as much; otherwise after all of them.
+      const above = held.filter((record) => record.coverage >= item.coverage).map((record) => record.signedAt);
+      const signedAt = above.length > 0 ? Math.max(0, Math.min(...above) - 1) : Math.max(now, ...held.map((record) => record.signedAt + 1));
+      if (store.putCheckpoint(project, { hash: item.hash, body: item.text, signedAt, receivedAt: now }) === 'stored') kept += 1;
+    }
+    sendJson(res, 200, JSON.stringify({ project, kept, ...checkpointOf(project) }));
+    events.channel.emit('checkpoint', project);
   };
 
   const entries: Handler = async (req, res, params) => {
@@ -392,6 +581,9 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     { path: ['v1', 'projects', ':project', 'heads'], methods: { GET: { id: 'heads', handler: heads } } },
     { path: ['v1', 'projects', ':project', 'append'], methods: { POST: { id: 'append', handler: append } } },
     { path: ['v1', 'projects', ':project', 'entries'], methods: { GET: { id: 'entries', handler: entries } } },
+    { path: ['v1', 'projects', ':project', 'events'], methods: { GET: { id: 'events', handler: eventStream } } },
+    { path: ['v1', 'projects', ':project', 'presence'], methods: { POST: { id: 'presence', handler: presencePost } } },
+    { path: ['v1', 'projects', ':project', 'checkpoint'], methods: { POST: { id: 'checkpoint', handler: checkpoint } } },
     { path: ['v1', 'blobs', ':hash'], methods: { PUT: { id: 'blob-put', handler: blobPut }, GET: { id: 'blob-get', handler: blobGet } } },
   ];
 
