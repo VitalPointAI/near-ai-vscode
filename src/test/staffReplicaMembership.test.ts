@@ -4,13 +4,14 @@
 // keep the roster whole through a split, a deputy and a handover.
 import assert from 'node:assert/strict';
 import { createHash, createPrivateKey, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import test, { after } from 'node:test';
+import test, { after, mock } from 'node:test';
 import type { ScaleTable } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
+import { entryHash } from '../domain/replica/entry';
 import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, leadAt, rosterView } from '../domain/replica/roster';
@@ -21,7 +22,7 @@ import { canonicalBytes } from '../domain/team/canonical';
 import type { SecretStorageLike } from '../services/auth';
 import { ENCRYPTION_KEY_SECRET, JOIN_SECRET_PREFIX } from '../staff/replica/keyring';
 import {
-  MEMBERSHIP_REFUSALS, addMyOtherMachine, admitJoinRequest, cellOrderHook, chooseRosterBranch, finishRekeys, handOverLead, inviteToProject, joinFromInvite, nameDeputy,
+  MEMBERSHIP_REFUSALS, addMyOtherMachine, admitJoinRequest, cellOrderHook, chooseRosterBranch, describeRosterBranches, finishRekeys, handOverLead, inviteToProject, joinFromInvite, nameDeputy,
   openWelcome, pendingInvitationsDir, remakeWelcome, removeFromProject, reviewJoinRequest, unfinishedRekeys, updateMember, voidInvite
 } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
@@ -1097,4 +1098,83 @@ test('MN-05: finishing an interrupted removal never writes a new epoch without i
   assert.equal(epochAt(after.roster.cells, y, after.position), 1, 'no label-less epoch was written for Y');
   assert.ok(after.roster.cells.cells.get(y)?.epochs.every((epoch) => epoch.epoch === 1));
   assert.ok(after.position >= cut.position);
+});
+
+// ---- 32-04 Task 1: a roster split is described from its branch entries alone (D-08) ---------------------------------------------------------------
+
+interface LeadSplit { t: Team; one: string; two: string; secondWriter: string }
+
+/** The two-lead-devices split: each lead device renames N offline on the same head, and the second device's change reaches the lead's computer. */
+async function leadSplit(): Promise<LeadSplit> {
+  const t = await team();
+  const second = await addMachine(t.lead, 'mbr-lead', 'a2', 'Lee Lead');
+  assert.equal((await head(second.p)).hash, (await head(t.lead.p)).hash);
+  ok(await updateMember(t.lead.host, { member: t.n.member, name: 'Nell One' }), 'first device');
+  const one = (await head(t.lead.p)).hash;
+  ok(await updateMember(second.host, { member: t.n.member, name: 'Nell Two' }), 'second device');
+  const two = (await head(second.p)).hash;
+  await sync(second, t.lead);
+  const split = await head(t.lead.p);
+  assert.equal(split.roster.pending.length, 1);
+  assert.deepEqual([...split.roster.pending[0].branches].sort(), [one, two].sort());
+  return { t, one, two, secondWriter: second.writer };
+}
+
+const UNREADABLE_BRANCH = 'A roster change this computer cannot read';
+
+/** Each branch's summary, by branch hash. */
+const summaries = (views: ReadonlyArray<{ branch: string; summary: string }>): Map<string, string> => new Map(views.map((view) => [view.branch, view.summary]));
+
+test('describeRosterBranches describes both branches of a split from the roster lines, without a welcome file', async () => {
+  const { t, one, two } = await leadSplit();
+  const welcome = mock.method(t.lead.p, 'welcomeFor', () => Promise.reject(new Error('no welcome file is built to describe a split')));
+  try {
+    const described = await describeRosterBranches(t.lead.host);
+    assert.deepEqual(described.map((view) => view.branch).sort(), [one, two].sort());
+    for (const view of described) {
+      assert.equal(view.summary, 'Changes the details of Nell Planner', 'named as the roster had it at the split');
+      assert.equal(view.by, 'mbr-lead', 'the member whose device wrote it');
+      assert.equal(typeof view.at, 'string');
+    }
+    assert.equal(welcome.mock.callCount(), 0, 'no welcome file was built');
+  } finally {
+    welcome.mock.restore();
+  }
+});
+
+test('describeRosterBranches skips damaged and overlong roster lines, and reads nothing through a symbolic link in place of the roster folder', async () => {
+  const { t, one, two, secondWriter } = await leadSplit();
+  // The fold is taken once; the store is not read again, so only describeRosterBranches reads the changed files below.
+  const folded = await t.lead.p.state();
+  const frozen = mock.method(t.lead.p, 'state', () => Promise.resolve(folded));
+  try {
+    const folder = path.join(t.lead.at.root, ...REPLICA_DIR.split('/'), 'streams', t.lead.p.projectId);
+    // Damaged lines before the branch entries in every roster line file: not JSON, the wrong shape, an empty line.
+    for (const name of readdirSync(folder).filter((item) => item.endsWith('.jsonl'))) {
+      const lineFile = path.join(folder, name);
+      writeFileSync(lineFile, `not json\n{"header":{},"body":""}\n\n${readFileSync(lineFile, 'utf8')}`);
+    }
+    const damaged = summaries(await describeRosterBranches(t.lead.host));
+    assert.equal(damaged.get(one), 'Changes the details of Nell Planner');
+    assert.equal(damaged.get(two), 'Changes the details of Nell Planner');
+    // The second branch's only line, padded past the longest line the store writes, is skipped whole: that branch cannot be read, the other can.
+    const twoFile = path.join(folder, `${secondWriter}.jsonl`);
+    const lines = readFileSync(twoFile, 'utf8').split('\n');
+    const index = lines.findIndex((line) => { try { return entryHash((JSON.parse(line) as { header: Parameters<typeof entryHash>[0] }).header) === two; } catch { return false; } });
+    assert.ok(index >= 0, 'the second branch is on the second device\'s line file');
+    lines[index] = `{${' '.repeat(40 * 1024)}${lines[index].slice(1)}`;
+    writeFileSync(twoFile, lines.join('\n'));
+    const overlong = summaries(await describeRosterBranches(t.lead.host));
+    assert.equal(overlong.get(one), 'Changes the details of Nell Planner');
+    assert.equal(overlong.get(two), UNREADABLE_BRANCH);
+    // The roster folder replaced by a symbolic link to the same lines: nothing is read through it.
+    const moved = `${folder}-moved`;
+    renameSync(folder, moved);
+    symlinkSync(moved, folder, 'dir');
+    const linked = summaries(await describeRosterBranches(t.lead.host));
+    assert.deepEqual([...linked.values()], [UNREADABLE_BRANCH, UNREADABLE_BRANCH]);
+    assert.deepEqual([...linked.keys()].sort(), [one, two].sort());
+  } finally {
+    frozen.mock.restore();
+  }
 });
