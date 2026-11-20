@@ -545,5 +545,5 @@ test('SECURITY.md has "Labelled products in shared projects" once inside the mul
   // The bullet saying labelled products are refused at conversion is gone, and the clearances subsection points to the new one.
   assert.ok(!text.includes('Labelled products are not made multi-user yet'), 'the old refusal bullet is replaced');
   assert.ok(subsectionOf(text, '### People and clearances are declared by the staff lead').includes('Labelled products in shared projects'), 'the clearances subsection points to the new one');
-  assert.doesNotMatch(text, /—/);
+  assert.doesNotMatch(text, /\u2014/);
 });
