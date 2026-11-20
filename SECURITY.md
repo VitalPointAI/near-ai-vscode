@@ -1959,6 +1959,154 @@ and Signal for your organization. It is not part of the extension and is never i
 A full section on what the relay stores and sends comes with the phase that first receives
 messages.
 
+## Your organization's sync hub
+
+`hub/` holds the sync hub: a separate service your organization runs to carry multi-user staff
+projects between people's computers. It is not part of the extension and is never in the VSIX.
+This release ships it for operators only; the editor cannot connect a project to it until a later
+release. How to run it, back it up and restore it is in `relay/README.md`, under "Your
+organization's sync hub". Each point below names the test that shows it: files under `hub/test/`
+are the hub's own suite, files under `src/test/` the extension's.
+
+### What the hub stores and what it reads
+
+- **What it stores.** For each project connected to it, for the life of the project: the sealed
+  entries and sealed attachments of every part of the project, the signed key grants (the label of
+  each part stays sealed inside its grant), and every checkpoint it signed or was handed back. It
+  never deletes or rewrites an entry, and an entry it acknowledged survives a hard kill
+  (`hub/test/hubStore.test.ts`, `hub/test/killDrill.test.ts`). It also keeps the check key of each
+  invitation registered with it and the join requests that passed its check, removed 7 days after
+  they were accepted (`hub/test/join.test.ts`). Who is active where is kept in memory only, never
+  on disk (`hub/test/presence.test.ts`).
+- **What it reads: the roster.** The hub holds the key of the part of each project every member
+  holds, which carries only the roster. So the hub server holds the staff list of every project
+  connected to it: the names, seats and declared clearances of the people in it, and their
+  devices. It needs the roster to check every change against it (`hub/test/append.test.ts`,
+  `hub/test/enrol.test.ts`).
+- **What it reads: only the parts the staff lead grants it.** The staff lead may grant the hub
+  further parts of a project, for watches that must run when nobody is at a computer (watches
+  arrive in a later release). Before any grant the lead's computer shows, and requires the lead to
+  confirm: "The hub will be able to read everything in this cell.
+  Anyone who takes over the hub server can read it too.
+  Grant only cells whose watches must run when nobody is at a computer." The legacy part that keeps a converted project's old ledgers is never granted
+  (`src/test/staffReplicaHubMembership.test.ts`).
+- **Everything else stays ciphertext.** A byte capture over a real session searches the hub's
+  database and attachment folder, every byte it receives and sends, and its logs, for product
+  names, titles, text, labels, decision reasons and attachments of parts not granted to it, as
+  UTF-8, UTF-16, hex and base64 at every offset, and encoded twice. None appear. The parts granted
+  to the hub open in its memory and appear in no log line and in no answer to a member not cleared
+  for them, and a planted canary in each encoding is found, so the search has teeth
+  (`hub/test/ciphertextOnly.test.ts`).
+- **Metadata it sees.** Project, part, device and entry ids, sizes and timing, which devices are
+  on each part (the roster says so), and who is active in which part right now (the activity value
+  itself is sealed). For a part granted to the hub, its checkpoints name the writer ids and entry
+  counts of that part, and every member receives them, including members not cleared for that part
+  (`hub/test/checkpoints.test.ts`, `hub/test/presence.test.ts`).
+
+### What the hub cannot do, and what members' computers do about it
+
+- **It cannot forge or change an entry.** Every entry is signed by the device that wrote it. The
+  hub refuses one whose signature, writer or place in its writer's log is wrong, and every member's
+  computer checks the signature, the writer and the place again before it keeps anything
+  (`hub/test/append.test.ts`, `src/test/staffHubTransport.test.ts`).
+- **It can withhold, delay, roll back or fork its view, and is named when it does.** A member's
+  computer names the hub as withholding when the hub's own heads, a checkpoint or a delivered
+  entry's citations name a change it does not deliver within 60 seconds; as delayed when this
+  computer's own changes in a part the hub checkpoints are not covered within 5 minutes; as rolled
+  back when it shows less than this computer already saw; and as forked when two checkpoints it
+  signed disagree. A forked hub is kept as proof (both checkpoints) and not trusted again until the
+  staff lead re-admits it. Replayed and reordered answers change nothing; an injected entry, a
+  corrupt attachment and another project's answer are refused and named
+  (`hub/test/maliciousHub.test.ts`, `src/test/replicaHubWitness.test.ts`).
+- **A restore from an old backup is refused as a rollback and refilled.** Members' computers hand
+  back the checkpoints the restored hub lost and push again what it lacks; the hub signs nothing
+  new until it holds everything those checkpoints cover, and its next checkpoint covers every
+  member's changes (`hub/test/restoreDrill.test.ts`).
+- **Limit: an honest restore can look like a fork.** If new work reaches a restored hub before
+  every member's computer has synced, a computer that held a checkpoint the restore lost sees two
+  checkpoints of the hub that disagree, names the hub rolled back and forked, and stops trusting
+  it. To that computer an honest restore and a real fork are the same evidence. The operator guide
+  gives the restore procedure that avoids it (members sync and make no new changes until every
+  device has synced). A member whose computer still names the hub forked keeps working by file or
+  through another hub until the staff lead re-admits the hub, a flow that arrives with the
+  editor's hub commands.
+- **Limit: a checkpoint nobody received.** If the hub signed a checkpoint that no member's
+  computer received, and later checkpoints come after it, a restore that loses it cannot be
+  mended by members: the hub signs nothing more for that project until it is started again on a
+  state whose checkpoints agree. Changes still sync; members' computers in time report the hub as
+  delayed.
+- **Limit: a reordered history with a changed count.** Members' computers judge a new checkpoint
+  against the ones they hold by its heads and by checkpoints over the same number of changes; they
+  do not yet recompute its order from the changes themselves, so a hub that reorders earlier
+  changes while also changing the count is not caught by that check.
+
+### Checkpoints cover only what the hub can read
+
+A checkpoint names, for each writer, facts kept inside the sealed changes (each head's order
+number and the roster it cites), so the hub signs checkpoints over only the part every member holds
+and the parts granted to it, and only over changes whose predecessors it holds too
+(`hub/test/checkpoints.test.ts`). For every other part, rollback and withholding are noticed by each
+member's own record of what it has seen and by citations of changes never delivered; delay is
+noticed only in the parts a checkpoint covers (`hub/test/maliciousHub.test.ts`, the
+ungranted-part rows).
+
+### Connections and sessions
+
+- **TLS ends at the hub, TLS 1.3 only** (`hub/test/tlsServer.test.ts`). Members' computers trust
+  it by the pin of its certificate's key, or by your organization's certificate authority, and never
+  by the system's list of authorities. A certificate with another pin, or one your organization's
+  authority did not issue for that host, is refused before any byte is sent
+  (`src/test/staffHubTransport.test.ts`).
+- **Sessions are bound to the connection.** A device opens a session by signing the hub's one-time
+  challenge together with keying material exported from that very TLS connection. Its token lasts
+  15 minutes, works only on that connection, and is checked against the roster on every call, so a
+  revoked or quarantined device is refused at once and its event stream ends
+  (`hub/test/session.test.ts`, `hub/test/events.test.ts`).
+- **A device sees only its own parts.** Heads, catch-up, attachments, events and activity go only
+  to devices on the part they belong to. A device that asks for the history or an attachment of a
+  part it is not on gets the same answer as for one that does not exist (`hub/test/api.test.ts`,
+  `hub/test/events.test.ts`, `hub/test/presence.test.ts`).
+
+### Joining and enrolment
+
+- **No join secret at the hub.** An invitation registered with the hub carries only a check key
+  derived from the join secret, so the hub can check a join request without ever holding the
+  secret. An invitation is locked after 5 wrong tries, and requests expire with their invitation.
+  The hub admits nobody: the staff lead's computer checks each request again and the lead still
+  compares the six words (`hub/test/join.test.ts`, `src/test/staffReplicaHubMembership.test.ts`).
+- **No project without a hub file.** A project reaches the hub only with a hub file the operator
+  printed: signed by the hub's own key, for one project, expiring after 1 to 30 days, and accepted
+  only for a roster that admits this hub's own key and certificate pin. The hub keeps only a hash of
+  the file's enrolment secret (`hub/test/enrol.test.ts`, `src/test/replicaHubFile.test.ts`).
+
+### No outbound connection, no model credential
+
+The hub holds no model credential and opens no outbound connection. The built hub, run through a
+whole session under a hook that records every network call a process can start, makes none; its
+health check connects only to itself; and no hub source file names a client network call
+(`hub/test/noOutbound.test.ts`). A key of its own for hub watches comes in a later release.
+
+### Limits, keys and release
+
+- **Size and rate limits.** At most 200 entries and 4 MiB per append, 8 MiB per attachment, 256 MiB
+  of attachments not yet used per device, 50 entries a second per device (a burst of 200), and per
+  address 120 session openings, 10 join requests and 10 enrolments a minute; 4 event streams per
+  device and 32 per address, and an event stream that falls 1 MiB behind is ended
+  (`hub/test/limits.test.ts`, `hub/test/api.test.ts`, `hub/test/events.test.ts`).
+- **Keys outside the state volume.** The hub's signing key, encryption key and TLS key are secret
+  files the operator makes and mounts; the hub never writes a key, refuses a secret given as a plain
+  environment value, and logs through a redaction layer. A backup of its state holds no byte of
+  either key (`hub/test/secrets.test.ts`, `hub/test/keys.test.ts`, `hub/test/stateDir.test.ts`,
+  `hub/test/logging.test.ts`, `hub/test/restoreDrill.test.ts`).
+- **Hardened container.** The hub has no runtime dependency. Its image is distroless and runs as a
+  user that is not root, with a read-only root filesystem, every capability dropped and its port
+  published on `127.0.0.1` until the operator chooses an address (`hub/test/container/container.test.ts`,
+  `hub/test/dockerContext.test.ts`).
+- **Never in the VSIX.** CI has an eighth job, `hub`, which installs the hub with install scripts
+  off, runs `npm audit` at high, its type check, its tests and its container suite on Node 26.13.1;
+  the owner adds it to main's required checks after this phase merges. `verify:release` refuses a
+  VSIX that contains anything from `hub/` (`src/test/hubIsolation.test.ts`).
+
 ## Known limitations
 
 | Limitation | Plan |

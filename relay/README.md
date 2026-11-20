@@ -4,6 +4,8 @@ The relay is its own small service for NEAR AI chats that arrive from Microsoft 
 
 This version is the foundation only. It starts, keeps a private state folder and a small database, loads its secrets safely, writes redacted logs, and answers a health check. It does not receive or send any Teams or Signal message yet. Those channels arrive in later phases.
 
+The same Compose file can also run your organization's sync hub, a separate service whose code lives in `hub/`. Its operator guide is the last section of this file, [Your organization's sync hub](#your-organizations-sync-hub).
+
 ## What you need
 
 - Node 26.13.1 or a later 26.x release. An older Node refuses at install (`npm ci` stops) and at start (the relay prints one sentence and exits).
@@ -130,3 +132,235 @@ The reply is 200 when the relay is healthy and 503 when it cannot read its own s
 - One relay per state directory. Nothing stops a second relay from opening the same folder until Phase 77 adds a lock, so run only one.
 - No Teams or Signal messages are handled yet.
 - This is a foundation guide. The full operator runbook (reverse proxy, TLS, backups, upgrades) arrives in Phase 84.
+
+## Your organization's sync hub
+
+The sync hub carries shared staff projects between the computers of the people who work on them. Your organization runs one hub, as its own service in this Compose file, under the profile `hub`. It runs without the relay, and the relay runs without it. Its code is in `hub/`, it has no runtime dependency, and it is never shipped in the extension's VSIX.
+
+This release ships the hub for operators only. People cannot connect a staff project to it from the editor yet; that arrives in a later release. You can stand the hub up now, back it up and practise a restore, so it is ready when the editor can use it.
+
+### What the hub is and what it never does
+
+- It keeps the signed, sealed history of each staff project that the staff lead connects to it, and hands it to the project's members. It checks every change against the project's member list before it keeps it, tells members' computers at once when something changes, and signs checkpoints that let every computer notice a hub that holds back, rolls back or shows different people different histories.
+- It holds no model credential, makes no model calls, runs no tools and opens no outbound connection. The only connection it makes is its own health check, to itself.
+- It cannot write as a member, change what a member wrote or admit anyone. People are admitted by the staff lead's computer, which checks the join request and the six words as before.
+
+### What you need
+
+- Docker with Compose. The image is built from this repository; both base images are pinned by digest.
+- A host name that members' computers can reach, for example `hub.example.test`, and a port (8443 unless you choose another).
+- A TLS certificate and key for that host name: from your organization's certificate authority, or a self-signed one made with the command below.
+- Every command in this section runs from the repository root.
+
+### Certificates and pins
+
+The hub ends TLS itself, with TLS 1.3 only. Members' computers trust it in one of two ways, never through the system's list of certificate authorities:
+
+- **The pin.** The pin is the sha256 of the certificate's public key (its SubjectPublicKeyInfo), written as 64 hex characters. The hub puts it in every hub file it prints, and the staff lead's computer records it when it admits the hub. A computer that meets a certificate with another pin sends nothing.
+- **Your organization's certificate authority.** A computer given your organization's CA accepts a certificate from that CA for the host name it connects to.
+
+Because the pin is the pin of the key, not of the certificate, renewing the certificate with the same key keeps the pin, and nothing changes for members. A new key gives a new pin: the staff lead then revokes the hub and admits it again from a new hub file.
+
+To make a self-signed certificate with an EC P-256 key for your host name:
+
+```sh
+mkdir -p relay/secrets/hub
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout relay/secrets/hub/hub_tls_key -out relay/secrets/hub/hub_tls_cert \
+  -days 365 -subj "/CN=hub.example.test" -addext "subjectAltName=DNS:hub.example.test"
+```
+
+To use your organization's CA instead, put the certificate it issued (followed by any intermediate certificates) in `relay/secrets/hub/hub_tls_cert` and its key, without a passphrase, in `relay/secrets/hub/hub_tls_key`. The certificate must name the host name members use.
+
+To print the pin of a certificate:
+
+```sh
+openssl x509 -in relay/secrets/hub/hub_tls_cert -noout -pubkey \
+  | openssl pkey -pubin -outform DER | openssl dgst -sha256 -r | cut -d' ' -f1
+```
+
+To renew a self-signed certificate with the same key, so the pin stays:
+
+```sh
+openssl req -x509 -key relay/secrets/hub/hub_tls_key -out relay/secrets/hub/hub_tls_cert.new \
+  -days 365 -subj "/CN=hub.example.test" -addext "subjectAltName=DNS:hub.example.test"
+```
+
+Print the pin of the new file with the command above, check it is the same, then put it in place of the old certificate (see [Changing a key or the certificate](#changing-a-key-or-the-certificate)). For a certificate from your organization's CA, ask for the renewal from the same key: `openssl req -new -key relay/secrets/hub/hub_tls_key -subj "/CN=hub.example.test" -addext "subjectAltName=DNS:hub.example.test" -out hub.csr` makes the request.
+
+### Secret files
+
+The hub reads four secrets, each from its own file, exactly as the relay does (see [Secrets](#secrets)): never from a plain environment value, and only from a file with mode 0400 or 0600 and no group or world access. Compose mounts them from `relay/secrets/hub/` (or the folder in `NEAR_AI_HUB_SECRETS_DIR`):
+
+| File | Secret | What it is |
+| --- | --- | --- |
+| `hub_tls_cert` | `HUB_TLS_CERT` | The TLS certificate, and any intermediate certificates after it. |
+| `hub_tls_key` | `HUB_TLS_KEY` | The certificate's private key, without a passphrase. |
+| `hub_signing_key` | `HUB_SIGNING_KEY` | The hub's Ed25519 signing key: one line made with `--generate-key signing`. It is the hub's identity; its checkpoints and hub files are signed with it. |
+| `hub_encryption_key` | `HUB_ENCRYPTION_KEY` | The hub's X25519 encryption key: one line made with `--generate-key encryption`. The keys of the parts of a project the hub may read are wrapped to it. |
+
+Build the image first, then make the two key lines. Each command prints one line and writes nothing else; the `umask` keeps the new file private from the moment it exists:
+
+```sh
+docker compose -f relay/compose.yaml --profile hub build hub
+(umask 077; docker run --rm --network none near-ai-hub:local /app/bin.mjs --generate-key signing > relay/secrets/hub/hub_signing_key)
+(umask 077; docker run --rm --network none near-ai-hub:local /app/bin.mjs --generate-key encryption > relay/secrets/hub/hub_encryption_key)
+```
+
+Without Docker, a checkout with Node 26.13.1 does the same: `cd hub && npm ci --ignore-scripts && npm run build`, then `node hub/dist/bin.mjs --generate-key signing` from the repository root.
+
+Print the certificate's pin now (above) and note it: once the files belong to the hub's user you need `sudo` to read them. Then give the four files to the hub's user, 65532, with mode 0400. Compose keeps the host file's owner and mode, so this is what the container sees:
+
+```sh
+sudo chown 65532:65532 relay/secrets/hub/*
+sudo chmod 0400 relay/secrets/hub/*
+```
+
+Keep these files out of the hub's state volume and out of its backups. They are the hub's identity: anyone holding them can act as your organization's hub, and losing them means the staff lead must admit a new hub. Back them up on their own, as privately as any other key.
+
+### Running with Compose
+
+The hub's settings go in a small file of Compose variables, `relay/secrets/hub.env`, so every command below uses the same ones. The `relay/secrets` folder is ignored by git.
+
+```sh
+cat > relay/secrets/hub.env <<'EOF'
+NEAR_AI_HUB_PUBLIC_ADDRESS=hub.example.test:8443
+NEAR_AI_HUB_PUBLISH_ADDRESS=192.0.2.10
+EOF
+docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub up -d --build hub
+docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub ps hub
+```
+
+`ps` shows the hub as `healthy` within a few seconds. Compose variables, all prefixed `NEAR_AI_HUB_` so the hub's own check of `HUB_` settings never sees them:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NEAR_AI_HUB_PUBLIC_ADDRESS` | not set | The host name and port members' computers use, such as `hub.example.test:8443`. The port is required. The hub serves without it, but cannot print a hub file. |
+| `NEAR_AI_HUB_PUBLISH_ADDRESS` | `127.0.0.1` | The address on this machine the hub's port is published on. Until you set it, nothing outside this machine reaches the hub. Set it to the address of the interface members reach, and use `0.0.0.0` only when every interface of the machine should accept the hub's port. |
+| `NEAR_AI_HUB_PUBLISH_PORT` | `8443` | The port on that address. |
+| `NEAR_AI_HUB_SECRETS_DIR` | `relay/secrets/hub` | The folder that holds the four secret files. A relative path is read from the `relay` folder. |
+| `NEAR_AI_HUB_IMAGE` | `near-ai-hub:local` | The name of the image to build and run. |
+
+What the container gives you is what the relay's gives (see [Running with Compose](#running-with-compose)): a shell-less distroless image run as user 65532, a read-only root filesystem, every capability dropped, no-new-privileges, a 16 MB private `/tmp`, limits of 128 processes and 512 MB of memory, and the volume `hub-state` (named `near-ai-relay_hub-state` by Docker) as its only writable path, mounted at `/var/lib/near-ai-hub`.
+
+A reverse proxy in front of the hub must pass TCP through and never end TLS: members' computers bind their session to the hub's own TLS connection, and a proxy that ends TLS breaks that binding, so nothing works through it. Behind a pass-through proxy every member appears to come from the proxy's address, so the hub's per-address limits (120 session openings, 10 join requests and 10 enrolments a minute, 32 event streams) apply to all of them together.
+
+### The hub file and enrolment
+
+Nobody can put a project on the hub without a hub file from you. A hub file (`.near-staff-hub`) names the hub, its address, its certificate pin and its public keys, and carries a one-time enrolment secret, all signed by the hub's own key. To print one that expires in 7 days, while the hub is running:
+
+```sh
+(umask 077; docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub exec -T hub \
+  /nodejs/bin/node /app/bin.mjs --hub-file 7 > hub.near-staff-hub)
+```
+
+- The number is the days until it expires, from 1 to 30; 7 when you leave it out.
+- One hub file connects one project. The staff lead's computer admits the hub to the project's member list from it and then enrols the project with it; a second project needs a new file. The editor command the staff lead uses for this arrives in a later release.
+- Treat it like a password until it is used: give it to the staff lead privately. Anyone holding it could put a project of their own on your hub. One that is lost or not needed can simply be left to expire.
+- The hub keeps only a hash of the enrolment secret. It does not store the secret: it derives it again from its own encryption key and the file's enrolment id when the project is enrolled. So a hub whose encryption key changed refuses every hub file it printed before; print new ones.
+- It prints nothing but the file. When it cannot (no public address set, days outside 1 to 30), it prints one `hub.start_refused` line instead and exits 1.
+
+### Health and logs
+
+`GET /healthz` returns three fields: `version`, `uptimeSeconds` and `store` (`ok`, or `down` when the hub's store is damaged), with 200 when healthy and 503 when not. The container healthcheck runs `node /app/bin.mjs --healthcheck` against the hub itself.
+
+The hub logs one JSON line per event, through a redacting logger. Lines name a project id, an invitation id, counts and reason words, and never a key, a token, a secret or the content of a project. Read them with `docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub logs hub`. The lines to know:
+
+| Event | Meaning |
+| --- | --- |
+| `hub.listening` | Started. Carries the hub's writer id and its public address. |
+| `hub.start_refused` | Did not start, with a reason word (`config`, `secrets`, `state-dir`, `keys`, `tls`, `store`, `listen`) and a plain sentence. |
+| `store.damaged`, `store.recovered` | The store found a missing blob file (restore from a backup), or cleaned up after an interrupted write. |
+| `checkpoint.signed` | A checkpoint was signed for a project. |
+| `checkpoint.waiting` | After a restore, the hub holds checkpoints that members handed back but not yet every change they cover, so it signs nothing for that project until members push those changes again. |
+| `checkpoint.conflict` | The checkpoints the hub holds for a project do not form one history, so it signs nothing more for it (see the restore drill). |
+| `checkpoint.trimmed`, `checkpoint.too_large` | A checkpoint was too large and left out some parts the hub was granted, or could not be made small enough. |
+| `checkpoint.failed` | Signing a checkpoint failed with an error; the next change tries again. |
+| `invite.locked` | An invitation was locked after 5 wrong tries. |
+
+### Backups
+
+The hub's state is one folder in the volume `hub-state`: the database `hub.db` (with `hub.db-wal` when present) and the folder `blobs/`. Back it up only while the hub is stopped, and keep the key files out of it.
+
+The image has no shell, so the copy is made by the image's own Node, as the hub's user, into a folder that only that user can read:
+
+```sh
+docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub stop hub
+mkdir -m 0700 hub-backup-2026-11-20
+sudo chown 65532:65532 hub-backup-2026-11-20
+docker run --rm --network none --user 65532:65532 \
+  -v near-ai-relay_hub-state:/var/lib/near-ai-hub:ro -v "$PWD/hub-backup-2026-11-20:/backup" \
+  near-ai-hub:local -e "require('node:fs').cpSync('/var/lib/near-ai-hub', '/backup/state', { recursive: true })"
+docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub start hub
+```
+
+Keep the backup as private as the key files, but apart from them. Back up often: a restore loses everything after the backup, and members' computers must push it back (below), so the newer the backup, the less they have to do.
+
+### Restoring from a backup
+
+Members' computers notice a hub that shows them less than they already saw. After an honest restore they call the hub rolled back once, hand back the newer checkpoints they hold, and push again what the hub lost; the hub waits (`checkpoint.waiting`) until it holds everything those checkpoints cover, then signs again.
+
+One limit needs care. To a member's computer, an honest restore and a hub that shows different people different histories look the same when new work reaches the restored hub before every computer has handed back what it holds. A computer that held a checkpoint the restore lost then calls the hub forked as well as rolled back, and stops trusting it. So restore like this:
+
+1. Ask the staff lead to tell every member: sync, and make no new changes in the project, until told otherwise.
+2. Save the current state too, with the backup commands above into another folder, before replacing it.
+3. Put the backup in place of the volume's contents and start the hub:
+
+   ```sh
+   docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub stop hub
+   docker run --rm --network none --user 65532:65532 \
+     -v near-ai-relay_hub-state:/var/lib/near-ai-hub -v "$PWD/hub-backup-2026-11-20:/backup:ro" \
+     near-ai-hub:local -e "
+       const fs = require('node:fs');
+       const dir = '/var/lib/near-ai-hub';
+       for (const name of fs.readdirSync(dir)) fs.rmSync(dir + '/' + name, { recursive: true });
+       fs.cpSync('/backup/state', dir, { recursive: true });"
+   docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub start hub
+   ```
+
+4. Let every member's computer sync. Watch the logs: `checkpoint.waiting` names projects that still miss changes, and `checkpoint.signed` follows once a project is whole again.
+5. When the staff lead has confirmed that every device has synced, and the logs show no `checkpoint.waiting` after the last of them reconnected, members may make changes again.
+
+If a member's computer still names the hub forked after an honest restore, it keeps refusing the hub, which is the safe choice. That member keeps working by file, or through another hub, until the staff lead re-admits the hub; re-admitting a hub arrives with the editor's hub commands in a later release.
+
+Right after a restore, `checkpoint.conflict` with the reason `order-mismatch` can clear by itself: it means a member handed back a checkpoint that comes after one the hub does not hold yet, and signing resumes once another member hands that one back. A related gap remains: the hub may have signed a checkpoint that no member's computer ever received, with later checkpoints coming after it. If a restore loses it, no computer can hand it back, and the hub signs nothing more for that project until it is started again on a state whose checkpoints agree (for example a newer backup that still holds that checkpoint). Changes still sync in the meantime, but members' computers will in time report the hub as delayed. `checkpoint.conflict` with any other reason (`not-nested`, `equal-count-tip-mismatch`) means the hub's own record does not agree with itself and never clears: tell the staff lead, who re-admits the hub.
+
+### The restore drill
+
+When members can connect projects from the editor, practise a restore before you need one, on a test project:
+
+1. Take a backup.
+2. Make a change from two members' computers and let both sync.
+3. Ask both members to stop changing the project, restore the backup and start the hub.
+4. Let both computers sync. Each should say once that the hub was rolled back, then nothing more.
+5. Check the logs: `checkpoint.waiting` lines stop and a `checkpoint.signed` line follows, with no `checkpoint.conflict`.
+6. Check that both computers show both changes.
+
+Until then, the hub's own test suite runs this drill on every change (`hub/test/restoreDrill.test.ts`), and you can practise the backup and restore commands on a hub with no projects: after the restore it must start and show `healthy`.
+
+### Upgrades
+
+1. Take a backup.
+2. Update this repository to the new release.
+3. Rebuild and restart the hub:
+
+   ```sh
+   docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub up -d --build hub
+   ```
+
+4. Check that `ps` shows it `healthy` and the logs show `hub.listening`.
+
+The store's schema is version 1. A newer hub that changes it upgrades the store when it starts; each step of the upgrade either completes or leaves the store as it was. An older hub refuses a store a newer one has written, with a plain sentence; to go back, start the newer hub again or restore the backup you took before the upgrade, following the restore steps above.
+
+### Changing a key or the certificate
+
+- **A renewed certificate with the same key**: replace `hub_tls_cert` (owned by 65532, mode 0400 as before) and recreate the container so it reads the new file: `docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub up -d --force-recreate hub`. The pin stays, so members notice nothing.
+- **A new TLS key, signing key or encryption key**: the hub becomes a different hub to every project. Replace the files and recreate the container as above, then print a new hub file for each project; the staff lead revokes the old hub and admits it again from the new file. Revoking moves every part of the project the hub held to a new key.
+
+### What the hub can read
+
+The hub holds the key of the part of each project every member holds. That part carries the member list: the names, seats and declared clearances of the people in the project, and their devices. So your organization's hub server holds the staff list of every project connected to it.
+
+It reads nothing else unless the staff lead grants it a part of the project, such as one whose watches must run when nobody is at a computer (watches arrive in a later release). The staff lead is shown this sentence before a grant: "The hub will be able to read everything in this cell. Anyone who takes over the hub server can read it too. Grant only cells whose watches must run when nobody is at a computer."
+
+Everything else stays sealed: the hub stores and passes on product text, labels, decisions and attachments of the other parts only as ciphertext. It still sees metadata: project, part and device ids, sizes and timing, and who is active in which part. SECURITY.md has the full list, and the test that shows each point, under "Your organization's sync hub".
