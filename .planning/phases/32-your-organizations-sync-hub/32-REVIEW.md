@@ -249,3 +249,27 @@ if (checkpoint.signer !== state.hub) return { state: make(state), findings: [fin
 _Reviewed: 2026-11-20T22:05:47Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
+
+## Resolution (2026-11-20)
+
+Every critical and major finding is fixed with a regression test that failed on the code above. Fixes were made on four branches and merged into `feat/phase-32-sync-hub`.
+
+| Finding | Outcome | Regression test |
+|---|---|---|
+| CR-01 | fixed: the hub judges a roster entry at the roster it cites, stores concurrent branches as the writer's log and lets the fold split; kept grants stay in the hub's key ring through a split | hub/test/append.test.ts "CR-01 roster race ...", "CR-01 no wedge", "CR-01 handover race" |
+| CR-02 | fixed: a product whose signed ledger lines name a product above its cell is left out of that cell's import (listed in `MigrationResult.withheld`) and reaches members below only as live text | staffReplicaMigration "CR-02 ...", staffReplicaLabelLeak "dependsOn canary (CR-02) ..." |
+| WR-01 | fixed: a version header must name its cell's full label (dominance both ways), so compartments and releasability are compared | staffReplicaLabelCells "label-change (WR-01) ..." |
+| WR-02 | fixed for covered cells: a device revoked at the head may refill places one of this hub's kept checkpoints covers; for cells the hub cannot open the limit stays (no checkpoint names them) | hub/test/restoreDrill.test.ts "restore drill, revoked since (WR-02)", append.test.ts "WR-02 restore ..." |
+| WR-03 | fixed: header 5 s, body 10 s then a minimum rate of 16 KiB/s; the authentication deadline covers getting a session, not an upload under way | tlsServer "a slow link ...", "slowloris ...", session "deadline: an enrolment still uploading ..." |
+| WR-04 | fixed: two bucket calls per session (120 sessions a minute), 120 s keep-alive, 300 streams per address (DESIGN 10.9; D-37's 32 raised because D-39 expects a whole site behind one address) | limits "a site behind one address ...", session "keep-alive ...", events "40 devices each hold a stream" |
+| WR-05 | fixed: the signer keeps only the latest checkpoint plus order state and reads kept checkpoints from a cursor | checkpoints "WR-05 bounded ..." |
+| WR-06 | fixed: `HubTransport.push` names and uploads blobs from a `blobsCitedBy` source (Phase 33 must pass it) | staffHubTransport "WR-06 ..." |
+| WR-07 | fixed on the client: entries whose blob neither side holds wait with their log (`heldBack`); the hub still refuses a whole batch on blob-missing, which honest clients no longer trigger | staffHubTransport "WR-07 ..." |
+| WR-08 | fixed: the witness refuses a checkpoint not signed by the hub it watches (`injected`, `other-signer`) | replicaHubWitness "WR-08 ..." |
+| WR-09 | fixed: trimming leaves out only streams no kept checkpoint covered, so trimmed checkpoints nest; `checkpoint.too_large` is logged when covered heads alone exceed the limit, documented in SECURITY.md (format unchanged per D-45) | checkpoints "WR-09 trimmed and still nested", "WR-09 stuck is reported" |
+| IN-01 | fixed: blob references on an entry the hub already holds are kept only from its writer | append "IN-01 blob references ..." |
+| IN-03 | fixed: `subscribe` reports the end of a stream through `onEnd` | staffHubTransport "IN-03 ..." |
+| IN-04 | fixed: token caps and revocation drops are per project and device | session "revoked in one project ..." |
+| IN-05 | fixed: grants the hub could not place yet are sent again with retries | staffHubTransport "IN-05 ..." |
+| IN-07 | fixed: the stream standing check loads the stored roster when it is not in memory | events "keep-alive: a stream whose roster is not held in memory ..." |
+| IN-02, IN-06 | open (minor): Start Again rebuild crash safety during recovery; no bound on join requests per invitation | - |
