@@ -29,10 +29,12 @@ import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import { isRecord } from '../../domain/team/validate';
 import { buildGrant, newEpochKey, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
-import { GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, buildEntry, entryHash, openBlob, openBody, writerIdOf } from '../../domain/replica/entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, entryHash, openBlob, openBody, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { addEntries, createFoldState } from '../../domain/replica/fold';
 import type { FoldResult, FoldState } from '../../domain/replica/fold';
+import { WELCOME_MAX_BYTES, buildWelcome, readWelcome } from '../../domain/replica/invite';
+import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
@@ -41,10 +43,12 @@ import { epochAt } from '../../domain/replica/rosterCells';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
+import { DecodeHost } from './decodeHost';
+import type { DecodeVerdict } from './decodeHost';
 import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore } from './store';
-import type { ReplicaStoreDeps, StoreRefusal, StoreRefused } from './store';
+import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefusal, StoreRefused } from './store';
 
 /** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
 export const GENESIS_PIN_FOLDER = 'staff-replica';
@@ -97,6 +101,8 @@ export interface ReplicaProjectDeps {
   keyStatus?: () => Promise<KeyStatusLookup>;
   /** The cell order the fold checks writes against (D-25), built by the host from Phase 70 dominance; absent means every citation is allowed. */
   cellOrder?: (roster: RosterState, keys: DeviceKeyRing) => ReplicaContext['cellOrder'];
+  /** The memory-capped decode worker entries from outside pass (D-05); the project makes its own on first need when absent, and close() ends it. */
+  decodeHost?: DecodeHost;
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -206,6 +212,21 @@ function parseJson(bytes: Buffer): unknown {
   }
 }
 
+/** The project a welcome file names (its genesis stream), read only to find the pin; readWelcome checks everything else. */
+function welcomeProject(file: unknown): string | undefined {
+  try {
+    const value: unknown = typeof file === 'string' ? (Buffer.byteLength(file, 'utf8') <= WELCOME_MAX_BYTES ? JSON.parse(file) : undefined) : file;
+    if (!isRecord(value) || !isRecord(value.genesis) || !isRecord(value.genesis.header)) return undefined;
+    const stream = value.genesis.header.stream;
+    return typeof stream === 'string' && STREAM_ID_PATTERN.test(stream) ? stream : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const PASS = { ok: true as const };
+const MAX_BLOB_CHARS = Math.ceil((BLOB_MAX_BYTES * 4) / 3);
+
 /** The input of a new shared project. The lead is this device's person; level is the project's level as a slug (D-49). */
 export interface CreateSharedInput {
   name: string;
@@ -228,6 +249,7 @@ export interface AppendOwnOptions {
 }
 export type AppendOwnResult = { ok: true; hash: string; built: BuiltEntry } | ProjectRefused;
 export interface OwnEntry { hash: string; stream: string; seq: number; data: unknown }
+export type WelcomeResult = { ok: true; added: number; held: Array<{ hash: string; reason: string }> } | ProjectRefused;
 export interface ProjectState { roster: RosterState; fold: FoldResult }
 
 export class ReplicaProject {
@@ -242,6 +264,7 @@ export class ReplicaProject {
   private rosterState: RosterState | undefined;
   private rosterKey: string | undefined;
   private recordedHead: string | undefined;
+  private ownDecoder: DecodeHost | undefined;
   private tail: Promise<unknown> = Promise.resolve();
 
   private constructor(
@@ -343,6 +366,55 @@ export class ReplicaProject {
     return created;
   }
 
+  /**
+   * Pins a project's genesis on this computer from the invitation it read (D-07), before the welcome arrives. A pin that already names the same
+   * anchor is kept; one that names another is never replaced (pin-mismatch).
+   */
+  public static async pinAnchor(deps: ReplicaProjectDeps, anchor: RosterAnchor): Promise<{ ok: true; first: boolean } | ProjectRefused> {
+    const checked = anchorOf(anchor);
+    if (checked === undefined) throw new Error('Nothing was pinned: the project anchor is not in the shape this version writes.');
+    const file = genesisPinFile(deps.globalStorageDir, checked.project);
+    const before = await readAnchorFile(file);
+    if (before.kind === 'damaged') return refuse('pin-damaged');
+    if (before.kind === 'anchor') return sameAnchor(before.anchor, checked) ? { ok: true, first: false } : refuse('pin-mismatch');
+    return (await writeAnchorFile(file, checked)) ? { ok: true, first: true } : refuse('pin-mismatch');
+  }
+
+  /**
+   * Joins a shared project in `root` from the welcome file the lead returned after admitting this device (D-15, D-44, D-45). The welcome is read
+   * against the pinned genesis (the pin from pinAnchor, or `anchor` on a first join when nothing is pinned yet) and this device's writer; a welcome
+   * for another project is refused pin-mismatch and anything else wrong welcome-refused, before anything is written. Then: the grants are opened
+   * into the key ring (SecretStorage), the pin is written if it was not, the roster entries go into the store through the decode check as entries
+   * from outside (D-05), the grants are stored, and project.json is written. A folder that holds another shared project is refused pin-mismatch.
+   */
+  public static async joinFromWelcome(root: string, deps: ReplicaProjectDeps, welcome: unknown, anchor?: RosterAnchor): Promise<ReplicaProject | ProjectRefused> {
+    const project = anchor?.project ?? welcomeProject(welcome);
+    if (project === undefined || !STREAM_ID_PATTERN.test(project)) return refuse('welcome-refused');
+    const pinFile = genesisPinFile(deps.globalStorageDir, project);
+    const pin = await readAnchorFile(pinFile);
+    if (pin.kind === 'damaged') return refuse('pin-damaged');
+    if (pin.kind === 'anchor' && anchor !== undefined && !sameAnchor(pin.anchor, anchor)) return refuse('pin-mismatch');
+    const pinned = pin.kind === 'anchor' ? pin.anchor : anchor === undefined ? undefined : anchorOf(anchor);
+    if (pinned === undefined) return refuse('not-shared');
+    const device = await deviceKeys(deps);
+    const read = readWelcome(welcome, { genesisHash: pinned.genesisHash, writer: device.writer });
+    if (!read.ok) return read.reason === 'wrong-project' ? refuse('pin-mismatch') : refuse('welcome-refused', read.message);
+    const local = await readAnchorFile(projectFile(root));
+    if (local.kind === 'damaged') return refuse('pin-damaged');
+    if (local.kind === 'anchor' && !sameAnchor(local.anchor, pinned)) return refuse('pin-mismatch');
+    // Every check has passed; from here on the join writes.
+    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    await ring.openGrants(read.welcome.grants);
+    if (pin.kind === 'missing' && !(await writeAnchorFile(pinFile, pinned))) return refuse('pin-mismatch');
+    const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
+    if (!(store instanceof ReplicaStore)) return storeRefused(store);
+    const joined = new ReplicaProject(path.resolve(root), pinned, deps, store, ring, device);
+    const received = await joined.receiveWelcome(read.welcome, read.entries);
+    if (isProjectRefused(received)) return received;
+    if (local.kind === 'missing' && !(await writeAnchorFile(projectFile(root), pinned))) return refuse('pin-damaged');
+    return joined;
+  }
+
   public get projectId(): string {
     return this.anchor.project;
   }
@@ -424,6 +496,64 @@ export class ReplicaProject {
     });
   }
 
+  /** Takes a welcome file for this project (for example a second one after the lead gave this device another cell): same checks as a join. */
+  public ingestWelcome(welcome: unknown): Promise<WelcomeResult> {
+    return this.exclusive(async () => {
+      const read = readWelcome(welcome, { genesisHash: this.anchor.genesisHash, writer: this.device.writer });
+      if (!read.ok) return read.reason === 'wrong-project' ? refuse('pin-mismatch') : refuse('welcome-refused', read.message);
+      return this.receiveWelcome(read.welcome, read.entries);
+    });
+  }
+
+  /**
+   * Takes entries and blobs from outside this machine (a transport, later). Each new entry passes the decode check first (D-05): the body of a
+   * doc.update or doc.compact this device can open is handed to the memory-capped decode worker, and one it refuses is kept, held and listed by
+   * heldForCheck(), never folded. An entry this device cannot open yet passes; the fold holds it for its key or blob.
+   */
+  public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[]): Promise<IngestResult | ProjectRefused> {
+    return this.exclusive(async () => {
+      const result = await this.store.ingestForeign(entries, blobs, this.foreignCheck(blobs));
+      return 'ok' in result ? result : storeRefused(result);
+    });
+  }
+
+  /** Entries from outside the decode check held back, with its reason. They stay in the store and out of the fold. */
+  public heldForCheck(): Array<{ hash: string; reason: string }> {
+    return this.store.heldForCheck();
+  }
+
+  /**
+   * The welcome file for one admitted device (D-15, D-45): the genesis, every roster entry with its blobs, and only the grants of the given cells
+   * whose every wrap names that device. Built from this device's store, so it carries what this device holds.
+   */
+  public welcomeFor(writer: string, cells: readonly string[]): Promise<WelcomeFile> {
+    return this.exclusive(async () => {
+      const own = this.store.entries().filter((entry) => entry.header.stream === this.anchor.project);
+      const genesis = own.find((entry) => entryHash(entry.header) === this.anchor.genesisHash);
+      if (genesis === undefined) throw new Error('The welcome file was not made: this computer does not hold the project genesis.');
+      const roster: SealedEntry[] = [];
+      const blobs = new Map<string, SealedBlob>();
+      for (const entry of own) {
+        const opened = await this.openEntry(entry);
+        if (opened === undefined || ROSTER_KIND_OWNER[opened.kind] === undefined) continue;
+        roster.push(entry);
+        if (opened.blob === undefined) continue;
+        const blob = this.blobCache.get(opened.blob) ?? await this.store.blob(opened.blob);
+        if (blob !== undefined) blobs.set(blob.hash, blob);
+      }
+      const { grants } = await this.store.grants();
+      return buildWelcome({ genesis, roster, blobs: [...blobs.values()], grants: grants.map((grant) => grant.signed), writer, cells });
+    });
+  }
+
+  /** Ends the decode worker this project made for itself (one passed in deps is the caller's to close). */
+  public async close(): Promise<void> {
+    await this.tail;
+    const decoder = this.ownDecoder;
+    this.ownDecoder = undefined;
+    if (decoder !== undefined) await decoder.close();
+  }
+
   // ---- inside ------------------------------------------------------------------------------------------------------------------------------------
 
   /** Runs one public step at a time on this object, so a fold never sees half of another step. */
@@ -431,6 +561,71 @@ export class ReplicaProject {
     const run = this.tail.then(work, work);
     this.tail = run.catch(() => undefined);
     return run;
+  }
+
+  private decoder(): DecodeHost {
+    if (this.deps.decodeHost !== undefined) return this.deps.decodeHost;
+    this.ownDecoder ??= new DecodeHost();
+    return this.ownDecoder;
+  }
+
+  /** A welcome already read and checked: its grants opened, its entries stored through the decode check, its grants stored. */
+  private async receiveWelcome(welcome: WelcomeFile, entries: readonly SealedEntry[]): Promise<WelcomeResult> {
+    await this.keys.openGrants(welcome.grants);
+    const ingested = await this.store.ingestForeign(entries, welcome.blobs, this.foreignCheck(welcome.blobs));
+    if (!('ok' in ingested)) return storeRefused(ingested);
+    for (const signed of welcome.grants) {
+      const grant = readGrant(signed);
+      if (!grant.ok) continue;
+      const stored = await this.store.putGrant(grant.grant.cell, grant.grant.epoch, signed);
+      if (!('ok' in stored)) return storeRefused(stored);
+    }
+    return { ok: true, added: ingested.added, held: ingested.held };
+  }
+
+  /**
+   * The store's ForeignCheck (D-05). Opens the body of a doc.update or doc.compact with this device's keys (and its blob, from this delivery or the
+   * store) and asks the decode worker about the update bytes or the compacted state; a refusal holds the entry with the worker's reason. Anything
+   * this device cannot open yet, and every other kind, passes: the fold checks it, holds it, or refuses it.
+   */
+  private foreignCheck(blobs: readonly SealedBlob[]): ForeignCheck {
+    const given = new Map<string, SealedBlob>();
+    for (const blob of blobs) {
+      if (!isRecord(blob) || typeof blob.hash !== 'string' || typeof blob.bytes !== 'string' || blob.bytes.length > MAX_BLOB_CHARS) continue;
+      if (blobBytesHash(blob) === blob.hash) given.set(blob.hash, blob);
+    }
+    const blobOf = async (hash: unknown): Promise<SealedBlob | undefined> => {
+      if (typeof hash !== 'string' || !HASH_PATTERN.test(hash)) return undefined;
+      return given.get(hash) ?? this.blobCache.get(hash) ?? await this.store.blob(hash);
+    };
+    return async (entry) => {
+      const { stream, epoch } = entry.header;
+      const key = this.keys.epochKey(stream, epoch);
+      if (key === undefined) return PASS;
+      const plain = openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+      const body = plain === undefined ? undefined : parseJson(plain);
+      if (!isRecord(body) || (body.kind !== 'doc.update' && body.kind !== 'doc.compact')) return PASS;
+      let data: unknown = body.data;
+      if (body.blob !== undefined) {
+        const blob = await blobOf(body.blob);
+        const opened = blob === undefined ? undefined : openBlob(key, stream, epoch, blob);
+        if (opened === undefined) return PASS;
+        data = parseJson(opened);
+      }
+      if (!isRecord(data)) return PASS;
+      let verdict: DecodeVerdict;
+      if (body.kind === 'doc.update') {
+        if (typeof data.update !== 'string') return PASS;
+        verdict = await this.decoder().inspect('update', Buffer.from(data.update, 'base64url'));
+      } else {
+        const state = await blobOf(data.stateBlob);
+        const opened = state === undefined ? undefined : openBlob(key, stream, epoch, state);
+        if (opened === undefined) return PASS;
+        verdict = await this.decoder().inspect('state', opened);
+      }
+      if (verdict.ok) return PASS;
+      return { ok: false, reason: `The decode check refused this ${body.kind === 'doc.update' ? 'update' : 'compaction'} (${verdict.error}).` };
+    };
   }
 
   private now(): Date {

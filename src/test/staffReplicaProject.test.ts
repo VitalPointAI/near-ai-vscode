@@ -1,21 +1,28 @@
 // The shared project on the host (31-18, D-07, D-19, D-24, D-44, D-46): created on disk, reopened, folded with the real roster and this device's key
 // ring through one long-lived context; joined from a welcome file on a second install; entries from outside checked by the decode worker first.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
+import { buildGrant, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, localInsert } from '../domain/replica/doc';
-import { ORIGIN_ROSTER } from '../domain/replica/roster';
+import { MAX_STRUCTS } from '../domain/replica/kindSchemas/doc';
+import { buildInvite, buildJoinRequest, checkJoinRequest, inviteAnchor, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
+import type { InvitePayload } from '../domain/replica/invite';
+import { ORIGIN_ROSTER, rosterView } from '../domain/replica/roster';
 import type { ProjectOutput } from '../domain/replica/projectFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../domain/staff/multiUser';
 import type { SecretStorageLike } from '../services/auth';
 import { DEVICE_KEY_SECRET } from '../team/identity';
+import { DecodeHost } from '../staff/replica/decodeHost';
 import { ENCRYPTION_KEY_SECRET, EPOCH_KEY_SECRET_PREFIX } from '../staff/replica/keyring';
 import { PROJECT_REFUSALS_HOST, ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
+import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { updateData } from './helpers/replicaWorld';
 
 class MemorySecrets implements SecretStorageLike {
@@ -173,4 +180,188 @@ test('createSharedProject run again after a crash before project.json uses the g
   // And once project.json is back, a third call returns the same project.
   const third = await created(lead);
   assert.equal(third.anchor.genesisHash, first.anchor.genesisHash);
+});
+
+// ---- Task 3: a second device joins from a welcome file; entries from outside pass the decode worker ---------------------------------------------
+
+const INVITE = 'inv-jo';
+const JOINER = 'mbr-jo';
+
+interface Joined { lead: Install; joiner: Install; a: ReplicaProject; b: ReplicaProject; admit: string; invite: InvitePayload; welcomeText: string }
+
+/**
+ * The lead (install A) invites one person by file; the joining device (install B, its own folder, global storage and secrets) reads the invite, pins
+ * its genesis and answers with a join request; A checks it, admits B's device at slot 2, grants B the base cell at the admission roster and builds a
+ * welcome for B alone; B joins from the welcome text. Files travel as JSON text.
+ */
+async function joinScenario(decodeHost?: DecodeHost): Promise<Joined> {
+  const lead = install('lead');
+  const joiner = install('joiner');
+  if (decodeHost !== undefined) joiner.deps.decodeHost = decodeHost;
+  const a = await created(lead);
+  const secret = newJoinSecret();
+  const invited = await a.appendOwn('member.invite', { invite: INVITE, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(secret) });
+  assert.ok('ok' in invited);
+  const inviteText = JSON.stringify(buildInvite(a.signer, {
+    genesisHash: a.anchor.genesisHash, project: a.projectId, name: 'Exercise Northwind', lead: { member: 'mbr-lead', x25519: a.anchor.lead.x25519 }, invite: INVITE, secret, expiresAt: INVITE_EXPIRES, now: new Date(NOW)
+  }));
+  // B's side: read the invite, pin its genesis, answer it.
+  const read = readInvite(inviteText, new Date(NOW));
+  assert.ok(read.ok);
+  const pinned = await ReplicaProject.pinAnchor(joiner.deps, inviteAnchor(read.invite));
+  assert.deepEqual(pinned, { ok: true, first: true });
+  const device = await ReplicaProject.localDevice(joiner.deps);
+  const requestText = JSON.stringify(buildJoinRequest(device.signer, read.invite, { name: 'Jo Analyst', x25519: device.x25519, now: new Date(NOW) }));
+  // A's side: check the request, admit, grant, welcome.
+  const checked = checkJoinRequest(requestText, { invite: read.invite, secret });
+  assert.ok(checked.ok);
+  const admitted = await a.appendOwn('member.admit', {
+    member: JOINER, invite: INVITE, name: 'Jo Analyst', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, agentSeats: [],
+    device: { writer: device.writer, publicKey: device.publicKey, x25519: checked.request.x25519, x25519Sig: checked.request.x25519Sig, slot: 2 }
+  });
+  assert.ok('ok' in admitted);
+  const baseKey = a.keys.epochKey(a.projectId, 1) as Buffer;
+  const grant = buildGrant(a.signer, {
+    cell: a.projectId, epoch: 1, roster: admitted.hash, labelSealed: '',
+    wraps: [{ writer: device.writer, wrap: wrapEpochKey({ cell: a.projectId, epoch: 1, writer: device.writer, recipient: device.x25519, epochKey: baseKey }) }]
+  });
+  assert.deepEqual(await a.putGrants([grant]), { ok: true, stored: 1, opened: 0 });
+  const welcomeText = JSON.stringify(await a.welcomeFor(device.writer, [a.projectId]));
+  const b = project(await ReplicaProject.joinFromWelcome(joiner.root, joiner.deps, welcomeText));
+  return { lead, joiner, a, b, admit: admitted.hash, invite: read.invite, welcomeText };
+}
+
+test('a second device joins from a welcome file: its store holds the roster, its pin is the invite\'s genesis, its key ring opens the base cell, and it reaches the lead\'s roster head', async () => {
+  const joined = await joinScenario();
+  const { a, b, joiner } = joined;
+  try {
+    const leadState = await a.state();
+    const joinerState = await b.state();
+    assert.deepEqual(joinerState.roster.positions, leadState.roster.positions);
+    assert.equal(joinerState.roster.positions[joinerState.roster.positions.length - 1], joined.admit);
+    assert.deepEqual(joinerState.roster.refused, []);
+    const view = rosterView(joinerState.roster);
+    assert.equal(view.isAdmitted(b.deviceWriter, joined.admit), true);
+    assert.equal(view.memberName(JOINER, joined.admit), 'Jo Analyst');
+    assert.deepEqual(b.keys.epochKey(b.projectId, 1), a.keys.epochKey(a.projectId, 1));
+    const pin = JSON.parse(readFileSync(genesisPinFile(joiner.global, b.projectId), 'utf8')) as { anchor: { genesisHash: string } };
+    assert.equal(pin.anchor.genesisHash, joined.invite.genesisHash);
+    const copy = JSON.parse(readFileSync(path.join(joiner.root, ...REPLICA_PROJECT_FILE.split('/')), 'utf8')) as { anchor: { genesisHash: string } };
+    assert.equal(copy.anchor.genesisHash, joined.invite.genesisHash);
+    // B's fold accepts the genesis too, and reopening B's folder gives the same line.
+    assert.ok(joinerState.fold.applied.includes(joined.invite.genesisHash));
+    const reopened = project(await ReplicaProject.open(joiner.root, joiner.deps));
+    assert.deepEqual((await reopened.state()).roster.positions, leadState.roster.positions);
+  } finally {
+    await b.close();
+  }
+});
+
+// One client group of `count` GC structs of length 1, then an empty delete set: an update Yjs would decode struct by struct.
+function writeVaruint(out: Uint8Array, at: number, value: number): number {
+  let rest = value;
+  let next = at;
+  while (rest > 127) { out[next] = 128 | (rest % 128); next += 1; rest = Math.floor(rest / 128); }
+  out[next] = rest;
+  return next + 1;
+}
+function gcProbe(count: number, client = 31): Uint8Array {
+  const out = new Uint8Array(32 + 2 * count);
+  let at = writeVaruint(out, 0, 1);
+  at = writeVaruint(out, at, count);
+  at = writeVaruint(out, at, client);
+  at = writeVaruint(out, at, 0);
+  for (let index = 0; index < count; index += 1) { out[at] = 0; out[at + 1] = 1; at += 2; }
+  at = writeVaruint(out, at, 0);
+  return out.slice(0, at);
+}
+
+test('entries from outside pass a real decode worker: an honest doc.update is applied, a hostile one over the struct limit is held, listed and kept out of the fold', async () => {
+  const decodeHost = new DecodeHost();
+  const joined = await joinScenario(decodeHost);
+  const { a, b } = joined;
+  try {
+    const clientId = clientIdOf(1, 0);
+    const client = await a.appendOwn('doc.client', { product: PRODUCT, clientId, actor: { kind: 'person' } });
+    const update = await a.appendOwn('doc.update', updateData(PRODUCT, localInsert(createLocalDoc(clientId), 0, 'Enemy holds the ridge.')));
+    assert.ok('ok' in client && 'ok' in update);
+    assert.equal(decodeHost.starts, 0, 'joining from the welcome needed no decode (roster entries carry no update)');
+    const honest = await b.ingestForeign([client.built.entry, update.built.entry], [...client.built.blobs, ...update.built.blobs]);
+    assert.ok('ok' in honest, 'the honest entries are taken');
+    assert.equal(honest.added, 2);
+    assert.deepEqual(honest.held, []);
+    assert.equal(decodeHost.starts, 1, 'the update went through the decode worker');
+    const after = await b.state();
+    assert.ok(after.fold.applied.includes(update.hash));
+    assert.equal(productOf(after.fold)?.text, 'Enemy holds the ridge.');
+
+    // A hostile update, sealed under the base key by an admitted writer: one struct over the cap. Its data moves to a sealed blob (it is larger
+    // than an inline body), so the check opens the blob before asking the worker.
+    const hostile = await a.appendOwn('doc.update', updateData(PRODUCT, gcProbe(MAX_STRUCTS + 1)));
+    assert.ok('ok' in hostile);
+    assert.equal(hostile.built.blobs.length, 1);
+    const result = await b.ingestForeign([hostile.built.entry], hostile.built.blobs);
+    assert.ok('ok' in result);
+    assert.equal(result.added, 1);
+    assert.equal(result.held.length, 1);
+    assert.equal(result.held[0].hash, hostile.hash);
+    assert.match(result.held[0].reason, /too-large/);
+    assert.deepEqual(b.heldForCheck().map((item) => item.hash), [hostile.hash]);
+    const folded = await b.state();
+    assert.equal(folded.fold.order.includes(hostile.hash), false, 'the held entry never reaches the fold');
+    assert.equal(folded.fold.held.some((item) => item.hash === hostile.hash), false);
+    assert.equal(productOf(folded.fold)?.text, 'Enemy holds the ridge.');
+    // Reopened, it is still held back.
+    const reopened = project(await ReplicaProject.open(joined.joiner.root, joined.joiner.deps));
+    assert.deepEqual(reopened.heldForCheck().map((item) => item.hash), [hostile.hash]);
+    assert.equal((await reopened.state()).fold.order.includes(hostile.hash), false);
+  } finally {
+    await decodeHost.close();
+  }
+});
+
+function treeHashes(dir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!existsSync(dir)) return out;
+  const walk = (current: string): void => {
+    for (const name of readdirSync(current)) {
+      const full = path.join(current, name);
+      if (statSync(full).isDirectory()) walk(full); else out.set(full, createHash('sha256').update(readFileSync(full)).digest('hex'));
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+test('a welcome whose genesis differs from the pin is refused pin-mismatch and changes nothing on disk, before and after the join', async () => {
+  // Another lead's project, with a welcome addressed to the same joining device.
+  const joined = await joinScenario();
+  const other = install('other-lead');
+  const c = await created(other);
+  const foreignWelcome = JSON.stringify(await c.welcomeFor(joined.b.deviceWriter, []));
+
+  // Before the join: a fresh device that read the first project's invite, pinned it and made its keys (as answering the invite does).
+  const fresh = install('fresh');
+  await ReplicaProject.pinAnchor(fresh.deps, inviteAnchor(joined.invite));
+  await ReplicaProject.localDevice(fresh.deps);
+  const freshBefore = new Map([...treeHashes(fresh.root), ...treeHashes(fresh.global)]);
+  const refused = await ReplicaProject.joinFromWelcome(fresh.root, fresh.deps, foreignWelcome, inviteAnchor(joined.invite));
+  assert.equal(isProjectRefused(refused) ? refused.refused : 'opened', 'pin-mismatch');
+  assert.deepEqual(new Map([...treeHashes(fresh.root), ...treeHashes(fresh.global)]), freshBefore);
+  assert.equal(existsSync(fresh.root), false);
+  // Without an anchor, the welcome names a project this computer never pinned: not-shared, and nothing written.
+  const unpinned = await ReplicaProject.joinFromWelcome(fresh.root, fresh.deps, foreignWelcome);
+  assert.equal(isProjectRefused(unpinned) ? unpinned.refused : 'opened', 'not-shared');
+  assert.deepEqual(new Map([...treeHashes(fresh.root), ...treeHashes(fresh.global)]), freshBefore);
+
+  // After the join: the joined device is offered the other project's welcome.
+  const before = new Map([...treeHashes(joined.joiner.root), ...treeHashes(joined.joiner.global)]);
+  const later = await joined.b.ingestWelcome(foreignWelcome);
+  assert.equal(isProjectRefused(later) ? later.refused : 'taken', 'pin-mismatch');
+  assert.deepEqual(new Map([...treeHashes(joined.joiner.root), ...treeHashes(joined.joiner.global)]), before);
+  // The right welcome again is taken and adds nothing new.
+  const again = await joined.b.ingestWelcome(joined.welcomeText);
+  assert.ok(!isProjectRefused(again));
+  assert.equal(again.added, 0);
+  await joined.b.close();
 });
