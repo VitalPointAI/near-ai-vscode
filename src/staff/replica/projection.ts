@@ -28,7 +28,7 @@ import { actorForTransition, personForTransition } from '../../domain/replica/ve
 import type { ProductVersions, VersionAct, VersionRecord, VersionView } from '../../domain/replica/versions';
 import { STAFF_LEVELS, STAFF_PROFILE_IDS } from '../../domain/staff/doctrine';
 import { apply, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash } from '../../domain/staff/ledger';
-import type { HistoryItem, LedgerEntry, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
+import type { HistoryItem, LedgerEntry, LedgerReplay, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
 import { PRODUCT_KINDS } from '../../domain/staff/products';
 import type { ProductDependency } from '../../domain/staff/products';
 import type { ProductRecord, ReleaseEvent, StaffActor } from '../../domain/staff/release';
@@ -315,6 +315,22 @@ export function projectProductStates(input: ProjectionInput): Map<string, Produc
   const out = new Map<string, ProductState>();
   for (const [product, projected] of projectAll(input)) out.set(product, projected.state);
   return out;
+}
+
+/**
+ * The fold as today's LedgerReplay, which everything reading staff state uses. `entries` counts the projected ledger steps, `head` is the fold's
+ * digest of the streams holding products, and the replay is never broken: the fold has already refused, held or quarantined what it does not trust,
+ * and a product the projection cannot vouch for is marked tampered on its own.
+ */
+export function projectLedgerReplay(input: ProjectionInput): LedgerReplay {
+  const projected = projectAll(input);
+  const products = new Map<string, ProductState>();
+  let entries = 0;
+  for (const [product, item] of projected) {
+    products.set(product, item.state);
+    entries += item.steps.length;
+  }
+  return { products, entries, head: productsHead(input.fold, [...projected.values()].map((item) => item.stream)) };
 }
 
 /** The digest of the streams that hold products: the fold's own digest when one stream does, a hash over the sorted pairs when several do. */
