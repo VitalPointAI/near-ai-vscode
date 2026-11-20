@@ -5,15 +5,23 @@
 // Builders beyond the shared roster world live in this file (the world helper is not edited in this wave).
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
+import type { Checkpoint } from '../domain/replica/checkpoint';
+import { createLocalDoc, localInsert } from '../domain/replica/doc';
+import { GENESIS_PREV, buildEntry } from '../domain/replica/entry';
+import { foldEntries } from '../domain/replica/fold';
+import type { FoldResult } from '../domain/replica/fold';
 import { joinSecretHash } from '../domain/replica/invite';
+import type { ProductTextOutput } from '../domain/replica/textFold';
 import { ORIGIN_ROSTER, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { clientIdOf, MAX_SLOT } from '../domain/replica/clientIds';
-import { MEMBER_REFUSALS, applyGenesisLead, applyMemberEntry, createMembersState, inviteAt } from '../domain/replica/rosterMembers';
+import { MEMBER_REFUSALS, applyGenesisLead, applyMemberEntry, createMembersState, hubCellsAt, inviteAt } from '../domain/replica/rosterMembers';
 import type { MemberApplyOutcome, MembersState } from '../domain/replica/rosterMembers';
 import type { VerifiedEntry } from '../domain/replica/verify';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_AT, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
+import { updateData } from './helpers/replicaWorld';
 import type { Written } from './helpers/replicaWorld';
 
 const JO = 'mbr-jo';
@@ -430,4 +438,180 @@ test('15.2 active -> rotated: the lead rotates its own device; the new device wr
   const stale = line.world.rosterEntry(lead, 'member.invite', inviteData('inv-kim'), rotate.hash);
   const refusedState = line.world.foldRoster({ entries: [...line.entries, stale.entry] });
   assert.deepEqual(refusedState.refused, [{ hash: stale.hash, kind: 'member.invite', reason: 'not-a-roster-writer' }]);
+});
+
+// ---- quarantine, release and the hub (D-04, D-12, D-20, D-48) ----
+
+const PRODUCT = 'intel-estimate';
+const BRANCH_TEXT = ['Enemy holds the ridge.', 'Enemy left the ridge.', 'Enemy reinforced the ridge.'];
+
+interface Forked { line: Line; jo: RosterDevice; admit: Written; forks: Array<{ client: string; update: string }>; entries: unknown[] }
+
+// Jo is admitted at slot 2 and granted the base cell; then Jo's device signs three different entries at seq 0 of the project stream, each followed by
+// its own seq 1, as a device restored from an old backup might.
+function forkedJo(): Forked {
+  const { line, jo, admit } = lineWithJo();
+  line.world.grant(line.world.lead, { roster: admit.hash, to: [jo] });
+  const key = line.world.epochKeyOf(line.world.project, 1);
+  const entries: unknown[] = [];
+  const forks = BRANCH_TEXT.map((text, branch) => {
+    const clientId = clientIdOf(2, branch);
+    const body = (lamport: number, kind: string, data: unknown) => ({ deps: [], roster: admit.hash, lamport, at: ROSTER_AT, actor: { kind: 'person' as const }, kind, data });
+    const client = buildEntry({ signer: jo.signer, key, stream: line.world.project, seq: 0, prev: GENESIS_PREV, epoch: 1, body: body(1, 'doc.client', { product: PRODUCT, clientId, actor: { kind: 'person' } }) });
+    const update = buildEntry({ signer: jo.signer, key, stream: line.world.project, seq: 1, prev: client.hash, epoch: 1, body: body(2, 'doc.update', updateData(PRODUCT, localInsert(createLocalDoc(clientId), 0, text))) });
+    for (const built of [client, update]) {
+      entries.push(built.entry);
+      for (const blob of built.blobs) line.world.blobs.set(blob.hash, blob);
+    }
+    return { client: client.hash, update: update.hash };
+  });
+  return { line, jo, admit, forks, entries };
+}
+
+// The main fold of the roster line and Jo's forked entries, through the real roster view folded from the same line.
+function mainFold(forked: Forked): { roster: RosterState; result: FoldResult } {
+  const roster = forked.line.fold();
+  const result = foldEntries([...forked.line.entries, ...forked.entries], forked.line.world.ctxFor(roster, forked.line.world.ringFor(forked.jo)));
+  return { roster, result };
+}
+
+test('15.2 active -> quarantined: two or more headers at one seq make the main fold quarantine the device; a device.quarantine entry changes no roster answer (D-48)', () => {
+  const forked = forkedJo();
+  const { line, jo } = forked;
+  const before = mainFold(forked);
+  assert.deepEqual(before.result.quarantined, [{ writer: jo.writer, stream: line.world.project, fromSeq: 0 }]);
+  for (const fork of forked.forks) for (const hash of [fork.client, fork.update]) assert.ok(before.result.excluded.includes(hash), hash);
+  // The lead records the quarantine: the entry applies and takes a position, and every member answer is what it was at the roster before it.
+  const head = line.head;
+  const quarantine = line.next('device.quarantine', { writer: jo.writer, stream: line.world.project, seq: 0 });
+  const after = mainFold(forked);
+  assert.deepEqual(after.roster.refused, []);
+  assert.equal(after.roster.positions[after.roster.positions.length - 1], quarantine.hash);
+  assert.deepEqual(after.roster.members, before.roster.members);
+  assert.deepEqual(memberAnswers(after.roster, JO, [jo], quarantine.hash), memberAnswers(after.roster, JO, [jo], head));
+  assert.equal(rosterView(after.roster).chosenBranch(jo.writer, line.world.project, 0), undefined);
+  // The quarantine comes from the proof in the main fold, not from the entry: it is the same with or without it.
+  assert.deepEqual(after.result.quarantined, before.result.quarantined);
+  // A quarantine naming a device the roster never had is refused.
+  assert.equal(refusalOf(line, line.tryEntry('device.quarantine', { writer: 'a'.repeat(64), stream: line.world.project, seq: 0 })), 'device-unknown');
+});
+
+test('15.2 quarantined -> active: device.release naming the third of three branches feeds chosenBranch, and a fresh main fold admits that branch and its later entries', () => {
+  const forked = forkedJo();
+  const { line, jo, forks } = forked;
+  // The branch with the highest hash: never one of the two headers the proof itself carries.
+  const order = forks.map((fork, index) => ({ fork, index })).sort((x, y) => (x.fork.client < y.fork.client ? -1 : 1));
+  const chosen = order[2];
+  const release = line.next('device.release', { writer: jo.writer, stream: line.world.project, seq: 0, branch: chosen.fork.client });
+  const { roster, result } = mainFold(forked);
+  assert.deepEqual(roster.refused, []);
+  assert.equal(roster.positions[roster.positions.length - 1], release.hash);
+  assert.equal(rosterView(roster).chosenBranch(jo.writer, line.world.project, 0), chosen.fork.client);
+  assert.equal(rosterView(roster).chosenBranch(jo.writer, line.world.project, 1), undefined);
+  assert.deepEqual(result.quarantined.filter((record) => record.writer === jo.writer), []);
+  assert.ok(result.applied.includes(chosen.fork.client));
+  assert.ok(result.applied.includes(chosen.fork.update));
+  for (const other of order.slice(0, 2)) for (const hash of [other.fork.client, other.fork.update]) assert.ok(result.excluded.includes(hash), hash);
+  const products = result.families.doc as ProductTextOutput[];
+  assert.equal(products.length, 1);
+  assert.equal(products[0].text, BRANCH_TEXT[chosen.index]);
+  // The device is admitted throughout: a release lifts the quarantine, it does not re-admit.
+  assert.equal(rosterView(roster).isAdmitted(jo.writer, release.hash), true);
+  assert.equal(refusalOf(line, line.tryEntry('device.release', { writer: 'a'.repeat(64), stream: line.world.project, seq: 0, branch: chosen.fork.client })), 'device-unknown');
+});
+
+test('15.2 quarantined -> revoked: device.revoke of the quarantined device applies and it is not admitted from then on', () => {
+  const forked = forkedJo();
+  const { line, jo, admit } = forked;
+  line.next('device.quarantine', { writer: jo.writer, stream: line.world.project, seq: 0 });
+  const revoke = line.next('device.revoke', { member: JO, writer: jo.writer, reason: 'Signed two histories.' });
+  const { roster, result } = mainFold(forked);
+  assert.deepEqual(roster.refused, []);
+  const view = rosterView(roster);
+  assert.equal(view.isAdmitted(jo.writer, admit.hash), true);
+  assert.equal(view.isAdmitted(jo.writer, revoke.hash), false);
+  assert.equal(view.deviceEncryptionKey?.(jo.writer, revoke.hash), undefined);
+  assert.equal(view.chosenBranch(jo.writer, line.world.project, 0), undefined);
+  // No branch was released, so the main fold keeps every branch out.
+  assert.deepEqual(result.quarantined, [{ writer: jo.writer, stream: line.world.project, fromSeq: 0 }]);
+});
+
+const CERT_PIN = 'c'.repeat(64);
+
+function checkpointBy(device: RosterDevice, project: string, rosterHead: string): ReturnType<typeof signCheckpoint> {
+  const checkpoint: Checkpoint = { type: 'checkpoint', v: 2, project, signer: device.writer, rosterHead, streams: [] };
+  return signCheckpoint(device.signer, checkpoint);
+}
+
+test('the hub member: hub.admit gives the hub device a slot and checkpointSigner from then on; hub.grant records a cell; hub.revoke ends both (D-04, D-12)', () => {
+  const { line, jo, admit } = lineWithJo();
+  const hub = line.world.device('HUB', 'hub-main');
+  const hubAdmit = line.next('hub.admit', { hub: 'hub-main', device: hub.descriptor(3), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE });
+  const grant = line.next('hub.grant', { hub: 'hub-main', cell: line.world.project });
+  const revoke = line.next('hub.revoke', { hub: 'hub-main', reason: 'Hub replaced.' });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  const view = rosterView(state);
+  assert.equal(view.checkpointSigner(hub.writer, admit.hash), false);
+  assert.equal(view.checkpointSigner(hub.writer, hubAdmit.hash), true);
+  assert.equal(view.checkpointSigner(hub.writer, grant.hash), true);
+  assert.equal(view.checkpointSigner(hub.writer, revoke.hash), false);
+  assert.equal(view.checkpointSigner(jo.writer, hubAdmit.hash), false);
+  assert.equal(view.checkpointSigner(line.world.lead.writer, hubAdmit.hash), false);
+  assert.equal(view.clientIdOwner?.(clientIdOf(3, 0), hubAdmit.hash), hub.writer);
+  // A version 2 checkpoint the hub signs verifies; one a member device signs does not (T-31-44); after the revoke the hub's does not either.
+  const project = line.world.project;
+  const signed = verifyCheckpoint(checkpointBy(hub, project, hubAdmit.hash), view);
+  assert.equal(signed.ok, true);
+  const byMember = verifyCheckpoint(checkpointBy(jo, project, hubAdmit.hash), view);
+  assert.equal(byMember.ok ? 'ok' : byMember.reason, 'not-a-checkpoint-signer');
+  const afterRevoke = verifyCheckpoint(checkpointBy(hub, project, revoke.hash), view);
+  assert.equal(afterRevoke.ok ? 'ok' : afterRevoke.reason, 'not-a-checkpoint-signer');
+  // The granted cell is recorded for the hub from the grant on.
+  const at = (hash: string): number => state.positionOf.get(hash) as number;
+  assert.deepEqual(hubCellsAt(state.members, 'hub-main', at(hubAdmit.hash)), []);
+  assert.deepEqual(hubCellsAt(state.members, 'hub-main', at(grant.hash)), [project]);
+  assert.equal(hubCellsAt(state.members, 'hub-main', at(revoke.hash)), undefined);
+});
+
+test('hub refusals: an id already used is member-exists or hub-exists, an unknown hub is hub-unknown, and a hub device takes a slot like any device', () => {
+  const { line } = lineWithJo();
+  const hub = line.world.device('HUB', 'hub-main');
+  assert.equal(refusalOf(line, line.tryEntry('hub.admit', { hub: JO, device: hub.descriptor(3), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE })), 'member-exists');
+  assert.equal(refusalOf(line, line.tryEntry('hub.admit', { hub: 'hub-main', device: hub.descriptor(2), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE })), 'slot-in-use');
+  assert.equal(refusalOf(line, line.tryEntry('hub.grant', { hub: 'hub-main', cell: line.world.project })), 'hub-unknown');
+  assert.equal(refusalOf(line, line.tryEntry('hub.revoke', { hub: 'hub-main' })), 'hub-unknown');
+  line.next('hub.admit', { hub: 'hub-main', device: hub.descriptor(3), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE });
+  assert.equal(refusalOf(line, line.tryEntry('hub.admit', { hub: 'hub-main', device: line.world.device('HUB-2', 'hub-main').descriptor(4), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE })), 'hub-exists');
+  // A member cannot take the hub's id, and the hub's device cannot join as a member's device.
+  line.next('member.invite', inviteData('inv-hub-name'));
+  const kim = line.world.device('KIM', 'mbr-kim');
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData('hub-main', 'inv-hub-name', kim, 5))), 'member-exists');
+  assert.equal(refusalOf(line, line.tryEntry('member.admit', admitData('mbr-kim', 'inv-hub-name', hub, 5))), 'device-exists');
+  line.next('hub.revoke', { hub: 'hub-main' });
+  assert.equal(refusalOf(line, line.tryEntry('hub.revoke', { hub: 'hub-main' })), 'hub-unknown');
+  assert.equal(refusalOf(line, line.tryEntry('hub.admit', { hub: 'hub-main', device: line.world.device('HUB-3', 'hub-main').descriptor(6), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE })), 'hub-exists');
+});
+
+test('every member, device, hub and invite kind has its rule: none is refused roster-kind-pending', () => {
+  const forked = forkedJo();
+  const { line, jo } = forked;
+  const laptop = line.world.device('JO-LAPTOP', JO);
+  const fresh = line.world.device('JO-NEW', JO);
+  const hub = line.world.device('HUB', 'hub-main');
+  line.next('member.invite', inviteData('inv-kim'));
+  line.next('invite.void', { invite: 'inv-kim' });
+  line.next('member.update', { member: JO, seat: 'j2-deputy' });
+  line.next('device.add', { member: JO, device: laptop.descriptor(5) });
+  line.next('device.rotate', { member: JO, from: laptop.writer, device: fresh.descriptor(6) });
+  line.next('device.quarantine', { writer: jo.writer, stream: line.world.project, seq: 0 });
+  line.next('device.release', { writer: jo.writer, stream: line.world.project, seq: 0, branch: forked.forks[0].client });
+  line.next('device.revoke', { member: JO, writer: fresh.writer });
+  line.next('hub.admit', { hub: 'hub-main', device: hub.descriptor(3), certPin: CERT_PIN, ceiling: DEMO_CLEARANCE });
+  line.next('hub.grant', { hub: 'hub-main', cell: line.world.project });
+  line.next('hub.revoke', { hub: 'hub-main' });
+  line.next('member.remove', { member: JO });
+  const state = line.fold();
+  assert.deepEqual(state.refused, []);
+  assert.equal(state.positions.length, line.entries.length + 1);
 });

@@ -175,14 +175,25 @@ export function inviteAt(state: MembersState, invite: string, position: number, 
   return record.forMember === undefined ? { state: standing, expiresAt: record.expiresAt } : { state: standing, expiresAt: record.expiresAt, forMember: record.forMember };
 }
 
-// The branch a device.release chose at a fork slot (31-14 records them).
+// The branch a device.release chose at a fork slot (D-20), keyed by writer, stream and seq. It feeds RosterView.chosenBranch, which forkChosen and
+// forkStanding (equivocation.ts) check against the branches of the slot.
 export function chosenBranchOf(state: MembersState, writer: string, stream: string, seq: number): string | undefined {
   return state.releases.get(`${writer}/${stream}/${seq}`);
 }
 
-// True when the writer is an admitted hub device at the position (31-14 admits hubs).
+export function hubAt(state: MembersState, hub: string, position: number): HubRecord | undefined {
+  return state.hubs.get(hub)?.find((record) => inForce(record, position));
+}
+
+// The cells granted to the hub at the position, or undefined when the hub is not in the roster there.
+export function hubCellsAt(state: MembersState, hub: string, position: number): readonly string[] | undefined {
+  return hubAt(state, hub, position)?.cells;
+}
+
+// True when the writer is a hub device admitted at the position and its hub is in force there: only such a device signs checkpoints (D-04, D-12).
 export function hubSignerAt(state: MembersState, writer: string, position: number): boolean {
-  return deviceAt(state, writer, position)?.kind === 'hub';
+  const device = deviceAt(state, writer, position);
+  return device !== undefined && device.kind === 'hub' && hubAt(state, device.member, position) !== undefined;
 }
 
 // ---- apply rules ----
@@ -391,6 +402,59 @@ function applyRevoke(state: MembersState, entry: VerifiedEntry, data: RevokeData
   return { status: 'applied' };
 }
 
+interface SlotData { writer: string; stream: string; seq: number }
+interface ReleaseData extends SlotData { branch: string }
+interface HubAdmitData { hub: string; device: DeviceDescriptor; certPin: string; ceiling: unknown }
+interface HubGrantData { hub: string; cell: string }
+interface HubRevokeData { hub: string }
+
+// device.quarantine is record only (D-48): the quarantine itself comes from an equivocation proof in the main fold, so the entry changes no state. It
+// must name a device the roster has had.
+function applyQuarantine(state: MembersState, data: SlotData): MemberApplyOutcome {
+  return deviceKeyOf(state, data.writer) === undefined ? refused('device-unknown') : { status: 'applied' };
+}
+
+// device.release (DESIGN 15.2 quarantined -> active): records the branch kept at the fork slot. Which hashes are branches of the slot is the main
+// fold's knowledge, so forkChosen accepts the choice only for a branch of that slot. A later release of the same slot replaces the choice: the roster
+// at its head is the lead's current word.
+function applyRelease(state: MembersState, data: ReleaseData): MemberApplyOutcome {
+  if (deviceKeyOf(state, data.writer) === undefined) return refused('device-unknown');
+  state.releases.set(`${data.writer}/${data.stream}/${data.seq}`, data.branch);
+  return { status: 'applied' };
+}
+
+// hub.admit: the hub is a service member (D-12) whose id shares the member namespace and is never given twice; its device takes a slot and is bound
+// like any device.
+function applyHubAdmit(state: MembersState, data: HubAdmitData, ctx: MemberApplyContext): MemberApplyOutcome {
+  if (state.members.has(data.hub)) return refused('member-exists');
+  if (state.hubs.has(data.hub)) return refused('hub-exists');
+  if (state.devices.has(data.device.writer)) return refused('device-exists');
+  const problem = newDeviceProblem(state, data.device);
+  if (problem !== undefined) return refused(problem);
+  state.hubs.set(data.hub, [{ hub: data.hub, certPin: data.certPin, ceiling: data.ceiling, cells: [], from: ctx.position }]);
+  addDevice(state, data.hub, data.device, 'hub', ctx.position);
+  return { status: 'applied' };
+}
+
+// hub.grant: the hub holds the cell from this position on (DESIGN 10.2). Whether the cell exists is the cells module's business.
+function applyHubGrant(state: MembersState, data: HubGrantData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const versions = state.hubs.get(data.hub);
+  const current = hubAt(state, data.hub, ctx.position - 1);
+  if (versions === undefined || current === undefined) return refused('hub-unknown');
+  if (!current.cells.includes(data.cell)) nextVersion(versions, current, { hub: current.hub, certPin: current.certPin, ceiling: current.ceiling, cells: [...current.cells, data.cell], from: ctx.position });
+  return { status: 'applied' };
+}
+
+// hub.revoke: the hub and its devices end at this position, so it signs no checkpoint from here on.
+function applyHubRevoke(state: MembersState, data: HubRevokeData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const cited = ctx.position - 1;
+  const current = hubAt(state, data.hub, cited);
+  if (current === undefined) return refused('hub-unknown');
+  current.until = ctx.position;
+  endDevicesOf(state, data.hub, cited, ctx.position);
+  return { status: 'applied' };
+}
+
 // Applies one member, device, hub or invite kind. The data was checked against its closed schema at verification. Validates first and changes the
 // state only when the outcome is applied.
 export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx: MemberApplyContext): MemberApplyOutcome {
@@ -411,8 +475,18 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
       return applyRotate(state, entry.data as RotateData, ctx);
     case 'device.revoke':
       return applyRevoke(state, entry, entry.data as RevokeData, ctx);
+    case 'device.quarantine':
+      return applyQuarantine(state, entry.data as SlotData);
+    case 'device.release':
+      return applyRelease(state, entry.data as ReleaseData);
+    case 'hub.admit':
+      return applyHubAdmit(state, entry.data as HubAdmitData, ctx);
+    case 'hub.grant':
+      return applyHubGrant(state, entry.data as HubGrantData, ctx);
+    case 'hub.revoke':
+      return applyHubRevoke(state, entry.data as HubRevokeData, ctx);
     default:
-      // member.update, member.remove, device.*, hub.* and invite.void: 31-14 adds their rules.
+      // A kind the driver routes here with no rule in this version: refused, never applied.
       return refused('roster-kind-pending');
   }
 }
