@@ -10,7 +10,10 @@ export type DataClass =
   | 'public';
 
 export type ProviderBoundary = 'local' | 'cloud' | 'tee' | 'unknown';
-/** `tee-only` allows only NEAR models run in an attested TEE (or a local runtime). */
+/**
+ * Kept as a recorded field of privacy decisions and attachment records; it decides no route (Phase 41 D-37: routing is decideRoute's, and
+ * nearAi.privacyMode is PrivacyModeSetting, an input of the private floor).
+ */
 export type SovereigntyMode = 'standard' | 'tee-only' | 'local-only';
 export type PrivacyRuleMode = 'block' | 'warn-and-confirm' | 'allow' | 'local-only';
 

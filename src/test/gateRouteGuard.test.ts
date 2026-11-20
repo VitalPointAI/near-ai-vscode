@@ -19,7 +19,23 @@ import { createProjectCredentialScope } from '../domain/auth';
 import type { OrganizationProfile } from '../domain/auth';
 import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
-import { BINDING_REFUSALS, DEFAULT_ROUTING, ROUTE_CHECK_FAILED_TEXT } from '../domain/gate/routing';
+import { BINDING_REFUSALS, DEFAULT_ROUTING, ROUTE_CHECK_FAILED_TEXT, ROUTE_REFUSALS } from '../domain/gate/routing';
+import type { RoutePolicy, VerifiedAuthorization } from '../domain/gate/routing';
+import { createHash } from 'node:crypto';
+import { parseModelsSection } from '../domain/gate/models';
+import { parseResidencySection } from '../domain/gate/sections';
+import { ConnectionNotBoundError } from '../services/connectionBinding';
+import { pinnedFetchAny } from '../services/privateRoute';
+import { parseEndpoints } from '../domain/gate/endpoints';
+import type { PolicyEndpoint } from '../domain/gate/endpoints';
+import { SCALE_PRESETS } from '../domain/gate/labels';
+import type { PolicyDocument } from '../domain/gate/policyDocument';
+import type { PolicyRecordVersion } from '../domain/gate/record';
+import type { PayloadSigner } from '../domain/team/signedPayload';
+import type { PolicyLayersView } from '../gate/organizationStore';
+import { policyVersionOf } from '../gate/host';
+import { routePolicyFor } from '../gate/sessionMark';
+import { DAY_MS, FIXED_NOW, authorizationFor, deviceKey, fixtureModelsSection, issuerKey, policyDocumentFor, signAuthorization, signerEntry } from './helpers/policyFixtures';
 import type { ActorRef, DecisionSink } from '../domain/gate/decide';
 import { buildDecisionRecord, isModelRequestRecord, validateDecisionRecord } from '../domain/gate/record';
 import type { DecisionRecord } from '../domain/gate/record';
@@ -1180,4 +1196,371 @@ test('the lists of content and non-content paths cannot be changed by a caller',
   }
   assert.equal(needsRouteCheck('/chat/completions', 'POST'), true);
   assert.equal(needsRouteCheck('/billing/costs', 'POST'), false, 'the non-content list still works');
+});
+
+// ---- Phase 41 (41-13, D-36, D-10): the effective policy reaches decideRoute at the client's one choke point ----
+
+const POLICY_NOW = FIXED_NOW;
+
+/** The parsed list of places of a test policy, sorted by id. */
+function placesOf(...entries: Array<Record<string, unknown>>): readonly PolicyEndpoint[] {
+  const parsed = parseEndpoints([...entries].sort((a, b) => (String(a['id']) < String(b['id']) ? -1 : 1)), SCALE_PRESETS);
+  assert.equal(parsed.ok, true, parsed.ok ? '' : `${parsed.reason} ${parsed.path}`);
+  if (!parsed.ok) throw new Error('unreachable');
+  return parsed.value;
+}
+
+/** A route policy as the host gives it: the effective policy's inputs and the version every record of the request names. */
+function routePolicyOf(overrides: Partial<RoutePolicy> = {}, policyVersion: PolicyRecordVersion = 'bundle-2'): RoutePolicy & { readonly policyVersion: PolicyRecordVersion } {
+  return { endpoints: [], authorizations: [], scales: SCALE_PRESETS, mappings: [], clearances: [], organization: true, requireAccreditedDevice: false, now: POLICY_NOW, policyVersion, ...overrides };
+}
+
+const MODELS_CA = { id: 'models-ca', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Internal'] };
+const ORG_SERVER = 'https://models.example.org/v1';
+
+/** A route at `mark` whose policy names `localHosts` as local, with the route policy `routePolicy` gives, recording into `records`. */
+function policyRoute(mark: Mark, records: DecisionRecord[], routePolicy: SessionRoute['routePolicy'], localHosts: readonly string[] = ['models.example.org'], extra: Partial<SessionRoute> = {}): SessionRoute {
+  const state = testBundleState();
+  if (state.state !== 'valid') throw new Error('unreachable');
+  const changed = { ...state, bundle: { ...state.bundle, routing: { ...state.bundle.routing, localHosts } } };
+  return recordingRoute(mark, records, { bundleState: () => changed, ...(routePolicy === undefined ? {} : { routePolicy }), ...extra });
+}
+
+async function serverClient(baseUrl = ORG_SERVER, options: Partial<NearAiClientOptions> = {}): Promise<{ client: NearAiClient; content: string[] }> {
+  const fake = fakeFetch({ local: ['local-model'] });
+  const client = new NearAiClient({ baseUrl, apiKey: '', fetchFn: fake.fetchFn, route: 'local', ...options });
+  await client.listLocalModels();
+  return { client, content: fake.content };
+}
+
+const versionOf = (record: DecisionRecord | undefined): string | undefined => record?.authorizations[0]?.policy.version;
+const ruleOf = (record: DecisionRecord | undefined): string | undefined => record?.authorizations[0]?.policy.name;
+
+test('41-13 tracer: your organization\'s list of places reaches the client, and org Confidential to a place whose ceiling is org Internal is refused before it is sent', async () => {
+  const records: DecisionRecord[] = [];
+  const server = await serverClient();
+  const policy = routePolicyOf({ endpoints: placesOf(MODELS_CA) });
+  await assert.rejects(
+    () => withSessionRoute(policyRoute([org('Confidential')], records, () => policy), () => ask(server.client, 'local-model')),
+    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.endpoint-ceiling' && error.message === ROUTE_REFUSALS['route.endpoint-ceiling']
+  );
+  assert.equal(server.content.length, 0, 'the counting fetch saw no content request');
+  assert.equal(records.length, 1);
+  assert.equal(ruleOf(records[0]), 'route.endpoint-ceiling');
+  assert.equal(versionOf(records[0]), 'bundle-2');
+  assert.equal(validateDecisionRecord(records[0]).ok, true);
+});
+
+test('41-13: the same place carries org Internal and its record names bundle-2; with no route policy, or one that gives none, the request is decided as before (bundle-1)', async () => {
+  const records: DecisionRecord[] = [];
+  const server = await serverClient();
+  const policy = routePolicyOf({ endpoints: placesOf(MODELS_CA) });
+  assert.equal((await withSessionRoute(policyRoute([org('Internal')], records, () => policy), () => ask(server.client, 'local-model'))).text, 'ok');
+  assert.equal(server.content.length, 1);
+  assert.equal(versionOf(records[0]), 'bundle-2');
+  assert.equal(ruleOf(records[0]), 'route.attested-cloud');
+  // No route policy: org Confidential goes to the named host as the safety patch decided it.
+  assert.equal((await withSessionRoute(policyRoute([org('Confidential')], records, undefined), () => ask(server.client, 'local-model'))).text, 'ok');
+  assert.equal(versionOf(records[1]), 'bundle-1');
+  // A route policy that gives none: the same.
+  assert.equal((await withSessionRoute(policyRoute([org('Confidential')], records, () => undefined), () => ask(server.client, 'local-model'))).text, 'ok');
+  assert.equal(versionOf(records[2]), 'bundle-1');
+  assert.equal(server.content.length, 3);
+  // A route policy that throws is a route that cannot be worked out: refused, recorded, nothing sent.
+  await assert.rejects(() => withSessionRoute(policyRoute([org('Internal')], records, () => { throw new Error('unreadable'); }), () => ask(server.client, 'local-model')), (error: unknown) => error instanceof RouteRefusedError && error.message === ROUTE_CHECK_FAILED_TEXT);
+  assert.equal(server.content.length, 3);
+  for (const record of records) assert.equal(validateDecisionRecord(record).ok, true);
+});
+
+/** The layers the host holds, for the pure policyVersionOf and routePolicyFor. */
+function layersOf(options: { organization?: PolicyDocument; personal?: PolicyDocument; stored?: unknown; effective?: PolicyDocument; failed?: boolean }): PolicyLayersView {
+  const organization: PolicyLayersView['organization'] = options.failed === true
+    ? { state: 'failed', reason: 'bad-signature', sentence: 'Your organization\'s rules could not be checked.' }
+    : options.organization === undefined
+      ? { state: 'none' }
+      : {
+        state: 'valid', document: options.organization, hash: 'a'.repeat(64), issuerPublicKey: options.organization.issuer.publicKey, fingerprintHex: '0'.repeat(64),
+        contacts: [], issuedAt: options.organization.issuedAt, expiresAt: options.organization.expiresAt, endsSoon: false
+      };
+  return {
+    organization,
+    ...(options.personal === undefined ? {} : { personal: { document: options.personal, hash: 'b'.repeat(64), stored: options.stored ?? { bundleVersion: 1 } } }),
+    ...(options.effective === undefined ? {} : { effective: options.effective }),
+    ignored: [],
+    migration: [],
+    ...(options.failed === true ? { failedLayer: 'organization' as const } : {})
+  };
+}
+
+test('41-13: policyVersionOf says bundle-2 for your organization\'s layer or a stored version 2 personal layer, and bundle-1 for the starting rules or a failed-closed state', () => {
+  const device = deviceKey('route-version');
+  const issuer = issuerKey('route-version');
+  const personal = policyDocumentFor({ key: device });
+  const organization = policyDocumentFor({ key: issuer, layer: 'organization' });
+  assert.equal(policyVersionOf(layersOf({ personal, effective: personal })), 'bundle-1', 'the starting rules (a version 1 personal layer)');
+  assert.equal(policyVersionOf(layersOf({ personal, effective: personal, stored: { bundleVersion: 2 } })), 'bundle-2', 'a stored version 2 personal layer');
+  assert.equal(policyVersionOf(layersOf({ personal, organization, effective: personal })), 'bundle-2', 'a valid organization layer');
+  assert.equal(policyVersionOf(layersOf({ personal, failed: true })), 'bundle-1', 'a failed-closed state');
+  assert.equal(policyVersionOf(layersOf({ personal, effective: personal, stored: { bundleVersion: 2 }, failed: true })), 'bundle-1', 'a failed organization layer never says bundle-2');
+  assert.equal(policyVersionOf({ organization: { state: 'none' }, ignored: [], migration: [] }), 'bundle-1', 'no layers read yet');
+});
+
+test('41-13: routePolicyFor gives nothing without an effective policy, and verifies each authorization against one key source: your organization\'s signers, or this device alone', () => {
+  const device = deviceKey('route-policy');
+  const issuer = issuerKey('route-policy');
+  const stranger = deviceKey('route-policy-stranger');
+  const personal = policyDocumentFor({ key: device });
+  assert.equal(routePolicyFor(layersOf({ personal }), POLICY_NOW, device.fingerprint, 'bundle-1'), undefined, 'no effective policy');
+  assert.equal(routePolicyFor(layersOf({ personal, failed: true }), POLICY_NOW, device.fingerprint, 'bundle-1'), undefined, 'a failed-closed state');
+  const accredited = (id: string, key: PayloadSigner) => signAuthorization(authorizationFor({ kind: 'accredited-device', id, subject: { device: device.fingerprint } }), key);
+  // Your organization's layer: only its signers count, never this device.
+  const organization = { ...policyDocumentFor({ key: issuer, layer: 'organization' }), people: { v: 1, clearances: [], signers: [signerEntry(issuer)] } } as unknown as PolicyDocument;
+  const effective = {
+    ...personal,
+    authorizations: [accredited('by-officer', issuer), accredited('by-this-device', device), accredited('by-stranger', stranger)],
+    agents: { ...personal.agents, requireAccreditedDevice: true },
+    endpoints: [],
+    people: { v: 1, clearances: [{ scale: 'org', level: 'Confidential', compartments: [] }] }
+  } as unknown as PolicyDocument;
+  const underOrganization = routePolicyFor(layersOf({ personal, organization, effective }), POLICY_NOW, device.fingerprint, 'bundle-2');
+  assert.ok(underOrganization !== undefined);
+  assert.deepEqual(underOrganization.authorizations.map((found) => [found.body.id, found.selfSigned]), [['by-officer', false]]);
+  assert.equal(underOrganization.organization, true);
+  assert.equal(underOrganization.requireAccreditedDevice, true);
+  assert.equal(underOrganization.deviceId, device.fingerprint);
+  assert.equal(underOrganization.policyVersion, 'bundle-2');
+  assert.equal(underOrganization.project, undefined, 'a route does not know its project: a project-scoped authorization covers nothing (D-54)');
+  assert.deepEqual(underOrganization.clearances, [{ scale: 'org', level: 'Confidential', compartments: [] }]);
+  assert.equal(underOrganization.now, POLICY_NOW);
+  // No organization layer: this device alone, and what it signed is self-signed (D-15).
+  const alone = routePolicyFor(layersOf({ personal, effective }), POLICY_NOW, device.fingerprint, 'bundle-1');
+  assert.ok(alone !== undefined);
+  assert.deepEqual(alone.authorizations.map((found) => [found.body.id, found.selfSigned]), [['by-this-device', true]]);
+  assert.equal(alone.organization, false);
+  assert.equal(alone.policyVersion, 'bundle-1');
+  // An expired authorization is left out.
+  const expired = { ...effective, authorizations: [signAuthorization(authorizationFor({ kind: 'accredited-device', id: 'old', subject: { device: device.fingerprint }, days: 1 }), device)] } as unknown as PolicyDocument;
+  assert.deepEqual(routePolicyFor(layersOf({ personal, effective: expired }), POLICY_NOW + 2 * DAY_MS, device.fingerprint, 'bundle-1')?.authorizations, []);
+});
+
+test('41-13: the gate host gives each runtime and its route for requests outside every session a route policy from its own layers', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-policy-'));
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.40-test' });
+  await host.start();
+  const outside = host.sessionRouteWithoutContext().routePolicy?.(host.now());
+  assert.ok(outside !== undefined, 'the starting rules are an effective policy');
+  assert.equal(outside.policyVersion, 'bundle-1');
+  assert.equal(outside.organization, false);
+  const runtime = await host.runtimeFor({ actor: { kind: 'agent', sessionId: 'route-policy', agentLabel: 'agent' }, presence: 'person', context: 'interactive' });
+  assert.equal(runtime.routePolicy?.(host.now())?.policyVersion, 'bundle-1');
+  // A session route made from the runtime carries the runtime's route policy.
+  assert.equal(sessionRouteFrom(runtime).routePolicy, runtime.routePolicy);
+  await host.flush();
+});
+
+// ---- 41-13 Task 3 (D-26, D-33, D-34, D-42): Protected B over the pinned connection, residency and reports through the client ----
+
+const PROTECTED_B: Label = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [], handling: [] };
+const SECRET: Label = { scale: 'ca-classified', level: 'Secret', compartments: [], releasability: [], handling: [] };
+
+/** A SHA-256 hex made at test time from a word, the shape of a TLS pin; never a written key. */
+function pinOf(word: string): string {
+  return createHash('sha256').update(word, 'utf8').digest('hex');
+}
+
+// A place's pins are kept sorted.
+const [PIN_ONE, PIN_TWO] = [pinOf('pin-one'), pinOf('pin-two')].sort() as [string, string];
+const MODELS_PB = { id: 'models-pb', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: [PIN_ONE, PIN_TWO], region: 'CA', maxLabel: ['ca-protected/Protected B', 'org/Internal'] };
+const DEVICE_ID = 'dev-0123456789abcdef0123456789abcdef';
+
+/** A verified authorization as the host hands it to the decision (the signature was checked by routePolicyFor). */
+function verified(body: ReturnType<typeof authorizationFor>, selfSigned = false): VerifiedAuthorization {
+  return { body, selfSigned };
+}
+
+const PROTECTED_B_ON_MODELS_PB = verified(authorizationFor({ kind: 'protected-b', id: 'pb-models', subject: { endpoint: 'models-pb' }, scope: { labels: ['ca-protected/Protected B'] } }));
+
+/** A server client whose pinned fetch is the hook's: every pin list asked for is kept, and the content the hook's fetch carried is counted apart. */
+async function pinnedServerClient(hookFetch?: (pins: readonly string[]) => typeof fetch): Promise<{ client: NearAiClient; plain: string[]; pinned: string[]; asked: string[][] }> {
+  const plain = fakeFetch({ local: ['local-model'] });
+  const viaPin = fakeFetch({ local: ['local-model'] });
+  const asked: string[][] = [];
+  const client = new NearAiClient({
+    baseUrl: ORG_SERVER, apiKey: '', fetchFn: plain.fetchFn, route: 'local',
+    pinnedFetchFor: (pins) => { asked.push([...pins]); return hookFetch?.(pins) ?? viaPin.fetchFn; }
+  });
+  await client.listLocalModels();
+  return { client, plain: plain.content, pinned: viaPin.content, asked };
+}
+
+test('41-13 D-26: Protected B to your organization\'s server goes only through a connection pinned to that place\'s TLS pins, never the plain fetch', async () => {
+  const records: DecisionRecord[] = [];
+  const server = await pinnedServerClient();
+  const policy = routePolicyOf({ endpoints: placesOf(MODELS_PB), authorizations: [PROTECTED_B_ON_MODELS_PB] });
+  assert.equal((await withSessionRoute(policyRoute([PROTECTED_B], records, () => policy), () => ask(server.client, 'local-model'))).text, 'ok');
+  assert.deepEqual(server.asked, [[PIN_ONE, PIN_TWO]], 'exactly the place\'s pins');
+  assert.equal(server.pinned.length, 1, 'the content went over the pinned connection');
+  assert.equal(server.plain.length, 0, 'never over the plain fetch');
+  assert.equal(ruleOf(records[0]), 'route.local-only');
+});
+
+test('41-13 D-26: without an authorization naming the place, Protected B is refused before fetch (route.authorization-missing) and recorded', async () => {
+  const records: DecisionRecord[] = [];
+  const server = await pinnedServerClient();
+  const policy = routePolicyOf({ endpoints: placesOf(MODELS_PB) });
+  await assert.rejects(() => withSessionRoute(policyRoute([PROTECTED_B], records, () => policy), () => ask(server.client, 'local-model')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.authorization-missing');
+  assert.equal(server.plain.length + server.pinned.length, 0);
+  assert.deepEqual(server.asked, []);
+  assert.equal(ruleOf(records[0]), 'route.authorization-missing');
+  assert.equal(versionOf(records[0]), 'bundle-2');
+});
+
+test('41-13 D-26: a connection that matches none of the pins is refused (route.endpoint-pin) with a refusal record, and nothing was sent', async () => {
+  const records: DecisionRecord[] = [];
+  const tried: string[] = [];
+  const server = await pinnedServerClient((pins) => pinnedFetchAny(pins, (pin) => (async () => { tried.push(pin); throw new ConnectionNotBoundError('The server presented another key, so nothing was sent.'); }) as typeof fetch));
+  const policy = routePolicyOf({ endpoints: placesOf(MODELS_PB), authorizations: [PROTECTED_B_ON_MODELS_PB] });
+  await assert.rejects(
+    () => withSessionRoute(policyRoute([PROTECTED_B], records, () => policy), () => ask(server.client, 'local-model')),
+    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.endpoint-pin' && error.message === ROUTE_REFUSALS['route.endpoint-pin']
+  );
+  assert.deepEqual(tried, [PIN_ONE, PIN_TWO], 'every pin was tried, in order');
+  assert.equal(server.plain.length + server.pinned.length, 0, 'nothing was sent');
+  const refusal = records.find((record) => ruleOf(record) === 'route.endpoint-pin');
+  assert.ok(refusal !== undefined, 'the refusal is recorded');
+  // The record keeps the sentence, cut to the record's length for a reason.
+  assert.ok((refusal.status_detail ?? '').length > 40 && ROUTE_REFUSALS['route.endpoint-pin'].startsWith(refusal.status_detail ?? ''), refusal.status_detail);
+  assert.equal(versionOf(refusal), 'bundle-2');
+  assert.equal(validateDecisionRecord(refusal).ok, true);
+});
+
+test('41-13 regression: Protected B to an exact https host your rules list with no pin and no authorization, which the safety patch sent, is refused (route.endpoint-pin)', async () => {
+  const unpinned = { ...MODELS_PB, tlsPins: [] };
+  const records: DecisionRecord[] = [];
+  const server = await pinnedServerClient();
+  // The safety patch sends it: an exact local-hosts entry over https.
+  assert.equal((await withSessionRoute(policyRoute([PROTECTED_B], records, undefined), () => ask(server.client, 'local-model'))).text, 'ok');
+  assert.equal(server.plain.length, 1);
+  const policy = routePolicyOf({ endpoints: placesOf(unpinned) });
+  await assert.rejects(() => withSessionRoute(policyRoute([PROTECTED_B], records, () => policy), () => ask(server.client, 'local-model')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.endpoint-pin');
+  assert.equal(server.plain.length + server.pinned.length, 1, 'nothing more was sent');
+});
+
+test('41-13: pinnedFetchAny tries the pins in order and moves on only when a connection is not bound; any other error stops at once', async () => {
+  const tried: string[] = [];
+  const answer = new Response('{}', { status: 200 });
+  const second = pinnedFetchAny(['a', 'b', 'c'], (pin) => (async () => {
+    tried.push(pin);
+    if (pin === 'a') throw new ConnectionNotBoundError('another key');
+    return answer;
+  }) as typeof fetch);
+  assert.equal(await second('https://models.example.org/v1/chat/completions', { method: 'POST' }), answer);
+  assert.deepEqual(tried, ['a', 'b'], 'stopped at the first pin that matched');
+  tried.length = 0;
+  const broken = pinnedFetchAny(['a', 'b'], (pin) => (async () => { tried.push(pin); throw new Error('network down'); }) as typeof fetch);
+  await assert.rejects(() => broken('https://models.example.org/v1/chat/completions', { method: 'POST' }), /network down/);
+  assert.deepEqual(tried, ['a'], 'another error stops at once');
+  tried.length = 0;
+  const none = pinnedFetchAny(['a', 'b'], (pin) => (async () => { tried.push(pin); throw new Error('wrapped', { cause: new ConnectionNotBoundError(`mismatch ${pin}`) }); }) as typeof fetch);
+  await assert.rejects(() => none('https://models.example.org/v1/chat/completions', { method: 'POST' }), (error: unknown) => (error as Error).message === 'wrapped' && ((error as Error).cause as Error).message === 'mismatch b');
+  assert.deepEqual(tried, ['a', 'b'], 'a not-bound cause moves on too; the last error is thrown');
+  await assert.rejects(() => pinnedFetchAny([])('https://models.example.org/v1/chat/completions', { method: 'POST' }), ConnectionNotBoundError);
+});
+
+test('41-13 D-33: residency through the client: a request to a place in the United States under a Canada-only rule is refused before fetch (route.residency) and recorded', async () => {
+  const records: DecisionRecord[] = [];
+  const server = await serverClient();
+  const residency = parseResidencySection({ v: 1, required: ['CA'] }, SCALE_PRESETS);
+  assert.equal(residency.ok, true);
+  if (!residency.ok) throw new Error('unreachable');
+  const policy = routePolicyOf({ endpoints: placesOf({ ...MODELS_CA, region: 'US' }), residency: residency.value });
+  await assert.rejects(() => withSessionRoute(policyRoute([org('Internal')], records, () => policy), () => ask(server.client, 'local-model')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.residency');
+  assert.equal(server.content.length, 0);
+  assert.equal(ruleOf(records[0]), 'route.residency');
+  // The same place in Canada is sent.
+  const canada = routePolicyOf({ endpoints: placesOf(MODELS_CA), residency: residency.value });
+  assert.equal((await withSessionRoute(policyRoute([org('Internal')], records, () => canada), () => ask(server.client, 'local-model'))).text, 'ok');
+});
+
+/** A NEAR AI Cloud client whose binding source holds a fresh bound fact for its host, so attested-cloud requests are sent. */
+async function boundNearClient(): Promise<{ client: NearAiClient; content: string[] }> {
+  const fake = fakeFetch({ tee: ['tee-model'], cloud: ['cloud-model'] });
+  const client = new NearAiClient({
+    baseUrl: NEAR, apiKey: 'test-key', fetchFn: fake.fetchFn, route: 'near',
+    binding: {
+      current: () => ({ state: 'bound', host: NEAR, checkedAt: Date.now() - 60_000, fingerprint: 'ab'.repeat(32) }),
+      refresh: async () => ({ state: 'bound', host: NEAR, checkedAt: Date.now(), fingerprint: 'ab'.repeat(32) }),
+      markNotBound: () => undefined,
+      fetchFor: () => fake.fetchFn
+    }
+  });
+  await client.listModels();
+  return { client, content: fake.content };
+}
+
+test('41-13 D-42: with a models section, a model with no passport on NEAR AI Cloud is sent and its record says route.passport would refuse', async () => {
+  const records: DecisionRecord[] = [];
+  const near = await boundNearClient();
+  const models = parseModelsSection(fixtureModelsSection(), SCALE_PRESETS);
+  assert.equal(models.ok, true);
+  if (!models.ok) throw new Error('unreachable');
+  const policy = routePolicyOf({ models: models.value, now: Date.now() });
+  // The bound fact is read against the system clock, so this route keeps it too.
+  const now = { clock: () => Date.now() };
+  assert.equal((await withSessionRoute(policyRoute([org('Internal')], records, () => policy, [], now), () => ask(near.client, 'tee-model'))).text, 'ok');
+  assert.equal(near.content.length, 1);
+  assert.deepEqual(records[0]?.unmapped.nearAi.wouldRefuse, ['route.passport']);
+  assert.equal(validateDecisionRecord(records[0]).ok, true);
+  // Without a models section nothing is reported.
+  assert.equal((await withSessionRoute(policyRoute([org('Internal')], records, () => routePolicyOf({ now: Date.now() }), [], now), () => ask(near.client, 'tee-model'))).text, 'ok');
+  assert.equal(records[1]?.unmapped.nearAi.wouldRefuse, undefined);
+});
+
+/** A loopback route at Secret with its own chat state, keeping its records and its chat notices. */
+function secretRoute(records: DecisionRecord[], notices: string[], routePolicy: SessionRoute['routePolicy'], attestation = { failed: false }): SessionRoute {
+  return policyRoute([SECRET], records, routePolicy, [], { onNotice: (text) => notices.push(text), attestation });
+}
+
+const notAccreditedEvents = (records: readonly DecisionRecord[]) => records.filter((record) => ruleOf(record) === 'route.not-accredited');
+
+test('41-13 D-34: Secret on this computer with no accredited-device authorization says the notice once, records route.not-accredited once, and the request\'s record reports route.accredited-device', async () => {
+  const records: DecisionRecord[] = [];
+  const notices: string[] = [];
+  const loopback = await localClient();
+  const policy = routePolicyOf({ organization: false, deviceId: DEVICE_ID });
+  const chat = { failed: false };
+  assert.equal((await withSessionRoute(secretRoute(records, notices, () => policy, chat), () => ask(loopback.client, 'local-model'))).text, 'ok');
+  assert.equal((await withSessionRoute(secretRoute(records, notices, () => policy, chat), () => ask(loopback.client, 'local-model'))).text, 'ok');
+  assert.equal(notices.length, 1);
+  assert.equal(notAccreditedEvents(records).length, 1);
+  const requests = records.filter((record) => ruleOf(record) === 'route.local-only');
+  assert.equal(requests.length, 2);
+  for (const request of requests) assert.deepEqual(request.unmapped.nearAi.wouldRefuse, ['route.accredited-device']);
+  for (const record of records) assert.equal(validateDecisionRecord(record).ok, true);
+});
+
+test('41-13 D-34: with an accredited-device authorization covering this device there is no notice and no event; with your organization\'s switch on and none, Secret is refused', async () => {
+  const loopback = await localClient();
+  const covered: DecisionRecord[] = [];
+  const told: string[] = [];
+  const accredited = verified(authorizationFor({ kind: 'accredited-device', id: 'acc-1', subject: { device: DEVICE_ID } }));
+  const policy = routePolicyOf({ organization: true, deviceId: DEVICE_ID, authorizations: [accredited] });
+  assert.equal((await withSessionRoute(secretRoute(covered, told, () => policy), () => ask(loopback.client, 'local-model'))).text, 'ok');
+  assert.deepEqual(told, []);
+  assert.deepEqual(notAccreditedEvents(covered), []);
+  assert.equal(covered[0]?.unmapped.nearAi.wouldRefuse, undefined);
+  // Your organization turns refusal on and no authorization covers this device: refused, nothing sent, no notice.
+  const refused: DecisionRecord[] = [];
+  const quiet: string[] = [];
+  const strict = routePolicyOf({ organization: true, requireAccreditedDevice: true, deviceId: DEVICE_ID });
+  await assert.rejects(() => withSessionRoute(secretRoute(refused, quiet, () => strict), () => ask(loopback.client, 'local-model')), (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.accredited-device');
+  assert.equal(ruleOf(refused[0]), 'route.accredited-device');
+  assert.deepEqual(quiet, []);
+  assert.equal(loopback.content.length, 1);
+  // No policy: the safety patch's notice, as before.
+  const patch: DecisionRecord[] = [];
+  const patchNotices: string[] = [];
+  assert.equal((await withSessionRoute(secretRoute(patch, patchNotices, undefined), () => ask(loopback.client, 'local-model'))).text, 'ok');
+  assert.equal(patchNotices.length, 1);
+  assert.equal(notAccreditedEvents(patch).length, 1);
 });

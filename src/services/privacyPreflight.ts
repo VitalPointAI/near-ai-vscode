@@ -18,6 +18,10 @@ const NEAR_CREDENTIAL_PATH = /(?:^|\/)(?:\.near-credentials)(?:\/|$)/i;
 const PERSONAL_DATA = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|\b(?:phone|address|ssn|social security)\b/i;
 
 export interface PrivacyPreflightOptions {
+  /**
+   * No production caller passes a mode since Phase 41 (D-37): routing, TEE-only mode included, is decideRoute's (OutboundGuard previews it). The option
+   * stays for its own tests and for the recorded sovereigntyMode field.
+   */
   mode?: SovereigntyMode;
   rules?: PrivacyRule[];
   now?: () => number;

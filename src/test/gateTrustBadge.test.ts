@@ -11,7 +11,10 @@ import {
   BADGE_CHECK_TIMEOUT_MS, MAX_TRUST_BYTES, MAX_TRUST_RECORDS, mergeTrustRecords, trustBadgeFromRecord, TRUST_BADGE_STATES, TRUST_BADGE_TEXT, TRUST_BADGE_TITLES, TRUST_VERIFICATIONS, parseTrustRecord, trustBadgeFor, trustBadgeRank,
   trustRecordKey, trustRecordOf, type TrustBadge, type TrustBadgeFacts, type TrustRecord, type TrustVerification
 } from '../domain/gate/trustBadge';
-import type { ConnectionBindingFact } from '../domain/gate/routing';
+import type { AllowingRecord, ConnectionBindingFact, RouteFacts } from '../domain/gate/routing';
+import { DEFAULT_ROUTING, decideRoute } from '../domain/gate/routing';
+import { TRUST_LINE_TEXT, trustFactsFor, type TrustFacts } from '../domain/gate/trust';
+import { answerFactsOf } from '../services/answerFacts';
 import type { Label } from '../domain/gate/labels';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { AgentConversation } from '../services/agentSession';
@@ -1303,4 +1306,148 @@ test('review 95.r3.2: the chat panel\'s close path waits for the badge record be
   assert.match(chatSource, /trackConversation\(conversation\)/);
   const extension = readFileSync(path.join(ROOT, 'src', 'extension.ts'), 'utf8');
   assert.match(extension, /export async function deactivate\(\): Promise<void> \{[\s\S]*?await closeAllConversations\(\);[\s\S]*?await flushSyncOnClose\(\);/);
+});
+
+// ---- 41-13 (D-38): the trust line on every badge, from the TrustFacts of the request that answered ----
+
+const ORG_INTERNAL: Label = { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] };
+const NEAR_TEE_FACTS: RouteFacts = {
+  clientRoute: 'near', host: 'https://cloud-api.near.ai/v1', nearEndpoint: true, model: { id: 'tee-model', privacyBoundary: 'tee' }, attestationFailed: false,
+  binding: BOUND, now: NOW + 1_000
+};
+
+/** The TrustFacts the client keeps for a NEAR TEE request allowed at org Internal (no policy: the routing table's record). */
+function teeTrust(): TrustFacts {
+  const decision = decideRoute([ORG_INTERNAL], DEFAULT_ROUTING, NEAR_TEE_FACTS);
+  assert.equal(decision.allowed, true);
+  return trustFactsFor(decision, NEAR_TEE_FACTS, { mark: [ORG_INTERNAL], routing: DEFAULT_ROUTING });
+}
+
+test('41-13 D-38: a NEAR TEE answer allowed at org Internal with every check at its best shows the three-part trust line', () => {
+  const badge = badgeOf({ trust: teeTrust() });
+  assert.equal(badge.state, 'verified-private');
+  assert.deepEqual(badge.line, {
+    runsOn: 'Runs on NEAR AI private hardware',
+    verified: 'Verified',
+    allowed: 'Allowed for Organization: Internal',
+    text: 'Runs on NEAR AI private hardware · Verified · Allowed for Organization: Internal'
+  });
+});
+
+test('41-13 D-38: the verified part is the badge\'s own state, never more than was proven', () => {
+  assert.equal(badgeOf({ trust: teeTrust(), verification: 'pending' }).line?.verified, 'Not verified');
+  assert.equal(badgeOf({ trust: teeTrust(), connectionFresh: false }).line?.verified, 'Model verified, connection not proven');
+  // TrustFacts that claim more than the badge proved change nothing: the badge's state wins.
+  const claimed: TrustFacts = { ...teeTrust(), verification: 'verified-private' };
+  assert.equal(badgeOf({ trust: claimed, verification: 'failed' }).line?.verified, 'Not verified');
+});
+
+test('41-13 D-38: an answer allowed by a person\'s authorization says who, which record and until when, and that it was self-signed on this computer', () => {
+  const record: AllowingRecord = { kind: 'authorization', authorizationKind: 'protected-b', id: 'pb-2026-01', name: 'Alex Example', expiresAt: '2027-12-01T00:00:00.000Z', selfSigned: true, label: 'org/Internal' };
+  const line = badgeOf({ trust: { ...teeTrust(), allowedBy: [{ kind: 'routing', label: 'org/Internal' }, record] } }).line;
+  assert.equal(line?.allowed, 'Allowed for Organization: Internal by Alex Example\'s authorization pb-2026-01 until 1 Dec 2027 (self-signed on this computer)');
+  const signed = badgeOf({ trust: { ...teeTrust(), allowedBy: [{ ...record, selfSigned: false }] } }).line;
+  assert.ok(signed !== undefined && !signed.allowed.includes('self-signed'));
+});
+
+test('41-13 D-38: without TrustFacts (an older path or a test client) the line\'s place comes from the badge facts and the allowed part says it was not recorded; state, title and reasons are unchanged', () => {
+  const tee = badgeOf({});
+  assert.equal(tee.line?.runsOn, 'Runs on NEAR AI private hardware');
+  assert.equal(tee.line?.allowed, TRUST_BADGE_TEXT.allowedNotRecorded);
+  assert.equal(tee.line?.text, `Runs on NEAR AI private hardware · Verified · ${TRUST_BADGE_TEXT.allowedNotRecorded}`);
+  assert.equal(badgeOf({ boundary: 'cloud', forwardedTo: 'openrouter.ai' }).line?.runsOn, 'Runs on outside provider (openrouter.ai)');
+  assert.equal(badgeOf({ boundary: 'cloud' }).line?.runsOn, 'Runs on an outside provider');
+  assert.equal(badgeOf({ nearEndpoint: false }).line?.runsOn, 'Runs on a place your rules do not name');
+  // The line adds a field and changes nothing else the badge says.
+  for (const facts of [{}, { boundary: 'cloud' as const }, { verification: 'pending' as const }, { connectionFresh: false }, { nearEndpoint: false }]) {
+    const withLine = badgeOf(facts);
+    const withTrust = badgeOf({ ...facts, trust: teeTrust() });
+    const { line: _line, ...rest } = withLine;
+    const { line: _other, ...same } = withTrust;
+    assert.deepEqual(same, rest, JSON.stringify(facts));
+  }
+});
+
+test('41-13 D-38: a replayed badge shows only what its record proves, and the stored record keeps its format', () => {
+  const at = new Date(NOW);
+  for (const state of ['verified-private', 'model-verified'] as const) {
+    const replayed = trustBadgeFromRecord(trustRecordOf('answer', { state, reasons: [] }, at));
+    assert.equal(replayed.line?.runsOn, 'Runs on NEAR AI private hardware', state);
+    assert.equal(replayed.line?.verified, TRUST_LINE_TEXT.verified[state]);
+    assert.equal(replayed.line?.allowed, TRUST_BADGE_TEXT.allowedNotKept);
+  }
+  const notVerified = trustBadgeFromRecord(trustRecordOf('answer', { state: 'not-verified', reasons: [TRUST_BADGE_TEXT.otherEndpoint] }, at));
+  assert.equal(notVerified.line?.runsOn, TRUST_BADGE_TEXT.placeNotKept);
+  assert.equal(notVerified.line?.verified, 'Not verified');
+  // The stored record is unchanged: exactly key, state, reasons and at, and any other key (a line among them) is refused.
+  const record = trustRecordOf('answer', badgeOf({ trust: teeTrust() }), at);
+  assert.deepEqual(Object.keys(record).sort(), ['at', 'key', 'reasons', 'state']);
+  assert.equal(parseTrustRecord({ ...record, line: { runsOn: 'Runs on this computer' } }), undefined);
+  assert.deepEqual(parseTrustRecord(JSON.parse(JSON.stringify(record))), record);
+});
+
+test('41-13 D-38: the page draws a badge\'s line as three spans in the button, with the line in its accessible name; a badge without a whole line draws as before', () => {
+  const doc = new FakeDocument();
+  const container = doc.createElement('div');
+  doc.body.append(container);
+  const badge = badgeOf({ trust: teeTrust() });
+  const button = kit.renderTrustBadge(doc, container, JSON.parse(JSON.stringify(badge)) as unknown, () => undefined, 'run-1-aaaaaa');
+  assert.ok(button !== undefined);
+  const span = (className: string): FakeNode | undefined => button.find((node) => node.className === className);
+  assert.equal(span('trust-runs-on')?.textContent, 'Runs on NEAR AI private hardware');
+  assert.equal(span('trust-title')?.textContent, 'Verified');
+  assert.equal(span('trust-allowed')?.textContent, 'Allowed for Organization: Internal');
+  assert.equal(button.attributes.get('aria-label'), `Trust: Verified private model. ${badge.line!.text}. Show details`);
+  assert.equal(button.attributes.get('data-state'), 'verified-private');
+  // Drawn again without a line, the same button draws as today.
+  const plain = { ...JSON.parse(JSON.stringify(badge)) as Record<string, unknown> };
+  delete plain['line'];
+  kit.renderTrustBadge(doc, container, plain, () => undefined, 'run-1-aaaaaa');
+  assert.equal(span('trust-runs-on'), undefined);
+  assert.equal(span('trust-title')?.textContent, 'Verified private model');
+  assert.equal(button.attributes.get('aria-label'), 'Trust: Verified private model. Show details');
+  // A line that is not three strings is not drawn.
+  for (const line of [{ runsOn: 'Runs on this computer', verified: 'Verified' }, { runsOn: 1, verified: 'Verified', allowed: 'x', text: 'y' }, 'Runs on this computer']) {
+    kit.renderTrustBadge(doc, container, { ...plain, line }, () => undefined, 'run-1-aaaaaa');
+    assert.equal(span('trust-runs-on'), undefined, JSON.stringify(line));
+    assert.equal(button.attributes.get('aria-label'), 'Trust: Verified private model. Show details');
+  }
+});
+
+test('41-13 D-38: through the session, a NEAR TEE answer\'s posted badge carries the trust line from the usage\'s TrustFacts', async () => {
+  const near = await cloud('bound');
+  const chat = badgeChat(CONFIDENTIAL);
+  await send(chat, near.client);
+  await settle();
+  const last = chat.badges().at(-1)!.badge;
+  assert.equal(last.state, 'verified-private');
+  assert.equal(last.line?.runsOn, 'Runs on NEAR AI private hardware');
+  assert.equal(last.line?.verified, 'Verified');
+  // org Confidential is shown with its display name; what allowed it came from the request, not derived.
+  assert.equal(last.line?.allowed, 'Allowed for Organization: Sensitive');
+  // answerFactsOf copies the usage's TrustFacts into the answer's facts.
+  const trust = teeTrust();
+  assert.deepEqual(answerFactsOf({ client: {} as never, model: 'tee-model', privacy: PRIVATE, local: false }, { verificationStatus: 'unknown', latencyMs: 1, trust }).trust, trust);
+  assert.equal(answerFactsOf({ client: {} as never, model: 'tee-model', privacy: PRIVATE, local: false }, { verificationStatus: 'unknown', latencyMs: 1 }).trust, undefined);
+});
+
+test('41-13: the badge module and the trust line module load in either order', () => {
+  const badgePath = require.resolve('../domain/gate/trustBadge');
+  const linePath = require.resolve('../domain/gate/trust');
+  const saved = [badgePath, linePath].map((file) => [file, require.cache[file]] as const);
+  try {
+    for (const first of [badgePath, linePath]) {
+      for (const file of [badgePath, linePath]) delete require.cache[file];
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require(first);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fresh = require(badgePath) as typeof import('../domain/gate/trustBadge');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const line = require(linePath) as typeof import('../domain/gate/trust');
+      assert.deepEqual([...line.TRUST_VERIFICATION_LEVELS], ['verified-private', 'model-verified', 'not-verified', 'not-checked'], path.basename(first));
+      assert.equal(fresh.trustBadgeFor({ ...BEST })?.line?.verified, 'Verified', path.basename(first));
+    }
+  } finally {
+    for (const [file, module] of saved) { if (module === undefined) delete require.cache[file]; else require.cache[file] = module; }
+  }
 });

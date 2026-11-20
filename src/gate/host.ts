@@ -10,7 +10,7 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
+import type { DecisionOutcome, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
 import { BundleStoreError, applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
@@ -20,7 +20,8 @@ import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
-import type { SessionRoute } from './sessionMark';
+import { routePolicyFor } from './sessionMark';
+import type { RoutePolicyNow, SessionRoute } from './sessionMark';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { labelMapKey, moveLabelEntry, resolveLabel, setLabelEntry } from '../domain/gate/labelMap';
 import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
@@ -258,7 +259,7 @@ export class GateHost {
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
       // Each record goes to the log of its own kind (owner decision after PR 4a): model requests to the model-request log, everything else here.
-      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(record); } catch { /* reported once above */ } } } },
+      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(this.withPolicyVersion(record, policyVersionOf(this.policyLayers()))); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
@@ -266,6 +267,7 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
+      routePolicy: (now) => this.routePolicyNow(now),
       // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
       labels: (folder: string) => this.labelsFor(folder)
     };
@@ -387,6 +389,7 @@ export class GateHost {
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
+        policyVersion: policyVersionOf(this.policyLayers()),
         // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it. With a
         // mark, the target is always the mark's strictest label, whoever records it (PR #87 review), as label.mark-raised records it.
         ...((): { label?: Label } => {
@@ -611,13 +614,14 @@ export class GateHost {
         record: (record) => {
           try {
             const root = this.projectRootNow();
-            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(record);
+            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(this.withPolicyVersion(record, policyVersionOf(this.policyLayers())));
           } catch { /* a record that cannot be kept never changes a request (D-21) */ }
         }
       },
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
       productVersion: this.options.productVersion,
+      routePolicy: (now) => this.routePolicyNow(now),
       attestation: { failed: false }
     };
   }
@@ -734,6 +738,25 @@ export class GateHost {
     }
   }
 
+  /** The route policy of a request decided now (D-36): from this host's own layers; one that cannot be worked out gives none, decided as the patch did. */
+  private routePolicyNow(now: number): RoutePolicyNow | undefined {
+    try {
+      const layers = this.policyLayers();
+      return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * A record as this host's sinks append it (D-10): a copy whose authorizations[0].policy.version is `version`, every other field as it was, so every record
+   * a runtime writes (tool calls, mark raises, refusals before the gate, model requests) names the policy version without agent/gateAdapter.ts knowing it.
+   */
+  private withPolicyVersion(record: DecisionRecord, version: PolicyRecordVersion): DecisionRecord {
+    const [first, ...rest] = record.authorizations;
+    return first === undefined ? record : { ...record, authorizations: [{ ...first, policy: { ...first.policy, version } }, ...rest] };
+  }
+
   private deviceFingerprint(): string {
     return this.current.state === 'valid' ? this.current.signer.fingerprint : DEVICE_UNKNOWN;
   }
@@ -830,7 +853,8 @@ export class GateHost {
         outcome,
         rule,
         ...(reason === undefined ? {} : { reason }),
-        bundleHash: state.state === 'valid' ? state.hash : ''
+        bundleHash: state.state === 'valid' ? state.hash : '',
+        policyVersion: policyVersionOf(this.policyLayers())
       });
       const named = { ...record, api: { ...record.api, operation: name } };
       const root = this.projectRootNow();
@@ -849,6 +873,17 @@ export class GateHost {
       try { listener(); } catch { /* a listener never breaks the host */ }
     }
   }
+}
+
+/**
+ * The version of the policy every record names (D-10): bundle-2 while an effective policy is in force and either your organization's layer is valid or the
+ * stored personal layer is a version 2 one; bundle-1 otherwise, a failed-closed state included. The one function that decides it. Pure.
+ */
+export function policyVersionOf(layers: PolicyLayersView): PolicyRecordVersion {
+  if (layers.effective === undefined || layers.failedLayer !== undefined || layers.organization.state === 'failed') return 'bundle-1';
+  if (layers.organization.state === 'valid') return 'bundle-2';
+  const stored = layers.personal?.stored;
+  return typeof stored === 'object' && stored !== null && (stored as { readonly bundleVersion?: unknown }).bundleVersion === 2 ? 'bundle-2' : 'bundle-1';
 }
 
 /**

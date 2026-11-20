@@ -57,6 +57,13 @@
     return node;
   }
 
+  /** The " · " between two parts of the trust line, hidden from screen readers (the accessible name already reads the line). */
+  function separator(doc) {
+    const node = el(doc, 'span', 'trust-separator', '·');
+    node.setAttribute('aria-hidden', 'true');
+    return node;
+  }
+
   function textButton(doc, label, onClick) {
     const button = el(doc, 'button', 'trust-action', label);
     button.type = 'button';
@@ -71,6 +78,14 @@
 
   function strings(list) {
     return Array.isArray(list) ? list.filter((item) => typeof item === 'string' && item.length > 0) : [];
+  }
+
+  /** The trust line (D-38) when the badge holds a whole one: where it ran, what was verified and what allowed it, each a string, and their joined text. */
+  function lineOf(badge) {
+    const line = badge.line;
+    if (!line || typeof line !== 'object') return undefined;
+    const parts = [line.runsOn, line.verified, line.allowed, line.text];
+    return parts.every((part) => typeof part === 'string') && parts[0].length > 0 && parts[1].length > 0 ? line : undefined;
   }
 
   /** Opens or closes the details. Opening moves focus into them; closing by Escape returns focus to the badge. */
@@ -117,7 +132,7 @@
   }
 
   /**
-   * Draws `badge` ({ state, title, explanation, reasons, helpers, notChecked, replayed }) under the answer in `container`, creating the badge the first
+   * Draws `badge` ({ state, title, explanation, reasons, helpers, notChecked, replayed, line }) under the answer in `container`, creating the badge the first
    * time and updating it after (an open details box stays open). Returns the badge button, or undefined when the badge is not one the page can draw.
    */
   function renderTrustBadge(doc, container, badge, post, runId) {
@@ -159,10 +174,18 @@
     const button = known.button;
     if (button.dataset) button.dataset.state = badge.state;
     button.setAttribute('data-state', badge.state);
-    button.setAttribute('aria-label', 'Trust: ' + badge.title + '. Show details');
+    const line = lineOf(badge);
+    button.setAttribute('aria-label', 'Trust: ' + badge.title + '. ' + (line ? line.text + '. ' : '') + 'Show details');
     const icon = el(doc, 'span', 'trust-icon', ICONS[badge.state]);
     icon.setAttribute('aria-hidden', 'true');
-    button.replaceChildren(icon, el(doc, 'span', 'trust-title', badge.title));
+    // With a trust line the button reads "Runs on ... · {verified} · {allowed}"; the verified words keep the title's place, so the state is still in words.
+    if (line) {
+      const parts = [el(doc, 'span', 'trust-runs-on', line.runsOn), el(doc, 'span', 'trust-title', line.verified)];
+      if (line.allowed.length > 0) parts.push(el(doc, 'span', 'trust-allowed', line.allowed));
+      const shown = [icon];
+      parts.forEach((part, index) => { if (index > 0) shown.push(separator(doc)); shown.push(part); });
+      button.replaceChildren(...shown);
+    } else button.replaceChildren(icon, el(doc, 'span', 'trust-title', badge.title));
     // Drawing again replaces the buttons; focus that was on one of them (Check again, then the badge comes back) moves to the details, not the page body.
     const active = known.doc && known.doc.activeElement;
     const focusInside = Boolean(active) && active !== known.details && typeof known.details.contains === 'function' && known.details.contains(active);

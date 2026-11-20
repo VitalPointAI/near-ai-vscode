@@ -2,6 +2,7 @@
 // ResponseEvidence from src/services/attestation.ts), which re-export them, so their importers compile unchanged. Pure: types only.
 import type { CapabilityMetadataStatus, CapabilityModality, CapabilityPrivacyBoundary, SkillCapability, ProviderOperation } from '../capabilities';
 import type { ConnectionBindingFact } from '../gate/routing';
+import type { TrustFacts } from '../gate/trust';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -97,6 +98,8 @@ export interface UsageMetadata {
    * (D-50). A bound fact alone does not prove the connection: a request sent without the pin may have reached another server (CLAS-08).
    */
   connectionPinned?: true;
+  /** The TrustFacts the route check of this request produced (D-38): where it runs, what allowed it and what would refuse it. The badge reads them. */
+  trust?: TrustFacts;
 }
 
 /** What a completion keeps so it can be verified later. Hashes only; no prompt or answer text. */

@@ -1,5 +1,5 @@
 import type { NearAiSettings } from '../domain/config';
-import { routeAllows, type PrivateRoute } from './agentSession';
+import { floorAllowsModel, floorFor, routeAllows, type PrivateRoute } from './privateRoute';
 import { estimateImageCostUsd, type AgentMessage, type ModelInfo } from './nearAiClient';
 import { OutboundGuard } from './outboundGuard';
 import { withPrivateOnly } from '../gate/sessionMark';
@@ -58,8 +58,8 @@ export function chooseTeamModel(need: TeamAiNeed, input: TeamAiInput): TeamAiCho
     if (chosen) return { ok: true, model: chosen.id, info: chosen, private: true };
     return { ok: false, reason: noPrivateModel(ordered, input) };
   }
-  const allowed = input.privacyMode === 'tee-only' ? ordered.filter((model) => model.privacyBoundary === 'tee' || model.privacyBoundary === 'local') : ordered;
-  const chosen = allowed[0];
+  const floor = floorFor({ privateOnly: input.privacyMode === 'tee-only' });
+  const chosen = ordered.find((model) => floorAllowsModel(floor, model));
   if (!chosen) return { ok: false, reason: 'TEE-only mode is on, and none of your key\'s models runs in NEAR\'s TEE or on this machine. Pick a model marked "Private", or turn off nearAi.privacyMode.' };
   return { ok: true, model: chosen.id, info: chosen, private: isPrivate(chosen) };
 }
@@ -140,8 +140,8 @@ export function chooseImageModel(need: TeamAiNeed, input: Pick<TeamAiDeps, 'mode
     if (chosen) return { ok: true, model: chosen.id, info: chosen, private: true };
     return { ok: false, reason: `${why} can only be made by a private image model (one in a NEAR TEE or on this computer), and none is available on this profile. Upload an icon instead.` };
   }
-  const allowed = input.privacyMode === 'tee-only' ? ordered.filter((model) => model.privacyBoundary === 'tee' || model.privacyBoundary === 'local') : ordered;
-  const chosen = allowed[0];
+  const floor = floorFor({ privateOnly: input.privacyMode === 'tee-only' });
+  const chosen = ordered.find((model) => floorAllowsModel(floor, model));
   if (!chosen) return { ok: false, reason: 'TEE-only mode is on, and none of your key\'s image models runs in NEAR\'s TEE or on this computer. Upload an icon instead, or turn off nearAi.privacyMode.' };
   return { ok: true, model: chosen.id, info: chosen, private: isPrivate(chosen) };
 }

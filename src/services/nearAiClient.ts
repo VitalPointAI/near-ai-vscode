@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
 import { AttestationReportCache, NOT_CHECKED_IN_EDITOR, sha256Hex, verifyResponse, type ResponseEvidence, type VerificationResult } from './attestation';
 import { isNearCloudEndpoint, isSecureEndpoint } from '../domain/config';
-import { bindingReason, decideRoute, isBindingFresh, notAccreditedText, routeCheckFailed, routingWhileFailedClosed, thisComputerOnlyLabelOf } from '../domain/gate/routing';
-import { labelKeyShown } from '../domain/gate/labelAlgebra';
+import { bindingReason, decideRoute, isBindingFresh, routeCheckFailed, routingWhileFailedClosed } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RouteRule, RoutingTable } from '../domain/gate/routing';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import type { Label } from '../domain/gate/labels';
 import type { Mark } from '../domain/gate/dominance';
-import { currentSessionRoute, defaultSessionRoute, notAccreditedRecordFor, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
-import type { SessionRoute } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, endpointPinRefusal, noteNotAccredited, privateOnlyNow, routeEventRecordFor, routeRecordFor, routingOf, UNCHECKABLE_ANSWER_REASONS } from '../gate/sessionMark';
+import { floorFor, pinnedFetchAny, requestTrust, routeFactsFor } from './privateRoute';
+import type { TrustFacts } from '../domain/gate/trust';
+import type { RouteRecordContext, SessionRoute } from '../gate/sessionMark';
 import { ConnectionNotBoundError } from './connectionBinding';
 import type { ConnectionBindingSource } from './connectionBinding';
 import { redactSecrets } from '../domain/redaction';
@@ -88,6 +89,8 @@ export interface NearAiClientOptions {
   binding?: ConnectionBindingSource;
   /** True when the session can use a local model instead of this client (a hybrid profile's NEAR client), so a refusal names the right fix. */
   localModelAvailable?: boolean;
+  /** The fetch held to a place's TLS pins when your organization's rules pin it (D-26). Defaults to pinnedFetchAny; tests give their own. */
+  pinnedFetchFor?: (pins: readonly string[]) => typeof fetch;
   /** For tests: the root the after-answer check trusts instead of Intel's, and the time it checks certificates at. Production leaves it unset. */
   attestationTrust?: { trustedRoot?: string; now?: () => Date };
 }
@@ -167,7 +170,7 @@ interface RouteCheck {
   readonly route: SessionRoute;
   readonly decision: RouteDecision;
   readonly facts: RouteFacts;
-  readonly context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable };
+  readonly context: Omit<RouteRecordContext, 'checkFailed' | 'connectionFallback'>;
   /** The binding fact the check read, when the client has a binding source. */
   readonly connection?: ConnectionBindingFact;
   /** The bound fact the request must be pinned to: set exactly when the request was allowed at attested-cloud to NEAR AI Cloud. */
@@ -179,6 +182,10 @@ interface RouteCheck {
   readonly optionalPin?: ConnectionBindingFact;
   /** Writes a second record for an optionally pinned request that fell back to an unpinned send (the first was written at the decision). Once only. */
   readonly recordFallback?: () => void;
+  /** The TLS pins of your organization's server the send is held to (D-26): a level that needs a pin, allowed there. */
+  readonly pinTo?: readonly string[];
+  /** The TrustFacts of the allowed request (D-38), kept per response for the answer's badge. */
+  readonly trust?: TrustFacts;
 }
 
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000;
@@ -361,6 +368,8 @@ export class NearAiClient implements ModelEndpoint {
   private readonly streams = new WeakMap<Response, { abort: () => void; release: () => void }>();
   /** The binding fact the route check read for each content response, when the client has a binding source; its usage carries it. */
   private readonly connections = new WeakMap<Response, ConnectionBindingFact>();
+  /** The TrustFacts of each content response's request (D-38); its usage carries them to the answer's badge. */
+  private readonly trusts = new WeakMap<Response, TrustFacts>();
   /** The content responses that came over a connection pinned to a fresh bound fact's key; their usage says so. */
   private readonly pinnedResponses = new WeakSet<Response>();
   /** The binding refresh running for each host, at most one: a route check that finds the fact missing or old starts one, never waits for it (OFFL-01). */
@@ -1164,36 +1173,30 @@ export class NearAiClient implements ModelEndpoint {
     const now = clockOf(route);
     // The decision reads the fact held now; a missing or old one is checked again out of band for the next request (OFFL-01).
     this.refreshBinding(host, now);
-    const attestation = attestationStateOf(route);
-    const info = model === undefined ? undefined : this.models.get(model);
-    const facts: RouteFacts = {
-      clientRoute: this.options.route,
-      host,
-      nearEndpoint: isNearCloudEndpoint(host),
-      model: info === undefined ? undefined : { id: info.id, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }) },
-      attestationFailed: attestation === 'failed',
-      // An unproven answer-check state is never proof of a private connection: no binding counts for it (D-50).
-      binding: attestation === 'unproven' ? { state: 'unknown', host } : fact,
-      now,
-      localModelAvailable: this.options.localModelAvailable === true,
-      sessionless: inSession === undefined
-    };
+    // D-37: privacyMode tee-only and a private member or agent team give one floor; decideRoute reads its tier and its allowed models.
+    const floor = floorFor({ privateOnly: privateOnlyNow() });
+    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined, allowedModels: floor.allowedModels });
     let decision: RouteDecision;
     let mark: Mark = [];
     let checkFailed = false;
+    let policyVersion: RouteRecordContext['policyVersion'];
     try {
       ({ routing, defaultLabel, bundleHash } = routingOf(route));
       mark = route.markOf();
-      // Coherence review S4: a private team or member, or nearAi.privacyMode tee-only, raises the tier to at least attested-cloud, so a model counts as
-      // private only when the gate's own check passes, never on the catalog's word alone.
-      decision = decideRoute(mark, routing, facts, defaultLabel, privateOnlyNow() ? 'attested-cloud' : undefined);
+      // D-36: the effective policy of the route's own host; none (or a route without one) decides as the safety patch did. A throw is a failed check.
+      const policy = route.routePolicy?.(now);
+      policyVersion = policy?.policyVersion;
+      // Coherence review S4: the floor raises the tier to at least attested-cloud, so a model counts as private only when the gate's own check passes.
+      decision = decideRoute(mark, routing, facts, defaultLabel, floor.tier, policy);
     } catch {
       // A policy state, a mark or a routing table that cannot be read means the route cannot be worked out: it is refused with a fixed rule and a plain
       // sentence, and recorded, rather than guessed or left to throw something nobody can read (PR 4a review).
       mark = [];
       checkFailed = true;
+      policyVersion = undefined;
       decision = routeCheckFailed();
     }
+    const context = { mark, defaultLabel, bundleHash, routing, ...(policyVersion === undefined ? {} : { policyVersion }) };
     // An attested-cloud request to NEAR AI Cloud is allowed only through a fresh bound fact (D-50); it is sent over a connection pinned to that fact's key.
     const pinned = decision.allowed && decision.tier === 'attested-cloud' && this.options.route === 'near' && facts.binding?.state === 'bound' ? facts.binding : undefined;
     // Owner, 2026-11-18: an any-cloud request to NEAR AI Cloud's own endpoint also goes over the pinned connection while a fresh proof for this host exists,
@@ -1204,11 +1207,11 @@ export class NearAiClient implements ModelEndpoint {
     // that dies mid-request still leaves it (PR #95 review round 3). A record that cannot be built or kept never changes the request (D-21).
     const write = (fellBack: boolean): void => {
       try {
-        route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { mark, defaultLabel, bundleHash, routing, checkFailed, ...(fellBack ? { connectionFallback: 'unpinned' as const } : {}) }));
+        route.sink?.record(routeRecordFor(route, decision, facts, model === undefined ? {} : { model }, { ...context, checkFailed, ...(fellBack ? { connectionFallback: 'unpinned' as const } : {}) }));
       } catch { /* see above */ }
     };
     write(false);
-    if (decision.allowed && !checkFailed) this.noteNotAccredited(route, decision, facts, model, { mark, defaultLabel, bundleHash, routing });
+    if (decision.allowed && !checkFailed) noteNotAccredited(route, decision, facts, model, context);
     let fellBackRecorded = false;
     const recordFallback = (): void => { if (!fellBackRecorded) { fellBackRecorded = true; write(true); } };
     if (!decision.allowed) throw new RouteRefusedError(decision.rule, decision.reason ?? 'Nothing was sent.');
@@ -1216,27 +1219,13 @@ export class NearAiClient implements ModelEndpoint {
       route,
       decision,
       facts,
-      context: { mark, defaultLabel, bundleHash, routing },
+      context,
       ...(this.options.binding === undefined ? {} : { connection: fact }),
       ...(pinned === undefined ? {} : { pinned }),
-      ...(optionalPin === undefined ? {} : { optionalPin, recordFallback })
+      ...(optionalPin === undefined ? {} : { optionalPin, recordFallback }),
+      ...(decision.pinTo === undefined ? {} : { pinTo: decision.pinTo }),
+      ...requestTrust(decision, facts, context, model === undefined ? undefined : this.models.get(model)?.forwardedTo)
     };
-  }
-
-  /**
-   * Coherence review S2 (report mode): when an allowed request carries content at a level that belongs only on an accredited system (Protected C, classified,
-   * NATO Confidential and above), the chat says once that this computer is not recorded as accredited, and the decision log records route.not-accredited
-   * once. Nothing is refused. A notice or record that cannot be made never changes the request (D-21).
-   */
-  private noteNotAccredited(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, model: string | undefined, context: { readonly mark: Mark; readonly defaultLabel: Label; readonly bundleHash: string; readonly routing: RoutingTable }): void {
-    try {
-      const label = thisComputerOnlyLabelOf(context.mark, context.defaultLabel);
-      if (label === undefined || route.attestation.notAccreditedTold === true) return;
-      route.attestation.notAccreditedTold = true;
-      const reason = notAccreditedText(labelKeyShown(label));
-      try { route.sink?.record(notAccreditedRecordFor(route, decision, facts, model === undefined ? {} : { model }, { ...context, label, reason })); } catch { /* D-21 */ }
-      try { route.onNotice?.(reason); } catch { /* a notice never changes a request */ }
-    } catch { /* D-21 */ }
   }
 
   /**
@@ -1244,6 +1233,7 @@ export class NearAiClient implements ModelEndpoint {
    * A source that cannot give a pinned fetch cannot carry the request at all: refused, never sent over an unpinned connection (CLAS-05).
    */
   private fetchFor(check: RouteCheck | undefined): typeof fetch {
+    if (check?.pinTo !== undefined) { try { return (this.options.pinnedFetchFor ?? pinnedFetchAny)(check.pinTo); } catch { throw this.pinRefused(check); } }
     if (check?.pinned === undefined && check?.optionalPin !== undefined) {
       // At any-cloud a source that gives no pinned fetch leaves the request as it was before (unpinned, not proven), never refused.
       try { return this.options.binding?.fetchFor?.(check.optionalPin) ?? this.fetchFn; } catch { return this.fetchFn; }
@@ -1253,6 +1243,12 @@ export class NearAiClient implements ModelEndpoint {
     try { pinned = this.options.binding?.fetchFor?.(check.pinned); } catch { pinned = undefined; }
     if (pinned === undefined) throw this.notBound(check, 'The binding source gives no pinned connection.');
     return pinned;
+  }
+
+  /** A connection to your organization's server that matched none of its pins (D-26): recorded, and nothing was sent. */
+  private pinRefused(check: RouteCheck): RouteRefusedError {
+    const refused = endpointPinRefusal(check.route, check.decision, check.facts, check.context);
+    return new RouteRefusedError(refused.rule, refused.reason ?? 'Nothing was sent.');
   }
 
   /** A pinned connection that did not present the attested key: the host is marked not-bound, the refusal is recorded, and nothing was sent. */
@@ -1281,7 +1277,8 @@ export class NearAiClient implements ModelEndpoint {
   /** The usage a response starts with: its headers, and the binding fact the route check read when there is one. */
   private usageStart(response: Response, started: number): UsageMetadata {
     const connection = this.connections.get(response);
-    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }), ...(this.pinnedResponses.has(response) ? { connectionPinned: true as const } : {}) };
+    const trust = this.trusts.get(response);
+    return { ...metadataFromHeaders(response.headers, started), ...(connection === undefined ? {} : { connection }), ...(this.pinnedResponses.has(response) ? { connectionPinned: true as const } : {}), ...(trust === undefined ? {} : { trust }) };
   }
 
   private async request(path: string, init: RequestInit, overrides: { maxRetries?: number; model?: string; failFast?: boolean; spendKind?: SpendKind; secret?: string; stream?: boolean } = {}): Promise<Response> {
@@ -1350,6 +1347,7 @@ export class NearAiClient implements ModelEndpoint {
             attempt -= 1;
             continue;
           }
+          if (check?.pinTo !== undefined && notBound) throw this.pinRefused(check);
           // The pinned connection presented another key: nothing was written, the host is not bound any more, and the request is refused (CLAS-05).
           if (check !== undefined && notBound) throw this.notBound(check, (error as Error).message);
           // Sent but cancelled or timed out before NEAR answered: NEAR may still have done (and billed) the work.
@@ -1374,6 +1372,7 @@ export class NearAiClient implements ModelEndpoint {
         if (response.ok) {
           if (model) this.cooling.delete(model);
           if (connection !== undefined) this.connections.set(response, connection);
+          if (check?.trust !== undefined) this.trusts.set(response, check.trust);
           if (check?.pinned !== undefined) { this.attestedAnswers.set(response, check.route); this.pinnedResponses.add(response); }
           if (optionalPin) this.pinnedResponses.add(response);
           if (billable) this.charge(path, init, model, overrides.spendKind, response, 'open');
