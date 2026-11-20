@@ -1,7 +1,7 @@
 // Turns the model's message list into thread entries (D-07), the original messages the person saw, without the things only the model sees. Pure: no
 // VS Code, no files. The thread log is built from this before the model's context is trimmed or compacted, so the log is never the compacted list.
 import { createHash } from 'node:crypto';
-import type { AgentMessage } from '../../services/nearAiClient';
+import type { AgentMessage } from '../provider/messages';
 import { capToolResult, entryId, type ThreadEntry } from './threadEntries';
 
 /** The assistant message `compactConversation` puts after its summary. */

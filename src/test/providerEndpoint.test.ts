@@ -1,6 +1,7 @@
 // FND-09, D-43: the provider interface. The chat message types live in the pure folder src/domain/provider, ModelEndpoint says what the agent needs from
 // any AI service, and NearAiClient is its first adapter with one new getter (`facts`) and no behaviour change.
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,8 +10,10 @@ import { RunCheckpoints } from '../agent/checkpoints';
 import type { AgentEvent } from '../agent/loop';
 import { DEFAULT_RULES } from '../agent/permissions';
 import { ShellSession } from '../agent/shell';
+import type { SafetyModelClient } from '../agent/safetyModel';
 import { DEFAULT_BASE_URL } from '../domain/config';
 import type { EndpointFacts, ModelEndpoint } from '../domain/provider/endpoint';
+import type { LocalInstallRequest, LocalModelRef, LocalServerAdmin } from '../domain/provider/localServer';
 import type { AgentMessage as DomainAgentMessage, CompletionEvent } from '../domain/provider/messages';
 import { NearAiClient } from '../services/nearAiClient';
 import type { AgentMessage as ClientAgentMessage } from '../services/nearAiClient';
@@ -74,4 +77,86 @@ test('D-43: the moved types are the same types', () => {
   const asDomain: DomainAgentMessage = fromClient;
   assert.equal(asClient, fromDomain);
   assert.equal(asDomain, fromClient);
+});
+
+// The scanner of teamBoundaries.test.ts, copied (importing that file would register its tests twice): every static import or re-export, side-effect
+// import, dynamic import() and require() with a string specifier, matched from the start of a line so a word in a comment is not an import.
+const STATIC_FORM = /^[ \t]*(import|export)[ \t]+(type[ \t]+)?[^;'"]*?\bfrom[ \t]*['"]([^'"\n]+)['"]/gm;
+const SIDE_EFFECT_FORM = /^[ \t]*import[ \t]*['"]([^'"\n]+)['"]/gm;
+const CALL_FORM = /(?:^|[^\w.$])(?:import|require)[ \t]*\([ \t]*['"]([^'"\n]+)['"]/gm;
+
+function specifiersOf(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(STATIC_FORM)) found.push(match[3] as string);
+  for (const match of text.matchAll(SIDE_EFFECT_FORM)) found.push(match[1] as string);
+  for (const match of text.matchAll(CALL_FORM)) found.push(match[1] as string);
+  return found;
+}
+
+const SRC = path.resolve(__dirname, '..', '..', 'src');
+const PROVIDER_FOLDER = path.join(SRC, 'domain', 'provider');
+
+/** The imports of a file in src/domain/provider that reach outside src/domain (a package, the editor, services, agent), as `file: specifier`. */
+function providerLeaks(file: string, text: string): string[] {
+  const leaks: string[] = [];
+  for (const specifier of specifiersOf(text)) {
+    if (specifier === 'node:crypto') continue;
+    const target = specifier.startsWith('.') ? path.relative(SRC, path.resolve(path.dirname(file), specifier)).split(path.sep).join('/') : undefined;
+    if (target === undefined || !(target === 'domain' || target.startsWith('domain/'))) leaks.push(`${path.basename(file)}: ${specifier}`);
+  }
+  return leaks;
+}
+
+test('D-43: the agent and domain state files import the provider types from src/domain/provider', () => {
+  for (const relative of ['agent/loop.ts', 'agent/context.ts', 'agent/safetyModel.ts', 'domain/state/threadView.ts', 'domain/state/threadCapture.ts']) {
+    const specifiers = specifiersOf(readFileSync(path.join(SRC, relative), 'utf8'));
+    assert.deepEqual(specifiers.filter((specifier) => specifier.endsWith('services/nearAiClient')), [], `${relative} imports no type from the NEAR AI client file`);
+    assert.ok(specifiers.some((specifier) => /(^|\/)(domain\/provider|provider)\/(messages|endpoint)$/.test(specifier) && path.resolve(path.join(SRC, path.dirname(relative)), specifier).startsWith(PROVIDER_FOLDER)), `${relative} imports from src/domain/provider`);
+  }
+});
+
+test('src/domain/provider imports only src/domain and no package', () => {
+  const files = readdirSync(PROVIDER_FOLDER).filter((name) => name.endsWith('.ts')).map((name) => path.join(PROVIDER_FOLDER, name));
+  for (const expected of ['messages.ts', 'endpoint.ts', 'localServer.ts']) assert.ok(files.some((file) => file.endsWith(expected)), `src/domain/provider/${expected} exists`);
+  for (const file of files) assert.deepEqual(providerLeaks(file, readFileSync(file, 'utf8')), [], `${path.basename(file)} stays inside src/domain`);
+
+  // Teeth: a planted import of services, an editor import, a package and a dynamic require are each reported; a word in a comment is not.
+  const planted = path.join(PROVIDER_FOLDER, 'planted.ts');
+  const text = [
+    "import { x } from '../../services/chat';",
+    "import * as vscode from 'vscode';",
+    "import type { Foo } from 'some-package';",
+    "const late = require('../../agent/loop');",
+    "// import { y } from '../../services/nearAiClient' is only a comment",
+    "import type { Label } from '../gate/labels';",
+    "import { createHash } from 'node:crypto';"
+  ].join('\n');
+  assert.deepEqual(providerLeaks(planted, text), ['planted.ts: ../../services/chat', 'planted.ts: vscode', 'planted.ts: some-package', 'planted.ts: ../../agent/loop']);
+});
+
+test('D-43: LocalServerAdmin is an interface with kind as data', async () => {
+  const installed: LocalModelRef[] = [{ name: 'example-model:7b', sha256: 'a'.repeat(64), sizeBytes: 4_000 }, { name: 'example-small' }];
+  const admin: LocalServerAdmin = {
+    kind: 'example-server',
+    identify: async () => ({ version: '1.2.3' }),
+    listInstalled: async () => installed,
+    verifyHash: async (name, sha256) => installed.some((model) => model.name === name && model.sha256 === sha256)
+  };
+  assert.equal(admin.kind, 'example-server', 'kind is a plain string, so a new server needs no change to the interface');
+  assert.equal(admin.install, undefined, 'install is optional');
+  assert.equal(admin.remove, undefined, 'remove is optional');
+  assert.deepEqual(await admin.identify(), { version: '1.2.3' });
+  const listed: readonly LocalModelRef[] = await admin.listInstalled();
+  assert.deepEqual(listed.map((model) => model.name), ['example-model:7b', 'example-small']);
+  assert.equal(await admin.verifyHash('example-model:7b', 'a'.repeat(64)), true);
+  assert.equal(await admin.verifyHash('example-model:7b', 'b'.repeat(64)), false, 'a different hash is refused');
+  assert.equal(await admin.verifyHash('example-small', 'a'.repeat(64)), false, 'a model with no known hash is refused');
+  const request: LocalInstallRequest = { name: 'example-model:7b', sha256: 'a'.repeat(64) };
+  assert.deepEqual(Object.keys(request).sort(), ['name', 'sha256']);
+});
+
+test('a SafetyModelClient fake written for today\'s shape still compiles', async () => {
+  const fake: SafetyModelClient = { async completeOnce() { return { text: '{"allow":false,"reason":"example"}', usage }; } };
+  const answer = await fake.completeOnce('example/model', [{ role: 'user', content: 'ls' }], { maxTokens: 10 });
+  assert.equal(answer.text, '{"allow":false,"reason":"example"}');
 });

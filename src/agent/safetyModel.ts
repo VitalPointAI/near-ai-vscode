@@ -1,4 +1,5 @@
-import type { AgentMessage, UsageMetadata } from '../services/nearAiClient';
+import type { AgentMessage, UsageMetadata } from '../domain/provider/messages';
+import type { ModelEndpoint } from '../domain/provider/endpoint';
 import { withSpendTag } from '../services/spendLedger';
 
 // The model half of the `auto` approval mode: a quick verdict from a private model on a shell
@@ -15,9 +16,7 @@ export interface CommandSafetyCheck {
   check(command: string, where: SafetyWhere, signal?: AbortSignal): Promise<SafetyVerdict>;
 }
 
-export interface SafetyModelClient {
-  completeOnce(model: string, messages: AgentMessage[], options: { maxTokens: number; signal?: AbortSignal; noThinking?: boolean }): Promise<{ text: string; usage: UsageMetadata; finishReason?: string }>;
-}
+export type SafetyModelClient = Pick<ModelEndpoint, 'completeOnce'>;
 
 export interface SafetyModelOptions {
   client: SafetyModelClient;
