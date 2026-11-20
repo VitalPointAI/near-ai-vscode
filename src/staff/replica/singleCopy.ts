@@ -42,6 +42,7 @@ import { actorForTransition, personForTransition } from '../../domain/replica/ve
 import type { ProductVersions, VersionAct, VersionView } from '../../domain/replica/versions';
 import { apply, entryDigest, LEDGER_ENTRY_VERSION, LEDGER_GENESIS, LINE_CLOSING_STATES, parseLedgerEntry, productHash, replayLedger } from '../../domain/staff/ledger';
 import type { LedgerEntry, LedgerHeadMark, ProductMetaInput, ProductState } from '../../domain/staff/ledger';
+import { STAFF_SECTION_IDS } from '../../domain/staff/doctrine';
 import { CALC_LEDGER_FILE, parseCalcLedgerEntry, replayCalcLedger } from '../../domain/staff/logistics';
 import { multiUserNoticeLines, REPLICA_DIR } from '../../domain/staff/multiUser';
 import { DECISION_LOG_FILE, DECISION_LOG_GENESIS, decisionDigest, parsePersonDecision, replayPersonDecisions } from '../../domain/staff/personDecisions';
@@ -553,9 +554,9 @@ export async function makeSingleMachineCopy(sharedRoot: string, destination: str
       if (ledger.products.has(difference.product)) continue;
       const body = texts.get(difference.product);
       const versions = ((input.fold.families.versions as ProductVersions[] | undefined) ?? []).find((item) => item.product === difference.product);
-      const section = versions?.section;
+      const section = STAFF_SECTION_IDS.find((id) => id === versions?.section);
       if (body === undefined || body === '' || section === undefined) continue;
-      files.set(staffProductPath(section as ProductState['record']['section'], difference.product), body);
+      files.set(staffProductPath(section, difference.product), body);
     }
 
     // The decision log, the calculator ledger and the wargame ledger, from their imports.

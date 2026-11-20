@@ -8,18 +8,31 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFile
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
+import { canonicalBytes } from '../domain/team/canonical';
+import { clientIdOf } from '../domain/replica/clientIds';
+import { createLocalDoc, localInsert, snapshotOf } from '../domain/replica/doc';
+import { sealBlob } from '../domain/replica/entry';
+import type { Actor, SealedBlob } from '../domain/replica/entry';
+import { epochAt } from '../domain/replica/rosterCells';
+import { deviceAt } from '../domain/replica/rosterMembers';
+import { replicaVersionHash } from '../domain/replica/versions';
+import type { ProductVersions } from '../domain/replica/versions';
 import { LEDGER_PROBLEMS, parseLedgerHeadMark } from '../domain/staff/ledger';
 import type { ProductState } from '../domain/staff/ledger';
+import { REPLICA_DIR } from '../domain/staff/multiUser';
 import type { PersonActor } from '../domain/staff/release';
 import { verifyPayload } from '../domain/team/signedPayload';
 import type { DeviceIdentity } from '../team/identity';
 import { isMigrationRefused, ledgerHeadKey, makeMultiUser, projectionInputOf } from '../staff/replica/migrate';
 import type { MigrationDeps } from '../staff/replica/migrate';
 import { projectLedgerReplay } from '../staff/replica/projection';
+import { admitJoinRequest, inviteToProject, joinFromInvite, openWelcome, updateMember } from '../staff/replica/membership';
+import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
-import { makeSingleMachineCopy } from '../staff/replica/singleCopy';
-import type { CopyDeps, CopyResult } from '../staff/replica/singleCopy';
+import type { ProjectRefused } from '../staff/replica/replicaProject';
+import { CONTESTED_AT_COPY_TEXT, COPY_REFUSALS, carriedApprovalName, makeSingleMachineCopy } from '../staff/replica/singleCopy';
+import type { CopyDeps, CopyRefused, CopyResult } from '../staff/replica/singleCopy';
 import { LEDGER_DIR, LEDGER_FILE, StaffHost, productPath } from '../staff/staffHost';
 import { callTool, CLEAN_BODY, hashIn, J5_TEAM, memorySecrets, trusting, writeBody } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
@@ -189,4 +202,219 @@ test('the shared project is byte for byte untouched by a copy: every file under 
   assert.ok(secretsAfter.has(markKey) && !secretsBefore.has(markKey));
   secretsAfter.delete(markKey);
   assert.deepEqual(secretsAfter, secretsBefore, 'no other secret changed');
+});
+
+// ---- Task 2: carried approvals, contested at copy time, and destination refusals ----------------------------------------------------------------
+
+const LEAD_NAME = 'P. Planner';
+const OFFICIAL = { scale: 'demo', level: 'OFFICIAL', compartments: [], releasability: [] };
+const HEADER = { kind: 'plan', label: 'demo/Official', profile: 'nato-ca', level: 'tactical' };
+const ROLES = { owner: 'lead-planner', sectionLead: 'j5-chief', releaseGuard: 'release-guard' };
+const agent = (member: string): Actor => ({ kind: 'agent', member, run: 'run-1' });
+const PERSON: Actor = { kind: 'person' };
+
+const projects: ReplicaProject[] = [];
+after(async () => {
+  for (const item of projects) await item.close();
+});
+
+function kept(value: ReplicaProject | ProjectRefused | undefined): ReplicaProject {
+  assert.ok(value instanceof ReplicaProject, `the project opens (${isProjectRefused(value) ? value.message : String(value)})`);
+  projects.push(value);
+  return value;
+}
+
+function done<T extends MembershipResult>(result: T, what: string): T {
+  assert.equal(result.ok, true, `${what}: ${result.reason ?? ''} ${result.message}`);
+  return result;
+}
+
+/** One install of a shared project: its folder, storage and secrets, and its open project. */
+interface Seat { readonly env: Env; readonly p: ReplicaProject; readonly host: SharedProjectHost }
+
+/** What a transport would carry from one install to another: every entry and blob it wrote. */
+interface Sent { entries: unknown[]; blobs: SealedBlob[] }
+
+async function write(seat: Seat, sent: Sent, kind: string, data: Record<string, unknown>, options: { actor?: Actor; deps?: readonly string[] } = {}): Promise<string> {
+  const result = await seat.p.appendOwn(kind, data, { actor: options.actor ?? PERSON, ...(options.deps === undefined ? {} : { deps: options.deps }) });
+  assert.ok(!isProjectRefused(result), `${kind}: ${isProjectRefused(result) ? result.message : ''}`);
+  sent.entries.push(result.built.entry);
+  sent.blobs.push(...result.built.blobs);
+  return result.hash;
+}
+
+/** The staff lead P founds a shared project (not migrated) and takes the section and decision roles a product needs. */
+async function founded(label: string): Promise<Seat> {
+  const env = await freshEnv(`${label}-lead`);
+  const p = kept(await ReplicaProject.createSharedProject(env.root, env.deps, { name: NAME, profile: 'nato-ca', level: 'tactical', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead', name: LEAD_NAME } }));
+  const host: SharedProjectHost = { project: p, deps: env.deps };
+  done(await updateMember(host, { member: 'mbr-lead', name: LEAD_NAME, roles: ['member', 'section_lead:j5', `decision_for:${DECISION_ROLE}`], agentSeats: ['lead-planner', 'release-guard'] }), 'lead roles');
+  return { env, p, host };
+}
+
+/** P writes the concept of operations as a live text, proposes it, the guard clears it and its owner submits it for the commander. */
+async function submitted(lead: Seat, sent: Sent): Promise<{ hash: string; submit: string }> {
+  const { roster } = await lead.p.state();
+  const position = roster.positions.length - 1;
+  const stream = lead.p.projectId;
+  const epoch = epochAt(roster.cells, stream, position) as number;
+  const key = lead.p.keys.epochKey(stream, epoch) as Buffer;
+  const clientId = clientIdOf(deviceAt(roster.members, lead.p.deviceWriter, position)?.slot ?? 1, 0);
+  await write(lead, sent, 'product.create', { product: CONOPS, section: 'j5', roles: { ...ROLES }, title: CONOPS });
+  await write(lead, sent, 'doc.client', { product: CONOPS, clientId, actor: { kind: 'person' } });
+  const doc = createLocalDoc(clientId);
+  await write(lead, sent, 'doc.update', { product: CONOPS, update: Buffer.from(localInsert(doc, 0, CLEAN_BODY)).toString('base64url') });
+  const hash = replicaVersionHash(CLEAN_BODY, []);
+  const blob = sealBlob(key, stream, epoch, canonicalBytes({ text: CLEAN_BODY, header: HEADER }));
+  assert.ok(!isProjectRefused(await lead.p.ingestForeign([], [blob])));
+  sent.blobs.push(blob);
+  await write(lead, sent, 'version.propose', { product: CONOPS, hash, textBlob: blob.hash, snapshot: Buffer.from(snapshotOf(doc)).toString('base64url'), pins: [] });
+  await write(lead, sent, 'version.verdict', { product: CONOPS, hash, gate: 'guard', verdict: 'CLEARED', reasons: [] }, { actor: agent('release-guard') });
+  const submit = await write(lead, sent, 'version.submit', { product: CONOPS, hash, decisionFor: DECISION_ROLE }, { actor: agent('lead-planner') });
+  return { hash, submit };
+}
+
+/** The copier C joins P's project by invitation (holding the commander's decision role) and is given everything P wrote. */
+async function joined(lead: Seat, label: string): Promise<Seat> {
+  const env = await freshEnv(`${label}-copier`);
+  const invited = done(await inviteToProject(lead.host, { name: COPIER.name, seat: 'j5-plans', roles: ['member', `decision_for:${DECISION_ROLE}`], clearance: OFFICIAL }), 'invite');
+  const asked = done(await joinFromInvite(env.root, env.deps, invited.file?.text, { name: COPIER.name }), 'join');
+  const admitted = done(await admitJoinRequest(lead.host, asked.file?.text, { codeMatched: true }), 'admit');
+  const welcomed = done(await openWelcome(env.root, env.deps, admitted.file?.text), 'welcome');
+  const p = kept(welcomed.project);
+  return { env, p, host: { project: p, deps: env.deps } };
+}
+
+async function deliver(to: Seat, sent: Sent): Promise<void> {
+  const result = await to.p.ingestForeign(sent.entries, sent.blobs);
+  assert.ok(!isProjectRefused(result), isProjectRefused(result) ? result.message : '');
+  assert.deepEqual(to.p.heldForCheck(), [], 'nothing is held by the decode check');
+}
+
+async function productOf(seat: Seat): Promise<ProductVersions> {
+  const { fold } = await seat.p.state();
+  const product = (fold.families.versions as ProductVersions[]).find((item) => item.product === CONOPS);
+  assert.ok(product !== undefined, 'the product is in the fold');
+  return product;
+}
+
+/** Every envelope of a ledger file in the copy: who signed each one. */
+function signersOf(file: string): string[] {
+  return readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => (JSON.parse(line) as { signer: { fingerprint: string } }).signer.fingerprint);
+}
+
+test('carried: P approved and released in the shared project; C\'s copy records both under C\'s key with the carried wording, and nothing is signed as P', async () => {
+  const lead = await founded('carried');
+  const sent: Sent = { entries: [], blobs: [] };
+  const { hash } = await submitted(lead, sent);
+  const approve = await write(lead, sent, 'version.decide', { product: CONOPS, hash, outcome: 'approve', reasons: [], decisionsSeen: [] });
+  await write(lead, sent, 'version.release', { product: CONOPS, hash, decisionsSeen: [approve] });
+  const copier = await joined(lead, 'carried');
+  await deliver(copier, sent);
+  const folded = await productOf(copier);
+  assert.deepEqual(folded.refusals, [], 'the fold accepts every step');
+  assert.equal(folded.records[0].release.state, 'released');
+
+  const destination = path.join(copier.env.base, 'copy');
+  const result = await copied(copier.env, destination);
+  assert.equal(result.carried, 2, 'the approval and the release are carried');
+  const replay = await hostAt(copier.env, destination).replay();
+  assert.equal(replay.broken, undefined, 'the copy verifies with today\'s verifier and C\'s key alone');
+  const state = replay.products.get(CONOPS) as ProductState;
+  assert.equal(state.record.state, 'released');
+  assert.deepEqual(state.approvedVersions, [1]);
+  const people = state.history.filter((item) => item.actor.kind === 'person').map((item) => ({ event: item.event, actor: item.actor as PersonActor }));
+  assert.deepEqual(people.map((item) => item.event), ['approve', 'release']);
+  assert.equal(people[0].actor.name, carriedApprovalName(LEAD_NAME, COPIER.name));
+  assert.equal(people[0].actor.name, 'P. Planner (approved in the shared project, carried by C. Copier)');
+  assert.equal(people[1].actor.name, carriedApprovalName(LEAD_NAME, COPIER.name, 'released'));
+  for (const item of people) {
+    assert.equal(item.actor.deviceFingerprint, copier.env.signer.fingerprint, 'a carried step names the copier\'s device');
+    assert.equal(item.actor.role, DECISION_ROLE);
+  }
+  assert.equal(state.record.approval?.by.kind, 'person');
+  const signers = new Set(signersOf(path.join(destination, LEDGER_DIR, LEDGER_FILE)));
+  assert.deepEqual([...signers], [copier.env.signer.fingerprint], 'every entry is signed by C, none by P');
+  assert.notEqual(lead.env.signer.fingerprint, copier.env.signer.fingerprint);
+});
+
+test('contested: an approve and a reject made at the same time are never carried; the version stays awaiting decision with the contested note', async () => {
+  const lead = await founded('contested');
+  const sent: Sent = { entries: [], blobs: [] };
+  const { hash, submit } = await submitted(lead, sent);
+  const copier = await joined(lead, 'contested');
+  await deliver(copier, sent);
+  // C rejects having seen the submit; P approves without having seen C's reject: the two decisions are concurrent.
+  const own: Sent = { entries: [], blobs: [] };
+  await write(copier, own, 'version.decide', { product: CONOPS, hash, outcome: 'reject', reasons: ['The flank is not covered.'], decisionsSeen: [] }, { deps: [submit] });
+  const later: Sent = { entries: [], blobs: [] };
+  await write(lead, later, 'version.decide', { product: CONOPS, hash, outcome: 'approve', reasons: [], decisionsSeen: [] });
+  await deliver(copier, later);
+  const folded = await productOf(copier);
+  assert.equal(folded.versions[0].decision.status, 'contested', 'the shared project holds a contested decision');
+
+  const destination = path.join(copier.env.base, 'copy');
+  const result = await copied(copier.env, destination);
+  assert.deepEqual(result.contested, [`${CONOPS}@1`]);
+  assert.equal(result.carried, 0, 'no decision is carried');
+  const host = hostAt(copier.env, destination);
+  const replay = await host.replay();
+  assert.equal(replay.broken, undefined);
+  const state = replay.products.get(CONOPS) as ProductState;
+  assert.equal(state.record.state, 'awaiting-decision', 'the version stays undecided in the copy');
+  assert.equal(state.record.approval, undefined);
+  assert.deepEqual(state.approvedVersions, []);
+  assert.ok(!state.history.some((item) => item.event === 'approve' || item.event === 'reject'), 'no decision is in the copy\'s history');
+  assert.ok(state.request?.dissent[0]?.startsWith(`${CONTESTED_AT_COPY_TEXT}:`), `the open request carries the note (${state.request?.dissent.join(' | ')})`);
+  assert.equal(CONTESTED_AT_COPY_TEXT, 'contested at copy time');
+  assert.equal((await host.productState(CONOPS))?.state, 'awaiting-decision', 'the product file agrees with the copy\'s ledger');
+});
+
+test('a very long name is shortened so the carried name stays within 120 characters and still ends with the copier', () => {
+  const long = carriedApprovalName('A'.repeat(300), 'C');
+  assert.ok(long.length <= 120, `${long.length} characters`);
+  assert.ok(long.endsWith(', carried by C)'));
+  assert.ok(long.startsWith('AAAA'));
+  assert.equal(carriedApprovalName('P', 'C'), 'P (approved in the shared project, carried by C)');
+  // A copier with a very long name still leaves the carried name in front, and the whole fits.
+  const both = carriedApprovalName('P. Planner', 'B'.repeat(300));
+  assert.ok(both.length <= 120 && both.startsWith('P') && both.endsWith('B)'), both);
+  // Line breaks and control characters never reach the one-line name field; a surrogate pair is never cut in half.
+  assert.equal(carriedApprovalName('P.\nPlanner', 'C'), 'P. Planner (approved in the shared project, carried by C)');
+  const emoji = carriedApprovalName('\u{1F600}'.repeat(100), 'C');
+  assert.ok(emoji.length <= 120 && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(emoji));
+});
+
+/** A refusal that wrote nothing anywhere: every file under the env's base and every secret are as they were. */
+async function refusedWithNothingWritten(env: Env, destination: string, expected: keyof typeof COPY_REFUSALS, root = env.root): Promise<void> {
+  const filesBefore = tree(env.base);
+  const secretsBefore = new Map(env.secrets.values);
+  const result = await makeSingleMachineCopy(root, destination, env.deps) as CopyRefused;
+  assert.equal(result.ok, false);
+  assert.equal(result.refused, expected);
+  assert.equal(result.message, COPY_REFUSALS[expected]);
+  assert.ok(!/\u2014/.test(result.message), 'plain sentence, no em-dash');
+  assert.deepEqual(tree(env.base), filesBefore, 'no file was written or changed');
+  assert.deepEqual(new Map(env.secrets.values), secretsBefore, 'no secret was written');
+}
+
+test('a destination inside the shared project\'s replica folder, or anywhere in the shared project, is refused destination-inside-shared with nothing written', async () => {
+  const env = await migrated('inside');
+  await refusedWithNothingWritten(env, path.join(env.root, ...REPLICA_DIR.split('/'), 'copy'), 'destination-inside-shared');
+  await refusedWithNothingWritten(env, path.join(env.root, 'copy'), 'destination-inside-shared');
+  await refusedWithNothingWritten(env, env.root, 'destination-inside-shared');
+});
+
+test('a destination that already holds staff files is refused destination-has-staff-files with nothing written', async () => {
+  const env = await migrated('has-staff');
+  const destination = path.join(env.base, 'other');
+  await mkdir(path.join(destination, '.planning', 'staff'), { recursive: true });
+  writeFileSync(path.join(destination, '.planning', 'staff', 'note.md'), '# Someone else\'s staff file\n');
+  await refusedWithNothingWritten(env, destination, 'destination-has-staff-files');
+});
+
+test('a folder that holds no shared project is refused not-shared with nothing written', async () => {
+  const env = await freshEnv('not-shared');
+  await releasedProduct(worldOf(env));
+  await refusedWithNothingWritten(env, path.join(env.base, 'copy'), 'not-shared');
 });
