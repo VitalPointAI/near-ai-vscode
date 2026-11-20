@@ -10,7 +10,7 @@
 //
 // Order of the checks: the shape; the enrolment id (unknown, used or expired, before any HMAC, so an unknown id costs nothing); the MAC in constant
 // time, before any roster work; the project not already held; the base cell grant wrapped to this hub's key; the genesis the hub can open; the roster
-// folded with the hub-side foldRoster and its head equal to the claimed head; hub.admit in force at the head naming this hub's writer, X25519 key and
+// folded with the hub-side foldRoster, a base cell grant to the hub placed by it, and its head equal to the claimed head; hub.admit in force at the head naming this hub's writer, X25519 key and
 // current certificate pin; the hub among the base cell's grantees at the head. Then everything is stored in one enrolProject call.
 import { createHash, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
@@ -348,6 +348,13 @@ export async function enrolProject(ctx: EnrolContext, request: unknown): Promise
     identity,
     now,
   });
+  // A base cell grant to this hub that the roster places (its signer a roster writer, the hub admitted at the roster it names). A grant made before
+  // hub.admit never counts, and without a placed one the hub could not read the roster again after a restart.
+  const hubGrantPlaced = read.grants.some((value) => {
+    const grant = readGrant(value);
+    return grant.ok && grant.grant.cell === read.project && grant.grant.wraps.some((wrap) => wrap.writer === identity.writer) && roster.placedGrants.has(grant.hash);
+  });
+  if (!hubGrantPlaced) return refuse('no-base-grant');
   if (roster.head !== read.rosterHead) return refuse('roster-mismatch');
 
   // Every entry is signed by a device the roster knows; an entry the fold refused is still that writer's log and is kept.

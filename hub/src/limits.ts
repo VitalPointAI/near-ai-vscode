@@ -70,15 +70,16 @@ export class TokenBucket {
     }
   }
 
-  /** Takes count tokens, all or none. A refusal says how many whole seconds until count tokens are there (at least 1). */
+  /** Takes count tokens, all or none. A count above the capacity needs a full bucket and empties it, so a batch at the batch cap can always pass
+   *  once the bucket has refilled. A refusal says how many whole seconds until the tokens are there (at least 1). */
   take(now: number, count = 1): TakeResult {
     this.refill(now);
-    if (count <= this.tokens) {
-      this.tokens -= count;
+    const need = Math.min(count, this.capacity);
+    if (need <= this.tokens) {
+      this.tokens -= need;
       return { ok: true };
     }
-    const missing = Math.min(count, this.capacity) - this.tokens;
-    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil(missing / this.perSecond)) };
+    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((need - this.tokens) / this.perSecond)) };
   }
 
   /** True when the bucket has refilled to full by now: forgetting it changes nothing. */
