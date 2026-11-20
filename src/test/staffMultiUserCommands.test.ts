@@ -132,7 +132,8 @@ function state(at: Install): { files: Record<string, string>; secrets: Array<[st
     try {
       const parsed = JSON.parse(value) as { purpose?: unknown; payload?: unknown; signed?: { purpose?: unknown; payload?: unknown } };
       if (parsed.purpose === 'staff-replica-mark') return `mark ${JSON.stringify(parsed.payload)}`;
-      // The mark since 31-REVIEW MJ-06: a compact signed payload (committing to the lists beside it by one hash) inside the stored value.
+      // The mark since 31-REVIEW MJ-06 and the PR #130 review: { v, signed }, a compact signed payload committing by one hash to the lists file in the
+      // store folder. That file is named by the hash of its bytes and is rewritten only when the lists change, so the file tree compares it as it is.
       return parsed.signed?.purpose === 'staff-replica-mark' ? `mark ${JSON.stringify(parsed.signed.payload)}` : value;
     } catch {
       return value;

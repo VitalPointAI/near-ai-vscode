@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -16,7 +16,7 @@ import type { SignedCheckpoint } from '../domain/replica/checkpoint';
 import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
 import type { SecretStorageLike } from '../services/auth';
-import { MARK_VERSION, REPLICA_MARK_SECRET_PREFIX, digestOf, markContentHash, markKey, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
+import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_LISTS_BYTES, REPLICA_MARK_SECRET_PREFIX, digestOf, markContentHash, markKey, markListsBytes, markListsFolder, parseReplicaMark, readMark, writeMark } from '../staff/replica/marks';
 import type { ReplicaMark } from '../staff/replica/marks';
 import { ReplicaStore, START_AGAIN_COMMAND_TITLE, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
 import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
@@ -121,17 +121,25 @@ test('after an append, secret storage holds one nearAi.staff.replicaMarks. key w
   assert.ok(keys[0].startsWith(REPLICA_MARK_SECRET_PREFIX));
   assert.equal(keys[0], markKey(path.join(root, REPLICA_DIR)));
   assert.match(keys[0].slice(REPLICA_MARK_SECRET_PREFIX.length), /^[0-9a-f]{32}$/, 'the key holds a hash of the path, never the path');
-  // The value holds the compact signed payload and the lists beside it (31-REVIEW MJ-06); the payload commits to the lists by one hash.
-  const stored = JSON.parse(secrets.values.get(keys[0]) as string) as { v: number; signed: unknown; heads: unknown; held: unknown; waiting: unknown };
-  assert.deepEqual(Object.keys(stored).sort(), ['heads', 'held', 'signed', 'v', 'waiting']);
+  // The value holds only the compact signed record; the lists are in a file in the store folder named by the sha256 the record signs.
+  const stored = JSON.parse(secrets.values.get(keys[0]) as string) as { v: number; signed: unknown };
+  assert.deepEqual(Object.keys(stored).sort(), ['signed', 'v']);
+  assert.equal(stored.v, MARK_VERSION);
   const verdict = verifyPayload(stored.signed, { purpose: 'staff-replica-mark', status: ACTIVE });
   assert.ok(verdict.ok);
   assert.equal(verdict.ok && verdict.signer.fingerprint, lead.signer.fingerprint);
-  const mark = parseReplicaMark({ rosterHead: null, heads: stored.heads, held: stored.held, waiting: stored.waiting });
+  const { bytes, name } = onlyListsFile(root, lead.writer);
+  const lists = JSON.parse(bytes.toString('utf8')) as { v: number; heads: unknown; held: unknown; waiting: unknown };
+  assert.deepEqual(Object.keys(lists).sort(), ['heads', 'held', 'v', 'waiting']);
+  assert.equal(lists.v, MARK_VERSION);
+  const mark = parseReplicaMark({ rosterHead: null, heads: lists.heads, held: lists.held, waiting: lists.waiting });
   assert.deepEqual(mark, { rosterHead: null, heads: [{ stream: STREAM, writer: lead.writer, seq: 0, hash: built.hash, count: 1, digest: digestOf([built.hash]) }], held: [], waiting: [] });
-  assert.deepEqual(verdict.ok && verdict.payload, { v: MARK_VERSION, rosterHead: null, heads: 1, held: 0, waiting: 0, content: markContentHash(mark as ReplicaMark) });
+  assert.equal(name, `${sha256Hex(bytes)}.json`, 'the lists file is named by the sha256 of its bytes');
+  assert.ok(markListsBytes(mark as ReplicaMark).equals(bytes), 'the lists file holds exactly the bytes this version writes');
+  assert.equal(markContentHash(mark as ReplicaMark), sha256Hex(bytes));
+  assert.deepEqual(verdict.ok && verdict.payload, { v: MARK_VERSION, rosterHead: null, heads: 1, held: 0, waiting: 0, content: sha256Hex(bytes) });
   assert.equal(verifyPayload(stored.signed, { purpose: 'staff-ledger-head', status: ACTIVE }).ok, false, 'the purpose is bound');
-  const read = await readMark(secrets, keys[0], ACTIVE);
+  const read = await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE);
   assert.deepEqual(read.kind === 'mark' && read.mark, mark);
 });
 
@@ -140,6 +148,15 @@ test('after an append, secret storage holds one nearAi.staff.replicaMarks. key w
 
 function streamFile(root: string, writer: string, stream = STREAM): string {
   return path.join(root, REPLICA_DIR, 'streams', stream, `${writer}.jsonl`);
+}
+
+/** The one lists file of a device's mark in a store folder: its path, name and bytes. */
+function onlyListsFile(root: string, writer: string): { file: string; name: string; bytes: Buffer } {
+  const folder = markListsFolder(path.join(root, REPLICA_DIR), writer);
+  const names = readdirSync(folder);
+  assert.equal(names.length, 1, `one lists file: ${names.join(', ')}`);
+  const file = path.join(folder, names[0]);
+  return { file, name: names[0], bytes: readFileSync(file) };
 }
 
 async function threeAppended(): Promise<{ root: string; lead: FixedSigner; secrets: MemorySecrets; built: BuiltEntry[] }> {
@@ -227,18 +244,27 @@ test('a mark whose signature does not verify (a tampered value) is refused mark-
   const { root, lead, secrets } = await threeAppended();
   const key = markKey(path.join(root, REPLICA_DIR));
   const good = secrets.values.get(key) as string;
-  // The lists beside the signature are trusted only when they hash to the signed content; the signed payload itself only with its signature.
-  const listEdited = JSON.parse(good) as { heads: Array<{ count: number }> };
+  // The lists file is trusted only when it hashes to the signed content; the signed payload itself only with its signature.
+  const { file, bytes } = onlyListsFile(root, lead.writer);
+  const listEdited = JSON.parse(bytes.toString('utf8')) as { heads: Array<{ count: number }> };
   listEdited.heads[0].count = 1;
-  secrets.values.set(key, JSON.stringify(listEdited));
+  writeFileSync(file, `${JSON.stringify(listEdited)}\n`);
   assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
+  const listAdded = JSON.parse(bytes.toString('utf8')) as { waiting: unknown[] };
+  listAdded.waiting.push({ hash: 'f'.repeat(64), reason: 'unchecked' });
+  writeFileSync(file, `${JSON.stringify(listAdded)}\n`);
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
+  writeFileSync(file, bytes);
+  assert.ok(await ReplicaStore.open(root, depsFor(lead, secrets)) instanceof ReplicaStore, 'the lists file put back opens');
   const payloadEdited = JSON.parse(good) as { signed: { payload: { heads: number } } };
   payloadEdited.signed.payload.heads = 2;
   secrets.values.set(key, JSON.stringify(payloadEdited));
   assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
-  const listAdded = JSON.parse(good) as { waiting: unknown[] };
-  listAdded.waiting.push({ hash: 'f'.repeat(64), reason: 'unchecked' });
-  secrets.values.set(key, JSON.stringify(listAdded));
+  // A value with the lists beside the signature (the version 2 shape) reads as unverified: no older version ever shipped, so nothing migrates.
+  const older = JSON.parse(good) as Record<string, unknown>;
+  secrets.values.set(key, JSON.stringify({ ...older, v: 2, heads: [], held: [], waiting: [] }));
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
+  secrets.values.set(key, JSON.stringify({ ...older, heads: [], held: [], waiting: [] }));
   assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
   secrets.values.set(key, 'not json');
   assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
@@ -414,8 +440,7 @@ test('two processes appending 50 entries each for two writers into one store at 
     });
   }
   const secrets = new FileSecrets(secretsFile);
-  const key = markKey(path.join(root, REPLICA_DIR));
-  const read = await readMark(secrets, key, ACTIVE);
+  const read = await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE);
   assert.equal(read.kind, 'mark', 'the shared mark verifies');
   const mark = read.kind === 'mark' ? read.mark : undefined;
   assert.deepEqual(mark?.heads.map((head) => [head.writer, head.seq, head.count]).sort(), [[fixedSigner('window-a').writer, 49, 50], [fixedSigner('window-b').writer, 49, 50]].sort());
@@ -470,7 +495,7 @@ test('two appendOwn calls at once in one process for one writer keep seq order, 
   assert.ok(all.every((result) => 'ok' in result && result.written === 1));
   const reopened = await opened(root, depsFor(lead, secrets));
   assert.equal(reopened.entries().length, 30);
-  const read = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
+  const read = await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE);
   assert.equal(read.kind, 'mark');
   assert.deepEqual(read.kind === 'mark' && read.mark.heads.map((head) => [head.writer, head.seq, head.count]).sort(), [[lead.writer, 24, 25], [other.writer, 4, 5]].sort());
 });
@@ -506,7 +531,7 @@ test('ingestForeign keeps all three entries when the check refuses one, holds th
   const again = await opened(root, depsFor(lead, secrets));
   assert.deepEqual(again.heldForCheck(), store.heldForCheck());
   assert.deepEqual(again.entries(), [foreign[0].entry, foreign[2].entry]);
-  const mark = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
+  const mark = await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE);
   assert.deepEqual(mark.kind === 'mark' && mark.mark.heads.map((head) => [head.writer, head.seq, head.count]), [[colleague.writer, 2, 3]], 'entries from outside move the mark too');
 });
 
@@ -560,7 +585,7 @@ test('ingestForeign drops what is not a sealed entry, counts a throwing check as
 
 // Before 31-REVIEW MJ-07 the held list was held.json in the project folder, outside the signed mark: deleting it let every held entry into the fold.
 // The list now lives in the signed mark, so this test pins the new rule instead of the held.json refusals it used to pin.
-test('the held list is in the signed mark: deleting or planting held.json changes nothing, and editing the list in the mark refuses mark-unverified', async () => {
+test('the held list is covered by the signed mark: deleting or planting held.json changes nothing, editing it in the lists file refuses mark-unverified, deleting the lists file refuses rolled-back', async () => {
   const root = project();
   const lead = fixedSigner('lead');
   const secrets = new MemorySecrets();
@@ -573,11 +598,28 @@ test('the held list is in the signed mark: deleting or planting held.json change
   const again = await opened(root, depsFor(lead, secrets));
   assert.deepEqual(again.heldForCheck().map((item) => item.hash), [foreign[0].hash]);
   assert.deepEqual(again.entries(), [foreign[1].entry], 'the held entry stays out of the fold');
-  const key = markKey(path.join(root, REPLICA_DIR));
-  const stored = JSON.parse(secrets.values.get(key) as string) as { held: unknown[] };
-  stored.held = [];
-  secrets.values.set(key, JSON.stringify(stored));
+  const { file, bytes } = onlyListsFile(root, lead.writer);
+  const lists = JSON.parse(bytes.toString('utf8')) as { held: unknown[] };
+  assert.equal(lists.held.length, 1);
+  lists.held = [];
+  writeFileSync(file, `${JSON.stringify(lists)}\n`);
   assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
+  // Renamed to the hash of its edited bytes, it is no longer the file the record names: still refused, never read as an empty list.
+  const edited = readFileSync(file);
+  rmSync(file);
+  writeFileSync(path.join(path.dirname(file), `${sha256Hex(edited)}.json`), edited);
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'rolled-back');
+  rmSync(path.join(path.dirname(file), `${sha256Hex(edited)}.json`));
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'rolled-back');
+  rmSync(path.join(root, REPLICA_DIR, MARK_LISTS_DIR), { recursive: true });
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'rolled-back');
+  assert.equal((await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE)).kind, 'lists-missing');
+  // Put back, the held entry is held again.
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, bytes);
+  const back = await opened(root, depsFor(lead, secrets));
+  assert.deepEqual(back.heldForCheck().map((item) => item.hash), [foreign[0].hash]);
+  assert.deepEqual(back.entries(), [foreign[1].entry]);
 });
 
 test('putGrant and putCheckpoint write content-addressed files atomically; grants() and checkpoints() read them back and list a damaged file as unreadable', async () => {
@@ -622,13 +664,13 @@ test('a recorded roster head is in the mark, and a store that no longer holds th
   const roster = chain(lead, 2, { stream: streamId('store/roster') });
   await store.appendOwn(roster);
   assert.deepEqual(await store.recordRosterHead(roster[1].hash), { ok: true });
-  const key = markKey(path.join(root, REPLICA_DIR));
-  const read = await readMark(secrets, key, ACTIVE);
+  const dir = path.join(root, REPLICA_DIR);
+  const read = await readMark(secrets, dir, ACTIVE);
   assert.equal(read.kind === 'mark' && read.mark.rosterHead, roster[1].hash);
   await assert.rejects(() => store.recordRosterHead('e'.repeat(64)), /not an entry in this store/);
-  const recorded = await readMark(secrets, key, ACTIVE);
+  const recorded = await readMark(secrets, dir, ACTIVE);
   assert.ok(recorded.kind === 'mark');
-  await writeMark(secrets, key, lead.signer, { ...recorded.mark, rosterHead: 'e'.repeat(64) });
+  await writeMark(secrets, dir, lead.signer, { ...recorded.mark, rosterHead: 'e'.repeat(64) });
   assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'rolled-back');
 });
 
@@ -670,21 +712,21 @@ test('CR-02: an entry naming this device as writer without its signature is drop
   assert.deepEqual(other.entries(), built.map((item) => item.entry));
 });
 
-test('MJ-06: a store with 1,300 (stream, writer) files is written, marked and reopened; the signed part of the mark stays small', async () => {
+test('MJ-06: a store with 1,300 (stream, writer) files is written, marked and reopened; the secret storage value stays under 2 KB', async () => {
   const root = project();
   const lead = fixedSigner('lead');
   const secrets = new MemorySecrets();
   const store = await opened(root, depsFor(lead, secrets));
   const built = Array.from({ length: 1300 }, (_, index) => chain(lead, 1, { stream: streamId(`store/many/${index}`) })[0]);
   assert.deepEqual(await store.appendOwn(built), { ok: true, written: 1300 });
-  const stored = JSON.parse(secrets.values.get(markKey(path.join(root, REPLICA_DIR))) as string) as { signed: unknown; heads: unknown[] };
-  assert.equal(stored.heads.length, 1300);
-  assert.ok(Buffer.byteLength(JSON.stringify(stored.signed)) < 2048, 'the signed payload does not grow with the number of files');
+  const value = secrets.values.get(markKey(path.join(root, REPLICA_DIR))) as string;
+  assert.ok(Buffer.byteLength(value) < 2048, `the secret storage value does not grow with the number of files (${Buffer.byteLength(value)} bytes)`);
+  assert.equal((JSON.parse(onlyListsFile(root, lead.writer).bytes.toString('utf8')) as { heads: unknown[] }).heads.length, 1300);
   const again = await opened(root, depsFor(lead, secrets));
   assert.equal(again.entries().length, 1300);
   const [next] = chain(lead, 1, { stream: streamId('store/many/0'), from: { seq: 0, hash: built[0].hash } });
   assert.deepEqual(await again.appendOwn([next]), { ok: true, written: 1 });
-  const read = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
+  const read = await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE);
   assert.equal(read.kind === 'mark' && read.mark.heads.length, 1300);
 });
 
@@ -709,8 +751,136 @@ test('MJ-06: a mark that could not be recorded leaves the synced lines ahead of 
   const again = await opened(root, depsFor(lead, secrets));
   assert.equal(again.entries().length, 2, 'the older mark is a floor, so the store opens');
   assert.deepEqual(await again.appendOwn([built[2]]), { ok: true, written: 1 });
-  const read = await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE);
+  const read = await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE);
   assert.deepEqual(read.kind === 'mark' && read.mark.heads.map((head) => [head.seq, head.count]), [[2, 3]]);
+});
+
+/** A mark of `heads` heads and `listed` held and waiting entries each, every held reason MAX_HELD_REASON long. */
+function bigMark(heads: number, listed: number): ReplicaMark {
+  const hex = (tag: string, index: number): string => sha256Hex(Buffer.from(`${tag}/${index}`));
+  return {
+    rosterHead: null,
+    heads: Array.from({ length: heads }, (_, index) => ({ stream: hex('s', index).slice(0, 32), writer: hex('w', index), seq: index, hash: hex('h', index), count: index + 1, digest: hex('d', index) })),
+    held: Array.from({ length: listed }, (_, index) => ({ hash: hex('held', index), reason: 'r'.repeat(200) })),
+    waiting: Array.from({ length: listed }, (_, index) => ({ hash: hex('wait', index), reason: 'awaiting-key' as const }))
+  };
+}
+
+test('PR #130 review: with 1,300 heads and 5,000 held and 5,000 waiting entries the secret storage value stays under 2 KB; the lists are in the content-addressed file', async () => {
+  const dir = path.join(project(), REPLICA_DIR);
+  mkdirSync(dir, { recursive: true });
+  const lead = fixedSigner('lead');
+  const secrets = new MemorySecrets();
+  const mark = bigMark(1300, 5000);
+  const text = await writeMark(secrets, dir, lead.signer, mark, () => new Date(AT));
+  assert.equal(secrets.values.get(markKey(dir)), text);
+  assert.ok(Buffer.byteLength(text) < 2048, `the secret storage value is ${Buffer.byteLength(text)} bytes`);
+  const stored = JSON.parse(text) as { v: number; signed: unknown };
+  assert.deepEqual(Object.keys(stored).sort(), ['signed', 'v']);
+  const verdict = verifyPayload<{ content: string }>(stored.signed, { purpose: 'staff-replica-mark', status: ACTIVE });
+  assert.ok(verdict.ok);
+  const folder = markListsFolder(dir, lead.writer);
+  assert.equal(folder, path.join(dir, 'marks', lead.writer));
+  assert.deepEqual(readdirSync(folder), [`${verdict.payload.content}.json`], 'the lists file is named by the signed content hash');
+  const bytes = readFileSync(path.join(folder, `${verdict.payload.content}.json`));
+  assert.equal(sha256Hex(bytes), verdict.payload.content, 'the signed content is the sha256 of the lists file');
+  assert.ok(bytes.length > 1_000_000, 'the lists are in the file, not in secret storage');
+  const read = await readMark(secrets, dir, ACTIVE);
+  assert.equal(read.kind, 'mark');
+  assert.deepEqual(read.kind === 'mark' && read.mark, parseReplicaMark(mark));
+});
+
+test('PR #130 review: a crash between the lists file and the secret leaves the old mark readable and the store opening; older lists files go only after a secret write', async () => {
+  const root = project();
+  const dir = path.join(root, REPLICA_DIR);
+  const lead = fixedSigner('lead');
+  const secrets = new FailingSecrets();
+  const store = await opened(root, depsFor(lead, secrets));
+  const built = chain(lead, 4);
+  assert.deepEqual(await store.appendOwn([built[0]]), { ok: true, written: 1 });
+  const before = onlyListsFile(root, lead.writer);
+  const oldText = secrets.values.get(markKey(dir));
+  // The lists file is written, then the secret write fails: the new file is there, the old one is not removed, and the secret is unchanged.
+  secrets.failNext = true;
+  await assert.rejects(() => store.appendOwn([built[1]]), /busy/);
+  assert.equal(secrets.values.get(markKey(dir)), oldText);
+  const folder = markListsFolder(dir, lead.writer);
+  const names = readdirSync(folder).sort();
+  assert.equal(names.length, 2, `the old lists file stays until a secret write names a new one: ${names.join(', ')}`);
+  assert.ok(names.includes(before.name));
+  assert.ok(readFileSync(before.file).equals(before.bytes));
+  const read = await readMark(secrets, dir, ACTIVE);
+  assert.deepEqual(read.kind === 'mark' && read.mark.heads.map((head) => [head.seq, head.count]), [[0, 1]], 'the old mark reads');
+  const again = await opened(root, depsFor(lead, secrets));
+  assert.equal(again.entries().length, 2);
+  // A stale temporary file and a stale lists file of this device are removed with the old one after the next secret write; other files stay.
+  writeFileSync(path.join(folder, `${'b'.repeat(64)}.json`), '{}\n');
+  writeFileSync(path.join(folder, `${'c'.repeat(64)}.json.123.abcdefabcdef.tmp`), 'x');
+  writeFileSync(path.join(folder, 'notes.txt'), 'kept');
+  const otherDevice = markListsFolder(dir, fixedSigner('other-install').writer);
+  mkdirSync(otherDevice, { recursive: true });
+  writeFileSync(path.join(otherDevice, `${'d'.repeat(64)}.json`), '{}\n');
+  assert.deepEqual(await again.appendOwn([built[2]]), { ok: true, written: 1 });
+  const after = readdirSync(folder).sort();
+  const current = JSON.parse(secrets.values.get(markKey(dir)) as string) as { signed: { payload: { content: string } } };
+  assert.deepEqual(after, [`${current.signed.payload.content}.json`, 'notes.txt'].sort());
+  assert.deepEqual(readdirSync(otherDevice), [`${'d'.repeat(64)}.json`], 'another install\'s lists are never removed');
+  // A failed secret write never removes anything.
+  secrets.failNext = true;
+  await assert.rejects(() => again.appendOwn([built[3]]), /busy/);
+  assert.ok(readdirSync(folder).includes(`${current.signed.payload.content}.json`));
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'mark');
+});
+
+test('PR #130 review: a lists file over the size limit, a symbolic link, or a file naming more than MAX_MARK_LISTED entries is unverified, never read as empty', async () => {
+  assert.equal(MAX_MARK_LISTED, 100_000);
+  assert.equal(MAX_MARK_LISTS_BYTES, 64 * 1024 * 1024);
+  const { root, lead, secrets } = await threeAppended();
+  const dir = path.join(root, REPLICA_DIR);
+  const { file, bytes } = onlyListsFile(root, lead.writer);
+  // Over the limit (a sparse file, so the test stays cheap): refused before it is read or hashed.
+  truncateSync(file, MAX_MARK_LISTS_BYTES + 1);
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'mark-unverified');
+  // A symbolic link in place of the lists file is not followed, even to the right bytes.
+  rmSync(file);
+  const elsewhere = path.join(project(), 'lists.json');
+  writeFileSync(elsewhere, bytes);
+  symlinkSync(elsewhere, file);
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
+  rmSync(file);
+  writeFileSync(file, bytes);
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'mark');
+  // A symbolic link in place of the marks folder is refused like every other store path.
+  const marks = path.join(dir, MARK_LISTS_DIR);
+  const moved = path.join(project(), 'marks');
+  cpSync(marks, moved, { recursive: true });
+  rmSync(marks, { recursive: true });
+  symlinkSync(moved, marks);
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
+  assertRefused(await ReplicaStore.open(root, depsFor(lead, secrets)), 'symlink');
+  rmSync(marks);
+  cpSync(moved, marks, { recursive: true });
+  assert.ok(await ReplicaStore.open(root, depsFor(lead, secrets)) instanceof ReplicaStore);
+  // A record signed by this device naming a lists file of MAX_MARK_LISTED + 1 waiting entries, its hash and sizes matching: unverified.
+  const waiting = Array.from({ length: MAX_MARK_LISTED + 1 }, (_, index) => ({ hash: sha256Hex(Buffer.from(`w/${index}`)), reason: 'unchecked' })).sort((a, b) => (a.hash < b.hash ? -1 : 1));
+  const over = Buffer.from(`${JSON.stringify({ v: MARK_VERSION, heads: [], held: [], waiting })}\n`);
+  const plant = (lists: Buffer, count: number): void => {
+    const content = sha256Hex(lists);
+    writeFileSync(path.join(markListsFolder(dir, lead.writer), `${content}.json`), lists);
+    const signed = signPayload(lead.signer, 'staff-replica-mark', { v: MARK_VERSION, rosterHead: null, heads: 0, held: 0, waiting: count, content }, { now: () => new Date(AT) });
+    secrets.values.set(markKey(dir), JSON.stringify({ v: MARK_VERSION, signed }));
+  };
+  plant(over, MAX_MARK_LISTED + 1);
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified');
+  plant(over, MAX_MARK_LISTED);
+  assert.equal((await readMark(secrets, dir, ACTIVE)).kind, 'unverified', 'sizes that do not match the file');
+  // At the limit, the same planted record verifies, so the bound is the list length and not something else.
+  const at = Buffer.from(`${JSON.stringify({ v: MARK_VERSION, heads: [], held: [], waiting: waiting.slice(0, MAX_MARK_LISTED) })}\n`);
+  plant(at, MAX_MARK_LISTED);
+  const read = await readMark(secrets, dir, ACTIVE);
+  assert.equal(read.kind === 'mark' && read.mark.waiting.length, MAX_MARK_LISTED);
+  await assert.rejects(() => writeMark(secrets, dir, lead.signer, { rosterHead: null, heads: [], held: [], waiting: waiting as ReplicaMark['waiting'] }), /not in the shape/);
 });
 
 test('MJ-07: an entry the check cannot run on yet waits out of the fold, across a reopen, until recheck passes or holds it; a held entry is never let in', async () => {
@@ -840,7 +1010,7 @@ test('MJ-08: Start Again resolves damaged and mark-unverified too, names each fo
   const unverified = await ReplicaStore.startAgain(root, depsFor(lead, secrets));
   assert.deepEqual(unverified, { ok: true, setAside: `${REPLICA_DIR}.set-aside-20261119-110000-2`, carried: 2 });
   assert.ok(await ReplicaStore.open(root, depsFor(lead, secrets)) instanceof ReplicaStore);
-  assert.equal((await readMark(secrets, markKey(path.join(root, REPLICA_DIR)), ACTIVE)).kind, 'mark', 'a new mark that verifies');
+  assert.equal((await readMark(secrets, path.join(root, REPLICA_DIR), ACTIVE)).kind, 'mark', 'a new mark that verifies');
   // A refusal with its own fix is never reset.
   const linked = project();
   const elsewhere = project();

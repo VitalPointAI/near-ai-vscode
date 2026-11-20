@@ -9,6 +9,7 @@
 //   grants/<cell>/<epoch>-<hash>.json   signed cell grants, named by the sha256 of their canonical bytes.
 //   checkpoints/<hash>.json             signed checkpoints, named by checkpointHash.
 //   project.json                        the convenience copy of the genesis pin (replicaProject.ts); the store copies it when it starts again.
+//   marks/<writer>/<hash>.json          the lists of this device's mark, named by the sha256 of their bytes (marks.ts); derived data the store owns.
 //   replica.lock                        the cross-window lock file (withFileLock).
 //
 // Rules:
@@ -16,9 +17,10 @@
 // - Blobs are written to a temporary file, synced, then renamed into place.
 // - Every append runs under withRegisterLock(storeDir) for order inside one process and, inside it, withFileLock(storeDir, 'replica.lock') for
 //   order across windows and processes, so appends never interleave; inside the locks the store first catches up with lines another window wrote.
-// - How far this device has seen is kept in a signed mark in secret storage (marks.ts). Opening a store whose files are behind the mark is refused
-//   rolled-back, or damaged when lines it had read can no longer be read. The mark is a floor: lines are written and synced before it, so a mark
-//   that could not be recorded leaves the files ahead of it, and the next write records it from every file (31-REVIEW MJ-06).
+// - How far this device has seen is kept in a signed mark (marks.ts): a small signed record in secret storage that commits by one hash to the lists
+//   file under marks/. Opening a store whose files are behind the mark, or that lacks the lists file the mark names, is refused rolled-back, or
+//   damaged when lines it had read can no longer be read. The mark is a floor: lines are written and synced before it, so a mark that could not be
+//   recorded leaves the files ahead of it, and the next write records it from every file (31-REVIEW MJ-06).
 // - A line in this device's own file counts only when it carries this device's valid signature; any other line there is damaged and never moves
 //   this device's head (31-REVIEW CR-02). Signatures of other writers are the fold's job.
 // - A symbolic link anywhere from the project root to a store file is refused: nothing is read or written through it.
@@ -50,7 +52,7 @@ import { MAX_PAYLOAD_BYTES } from '../../domain/team/signedPayload';
 import { GRANT_MAX_BYTES } from '../../domain/replica/cellKeys';
 import { isRecord } from '../../domain/team/validate';
 import { readWhole } from '../staffFiles';
-import { compareWithMark, digestOf, heldReason, markKey, readMark, writeMark } from './marks';
+import { MARK_LISTS_DIR, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 
 /** The cross-window lock file inside the store folder. */
@@ -377,7 +379,8 @@ export class ReplicaStore {
    * the last one it wrote instead of forking its chain), the grants and blobs that match their names, and project.json. The new store is built in a
    * temporary folder first and renamed into place, then this device's mark is replaced by one for the new store. Entries of other writers are not
    * carried: they come back with a new welcome file (and, in a later version, from the sharing service). An interruption at any step leaves either
-   * the old store or the new one in place with a mark that refuses the other, so running this again finishes the job.
+   * the old store or the new one in place with a mark that refuses the other, so running this again finishes the job: the old mark's lists file
+   * (marks/, derived data) goes aside with the old folder, so until the new mark is written the new store lacks it and is refused rolled-back.
    */
   public static async startAgain(root: string, deps: ReplicaStoreDeps): Promise<StartedAgain | StoreRefused> {
     const probe = await ReplicaStore.open(root, deps);
@@ -998,11 +1001,14 @@ export class ReplicaStore {
   /**
    * Reads this device's mark and, when it changed since this store last read or wrote it, checks the files against it (refused rolled-back or damaged
    * when they are behind it) and takes its verdicts: an entry it holds stays held; an entry it covers is waiting when it lists it, and passed when it
-   * does not. Refused mark-unverified when a mark is there and does not verify.
+   * does not. Refused mark-unverified when a mark is there and does not verify (its lists file included), and rolled-back when it verifies but the
+   * lists file it names is not in the folder (an older copy of the folder, or part of it deleted).
    */
   private async syncMark(): Promise<void> {
-    const read = await readMark(this.deps.secrets, markKey(this.dir), await this.deps.keyStatus());
+    await this.checkMarkLists();
+    const read = await readMark(this.deps.secrets, this.dir, await this.deps.keyStatus());
     if (read.kind === 'unverified') throw new Refusal('mark-unverified');
+    if (read.kind === 'lists-missing') throw new Refusal('rolled-back');
     if (read.kind === 'none') { this.mark = undefined; this.markText = undefined; return; }
     if (read.text === this.markText) return;
     const compared = compareWithMark(read.mark, this.fileStates());
@@ -1046,9 +1052,16 @@ export class ReplicaStore {
       held: this.heldForCheck(),
       waiting: this.waitingForCheck()
     };
-    const text = await writeMark(this.deps.secrets, markKey(this.dir), await this.deps.signer(), mark, this.deps.now ?? (() => new Date()));
+    await this.checkMarkLists();
+    const text = await writeMark(this.deps.secrets, this.dir, await this.deps.signer(), mark, this.deps.now ?? (() => new Date()));
     this.mark = mark;
     this.markText = text;
+  }
+
+  /** Refuses a symbolic link (or anything that is not a folder) on the way to this device's lists folder, like every other store path. */
+  private async checkMarkLists(): Promise<void> {
+    const problem = await checkPath(this.root, [...REPLICA_DIR.split('/'), MARK_LISTS_DIR, this.own.writer]);
+    if (problem) throw new Refusal(problem);
   }
 }
 

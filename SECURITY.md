@@ -1357,26 +1357,34 @@ agent, and the sealed text they carry) is kept on each machine in a replica stor
 project folder.
 
 - **Where it lives.** The store is the folder `.planning/staff/replica/`: one append-only file per
-  writer per product area, sealed attachments named by their hash, signed key grants and signed
-  checkpoints. Entries and attachments are written whole and synced to disk before they count; a
-  line cut short by a crash is never counted. The store never deletes an entry or an attachment
-  and never rewrites a line.
+  writer per product area, sealed attachments named by their hash, signed key grants, signed
+  checkpoints and the lists of each device's rollback record (below). Entries and attachments are
+  written whole and synced to disk before they count; a line cut short by a crash is never
+  counted. The store never deletes an entry or an attachment and never rewrites a line.
 - **Git ignores it.** The folder holds its own `.gitignore` that ignores everything in it, so the
   shared history is never committed to your repository by accident. It is carried between
   machines by the sharing service, not by git, so a branch switch cannot roll it back.
 - **Two windows at once.** Every write takes a lock in the folder, so two editor windows or two
   processes on one machine never mix or lose each other's lines.
 - **Rollback is noticed.** After each write the device records how far it has seen the shared
-  history (for each writer's file the newest change, the count of changes and a digest of them in
-  order, and the newest roster change) in the editor's secret storage, outside the project. The
-  device signs a short summary that commits to the whole record by one hash, so the record works
-  however many files a project has. When the folder is opened again and it holds less than that
+  history: for each writer's file the newest change, the count of changes and a digest of them in
+  order, the changes set aside or waiting for the decode check, and the newest roster change. The
+  record has two parts. The editor's secret storage, outside the project, holds only a small
+  signed record of a few hundred bytes, however many files a project has: the device signs the
+  newest roster change, the sizes of the lists and the sha256 of the file that holds them. The
+  lists themselves are in that file, in the store folder (`marks/`, named by the sha256 of its
+  bytes, one folder per device), and are trusted only when its bytes hash to the signed value and
+  it holds lists of the signed sizes. When the folder is opened again and it holds less than that
   record (restored from an older backup, a file cut short or deleted, a change swapped, moved or
-  put in between), the store is refused with a plain message and nothing is changed. A change the
-  device had already read that can no longer be read (a disk error, an edited file) is reported as
-  damage, not as an older copy. A record whose signature does not verify is refused the same way
-  and is never trusted or silently replaced. The record is written after the changes are on disk,
-  so a record that could not be written never stops the next write; that write records it.
+  put in between, or the lists file itself gone), the store is refused with a plain message and
+  nothing is changed. A change the device had already read that can no longer be read (a disk
+  error, an edited file) is reported as damage, not as an older copy. A signed record whose
+  signature does not verify, or whose lists file is edited, unreadable, over 64 MB or a symbolic
+  link, is refused the same way and is never trusted, read as empty or silently replaced. The
+  record is written after the changes are on disk, so a record that could not be written never
+  stops the next write; that write records it. The lists file is written first, then the signed
+  record, and the device's older lists files are removed only after the signed record is written,
+  so an interruption at any point leaves a record whose lists file is there.
 - **Starting again is a person's choice.** A refused store is never reset by itself. **Staff:
   Start This Computer's Shared History Again** asks first and only then moves the store folder
   aside to a folder beside it (`.planning/staff/replica.set-aside-<time>/`, still ignored by git);
@@ -1387,20 +1395,22 @@ project folder.
 - **Only this device writes as this device.** A line that names this device as its writer counts
   only when it carries this device's valid signature. Any other such line is damage, so a planted
   line can never become this device's newest change or block its next one.
-- **No private keys in the folder.** The store holds only sealed entries, sealed attachments and
-  signed grants and checkpoints. No private key, epoch key or join secret is ever written to it;
+- **No private keys in the folder.** The store holds only sealed entries, sealed attachments,
+  signed grants and checkpoints, and the lists of the rollback record (hashes, counts and the
+  reasons changes were set aside). No private key, epoch key or join secret is ever written to it;
   the device key stays in the editor's secret storage.
 - **Changes from other machines are checked first.** A change that arrives from another machine is
   checked by the decode worker (above) before the shared view is built from it. A change the check
   refuses is still kept in the store, set aside with the reason, and left out of the shared view.
   It is never silently dropped, so a person can see what was set aside and why. The list of what
-  was set aside is part of the device's signed record in secret storage, not a file in the
-  project, so deleting or editing a file cannot let a refused change in. A change the check cannot
-  run on yet, because its key or its attachment has not arrived, waits outside the shared view
-  and is checked when they arrive; so does a change found in the folder that no check has passed
-  (copied in by hand, or written by another install of the extension). The project's member list
-  is still read from a change that waits for its key, because that key comes only from the grants
-  the member list places; reading the member list decodes no document update.
+  was set aside is covered by the device's signed record: it is in the lists file whose hash the
+  record signs, so deleting or editing that file refuses the store, and no file in the project can
+  let a refused change in. A change the check cannot run on yet, because its key or its attachment
+  has not arrived, waits outside the shared view and is checked when they arrive; so does a change
+  found in the folder that no check has passed (copied in by hand, or written by another install
+  of the extension). The project's member list is still read from a change that waits for its
+  key, because that key comes only from the grants the member list places; reading the member
+  list decodes no document update.
 - **Symbolic links are refused.** If any folder or file on the way to the store is a symbolic
   link, nothing is read or written through it.
 
