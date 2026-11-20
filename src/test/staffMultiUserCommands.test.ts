@@ -27,6 +27,7 @@ import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { COPY_REFUSALS } from '../staff/replica/singleCopy';
 import { START_AGAIN_COMMAND_TITLE, STORE_REFUSALS } from '../staff/replica/store';
 import { LEDGER_DIR, LEDGER_FILE } from '../staff/staffHost';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { MemorySecrets } from './helpers/teamHarness';
 import { CLEAN_BODY, J5_TEAM, callTool, writeBody } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
@@ -37,6 +38,8 @@ const uninstall = installVscodeStub(stub);
 const staffCommands = require('../services/staffCommands') as typeof import('../services/staffCommands');
 const multi = require('../services/staffMultiUserCommands') as typeof import('../services/staffMultiUserCommands');
 const hosts = require('../staff/staffHost') as typeof import('../staff/staffHost');
+// The module object the commands load the flows from, so a test can replace one flow with node:test's mock.method.
+const membershipModule = require('../staff/replica/membership') as typeof import('../staff/replica/membership');
 
 const opened: ReplicaProject[] = [];
 after(async () => {
@@ -816,7 +819,7 @@ test('every text a command can show has no em-dash, calls an organization only "
   const own = [
     multi.MULTI_USER_PREVIEW_OFF_TEXT, multi.MAKE_MULTI_USER_QUESTION, multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT,
     multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.NOT_COPIED_TEXT, multi.SIX_WORDS_MATCH, multi.SIX_WORDS_DIFFER, ...Object.values(multi.REFUSAL_NEXT_STEPS),
-    multi.MAKE_WELCOME_AGAIN, multi.WELCOME_NOT_SAVED_TEXT, multi.FINISH_UNFINISHED_LABEL
+    multi.MAKE_WELCOME_AGAIN, multi.WELCOME_NOT_SAVED_TEXT, multi.FINISH_UNFINISHED_LABEL, multi.JOIN_NO_FILE_TEXT
   ];
   const refusals: Array<[string, string]> = [
     ...Object.entries(MEMBERSHIP_REFUSALS), ...Object.entries(MIGRATION_REFUSALS), ...Object.entries(COPY_REFUSALS), ...Object.entries(PROJECT_REFUSALS_HOST),
@@ -829,7 +832,7 @@ test('every text a command can show has no em-dash, calls an organization only "
   }
   const NEXT = /\b(ask|use|choose|open|try|run|check|make|send|compare|put|look|admit|turn on|cancel|move|fix|copy|pick|hand|add|invite|close|set it aside|remove)\b/i;
   for (const text of shown) assert.match(text, NEXT, 'a refusal says what to do next');
-  for (const text of [multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT, multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.MULTI_USER_PREVIEW_OFF_TEXT]) assert.match(text, NEXT, text);
+  for (const text of [multi.JOIN_NO_FILE_TEXT, multi.NO_FOLDER_TEXT, multi.NOT_SHARED_TEXT, multi.WORDS_DIFFER_TEXT, multi.WORDS_NOT_CONFIRMED_TEXT, multi.INVITE_INSIDE_PROJECT_TEXT, multi.SEAT_TEXT, multi.AGENT_SEATS_TEXT, multi.MULTI_USER_PREVIEW_OFF_TEXT]) assert.match(text, NEXT, text);
   assert.deepEqual(NOTICES, [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, 'People and clearances in this project are declared by the staff lead, not verified.']);
   // None of the commands is a person decision the Staff Room may run (D-37).
   for (const id of Object.values(C)) assert.equal(PERSON_DECISION_COMMANDS.includes(id), false, id);
@@ -1021,4 +1024,51 @@ test('a join request that could not be saved says running Join again is safe, an
   await admitBy(first, request, multi.SIX_WORDS_MATCH, path.join(first.out, 'welcome-j'));
   assert.match(lastNotification().message, /J\. Example/);
   assert.equal(multi.JOIN_NOT_SAVED_TEXT.includes('—'), false);
+});
+
+test('D-05: Join refuses a flow result that is ok but carries no file: it says so, saves nothing at the chosen place and shows no six words', async () => {
+  const first = await lead('join-no-file-lead');
+  const invitation = await inviteBy(first, 'K. Example');
+  const joiner = install('join-no-file');
+  use(joiner);
+  const target = path.join(joiner.out, 'join-empty');
+  stub.openDialogAnswers.push([invitation]);
+  stub.inputAnswers.push('K. Example');
+  stub.saveDialogAnswers.push(target);
+  const dialogs = stub.messageOptions.length;
+  const joined = mock.method(membershipModule, 'joinFromInvite', async () => ({ ok: true, message: 'Your join request is ready.', notices: [] }));
+  try {
+    await run(C.join);
+  } finally {
+    joined.mock.restore();
+  }
+  assert.equal(joined.mock.callCount(), 1, 'the flow ran');
+  const shown = lastNotification();
+  assert.equal(shown.level, 'warn', shown.message);
+  assert.ok(shown.message.startsWith(multi.JOIN_NO_FILE_TEXT), shown.message);
+  assert.equal(multi.JOIN_NO_FILE_TEXT, 'The join request was not made. Nothing was saved. Run Join Staff Project again.');
+  hasNotices(shown.message, 'the refusal');
+  assert.equal(existsSync(`${target}${JOIN_REQUEST_FILE_EXTENSION}`), false, 'nothing is written at the chosen place');
+  assert.deepEqual(readdirSync(joiner.out), [], 'nothing is written in the folder chosen either');
+  assert.equal(stub.messageOptions.slice(dialogs).some((entry) => entry.message.startsWith('Read these six words')), false, 'no six-word dialog');
+});
+
+test('D-06: saveSecretFile syncs the target\'s folder after the rename, when the target holds the text and no temporary copy is left beside it', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-secret-sync-'));
+  const target = path.join(dir, `invitation${INVITE_FILE_EXTENSION}`);
+  const secret = `secret-${'y'.repeat(40)}`;
+  const seen: Array<{ dir: string; text: string | undefined; others: string[] }> = [];
+  setFolderSyncProbe((synced) => {
+    seen.push({ dir: synced, text: existsSync(target) ? readFileSync(target, 'utf8') : undefined, others: readdirSync(dir).filter((name) => name !== path.basename(target)) });
+  });
+  try {
+    await multi.saveSecretFile(target, secret);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  const synced = seen.filter((item) => item.dir === dir);
+  assert.equal(synced.length, 1, `the target's folder is synced once: ${JSON.stringify(seen.map((item) => item.dir))}`);
+  assert.equal(synced[0].text, secret, 'the folder is synced after the rename, with the secret in place');
+  assert.deepEqual(synced[0].others, [], 'no temporary copy is left beside it when the folder is synced');
+  assert.equal(readFileSync(target, 'utf8'), secret);
 });

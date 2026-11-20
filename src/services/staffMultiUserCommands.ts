@@ -28,7 +28,7 @@ import { REPLICA_PROJECT_FILE, multiUserNoticeLines } from '../domain/staff/mult
 import { canonicalBytes } from '../domain/team/canonical';
 import { identityDir } from '../team/identity';
 import { localKeyStatus } from '../team/keyHistory';
-import { readWhole } from '../staff/staffFiles';
+import { readWhole, syncFolder } from '../staff/staffFiles';
 import { staffHostFor } from '../staff/staffHost';
 import { askPerson } from './staffCommands';
 import type { StaffCommandArgs, StaffCommandContext } from './staffCommands';
@@ -66,6 +66,8 @@ export const WORDS_NOT_CONFIRMED_TEXT = 'Nobody was admitted, because the six wo
  * request with new six words, and only the new one is sent.
  */
 export const JOIN_NOT_SAVED_TEXT = 'Nothing was sent and the project was not changed, so it is safe to run Staff: Join Staff Project again with the same invitation and choose another place. It makes a new join request with new six words; send only the new one.';
+/** When the join flow answers ok but gives no join request to save (D-05): nothing is saved, so no empty request is ever sent. */
+export const JOIN_NO_FILE_TEXT = 'The join request was not made. Nothing was saved. Run Join Staff Project again.';
 export const INVITE_NOT_SAVED_TEXT = 'To save it again, run Staff: Remove from Staff Project on this computer and pick Save the invitation again; nothing in the project changes. Or cancel it there and invite them again.';
 export const INVITE_SAVE_AGAIN_PREFIX = 'Save the invitation for ';
 export const INVITE_INSIDE_PROJECT_TEXT = 'The invitation holds a one-time secret, so it is not saved inside the project folder, where git could commit it. Nothing was changed. Choose a folder outside the project.';
@@ -215,8 +217,9 @@ async function inside(folder: string, file: string): Promise<boolean> {
 /**
  * Saves a file readable by this user account only: an invitation holds a one-time secret. The bytes go to a new file beside the target, created
  * exclusively with mode 0600 at open time (so it is never readable by others, not even for a moment), synced, then renamed over the target; an
- * existing file chosen in the dialog is replaced, not rewritten in place. On any failure after the new file exists it is removed before the error
- * is reported, so no copy of the secret is left behind; if even that removal fails, the error says where the file is.
+ * existing file chosen in the dialog is replaced, not rewritten in place. The folder is then synced, so a power cut cannot lose the saved file
+ * (D-06). On any failure after the new file exists it is removed before the error is reported, so no copy of the secret is left behind; if even
+ * that removal fails, the error says where the file is. A failed folder sync is reported like any other save error; the file is in place by then.
  */
 export async function saveSecretFile(target: string, text: string): Promise<void> {
   const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomBytes(6).toString('hex')}.tmp`);
@@ -229,6 +232,7 @@ export async function saveSecretFile(target: string, text: string): Promise<void
       await handle.close();
     }
     await rename(temporary, target);
+    await syncFolder(path.dirname(target));
   } catch (error) {
     try {
       await unlink(temporary);
@@ -437,8 +441,10 @@ async function joinCommand(context: StaffCommandContext): Promise<void> {
   if (!target) return;
   const result = await membership.joinFromInvite(root, deps, read.text, { name });
   if (!result.ok) { show(result); return; }
+  // An ok answer with no request in it is refused, so an empty join request is never saved or sent (D-05).
+  if (result.file === undefined) { warn(JOIN_NO_FILE_TEXT); return; }
   try {
-    await saveFile(target, result.file?.text ?? '');
+    await saveFile(target, result.file.text);
   } catch (error) {
     warn(`The join request could not be saved at ${target} (${error instanceof Error ? error.message : String(error)}). ${JOIN_NOT_SAVED_TEXT}`);
     return;
