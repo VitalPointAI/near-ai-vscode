@@ -297,5 +297,92 @@
   ],
   "digests": {
     "b787524b7356470c30e0d23f5e4b60b2": "4c156df0390fb1912efb5c7ddac4c76cb27f0d2196f81483705c0976807d5383"
+  },
+  "checkpointV2": {
+    "unsigned": {
+      "type": "checkpoint",
+      "v": 2,
+      "project": "vector-project",
+      "signer": "a23d6d41b2bb534e0d45bc875e5bd26f143390b5360f8923cd8a7794a9d9e643",
+      "rosterHead": "5e1727326b2800dd79432b6e134aa27f00d251b056b89826697796274a426db8",
+      "streams": [
+        {
+          "stream": "b787524b7356470c30e0d23f5e4b60b2",
+          "heads": [
+            {
+              "writer": "677dff1e17c94a4bbd8af9c17c9ba6722ec0ae57fd9f9eb9c0cccb6412b27c21",
+              "seq": 1,
+              "hash": "6ae23cdd6b4fd224fdb08953e09bffb63177118e5e83ec73a39a7e0a0bb87086",
+              "lamport": 2,
+              "roster": "5e1727326b2800dd79432b6e134aa27f00d251b056b89826697796274a426db8"
+            },
+            {
+              "writer": "a23d6d41b2bb534e0d45bc875e5bd26f143390b5360f8923cd8a7794a9d9e643",
+              "seq": 2,
+              "hash": "229ee6df1d00e3146d796e6bcb4176edf3a576c382d1fcfb06c4825227710552",
+              "lamport": 3,
+              "roster": "5e1727326b2800dd79432b6e134aa27f00d251b056b89826697796274a426db8"
+            }
+          ],
+          "count": 5,
+          "orderTip": "531b66f1273ec265cb18e324ce5b1011c6a42e9bb9ad6f78e363a9fb1965a385"
+        }
+      ]
+    },
+    "orderTips": [
+      {
+        "stream": "b787524b7356470c30e0d23f5e4b60b2",
+        "order": [
+          "568245841834cec2c951e9fb846d0dfae0a389eb5bd26d84653b681d7e877a6f",
+          "2de70a8bd487c75fa13d404aeda7a622e5a7229eaed08ef7ae95d750927f4746",
+          "6ae23cdd6b4fd224fdb08953e09bffb63177118e5e83ec73a39a7e0a0bb87086",
+          "3fb2243aca8116fb5fcce67c69908e43dda398cf99cb05f125488f09795e3b07",
+          "229ee6df1d00e3146d796e6bcb4176edf3a576c382d1fcfb06c4825227710552"
+        ],
+        "orderTip": "531b66f1273ec265cb18e324ce5b1011c6a42e9bb9ad6f78e363a9fb1965a385"
+      }
+    ],
+    "signed": {
+      "v": 1,
+      "purpose": "staff-replica",
+      "signer": {
+        "fingerprint": "dev-a23d6d41b2bb534e0d45bc875e5bd26f",
+        "publicKey": "kgXLO2qiEMm4IuSbc4-xh5m8ECdstuR9lKPCU19eeZM"
+      },
+      "signedAt": "1970-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "checkpoint",
+        "v": 2,
+        "project": "vector-project",
+        "signer": "a23d6d41b2bb534e0d45bc875e5bd26f143390b5360f8923cd8a7794a9d9e643",
+        "rosterHead": "5e1727326b2800dd79432b6e134aa27f00d251b056b89826697796274a426db8",
+        "streams": [
+          {
+            "stream": "b787524b7356470c30e0d23f5e4b60b2",
+            "heads": [
+              {
+                "writer": "677dff1e17c94a4bbd8af9c17c9ba6722ec0ae57fd9f9eb9c0cccb6412b27c21",
+                "seq": 1,
+                "hash": "6ae23cdd6b4fd224fdb08953e09bffb63177118e5e83ec73a39a7e0a0bb87086",
+                "lamport": 2,
+                "roster": "5e1727326b2800dd79432b6e134aa27f00d251b056b89826697796274a426db8"
+              },
+              {
+                "writer": "a23d6d41b2bb534e0d45bc875e5bd26f143390b5360f8923cd8a7794a9d9e643",
+                "seq": 2,
+                "hash": "229ee6df1d00e3146d796e6bcb4176edf3a576c382d1fcfb06c4825227710552",
+                "lamport": 3,
+                "roster": "5e1727326b2800dd79432b6e134aa27f00d251b056b89826697796274a426db8"
+              }
+            ],
+            "count": 5,
+            "orderTip": "531b66f1273ec265cb18e324ce5b1011c6a42e9bb9ad6f78e363a9fb1965a385"
+          }
+        ]
+      },
+      "sig": "vX52hc05K8tRt2IvSRCE5r2hJ9laDBPsgv3wHGS8Q06s3-2UEW0rY6uxNbX8r_174TEcFCPoeiKz-xAKFlqOBw"
+    },
+    "hash": "4341d94acd227f1ba9798c2eaad41b393303ac6fcdf60701fc4a26962e00fe3e",
+    "signerLabel": "near-ai replica vector writer A"
   }
 }
