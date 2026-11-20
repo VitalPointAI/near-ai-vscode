@@ -11,11 +11,12 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url, verifySignature } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { signPayload, verifyPayload } from '../team/signedPayload';
+import { MAX_PAYLOAD_BYTES, signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 import { isRecord } from '../team/validate';
 import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from './entry';
 import { X25519_KEY_BYTES, x25519BindingBytes } from './cellKeys';
+import { safetyCode } from './safetyCode';
 
 export const INVITE_FILE_EXTENSION = '.near-staff-invite';
 export const JOIN_REQUEST_FILE_EXTENSION = '.near-staff-join';
@@ -46,6 +47,18 @@ export type InviteRefusal = keyof typeof INVITE_REFUSALS;
 export type InviteFailure = { ok: false; reason: InviteRefusal; message: string };
 
 const refuse = (reason: InviteRefusal): InviteFailure => ({ ok: false, reason, message: INVITE_REFUSALS[reason] });
+
+// A file as it arrives: JSON text (measured before it is parsed) or a value a caller already parsed. Anything that is not text is passed through for
+// the shape checks to judge.
+function fileValue(value: unknown, maxBytes: number): { ok: true; value: unknown } | InviteFailure {
+  if (typeof value !== 'string') return { ok: true, value };
+  if (Buffer.byteLength(value, 'utf8') > maxBytes) return refuse('malformed');
+  try {
+    return { ok: true, value: JSON.parse(value) as unknown };
+  } catch {
+    return refuse('malformed');
+  }
+}
 
 // A fresh one-time join secret as base64url.
 export function newJoinSecret(): string {
@@ -116,9 +129,12 @@ export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): Sig
 
 export type InviteRead = { ok: true; invite: InvitePayload } | InviteFailure;
 
-// Reads an invite file's parsed content at time now. Checks the shape, that the lead's own key signed it, and the expiry. Never throws.
-export function readInvite(value: unknown, now: Date): InviteRead {
+// Reads an invite file (its JSON text or its parsed content) at time now. Checks the shape, that the lead's own key signed it, and the expiry. Never throws.
+export function readInvite(file: unknown, now: Date): InviteRead {
   try {
+    const parsed = fileValue(file, MAX_PAYLOAD_BYTES);
+    if (!parsed.ok) return parsed;
+    const value = parsed.value;
     const payload = isRecord(value) ? invitePayloadOf(value.payload) : undefined;
     if (payload === undefined) return refuse('malformed');
     const verdict = verifyPayload<unknown>(value, { purpose: 'staff-invite', status: onlyKey(payload.lead.publicKey) });
@@ -144,9 +160,12 @@ export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, i
 
 export type JoinRequestCheck = { ok: true; request: JoinRequestPayload; writer: string } | InviteFailure;
 
-// The lead's check of a join request against the invite it answers and the secret the lead kept. Never throws.
-export function checkJoinRequest(value: unknown, expected: { invite: InvitePayload; secret: string }): JoinRequestCheck {
+// The lead's check of a join request file (its JSON text or its parsed content) against the invite it answers and the secret the lead kept. Never throws.
+export function checkJoinRequest(file: unknown, expected: { invite: InvitePayload; secret: string }): JoinRequestCheck {
   try {
+    const parsed = fileValue(file, MAX_PAYLOAD_BYTES);
+    if (!parsed.ok) return parsed;
+    const value = parsed.value;
     const payload = isRecord(value) ? joinPayloadOf(value.payload) : undefined;
     if (payload === undefined) return refuse('malformed');
     const verdict = verifyPayload<unknown>(value, { purpose: 'staff-join-request', status: onlyKey(payload.publicKey) });
@@ -165,7 +184,17 @@ export function checkJoinRequest(value: unknown, expected: { invite: InvitePaylo
   }
 }
 
-// RED stub (31-16 Task 1): replaced by the real derivation in the next commit.
-export function inviteSafetyCode(_invite: InvitePayload, _joiner: { publicKey: string; x25519: string }): string[] {
-  return [];
+
+export interface SafetyCodeKeys { publicKey: string; x25519: string }
+
+// The six safety code words for an invite and the joining device's keys (D-16). The lead passes the checked request (it carries the joiner's keys); the
+// joining device passes its own keys. Both read the lead's keys, the invite id and the genesis hash from the invite, so the two screens agree exactly
+// when no key was swapped in transit. The join secret is not an input.
+export function inviteSafetyCode(invite: InvitePayload, joiner: SafetyCodeKeys): string[] {
+  return safetyCode({
+    invite: invite.invite,
+    genesisHash: invite.genesisHash,
+    lead: { publicKey: invite.lead.publicKey, x25519: invite.lead.x25519 },
+    joiner: { publicKey: joiner.publicKey, x25519: joiner.x25519 }
+  });
 }
