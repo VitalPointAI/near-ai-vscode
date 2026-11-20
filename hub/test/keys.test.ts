@@ -104,7 +104,7 @@ function refused(action: () => unknown, setting: string, pattern: RegExp, keyTex
     assert.match(error.message, pattern);
     assert.ok(error.message.includes(setting), 'the sentence names the setting');
     assert.ok(!error.message.includes(keyText.slice(-20)), 'the sentence repeated the key text');
-    assert.ok(!error.message.includes('—'), 'no em-dash');
+    assert.ok(!error.message.includes('\u2014'), 'no em-dash');
     return true;
   });
 }
