@@ -1379,11 +1379,16 @@ project folder.
   history: for each writer's file the newest change, the count of changes and a digest of them in
   order, the changes set aside or waiting for the decode check, and the newest roster change. The
   record has two parts. The editor's secret storage, outside the project, holds only a small
-  signed record of a few hundred bytes, however many files a project has: the device signs the
-  newest roster change, the sizes of the lists and the sha256 of the file that holds them. The
-  lists themselves are in that file, in the store folder (`marks/`, named by the sha256 of its
-  bytes, one folder per device), and are trusted only when its bytes hash to the signed value and
-  it holds lists of the signed sizes. When the folder is opened again and it holds less than that
+  signed record, which stays a few hundred bytes: the device signs the newest roster change, the
+  sizes of the lists and the sha256 of the file that holds them. The lists themselves are in that
+  file, in the store folder (`marks/`, named by the sha256 of its bytes, one folder per device),
+  and are trusted only when its bytes hash to the signed value and it holds lists of the signed
+  sizes. The lists file is bounded, so no other device can grow it until it can no longer be
+  written: it keeps at most 1,000 refused changes from one device in each part of the project and
+  10,000 in all, and 100,000 waiting for the decode check. Past a device's bound its later changes
+  in that part of the project are not kept; the store notes that once, with one line for that
+  device, and everyone else's changes are still recorded. A new change that would wait past
+  100,000 is not kept this time and is taken when it is delivered again. When the folder is opened again and it holds less than that
   record (restored from an older backup, a file cut short or deleted, a change swapped, moved or
   put in between, or the lists file itself gone), the store is refused with a plain message and
   nothing is changed. A change the device had already read that can no longer be read (a disk
@@ -1393,7 +1398,9 @@ project folder.
   record is written after the changes are on disk, so a record that could not be written never
   stops the next write; that write records it. The lists file is written first, then the signed
   record, and the device's older lists files are removed only after the signed record is written,
-  so an interruption at any point leaves a record whose lists file is there.
+  so an interruption at any point leaves a record whose lists file is there. The lists file's
+  folder is synced to disk before the record names it, so a power cut cannot lose the file the
+  record names.
 - **Starting again is a person's choice.** A refused store is never reset by itself. **Staff:
   Start This Computer's Shared History Again** asks first and only then moves the store folder
   aside to a folder beside it (`.planning/staff/replica.set-aside-<time>/`, still ignored by git);
@@ -1401,6 +1408,11 @@ project folder.
   sealed attachments and the project record into a new store and starts a new signed record.
   Changes from other people are not carried: they come back with a new welcome file from the staff
   lead (and, in a later version, from the sharing service). A store that opens is left alone.
+  A Start Again that is interrupted (the editor closed or the power cut part way) finishes on the
+  next open and never starts empty: it writes down what it is doing before it moves anything and
+  syncs each step to disk. If the store folder is gone while this device still has its record, it
+  is not made again empty: Start Again rebuilds it from the newest folder set aside whose changes
+  from this device verify, and the result names that folder.
 - **Only this device writes as this device.** A line that names this device as its writer counts
   only when it carries this device's valid signature. Any other such line is damage, so a planted
   line can never become this device's newest change or block its next one.
