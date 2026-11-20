@@ -4,7 +4,7 @@
 
 - Milestone 1: Phases 1-6 (SHIPPED)
 - **v0.4.0 A working core and a native NEAR agent runner**: Phases 7-12 (SHIPPED)
-- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36; Phase 33.1, assigned positions and handover, inserted 2026-11-20 after Phase 33; Phases 38 to 40, the portfolio view, added 2026-11-20 after drop B; the coherence review of 2026-11-20 (`.planning/research/coherence/REVIEW.md`) adds a safety patch first, then Phase 41, the organization policy foundation, before Phases 32.1, 32.2, 33.1, 36 and 37, and places capital projects as Phases 42 and 43)
+- **0.4.x line**: ongoing releases on top of v0.4.0 (current; 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29), then 0.4.30 to 0.4.32 through release PRs #84, #88 and #93; 0.4.33 in preparation; Phase 27 shipped as 0.4.20 and its record closed 2026-11-17; Phases 28 and 29 planned; Phases 30 to 35, multi-user staff workspaces and your organization's sync hub, added 2026-11-19 as two staff collaboration drops; Phases 36 and 37, Cohere Model Vault as a third inference endpoint, added 2026-11-20 to build after Phase 32; Phases 32.1 and 32.2, guided setup and the local model manager, inserted 2026-11-20 to build after Phase 32 and before Phase 36; Phase 33.1, assigned positions and handover, inserted 2026-11-20 after Phase 33; Phases 38 to 40, the portfolio view, added 2026-11-20 after drop B; the coherence review of 2026-11-20 (`.planning/research/coherence/REVIEW.md`) adds a safety patch first, then Phase 41, the organization policy foundation, before Phases 32.1, 32.2, 33.1, 36 and 37, and places capital projects as Phases 42 and 43; Phase 44, accreditation evidence and a compliance dashboard, added 2026-11-20 to run beside the others because it changes no extension UI)
 - **The former v0.5.0 knowledge-base plan** (Trusted-source knowledge base; never shipped, so its number was reassigned on 2026-11-18): PAUSED 2026-10-29. On 2026-11-18 the owner brought its knowledge base back as the viewing layer of v0.6.0 Data platform instead of a separate project: each of its Phases 13-24 is carried, changed, superseded or deferred there (table in that section, and marked in the archive). Its roadmap, requirements, research and Phase 13 plans are archived in `.planning/milestones/v0.5.0-paused/`; the Phase 13 code lives on the local branch `gsd/phase-13-sovereignty-gate-post-quantum-cryptography-and-the-encrypted`.
 - **The former v0.6.0 Team Mode branch plan** (never shipped, so its number was reassigned on 2026-11-18): Phases 60-67 on the unmerged, local-only branch `feat/team-fix-pass` (Phase 60 complete, 61 and 62 built with re-tests open, 63-67 not started). Its identity and signed-event core lands on `main` in v0.5.0 Phase 69; the rest is the later milestone L2 (disposition table there).
 - **v0.5.0 Governed agent platform**: Phases 68-74, with 74.1 and 74.2 inserted 2026-11-19 for model provenance (numbered v0.7.0 until 2026-11-18; Phase 68 complete: merged as PR #50, 052d5cf, and `relay` is a required check on main since the owner's D-19 step, 2026-11-15; Phase 69 complete, PRs #59 and #61; Phase 70 executed, every PR merged, part 4e last as #95 on 2026-11-18; replanned 2026-11-15 from the owner's platform direction; split 2026-11-18, when its relay phases became their own milestone)
@@ -25,7 +25,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 
-Next phases are added here (Phases 26 to 43 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
+Next phases are added here (Phases 26 to 44 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -503,6 +503,28 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 43 to break down)
+
+### Security accreditation: evidence and a compliance dashboard (Phase 44, added 2026-11-20)
+
+Design: `.planning/research/compliance-dashboard/DESIGN.md`. Accreditation (security assessment and authorization) is your organization's decision for the system it deploys; the product supplies the control text per level (ITSP.10.033 and its Medium profile ITSP.10.033-01, which replaced ITSG-33 Annexes 3A and 4A Profile 1 in 2026), its implementation statements, a responsibility matrix, automatic evidence and an honest gap list, all generated from one OSCAL source. Planned, not planned in detail.
+
+### Phase 44: Accreditation evidence and compliance dashboard
+**Goal**: Anyone preparing a security assessment of a system that uses this product can see, per level (Unclassified, Protected A, Protected B, later Classified on the appliance), the exact controls, what the product does for each with live evidence from CI, what your organization must do, and every gap with its remediation and owner, and can download each release's documentation package in OSCAL and readable form.
+**Depends on**: Nothing in flight (reads the docs site from PR #141 and CI as they are). Runs in parallel with Phases 30 to 43 and the patch line: it touches `compliance/` (new), `docs-site/`, `scripts/` and `.github/workflows/` (gate files, owner approval), never `src/` or `media/`. Later picks up the Phase 41 audit chain and Phase 75 relay authentication as evidence.
+**Requirements**: ACCR-01 to ACCR-12 (defined in the design, section 18; added to REQUIREMENTS.md when Phase 44 is planned)
+**Success Criteria** (what must be TRUE):
+  1. The Protected B page lists every ITSP.10.033-01 control with its state; each control shows the attributed official text, our statement, the responsibility, the evidence with its CI run and time, and for a gap the remediation, owner and phase. (ACCR-01, ACCR-03, ACCR-07, ACCR-08)
+  2. Deleting or skipping a test that a Met control relies on turns it Not met in the same PR's summary; a lapsed daily audit turns its controls Stale. (ACCR-04, ACCR-05, ACCR-06, ACCR-10)
+  3. A control with a statement but no evidence is never Met, and no source file can set a status. (ACCR-06)
+  4. A release's package validates with `oscal-cli`, imports into Compliance Trestle, verifies against its checksums and attestation, and holds no secrets, prompt content or organization data. (ACCR-09, ACCR-11)
+  5. A change to an official source page is reported within a week; the importer lists every difference from the unofficial conversions. (ACCR-02)
+  6. The incident response plan, supported-versions table, threat model and data-flow diagrams exist with review dates; the relay image is scanned and has an SBOM; releases carry attestations; CODEOWNERS covers gate paths; `docs` is a required check. (ACCR-12)
+**Research flags**: Treasury Board Directive on Security Management Appendix B clauses; whether the Cyber Centre will publish a machine-readable catalogue; the Unclassified reference set (CAN/DGSI 104 versus CPCSC Level 1); ITSP.40.111 status of Ed25519 and scrypt; which repository settings a read-only token can read.
+**Plans:** 0 plans
+**UI hint**: yes (docs site pages only; no extension UI)
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 44 to break down)
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -1644,6 +1666,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 41. Organization policy foundation (F1) | 0/TBD | Not started (after the coherence safety patch; before 32.1, 32.2, 33.1, 36 and 37) | - |
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
+| 44. Accreditation evidence and compliance dashboard | 0/TBD | Not started (no dependency in flight; may run beside any phase) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
