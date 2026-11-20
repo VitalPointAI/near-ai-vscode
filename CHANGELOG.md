@@ -23,6 +23,20 @@
 - **No secrets in the activity history.** The description an agent gives when it starts another
   agent, and the role it names, are redacted before they are saved to the project's activity
   history, as the live view already showed them.
+- **More git commands count as reaching the network.** After an agent reads a credential file, `git
+  remote update`, `git remote show` and `prune`, `git send-pack`, `git fetch-pack`, git lfs fetch,
+  pull, push and clone, and `git submodule update` now ask in every mode, like `git fetch` and
+  `git push` already did.
+- **git's stored logins stay private.** `git credential fill` and git's credential helpers run by
+  hand (`git credential-store get` and the like) are refused in every mode, like `gh auth token`;
+  `git credential approve`, `reject` and `erase` ask first. A command spelled with `$'…'` quoting
+  is now read as the shell reads it, so it cannot hide one of these.
+- **A repointed MCP server is approved again.** Editing an MCP server to a new address, transport
+  or program holds all its tools until you approve them on the MCP page; renaming it keeps the
+  approval.
+- **The project's key folder is safer from searches.** A search or copy that runs through
+  `.near-ai` or its state folder (`grep -r`, `rg`, `find`, `tar`, `cp -r` and the like) is
+  refused, as reading the key folder directly already was.
 
 
 ## 0.4.35

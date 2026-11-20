@@ -231,8 +231,9 @@ commands that print a secret, commands that print a stored login or token
 (`gh auth token`, `gh auth status --show-token`, `gcloud auth
 print-access-token` and `print-identity-token`, `az account get-access-token`,
 `aws configure get` of a key, token or secret, `aws sts get-session-token`,
-`aws ecr get-login-password` and the like, `npm token list` and `create`, and the `docker-credential-*`
-helpers), VS Code's own secrets database, and this extension's own identity
+`aws ecr get-login-password` and the like, `npm token list` and `create`, `git credential fill`,
+git's credential helpers run by hand (`git credential-store get`, `git-credential-libsecret get`), and the `docker-credential-*`
+helpers; `git credential approve`, `reject` and `erase` change the stored login, so they ask), VS Code's own secrets database, and this extension's own identity
 and policy files in its storage. This holds for the file tools and for shell
 commands alike. For aws, gcloud and az, a word that looks like a command that
 prints a token (such as `get-session-token`, `print-access-token` or
@@ -257,7 +258,10 @@ nobody is there to answer: publishing or sending, a web fetch or search, a
 call to an add-on server with a web address (or a local one declared to reach
 a host), and a shell command the checks know reaches the network (curl or wget
 other than a plain download, http and xh, nc, socat, telnet, ssh, scp, sftp,
-rsync to another machine, git push, fetch, pull, clone and ls-remote, gh and
+rsync to another machine, git push, fetch, pull, clone and ls-remote, the
+plumbing under them (send-pack, fetch-pack, http-push, http-fetch), `git remote
+update`, `show` and `prune`, `git submodule update`, git lfs fetch, pull, push,
+clone and its other server commands, gh and
 glab, the cloud and cluster tools, a container registry push, pull or login,
 an install that names a remote address (a URL other than `file://`, or a
 version-control address) with npm, yarn, pnpm, bun, pip, `python -m pip`, uv,
@@ -281,7 +285,8 @@ The checks that keep agents out of key and credential folders read the text of
 a command, following the shell's folder and any cd or pushd earlier in the same
 command. They cannot see a path built while the command runs (from a variable
 or $(...)), what a script or an npm script the command starts does, a program
-that reads a store for you (for example git credential fill), a walk down from
+that reads a store for you and is not one of the token printers the checks know,
+a walk down from
 a parent folder, or anything an add-on server or the cyber host tools do inside
 themselves. There is no operating-system sandbox around the shell yet, so a
 determined command can still get past them. Because they read text, a command
@@ -293,7 +298,8 @@ The checks that find publishing, destruction and protected writes in a shell
 command also read its text, through npm, yarn, pnpm and bun scripts (from the
 package.json of the folder the command runs in, after any cd on the line) and
 wrappers such as bash -c, sudo, xargs, pipes, subshells, timeout, nice, stdbuf,
-flock and watch. They do not see a command built while it runs (bash -c
+flock and watch. A word in `$'…'` quoting is decoded as the shell decodes it
+before it is read, so `gh $'auth' token` is the printer it runs. They do not see a command built while it runs (bash -c
 "$CMD"), a file run with source or piped into sh, or a script written or
 changed earlier on the same line (it is read as it was before the line ran).
 Under fully-autonomous such a command runs without asking. A command nested
@@ -320,8 +326,10 @@ could, and links followed. So `cd .near-ai/state` followed by `cat keys/local.ke
 and a shell that ends up inside the key folder runs nothing but a `cd` out of it. The shell
 checks still read text, so they are a heuristic: a path built at run time from pieces that do
 not look like it (a variable, `$(...)`, string arithmetic, base64), a script that another
-script or `npm run` starts, or a directory walk (`grep -r`, `find`, `**`) from a folder above
-the key folder is not caught. There is no OS-level sandbox around the agent's
+script or `npm run` starts, or a directory walk (`grep -r`, `find`, `**`) from the project
+root or a folder above it is not caught. A walk that searches, packs or copies `.near-ai` or a
+state folder itself (`grep -r`, `rg`, `find`, `tar`, `zip`, `cp`, `rsync`, `scp`, named there or
+started inside it) is refused like a path into the key folder. There is no OS-level sandbox around the agent's
 shell.
 
 ### Your policy file and decision records
@@ -1796,7 +1804,11 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   approve is the listing the page shows. A tool the server no longer lists is
   reported the same way. If a server's approval record is lost after it was
   made, every tool of that server is held until you approve them again; a lost
-  record never counts as a first connection. The first listing is trusted as it is: read it on the
+  record never counts as a first connection. Editing a server to point it
+  somewhere else (a new web address, a different transport, or another local
+  program or arguments) drops its approval the same way: every tool is held
+  until you approve the new server's listing. Renaming it or changing its
+  headers keeps the approval. The first listing is trusted as it is: read it on the
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
