@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { foldEntries } from '../domain/replica/fold';
 import { rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import type { SealedEntry } from '../domain/replica/entry';
@@ -137,4 +138,106 @@ test('the lead replaces the deputy: the old deputy\'s next roster entry is refus
   const withNew = foldWith(s, [...base.filter((entry) => entry !== after.entry), byNewDeputy.entry]);
   assert.deepEqual(withNew.refused, []);
   assert.equal(headOf(withNew), byNewDeputy.hash);
+});
+
+// ---- Task 2: lead handover -------------------------------------------------------------------------------------------------------------------
+
+test('a planned handover by the lead: staff_lead is the new lead\'s from that roster on and the old lead\'s before; the old lead\'s later entry is refused', () => {
+  const s = staff();
+  const handover = s.world.rosterEntry(s.lead, 'lead.handover', { to: s.em.member, reason: 'planned' }, s.head);
+  const byOld = inviteBy(s.world, s.lead, handover.hash, 'inv-old-lead');
+  const byNew = inviteBy(s.world, s.em, handover.hash, 'inv-new-lead');
+  const base = s.world.entries.filter((entry) => entry !== byNew.entry);
+  const state = foldWith(s, base);
+  assert.deepEqual(refusalsOf(state), [[byOld.hash, 'member.invite', 'not-a-roster-writer']]);
+  assert.equal(headOf(state), handover.hash);
+  const view = rosterView(state);
+  assert.equal(view.hasRole(s.em.member, 'staff_lead', handover.hash), true);
+  assert.equal(view.hasRole(s.em.member, 'staff_lead', s.head), false);
+  assert.equal(view.hasRole(s.lead.member, 'staff_lead', s.head), true);
+  assert.equal(view.hasRole(s.lead.member, 'staff_lead', handover.hash), false);
+  assert.equal(view.roleWithdrawnBy(s.lead.member, 'staff_lead', s.genesis.hash), handover.hash);
+  // The old lead stays a member with an admitted device; only the lead role moved.
+  assert.equal(view.isAdmitted(s.lead.writer, handover.hash), true);
+  assert.equal(view.hasRole(s.lead.member, 'member', handover.hash), true);
+  // The new lead writes at the new head.
+  const withNew = foldWith(s, [...base.filter((entry) => entry !== byOld.entry), byNew.entry]);
+  assert.deepEqual(withNew.refused, []);
+  assert.equal(headOf(withNew), byNew.hash);
+});
+
+test('an old lead who is named deputy after the handover writes the roster again from that roster on', () => {
+  const s = staff();
+  const handover = s.world.rosterEntry(s.lead, 'lead.handover', { to: s.em.member, reason: 'planned' }, s.head);
+  const named = s.world.rosterEntry(s.em, 'deputy.name', { member: s.lead.member }, handover.hash);
+  const byOld = inviteBy(s.world, s.lead, named.hash, 'inv-old-lead-as-deputy');
+  const state = s.world.foldRoster();
+  assert.deepEqual(state.refused, []);
+  assert.equal(headOf(state), byOld.hash);
+  const view = rosterView(state);
+  assert.equal(view.hasRole(s.lead.member, 'deputy_lead', named.hash), true);
+  assert.equal(view.hasRole(s.lead.member, 'staff_lead', named.hash), false);
+  assert.equal(view.hasRole(s.em.member, 'staff_lead', byOld.hash), true);
+});
+
+test('the deputy hands over with reason lead-lost and it applies; a planned handover from the deputy is refused handover-not-allowed', () => {
+  const s = staff();
+  const named = s.world.rosterEntry(s.lead, 'deputy.name', { member: s.dee.member }, s.head);
+  const base = [...s.world.entries];
+  const planned = s.world.rosterEntry(s.dee, 'lead.handover', { to: s.dee.member, reason: 'planned' }, named.hash);
+  const refused = foldWith(s, [...base, planned.entry]);
+  assert.deepEqual(refusalsOf(refused), [[planned.hash, 'lead.handover', 'handover-not-allowed']]);
+  assert.equal(rosterView(refused).hasRole(s.lead.member, 'staff_lead', named.hash), true);
+
+  const lost = s.world.rosterEntry(s.dee, 'lead.handover', { to: s.dee.member, reason: 'lead-lost' }, named.hash);
+  const byOld = inviteBy(s.world, s.lead, lost.hash, 'inv-lost-lead');
+  const state = foldWith(s, [...base, lost.entry, byOld.entry]);
+  assert.deepEqual(refusalsOf(state), [[byOld.hash, 'member.invite', 'not-a-roster-writer']]);
+  assert.equal(headOf(state), lost.hash);
+  const view = rosterView(state);
+  assert.equal(view.hasRole(s.dee.member, 'staff_lead', lost.hash), true);
+  // The deputy who became the lead holds one lead role, not two.
+  assert.equal(view.hasRole(s.dee.member, 'deputy_lead', lost.hash), false);
+  assert.equal(view.hasRole(s.dee.member, 'deputy_lead', named.hash), true);
+  assert.equal(view.hasRole(s.lead.member, 'staff_lead', lost.hash), false);
+  // The new lead names a new deputy, which the old deputy could not do.
+  const next = s.world.rosterEntry(s.dee, 'deputy.name', { member: s.eve.member }, lost.hash);
+  const after = foldWith(s, [...base, lost.entry, next.entry]);
+  assert.deepEqual(after.refused, []);
+  assert.equal(rosterView(after).hasRole(s.eve.member, 'deputy_lead', next.hash), true);
+});
+
+test('a plain member writing lead.handover is refused not-a-roster-writer; a handover to the lead or to an unknown member is refused', () => {
+  const s = staff();
+  const base = [...s.world.entries];
+  const byMember = s.world.rosterEntry(s.em, 'lead.handover', { to: s.em.member, reason: 'lead-lost' }, s.head);
+  assert.deepEqual(refusalsOf(foldWith(s, [...base, byMember.entry])), [[byMember.hash, 'lead.handover', 'not-a-roster-writer']]);
+  for (const [to, reason] of [[s.lead.member, 'names-the-lead'], ['mbr-nobody', 'not-an-active-member']] as const) {
+    const bad = s.world.rosterEntry(s.lead, 'lead.handover', { to, reason: 'planned' }, s.head);
+    const state = foldWith(s, [...base, bad.entry]);
+    assert.deepEqual(refusalsOf(state), [[bad.hash, 'lead.handover', reason]], to);
+    assert.equal(headOf(state), s.head, to);
+    assert.equal(rosterView(state).hasRole(s.lead.member, 'staff_lead', s.head), true, to);
+  }
+});
+
+const PRODUCT_ROLES = { owner: 'j2-chief', sectionLead: 'j2-lead', releaseGuard: 'release-guard' };
+
+test('after a handover the main fold still accepts the genesis and a product created by the old lead at the earlier roster, and judges later acts at their own roster', () => {
+  const s = staff();
+  const create = s.world.write(s.lead, { kind: 'product.create', data: { product: 'intel-estimate', section: 'j2', roles: PRODUCT_ROLES, title: 'Intel estimate' }, roster: s.head });
+  const handover = s.world.rosterEntry(s.lead, 'lead.handover', { to: s.em.member, reason: 'planned' }, s.head);
+  const byOld = s.world.write(s.lead, { kind: 'product.owner', data: { product: 'intel-estimate', owner: 'j2-chief-2' }, roster: handover.hash, deps: [create] });
+  const byNew = s.world.write(s.em, { kind: 'product.owner', data: { product: 'intel-estimate', owner: 'j2-chief-3' }, roster: handover.hash, deps: [create, byOld] });
+  const state = s.world.foldRoster();
+  assert.equal(headOf(state), handover.hash);
+  const result = foldEntries(s.world.entries, s.world.ctxFor(state, s.world.ringFor(s.lead)));
+  // Authority at the cited roster (D-11): the genesis cites the origin and the product.create cites the roster before the handover, where the old lead
+  // held staff_lead, so the later handover rejects neither.
+  assert.ok(result.applied.includes(s.genesis.hash));
+  assert.ok(result.applied.includes(create.hash));
+  assert.deepEqual(result.refused.filter((item) => item.family === 'versions').map((item) => [item.hash, item.reason]), [[byOld.hash, 'not-authorised']]);
+  assert.ok(result.applied.includes(byNew.hash));
+  const products = result.families.versions as Array<{ product: string; roles: { owner: string } }>;
+  assert.equal(products.find((product) => product.product === 'intel-estimate')?.roles.owner, 'j2-chief-3');
 });

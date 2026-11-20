@@ -72,7 +72,8 @@ export const ROSTER_REFUSALS = {
   'person-only': 'Only a person can change the roster; an agent or the hub cannot.',
   'deputy-cannot-name-deputy': 'Only the staff lead names the deputy lead, so this naming by the deputy is refused.',
   'not-an-active-member': 'This names someone who is not an active member at the roster it follows.',
-  'names-the-lead': 'This names the member who already holds the staff lead role, so it is refused.'
+  'names-the-lead': 'This names the member who already holds the staff lead role, so it is refused.',
+  'handover-not-allowed': 'The deputy lead may hand over the lead only when the lead is lost, so this handover is refused.'
 } as const;
 export type RosterRefusal = keyof typeof ROSTER_REFUSALS;
 
@@ -261,6 +262,21 @@ function applyDeputyName(state: RosterState, entry: VerifiedEntry, position: num
   return { status: 'applied' };
 }
 
+// lead.handover (D-10): the lead hands over for any reason; the deputy hands over only with reason lead-lost (D-48: a lead who is merely unreachable
+// is replaced this way). The new lead holds staff_lead from the handover's position on and the old lead keeps it at every earlier roster (D-11). When
+// the deputy becomes the lead, the deputy role ends there, so one member never holds both.
+function applyHandover(state: RosterState, entry: VerifiedEntry, position: number): ApplyOutcome {
+  const cited = position - 1;
+  const data = entry.data as { to: string; reason: string };
+  const signer = signerAt(state, entry, cited);
+  if (signer !== leadAt(state, cited) && !(signer === deputyAt(state, cited) && data.reason === 'lead-lost')) return { status: 'refused', reason: 'handover-not-allowed' };
+  const problem = leadRoleProblem(state, data.to, cited);
+  if (problem !== undefined) return { status: 'refused', reason: problem };
+  state.leads.push({ member: data.to, from: position });
+  if (deputyAt(state, cited) === data.to) state.deputies.push({ member: undefined, from: position });
+  return { status: 'applied' };
+}
+
 function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   const position = state.positions.length;
   const owner = ROSTER_KIND_OWNER[entry.body.kind];
@@ -271,7 +287,8 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   }
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
-  // lead.handover and roster.choose: their rules follow.
+  if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
+  // roster.choose: its rule follows.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
 
