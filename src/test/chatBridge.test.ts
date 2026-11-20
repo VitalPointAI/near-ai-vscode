@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
-import { appendAssistantTurn, appendUserTurn, modelOptions, parseChatWebviewMessage, providerErrorMessage, sessionSummaryMessage, promptResponseMessage, progressCardMessage, progressActivitySummary, promptMessage, profileStatusMessage } from '../services/chatBridge';
+import { appendAssistantTurn, appendUserTurn, modelOptions, modelPrivacyLabel, parseChatWebviewMessage, providerErrorMessage, sessionSummaryMessage, promptResponseMessage, progressCardMessage, progressActivitySummary, promptMessage, profileStatusMessage } from '../services/chatBridge';
 import { NearAiError } from '../services/nearAiClient';
 
 test('webview message parsing accepts only the typed chat protocol', () => {
@@ -90,7 +91,7 @@ test('model options lead with private models and label forwarded ones with their
     { id: 'z-ai/glm-5.3', privacyBoundary: 'tee', supportsReasoning: false }
   ]);
   assert.deepEqual(options.map((option) => [option.id, option.privacy, option.label]), [
-    ['z-ai/glm-5.3', 'tee', 'z-ai/glm-5.3 · Private · runs in NEAR TEE'],
+    ['z-ai/glm-5.3', 'tee', 'z-ai/glm-5.3 · Private · NEAR AI private hardware, checked each time it is used'],
     ['deepseek/deepseek-v4.1-flash', 'forwarded', 'deepseek/deepseek-v4.1-flash · Not private · forwarded to openrouter.ai']
   ]);
 });
@@ -149,4 +150,14 @@ test('retired studio messages are rejected by the chat protocol and have no host
 test('0.4.28: "Watch the team" asks for Team Live and carries nothing the page could choose', () => {
   assert.deepEqual(parseChatWebviewMessage({ type: 'open-team-live' }), { type: 'open-team-live' });
   assert.equal(parseChatWebviewMessage({ type: 'open-team-live', runId: 'run-x' }), undefined);
+});
+
+// Coherence review S4 and the glossary: the picker says where a private model runs and that it is checked each time, never that it is private on the
+// catalog's word alone. The words still start with "Private", which the answer's facts read when no catalog entry says where a model runs.
+test('S4: the picker\'s words for a TEE model say NEAR AI private hardware, checked each time it is used', () => {
+  assert.equal(modelPrivacyLabel({ privacyBoundary: 'tee' }), 'Private · NEAR AI private hardware, checked each time it is used');
+  assert.equal(modelPrivacyLabel({ privacyBoundary: 'local' }), 'Local · runs on this machine');
+  const page = readFileSync(path.join(__dirname, '..', '..', 'media', 'chat', 'chat.js'), 'utf8');
+  assert.ok(page.includes("['tee', 'Private · NEAR AI private hardware, checked each time it is used']"));
+  assert.ok(!page.includes('runs in NEAR TEE'));
 });

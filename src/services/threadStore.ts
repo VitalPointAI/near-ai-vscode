@@ -16,7 +16,8 @@ import { isSyntheticMessage, messagesToEntries } from '../domain/state/threadCap
 import { threadLines, threadTip, unionEntries, type ThreadEntry, type ThreadLines, type ThreadRole } from '../domain/state/threadEntries';
 import { PARTIAL_HISTORY, PARTIAL_HISTORY_NOTE, entriesToMessages, pairToolResults } from '../domain/state/threadView';
 import type { AgentMessage } from './nearAiClient';
-import { SCALE_PRESETS, parseLabel } from '../domain/gate/labels';
+import { parseLabel } from '../domain/gate/labels';
+import { activeScales } from '../domain/gate/labelAlgebra';
 import type { Label } from '../domain/gate/labels';
 import { raiseMark, sameMark } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
@@ -93,7 +94,7 @@ export function chatLabelOf(meta: Pick<ThreadMeta, 'label'> | undefined): ChatLa
   if (raw.mark.length === 0 || raw.mark.length > 16) return { kind: 'unreadable' };
   const mark: Label[] = [];
   for (const entry of raw.mark) {
-    const parsed = parseLabel(entry, SCALE_PRESETS);
+    const parsed = parseLabel(entry, activeScales());
     if (!parsed.ok) return { kind: 'unreadable' };
     mark.push(parsed.value);
   }
@@ -104,7 +105,8 @@ export function chatLabelOf(meta: Pick<ThreadMeta, 'label'> | undefined): ChatLa
 /** The join of two marks (D-29): every label of both, joined per scale. */
 export function joinMarks(a: Mark, b: Mark): Mark {
   let out: Mark = a;
-  for (const label of b) if (!out.some((held) => sameMark([held], [label]))) out = raiseMark(out, label, SCALE_PRESETS);
+  const scales = activeScales();
+  for (const label of b) if (!out.some((held) => sameMark([held], [label]))) out = raiseMark(out, label, scales);
   return out;
 }
 

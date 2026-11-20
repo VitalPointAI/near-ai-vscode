@@ -7,6 +7,7 @@ import type { BundleState } from '../domain/gate/bundle';
 import type { Mark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';
 import { isDefaultMark } from '../gate/sessionMark';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 
 export const SHOW_POLICY_COMMAND = 'nearAi.policy.show';
 export const POLICY_STATUS_TEXT = 'Policy';
@@ -44,7 +45,8 @@ export function gateStatusText(state: BundleState | undefined, now: number, chat
   const shown = policyStatusText(state, now);
   // D-33: the label of the chat in view, beside the policy state, while it is above the default label; nothing for it at the default or with no chat.
   if (chatMark === undefined || chatMark.mark.length === 0 || isDefaultMark(chatMark.mark, chatMark.defaultLabel)) return shown;
-  const label = chatMark.mark.map((each) => `${each.scale}/${each.level}`).join(', ');
+  // Coherence review S8: the scale's name with the level, never the raw id.
+  const label = chatMark.mark.map((each) => labelKeyShown(each)).join(', ');
   return { ...shown, text: `${shown.text} · ${label}`, tooltip: `${shown.tooltip} The chat in view is labelled ${label}: its label decides where its content may be sent.` };
 }
 

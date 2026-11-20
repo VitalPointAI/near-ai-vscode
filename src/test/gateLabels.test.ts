@@ -210,3 +210,56 @@ test('the plain texts are fixed once, say what they must, and never overclaim', 
     assert.ok(!/\bverified clearance\b/i.test(text));
   }
 });
+
+// ---- Coherence review S7 and S8: one label ranking on the active policy's scales, and labels shown by the scale's name ----
+
+test('S7: the label module ranks on the active policy\'s scales, falls back to the presets only with no usable source, and the staff checks use it', async () => {
+  const algebra = await import('../domain/gate/labelAlgebra');
+  const observation = await import('../domain/staff/obs/observation');
+  // A policy that extends the organization scale with a level between Internal and Confidential.
+  const extended = { ...SCALE_PRESETS, org: { name: 'Organization', levels: ['Public', 'Internal', 'Partner', 'Confidential', 'Restricted'] } };
+  // With no source: the presets, as before.
+  assert.equal(algebra.labelKeyAtLeast('org/Partner', 'org/Internal'), false, 'an unknown level is never at least anything');
+  assert.equal(observation.joinTemplateLabels(['org/Public', 'org/Partner']), undefined);
+  const clear = algebra.setActiveScaleSource(() => extended);
+  try {
+    assert.equal(algebra.activeScales(), extended);
+    assert.equal(algebra.labelKeyAtLeast('org/Partner', 'org/Internal'), true);
+    assert.equal(algebra.labelKeyAtLeast('org/Internal', 'org/Partner'), false);
+    assert.equal(observation.labelAtLeast('org/Partner', 'org/Internal'), true, 'the staff check reads the policy');
+    assert.equal(observation.joinTemplateLabels(['org/Public', 'org/Partner', 'org/Internal']), 'org/Partner');
+    assert.equal(observation.joinTemplateLabels(['org/Public', 'nato/NATO Unclassified']), undefined, 'different scales still do not join');
+    assert.equal(algebra.labelKeyRank('org/Confidential'), 3);
+  } finally { clear(); }
+  assert.equal(algebra.activeScales(), SCALE_PRESETS);
+  // A source that throws or gives nothing usable leaves the presets (the gate's own failed-closed scales).
+  for (const broken of [() => { throw new Error('unreadable'); }, () => ({}) as never, () => null as never]) {
+    const undo = algebra.setActiveScaleSource(broken);
+    try { assert.equal(algebra.activeScales(), SCALE_PRESETS); } finally { undo(); }
+  }
+  // A replaced source is never cleared by its predecessor.
+  const firstClear = algebra.setActiveScaleSource(() => extended);
+  const secondClear = algebra.setActiveScaleSource(() => SCALE_PRESETS);
+  firstClear();
+  assert.equal(algebra.activeScales(), SCALE_PRESETS);
+  secondClear();
+});
+
+test('S8: a label is shown as the scale\'s name with the level; the organization\'s Confidential reads Sensitive and its id is unchanged', async () => {
+  const algebra = await import('../domain/gate/labelAlgebra');
+  assert.equal(algebra.labelKeyShown({ scale: 'org', level: 'Confidential' }), 'Organization: Sensitive');
+  assert.equal(algebra.labelKeyShown('ca-classified/Confidential'), 'Canada, Classified: Confidential');
+  assert.equal(algebra.labelKeyShown({ scale: 'ca-protected', level: 'Protected B' }), 'Canada, Protected: Protected B');
+  assert.equal(algebra.labelKeyShown({ scale: 'nato', level: 'NATO Secret' }), 'NATO: NATO Secret');
+  assert.equal(algebra.labelKeyShown({ scale: 'org', level: 'Internal' }), 'Organization: Internal');
+  // A scale the policy does not know shows its id rather than a guess; a text without a scale is left as it is.
+  assert.equal(algebra.labelKeyShown({ scale: 'custom', level: 'High' }), 'custom: High');
+  assert.equal(algebra.labelKeyShown('no-slash'), 'no-slash');
+  // The policy's own scale name is used when it has one.
+  const clear = algebra.setActiveScaleSource(() => ({ ...SCALE_PRESETS, custom: { name: 'Project', levels: ['Low', 'High'] } }));
+  try { assert.equal(algebra.labelKeyShown({ scale: 'custom', level: 'High' }), 'Project: High'); } finally { clear(); }
+  // Ids are unchanged: a label still parses and keys by its stored level name.
+  assert.equal(labelKey({ scale: 'org', level: 'Confidential' }), 'org/Confidential');
+  assert.equal(parseLabel({ scale: 'org', level: 'Sensitive', compartments: [], releasability: [], handling: [] }, SCALE_PRESETS).ok, false, 'the display name is never an id');
+  assert.equal(algebra.levelShown('ca-classified', 'Confidential'), 'Confidential', 'only the organization scale is renamed');
+});

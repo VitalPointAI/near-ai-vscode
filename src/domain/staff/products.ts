@@ -218,6 +218,14 @@ export const STAFF_MARKERS = {
 } as const;
 
 /**
+ * Coherence review S5 (owner decision Q3): staff teams are marked private, and every private model NEAR AI offers today comes from developers in the
+ * People's Republic of China, which provenance rules forbid for operational work. Said where a staff team is set up (the setup's model step and its last
+ * message), in the team file's "Private models only" rule, once in each chat that runs a staff team, and in README and SECURITY.md. It changes no routing.
+ */
+export const STAFF_PRIVATE_MODELS_TEXT =
+  "The private models NEAR AI offers today come from developers in the People's Republic of China. Use this team only on fictional or exercise material until your organization approves a model for operational work.";
+
+/**
  * The four lines every staff member's instructions open with (design 10, 3.1). Kept short, and the same for every section, so a template only adds
  * what is its own.
  */

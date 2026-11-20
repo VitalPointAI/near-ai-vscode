@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { CAPABILITY_VERBS } from '../domain/gate/vocabulary';
+import { UPDATE_REASONS } from '../domain/gate/bundle';
 import type { BundleState } from '../domain/gate/bundle';
 import { CLEARANCE_SELF_ASSERTED_TEXT, HANDLING_FLAGS, LABELS_NOT_ACCREDITATION_TEXT, LABEL_TOKEN_PATTERN, SCALE_PRESETS_CAVEAT_TEXT, labelKey, parseLabel } from '../domain/gate/labels';
 import type { Clearance, Label } from '../domain/gate/labels';
@@ -25,7 +26,9 @@ import { GateHost } from '../gate/host';
 import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError, USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
 import type { LabelMapQuestion } from '../gate/labelMapStore';
 import type { LabelMapState } from '../domain/gate/labelMap';
-import { setDefaultSessionRoute } from '../gate/sessionMark';
+import { setDefaultSessionRoute, setPrivateOnlySetting } from '../gate/sessionMark';
+import { labelKeyShown, levelShown, scaleShown, setActiveScaleSource } from '../domain/gate/labelAlgebra';
+import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routing';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
 import type { GateStatusTimers } from './gateStatusBar';
@@ -41,7 +44,7 @@ export const DISCARD_DRAFT_ACTION = 'Discard';
 
 /** Pitfall 14: unlabelled content takes the default label, so a policy with no clearance on that scale cannot read it. */
 export function unlabelledDefaultText(defaultLabel: Label): string {
-  return `Content with no label takes your policy's default label, ${labelKey(defaultLabel)}, so a policy with no clearance on the ${defaultLabel.scale} scale cannot read it.`;
+  return `Content with no label takes your policy's default label, ${labelKeyShown(defaultLabel)}, so a policy with no clearance on the ${scaleShown(defaultLabel.scale)} scale cannot read it.`;
 }
 
 /** What Edit Policy says beside the draft it opens (D-27, D-41, CLAS-07). */
@@ -125,9 +128,18 @@ export function policyDocumentText(state: BundleState | undefined, now: number):
   const problem = policyProblem(state, now);
   const usable = problem === undefined && state.state === 'valid';
   // Edit Policy works only on a policy that can be trusted, so a failed one names only the reset (D-41).
+  // A policy written for a newer version is fixed by updating, never by a reset that would discard its rules (coherence review S6).
+  // An unknown setting in a policy only this install's keys signed may be the person's own hand edit (PR #143 review): it names both ways on, and Reset only
+  // for that own policy, saying what it discards. A policy any other key signed is never offered Reset.
+  const needsUpdate = state.state === 'failed-closed' && (UPDATE_REASONS.has(state.reason) || (state.reason === 'unknown-field' && state.ownPolicy !== true));
+  const ownUnknownField = state.state === 'failed-closed' && state.reason === 'unknown-field' && state.ownPolicy === true;
   lines.push(usable
     ? 'This view only shows your policy. Editing it changes nothing. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults.'
-    : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
+    : ownUnknownField
+      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded.'
+      : needsUpdate
+        ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of NEAR AI: update the extension. Resetting it would discard every rule it holds.'
+        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.', '');
   if (!usable || state.state !== 'valid') {
     lines.push('State: not usable, so only reading and planning are allowed');
     // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
@@ -246,6 +258,16 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   // CLAS-06: a model request made outside every session route is still decided by this host's policy and recorded in the open project's log.
   // It is cleared at deactivation (the context's subscriptions are disposed then), and only while it is still this host's (PR 4a review).
   const clearDefaultRoute = setDefaultSessionRoute(host.sessionRouteWithoutContext());
+  // Coherence review S7: every label ranking (the staff checks, a chat's label) reads this host's policy scales, the presets only while it failed closed.
+  const clearScales = setActiveScaleSource(() => host.labelPolicy().scales);
+  // Coherence review S4: TEE-only mode puts the private floor on every model request, so the gate's own check decides what counts as private.
+  const clearPrivateOnly = setPrivateOnlySetting(() => vscode.workspace.getConfiguration('nearAi').get<string>('privacyMode') === 'tee-only');
+  try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }); } catch { /* replaced at the next activation */ }
+  // Coherence review S1: a policy whose local hosts hold a *. pattern is told once in this window what changed and how to fix the entry.
+  void host.state().then((state) => {
+    const patterns = state.state === 'valid' ? patternLocalHosts(state.bundle.routing) : [];
+    if (patterns.length > 0) tell(localHostPatternNotice(patterns));
+  }).catch(() => undefined);
   // D-58: every thread merge in this window judges signed lowerings with this host's key sources, and each is recorded once.
   try { context.subscriptions?.push({ dispose: host.registerLabelLowerings() }); } catch { /* with no judge every lowering from another copy is rejected */ }
   try { context.subscriptions?.push({ dispose: clearDefaultRoute }); } catch { /* an editor that cannot take it still replaces the route at the next activation */ }
@@ -462,14 +484,14 @@ export const ACCEPT_BRANCH_QUESTION = "Use this branch's labels?";
 export const ACCEPT_BRANCH_DETAIL = 'The label file in this project is signed, but it is not the one this computer last checked (for example after switching branches). Using it makes its labels the current ones, signed again with this computer\'s key.';
 
 export const NO_LABELS_WHILE_FAILED_TEXT =
-  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Run NEAR AI: Reset Policy to Defaults, then set the label.';
+  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Run NEAR AI: Show Policy to see why and what fixes it, then set the label.';
 
 /** Said after the person accepts another branch's signed labels (D-61). */
 export const BRANCH_LABELS_ACCEPTED_TEXT = "This branch's labels are now the ones NEAR AI checks in this project.";
 
 /** The words of the refusal when the person's own clearance does not cover the label they chose (D-27). */
 export function notYourClearanceText(label: Label): string {
-  return `You cannot set ${labelKey(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance with NEAR AI: Edit Policy first. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+  return `You cannot set ${labelKeyShown(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance with NEAR AI: Edit Policy first. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
 }
 
 /** What Set Label acts on: a project, and a project-relative path in it (a folder ends with `/`, the project itself is the empty path). */
@@ -478,8 +500,9 @@ export interface LabelTarget {
   readonly path: string;
 }
 
+/** A label as Set Label and Lower This Chat's Label show it: the scale's name with the level (coherence review S8), then compartments and handling. */
 function labelShown(label: Label): string {
-  const parts = [labelKey(label)];
+  const parts = [labelKeyShown(label)];
   if (label.compartments.length > 0) parts.push(`compartments ${label.compartments.join(', ')}`);
   if (label.handling.length > 0) parts.push(label.handling.join(', '));
   return parts.join(', ');
@@ -530,7 +553,7 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
   if (scalePick.remove !== true) {
     const scale = scalePick.scale!;
     const levels = policy.scales[scale]?.levels ?? [];
-    const levelPick = await vscode.window.showQuickPick(levels.map((level) => ({ label: level })), { title: `Level on ${scale}`, placeHolder: CAVEAT_SCALES.has(scale) ? SCALE_PRESETS_CAVEAT_TEXT : 'Pick a level, lowest first.' });
+    const levelPick = await vscode.window.showQuickPick(levels.map((level) => ({ label: levelShown(scale, level), ...(levelShown(scale, level) === level ? {} : { description: `stored as ${scale}/${level}` }), level })), { title: `Level on ${scaleShown(scale, policy.scales)}`, placeHolder: CAVEAT_SCALES.has(scale) ? SCALE_PRESETS_CAVEAT_TEXT : 'Pick a level, lowest first.' });
     if (levelPick === undefined) return false;
     const typed = await vscode.window.showInputBox({ prompt: COMPARTMENTS_PROMPT, title: 'Compartments', validateInput: (value: string) => (value.trim() === '' || value.trim().split(/\s+/).every((token) => LABEL_TOKEN_PATTERN.test(token)) ? undefined : 'Use capital letters and digits, with - or _ after the first one, up to 32 characters each.') });
     if (typed === undefined) return false;
@@ -538,7 +561,7 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
     const handlingPick = await vscode.window.showQuickPick(HANDLING_FLAGS.map((flag) => ({ label: flag })), { title: 'Handling', placeHolder: HANDLING_PLACEHOLDER, canPickMany: true });
     if (handlingPick === undefined) return false;
     const handling = (handlingPick as readonly vscode.QuickPickItem[]).map((item) => item.label).sort();
-    const parsed = parseLabel({ scale, level: levelPick.label, compartments, releasability: [], handling }, policy.scales);
+    const parsed = parseLabel({ scale, level: levelPick.level, compartments, releasability: [], handling }, policy.scales);
     if (!parsed.ok) {
       void Promise.resolve(vscode.window.showWarningMessage('Nothing was changed: that label is not one your policy knows.')).catch(() => undefined);
       return false;

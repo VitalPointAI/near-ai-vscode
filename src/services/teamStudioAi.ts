@@ -2,6 +2,7 @@ import type { NearAiSettings } from '../domain/config';
 import { routeAllows, type PrivateRoute } from './agentSession';
 import { estimateImageCostUsd, type AgentMessage, type ModelInfo } from './nearAiClient';
 import { OutboundGuard } from './outboundGuard';
+import { withPrivateOnly } from '../gate/sessionMark';
 
 // Every model call Team Studio makes (drafting a team from a description, Improve with AI) goes through here, so it passes the same outbound check as
 // chat: emergency stop, the daily spend limit, TEE-only mode and the privacy preflight (0.4.27: draftTeam used to call the model directly and skipped
@@ -109,7 +110,10 @@ export async function teamModelCall(deps: TeamAiDeps, call: TeamAiCall): Promise
   const verdict = new OutboundGuard(deps.settings).check({ model: choice.model, modelInfo: choice.info, text }, await deps.spentTodayUsd());
   if (verdict.outcome !== 'allow') return { ok: false, blocked: true, model: choice.model, reason: `${verdict.reason}${verdict.outcome === 'confirm' ? ' Team Studio cannot send it; remove it and try again.' : ''}` };
   if (call.signal?.aborted) return { ok: false, blocked: true, model: choice.model, reason: 'Cancelled.' };
-  const reply = await deps.complete(choice.model, call.messages, { maxTokens: call.maxTokens, ...(call.signal ? { signal: call.signal } : {}), noThinking: true });
+  // Coherence review S4: a private need is sent with the private floor on, so the gate's own check (a model on this computer, or a private NEAR AI Cloud
+  // model over a proven connection) decides at the client; the catalog's word chose the model and never counts as the check.
+  const send = () => deps.complete(choice.model, call.messages, { maxTokens: call.maxTokens, ...(call.signal ? { signal: call.signal } : {}), noThinking: true });
+  const reply = await (call.need === 'private' ? withPrivateOnly(send) : send());
   return { ok: true, text: reply.text, model: choice.model, private: choice.private, ...(reply.finishReason ? { finishReason: reply.finishReason } : {}) };
 }
 
@@ -167,7 +171,8 @@ export async function teamImageCall(deps: TeamAiDeps, call: { need: TeamAiNeed; 
   const blocked = await imageCallBlocked(deps, choice, call.prompt);
   if (blocked) return { ok: false, reason: blocked, model: choice.model };
   if (call.signal?.aborted) return { ok: false, reason: 'Cancelled.', model: choice.model };
-  const result = await deps.generateImage!(choice.model, call.prompt, call.signal);
+  const make = () => deps.generateImage!(choice.model, call.prompt, call.signal);
+  const result = await (call.need === 'private' ? withPrivateOnly(make) : make());
   if (!result.bytes?.length) return { ok: false, reason: 'The image model returned no picture.', model: choice.model };
   return { ok: true, bytes: result.bytes, model: choice.model, private: choice.private };
 }

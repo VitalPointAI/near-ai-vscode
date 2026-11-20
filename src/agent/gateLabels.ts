@@ -16,6 +16,7 @@ import type { DominanceContext, DominanceReason, Mark } from '../domain/gate/dom
 import { holdsReads } from '../domain/gate/labelMap';
 import type { LabelSource, LabelView } from '../domain/gate/labelMap';
 import { SCALE_PRESETS, labelKey } from '../domain/gate/labels';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../domain/gate/labels';
 import type { Capability } from '../domain/gate/vocabulary';
 import { hostlessLabelReader } from '../gate/labelMapStore';
@@ -23,7 +24,7 @@ import { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } from './commandSafety';
 
 /** A broken policy holds no clearances (D-53): anything above the shipped default label is refused with this sentence. */
 export const FAILED_CLOSED_LABEL_TEXT =
-  'Your policy file cannot be trusted right now, so NEAR AI cannot check your clearance, and labelled files cannot be read. Run NEAR AI: Reset Policy to Defaults.';
+  'Your policy file cannot be trusted right now, so NEAR AI cannot check your clearance, and labelled files cannot be read. Run NEAR AI: Show Policy to see why and what fixes it.';
 
 /** Added to every refusal for a clearance, so the person knows the one way to declare one. */
 export const ADD_CLEARANCE_HINT = 'If you hold a clearance for it, add it with NEAR AI: Edit Policy.';
@@ -248,7 +249,8 @@ function sourceOf(runtime: GateRuntime, root: string): LabelSource {
 
 function shownLabel(label: Label): string {
   const compartments = label.compartments.length === 0 ? '' : ` (compartments ${label.compartments.join(', ')})`;
-  return `${labelKey(label)}${compartments}`;
+  // Coherence review S8: the scale's name with the level, never the raw id.
+  return `${labelKeyShown(label)}${compartments}`;
 }
 
 function isShippedDefault(label: Label): boolean {

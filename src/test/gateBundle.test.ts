@@ -10,7 +10,7 @@ import { signPayload } from '../domain/team/signedPayload';
 import type { PayloadPurpose, PayloadSigner, SignedPayload } from '../domain/team/signedPayload';
 import {
   BUNDLE_FAILURES, FAILED_CLOSED_VERBS, RENEW_WINDOW_DAYS, SELF_SIGNED_LIFETIME_DAYS, bundleHash, defaultBundlePayload, effectiveNow, failedClosed,
-  isDefaultBundle, needsRenewal, parseBundle, verifyBundleEnvelope
+  KNOWN_BUNDLE_FEATURES, UPDATE_REASONS, isDefaultBundle, needsRenewal, parseBundle, verifyBundleEnvelope
 } from '../domain/gate/bundle';
 import type { BundleFailureReason, BundleState, PolicyBundle } from '../domain/gate/bundle';
 import { dominates, whyNotDominated } from '../domain/gate/dominance';
@@ -499,6 +499,7 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
   expired: (signer) => check(signedDefault(signer), signer, NOW + 366 * DAY),
   'vocabulary-unknown': (signer) => check(signBundle(signer, edited(signer, (p) => { p.vocabulary = 2; })), signer),
   'unknown-field': (signer) => check(signBundle(signer, edited(signer, (p) => { p.extra = true; })), signer),
+  'needs-update': (signer) => check(signBundle(signer, edited(signer, (p) => { p.requires = ['org-layer']; })), signer),
   'wrong-type': (signer) => check(signBundle(signer, edited(signer, (p) => { p.issuedAt = 'yesterday'; })), signer),
   'signer-mismatch': (signer) => {
     const other = makeSigner();
@@ -514,7 +515,7 @@ const REASON_PRODUCERS: Record<BundleFailureReason, (signer: PayloadSigner) => B
 
 test('every failure reason has a producer in this file, so none is untested', () => {
   assert.deepEqual(Object.keys(REASON_PRODUCERS).sort(), Object.keys(BUNDLE_FAILURES).sort());
-  assert.equal(Object.keys(BUNDLE_FAILURES).length, 23);
+  assert.equal(Object.keys(BUNDLE_FAILURES).length, 24);
 });
 
 for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
@@ -535,8 +536,15 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
       assert.match(state.sentence, /Reload the window to try again\.$/);
     } else if (reason === 'clock-behind') {
       assert.match(state.sentence, /Set the clock to the right time, then reload the window\.$/);
-    } else if (reason === 'unsupported-version' || reason === 'vocabulary-unknown') {
-      assert.match(state.sentence, /Update the extension, or run NEAR AI: Reset Policy to Defaults to sign a fresh one\.$/);
+    } else if (reason === 'unknown-field') {
+      // PR #143 review: a newer version's setting and a hand edit look alike here, so the sentence names both ways on and points at Show Policy, which
+      // offers Reset only for the person's own policy.
+      assert.match(state.sentence, /If a newer version of NEAR AI wrote it, update the extension\. If you changed your own policy by hand, NEAR AI: Show Policy says how to go back\.$/);
+      assert.ok(!/Reset/.test(state.sentence), state.sentence);
+    } else if (UPDATE_REASONS.has(reason)) {
+      // Coherence review S6: a policy written for a newer version is fixed by updating; Reset would discard an organization's rules, so it is never offered.
+      assert.match(state.sentence, /Update the NEAR AI extension to use it\. Until then only reading and planning run, and your policy file is left as it is\.$/);
+      assert.ok(!/Reset/.test(state.sentence), state.sentence);
     } else {
       assert.match(state.sentence, /Run NEAR AI: Reset Policy to Defaults to sign a fresh one\.$/);
     }
@@ -663,4 +671,78 @@ test('a default bundle signed by a different key than the one it names is not ac
   const payload = defaultFor(real);
   const status: KeyStatusLookup = (key) => ({ state: key.fingerprint === impostor.fingerprint || key.fingerprint === real.fingerprint ? 'active' : 'unknown' });
   assert.equal(failedWith(verifyBundleEnvelope(signBundle(impostor, payload), { status, now: NOW })), 'signer-mismatch');
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Coherence review S6: a policy written for a newer version says "update the extension", never Reset, and still fails closed
+
+test('S6: an optional requires list naming no unknown feature is accepted, and the default bundle carries none', () => {
+  const signer = makeSigner();
+  assert.deepEqual([...KNOWN_BUNDLE_FEATURES], []);
+  assert.equal(Object.prototype.hasOwnProperty.call(defaultFor(signer), 'requires'), false);
+  const plain = check(signedDefault(signer), signer);
+  assert.equal(plain.state, 'valid');
+  if (plain.state === 'valid') assert.equal(plain.bundle.requires, undefined);
+  const empty = check(signBundle(signer, edited(signer, (p) => { p.requires = []; })), signer);
+  assert.equal(empty.state, 'valid');
+  if (empty.state === 'valid') assert.deepEqual(empty.bundle.requires, []);
+});
+
+test('S6: an unknown required feature fails closed as needs-update, before an unknown key would, and no sentence offers Reset', () => {
+  const signer = makeSigner();
+  const needs = check(signBundle(signer, edited(signer, (p) => { p.requires = ['org-layer']; })), signer);
+  assert.equal(failedWith(needs), 'needs-update');
+  // A newer policy usually has both: the feature is named first, so the person reads "update".
+  const both = check(signBundle(signer, edited(signer, (p) => { p.requires = ['org-layer']; p.organization = { id: 'x' }; })), signer);
+  assert.equal(failedWith(both), 'needs-update');
+  // An unknown key alone is still refused (fail closed: it is never ignored or applied), with the update sentence.
+  const unknown = check(signBundle(signer, edited(signer, (p) => { p.organization = { id: 'x' }; })), signer);
+  assert.equal(failedWith(unknown), 'unknown-field');
+  assert.match(unknown.state === 'failed-closed' ? unknown.sentence : '', /update the extension/);
+  for (const reason of UPDATE_REASONS) {
+    assert.match(BUNDLE_FAILURES[reason], /Update the NEAR AI extension/);
+    assert.ok(!/Reset/.test(BUNDLE_FAILURES[reason]), reason);
+  }
+  // Every other reason keeps its own fix.
+  assert.match(BUNDLE_FAILURES['bad-signature'], /Reset Policy to Defaults/);
+});
+
+test('S6: a requires list that is not a list of feature ids is wrong-type, never accepted', () => {
+  const signer = makeSigner();
+  for (const value of ['org-layer', [1], ['Has Capitals'], [''], {}, Array.from({ length: 33 }, (_, index) => `f${String(index)}`)]) {
+    assert.equal(failedWith(check(signBundle(signer, edited(signer, (p) => { p.requires = value; })), signer)), 'wrong-type', JSON.stringify(value));
+  }
+  assert.equal(parseBundle({ ...defaultFor(signer), requires: ['org-layer'] }).ok, false);
+});
+
+test('S6 (PR #143 review): a policy whose content cannot be read is marked as the person\'s own only when verified against this install\'s own keys', () => {
+  const signer = makeSigner();
+  const envelope = signBundle(signer, edited(signer, (p) => { p.typo = true; }));
+  const status = activeFor(signer);
+  const own = verifyBundleEnvelope(envelope, { status, now: NOW, ownKeysOnly: true });
+  assert.equal(own.state === 'failed-closed' && own.reason, 'unknown-field');
+  assert.equal(own.state === 'failed-closed' && own.ownPolicy, true);
+  // Without the store's word that the keys are this install's own (an organization's key later), it is never marked as the person's own.
+  const other = verifyBundleEnvelope(envelope, { status, now: NOW });
+  assert.equal(other.state === 'failed-closed' && other.ownPolicy, undefined);
+  // A signature that does not verify is never the person's own, whatever the store says.
+  const tampered = clone(envelope) as Loose;
+  tampered.payload.typo = false;
+  const bad = verifyBundleEnvelope(tampered, { status, now: NOW, ownKeysOnly: true });
+  assert.equal(bad.state === 'failed-closed' && bad.reason, 'bad-signature');
+  assert.equal(bad.state === 'failed-closed' && bad.ownPolicy, undefined);
+});
+
+test('S6 (Phase 41 schema): a feature id may carry an @N version; an unknown one such as x@1 is needs-update and says update, never Reset; a malformed version is wrong-type', () => {
+  const signer = makeSigner();
+  for (const feature of ['x@1', 'labels@1', 'endpoints@12', 'models']) {
+    const state = check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer);
+    assert.equal(failedWith(state), 'needs-update', feature);
+    const sentence = state.state === 'failed-closed' ? state.sentence : '';
+    assert.match(sentence, /Update the NEAR AI extension/);
+    assert.ok(!/Reset/.test(sentence), feature);
+  }
+  for (const feature of ['x@0', 'x@', 'x@01', 'x@12345', 'X@1', 'x@1@2', '@1']) {
+    assert.equal(failedWith(check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer)), 'wrong-type', feature);
+  }
 });

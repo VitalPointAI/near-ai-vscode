@@ -134,9 +134,15 @@ export interface ChatModelOption {
   forwardedTo?: string;
 }
 
+/**
+ * The words for a model the catalog lists as running in NEAR AI's private hardware (coherence review S4, glossary): the catalog's word only chooses the
+ * model; a request counts as private only when the gate's own check passes, each time it is sent.
+ */
+export const PRIVATE_MODEL_LABEL = 'Private · NEAR AI private hardware, checked each time it is used';
+
 /** Short, user-facing privacy wording for a model, shared by every chat surface. */
 export function modelPrivacyLabel(model?: Pick<ModelInfo, 'privacyBoundary' | 'forwardedTo'>): string {
-  if (model?.privacyBoundary === 'tee') return 'Private · runs in NEAR TEE';
+  if (model?.privacyBoundary === 'tee') return PRIVATE_MODEL_LABEL;
   if (model?.privacyBoundary === 'local') return 'Local · runs on this machine';
   if (model?.privacyBoundary === 'cloud') return model.forwardedTo ? `Not private · forwarded to ${model.forwardedTo}` : 'Not private · forwarded';
   return 'Privacy unknown';
