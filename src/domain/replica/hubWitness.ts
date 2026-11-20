@@ -178,8 +178,10 @@ function keptCopy(checkpoint: Checkpoint, sig: string, roster: RosterView): Sign
   return { v: 1, purpose: 'staff-replica', signer: { fingerprint, publicKey: device.publicKey }, signedAt: REPLICA_SIGNED_AT, payload: checkpoint, sig };
 }
 
-// A checkpoint the hub sent (D-46). In order: it must verify for this roster (else injected), name this project (else wrong-project) and come from
-// a hub this computer still trusts (else forked-view again). Then it is compared with the newest one held: a head below it is rolled-back (the newest
+// A checkpoint the hub sent (D-46). In order: it must verify for this roster (else injected), name this project (else wrong-project), be signed by
+// the hub this witness watches (else injected, other-signer: another hub your organization admitted may sign checkpoints too, but its checkpoints
+// say nothing about this hub's copy, so they are never kept as this hub's newest nor compared with it) and come from a hub this computer still
+// trusts (else forked-view again). Then it is compared with the newest one held: a head below it is rolled-back (the newest
 // stays), another version is forked-view (both kept as proof, the hub distrusted), and otherwise it becomes the newest. entries, when given, lets
 // checkpointConflict judge nesting as well as equal counts; pass the entries this computer holds under both checkpoints, or none.
 export function witnessCheckpoint(state: WitnessState, signed: unknown, roster: RosterView, entries?: readonly CheckpointEntry[]): CheckpointWitness {
@@ -187,6 +189,7 @@ export function witnessCheckpoint(state: WitnessState, signed: unknown, roster: 
   if (!verdict.ok) return { state: make(state), findings: [finding('injected', { reason: verdict.reason })], trusted: false };
   const checkpoint = verdict.checkpoint;
   if (checkpoint.project !== state.project) return { state: make(state), findings: [finding('wrong-project', { project: short(checkpoint.project), checkpoint: short(verdict.hash) })], trusted: false };
+  if (checkpoint.signer !== state.hub) return { state: make(state), findings: [finding('injected', { reason: 'other-signer', signer: short(checkpoint.signer) })], trusted: false };
   if (state.distrusted) return { state: make(state), findings: [finding('forked-view', { checkpoint: short(verdict.hash) })], trusted: false };
   const kept = keptCopy(checkpoint, (signed as { sig: string }).sig, roster);
   const accept = (): CheckpointWitness => ({ state: make(state, { newest: kept, seen: raiseSeen(state.seen, headsOf(checkpoint)) }), findings: [], trusted: true });
