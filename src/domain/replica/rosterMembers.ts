@@ -5,8 +5,8 @@
 // Every record carries the position it starts at (from) and, once ended, the position it ends at (until), so every query takes a position and the
 // roster view answers at the roster an entry cites (D-11). A record is in force at position p when from <= p and (until is absent or p < until).
 //
-// Owner of the apply rules for each kind: 31-12 (this file's first version) applies the genesis lead device, member.invite and member.admit; every
-// other kind routed here is refused roster-kind-pending until 31-14 adds its rule. A pending kind is refused, never applied.
+// Owner of the apply rules: 31-12 wrote the genesis lead device, member.invite and member.admit; 31-14 completes every member, device, hub and invite
+// kind. A kind with no rule yet is refused roster-kind-pending, never applied.
 import { verifySignature } from '../team/canonical';
 import { x25519BindingBytes } from './cellKeys';
 import { isSlot } from './clientIds';
@@ -15,17 +15,24 @@ import type { VerifiedEntry } from './verify';
 export const MEMBER_REFUSALS = {
   'invite-unknown': 'This names an invitation the roster does not have at the roster it follows.',
   'invite-exists': 'An invitation with this id is already in the roster, so this one is refused.',
-  'invite-expired': 'The invitation had expired when this admission was written.',
+  'invite-expired': 'The invitation had expired when this entry was written.',
   'invite-voided': 'The invitation was cancelled, so it cannot admit anyone.',
   'invite-used': 'The invitation was already used, and an invitation admits only once.',
   'invite-for-device': 'This invitation adds a device for an existing member, so it cannot admit a new member.',
-  'member-exists': 'A member with this id is already in the roster.',
+  'invite-wrong-member': 'This invitation was not made to add a device for this member.',
+  'member-exists': 'A member or hub with this id is already in the roster, and an id is never given twice.',
   'member-unknown': 'This names a member the roster does not have at the roster it follows.',
   'lead-role-by-handover-only': 'The staff lead and deputy lead roles are given only by the genesis, a handover or naming the deputy.',
+  'lead-not-removable': 'The staff lead cannot be removed. Hand the lead over first.',
+  'last-lead-device': 'This is the last device of the staff lead, and revoking it would leave no device able to change the roster. Add another device or hand the lead over first.',
   'slot-in-use': 'This device slot was already given to another device, and a slot is never reused.',
   'slot-out-of-range': 'The device needs a roster slot from 1 to 4095.',
+  'device-limit': 'All 4095 device slots of this project have been given, so no more devices can be added.',
   'device-exists': 'This device is already in the roster.',
-  'bad-binding': 'The device did not sign its encryption key with its signing key, so the keys do not belong together.'
+  'bad-binding': 'The device did not sign its encryption key with its signing key, so the keys do not belong together.',
+  'device-unknown': 'This names a device the roster does not have for that member at the roster it follows.',
+  'hub-exists': 'A hub or member with this id is already in the roster, and an id is never given twice.',
+  'hub-unknown': 'This names a hub the roster does not have at the roster it follows.'
 } as const;
 export type MemberRefusal = keyof typeof MEMBER_REFUSALS;
 export type MemberApplyOutcome = { status: 'applied' } | { status: 'refused'; reason: MemberRefusal | 'roster-kind-pending' };
@@ -226,6 +233,57 @@ function applyAdmit(state: MembersState, entry: VerifiedEntry, data: AdmitData, 
   return { status: 'applied' };
 }
 
+interface UpdateData { member: string; name?: string; seat?: string; roles?: string[]; clearance?: unknown; agentSeats?: string[] }
+interface RemoveData { member: string }
+
+// Ends the version in force at the cited roster and opens the next one at the entry's position, so earlier rosters keep their answers (D-11).
+function nextVersion<T extends { from: number; until?: number }>(versions: T[], current: T, next: T): void {
+  current.until = next.from;
+  versions.push(next);
+}
+
+// Ends every device of the member that is in force at the cited roster. Their slots stay given (D-41).
+function endDevicesOf(state: MembersState, member: string, cited: number, position: number): void {
+  for (const versions of state.devices.values()) {
+    const record = versions.find((candidate) => inForce(candidate, cited));
+    if (record !== undefined && record.member === member) record.until = position;
+  }
+}
+
+// member.update (DESIGN 15.1 active -> active): changes the named fields only. Lead and deputy roles come from the genesis, a handover or naming the
+// deputy, never from an update (D-10, D-12); agent seats come only from admit and update (D-12).
+function applyUpdate(state: MembersState, data: UpdateData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const versions = state.members.get(data.member);
+  const current = memberAt(state, data.member, ctx.position - 1);
+  if (versions === undefined || current === undefined) return refused('member-unknown');
+  if (data.roles !== undefined && data.roles.some((role) => LEAD_ROLES.includes(role))) return refused('lead-role-by-handover-only');
+  const next: MemberRecord = {
+    member: current.member,
+    name: data.name ?? current.name,
+    roles: [...(data.roles ?? current.roles)],
+    agentSeats: [...(data.agentSeats ?? current.agentSeats)],
+    from: ctx.position
+  };
+  const seat = data.seat ?? current.seat;
+  if (seat !== undefined) next.seat = seat;
+  const clearance = data.clearance ?? current.clearance;
+  if (clearance !== undefined) next.clearance = clearance;
+  if (current.invite !== undefined) next.invite = current.invite;
+  nextVersion(versions, current, next);
+  return { status: 'applied' };
+}
+
+// member.remove (DESIGN 15.1 active -> removed): the member and every device of it end at this position. The lead leaves only through a handover.
+function applyRemove(state: MembersState, data: RemoveData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const cited = ctx.position - 1;
+  const current = memberAt(state, data.member, cited);
+  if (current === undefined) return refused('member-unknown');
+  if (data.member === ctx.lead) return refused('lead-not-removable');
+  current.until = ctx.position;
+  endDevicesOf(state, data.member, cited, ctx.position);
+  return { status: 'applied' };
+}
+
 // Applies one member, device, hub or invite kind. The data was checked against its closed schema at verification. Validates first and changes the
 // state only when the outcome is applied.
 export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx: MemberApplyContext): MemberApplyOutcome {
@@ -234,6 +292,10 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
       return applyInvite(state, entry.data as InviteData, ctx);
     case 'member.admit':
       return applyAdmit(state, entry, entry.data as AdmitData, ctx);
+    case 'member.update':
+      return applyUpdate(state, entry.data as UpdateData, ctx);
+    case 'member.remove':
+      return applyRemove(state, entry.data as RemoveData, ctx);
     default:
       // member.update, member.remove, device.*, hub.* and invite.void: 31-14 adds their rules.
       return refused('roster-kind-pending');

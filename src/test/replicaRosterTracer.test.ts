@@ -262,8 +262,6 @@ test('a roster entry of a kind whose rule is not written yet is refused roster-k
   const reference = joinerRoster(joined);
   const keys = world.ringFor(joined.joiner);
   const pending: Array<[string, Record<string, unknown>]> = [
-    ['member.update', { member: JOINER_MEMBER, roles: ['member', 'observer'], agentSeats: ['release-guard'] }],
-    ['member.remove', { member: JOINER_MEMBER }],
     ['device.revoke', { member: JOINER_MEMBER, writer: joined.joiner.writer }],
     ['invite.void', { invite: INVITE_ID }],
     ['cell.create', { cell: 'c'.repeat(32), epoch: 1, grant: 'd'.repeat(64) }],
