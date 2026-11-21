@@ -49,6 +49,12 @@ test('a permitted source writes prose while ids-and-links-only sources can write
   assert.equal(JSON.parse(readFileSync(linkOnly, 'utf8')).catalog.controls[0].links[0].href, 'https://example.invalid');
 });
 
+test('the licence gate finds a source-id in valid OSCAL catalog metadata props', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'licence-metadata-props-'));
+  const file = writeImportResult(root, { sourceId: 'itsp-10-033', catalog: { catalog: { metadata: { props: [{ name: 'source-id', value: 'itsp-10-033' }] }, controls: [{ id: 'x', parts: [{ prose: 'permitted test prose' }] }] } } }, SOURCE_REGISTRY);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).catalog.controls[0].id, 'x');
+});
+
 test('the catalogue scan reports external prose with its file and control', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'licence-catalog-'));
   const file = path.join(root, 'catalog.json');
