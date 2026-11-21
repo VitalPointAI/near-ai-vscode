@@ -176,6 +176,31 @@ export function modelOf(doc: unknown): OscalModel | undefined {
   return (OSCAL_MODELS as readonly string[]).includes(roots[0]) ? (roots[0] as OscalModel) : undefined;
 }
 
+const hasSourceId = (metadata: Record<string, unknown>, sourceId: string): boolean => Array.isArray(metadata.props) && metadata.props.some((prop) => isPlainObject(prop) && prop.name === 'source-id' && prop.value === sourceId);
+
+/**
+ * CPCSC is a deliberately link-only import report, not an incomplete OSCAL
+ * catalogue.  Keep its recognition narrow so a malformed report cannot evade
+ * OSCAL validation merely by living under import-reports/.
+ */
+function isCpcscLevel1ImportReport(doc: unknown): boolean {
+  if (!isPlainObject(doc) || Object.keys(doc).length !== 1 || !isPlainObject(doc.catalog)) return false;
+  const catalog = doc.catalog;
+  if (!isPlainObject(catalog.metadata) || !hasSourceId(catalog.metadata, 'cpcsc-level-1') || !Array.isArray(catalog.controls)) return false;
+  return catalog.controls.every((control) => isPlainObject(control)
+    && Object.keys(control).every((key) => key === 'id' || key === 'links')
+    && /^itsp171-\d{2}\.\d{2}\.\d{2}$/.test(String(control.id ?? ''))
+    && Array.isArray(control.links) && control.links.every((link) => isPlainObject(link) && Object.keys(link).length === 1 && link.href === 'https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html')
+    && !Object.hasOwn(control, 'parts'));
+}
+
+/** Infers an OSCAL model for a source file, excluding only recognised typed import reports. */
+export function modelForSourceFile(rootDir: string, file: string, doc: unknown): OscalModel | undefined {
+  const relative = path.relative(rootDir, file).split(path.sep).join('/');
+  if (relative === 'import-reports/cpcsc-level-1.json' && isCpcscLevel1ImportReport(doc)) return undefined;
+  return modelOf(doc);
+}
+
 /** The default byte cap of loadJson: 16 MiB (the NIST catalogue is about 10.4 MB). */
 export const DEFAULT_MAX_JSON_BYTES = 16 * 1024 * 1024;
 /** Keys loadJson refuses anywhere in a document. */
