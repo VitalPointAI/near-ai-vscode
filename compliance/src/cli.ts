@@ -6,6 +6,7 @@ const COMMANDS = Object.freeze([
   'licence-check',
   'watch',
   'cross-check',
+  'sources',
   'bundle',
   'dashboard',
   'validate',

@@ -10,6 +10,7 @@ type GeneratedCatalog = { catalog: { metadata: Record<string, unknown>; groups: 
 const DPA_37_URL = 'https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html';
 const CGR_URL = 'https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html';
 const ACCURATE_REPRODUCTION_NOTICE = 'Accurate reproduction, not the official version.';
+const RETRIEVED_AT = '2026-11-21T00:00:00Z';
 
 export const CGP_REQUIREMENTS = [
   { id: 'cgp-37-1', instrument: 'defence-production-act', section: '37', paragraph: '1', url: DPA_37_URL },
@@ -113,7 +114,7 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     sourceId: 'defence-production-act',
     title: 'Controlled Goods Program requirements',
     version: '0.1.0',
-    retrievedAt: new Date().toISOString()
+    retrievedAt: RETRIEVED_AT
   }) as unknown as GeneratedCatalog;
   catalog.catalog.metadata.remarks = ACCURATE_REPRODUCTION_NOTICE;
   const dpa = newGroup('dpa', 'Defence Production Act Part 2');

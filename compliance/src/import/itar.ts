@@ -8,6 +8,7 @@ type Element = DefaultTreeAdapterTypes.Element;
 type GeneratedCatalog = { catalog: { metadata: Record<string, unknown>; groups: Array<{ id: string; title: string; controls: unknown[] }> } };
 const TITLES_URL = 'https://www.ecfr.gov/api/versioner/v1/titles.json';
 const NOTICE = 'Unofficial editorial compilation as of the listed date; the official CFR governs.';
+const RETRIEVED_AT = '2026-11-21T00:00:00Z';
 
 export const ITAR_REQUIREMENTS = [
   ['itar-120.50', 22, '120', '120.50', '(a)'], ['itar-120.54-a5', 22, '120', '120.54', '(a)(5)'], ['itar-120.55', 22, '120', '120.55', undefined], ['itar-120.56-a', 22, '120', '120.56', '(a)'], ['itar-120.56-b', 22, '120', '120.56', '(b)'], ['itar-122.1', 22, '122', '122.1', '(a)'], ['itar-122.5', 22, '122', '122.5', '(a)'], ['itar-126.1', 22, '126', '126.1', '(a)'], ['itar-126.5', 22, '126', '126.5', '(a)'], ['itar-126.18', 22, '126', '126.18', '(a)'], ['itar-127.12', 22, '127', '127.12', '(a)'],
@@ -77,7 +78,7 @@ async function titleDates(context: { readonly offlinePages?: Readonly<Record<str
 /** Reads eCFR versioned title text with the title's advertised as-of date. */
 export async function importSource(context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly fetcher?: Fetcher } = {}) {
   const dates = await titleDates(context);
-  const catalog = newCatalog({ sourceId: 'ecfr-title-22', title: 'ITAR and EAR requirements', version: '0.1.0', retrievedAt: new Date().toISOString() }) as unknown as GeneratedCatalog;
+  const catalog = newCatalog({ sourceId: 'ecfr-title-22', title: 'ITAR and EAR requirements', version: '0.1.0', retrievedAt: RETRIEVED_AT }) as unknown as GeneratedCatalog;
   catalog.catalog.metadata.remarks = `${NOTICE} Title 22: ${dates[22]}; Title 15: ${dates[15]}.`;
   const groups = new Map([['itar', newGroup('itar', 'International Traffic in Arms Regulations')], ['ear', newGroup('ear', 'Export Administration Regulations')]]);
   const documents = new Map<string, Node>();
