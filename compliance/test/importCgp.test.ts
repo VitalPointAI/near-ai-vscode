@@ -6,9 +6,9 @@ import { test } from 'node:test';
 import { run as runImport } from '../src/commands/import.ts';
 import { importSource } from '../src/import/cgp.ts';
 
-const pageUrl = 'https://laws-lois.justice.gc.ca/eng/acts/D-1.5/page-3.html#h-419174';
+const pageUrl = 'https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html';
 const fixture = readFileSync(new URL('./fixtures/import/cgp/dpa-part-2.html', import.meta.url), 'utf8');
-const regulationsUrl = 'https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/page-1.html';
+const regulationsUrl = 'https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html';
 const regulations = readFileSync(new URL('./fixtures/import/cgp/cgr.html', import.meta.url), 'utf8');
 const cgpPages = () => ({ [pageUrl]: fixture, [regulationsUrl]: regulations });
 
@@ -80,4 +80,19 @@ test('keeps Act and Regulation requirements in distinct catalogue groups', async
 test('names the absent Regulation paragraph when an expected requirement is missing', async () => {
   const missing = regulations.replace('<p>(j) Provide a list on request.</p>', '');
   await assert.rejects(() => importSource({ offlinePages: { [pageUrl]: fixture, [regulationsUrl]: missing } }), /cgp-10-j/);
+});
+
+test('uses Justice Laws semantic labels for current Section 37 subsections', async () => {
+  const currentAct = `<!doctype html><main><ul class="Section ProvisionList">
+    <li><p class="Subsection"><strong><a class="sectionLabel" id="s-37"><span class="sectionLabel">37</span></a></strong> <span class="lawlabel">(1)</span> Current subsection one.</p></li>
+    <li><p class="Subsection"><span class="lawlabel">(2)</span> Current subsection two.</p></li>
+    <li><p class="Subsection"><span class="lawlabel">(3)</span> Definition only.</p></li>
+  </ul></main>`;
+  const result = await importSource({ offlinePages: { [pageUrl]: currentAct, [regulationsUrl]: regulations } });
+  const controls = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string; parts: Array<{ prose: string }> }> }> } }).catalog.groups.flatMap((group) => group.controls);
+  assert.match(controls.find((control) => control.id === 'cgp-37-1')?.parts[0].prose ?? '', /Current subsection one\./);
+  assert.match(controls.find((control) => control.id === 'cgp-37-2')?.parts[0].prose ?? '', /Current subsection two\./);
+
+  const missingSecond = currentAct.replace('<li><p class="Subsection"><span class="lawlabel">(2)</span> Current subsection two.</p></li>', '');
+  await assert.rejects(() => importSource({ offlinePages: { [pageUrl]: missingSecond, [regulationsUrl]: regulations } }), /cgp-37-2/);
 });
