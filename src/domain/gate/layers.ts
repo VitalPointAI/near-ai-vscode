@@ -512,10 +512,22 @@ function isDefault(segments: readonly string[] | undefined, mine: unknown): bool
   return found !== undefined && sameValue(found, mine);
 }
 
+/**
+ * IN-02: the whole personal value of each listed entry, as stable text. `yours` is cut to 80 characters for display, so wideningOf compares this instead:
+ * two different values that share their first 77 characters are not the same setting. Kept beside the entry so IgnoredSetting keeps its shape.
+ */
+const FULL_VALUE = new WeakMap<IgnoredSetting, string>();
+
+/** The text wideningOf compares an entry by: its whole value when composition recorded one, else its display text. */
+function fullValueOf(entry: IgnoredSetting): string {
+  return FULL_VALUE.get(entry) ?? `display:${entry.yours}`;
+}
+
 /** Lists a wider personal value, unless it is empty, a section default, or reserved. */
 function widen(context: Context, pattern: string, key: string, mine: unknown, allowed: unknown, segments?: readonly string[]): void {
   if (isEmpty(mine) || pattern.startsWith('reserved') || isDefault(segments, mine)) return;
   const entry: IgnoredSetting = Object.freeze({ key, layer: 'personal', yours: shortText(mine), allowed: shortText(allowed) });
+  FULL_VALUE.set(entry, `value:${stableText(mine)}`);
   context.pending.push(segments === undefined ? { order: orderOf(pattern), entry, mine } : { order: orderOf(pattern), entry, segments, mine });
 }
 
@@ -1033,7 +1045,8 @@ function documentValue(document: PolicyDocument, path: string): unknown {
 
 /**
  * The first setting a new edit widens, or undefined: compose the organization layer with `base` and with `next`, and return the first entry of the second
- * (in table order) whose key and value the first does not list, so a value already clamped at load never blocks an unrelated edit. Removing an export
+ * (in table order) whose key and whole value (not the shortened display text, IN-02) the first does not list, so a value already clamped at load never
+ * blocks an unrelated edit. Removing an export
  * regime your organization lists widens too (D-60), with your organization's list as the allowed value.
  */
 export function wideningOf(organization: PolicyDocument | undefined, base: PolicyDocument, next: PolicyDocument): IgnoredSetting | undefined {
@@ -1042,7 +1055,7 @@ export function wideningOf(organization: PolicyDocument | undefined, base: Polic
   const after = composeLayers({ organization, personal: next }).ignored;
   const found: Array<{ readonly order: number; readonly entry: IgnoredSetting }> = [];
   for (const entry of after) {
-    if (!before.some((other) => other.key === entry.key && other.yours === entry.yours)) {
+    if (!before.some((other) => other.key === entry.key && fullValueOf(other) === fullValueOf(entry))) {
       found.push({ order: orderOf(ruleEntryOf(entry.key)?.pattern ?? normalPath(entry.key)), entry });
     }
   }

@@ -306,6 +306,27 @@ test('D-20: wideningOf names the key a new edit widens', () => {
   assert.equal(widerThanOrganizationText(found as IgnoredSetting), 'Your organization\'s rules do not allow labels.routing.levels.org/Internal to be wider than local-only.');
 });
 
+test('IN-02: wideningOf compares whole values, not the shortened display text', () => {
+  const org = organization((doc) => { doc.agents.mcp.unattended = ['srv-a']; });
+  // Two wider lists whose display text shares its first 77 characters and is cut at 80: only the last server differs.
+  const shared = ['a'.repeat(31), 'b'.repeat(31)];
+  const base = personal((doc) => { doc.agents.mcp.unattended = ['srv-a', ...shared, `${'c'.repeat(30)}1`]; });
+  const next = personal((doc) => { doc.agents.mcp.unattended = ['srv-a', ...shared, `${'c'.repeat(30)}2`]; });
+  const before = composeLayers({ organization: org, personal: base }).ignored.find((entry) => entry.key === 'agents.mcp.unattended');
+  const after = composeLayers({ organization: org, personal: next }).ignored.find((entry) => entry.key === 'agents.mcp.unattended');
+  assert.ok(before !== undefined && after !== undefined, 'both lists are wider than your organization allows');
+  assert.equal(before.yours, after.yours, 'the display text is the same for both');
+  assert.ok(before.yours.endsWith('...'));
+  // The new server is a new widening, refused before signing.
+  const found = wideningOf(org, base, next);
+  assert.equal(found?.key, 'agents.mcp.unattended');
+  assert.equal(found?.allowed, 'srv-a');
+  // The same clamped value again, or an unrelated edit beside it, is not refused.
+  const same = personal((doc) => { doc.agents.mcp.unattended = ['srv-a', ...shared, `${'c'.repeat(30)}1`]; withSection(doc, 'limits', { v: 1, spend: { dailyNanoUsd: 50 } }, 'limits@1'); });
+  assert.equal(wideningOf(org, base, same), undefined);
+  assert.equal(wideningOf(org, base, base), undefined);
+});
+
 test('ignoredSettingsNotice lists at most five settings, then how many more, and has no em-dash', () => {
   assert.equal(ignoredSettingsNotice([]), undefined);
   const entries: IgnoredSetting[] = Array.from({ length: 7 }, (_, index) => ({ key: `limits.key${String(index)}`, layer: 'personal', yours: '9', allowed: '1' }));
