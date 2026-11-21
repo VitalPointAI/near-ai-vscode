@@ -1,0 +1,12 @@
+{
+  "profile": {
+    "uuid": "00000000-0000-4000-8000-000000000003",
+    "metadata": {
+      "title": "Protected A profile",
+      "version": "1.0.0",
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1"
+    },
+    "imports": [{ "href": "itsp-10-033-01-medium.json", "include-all": {} }]
+  }
+}
