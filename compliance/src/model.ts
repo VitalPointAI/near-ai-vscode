@@ -119,6 +119,12 @@ export const FORBIDDEN_STATUS_NAMES = Object.freeze(['status', 'state', 'met'] a
  */
 export const ALLOWED_STATUS_FORM = Object.freeze({ dir: 'catalogs', propName: 'status', value: 'withdrawn', on: 'control' } as const);
 
+/** The only unsettled questions a component statement may name (D-19). */
+export const UNSETTLED_QUESTIONS = Object.freeze({
+  'tee-question': 'Whether a model service in a trusted execution environment run by a third party may receive this content.',
+  'third-party-encrypted-storage': 'Whether encrypted storage at a third party counts as possession, release or export.'
+} as const);
+
 /** One statement of an implemented requirement in a component definition. */
 export interface Statement {
   /** The OSCAL statement id, for example `ac-02_smt.a`. */

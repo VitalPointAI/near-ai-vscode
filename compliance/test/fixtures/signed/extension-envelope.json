@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "purpose": "policy-authorization",
+  "signer": {
+    "fingerprint": "dev-22790a1fe892cfd0a3d52bccd54bdb1b",
+    "publicKey": "PquTwP3F0t6AkUo947k2W8_PAPQeIdnSDQyHg48X6W0"
+  },
+  "signedAt": "2026-11-21T12:00:00.000Z",
+  "payload": {
+    "kind": "compliance-signed-parity",
+    "note": "This fixture proves the verifier reads extension envelopes."
+  },
+  "sig": "o-l4bhZVM7ux8Zz28iVSJfOcIjAsQx13-RpgONKFJNGY6-YmKvqWj3b9odfWl21Gv6l_dWzeRls362NfL1x2CA"
+}
