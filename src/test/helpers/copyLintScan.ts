@@ -466,7 +466,7 @@ function countOf(text: string, needle: string): number {
  * Single words that are mode words and not ordinary English, so a count is a real hit. Left out because each is also plain English or a word every mode
  * uses in another sense: Position, Member, Invitation, Accept, Decline, Guest, Removed, Handover, Acting, Role, Employee, People and Approved.
  */
-export const DISTINCTIVE_MODE_WORDS: readonly string[] = Object.freeze(['Billet', 'Directorate', 'Dual-hatted', 'Roster']);
+export const DISTINCTIVE_MODE_WORDS: readonly string[] = Object.freeze(['Directorate', 'Dual-hatted', 'Roster']);
 
 /** The mode words rule 2 counts: every `word` and `also` value of the mode table with two or more words, plus DISTINCTIVE_MODE_WORDS. Never spelled here. */
 export function modeWordsFromTable(modes: Readonly<Record<ModeId, ModeRow>> = MODES): string[] {
@@ -482,9 +482,12 @@ const phraseRegex = (phrase: string): RegExp => new RegExp(`${TOKEN_BEFORE}${phr
 const modeMatchers = (words: readonly string[]): Array<{ word: string; regex: RegExp }> => words.map((word) => ({ word, regex: phraseRegex(word) }));
 const DEFAULT_MODE_MATCHERS = modeMatchers(modeWordsFromTable());
 
-/** Rule 6 (owner, 2026-11-20): team, teams or team's, unless "agent" or "work" comes before it, or it is Microsoft Teams. "Team Mode" counts here. */
+/**
+ * Rule 6 (owner, 2026-11-20): team, teams or team's, unless "agent" or "work" comes before it, or it is Microsoft Teams. "Team Mode" counts here.
+ * "Defence team" is allowed too (owner, 2026-11-21): the Military and Public service mode word "Defence team member" names the whole Defence Team.
+ */
 const TEAM_WORD = /(?<![A-Za-z0-9_])teams?(?:['\u2019]s)?(?![A-Za-z0-9_])/gi;
-const TEAM_QUALIFIER = /(?:agent|work)[\s-]+$/i;
+const TEAM_QUALIFIER = /(?:agent|work|defence)[\s-]+$/i;
 const MICROSOFT = /Microsoft\s+$/;
 
 function bareTeamHits(text: string): number {
