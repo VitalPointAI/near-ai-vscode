@@ -1,0 +1,154 @@
+{
+  "$id": "urn:near-ai-vscode:compliance:schema:evidence-rule",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "componentId": {
+      "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+      "type": "string"
+    },
+    "controlId": {
+      "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+      "type": "string"
+    },
+    "observation": {
+      "additionalProperties": false,
+      "properties": {
+        "collector": {
+          "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^\\S(?:.*\\S)?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "collector",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "rule": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "test",
+              "type": "string"
+            },
+            "observation": false,
+            "test": {
+              "$ref": "#/definitions/test"
+            }
+          },
+          "required": [
+            "kind",
+            "test"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "observation",
+              "type": "string"
+            },
+            "observation": {
+              "$ref": "#/definitions/observation"
+            },
+            "test": false
+          },
+          "required": [
+            "kind",
+            "observation"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "component": {
+          "$ref": "#/definitions/componentId"
+        },
+        "control": {
+          "$ref": "#/definitions/controlId"
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9.-]{0,95}$",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "test",
+            "observation"
+          ],
+          "type": "string"
+        },
+        "observation": {
+          "$ref": "#/definitions/observation"
+        },
+        "statement": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "type": "string"
+        },
+        "test": {
+          "$ref": "#/definitions/test"
+        }
+      },
+      "required": [
+        "component",
+        "control",
+        "id",
+        "kind",
+        "statement"
+      ],
+      "type": "object"
+    },
+    "test": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[A-Za-z0-9._/-]{1,255}\\.(?:ts|mts|cts|js|mjs|cjs)$",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "type": "array"
+        }
+      },
+      "required": [
+        "file",
+        "name",
+        "path"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Evidence rules: each ties one statement of a component to a mapped test or a collector's observation (D-21). Rules carry no status; the state is computed.",
+  "properties": {
+    "rules": {
+      "items": {
+        "$ref": "#/definitions/rule"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rules"
+  ],
+  "title": "Evidence rules",
+  "type": "object"
+}

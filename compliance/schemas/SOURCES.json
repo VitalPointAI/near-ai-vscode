@@ -1,0 +1,10 @@
+[
+  {
+    "file": "oscal_complete_schema.json",
+    "licence": "NIST work: public domain in the United States (17 U.S.C. 105), CC0 1.0 Universal elsewhere",
+    "retrievedAt": "2026-11-21T18:11:18Z",
+    "sha256": "f53c67f5f64cc49c9b3512834d2baa2f8da841cf2cc0c361e6d77ecce0f3d077",
+    "url": "https://github.com/usnistgov/OSCAL/releases/download/v1.2.1/oscal_complete_schema.json",
+    "version": "1.2.1"
+  }
+]

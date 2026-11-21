@@ -37,3 +37,6 @@ hub/**
 # The documentation site is its own workspace with its own lockfile and never ships in the extension.
 docs-site/**
 docs/testing.md
+# The compliance package and the security documents are their own package and documents and never ship in the extension (D-48).
+compliance/**
+docs/security/**
