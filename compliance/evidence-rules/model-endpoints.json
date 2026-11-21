@@ -1,0 +1,8 @@
+{
+  "rules": [
+    { "id": "model-endpoints.sc-08.connection-binding", "component": "model-endpoints", "control": "sc-08", "statement": "sc-08_smt.endpoint-binding", "kind": "test", "test": { "file": "src/test/gateConnectionBinding.test.ts", "path": [], "name": "at Confidential a mismatch on the pinned connection still refuses: nothing goes over the normal fetch and nothing falls back" } },
+    { "id": "model-endpoints.sc-13.listed", "component": "model-endpoints", "control": "sc-13", "statement": "sc-13_smt.listed", "kind": "observation", "observation": { "collector": "crypto", "subject": "aes-256-gcm" } },
+    { "id": "model-endpoints.sc-13.x25519", "component": "model-endpoints", "control": "sc-13", "statement": "sc-13_smt.x25519-scrypt", "kind": "observation", "observation": { "collector": "crypto", "subject": "x25519" } },
+    { "id": "model-endpoints.sc-13.scrypt", "component": "model-endpoints", "control": "sc-13", "statement": "sc-13_smt.x25519-scrypt", "kind": "observation", "observation": { "collector": "crypto", "subject": "scrypt" } }
+  ]
+}

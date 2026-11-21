@@ -38,3 +38,12 @@ Run the tests through the repository's runner as shown (from the repository root
 Everything generated (resolved profiles, the evidence bundle, the dashboard JSON and the release package) goes under `compliance/out/`, which git ignores. Nothing generated is committed, so nothing on `main` can drift from what CI computed.
 
 Neither this package nor `docs/security/` ships in the extension: both are listed in `.vscodeignore`, and the release content check refuses a package that holds either.
+# Compliance evidence data
+
+## Writing statements and evidence rules
+
+Add a statement only for behavior the product has today. State what the code does in plain words; do not describe it as compliant, certified, or accredited. Give each implemented requirement exactly one responsibility. A limitation must match a row in SECURITY.md exactly.
+
+Every statement needs an evidence rule. A test rule names the source test file and its exact literal test name, never a comment or a broad file-level result. Renaming or removing that literal name makes the PR summary show the evidence loss. Collector rules name only their documented collector and subject.
+
+Component and rule source files never carry a state. The generated dashboard computes states from current evidence, responsibility, tailoring, and the unsettled or official-decision boundaries.

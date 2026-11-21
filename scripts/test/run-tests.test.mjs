@@ -125,6 +125,24 @@ test('NEAR_AI_TEST_REPORT: one row per leaf test with its file, suite path, name
   }
 });
 
+test('NEAR_AI_TEST_REPORT: a TypeScript CommonJS test emits its literal leaf name', () => {
+  // Root tests are compiled with `esModuleInterop` and therefore call the
+  // default imported node:test function from CommonJS output.
+  const compiled = [
+    '"use strict";',
+    'var __importDefault = (mod) => (mod && mod.__esModule) ? mod : { default: mod };',
+    'const node_test_1 = __importDefault(require("node:test"));',
+    '(0, node_test_1.default)("compiled leaf is reported", () => {});',
+    '',
+  ].join('\n');
+  const dir = fixtureFiles({ 'dist/test/compiled.test.js': compiled });
+  const result = runReport(dir, ['dist/test/compiled.test.js'], 'report.ndjson');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(rows(path.join(dir, 'report.ndjson')).map(({ file, name, status }) => ({ file, name, status })), [
+    { file: 'dist/test/compiled.test.js', name: 'compiled leaf is reported', status: 'passed' },
+  ]);
+});
+
 test('NEAR_AI_TEST_REPORT: the exit code and the console output are the same as without it', () => {
   const dir = fixtureFiles({ 'mixed.test.mjs': MIXED });
   const plain = runReport(dir, ['mixed.test.mjs'], undefined);
