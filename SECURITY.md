@@ -552,7 +552,12 @@ only reading and planning run until your organization sends current ones,
 and the status bar says why, for example: "Your organization's rules ended on 2027-01-31. Ask Security desk (security@example.org) for the current rules."
 The tool your organization uses to make these files, `scripts/org-issuer.mjs`,
 keeps its key in a passphrase-protected file on the issuing computer, never
-on yours.
+on yours. The key file is sealed with AES-256-GCM under a key that scrypt
+derives from the passphrase (N = 2^17, r = 8, p = 1, a random 16-byte salt
+and 12-byte nonce for each file), so someone who copies the file must pay
+that cost for every passphrase they try. The tool opens a new key file again
+with its passphrase before it says done, and refuses a key file that is not
+sealed this way, including an unencrypted key.
 
 #### Layers, the policy page and versions
 
@@ -797,9 +802,12 @@ records they are the compartments `CGP`, `ITAR` and `EAR`.
 Under the starting rules, content marked Controlled goods (Canada), ITAR or
 US export-controlled (EAR) stays on this computer: the starting rules route
 all three to local-only. A fresh install, and the renewal of starting rules
-nobody edited, get these entries. A policy someone edited is not changed in
-place; it gets them through a change on the policy page. Under your
-organization's rules, your organization decides.
+nobody edited, get these entries. An install upgraded from an earlier version
+whose starting rules nobody edited gets them when its policy is next renewed,
+in the last 30 days before the policy ends; until then those markings are
+routed by their level. A policy someone edited is not changed in place; it
+gets them through a change on the policy page. Under your organization's
+rules, your organization decides.
 
 Your organization's rules can now carry its export-control decisions: who
 may see such content and which AI services may receive it. Nothing grants
