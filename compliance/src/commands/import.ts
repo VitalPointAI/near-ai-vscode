@@ -14,14 +14,26 @@ export async function run(argv: readonly string[]): Promise<number> {
   const lang = langIndex === -1 ? 'both' : options[langIndex + 1];
   if (!outRoot || (offlineIndex !== -1 && !options[offlineIndex + 1]) || !['en', 'fr', 'both'].includes(lang)) return 2;
   try {
-    const importer = await import(`../import/${source}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both' }) => Promise<{ sourceId: string; catalog: unknown; file?: string; reports?: readonly { readonly file: string; readonly content: unknown }[] }> };
+    const importer = await import(`../import/${source}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both' }) => Promise<{ sourceId: string; catalog: unknown; file?: string; rawBytes?: Buffer; reports?: readonly { readonly file: string; readonly content: unknown }[] }> };
     if (!importer.importSource) return 2;
     const offlinePages = offlineIndex === -1 ? undefined : JSON.parse(readFileSync(path.join(options[offlineIndex + 1], 'pages.json'), 'utf8')) as Record<string, string>;
     const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both' });
     writeImportResult(outRoot, result, SOURCE_REGISTRY);
+    if (result.rawBytes) writeRawResult(outRoot, result.file ?? path.join('catalogs', `${result.sourceId}.json`), result.rawBytes);
     writeReports(outRoot, result.reports ?? []);
     return 0;
   } catch { return 2; }
+}
+
+/** Replaces the checked catalogue serialization with verified importer bytes without a JSON round-trip. */
+export function writeRawResult(outRoot: string, file: string, bytes: Buffer): void {
+  mkdirSync(outRoot, { recursive: true });
+  const root = realpathSync(outRoot);
+  if (path.isAbsolute(file)) throw new Error('import output must be relative');
+  const target = path.resolve(root, file);
+  if (target !== root && !target.startsWith(root + path.sep)) throw new Error('import output escapes its root');
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, bytes, { mode: 0o644 });
 }
 
 /** Writes source-neutral importer reports under the same lexical output boundary as catalogues. */

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { test } from 'node:test';
 import { importSource } from '../src/import/itsp-10-033.ts';
-import { run } from '../src/commands/import.ts';
+import { run, writeRawResult } from '../src/commands/import.ts';
 import { validateOscal } from '../src/validate.ts';
 
 const fixtures = new URL('./fixtures/import/itsp10033/', import.meta.url);
@@ -131,4 +131,12 @@ test('English-only imports contain no French parts', async () => {
 
 test('refuses a French-only import because English is authoritative', async () => {
   await assert.rejects(() => importSource({ offlinePages: pages, lang: 'fr' }), /authoritative English/);
+});
+
+test('generic import plumbing preserves verified raw bytes and its output boundary', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'raw-import-'));
+  const bytes = Buffer.from([0x7b, 0x0a, 0xff, 0x0a, 0x7d]);
+  writeRawResult(root, 'catalogs/raw.json', bytes);
+  assert.deepEqual(readFileSync(path.join(root, 'catalogs/raw.json')), bytes);
+  assert.throws(() => writeRawResult(root, '../outside.json', bytes), /escapes/);
 });
