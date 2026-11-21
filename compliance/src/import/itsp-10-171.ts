@@ -66,7 +66,7 @@ export function parseItsp171(pages: PageSet): Itsp171Result {
   const unmatchedAssessmentIds = [...assessment.keys()].filter((id) => !seen.has(id)).sort();
   return {
     catalog, unmatchedAssessmentIds, requirementsWithoutSourceControls,
-    mapping: { 'mapping-collection': { uuid: '00000000-0000-4000-8000-000000000002', metadata: { title: 'ITSP.10.171 to ITSP.10.033 mapping', version: '1.0', 'last-modified': '2026-11-21T00:00:00Z', 'oscal-version': '1.2.1' }, mappings: mappingRows } },
+    mapping: { 'mapping-collection': { uuid: '00000000-0000-4000-8000-000000000002', metadata: { title: 'ITSP.10.171 to ITSP.10.033 mapping', version: '1.0', 'last-modified': '2026-11-21T00:00:00Z', 'oscal-version': '1.2.1' }, provenance: { method: 'automation', 'matching-rationale': 'syntactic', status: 'draft', 'mapping-description': 'Identifier references parsed from the published ITSP.10.171 requirements.' }, mappings: mappingRows } },
     report: { unmatchedAssessmentIds, requirementsWithoutSourceControls }
   };
 }

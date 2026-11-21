@@ -37,6 +37,11 @@ test('produces a valid ITSP.10.171 catalogue through the importer entry point', 
   assert.deepEqual(validateOscal(result.catalog, 'catalog', { ours: true }), { ok: true, errors: [] });
 });
 
+test('stamps the standards-required mapping provenance', () => {
+  const mapping: any = parseItsp171(pages).mapping['mapping-collection'];
+  assert.deepEqual(mapping.provenance, { method: 'automation', 'matching-rationale': 'syntactic', status: 'draft', 'mapping-description': 'Identifier references parsed from the published ITSP.10.171 requirements.' });
+});
+
 test('the contractor overlay imports the catalogue with include-all and validates', () => {
   const profile = JSON.parse(readFileSync(path.join(root, '..', 'profiles', 'itsp-10-171-overlay.json'), 'utf8'));
   assert.deepEqual(profile.profile.imports, [{ href: '../catalogs/itsp-10-171/catalog.json', 'include-all': {} }]);
