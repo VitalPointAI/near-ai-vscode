@@ -119,6 +119,9 @@ export const FORBIDDEN_STATUS_NAMES = Object.freeze(['status', 'state', 'met'] a
  */
 export const ALLOWED_STATUS_FORM = Object.freeze({ dir: 'catalogs', propName: 'status', value: 'withdrawn', on: 'control' } as const);
 
+/** The OSCAL mapping model requires this lifecycle field; it is not a product assessment. */
+export const ALLOWED_MAPPING_PROVENANCE_STATUS = Object.freeze({ dir: 'mappings', trail: ['mapping-collection', 'provenance'] as const } as const);
+
 /** The only unsettled questions a component statement may name (D-19). */
 export const UNSETTLED_QUESTIONS = Object.freeze({
   'tee-question': 'Whether a model service in a trusted execution environment run by a third party may receive this content.',

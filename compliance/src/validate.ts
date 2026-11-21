@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { Ajv, type ErrorObject, type ValidateFunction } from 'ajv';
 import addFormatsModule from 'ajv-formats';
-import { ALLOWED_STATUS_FORM, FORBIDDEN_STATUS_NAMES, OSCAL_VERSION, SOURCE_DIRS, SOURCE_FILES } from './model.ts';
+import { ALLOWED_MAPPING_PROVENANCE_STATUS, ALLOWED_STATUS_FORM, FORBIDDEN_STATUS_NAMES, OSCAL_VERSION, SOURCE_DIRS, SOURCE_FILES } from './model.ts';
 
 // ajv-formats is CommonJS; its plugin is both module.exports and module.exports.default.
 const addFormats = addFormatsModule.default;
@@ -205,6 +205,10 @@ function isAllowedStatusProp(file: string, ownerTrail: readonly (string | number
   return length >= 2 && typeof ownerTrail[length - 1] === 'number' && ownerTrail[length - 2] === 'controls';
 }
 
+function isAllowedStatusKey(file: string, trail: readonly (string | number)[], key: string): boolean {
+  return key === 'status' && file.split('/')[0] === ALLOWED_MAPPING_PROVENANCE_STATUS.dir && trail.length === ALLOWED_MAPPING_PROVENANCE_STATUS.trail.length && trail.every((segment, index) => segment === ALLOWED_MAPPING_PROVENANCE_STATUS.trail[index]);
+}
+
 function walkValue(file: string, value: unknown, trail: (string | number)[], found: StatusField[]): void {
   const at = (keys: readonly (string | number)[]): string => `$${keys.map(segment).join('')}`;
   if (Array.isArray(value)) {
@@ -213,7 +217,7 @@ function walkValue(file: string, value: unknown, trail: (string | number)[], fou
   }
   if (typeof value !== 'object' || value === null) return;
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (isForbidden(key)) found.push({ file, path: at([...trail, key]), name: key, kind: 'key' });
+    if (isForbidden(key) && !isAllowedStatusKey(file, trail, key)) found.push({ file, path: at([...trail, key]), name: key, kind: 'key' });
     if (key === 'props' && Array.isArray(child)) {
       child.forEach((prop, index) => {
         if (typeof prop !== 'object' || prop === null || Array.isArray(prop)) return;

@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { findStatusFields } from '../src/validate.ts';
+import { findStatusFields, validateOscal } from '../src/validate.ts';
 import { SOURCE_DIRS, SOURCE_FILES } from '../src/model.ts';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,6 +73,16 @@ test('the publisher withdrawal marker on a control under catalogs passes; anothe
     ['under our own namespace', { 'catalogs/c.json': control([{ ...withdrawn, ns: 'urn:near-ai-vscode:compliance' }]) }]
   ];
   for (const [label, files] of cases) assert.equal(findStatusFields(plant(files)).length, 1, label);
+});
+
+test('only OSCAL mapping provenance may carry its required lifecycle status, whose value the OSCAL schema validates', () => {
+  const mapping = { 'mapping-collection': { provenance: { status: 'draft' } } };
+  assert.deepEqual(findStatusFields(plant({ 'mappings/ours.json': mapping })), []);
+  const misplaced = { 'mapping-collection': { status: 'draft', provenance: { status: 'draft' } } };
+  assert.equal(findStatusFields(plant({ 'mappings/ours.json': misplaced })).length, 1);
+  const invalid = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'mappings', 'cgp-to-itsp10033.json'), 'utf8'));
+  invalid['mapping-collection'].provenance.status = 'assessment-met';
+  assert.equal(validateOscal(invalid, 'mapping-collection', { ours: true }).ok, false);
 });
 
 test('missing source folders and files are skipped by name, and files outside the source folders are not sources', () => {
