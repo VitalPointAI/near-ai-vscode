@@ -1,0 +1,25 @@
+{
+  "controls": [
+    "ac-03",
+    "ac-21",
+    "cgp-13",
+    "cgp-37-2",
+    "itar-120.56-a",
+    "itar-126.5"
+  ],
+  "gap": "X2",
+  "id": "x02",
+  "milestones": [
+    {
+      "phase": "45",
+      "title": "Signed export-person decisions decide who may hold a reserved compartment"
+    },
+    {
+      "phase": "71",
+      "title": "Person decisions issued as verifiable credentials"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Let only a signed export-person decision from the regime's official give a person a reserved compartment, and later issue those decisions as verifiable credentials.",
+  "title": "Clearances are self-declared; there is no signed person decision for export regimes"
+}

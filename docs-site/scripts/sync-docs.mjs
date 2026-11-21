@@ -87,6 +87,7 @@ function targetFor(source) {
     'docs/staff-env-packs.md': 'using/reference/staff-env-packs'
   };
   if (fixed[source]) return fixed[source];
+  if (source.startsWith('docs/security/')) return `security/documents/${source.slice('docs/security/'.length, -3)}`;
   if (source.startsWith('docs/decisions/')) return `architecture/decisions/${source.slice('docs/decisions/'.length, -3)}`;
   if (source.startsWith('docs/') && !source.startsWith('docs/references/')) return `using/reference/${source.slice('docs/'.length, -3)}`;
   if (source.startsWith('.planning/research/')) return `architecture/design/${source.slice('.planning/research/'.length, -3)}`;
@@ -104,7 +105,12 @@ const labels = {
   'CONTRIBUTING.md': 'Contributing',
   'docs/development-workflow.md': 'Development workflow',
   'docs/testing.md': 'Testing rules',
-  'docs-site/README.md': 'This documentation site'
+  'docs-site/README.md': 'This documentation site',
+  'docs/security/incident-response.md': 'Incident response plan',
+  'docs/security/threat-model.md': 'Threat model',
+  'docs/security/data-flow.md': 'Data flows',
+  'docs/security/crypto-inventory.md': 'Cryptography inventory',
+  'docs/security/controlled-goods-and-itar.md': 'Controlled goods and ITAR'
 };
 
 const problems = [];

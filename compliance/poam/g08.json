@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "cp-09",
+    "cp-10"
+  ],
+  "gap": "G8",
+  "id": "g08",
+  "milestones": [
+    {
+      "phase": "84",
+      "title": "Relay operator runbook with backup, restore and upgrade steps"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The hub's backup, restore and restore drill are documented; the relay's operator runbook adds its backups, restore and upgrades.",
+  "title": "No backup and recovery guidance for the messaging relay"
+}

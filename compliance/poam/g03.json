@@ -1,0 +1,19 @@
+{
+  "controls": [
+    "ac-17",
+    "ia-02",
+    "ia-09",
+    "sc-23"
+  ],
+  "gap": "G3",
+  "id": "g03",
+  "milestones": [
+    {
+      "phase": "75",
+      "title": "Inbound authenticity, allowlisting and channel manifests for the relay"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Authenticate every inbound request to the relay and allow only listed senders and channels, as planned for the relay.",
+  "title": "The messaging relay has no inbound authentication yet"
+}
