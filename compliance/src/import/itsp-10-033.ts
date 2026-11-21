@@ -74,7 +74,11 @@ export async function importSource(context: ImportContext) {
   if (context.lang === 'fr') throw new Error('French import requires authoritative English text');
   const page = pageReader(context);
   const english = await readEnglish(page);
-  const french = context.lang === 'both' ? await readFrench(page) : { controls: [], pages: [], failures: [] };
+  let french: Awaited<ReturnType<typeof readFrench>> = { controls: [], pages: [], failures: [] };
+  if (context.lang === 'both') {
+    try { french = await readFrench(page); }
+    catch (error) { french = { controls: [], pages: [], failures: [{ page: frenchLanding, reason: error instanceof Error ? error.message : String(error) }] }; }
+  }
   const pairing = pairFrench(english.controls, french.controls);
   pairing.pairs.forEach(({ english: base, french: translated }) => addFrenchParts(base, translated));
   const version = english.pages.find((entry) => entry.dateModified !== 'unknown')?.dateModified ?? 'unknown';

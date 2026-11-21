@@ -147,6 +147,18 @@ test('reports ids that exist in only one language and malformed French pages', a
   assert.deepEqual(report.frenchFailures, [{ page: 'https://www.cyber.gc.ca/fr/conseils/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/famille-xb-fr.html', reason: 'French page has no control headings' }]);
 });
 
+test('keeps the authoritative English catalogue when the French landing page is unavailable', async () => {
+  const fetcher: Fetcher = { get: async (url) => {
+    if (url === 'https://www.cyber.gc.ca/fr/conseils/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033') throw new Error('GET French landing returned 404');
+    const body = pages[url];
+    if (!body) throw new Error(`missing fixture for ${url}`);
+    return { url, body: Buffer.from(body), status: 200 };
+  } };
+  const result: any = await importSource({ fetcher, lang: 'both' });
+  assert.equal(result.catalog.catalog.groups[0].controls[0].id, 'xa-01');
+  assert.deepEqual(result.reports[0].content.frenchFailures, [{ page: 'https://www.cyber.gc.ca/fr/conseils/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033', reason: 'GET French landing returned 404' }]);
+});
+
 test('English-only imports contain no French parts', async () => {
   const result: any = await importSource({ offlinePages: pages, lang: 'en' });
   const control = result.catalog.catalog.groups.find((group: any) => group.id === 'xa').controls[0];
