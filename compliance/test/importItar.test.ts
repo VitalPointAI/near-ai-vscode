@@ -26,6 +26,12 @@ test('records the eCFR title dates and unofficial editorial notice', async () =>
   assert.match(JSON.stringify(result), /official CFR governs/i);
 });
 
+test('returns the eCFR dates in the ITAR import report contract', async () => {
+  const result = await importSource({ offlinePages: pages() }) as unknown as { reportFile: string; report: { titleAsOf: Record<string, string> } };
+  assert.equal(result.reportFile, 'import-reports/itar.json');
+  assert.deepEqual(result.report.titleAsOf, { '15': '2026-11-19', '22': '2026-11-20' });
+});
+
 test('reports a missing listed requirement rather than silently dropping it', async () => {
   const missingEar: Record<string, string> = pages(); delete missingEar[page15];
   await assert.rejects(() => importSource({ offlinePages: missingEar }), /EAR-734\.18-a5|ear-734\.18-a5/);

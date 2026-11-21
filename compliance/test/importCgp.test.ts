@@ -33,6 +33,13 @@ test('stamps source provenance and an accurate-reproduction notice', async () =>
   assert.match(JSON.stringify(result), /Accurate reproduction, not the official version\./);
 });
 
+test('returns the excluded Act definition in the CGP import report contract', async () => {
+  const result = await importSource({ offlinePages: cgpPages() }) as unknown as { reportFile: string; report: { excluded: Array<{ id: string; reason: string }>; sourceIds: string[] } };
+  assert.equal(result.reportFile, 'import-reports/cgp.json');
+  assert.deepEqual(result.report.excluded, [{ id: 'cgp-37-3', reason: 'definition' }]);
+  assert.deepEqual(result.report.sourceIds, ['defence-production-act', 'controlled-goods-regulations']);
+});
+
 test('the Controlled goods profile imports every generated CGP requirement', () => {
   const profile = JSON.parse(readFileSync(new URL('../profiles/overlay-cgp.json', import.meta.url), 'utf8')) as { profile: { imports: Array<{ href: string; 'include-all': Record<string, never> }> } };
   assert.deepEqual(profile.profile.imports, [{ href: '../catalogs/cgp/catalog.json', 'include-all': {} }]);

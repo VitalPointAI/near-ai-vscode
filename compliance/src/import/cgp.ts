@@ -87,5 +87,9 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
   }
   catalog.catalog.groups.push(dpa);
   catalog.catalog.groups.push(cgr);
-  return { sourceId: 'defence-production-act', file: 'catalogs/cgp/catalog.json', catalog };
+  return {
+    sourceId: 'defence-production-act', file: 'catalogs/cgp/catalog.json', catalog,
+    reportFile: 'import-reports/cgp.json',
+    report: { sourceIds: ['defence-production-act', 'controlled-goods-regulations'], excluded: [{ id: 'cgp-37-3', reason: 'definition' }] }
+  };
 }

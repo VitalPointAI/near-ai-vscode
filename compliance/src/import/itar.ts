@@ -38,5 +38,8 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     groups.get(id.startsWith('ear-') ? 'ear' : 'itar')!.controls.push({ ...newControl({ id, title: id.toUpperCase(), label: id.toUpperCase() }), links: [{ href: url, rel: 'reference' }], parts: [statementPart([prose])] });
   }
   catalog.catalog.groups.push(groups.get('itar')!, groups.get('ear')!);
-  return { sourceId: 'ecfr-title-22', file: 'catalogs/itar/catalog.json', catalog };
+  return {
+    sourceId: 'ecfr-title-22', file: 'catalogs/itar/catalog.json', catalog,
+    reportFile: 'import-reports/itar.json', report: { titleAsOf: { '15': dates[15], '22': dates[22] } }
+  };
 }
