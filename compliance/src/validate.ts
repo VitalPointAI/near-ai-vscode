@@ -1,12 +1,12 @@
 // Validators for OSCAL documents and our own files, the safe JSON loader, and the no-status walk (44-01, D-16, D-17, D-43, D-44).
 // OSCAL documents are checked offline against the vendored OSCAL 1.2.1 complete schema with ajv in non-strict mode (the OSCAL schemas use an
 // untyped `pattern`); our own schemas compile in strict mode with every error reported.
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { Ajv, type ErrorObject, type ValidateFunction } from 'ajv';
 import addFormatsModule from 'ajv-formats';
-import { OSCAL_VERSION } from './model.ts';
+import { ALLOWED_STATUS_FORM, FORBIDDEN_STATUS_NAMES, OSCAL_VERSION, SOURCE_DIRS, SOURCE_FILES } from './model.ts';
 
 // ajv-formats is CommonJS; its plugin is both module.exports and module.exports.default.
 const addFormats = addFormatsModule.default;
@@ -180,4 +180,75 @@ export function loadJson(file: string, options: { readonly maxBytes?: number } =
   } catch (error) {
     throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/** One status-like key or prop found in a source file. `file` is relative to the walked folder, with forward slashes. */
+export interface StatusField {
+  readonly file: string;
+  readonly path: string;
+  readonly name: string;
+  readonly kind: 'key' | 'prop';
+}
+
+/** The OSCAL namespace a standard prop may name explicitly; the withdrawal marker is the publisher's, so it is in no namespace of ours. */
+const OSCAL_STANDARD_NS = 'http://csrc.nist.gov/ns/oscal';
+
+const segment = (key: string | number): string => (typeof key === 'number' ? `[${key}]` : /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`);
+const isForbidden = (name: string): boolean => (FORBIDDEN_STATUS_NAMES as readonly string[]).includes(name.toLowerCase());
+
+/** True for the one allowed form: a `status` prop with value `withdrawn` on a control (an element of a `controls` array) in a file under catalogs/. */
+function isAllowedStatusProp(file: string, ownerTrail: readonly (string | number)[], prop: Record<string, unknown>): boolean {
+  if (file.split('/')[0] !== ALLOWED_STATUS_FORM.dir) return false;
+  if (prop.name !== ALLOWED_STATUS_FORM.propName || prop.value !== ALLOWED_STATUS_FORM.value) return false;
+  if (prop.ns !== undefined && prop.ns !== OSCAL_STANDARD_NS) return false;
+  const length = ownerTrail.length;
+  return length >= 2 && typeof ownerTrail[length - 1] === 'number' && ownerTrail[length - 2] === 'controls';
+}
+
+function walkValue(file: string, value: unknown, trail: (string | number)[], found: StatusField[]): void {
+  const at = (keys: readonly (string | number)[]): string => `$${keys.map(segment).join('')}`;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => walkValue(file, item, [...trail, index], found));
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (isForbidden(key)) found.push({ file, path: at([...trail, key]), name: key, kind: 'key' });
+    if (key === 'props' && Array.isArray(child)) {
+      child.forEach((prop, index) => {
+        if (typeof prop !== 'object' || prop === null || Array.isArray(prop)) return;
+        const name = (prop as Record<string, unknown>).name;
+        if (typeof name === 'string' && isForbidden(name) && !isAllowedStatusProp(file, trail, prop as Record<string, unknown>)) {
+          found.push({ file, path: at([...trail, 'props', index]), name, kind: 'prop' });
+        }
+      });
+    }
+    walkValue(file, child, [...trail, key], found);
+  }
+}
+
+function jsonFilesIn(dir: string): string[] {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
+  return readdirSync(dir, { recursive: true, encoding: 'utf8' })
+    .map((entry) => path.join(dir, entry))
+    .filter((file) => file.endsWith('.json') && statSync(file).isFile())
+    .sort();
+}
+
+/**
+ * Walks every `.json` file under each SOURCE_DIRS folder and each SOURCE_FILES file of `rootDir` (missing ones are skipped by name) and returns every
+ * object key and every `props[].name` in FORBIDDEN_STATUS_NAMES (any letter case) outside ALLOWED_STATUS_FORM, with file and JSON path (D-17, D-44).
+ * A source file that is not valid JSON throws, naming the file.
+ */
+export function findStatusFields(rootDir: string): StatusField[] {
+  const files = [
+    ...SOURCE_DIRS.flatMap((dir) => jsonFilesIn(path.join(rootDir, dir))),
+    ...SOURCE_FILES.map((file) => path.join(rootDir, file)).filter((file) => existsSync(file) && statSync(file).isFile())
+  ];
+  const found: StatusField[] = [];
+  for (const file of files) {
+    const relativeFile = path.relative(rootDir, file).split(path.sep).join('/');
+    walkValue(relativeFile, loadJson(file), [], found);
+  }
+  return found;
 }
