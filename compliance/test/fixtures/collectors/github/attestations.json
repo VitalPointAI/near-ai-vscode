@@ -1,0 +1,32 @@
+{
+  "attestations": [
+    {
+      "bundle": {
+        "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+        "verificationMaterial": {},
+        "dsseEnvelope": {
+          "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJzdWJqZWN0IjpbeyJuYW1lIjoiZXhhbXBsZS1leHRlbnNpb24tMC4wLjEudnNpeCIsImRpZ2VzdCI6eyJzaGEyNTYiOiI0NzhjZGQ1YjY3NGZhYjAyZDFjNzk3MmMzNDllNWIxNTRkZDJkZGYwY2U2NWYyNDkzOGNjNjdkZWQxMmU5YjkwIn19XSwicHJlZGljYXRlVHlwZSI6Imh0dHBzOi8vc2xzYS5kZXYvcHJvdmVuYW5jZS92MSIsInByZWRpY2F0ZSI6e319",
+          "payloadType": "application/vnd.in-toto+json",
+          "signatures": [{ "sig": "c3ludGhldGlj" }]
+        }
+      },
+      "repository_id": 1000001,
+      "bundle_url": "https://example.invalid/attestations/bundle/1",
+      "initiator": "example-initiator"
+    },
+    {
+      "bundle": {
+        "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+        "verificationMaterial": {},
+        "dsseEnvelope": {
+          "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJzdWJqZWN0IjpbeyJuYW1lIjoiZXhhbXBsZS1leHRlbnNpb24tMC4wLjEudnNpeCIsImRpZ2VzdCI6eyJzaGEyNTYiOiI0NzhjZGQ1YjY3NGZhYjAyZDFjNzk3MmMzNDllNWIxNTRkZDJkZGYwY2U2NWYyNDkzOGNjNjdkZWQxMmU5YjkwIn19XSwicHJlZGljYXRlVHlwZSI6Imh0dHBzOi8vY3ljbG9uZWR4Lm9yZy9ib20iLCJwcmVkaWNhdGUiOnt9fQ==",
+          "payloadType": "application/vnd.in-toto+json",
+          "signatures": [{ "sig": "c3ludGhldGlj" }]
+        }
+      },
+      "repository_id": 1000001,
+      "bundle_url": "https://example.invalid/attestations/bundle/2",
+      "initiator": "example-initiator"
+    }
+  ]
+}
