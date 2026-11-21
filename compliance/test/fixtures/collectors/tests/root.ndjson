@@ -1,0 +1,4 @@
+{"file":"dist/test/sample.test.js","path":[],"name":"sample passes","status":"passed","skip":null,"ms":0}
+{"file":"dist/test/sample.test.js","path":[],"name":"sample is skipped","status":"skipped","skip":"fixture skip","ms":0}
+{"file":"dist/test/sample.test.js","path":[],"name":"sample is still to do","status":"todo","skip":null,"ms":0}
+{"file":"dist/test/sample.test.js","path":["sample suite"],"name":"sample fails on purpose","status":"failed","skip":null,"ms":0}
