@@ -805,6 +805,47 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 |-------------|-------|
 | FND-01 … FND-09 | Phase 41: complete (2026-11-20, plans 41-01 to 41-15; tests in 41-VALIDATION.md) |
 
+## Phase 32.1 requirements: Get Started, guided setup with viable options (0.4.x)
+
+**Defined:** 2026-11-21 from `.planning/research/guided-onboarding/DESIGN.md` (section 16.2) and `.planning/research/portfolio-and-assignment/DESIGN.md` (section 5, ORG-01 to ORG-04), added when Phase 32.1 was planned.
+**Core value:** A person answers a few plain questions about their work, sees only the options that really work here and that your organization allows, and gets one recommendation with a reason.
+
+- [ ] **GUIDE-01**: The question set (kind of work, data, Canada, conditional follow-ups, pre-answered agent work), one per screen, with Not sure mapped to the stricter reading and explained; levels shown as scale name plus level; the kind of work remembered per person, the rest per project.
+- [ ] **GUIDE-02**: Answers map to a proposed project label on the policy's scales, applied through Set Label and only ever raised; Protected C, classified and contract work without approval stop with the plain sentence and no recommendation.
+- [ ] **GUIDE-03**: Viability per option (detected, configured, allowed, answered) for local servers on loopback, policy-named hosts and servers found on your network and approved, NEAR AI and the device class; only viable options can be chosen; the rest are listed apart with reason and fix; results go stale after 10 minutes or on a change.
+- [ ] **GUIDE-04**: A pure `recommend()` that calls `decideRoute` for every option and ranks with rules R1 to R9, giving one recommendation with a one-sentence reason; ruled-out options greyed with the gate's refusal sentence.
+- [ ] **GUIDE-05**: Option cards in plain words (where your text goes, who could see it, what is proven, what is not, cost, speed) ending in the trust line from `TrustFacts`; a choice other than the recommendation records a reason.
+- [ ] **GUIDE-06**: The policy wins: only verified bundles, nothing outside the bundle offered, who to ask from the `onboarding` v2 section or a generic contact, no policy edit or label lowering offered; rule changes only as proposals in the one policy editor; the `onboarding` section named in `requires` and parsed with strict key checks.
+- [ ] **GUIDE-07**: Check answers with a grouped list of what will change before Apply; re-run pre-filled showing only differences; partly applied runs finish on re-run; a hash-chained local audit record of answers, viability snapshot, bundle hash, options, recommendation, choice and changes; in a shared project the answers, label and mode as project-stream entries.
+- [ ] **GUIDE-08**: Landing by kind of work with a filtered checklist (including My computers and Share with people) and the first-run guarantee; Get Started as the only setup command, every other setup path folded in with old ids as hidden aliases, staff setup's "where" question and discovery `locality` removed; an invitation file opens Get Started prefilled; keyboard, screen reader and reduced motion on the webview kit.
+- [x] **ORG-01**: One pure mode table (`src/domain/org/modes.ts`): four modes, concept-key vocabulary and behaviour settings (built in Phase 41 as FND-07; first shown on screen by 32.1).
+- [x] **ORG-02**: The `people.organization` section of policy bundle v2, named in `requires` (built in Phase 41 as part of FND-01 and FND-07).
+- [x] **ORG-03**: `term()` used by every joining and organization string, checked by the copy lint with its baseline (built in Phase 41 as FND-07).
+- [ ] **ORG-04**: Get Started suggests a mode from "kind of work" on the check-answers page, shows "Set by your organization" when fixed, and records the choice.
+
+| Requirement | Phase |
+|-------------|-------|
+| GUIDE-01 … GUIDE-08 | Phase 32.1: planned |
+| ORG-01 … ORG-03 | Phase 41: complete (FND-07); success criterion 7 of Phase 32.1 checks them on screen |
+| ORG-04 | Phase 32.1: planned |
+
+## Phase 32.2 requirements: Local model manager (0.4.x)
+
+**Defined:** 2026-11-21 from `.planning/research/guided-onboarding/DESIGN.md` (section 16.3), added when Phase 32.2 was planned.
+**Core value:** A person sees what local models this machine can run and how fast, installs the recommended Western models safely, and assigns them to jobs, so the guide can offer local AI.
+
+- [ ] **LMOD-01**: Hardware detection with unified memory as a first-class device class (Strix Halo GTT, GB10 via meminfo, Apple working set), fixed tools only, no shell, timeouts and output caps.
+- [ ] **LMOD-02**: Server adapters (each a `ModelEndpoint`, plus `LocalServerAdmin` where the server can install) for Ollama, llama.cpp server, Lemonade, LM Studio, vLLM, NVIDIA NIM, LocalAI and Jan, identified by signature endpoints on loopback, policy-named hosts and approved found servers, install where supported and list-only otherwise.
+- [ ] **LMOD-03**: Fit bands and speed estimates per artifact from GGUF header ranged reads and the bandwidth formula, labelled as estimates; an optional benchmark replaces them with measured numbers per machine, server and artifact.
+- [ ] **LMOD-04**: Recommendations by job and kind of work from passports and the signed local catalogue (shipped, replaceable by the policy's `models.localCatalogue`); PRC-origin and passport-less models only into the research workspace's list.
+- [ ] **LMOD-05**: Install with licence acceptance, disk check, HTTPS from pinned sources or your organization's mirror, sha256 verified before the file is visible to the server, safetensors or GGUF only; update offered only within the passport; remove after confirmation naming the jobs affected.
+- [ ] **LMOD-06**: Models by job for fast, standard, deep, embeddings and safety within the policy's defaults; a person's own setting kept; the tool-calling and embedding tests before a job's model counts as viable.
+- [ ] **LMOD-07**: Local audit records for install, update, remove, assignment and benchmark; SECURITY.md and README sections for local models; the page on the webview kit.
+
+| Requirement | Phase |
+|-------------|-------|
+| LMOD-01 … LMOD-07 | Phase 32.2: planned |
+
 ## Phase 44 requirements: Accreditation evidence and compliance dashboard (0.4.x)
 
 **Defined:** 2026-11-21 from `.planning/research/compliance-dashboard/DESIGN.md` (section 18) and `CGP-ITAR.md` (sections 10 to 14), added when Phase 44 was planned.
