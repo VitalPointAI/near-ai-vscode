@@ -775,13 +775,14 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **MUS-10**: Git per-writer refs, sealed bundle files and LAN peer links, converging with the hub.
 - [ ] **MUS-11**: Shared run summaries and claims; observation slices with coalescing and budgets.
 - [ ] **MUS-12**: Standing watches on the hub under draft-only, rate, spend, route and kill-switch guards.
+- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1; POST-02 to POST-08 are added when Phase 33.1 is planned).
 
 | Requirement | Phase |
 |-------------|-------|
 | MUS-01 … MUS-03 | Phase 30 |
 | MUS-04 … MUS-06 | Phase 31 |
 | MUS-07, MUS-08 | Phase 32 |
-| MUS-09 | Phase 33 |
+| MUS-09, POST-01 | Phase 33 |
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 

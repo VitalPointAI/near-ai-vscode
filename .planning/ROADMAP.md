@@ -261,8 +261,8 @@ Plans:
 
 ### Phase 33: Live multi-user staff projects
 **Goal**: Several people work one staff project at the same time from their own machines, see each other and each other's edits live, and decide products with signed, verifiable decisions.
-**Depends on**: Phases 30, 31 and 32
-**Requirements**: MUS-09
+**Depends on**: Phases 30, 31 and 32; Phase 41 (trust line, `term()`, copy lint, architecture test)
+**Requirements**: MUS-09, POST-01
 **Success Criteria** (what must be TRUE):
   1. Product editors are bound to the shared text: local and remote edits interleave without echo, undo removes only your own edits, other people's cursors show with names, and Show Who Wrote This attributes every part to a person or to an agent on a named person's machine. (MUS-09)
   2. The Staff Room shows who is online and what they work on, the sync control shows every connection state in one plain sentence with one action, and an offline banner explains that work is kept and may become contested. (MUS-09)
