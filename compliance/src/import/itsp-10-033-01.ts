@@ -5,7 +5,7 @@ import { createFetcher, type Fetcher } from './lib/fetch.ts';
 
 type HtmlNode = { readonly tagName?: string; readonly childNodes?: readonly HtmlNode[]; readonly value?: string };
 export interface ProfileRow { readonly control: string; readonly value: string; readonly placeholder?: string; readonly note?: string }
-export interface ImportReport { readonly rows: readonly ProfileRow[]; readonly counts: Readonly<Record<string, number>>; readonly differences: readonly { readonly control: string; readonly en: string; readonly fr: string }[] }
+export interface ImportReport { readonly rows: readonly ProfileRow[]; readonly counts: Readonly<Record<string, number>>; readonly differences: readonly { readonly control: string; readonly en: string; readonly fr: string }[]; readonly frenchFailures: readonly { readonly page: string; readonly reason: string }[] }
 export interface TailoringRemoval { readonly control: string; readonly reason: string; readonly reviewer: string; readonly reviewedAt: string }
 
 const cellText = (node: HtmlNode): string => (typeof node.value === 'string' ? node.value : (node.childNodes ?? []).map(cellText).join('')).replace(/\s+/g, ' ').trim();
@@ -68,7 +68,8 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
   const counts: Record<string, number> = {};
   for (const row of rows) counts[row.value] = (counts[row.value] ?? 0) + 1;
   const frenchHtml = context.lang === 'en' ? undefined : await read('fr', frenchPage);
-  const french = frenchHtml ? profileRows(frenchHtml, 'fr') : [];
+  let french: ProfileRow[] = []; const frenchFailures: { page: string; reason: string }[] = [];
+  if (frenchHtml) try { french = profileRows(frenchHtml, 'fr'); } catch (error) { frenchFailures.push({ page: frenchPage, reason: error instanceof Error ? error.message : String(error) }); }
   const frenchValues: Readonly<Record<string, string>> = {
     'Sélectionné': 'Selected', 'Non sélectionné': 'Not selected',
     'Déployé dans l’ensemble de l’organisation. Non associé à une base de référence.': 'Deployed organization-wide. Not associated with baseline.',
@@ -80,7 +81,7 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     if (!en || !fr) throw new Error(`ITSP.10.033-01 ${row.control}: unknown French selection value ${JSON.stringify(row.value)}`);
     return en.value === fr ? [] : [{ control: row.control, en: en.value, fr }];
   });
-  return { sourceId: 'itsp-10-033-01', catalog, file: 'profiles/itsp-10-033-01-medium.json', reportFile: 'import-reports/itsp-10-033-01.json', report: { rows, counts, differences } };
+  return { sourceId: 'itsp-10-033-01', catalog, file: 'profiles/itsp-10-033-01-medium.json', reportFile: 'import-reports/itsp-10-033-01.json', report: { rows, counts, differences, frenchFailures } };
 }
 
 /** Builds the derived Protected A profile only from reviewed tailoring removals. */
