@@ -26,6 +26,13 @@
 // lead, and checked here against the import's head, count and file hash), and the product carries IMPORTED_APPROVAL_TEXT for any approval it holds.
 // Once acts are written on top (Phase 33), the fold's own projection above applies.
 //
+// Label cells (plan 32-10; D-17, D-20, D-22 revised, D-23): a conversion keeps each product in the cell for its label, the whole product ledger in the
+// lead-only legacy cell, and in each label cell a products import of scope cell carrying only that cell's products' lines. So the imported history
+// comes from the whole import when this machine holds it (importOf), and otherwise from each cell import it holds (scopedImportsOf), every line of it
+// verified on its own (replayScopedImport). A member below a cell holds neither its import nor its products, and sees exactly the cells it holds. A
+// product shows its cell's label (cellLabels), and a version whose label is not its cell's is marked tampered. A 0.4.35 preview project keeps its
+// products in the base cell, which cellLabels never names, so it is shown as before.
+//
 // writeProjections, at the end of this file, is the one function here that touches files: it writes the product files and the passthrough ledgers
 // (decisions, calculator, wargame) a migrated project keeps at their usual paths, through writeIfUnchanged.
 import { createHash } from 'node:crypto';
@@ -33,6 +40,7 @@ import * as path from 'node:path';
 import { fingerprintOf } from '../../domain/team/canonical';
 import type { Actor } from '../../domain/replica/entry';
 import type { FoldResult } from '../../domain/replica/fold';
+import { DEFAULT_PRODUCT_LABEL } from '../../domain/replica/productCells';
 import type { ProjectImport, ProjectOutput } from '../../domain/replica/projectFold';
 import type { ProductTextOutput } from '../../domain/replica/textFold';
 import type { RosterView } from '../../domain/replica/rosterView';
@@ -72,12 +80,18 @@ export interface ProjectionInput {
   readonly roster: RosterView;
   /** The text of each version the caller has opened, by replica version hash. Needed only for versions with pins (see the file comment). */
   readonly texts?: ReadonlyMap<string, string>;
+  /**
+   * The label of each label cell the caller holds, by stream, as people read it (labelCells.ts cellLabelTexts). A product in one of them is shown
+   * with that label and must carry it; the base cell (a 0.4.35 preview project's products) has no entry and is not checked.
+   */
+  readonly cellLabels?: ReadonlyMap<string, string>;
 }
 
 /** Why the projection cannot vouch for a product, in the words a person reads. */
 export const PROJECTION_PROBLEMS = {
   disagrees: 'The shared history of this product holds steps that today\'s product ledger cannot show one after another (for example gate verdicts or decisions made at the same time that disagree), so this view cannot vouch for it.',
-  unreadable: 'A step in the shared history of this product could not be turned into a product ledger entry (its header, a pin or its time is missing), so this view cannot vouch for it.'
+  unreadable: 'A step in the shared history of this product could not be turned into a product ledger entry (its header, a pin or its time is missing), so this view cannot vouch for it.',
+  'label-mismatch': 'This product\'s label is not the label of the part of the project it is kept in, so this view cannot vouch for it.'
 } as const;
 
 /** The projection's view of one admitted entry. */
@@ -276,7 +290,7 @@ function projectProduct(product: ProductVersions, context: Context): ProductProj
     return { stream: product.stream, state: done, steps };
   } catch (error) {
     if (!(error instanceof ProjectionProblem)) throw error;
-    return { stream: product.stream, state: fallback(product, state, hashes, metas, error.reason, roster), steps: [] };
+    return { stream: product.stream, state: fallback(product, state, hashes, metas, error.reason, roster, context.input.cellLabels?.get(product.stream)), steps: [] };
   }
 }
 
@@ -297,7 +311,7 @@ function agreesWithFold(state: ProductState, product: ProductVersions): boolean 
 }
 
 /** A product the projection cannot vouch for: the fold's own record of its newest version, with no gate mark or request claimed, marked tampered. */
-function fallback(product: ProductVersions, partial: ProductState | undefined, hashes: ReadonlyMap<string, string>, metas: ReadonlyMap<number, ProductMetaInput>, reason: keyof typeof PROJECTION_PROBLEMS, roster: RosterView): ProductState {
+function fallback(product: ProductVersions, partial: ProductState | undefined, hashes: ReadonlyMap<string, string>, metas: ReadonlyMap<number, ProductMetaInput>, reason: keyof typeof PROJECTION_PROBLEMS, roster: RosterView, cellLabel?: string): ProductState {
   const newest = product.records[product.records.length - 1];
   const legacy = (hash: string): string => hashes.get(hash) ?? hash;
   const fold = newest.release;
@@ -310,8 +324,10 @@ function fallback(product: ProductVersions, partial: ProductState | undefined, h
     ...(fold.rejection === undefined ? {} : { rejection: { ...fold.rejection, by: withFingerprint(fold.rejection.by, roster) } }),
     ...(fold.withdrawal === undefined ? {} : { withdrawal: { ...fold.withdrawal, by: withFingerprint(fold.withdrawal.by, roster) } })
   };
-  // A header that cannot be read still needs a meta of today's shape; the first value of each list stands in, and the product reads as tampered.
-  const meta = metas.get(newest.number) ?? { kind: PRODUCT_KINDS[0], label: 'org/Internal', profile: STAFF_PROFILE_IDS[0], level: STAFF_LEVELS[0], dependsOn: [] };
+  // A header that cannot be read still needs a meta of today's shape; the first value of each list stands in, the label is the cell's (its scale and
+  // level, as today's ledger keeps a label) or today's default when the cell's label is not known here, and the product reads as tampered.
+  const label = cellLabel === undefined ? DEFAULT_PRODUCT_LABEL : scaleLevel(cellLabel);
+  const meta = metas.get(newest.number) ?? { kind: PRODUCT_KINDS[0], label, profile: STAFF_PROFILE_IDS[0], level: STAFF_LEVELS[0], dependsOn: [] } as ProductMetaInput;
   return { record, meta, history: partial?.history ?? [], approvedVersions: partial?.approvedVersions ?? [], older: partial?.older ?? [], tampered: PROJECTION_PROBLEMS[reason] };
 }
 
@@ -332,7 +348,24 @@ function projectAll(input: ProjectionInput): Map<string, ProductProjection> {
     if (projected !== undefined) out.set(product.product, projected);
   }
   overlayImported(input, products, out);
+  checkCellLabels(input, out);
   return out;
+}
+
+/** scale/level of a label text ("org/Confidential//REL CAN" gives "org/Confidential"): what today's ledger keeps of a label. */
+const scaleLevel = (text: string): string => text.split('//')[0];
+
+/**
+ * A product kept in a label cell must carry that cell's label (D-17): one whose shown label (its version's, or its imported ledger's) is not the cell's,
+ * on scale and level, is marked tampered and sends no events. A stream cellLabels does not name (the base cell, a cell not held) is not checked.
+ */
+function checkCellLabels(input: ProjectionInput, out: Map<string, ProductProjection>): void {
+  if (input.cellLabels === undefined) return;
+  for (const [name, item] of out) {
+    const cell = input.cellLabels.get(item.stream);
+    if (cell === undefined || item.state.tampered !== undefined || scaleLevel(item.state.meta.label) === scaleLevel(cell)) continue;
+    out.set(name, { ...item, state: { ...item.state, tampered: PROJECTION_PROBLEMS['label-mismatch'] }, steps: [] });
+  }
 }
 
 // ---- Imported products (31-19) -----------------------------------------------------------------------------------------------------------------
@@ -380,32 +413,73 @@ export function projectImportedLedger(importRecord: ProjectImport, bytes: Buffer
   return replay;
 }
 
-/** The first import of a ledger in the fold (streams in fold order, imports as the project family lists them). */
+/**
+ * The first whole import of a ledger in the fold (streams in fold order, imports as the project family lists them): scope whole, as every Phase 31
+ * import reads. A cell import (D-20) carries only some of the ledger's lines and is never the ledger; see scopedImportsOf.
+ */
 export function importOf(fold: FoldResult, ledger: string): ProjectImport | undefined {
   for (const stream of (fold.families.project as ProjectOutput | undefined) ?? []) {
-    const found = stream.imports.find((item) => item.ledger === ledger);
+    const found = stream.imports.find((item) => item.ledger === ledger && item.scope !== 'cell');
     if (found !== undefined) return found;
   }
   return undefined;
 }
 
-/** Does the fold hold nothing for this product beyond what was reconstructed from the import (at most one version, citing it, and no act)? */
-function onlyImported(product: ProductVersions | undefined, entry: string, entries: ReadonlyMap<string, ProjectionEntry>): boolean {
-  if (product === undefined) return true;
-  if (product.versions.length > 1 || product.records.some((record) => record.acts.length > 0)) return false;
-  return product.versions.every((view) => entries.get(view.entry)?.deps?.includes(entry) === true);
+/** A cell import of a ledger (D-20) and the stream (the label cell) it is kept in. */
+export interface ScopedImport { readonly stream: string; readonly record: ProjectImport }
+
+/** Every cell import of a ledger in the fold, with its stream, in fold order: the ones this machine holds. */
+export function scopedImportsOf(fold: FoldResult, ledger: string): ScopedImport[] {
+  const out: ScopedImport[] = [];
+  for (const stream of (fold.families.project as ProjectOutput | undefined) ?? []) {
+    for (const record of stream.imports) if (record.ledger === ledger && record.scope === 'cell') out.push({ stream: stream.stream, record });
+  }
+  return out;
 }
 
-function overlayImported(input: ProjectionInput, products: readonly ProductVersions[], out: Map<string, ProductProjection>): void {
-  const record = importOf(input.fold, IMPORTED_PRODUCTS_LEDGER);
-  if (record === undefined) return;
-  const bytes = importedFile(record, input.entries);
-  const replay = bytes === undefined ? undefined : projectImportedLedger(record, bytes);
-  if (replay === undefined) return;
-  const stream = (input.fold.families.project as ProjectOutput).find((item) => item.imports.some((found) => found.entry === record.entry))?.stream ?? '';
+/**
+ * Today's state of the products a cell import carries (D-20): its file must match the hash the fold lists and hold exactly `lines` lines, every line
+ * must verify on its own (each is a signed ledger entry, every key taken as the lead found it at import) and read as a ledger entry, a person's step
+ * must be signed by that person's own key as replayLedger requires, and the seqs must strictly rise. The lines are a part of the ledger, so there is no
+ * prev chain to follow; each product's entries are replayed through today's apply() in order, which gives the same state as the whole ledger gives it.
+ * The head is the whole ledger's, as the import records it. Undefined when any of that fails.
+ */
+export function replayScopedImport(record: ProjectImport, bytes: Buffer): LedgerReplay | undefined {
+  if (record.scope !== 'cell' || record.lines === undefined) return undefined;
+  if (record.fileHash === undefined || createHash('sha256').update(bytes).digest('hex') !== record.fileHash) return undefined;
+  const lines = ledgerLinesOf(bytes);
+  if (lines.length !== record.lines) return undefined;
+  const products = new Map<string, ProductState>();
+  let last = -1;
+  for (const envelope of lines) {
+    const verdict = verifyPayload(envelope, { purpose: 'staff-ledger', status: AS_VERIFIED_AT_IMPORT });
+    if (!verdict.ok) return undefined;
+    const entry = parseLedgerEntry(verdict.payload);
+    if (entry === undefined || entry.seq <= last || entry.seq >= record.count) return undefined;
+    if (entry.actor.kind === 'person' && entry.actor.deviceFingerprint !== verdict.signer.fingerprint) return undefined;
+    const applied = apply(products.get(entry.product), entry);
+    if (applied === undefined) return undefined;
+    products.set(entry.product, applied);
+    last = entry.seq;
+  }
+  return { products, entries: lines.length, head: record.legacyHead };
+}
+
+/**
+ * Does the fold hold nothing for this product beyond what was reconstructed from an import of its ledger (at most one version, citing one of `entries`,
+ * and no act)? A reconstructed version cites its cell's import, which may be another import of the ledger than the one the projection reads.
+ */
+function onlyImported(product: ProductVersions | undefined, imports: ReadonlySet<string>, entries: ReadonlyMap<string, ProjectionEntry>): boolean {
+  if (product === undefined) return true;
+  if (product.versions.length > 1 || product.records.some((record) => record.acts.length > 0)) return false;
+  return product.versions.every((view) => entries.get(view.entry)?.deps?.some((dep) => imports.has(dep)) === true);
+}
+
+/** Shows each product of an imported ledger replay whose shared history holds nothing more than its reconstruction. */
+function overlayReplay(input: ProjectionInput, products: readonly ProductVersions[], out: Map<string, ProductProjection>, record: ProjectImport, replay: LedgerReplay, stream: string, imports: ReadonlySet<string>): void {
   for (const [name, state] of replay.products) {
     const folded = products.find((product) => product.product === name);
-    if (!onlyImported(folded, record.entry, input.entries)) continue;
+    if (!onlyImported(folded, imports, input.entries)) continue;
     const imported: ImportedProduct = {
       ledger: record.ledger,
       entry: record.entry,
@@ -413,6 +487,31 @@ function overlayImported(input: ProjectionInput, products: readonly ProductVersi
     };
     const shown: ProjectedProductState = { ...state, imported };
     out.set(name, { stream: folded?.stream ?? stream, state: shown, steps: [], legacyEntries: replay.entries });
+  }
+}
+
+/**
+ * The imported history (31-19, D-20): from the whole product ledger when this machine holds it (the lead, in the legacy cell, or a Phase 31 import),
+ * else from each cell import it holds, each showing only its own products.
+ */
+function overlayImported(input: ProjectionInput, products: readonly ProductVersions[], out: Map<string, ProductProjection>): void {
+  const outputs = (input.fold.families.project as ProjectOutput | undefined) ?? [];
+  const imports = new Set(outputs.flatMap((item) => item.imports.filter((found) => found.ledger === IMPORTED_PRODUCTS_LEDGER).map((found) => found.entry)));
+  const record = importOf(input.fold, IMPORTED_PRODUCTS_LEDGER);
+  if (record !== undefined) {
+    const bytes = importedFile(record, input.entries);
+    const replay = bytes === undefined ? undefined : projectImportedLedger(record, bytes);
+    if (replay === undefined) return;
+    const stream = outputs.find((item) => item.imports.some((found) => found.entry === record.entry))?.stream ?? '';
+    overlayReplay(input, products, out, record, replay, stream, imports);
+    return;
+  }
+  for (const scoped of scopedImportsOf(input.fold, IMPORTED_PRODUCTS_LEDGER)) {
+    const bytes = importedFile(scoped.record, input.entries);
+    const replay = bytes === undefined ? undefined : replayScopedImport(scoped.record, bytes);
+    if (replay === undefined) continue;
+    // Only this import's own entry vouches for its products: a version citing another cell's import is not shown from this one.
+    overlayReplay(input, products, out, scoped.record, replay, scoped.stream, new Set([scoped.record.entry]));
   }
 }
 

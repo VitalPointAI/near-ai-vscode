@@ -28,9 +28,25 @@
 //   entry the check refuses is still written, held with its reason in the signed mark, and left out of entries(); it is never silently dropped. An
 //   entry the check could not run on yet (its key or its blob is not here), and an entry found on disk that no check has passed (copied in by hand,
 //   or written by another install), waits out of the fold until recheck() passes it (31-REVIEW MJ-07).
+// - Refused entries are bounded (32-CONTEXT D-14), so one device cannot grow this device's mark until it can no longer be written: at most
+//   MAX_REFUSED_PER_WRITER held per writer per stream, the last of them held with FLOODED_REASON as that writer's one flooded line. From then on none
+//   of that writer's entries from outside in that stream is written or checked (counted in IngestResult.flooded); everyone else's still are. The
+//   held list never names more than MAX_MARK_LISTED: the entry that fills it is its writer's flooded line, and past that a refused entry is not
+//   kept. A new entry that would wait past MAX_MARK_WAITING is not written (IngestResult.deferred) and is taken when it comes again.
 // - The store never deletes an entry or a blob and never rewrites a line (P-31-17). No private key or secret is ever written here (P-31-18).
 // - Starting again (startAgain, person-confirmed, 31-REVIEW MJ-08) moves the whole folder aside, never deletes it, and starts a new one with this
 //   device's own signed entries, the grants, the blobs and project.json carried over, under a new mark.
+// - Starting again is resumable (32-CONTEXT D-03, D-06). Its steps, each followed by a sync of .planning/staff so a power cut keeps it:
+//     built           the new store is built in .planning/staff/replica.new-<random> and synced, folder by folder;
+//     intent-written  .planning/staff/replica.start-again.json names the folder to set aside, the temporary folder and the source;
+//     set-aside       the store folder is renamed to replica.set-aside-<time> (skipped when there was no store folder);
+//     moved-in        the temporary folder is renamed to replica;
+//     marked          this device's mark is replaced by one for the new store; then the intent is removed.
+//   Every open that finds the intent finishes the job first (finishStartAgain), whatever step it stopped at, and never starts an empty store. Every
+//   locked operation runs under the .planning/staff lock (replica.start-again.lock) as well, so nothing makes or reads the store folder while a
+//   Start Again holds it.
+// - A store folder that is gone while this device's mark remains, or while a folder set aside beside it holds project.json, is refused rolled-back
+//   and never made again empty: Start Again carries from the newest set-aside folder whose own entries verify, and says which one it used.
 import { createHash, randomBytes } from 'node:crypto';
 import type { Hash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -51,8 +67,8 @@ import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import { MAX_PAYLOAD_BYTES } from '../../domain/team/signedPayload';
 import { GRANT_MAX_BYTES } from '../../domain/replica/cellKeys';
 import { isRecord } from '../../domain/team/validate';
-import { readWhole } from '../staffFiles';
-import { MARK_LISTS_DIR, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
+import { readWhole, syncFolder } from '../staffFiles';
+import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 
 /** The cross-window lock file inside the store folder. */
@@ -70,6 +86,28 @@ const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 
 /** The command that starts this computer's shared history again, as the refusals name it. */
 export const START_AGAIN_COMMAND_TITLE = 'Staff: Start This Computer\'s Shared History Again';
+/** The record of an unfinished Start Again, beside the store folder (relative to the project, forward slashes). */
+export const START_AGAIN_INTENT_FILE = `${REPLICA_DIR}.start-again.json`;
+/** The lock file in .planning/staff that Start Again, its recovery and every locked store operation take first. */
+export const START_AGAIN_LOCK_FILE = 'replica.start-again.lock';
+/** The steps of Start Again, in order; a test probe runs after each and can stop the process there. */
+export const START_AGAIN_STEPS = ['built', 'intent-written', 'set-aside', 'moved-in', 'marked'] as const;
+export type StartAgainStep = typeof START_AGAIN_STEPS[number];
+/** For tests only: awaited after each step of Start Again. */
+export type StartAgainProbe = (step: StartAgainStep) => Promise<void> | void;
+let startAgainProbe: StartAgainProbe | undefined;
+export function setStartAgainProbe(next: StartAgainProbe | undefined): void { startAgainProbe = next; }
+
+const STAFF_PARTS = path.posix.dirname(REPLICA_DIR).split('/');
+const STORE_PARTS = REPLICA_DIR.split('/');
+const STORE_NAME = path.posix.basename(REPLICA_DIR);
+// The only folder names an intent may give, and the only folders Start Again reads beside the store. Exact, so no name can leave .planning/staff.
+const SET_ASIDE_NAME = /^replica\.set-aside-(\d{8}-\d{6})(?:-(\d+))?$/;
+const TEMPORARY_NAME = /^replica\.new-[0-9a-f]{12}$/;
+const INTENT_MAX_BYTES = 4 * 1024;
+// A .planning/staff the user cannot write: no Start Again can run there, so a locked operation runs without its lock (only when no intent is there).
+const UNWRITABLE = new Set(['EACCES', 'EPERM', 'EROFS']);
+
 const START_AGAIN_STEP = `run ${START_AGAIN_COMMAND_TITLE}. It sets this copy aside without deleting anything, and your staff lead can then send you a new welcome file to bring the shared history back.`;
 
 // Closed list of refusals, in plain words. No message names a key, a secret or a full hash, and none uses an em-dash.
@@ -82,7 +120,9 @@ export const STORE_REFUSALS = {
   symlink: 'A folder or file on the way to the shared history in this project is a symbolic link, so nothing was read or written through it. Nothing was changed. Replace it with a real folder or file.',
   unreadable: 'Part of the shared history in this project folder could not be read, so it was not opened. Nothing was changed. Check that the folder and its files can be read by your user account.',
   'not-a-store': 'The shared history folder in this project is not a folder this extension made, so it was not opened. Nothing was changed.',
-  'out-of-order': 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.'
+  'out-of-order': 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.',
+  'start-again-unfinished': 'Starting this computer\'s shared history again did not finish, so the shared history was not opened. Nothing was deleted. Open the project again to finish it. If this message comes back, check that the folders in .planning/staff can be read and written by your user account.',
+  'nothing-to-carry': 'There is no copy of this project\'s shared history on this computer to start again from, so nothing was changed. Ask your staff lead for a new welcome file and open it with Staff: Join Staff Project.'
 } as const;
 export type StoreRefusal = keyof typeof STORE_REFUSALS;
 export interface StoreRefused { refused: StoreRefusal; message: string }
@@ -96,6 +136,11 @@ export interface ReplicaStoreDeps {
   signer: () => Promise<PayloadSigner>;
   keyStatus: () => Promise<KeyStatusLookup>;
   now?: () => Date;
+  /**
+   * For tests only: smaller bounds than MAX_REFUSED_PER_WRITER, MAX_MARK_LISTED and MAX_MARK_WAITING, so a test need not build tens of thousands of
+   * entries. Production passes none. A value above its constant is ignored, so the mark this store writes always reads back.
+   */
+  limits?: Partial<{ refusedPerWriter: number; heldPerStore: number; waiting: number }>;
 }
 
 export type AppendResult = { ok: true; written: number } | StoreRefused;
@@ -124,12 +169,32 @@ export interface IngestResult {
   blobsAdded: number;
   /** Blobs not written: over BLOB_MAX_BYTES, or bytes that do not match their name. */
   blobsRefused: number;
+  /**
+   * New entries not written because their writer is flooded in their stream (D-14): it sent MAX_REFUSED_PER_WRITER refused entries, the last held as
+   * its flooded line. A refused entry the held list has no room for is not written and counted here too.
+   */
+  flooded: number;
+  /** New entries not written this time, because the waiting list is full or no check ran on them: they are taken when delivered again. */
+  deferred: number;
 }
+
+/**
+ * The most refused entries from outside one writer that stay held in one stream (32-CONTEXT D-14). The last of them is held with FLOODED_REASON, the
+ * writer's one flooded line; from then on none of that writer's entries from outside in that stream is written.
+ */
+export const MAX_REFUSED_PER_WRITER = 1_000;
+/** The held reason of a writer's flooded line. A check's own reason that reads the same is stored with "check: " in front (T-32-20). */
+export const FLOODED_REASON = 'flooded: too many refused changes from this device in this part of the project; later ones are not kept';
+/** What the Staff Room says of a flooded writer (Phase 33). */
+export const FLOODED_TEXT = 'Too many refused changes arrived from one device. They were not kept.';
 
 export interface RecheckResult { ok: true; passed: number; held: number; waiting: number }
 
-/** What starting again did: where the old folder was set aside (relative to the project, with forward slashes) and how many entries were carried. */
-export interface StartedAgain { ok: true; setAside: string; carried: number }
+/**
+ * What starting again did: where the old folder was set aside (relative to the project, with forward slashes; null when there was no store folder to
+ * set aside) and how many entries were carried. carriedFrom names the folder carried from when it was not the one just set aside.
+ */
+export interface StartedAgain { ok: true; setAside: string | null; carried: number; carriedFrom?: string }
 
 /** A signed grant or checkpoint file read back, or the file named with why it could not be. Unreadable files are listed, never dropped silently. */
 export interface StoredGrant { cell: string; epoch: number; hash: string; signed: unknown }
@@ -158,7 +223,9 @@ async function runCheck(check: ForeignCheck, entry: SealedEntry): Promise<{ kind
   }
   if (isRecord(verdict) && verdict.ok === true) return { kind: 'pass' };
   if (isRecord(verdict) && verdict.ok === false && (verdict.awaiting === 'key' || verdict.awaiting === 'blob')) return { kind: 'wait', reason: verdict.awaiting === 'key' ? 'awaiting-key' : 'awaiting-blob' };
-  return { kind: 'held', reason: heldReason(isRecord(verdict) ? verdict.reason : undefined) };
+  const reason = heldReason(isRecord(verdict) ? verdict.reason : undefined);
+  // Only the store writes a flooded line (T-32-20): a check's reason that reads the same is kept with a prefix, so it never floods a writer.
+  return { kind: 'held', reason: reason === FLOODED_REASON ? heldReason(`check: ${reason}`) : reason };
 }
 
 function refusal(reason: StoreRefusal): StoreRefused {
@@ -335,6 +402,180 @@ async function writeNewFile(file: string, bytes: Buffer | string): Promise<void>
   }
 }
 
+// ---- Start Again: the intent, the folders beside the store, the .planning/staff lock -----------------------------------------------------------
+
+/** What Start Again recorded before its first rename: folder names only (basenames in .planning/staff), the writer and counts. */
+interface StartAgainIntent {
+  v: 1;
+  writer: string;
+  /** The name the store folder is set aside under; null when there was no store folder to set aside. */
+  setAside: string | null;
+  temporary: string;
+  /** The folder carried from: the store folder itself, or a folder set aside or left beside it. */
+  source: string;
+  carried: number;
+  grants: number;
+  blobs: number;
+}
+
+const INTENT_KEYS = ['blobs', 'carried', 'grants', 'setAside', 'source', 'temporary', 'v', 'writer'];
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** The intent read from untrusted text, or undefined when it is not exactly the shape this version writes (T-32-01). */
+function parseIntent(text: string): StartAgainIntent | undefined {
+  let value: unknown;
+  try { value = JSON.parse(text) as unknown; } catch { return undefined; }
+  if (!isRecord(value) || Object.keys(value).sort().join(',') !== INTENT_KEYS.join(',') || value.v !== 1) return undefined;
+  const { writer, setAside, temporary, source, carried, grants, blobs } = value;
+  if (typeof writer !== 'string' || !HASH_PATTERN.test(writer)) return undefined;
+  if (setAside !== null && (typeof setAside !== 'string' || !SET_ASIDE_NAME.test(setAside))) return undefined;
+  if (typeof temporary !== 'string' || !TEMPORARY_NAME.test(temporary)) return undefined;
+  if (typeof source !== 'string' || source === temporary || !(source === STORE_NAME || SET_ASIDE_NAME.test(source) || TEMPORARY_NAME.test(source))) return undefined;
+  if (source === STORE_NAME && setAside === null) return undefined;
+  if (!isCount(carried) || !isCount(grants) || !isCount(blobs)) return undefined;
+  return { v: 1, writer, setAside, temporary, source, carried, grants, blobs };
+}
+
+function staffDirOf(root: string): string {
+  return path.join(root, ...STAFF_PARTS);
+}
+
+function intentFileOf(root: string): string {
+  return path.join(root, ...START_AGAIN_INTENT_FILE.split('/'));
+}
+
+/** What is at a path: nothing, a real folder, or something else (a file, a link). Errors other than absence are thrown. */
+async function kindAt(file: string): Promise<'none' | 'folder' | 'other'> {
+  try {
+    const info = await lstat(file);
+    return info.isDirectory() ? 'folder' : 'other';
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return 'none';
+    throw error;
+  }
+}
+
+/** Is there an intent (or anything at its path)? A path that cannot be checked counts as there, so nothing goes on as if it were not. */
+async function intentPresent(root: string): Promise<boolean> {
+  try {
+    await lstat(intentFileOf(root));
+    return true;
+  } catch (error) {
+    return !(errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR');
+  }
+}
+
+/** Is `file` a plain file (no link)? */
+async function isPlainFile(file: string): Promise<boolean> {
+  try { return (await lstat(file)).isFile(); } catch { return false; }
+}
+
+interface Leftover { name: string; dir: string }
+
+/**
+ * The folders set aside or left beside the store, real folders only (no link): replica.set-aside-* newest first by name (time, then number), then
+ * replica.new-* newest first by change time. Read, never written.
+ */
+async function leftoverFolders(root: string): Promise<Leftover[]> {
+  const staff = staffDirOf(root);
+  let names: string[];
+  try { names = await readdir(staff); } catch (error) {
+    if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return [];
+    throw error;
+  }
+  const asides: Array<{ name: string; stamp: string; n: number }> = [];
+  const temporaries: Array<{ name: string; at: number }> = [];
+  for (const name of names) {
+    const aside = SET_ASIDE_NAME.exec(name);
+    if (!aside && !TEMPORARY_NAME.test(name)) continue;
+    let info;
+    try { info = await lstat(path.join(staff, name)); } catch { continue; }
+    if (!info.isDirectory()) continue;
+    if (aside) asides.push({ name, stamp: aside[1], n: aside[2] === undefined ? 1 : Number(aside[2]) });
+    else temporaries.push({ name, at: info.mtimeMs });
+  }
+  asides.sort((a, b) => (a.stamp === b.stamp ? b.n - a.n : a.stamp < b.stamp ? 1 : -1));
+  temporaries.sort((a, b) => b.at - a.at || (a.name < b.name ? 1 : -1));
+  return [...asides, ...temporaries].map(({ name }) => ({ name, dir: path.join(staff, name) }));
+}
+
+/**
+ * Is the shared history of the project at `root` missing: no store folder, while a folder set aside or left beside it (replica.set-aside-* or
+ * replica.new-*) holds a project.json? Such a store is never made again empty. A folder that cannot be listed counts as missing (fail closed).
+ */
+export async function sharedHistoryMissing(root: string): Promise<boolean> {
+  const absolute = path.resolve(root);
+  try {
+    if ((await kindAt(path.join(absolute, ...STORE_PARTS))) !== 'none') return false;
+    for (const leftover of await leftoverFolders(absolute)) if (await isPlainFile(path.join(leftover.dir, PROJECT_FILE_NAME))) return true;
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Runs `work` under the .planning/staff lock, refusing a symbolic link on the way first. With `lenient`, a .planning/staff this user cannot write
+ * (where no Start Again can run) lets `work` run without the lock, as long as no intent is there.
+ */
+/**
+ * In-process queue per project root, joined before any await, so two locked operations started in
+ * order in one window take the .planning/staff lock in that order (checkPath awaits before the
+ * file lock's own queue is joined).
+ */
+const startAgainQueues = new Map<string, Promise<unknown>>();
+
+function withStartAgainLock<T>(root: string, work: () => Promise<T>, lenient: boolean): Promise<T> {
+  const previous = startAgainQueues.get(root) ?? Promise.resolve();
+  const run = previous.then(() => startAgainLocked(root, work, lenient));
+  const tail = run.then(() => undefined, () => undefined);
+  startAgainQueues.set(root, tail);
+  void tail.then(() => { if (startAgainQueues.get(root) === tail) startAgainQueues.delete(root); });
+  return run;
+}
+
+async function startAgainLocked<T>(root: string, work: () => Promise<T>, lenient: boolean): Promise<T> {
+  const problem = await checkPath(root, STAFF_PARTS);
+  if (problem) throw new Refusal(problem);
+  let entered = false;
+  try {
+    return await withFileLock(staffDirOf(root), START_AGAIN_LOCK_FILE, () => { entered = true; return work(); });
+  } catch (error) {
+    if (entered || !lenient || !UNWRITABLE.has(errorCode(error) ?? '')) throw error;
+  }
+  if (await intentPresent(root)) throw new Refusal('start-again-unfinished');
+  return work();
+}
+
+/** Syncs every folder under `dir`, deepest first (not `dir` itself). */
+async function syncTree(dir: string): Promise<void> {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const child = path.join(dir, entry.name);
+    await syncTree(child);
+    await syncFolder(child);
+  }
+}
+
+/** The first free set-aside name for `stamp` in .planning/staff: the stamp itself, then -2, -3. */
+async function freeAsideName(staff: string, stamp: string): Promise<string> {
+  let name = `${STORE_NAME}.set-aside-${stamp}`;
+  for (let attempt = 2; (await kindAt(path.join(staff, name))) !== 'none'; attempt += 1) name = `${STORE_NAME}.set-aside-${stamp}-${attempt}`;
+  return name;
+}
+
+/** A folder in .planning/staff as the project names it: relative, with forward slashes. */
+function staffRelative(name: string): string {
+  return `${STAFF_PARTS.join('/')}/${name}`;
+}
+
+async function writeIntent(root: string, intent: StartAgainIntent): Promise<void> {
+  await writeAtomic(intentFileOf(root), `${JSON.stringify(intent)}\n`);
+}
+
 export class ReplicaStore {
   private readonly files = new Map<string, StreamFile>();
   private readonly byHash = new Map<string, SealedEntry>();
@@ -343,13 +584,23 @@ export class ReplicaStore {
   private readonly held = new Map<string, string>();
   /** Entries from outside no check has passed yet, with why. */
   private readonly waiting = new Map<string, WaitReason>();
+  /** How many held entries each (stream, writer) file has, and how many in all, counting stored entries only (indexHeld). */
+  private readonly heldBy = new Map<string, number>();
+  private heldCount = 0;
+  /** The files whose flooded line is held (D-14): none of their entries from outside is written again. */
+  private readonly floodedFiles = new Map<string, { stream: string; writer: string }>();
   private damaged = 0;
   private waitingAdded = 0;
   /** The mark last read or written, and its exact text, so a mark nobody changed is not compared again. */
   private mark: ReplicaMark | undefined;
   private markText: string | undefined;
 
-  private constructor(public readonly root: string, public readonly dir: string, private readonly deps: ReplicaStoreDeps, private readonly own: OwnDevice) {}
+  /** The store folder's path from the project root, by part (the store itself, or a folder set aside that Start Again reads). */
+  private readonly parts: readonly string[];
+
+  private constructor(public readonly root: string, public readonly dir: string, private readonly deps: ReplicaStoreDeps, private readonly own: OwnDevice) {
+    this.parts = path.relative(root, dir).split(path.sep);
+  }
 
   /**
    * Opens (and on first use makes) the store of the project at `root`. Refused when a symbolic link is on the way, when part of the store cannot be
@@ -376,11 +627,17 @@ export class ReplicaStore {
    *
    * The whole store folder is moved aside to `<store>.set-aside-<time>` beside it (never deleted; it keeps its own .gitignore, so git still ignores
    * it), and a new store is made from what can be carried safely: this device's own entries that carry its valid signature (so its next entry follows
-   * the last one it wrote instead of forking its chain), the grants and blobs that match their names, and project.json. The new store is built in a
-   * temporary folder first and renamed into place, then this device's mark is replaced by one for the new store. Entries of other writers are not
-   * carried: they come back with a new welcome file (and, in a later version, from the sharing service). An interruption at any step leaves either
-   * the old store or the new one in place with a mark that refuses the other, so running this again finishes the job: the old mark's lists file
-   * (marks/, derived data) goes aside with the old folder, so until the new mark is written the new store lacks it and is refused rolled-back.
+   * the last one it wrote instead of forking its chain), the grants and blobs that match their names, and project.json. Entries of other writers are
+   * not carried: they come back with a new welcome file (and, in a later version, from the sharing service).
+   *
+   * Where it carries from (32-CONTEXT D-03): the store folder when it holds an entry of this device's own; otherwise the newest folder set aside
+   * beside it (by name), then the newest folder left by an older Start Again (replica.new-*), whose own entries are one unbroken chain this device
+   * signed; otherwise the first of those folders holding project.json (a reader device); otherwise nothing is changed (nothing-to-carry). A store
+   * folder that is gone is never started empty. carriedFrom names the folder used when it was not the store folder.
+   *
+   * The new store is built in a temporary folder and synced, an intent is recorded, and then the renames and the mark follow, each synced (see the
+   * file header). A stop at any step is finished by the next open (finishStartAgain). No file system error escapes: it is start-again-unfinished,
+   * and nothing is deleted.
    */
   public static async startAgain(root: string, deps: ReplicaStoreDeps): Promise<StartedAgain | StoreRefused> {
     const probe = await ReplicaStore.open(root, deps);
@@ -388,53 +645,220 @@ export class ReplicaStore {
     if (!START_AGAIN_REFUSALS.includes(probe.refused)) return probe;
     const absolute = path.resolve(root);
     const dir = path.join(absolute, REPLICA_DIR);
-    const own = ownOf(await deps.signer());
-    const parts = REPLICA_DIR.split('/');
     try {
-      return await withRegisterLock(dir, () => withFileLock(dir, REPLICA_LOCK_FILE, async () => {
-        const problem = await checkPath(absolute, parts);
+      const own = ownOf(await deps.signer());
+      return await withStartAgainLock(absolute, async () => {
+        // A Start Again another window left unfinished is finished first.
+        await ReplicaStore.rollForward(absolute, deps, own);
+        const problem = await checkPath(absolute, STORE_PARTS);
         if (problem) throw new Refusal(problem);
-        const old = new ReplicaStore(absolute, dir, deps, own);
-        await old.catchUp();
-        const temporary = `${dir}.new-${randomBytes(6).toString('hex')}`;
-        await mkdir(temporary);
-        await writeNewFile(path.join(temporary, '.gitignore'), STORE_GITIGNORE);
-        let carried = 0;
-        for (const file of old.files.values()) {
-          if (file.writer !== own.writer || file.hashes.size === 0) continue;
-          await mkdir(path.join(temporary, 'streams', file.stream), { recursive: true });
-          const lines = [...file.hashes].map((hash) => old.byHash.get(hash) as SealedEntry).map((entry) => `${JSON.stringify({ header: entry.header, body: entry.body })}\n`);
-          await writeNewFile(path.join(temporary, 'streams', file.stream, `${file.writer}.jsonl`), lines.join(''));
-          carried += lines.length;
-        }
-        for (const grant of (await old.grants()).grants) {
-          await mkdir(path.join(temporary, 'grants', grant.cell), { recursive: true });
-          await writeNewFile(path.join(temporary, 'grants', grant.cell, `${grant.epoch}-${grant.hash}.json`), canonicalBytes(grant.signed));
-        }
-        for (const name of await old.listDir(['blobs'], [])) {
-          const blob = HASH_PATTERN.test(name) ? await old.blob(name) : undefined;
-          if (blob === undefined) continue;
-          await mkdir(path.join(temporary, 'blobs'), { recursive: true });
-          await writeNewFile(path.join(temporary, 'blobs', name), Buffer.from(blob.bytes, 'base64url'));
-        }
-        const projectFile = path.join(dir, PROJECT_FILE_NAME);
-        const project = (await lstat(projectFile).then((info) => info.isFile(), () => false)) ? await readWhole(projectFile, PROJECT_FILE_MAX_BYTES) : undefined;
-        if (project?.kind === 'text') await writeNewFile(path.join(temporary, PROJECT_FILE_NAME), project.bytes);
-        // The old folder goes aside under a name of its own, then the new one takes its place.
-        const stamp = stampOf((deps.now ?? (() => new Date()))());
-        let aside = `${dir}.set-aside-${stamp}`;
-        for (let attempt = 2; await lstat(aside).then(() => true, () => false); attempt += 1) aside = `${dir}.set-aside-${stamp}-${attempt}`;
-        await rename(dir, aside);
-        await rename(temporary, dir);
-        const fresh = new ReplicaStore(absolute, dir, deps, own);
-        await fresh.catchUp();
-        await fresh.writeOwnMark(null);
-        return { ok: true as const, setAside: path.relative(absolute, aside).split(path.sep).join('/'), carried };
-      }));
+        const storeHere = (await kindAt(dir)) === 'folder';
+        const run = (): Promise<StartedAgain> => ReplicaStore.startAgainLocked(absolute, deps, own, storeHere);
+        return storeHere ? await withRegisterLock(dir, () => withFileLock(dir, REPLICA_LOCK_FILE, run)) : await withRegisterLock(dir, run);
+      }, false);
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
+      return refusal('start-again-unfinished');
+    }
+  }
+
+  /** Start Again under the .planning/staff lock and, while the store folder is there, the store's own locks. */
+  private static async startAgainLocked(root: string, deps: ReplicaStoreDeps, own: OwnDevice, storeHere: boolean): Promise<StartedAgain> {
+    const dir = path.join(root, REPLICA_DIR);
+    const staff = staffDirOf(root);
+    // Checked again under the locks: another window may have started again since the first look.
+    const old = new ReplicaStore(root, dir, deps, own);
+    const verdict = await old.verdict(storeHere);
+    if (verdict === undefined) throw new Refusal('not-needed');
+    if (!START_AGAIN_REFUSALS.includes(verdict)) throw new Refusal(verdict);
+    const source = await ReplicaStore.sourceFor(root, deps, own, storeHere ? old : undefined);
+    if (source === undefined) throw new Refusal('nothing-to-carry');
+    const stamp = stampOf((deps.now ?? (() => new Date()))());
+    const setAside = storeHere ? await freeAsideName(staff, stamp) : null;
+    const temporaryName = `${STORE_NAME}.new-${randomBytes(6).toString('hex')}`;
+    const temporary = path.join(staff, temporaryName);
+    const counts = await ReplicaStore.buildFrom(source.store, temporary);
+    await startAgainProbe?.('built');
+    await syncFolder(temporary);
+    const intent: StartAgainIntent = { v: 1, writer: own.writer, setAside, temporary: temporaryName, source: source.name, ...counts };
+    await writeIntent(root, intent);
+    await startAgainProbe?.('intent-written');
+    await syncFolder(staff);
+    if (setAside !== null) {
+      await rename(dir, path.join(staff, setAside));
+      await startAgainProbe?.('set-aside');
+      await syncFolder(staff);
+    }
+    await rename(temporary, dir);
+    await startAgainProbe?.('moved-in');
+    await syncFolder(staff);
+    const fresh = new ReplicaStore(root, dir, deps, own);
+    await fresh.catchUp();
+    await fresh.writeOwnMark(null);
+    await startAgainProbe?.('marked');
+    await rm(intentFileOf(root));
+    await syncFolder(staff);
+    return {
+      ok: true,
+      setAside: setAside === null ? null : staffRelative(setAside),
+      carried: counts.carried,
+      ...(source.name === STORE_NAME ? {} : { carriedFrom: staffRelative(source.name) })
+    };
+  }
+
+  /**
+   * Where Start Again carries from: the store folder when it holds an entry of this device's own; else the newest folder set aside, then left, whose
+   * own entries verify; else the first of the store folder and those folders that holds project.json; else undefined. Folders are only read.
+   */
+  private static async sourceFor(root: string, deps: ReplicaStoreDeps, own: OwnDevice, store: ReplicaStore | undefined): Promise<{ name: string; store: ReplicaStore } | undefined> {
+    if (store?.hasOwnEntry()) return { name: STORE_NAME, store };
+    const candidates: Array<{ name: string; store: ReplicaStore }> = [];
+    for (const leftover of await leftoverFolders(root)) {
+      const read = new ReplicaStore(root, leftover.dir, deps, own);
+      try { await read.catchUp(); } catch { continue; }
+      candidates.push({ name: leftover.name, store: read });
+    }
+    const verified = candidates.find((candidate) => candidate.store.ownChainVerifies());
+    if (verified) return verified;
+    for (const candidate of [...(store ? [{ name: STORE_NAME, store }] : []), ...candidates]) {
+      if (await isPlainFile(path.join(candidate.store.dir, PROJECT_FILE_NAME))) return candidate;
+    }
+    return undefined;
+  }
+
+  /**
+   * Builds a new store in `temporary` (which must not exist) from `source`, a store already read: this device's own entries, the grants and blobs that
+   * match their names, project.json and the store's .gitignore. Every folder inside is synced; `temporary` itself is synced by the caller.
+   */
+  private static async buildFrom(source: ReplicaStore, temporary: string): Promise<{ carried: number; grants: number; blobs: number }> {
+    await mkdir(temporary);
+    await writeNewFile(path.join(temporary, '.gitignore'), STORE_GITIGNORE);
+    let carried = 0;
+    for (const file of source.files.values()) {
+      if (file.writer !== source.own.writer || file.hashes.size === 0) continue;
+      await mkdir(path.join(temporary, 'streams', file.stream), { recursive: true });
+      const lines = [...file.hashes].map((hash) => source.byHash.get(hash) as SealedEntry).map((entry) => `${JSON.stringify({ header: entry.header, body: entry.body })}\n`);
+      await writeNewFile(path.join(temporary, 'streams', file.stream, `${file.writer}.jsonl`), lines.join(''));
+      carried += lines.length;
+    }
+    let grants = 0;
+    for (const grant of (await source.grants()).grants) {
+      await mkdir(path.join(temporary, 'grants', grant.cell), { recursive: true });
+      await writeNewFile(path.join(temporary, 'grants', grant.cell, `${grant.epoch}-${grant.hash}.json`), canonicalBytes(grant.signed));
+      grants += 1;
+    }
+    let blobs = 0;
+    for (const name of await source.listDir(['blobs'], [])) {
+      const blob = HASH_PATTERN.test(name) ? await source.blob(name) : undefined;
+      if (blob === undefined) continue;
+      await mkdir(path.join(temporary, 'blobs'), { recursive: true });
+      await writeNewFile(path.join(temporary, 'blobs', name), Buffer.from(blob.bytes, 'base64url'));
+      blobs += 1;
+    }
+    const projectFile = path.join(source.dir, PROJECT_FILE_NAME);
+    const project = (await isPlainFile(projectFile)) ? await readWhole(projectFile, PROJECT_FILE_MAX_BYTES) : undefined;
+    if (project?.kind === 'text') await writeNewFile(path.join(temporary, PROJECT_FILE_NAME), project.bytes);
+    await syncTree(temporary);
+    return { carried, grants, blobs };
+  }
+
+  /**
+   * Finishes a Start Again that stopped before its end (32-CONTEXT D-03), under the .planning/staff lock. ReplicaStore.open and every locked operation
+   * call this first when an intent is there; the project host calls it before it decides a folder holds no shared project. Nothing to do is ok.
+   */
+  public static async finishStartAgain(root: string, deps: ReplicaStoreDeps): Promise<{ ok: true } | StoreRefused> {
+    const absolute = path.resolve(root);
+    try {
+      const own = ownOf(await deps.signer());
+      await withStartAgainLock(absolute, () => ReplicaStore.rollForward(absolute, deps, own), false);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof Refusal) return refusal(error.reason);
+      return refusal('start-again-unfinished');
+    }
+  }
+
+  /**
+   * Rolls an intent forward, under the .planning/staff lock; each step is checked on disk first, so running it twice is harmless:
+   *   store and temporary there: the store is set aside (under the next free name when the intent's is taken), then the temporary moved in;
+   *   store gone, temporary there: the temporary is moved in;
+   *   both gone: the store is built again from the folder the intent names (never an empty store);
+   *   store there, temporary gone: both renames are done.
+   * Then this device's mark is written unless it already accepts the store (only for an intent of this device's own; another device's mark is its
+   * own business), and the intent is removed. Anything else is start-again-unfinished, with nothing deleted.
+   */
+  private static async rollForward(root: string, deps: ReplicaStoreDeps, own: OwnDevice): Promise<void> {
+    try {
+      await ReplicaStore.rollForwardSteps(root, deps, own);
+    } catch (error) {
+      if (error instanceof Refusal) throw error;
+      throw new Refusal('start-again-unfinished');
+    }
+  }
+
+  private static async rollForwardSteps(root: string, deps: ReplicaStoreDeps, own: OwnDevice): Promise<void> {
+    const intentFile = intentFileOf(root);
+    let info;
+    try { info = await lstat(intentFile); } catch (error) {
+      if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') return;
       throw error;
     }
+    const unfinished = new Refusal('start-again-unfinished');
+    // A planted link or folder at the intent's name is never followed (T-32-01).
+    if (!info.isFile()) throw unfinished;
+    const read = await readWhole(intentFile, INTENT_MAX_BYTES);
+    if (read.kind === 'missing') return;
+    if (read.kind !== 'text') throw unfinished;
+    let intent = parseIntent(read.text);
+    if (intent === undefined) throw unfinished;
+    const problem = await checkPath(root, STORE_PARTS);
+    if (problem) throw new Refusal(problem);
+    const staff = staffDirOf(root);
+    const dir = path.join(root, REPLICA_DIR);
+    const temporary = path.join(staff, intent.temporary);
+    let store = await kindAt(dir);
+    let temp = await kindAt(temporary);
+    if (store === 'other' || temp === 'other') throw unfinished;
+    if (store === 'folder' && temp === 'folder') {
+      let setAside = intent.setAside;
+      if (setAside === null || (await kindAt(path.join(staff, setAside))) !== 'none') {
+        const stamp = setAside === null ? stampOf((deps.now ?? (() => new Date()))()) : (SET_ASIDE_NAME.exec(setAside) as RegExpExecArray)[1];
+        setAside = await freeAsideName(staff, stamp);
+        intent = { ...intent, setAside };
+        await writeIntent(root, intent);
+        await syncFolder(staff);
+      }
+      await rename(dir, path.join(staff, setAside));
+      await syncFolder(staff);
+      store = 'none';
+    }
+    if (store === 'none' && temp === 'none') {
+      // Built again from the folder the intent names; this device's own entries are only carried for an intent of its own.
+      const from = intent.source === STORE_NAME ? intent.setAside : intent.source;
+      if (from === null || intent.writer !== own.writer || (await kindAt(path.join(staff, from))) !== 'folder') throw unfinished;
+      const source = new ReplicaStore(root, path.join(staff, from), deps, own);
+      await source.catchUp();
+      await ReplicaStore.buildFrom(source, temporary);
+      await syncFolder(temporary);
+      temp = 'folder';
+    }
+    if (store === 'none' && temp === 'folder') {
+      await rename(temporary, dir);
+      await syncFolder(staff);
+      store = 'folder';
+    } else if (intent.setAside !== null && (await kindAt(path.join(staff, intent.setAside))) !== 'folder') {
+      // The store is there and the temporary is gone, yet the folder it was set aside to is not: this may still be the old store. Left alone.
+      throw unfinished;
+    }
+    if (intent.writer === own.writer) {
+      await withRegisterLock(dir, () => withFileLock(dir, REPLICA_LOCK_FILE, async () => {
+        const fresh = new ReplicaStore(root, dir, deps, own);
+        await fresh.catchUp();
+        if (!(await fresh.markAccepts())) await fresh.writeOwnMark(null);
+      }));
+    }
+    await rm(intentFile);
+    await syncFolder(staff);
   }
 
   /** What the fold gets: every stored entry except those held back or still waiting for the decode check, in the order the store first saw them. */
@@ -460,6 +884,11 @@ export class ReplicaStore {
   /** Stored entries no decode check has passed yet, with why. They stay out of the fold until recheck() passes them. */
   public waitingForCheck(): Array<{ hash: string; reason: WaitReason }> {
     return [...this.waiting].filter(([hash]) => this.byHash.has(hash)).map(([hash, reason]) => ({ hash, reason }));
+  }
+
+  /** The (stream, writer) files whose flooded line is held (D-14), in stream then writer order. Their later entries from outside are not written. */
+  public flooded(): Array<{ stream: string; writer: string }> {
+    return [...this.floodedFiles.values()].sort((a, b) => (a.stream !== b.stream ? (a.stream < b.stream ? -1 : 1) : a.writer < b.writer ? -1 : a.writer > b.writer ? 1 : 0)).map((item) => ({ ...item }));
   }
 
   /** Rises each time an entry nobody has checked is found on disk, so the host knows to run recheck() again. */
@@ -504,7 +933,7 @@ export class ReplicaStore {
   /** A stored blob, or undefined when it is not here, is not a plain file, or its bytes do not match its name. */
   public async blob(hash: string): Promise<SealedBlob | undefined> {
     if (!HASH_PATTERN.test(hash)) return undefined;
-    if (await checkPath(this.root, [...REPLICA_DIR.split('/'), 'blobs'])) return undefined;
+    if (await checkPath(this.root, [...this.parts, 'blobs'])) return undefined;
     const file = path.join(this.dir, 'blobs', hash);
     try {
       const info = await lstat(file);
@@ -574,6 +1003,11 @@ export class ReplicaStore {
    * needs no decode check. Each other new entry then passes `check`. Every new entry is written; one the check refuses is held, and one the check
    * cannot run on yet waits, both recorded in the signed mark with the lines, so neither reaches the fold. An entry already stored is neither written
    * nor checked again. A check that throws counts as a refusal.
+   *
+   * Refused entries are bounded (D-14), in input order: a writer's refused entries in one stream are held up to MAX_REFUSED_PER_WRITER, the last of
+   * them as its flooded line; from then on that writer's entries in that stream are not written (counted in `flooded`) and not checked. The entry
+   * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
+   * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
    */
   public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
@@ -588,8 +1022,19 @@ export class ReplicaStore {
       seen.add(hash);
       fresh.push({ entry, hash });
     }
+    // The check runs outside the locks. A writer already flooded, or that this batch would flood, is not checked again; the decision is made under
+    // the locks, where an entry left unchecked whose writer turns out not to be flooded is deferred, so it is checked when it comes again.
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
-    for (const { entry, hash } of fresh) verdicts.set(hash, entry.header.writer === this.own.writer ? { kind: 'pass' } : await runCheck(check, entry));
+    const refusedHere = new Map<string, number>();
+    for (const { entry, hash } of fresh) {
+      if (entry.header.writer === this.own.writer) { verdicts.set(hash, { kind: 'pass' }); continue; }
+      const id = fileId(entry.header.stream, entry.header.writer);
+      const refused = refusedHere.get(id) ?? 0;
+      if (this.floodedFiles.has(id) || (this.heldBy.get(id) ?? 0) + refused >= this.bounds().refusedPerWriter) continue;
+      const verdict = await runCheck(check, entry);
+      verdicts.set(hash, verdict);
+      if (verdict.kind === 'held') refusedHere.set(id, refused + 1);
+    }
     let blobsRefused = 0;
     const goodBlobs = new Map<string, Buffer>();
     for (const blob of blobs) {
@@ -602,15 +1047,32 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        // Another window may have stored some of these since the check ran: those are duplicates now.
-        const toWrite = fresh.filter(({ hash }) => !this.byHash.has(hash));
-        duplicates += fresh.length - toWrite.length;
+        const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
-        for (const { hash } of toWrite) {
+        let flooded = 0;
+        let deferred = 0;
+        for (const item of fresh) {
+          const { entry, hash } = item;
+          // Another window may have stored it since the check ran: a duplicate now.
+          if (this.byHash.has(hash)) { duplicates += 1; continue; }
+          const id = fileId(entry.header.stream, entry.header.writer);
+          if (this.floodedFiles.has(id)) { flooded += 1; continue; }
           const verdict = verdicts.get(hash);
-          if (verdict?.kind === 'held') { this.held.set(hash, verdict.reason); held.push({ hash, reason: verdict.reason }); }
-          if (verdict?.kind === 'wait') { this.waiting.set(hash, verdict.reason); waiting.push({ hash, reason: verdict.reason }); }
+          if (!verdict) { deferred += 1; continue; }
+          if (verdict.kind === 'held') {
+            const fate = this.refusedFate(id);
+            if (fate === 'drop') { flooded += 1; continue; }
+            const reason = fate === 'flood' ? FLOODED_REASON : verdict.reason;
+            this.hold(hash, entry, reason);
+            held.push({ hash, reason });
+          }
+          if (verdict.kind === 'wait') {
+            if (this.waiting.size >= this.bounds().waiting) { deferred += 1; continue; }
+            this.waiting.set(hash, verdict.reason);
+            waiting.push({ hash, reason: verdict.reason });
+          }
+          toWrite.push(item);
         }
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
@@ -618,7 +1080,7 @@ export class ReplicaStore {
           await this.appendLines(toWrite.map(({ entry }) => entry));
           await this.writeOwnMark();
         }
-        return { ok: true as const, added: toWrite.length, duplicates, held, waiting, dropped, blobsAdded, blobsRefused };
+        return { ok: true as const, added: toWrite.length, duplicates, held, waiting, dropped, blobsAdded, blobsRefused, flooded, deferred };
       });
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
@@ -630,11 +1092,23 @@ export class ReplicaStore {
    * Runs `check` again on every entry still waiting (never checked, or waiting for its key or blob). One that passes reaches entries(); one that is
    * refused is held; one that still cannot be checked keeps waiting. The outcome is recorded in the signed mark. An entry another window decided in
    * the meantime keeps that window's verdict.
+   *
+   * The bounds of ingestForeign hold here too (D-14): a refusal that reaches its writer's bound, or fills the held list, is held as the writer's
+   * flooded line; a refused entry the held list has no room for keeps waiting. A flooded writer's waiting entries stay out of the fold and are not
+   * checked again.
    */
   public async recheck(check: ForeignCheck): Promise<RecheckResult | StoreRefused> {
-    const targets = [...this.waiting.keys()].filter((hash) => this.byHash.has(hash));
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
-    for (const hash of targets) verdicts.set(hash, await runCheck(check, this.byHash.get(hash) as SealedEntry));
+    const refusedHere = new Map<string, number>();
+    for (const hash of [...this.waiting.keys()]) {
+      const id = this.fileOf(hash);
+      if (id === undefined) continue;
+      const refused = refusedHere.get(id) ?? 0;
+      if (this.floodedFiles.has(id) || (this.heldBy.get(id) ?? 0) + refused >= this.bounds().refusedPerWriter) continue;
+      const verdict = await runCheck(check, this.byHash.get(hash) as SealedEntry);
+      verdicts.set(hash, verdict);
+      if (verdict.kind === 'held') refusedHere.set(id, refused + 1);
+    }
     try {
       return await this.locked(async () => {
         await this.catchUp();
@@ -644,9 +1118,17 @@ export class ReplicaStore {
         let changed = false;
         for (const [hash, verdict] of verdicts) {
           const before = this.waiting.get(hash);
-          if (before === undefined) continue;
+          const id = this.fileOf(hash);
+          if (before === undefined || id === undefined || this.floodedFiles.has(id)) continue;
           if (verdict.kind === 'pass') { this.waiting.delete(hash); passed += 1; changed = true; }
-          if (verdict.kind === 'held') { this.waiting.delete(hash); this.held.set(hash, verdict.reason); held += 1; changed = true; }
+          if (verdict.kind === 'held') {
+            const fate = this.refusedFate(id);
+            if (fate === 'drop') continue;
+            this.waiting.delete(hash);
+            this.hold(hash, this.byHash.get(hash) as SealedEntry, fate === 'flood' ? FLOODED_REASON : verdict.reason);
+            held += 1;
+            changed = true;
+          }
           if (verdict.kind === 'wait' && verdict.reason !== before) { this.waiting.set(hash, verdict.reason); changed = true; }
         }
         if (changed) await this.writeOwnMark();
@@ -726,7 +1208,7 @@ export class ReplicaStore {
 
   /** Names in a store folder, leaving out temporary files; a folder that is a link or cannot be listed is reported as unreadable. */
   private async listDir(parts: readonly string[], unreadable: UnreadableFile[]): Promise<string[]> {
-    const problem = await checkPath(this.root, [...REPLICA_DIR.split('/'), ...parts]);
+    const problem = await checkPath(this.root, [...this.parts, ...parts]);
     if (problem) { unreadable.push({ file: parts.join('/'), reason: problem === 'symlink' ? 'it is a symbolic link' : 'it is not a folder the store made' }); return []; }
     try {
       return (await readdir(path.join(this.dir, ...parts))).filter((name) => !name.endsWith('.tmp')).sort();
@@ -781,22 +1263,78 @@ export class ReplicaStore {
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
   /**
-   * Runs `work` under the in-process register lock (same-process order) and, inside it, the cross-window file lock (other windows and processes),
-   * after checking that no symbolic link is on the way to the store. Neither lock is re-entrant: `work` never calls another locked method.
+   * Runs `work` under the .planning/staff lock (so no Start Again runs meanwhile; an unfinished one is finished first), then the in-process register
+   * lock (same-process order) and, inside it, the cross-window file lock (other windows and processes), after checking that no symbolic link is on the
+   * way to the store. A store folder that is gone while this device's mark remains, or while a folder beside it holds project.json, is refused
+   * rolled-back and not made again (32-CONTEXT D-03). None of the locks is re-entrant: `work` never calls another locked method.
    */
   private locked<T>(work: () => Promise<T>): Promise<T> {
-    return withRegisterLock(this.dir, async () => {
-      const parts = REPLICA_DIR.split('/');
-      const problem = await checkPath(this.root, parts);
-      if (problem) throw new Refusal(problem);
-      await mkdir(this.dir, { recursive: true });
-      return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
-        const again = await checkPath(this.root, parts);
-        if (again) throw new Refusal(again);
-        await this.ensureIgnore();
-        return work();
+    return withStartAgainLock(this.root, async () => {
+      if (await intentPresent(this.root)) await ReplicaStore.rollForward(this.root, this.deps, this.own);
+      return withRegisterLock(this.dir, async () => {
+        const problem = await checkPath(this.root, this.parts);
+        if (problem) throw new Refusal(problem);
+        if ((await kindAt(this.dir)) === 'none' && (await this.historyGone())) throw new Refusal('rolled-back');
+        await mkdir(this.dir, { recursive: true });
+        return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
+          const again = await checkPath(this.root, this.parts);
+          if (again) throw new Refusal(again);
+          await this.ensureIgnore();
+          return work();
+        });
       });
-    });
+    }, true);
+  }
+
+  /** Was there a shared history here that is gone: this device's mark for this store remains, or a folder beside it holds project.json? */
+  private async historyGone(): Promise<boolean> {
+    if (await sharedHistoryMissing(this.root)) return true;
+    return (await readMark(this.deps.secrets, this.dir, await this.deps.keyStatus())).kind !== 'none';
+  }
+
+  /** What open would say of this store now, read without its locks (the caller holds them): undefined when it opens, else the refusal. */
+  private async verdict(storeHere: boolean): Promise<StoreRefusal | undefined> {
+    try {
+      if (!storeHere) return (await this.historyGone()) ? 'rolled-back' : undefined;
+      await this.catchUp();
+      await this.syncMark();
+      return undefined;
+    } catch (error) {
+      if (error instanceof Refusal) return error.reason;
+      throw error;
+    }
+  }
+
+  /** Does the store hold an entry of this device's own, with its valid signature? */
+  private hasOwnEntry(): boolean {
+    return [...this.files.values()].some((file) => file.writer === this.own.writer && file.hashes.size > 0);
+  }
+
+  /**
+   * Are this device's own entries in this folder one unbroken chain in every stream (T-32-02): at least one entry, no line it did not sign, and seq 0
+   * to the highest exactly once each, the first after GENESIS_PREV and each after the one before.
+   */
+  private ownChainVerifies(): boolean {
+    const files = [...this.files.values()].filter((file) => file.writer === this.own.writer && (file.hashes.size > 0 || file.damaged > 0));
+    if (files.length === 0) return false;
+    for (const file of files) {
+      if (file.damaged > 0 || file.hashes.size !== file.maxSeq + 1) return false;
+      let prev = GENESIS_PREV;
+      for (let seq = 0; seq <= file.maxSeq; seq += 1) {
+        const at = file.bySeq.get(seq) ?? [];
+        if (at.length !== 1 || this.byHash.get(at[0])?.header.prev !== prev) return false;
+        prev = at[0];
+      }
+    }
+    return true;
+  }
+
+  /** Does this device's mark already accept the store as read (so a second recovery does not write it again)? */
+  private async markAccepts(): Promise<boolean> {
+    await this.checkMarkLists();
+    const read = await readMark(this.deps.secrets, this.dir, await this.deps.keyStatus());
+    if (read.kind !== 'mark' || !compareWithMark(read.mark, this.fileStates()).ok) return false;
+    return !read.mark.rosterHead || this.byHash.has(read.mark.rosterHead);
   }
 
   /** The store's own .gitignore: written when missing or different, so the folder always ignores itself. */
@@ -983,6 +1521,60 @@ export class ReplicaStore {
     return true;
   }
 
+  /** The bounds on refused and waiting entries (D-14): the constants, or the smaller test-only limits in the deps. */
+  private bounds(): { refusedPerWriter: number; heldPerStore: number; waiting: number } {
+    const bound = (value: number | undefined, most: number): number => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= most ? value : most);
+    const limits = this.deps.limits ?? {};
+    return {
+      refusedPerWriter: bound(limits.refusedPerWriter, MAX_REFUSED_PER_WRITER),
+      heldPerStore: bound(limits.heldPerStore, MAX_MARK_LISTED),
+      waiting: bound(limits.waiting, MAX_MARK_WAITING)
+    };
+  }
+
+  /**
+   * What becomes of one more refused entry of the file `id`: held; held as the file's flooded line when it is the last the writer's bound or the held
+   * list allows; or not kept when the held list is full.
+   */
+  private refusedFate(id: string): 'hold' | 'flood' | 'drop' {
+    const { refusedPerWriter, heldPerStore } = this.bounds();
+    if (this.heldCount >= heldPerStore) return 'drop';
+    return (this.heldBy.get(id) ?? 0) >= refusedPerWriter - 1 || this.heldCount >= heldPerStore - 1 ? 'flood' : 'hold';
+  }
+
+  /** The (stream, writer) file of a stored entry. */
+  private fileOf(hash: string): string | undefined {
+    const entry = this.byHash.get(hash);
+    return entry ? fileId(entry.header.stream, entry.header.writer) : undefined;
+  }
+
+  /** Holds one entry with its reason and counts it for its file; FLOODED_REASON floods the file. */
+  private hold(hash: string, entry: SealedEntry, reason: string): void {
+    if (this.held.has(hash)) return;
+    this.held.set(hash, reason);
+    const { stream, writer } = entry.header;
+    const id = fileId(stream, writer);
+    this.heldBy.set(id, (this.heldBy.get(id) ?? 0) + 1);
+    this.heldCount += 1;
+    if (reason === FLOODED_REASON) this.floodedFiles.set(id, { stream, writer });
+  }
+
+  /** Counts the held entries again from `held`, stored entries only: per file, in all, and the files whose flooded line is held. */
+  private indexHeld(): void {
+    this.heldBy.clear();
+    this.floodedFiles.clear();
+    this.heldCount = 0;
+    for (const [hash, reason] of this.held) {
+      const entry = this.byHash.get(hash);
+      if (!entry) continue;
+      const { stream, writer } = entry.header;
+      const id = fileId(stream, writer);
+      this.heldBy.set(id, (this.heldBy.get(id) ?? 0) + 1);
+      this.heldCount += 1;
+      if (reason === FLOODED_REASON) this.floodedFiles.set(id, { stream, writer });
+    }
+  }
+
   private fileStates(): MarkFileState[] {
     return [...this.files.values()].map((file) => ({
       stream: file.stream,
@@ -1005,6 +1597,15 @@ export class ReplicaStore {
    * lists file it names is not in the folder (an older copy of the folder, or part of it deleted).
    */
   private async syncMark(): Promise<void> {
+    try {
+      await this.syncMarkLists();
+    } finally {
+      // The held counts follow every change of the held list or of the stored entries, whatever the mark said (D-14).
+      this.indexHeld();
+    }
+  }
+
+  private async syncMarkLists(): Promise<void> {
     await this.checkMarkLists();
     const read = await readMark(this.deps.secrets, this.dir, await this.deps.keyStatus());
     if (read.kind === 'unverified') throw new Refusal('mark-unverified');
@@ -1060,8 +1661,13 @@ export class ReplicaStore {
 
   /** Refuses a symbolic link (or anything that is not a folder) on the way to this device's lists folder, like every other store path. */
   private async checkMarkLists(): Promise<void> {
-    const problem = await checkPath(this.root, [...REPLICA_DIR.split('/'), MARK_LISTS_DIR, this.own.writer]);
+    const problem = await checkPath(this.root, [...this.parts, MARK_LISTS_DIR, this.own.writer]);
     if (problem) throw new Refusal(problem);
   }
 }
 
+
+/** Finishes a Start Again left unfinished in the project at `root` (see ReplicaStore.finishStartAgain). */
+export function finishStartAgain(root: string, deps: ReplicaStoreDeps): Promise<{ ok: true } | StoreRefused> {
+  return ReplicaStore.finishStartAgain(root, deps);
+}

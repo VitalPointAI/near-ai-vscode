@@ -2,9 +2,12 @@
 // text and staff events today's single-machine host produces for the same history. Each scenario is written twice (src/test/helpers/
 // staffReplicaHistory.ts): through today's host and as replica entries; the projection of the fold must tell the same story.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
+import { baseCellHeldProducts } from '../domain/replica/productCells';
+import type { ProjectImport, ProjectOutput } from '../domain/replica/projectFold';
 import { verifyEntry } from '../domain/replica/verify';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import type { ProductVersions } from '../domain/replica/versions';
@@ -13,7 +16,7 @@ import { headerDisagreement, productHash } from '../domain/staff/ledger';
 import type { ProductState } from '../domain/staff/ledger';
 import { parseProductFile } from '../domain/staff/products';
 import type { ProductHeader } from '../domain/staff/products';
-import { PROJECTION_PROBLEMS, projectionEntry, projectLedgerReplay, projectProductFile, projectProductStates, projectStaffEvents } from '../staff/replica/projection';
+import { PROJECTION_PROBLEMS, importOf, projectionEntry, projectLedgerReplay, projectProductFile, projectProductStates, projectStaffEvents, replayScopedImport, scopedImportsOf } from '../staff/replica/projection';
 import type { ProjectionEntry, ProjectionInput } from '../staff/replica/projection';
 import { ANNEX, CONOPS, DECISION_ROLE, GUARD_DEVICE, TWIN_DEVICE, TWIN_RUN, TWIN_SCENARIOS, twinHistory } from './helpers/staffReplicaHistory';
 import type { TwinHistory, TwinScenario } from './helpers/staffReplicaHistory';
@@ -302,4 +305,132 @@ test('a product the projection cannot vouch for sends no events: no step the fol
   twin.world.write(GUARD_DEVICE, { kind: 'version.verdict', data: { product: CONOPS, hash, gate: 'guard', verdict: 'HOLD', reasons: ['Compilation risk.'] }, actor: { kind: 'agent', member: 'release-guard', run: 'run-2' }, deps: [propose] });
   const events = projectStaffEvents(folded({ ...twin, replicaEntries: [...twin.world.entries] }).input, 'run-projected');
   assert.deepEqual(events, []);
+});
+
+// ---- Products in label cells (plan 32-10; D-17, D-20, D-22 revised, D-23) --------------------------------------------------------------------
+
+const sha256 = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
+const productOfLine = (line: unknown): string => ((line as { payload: { product: string } }).payload.product);
+
+/** A cell import of today's ledger carrying the lines given, as the conversion seals one: the whole ledger's head and count, the lines and their count. */
+function cellImport(twin: TwinHistory, lines: readonly unknown[], change: Partial<ProjectImport> = {}): { record: ProjectImport; bytes: Buffer } {
+  const bytes = Buffer.from(`${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+  const record: ProjectImport = {
+    ledger: 'products', legacyHead: twin.legacyReplay.head, count: twin.legacyReplay.entries, entry: 'e'.repeat(64), member: 'mbr-demo', writer: 'f'.repeat(64),
+    fileHash: sha256(bytes), marked: false, scope: 'cell', lines: lines.length, ...change
+  };
+  return { record, bytes };
+}
+
+test('scoped import: replayScopedImport replays only the lines it carries, each verified on its own, and gives today\'s state of its products', async () => {
+  const twin = await twinHistory('pinned');
+  const lines = twin.legacyLines.filter((line) => productOfLine(line) === ANNEX);
+  assert.ok(lines.length > 0 && lines.length < twin.legacyLines.length, 'the annex has some of the ledger\'s lines');
+  const { record, bytes } = cellImport(twin, lines);
+  const replay = replayScopedImport(record, bytes);
+  assert.ok(replay !== undefined, 'the cell import replays');
+  assert.deepEqual([...replay.products.keys()], [ANNEX]);
+  assert.deepEqual(replay.products.get(ANNEX), twin.legacyReplay.products.get(ANNEX), 'the same state as the whole ledger gives the annex');
+  assert.equal(replay.head, twin.legacyReplay.head, 'its head is the whole ledger\'s');
+  assert.equal(replay.entries, lines.length);
+  assert.equal(replay.broken, undefined);
+});
+
+test('scoped import: a cell import whose file hash differs, whose line count is not lines, whose seqs do not rise or one of whose lines fails its signature gives nothing', async () => {
+  const twin = await twinHistory('released');
+  const lines = twin.legacyLines.filter((line) => productOfLine(line) === CONOPS);
+  assert.ok(lines.length >= 3, 'the released product has several lines');
+  const good = cellImport(twin, lines);
+  assert.ok(replayScopedImport(good.record, good.bytes) !== undefined, 'the untouched import replays');
+
+  assert.equal(replayScopedImport({ ...good.record, fileHash: sha256('another file') }, good.bytes), undefined, 'file hash');
+  assert.equal(replayScopedImport({ ...good.record, lines: lines.length + 1 }, good.bytes), undefined, 'line count');
+  assert.equal(replayScopedImport({ ...good.record, scope: 'whole' }, good.bytes), undefined, 'a whole import is not a cell import');
+  const swapped = cellImport(twin, [lines[1], lines[0], ...lines.slice(2)]);
+  assert.equal(replayScopedImport(swapped.record, swapped.bytes), undefined, 'seqs out of order');
+  const repeated = cellImport(twin, [lines[0], lines[0], ...lines.slice(1)]);
+  assert.equal(replayScopedImport(repeated.record, repeated.bytes), undefined, 'a seq repeated');
+  // An agent's step with its time changed: the line still reads as a ledger entry and applies, but its signature no longer verifies.
+  const agentAt = lines.findIndex((line) => (line as { payload: { actor: { kind: string } } }).payload.actor.kind === 'agent');
+  assert.ok(agentAt >= 0, 'an agent made one of the steps');
+  const forged = JSON.parse(JSON.stringify(lines[agentAt])) as { payload: { at: string } };
+  forged.payload.at = '2026-11-18T12:00:00.500Z';
+  const tampered = cellImport(twin, lines.map((line, index) => (index === agentAt ? forged : line)));
+  assert.equal(replayScopedImport(tampered.record, tampered.bytes), undefined, 'a line whose signature fails');
+
+  // Two products' lines, each product's in its own order but the products one after the other: every product applies, the seqs do not rise.
+  const two = await twinHistory('pinned');
+  const byProduct = (product: string): unknown[] => two.legacyLines.filter((line) => productOfLine(line) === product);
+  const inOrder = cellImport(two, two.legacyLines);
+  assert.ok(replayScopedImport(inOrder.record, inOrder.bytes) !== undefined, 'the lines in ledger order replay');
+  const annexFirst = cellImport(two, [...byProduct(ANNEX), ...byProduct(CONOPS)]);
+  assert.equal(replayScopedImport(annexFirst.record, annexFirst.bytes), undefined, 'lines out of the ledger\'s order');
+});
+
+test('scoped import: importOf finds whole imports only and scopedImportsOf lists the cell imports with their stream', async () => {
+  const twin = await twinHistory('pinned');
+  const whole = { ...cellImport(twin, twin.legacyLines).record, scope: 'whole' as const, lines: undefined, entry: 'a'.repeat(64) };
+  const conops = { ...cellImport(twin, twin.legacyLines.filter((line) => productOfLine(line) === CONOPS)).record, entry: 'b'.repeat(64) };
+  const annex = { ...cellImport(twin, twin.legacyLines.filter((line) => productOfLine(line) === ANNEX)).record, entry: 'c'.repeat(64) };
+  const project = (imports: ProjectImport[][]): FoldResult => ({ families: { project: imports.map((items, index) => ({ stream: `cell-${index}`, genesis: null, imports: items })) as unknown as ProjectOutput } }) as unknown as FoldResult;
+  assert.equal(importOf(project([[conops], [annex]]), 'products'), undefined, 'cell imports are not the whole ledger');
+  assert.deepEqual(scopedImportsOf(project([[conops], [annex]]), 'products').map((item) => [item.stream, item.record.entry]), [['cell-0', conops.entry], ['cell-1', annex.entry]]);
+  assert.equal(importOf(project([[conops], [whole]]), 'products')?.entry, whole.entry);
+  assert.deepEqual(scopedImportsOf(project([[whole]]), 'products'), []);
+  assert.deepEqual(scopedImportsOf(project([[conops]]), 'decisions'), []);
+});
+
+test('preview: a shared project holding its products in the base stream, with a whole import there and no label cell, projects exactly as before', async () => {
+  const twin = await twinHistory('released');
+  const plain = folded(twin);
+  const bytes = Buffer.from(`${twin.legacyLines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+  twin.world.write(TWIN_DEVICE, { kind: 'project.import', data: { ledger: 'products', legacyHead: twin.legacyReplay.head, count: twin.legacyReplay.entries, file: bytes.toString('base64url') } });
+  const { fold, input } = folded({ ...twin, replicaEntries: [...twin.world.entries] });
+  cleanFold(fold);
+  assert.ok(baseCellHeldProducts(fold, twin.world.stream), 'the products are in the stream that holds the import');
+  assert.equal(importOf(fold, 'products')?.scope, 'whole');
+  // No label cell: cellLabels names no stream that holds a product.
+  const withLabels = { ...input, cellLabels: new Map([['another-cell', 'org/Internal']]) };
+  const before = projectLedgerReplay(plain.input);
+  for (const view of [input, withLabels]) {
+    const replay = projectLedgerReplay(view);
+    assert.deepEqual([...replay.products.keys()], [...before.products.keys()]);
+    for (const [product, state] of replay.products) {
+      assert.equal(state.tampered, undefined, product);
+      assert.deepEqual(comparable(state), comparable(before.products.get(product) as ProductState), product);
+      assert.deepEqual(comparable(state), comparable(twin.legacyReplay.products.get(product) as ProductState), product);
+    }
+    assert.deepEqual(projectStaffEvents(view, 'run-projected').map(eventKey), twin.legacyEvents.map(eventKey));
+  }
+});
+
+test('label-mismatch: a product whose version label is not its cell\'s is marked tampered; one whose label is its cell\'s is shown as it is', async () => {
+  const twin = await twinHistory('proposed');
+  const { input } = folded(twin);
+  const label = (twin.legacyReplay.products.get(CONOPS) as ProductState).meta.label;
+  const other = label === 'org/Public' ? 'org/Internal' : 'org/Public';
+  const same = projectLedgerReplay({ ...input, cellLabels: new Map([[twin.world.stream, label]]) }).products.get(CONOPS) as ProductState;
+  assert.equal(same.tampered, undefined);
+  assert.deepEqual(comparable(same), comparable(twin.legacyReplay.products.get(CONOPS) as ProductState));
+  const mismatched = { ...input, cellLabels: new Map([[twin.world.stream, other]]) };
+  const shown = projectLedgerReplay(mismatched).products.get(CONOPS) as ProductState;
+  assert.equal(shown.tampered, PROJECTION_PROBLEMS['label-mismatch']);
+  assert.equal(shown.meta.label, label, 'the version\'s own label is shown, with the mark');
+  assert.deepEqual(projectStaffEvents(mismatched, 'run-projected'), [], 'a product the view cannot vouch for sends no events');
+  assert.match(PROJECTION_PROBLEMS['label-mismatch'], /not the label of the part of the project it is kept in/);
+  assert.ok(!PROJECTION_PROBLEMS['label-mismatch'].includes('\u2014'));
+});
+
+test('label-mismatch: a product the projection cannot read a version header for shows its cell\'s label, not a guessed one', async () => {
+  const twin = await twinHistory('pinned');
+  const { fold, input } = folded(twin);
+  // Without the pinned product in view the annex's pin cannot be named, so its header cannot be read and the fold's record stands.
+  const versions = (fold.families.versions as ProductVersions[]).filter((item) => item.product !== CONOPS);
+  const blind = { ...input, fold: { ...fold, families: { ...fold.families, versions } } as FoldResult };
+  const unlabelled = projectLedgerReplay(blind).products.get(ANNEX) as ProductState;
+  assert.equal(unlabelled.tampered, PROJECTION_PROBLEMS.unreadable);
+  assert.equal(unlabelled.meta.label, 'org/Internal', 'with no cell label known, the default product label');
+  const labelled = projectLedgerReplay({ ...blind, cellLabels: new Map([[twin.world.stream, 'org/Confidential']]) }).products.get(ANNEX) as ProductState;
+  assert.equal(labelled.meta.label, 'org/Confidential', 'the label of the cell it is kept in');
+  assert.equal(labelled.tampered, PROJECTION_PROBLEMS.unreadable, 'still marked for what it is');
 });

@@ -23,6 +23,8 @@ import { attributeText, summariseAuthors } from './attribution';
 import type { AuthorSummary } from './attribution';
 import type { CausalGraph } from './causal';
 import { resolveDecisions } from './decisions';
+import { PRODUCT_CELL_REFUSALS, pinProblem } from './productCells';
+import type { PinCandidate } from './productCells';
 import type { DecisionAct, DecisionClass, DecisionOutcome, DecisionResult } from './decisions';
 import type { FamilyReducer, FoldView, ReduceOutcome } from './reducers';
 import type { RosterView } from './rosterView';
@@ -65,7 +67,9 @@ export const VERSION_REFUSALS = {
   'not-gate-member': 'Only a member the roster lets run the release guard, or for the tradecraft gate the tradecraft reviewer, can give that verdict.',
   'too-many': 'This device has already proposed this product the largest allowed number of times.',
   'too-many-acts': 'This device has already written the largest allowed number of steps on this version.',
-  'unsupported-kind': 'This kind of entry is not applied by this version.'
+  'unsupported-kind': 'This kind of entry is not applied by this version.',
+  // Plan 32-08 (D-18): a pin to a product above the version's own cell.
+  ...PRODUCT_CELL_REFUSALS
 } as const;
 export type VersionRefusalReason = keyof typeof VERSION_REFUSALS | ReleaseRefusalReason;
 
@@ -278,12 +282,23 @@ function applyPropose(state: VersionsState, entry: VerifiedEntry, view: FoldView
   const writer = entry.header.writer;
   const count = product.proposalCounts.get(writer) ?? 0;
   if (count >= MAX_PROPOSALS_PER_WRITER_PRODUCT) return refused('too-many');
-  const outcome = checkProposal(product, entry, data, view);
+  const outcome = checkProposal(state, product, entry, data, view);
   if (outcome.status !== 'held') product.proposalCounts.set(writer, count + 1);
   return outcome;
 }
 
-function checkProposal(product: ProductEntry, entry: VerifiedEntry, data: { product: string; hash: string; textBlob: string; snapshot: string; pins: Pin[] }, view: FoldView): ReduceOutcome {
+// Every product the fold has reached, with the hashes of its accepted versions: what a pin may name (D-18).
+function pinCandidates(state: VersionsState): PinCandidate[] {
+  return [...state.products.values()].map((item) => ({ stream: item.stream, product: item.product, hashes: new Set(item.versions.map((version) => version.hash)) }));
+}
+
+function checkProposal(state: VersionsState, product: ProductEntry, entry: VerifiedEntry, data: { product: string; hash: string; textBlob: string; snapshot: string; pins: Pin[] }, view: FoldView): ReduceOutcome {
+  // Write up, never down, through pins too (D-18, D-67): checked first, before any blob is opened, and counted against the cap like any refusal. Only
+  // earlier entries in the fold order decide it, so every machine that holds the same cells gets the same answer.
+  if (view.ctx.cellOrder !== undefined && data.pins.length > 0) {
+    const problem = pinProblem(entry.header.stream, data.pins, pinCandidates(state), (citing, cited) => view.ctx.cellOrder?.(citing, cited) === true);
+    if (problem !== undefined) return refused(problem);
+  }
   const read = readBlobText(view, entry, data.textBlob);
   if (!read.ok) return read.hold ? held('missing-blob') : refused(read.tooLarge === true ? 'too-large' : 'bad-blob');
   const pins = data.pins.map((pin) => ({ product: pin.product, hash: pin.hash }));

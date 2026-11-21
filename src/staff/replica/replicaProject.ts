@@ -27,7 +27,7 @@ import type { DeviceIdentity } from '../../team/identity';
 import { localKeyStatus } from '../../team/keyHistory';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import { isRecord } from '../../domain/team/validate';
-import { buildGrant, newEpochKey, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { buildGrant, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
@@ -39,17 +39,21 @@ import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
-import { epochAt } from '../../domain/replica/rosterCells';
-import { deviceKeyOf } from '../../domain/replica/rosterMembers';
+import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
+import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
+import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
+import type { Citation } from '../../domain/replica/chain';
+import type { HeadSet } from '../../domain/replica/transport';
 import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
 import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
 import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
 import type { DeviceEncryptionKey } from './keyring';
-import { ReplicaStore } from './store';
+import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
+import type { SyncLocal } from './hubSync';
 
 /** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
 export const GENESIS_PIN_FOLDER = 'staff-replica';
@@ -85,6 +89,27 @@ function refuse(reason: ProjectRefusal, message?: string): ProjectRefused {
 
 function storeRefused(refused: StoreRefused): ProjectRefused {
   return { refused: 'store-refused', message: refused.message, store: refused.refused };
+}
+
+/**
+ * Finishes a Start Again left unfinished in `root` (32-CONTEXT D-03) before anything decides the folder holds no shared project: while it is
+ * unfinished the store folder, and project.json in it, may be gone. Nothing is made for a folder with no intent. A refusal is the store's.
+ */
+async function finishUnfinished(root: string, deps: ReplicaProjectDeps): Promise<ProjectRefused | undefined> {
+  try {
+    await lstat(path.join(path.resolve(root), ...START_AGAIN_INTENT_FILE.split('/')));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+  }
+  const device = await deviceKeys(deps);
+  const finished = await finishStartAgain(root, storeDeps(deps, device.identity));
+  return 'ok' in finished ? undefined : storeRefused(finished);
+}
+
+/** The refusal of a folder whose shared history went missing (its store folder is gone beside a folder set aside that holds project.json). */
+function historyMissing(): ProjectRefused {
+  return storeRefused({ refused: 'rolled-back', message: STORE_REFUSALS['rolled-back'] });
 }
 
 export function isProjectRefused(value: unknown): value is ProjectRefused {
@@ -252,6 +277,8 @@ export interface AppendOwnOptions {
 }
 export type AppendOwnResult = { ok: true; hash: string; built: BuiltEntry } | ProjectRefused;
 export interface OwnEntry { hash: string; stream: string; seq: number; data: unknown }
+/** A cell this device holds an epoch of (heldCells): label is the sealed label as opened here, for a cell that is not the base cell. */
+export interface HeldCell { cell: string; base: boolean; epochs: number[]; label?: unknown }
 export type WelcomeResult = { ok: true; added: number; held: Array<{ hash: string; reason: string }> } | ProjectRefused;
 export interface ProjectState { roster: RosterState; fold: FoldResult }
 
@@ -287,12 +314,16 @@ export class ReplicaProject {
   }
 
   /**
-   * Opens the shared project in `root`. Undefined when the folder holds no shared project (no project.json). Refused when this computer has not
-   * joined it (no pin), when project.json disagrees with the pin, when either cannot be read, or when the store refuses.
+   * Opens the shared project in `root`. A Start Again left unfinished is finished first (32-CONTEXT D-03). Undefined when the folder holds no shared
+   * project (no project.json, and no folder set aside beside a missing store folder holds one). Refused when this computer has not joined it (no
+   * pin), when project.json disagrees with the pin, when either cannot be read, when the store refuses, or rolled-back when the store folder is gone
+   * beside a folder set aside that holds project.json (its shared history went missing; Start Again carries from that folder).
    */
   public static async open(root: string, deps: ReplicaProjectDeps): Promise<ReplicaProject | ProjectRefused | undefined> {
+    const unfinished = await finishUnfinished(root, deps);
+    if (unfinished !== undefined) return unfinished;
     const local = await readAnchorFile(projectFile(root));
-    if (local.kind === 'missing') return undefined;
+    if (local.kind === 'missing') return (await sharedHistoryMissing(root)) ? historyMissing() : undefined;
     if (local.kind === 'damaged') return refuse('pin-damaged');
     const pin = await readAnchorFile(genesisPinFile(deps.globalStorageDir, local.anchor.project));
     if (pin.kind === 'damaged') return refuse('pin-damaged');
@@ -387,12 +418,15 @@ export class ReplicaProject {
   /**
    * Starts this computer's shared history of the project in `root` again, after the person confirmed it (31-REVIEW MJ-08): only when its store is
    * refused rolled-back, damaged or mark-unverified (ReplicaStore.startAgain). The store folder is moved aside, never deleted; this device's own
-   * signed entries, the grants, the blobs and project.json are carried into a new one; its mark starts again. Undefined when the folder holds no
-   * shared project. The rest of the history comes back with a new welcome file, opened with Staff: Join Staff Project.
+   * signed entries, the grants, the blobs and project.json are carried into a new one; its mark starts again. A Start Again left unfinished is
+   * finished first, and a store folder that is gone beside a folder set aside holding project.json is started again from that folder (32-CONTEXT
+   * D-03). Undefined when the folder holds no shared project. The rest of the history comes back with a new welcome file, opened with Staff: Join Staff Project.
    */
   public static async startHistoryAgain(root: string, deps: ReplicaProjectDeps): Promise<StartedAgain | ProjectRefused | undefined> {
+    const unfinished = await finishUnfinished(root, deps);
+    if (unfinished !== undefined) return unfinished;
     const local = await readAnchorFile(projectFile(root));
-    if (local.kind === 'missing') return undefined;
+    if (local.kind === 'missing' && !(await sharedHistoryMissing(root))) return undefined;
     const device = await deviceKeys(deps);
     const result = await ReplicaStore.startAgain(root, storeDeps(deps, device.identity));
     return 'ok' in result ? result : storeRefused(result);
@@ -499,6 +533,54 @@ export class ReplicaProject {
     });
   }
 
+  /** Every own stored entry of a kind whose data the predicate accepts, with its stream and hash, in the store's order. findOwn without stopping. */
+  public findOwnAll(kind: string, predicate: (data: unknown) => boolean): Promise<OwnEntry[]> {
+    return this.exclusive(async () => {
+      await this.foldNow();
+      const found: OwnEntry[] = [];
+      for (const entry of this.store.entries()) {
+        if (entry.header.writer !== this.device.writer) continue;
+        const opened = await this.openEntry(entry);
+        if (opened === undefined || opened.kind !== kind) continue;
+        if (predicate(opened.data)) found.push({ hash: entryHash(entry.header), stream: entry.header.stream, seq: entry.header.seq, data: opened.data });
+      }
+      return found;
+    });
+  }
+
+  /**
+   * The cells of the roster at its head of which this device's ring holds at least one epoch, sorted by cell: whether it is the base cell, the epochs
+   * held, and for any other cell its label as sealed (any value; the caller reads it), opened from a grant of a held epoch, newest epoch first, as
+   * membership's cellLabel does. A cell whose label does not open here has no label.
+   */
+  public heldCells(): Promise<HeldCell[]> {
+    return this.exclusive(async () => {
+      const { roster } = await this.foldNow();
+      const position = roster.positions.length - 1;
+      const held: HeldCell[] = [];
+      for (const cell of [...roster.cells.cells.keys()].sort()) {
+        if (epochAt(roster.cells, cell, position) === undefined) continue;
+        const epochs = epochsAt(roster.cells, cell, position).map((item) => item.epoch).filter((epoch) => this.keys.holds(cell, epoch));
+        if (epochs.length === 0) continue;
+        if (cell === this.anchor.project) {
+          held.push({ cell, base: true, epochs });
+          continue;
+        }
+        const record = roster.cells.cells.get(cell);
+        let label: unknown;
+        for (const grant of [...(record?.grants ?? [])].sort((a, b) => b.epoch - a.epoch)) {
+          if (grant.grant.labelSealed === '') continue;
+          const key = this.keys.epochKey(cell, grant.epoch);
+          if (key === undefined) continue;
+          label = openLabel(key, cell, grant.epoch, grant.grant.labelSealed);
+          if (label !== undefined) break;
+        }
+        held.push(label === undefined ? { cell, base: false, epochs } : { cell, base: false, epochs, label });
+      }
+      return held;
+    });
+  }
+
   /**
    * Stores signed cell grants (every one must read), then folds the roster, so the key ring takes the keys of the grants the roster placed. A grant the
    * roster does not place (a signer who may not change the roster, an epoch it has not founded) is stored and never opened (CR-01). opened is how many
@@ -570,6 +652,138 @@ export class ReplicaProject {
       }
       const { grants } = await this.store.grants();
       return buildWelcome({ genesis, roster, blobs: [...blobs.values()], grants: grants.map((grant) => grant.signed), writer, cells });
+    });
+  }
+
+  // ---- read access for the one-shot hub sync (32-23) -------------------------------------------------------------------------------------------
+
+  /** Per stream, the head of every writer's log in the store (entries the decode check refused left out of the list of writers). */
+  public heads(): Promise<HeadSet['streams']> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      const streams = new Map<string, HeadSet['streams'][number]>();
+      const seen = new Set<string>();
+      for (const entry of this.store.rosterEntries()) {
+        const { stream, writer } = entry.header;
+        if (seen.has(`${stream}/${writer}`)) continue;
+        seen.add(`${stream}/${writer}`);
+        const head = this.store.head(stream, writer);
+        if (head === undefined) continue;
+        const row = streams.get(stream) ?? { stream, heads: [] };
+        row.heads.push({ writer, seq: head.seq, hash: head.hash });
+        streams.set(stream, row);
+      }
+      return [...streams.values()];
+    });
+  }
+
+  /** The head of one writer's log in one stream, or undefined when the store holds none. */
+  public head(stream: string, writer: string): Promise<{ seq: number; hash: string } | undefined> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      return this.store.head(stream, writer);
+    });
+  }
+
+  /** Which of these entry hashes the store holds. */
+  public holds(hashes: readonly string[]): Promise<Set<string>> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      return new Set(hashes.filter((hash) => this.store.has(hash)));
+    });
+  }
+
+  /** The stored entries of one writer in one stream above a seq, in seq order (entries the decode check refused left out). */
+  public entriesAfter(stream: string, writer: string, seq: number): Promise<SealedEntry[]> {
+    return this.exclusive(async () => {
+      await this.refreshed();
+      return this.store.rosterEntries().filter((entry) => entry.header.stream === stream && entry.header.writer === writer && entry.header.seq > seq).sort((a, b) => a.header.seq - b.header.seq);
+    });
+  }
+
+  /** A blob this computer holds, or undefined. */
+  public blob(hash: string): Promise<SealedBlob | undefined> {
+    return this.exclusive(async () => this.blobCache.get(hash) ?? await this.store.blob(hash));
+  }
+
+  /** The blobs that entries waiting for a blob cite and this computer does not hold. */
+  public wantedBlobs(): Promise<string[]> {
+    return this.exclusive(async () => {
+      await this.foldNow();
+      const waiting = new Set(this.store.waitingForCheck().filter((item) => item.reason === 'awaiting-blob').map((item) => item.hash));
+      const wanted = new Set<string>();
+      for (const entry of this.store.rosterEntries()) {
+        if (!waiting.has(entryHash(entry.header))) continue;
+        for (const hash of this.citedBlobs(entry)) if (!this.blobCache.has(hash) && (await this.store.blob(hash)) === undefined) wanted.add(hash);
+      }
+      return [...wanted].sort();
+    });
+  }
+
+  /** The blobs the given stored entries use, as append blobRefs: a body's blob and a compaction's state blob. Entries this device cannot open name none. */
+  public blobsCitedBy(hashes: readonly string[]): Promise<Array<{ entry: string; blob: string }>> {
+    return this.exclusive(async () => {
+      await this.foldNow();
+      const wanted = new Set(hashes);
+      const refs: Array<{ entry: string; blob: string }> = [];
+      for (const entry of this.store.rosterEntries()) {
+        const hash = entryHash(entry.header);
+        if (!wanted.has(hash)) continue;
+        for (const blob of this.citedBlobs(entry)) refs.push({ entry: hash, blob });
+      }
+      return refs;
+    });
+  }
+
+  /**
+   * The deps that entries the chain stage holds for a missing predecessor cite and the store does not hold, each with the citing entry's stream
+   * (D-50, D-63): the hub sync cites them for its withheld finding. Only those held entries are opened, and only their bodies (not a blob they use).
+   */
+  public missingDeps(): Promise<Citation[]> {
+    return this.exclusive(async () => {
+      const { fold } = await this.foldNow();
+      const cited = new Map<string, Citation>();
+      for (const held of fold.held) {
+        if (held.stage !== 'chain' || held.reason !== 'missing-predecessor' || held.hash === undefined) continue;
+        const entry = this.entryByHash(held.hash);
+        const key = entry === undefined ? undefined : this.keys.epochKey(entry.header.stream, entry.header.epoch);
+        const plain = entry === undefined || key === undefined ? undefined : openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+        const body = plain === undefined ? undefined : parseJson(plain);
+        if (entry === undefined || !isRecord(body) || !Array.isArray(body.deps)) continue;
+        for (const dep of body.deps as unknown[]) {
+          if (!isRecord(dep) || typeof dep.writer !== 'string' || !HASH_PATTERN.test(dep.writer) || typeof dep.hash !== 'string' || !HASH_PATTERN.test(dep.hash)) continue;
+          if (!Number.isSafeInteger(dep.seq) || (dep.seq as number) < 0 || cited.has(dep.hash) || this.store.has(dep.hash)) continue;
+          cited.set(dep.hash, { stream: entry.header.stream, writer: dep.writer, seq: dep.seq as number, hash: dep.hash });
+        }
+      }
+      return [...cited.values()].sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+    });
+  }
+
+  /** Every signed cell grant stored, with its hash. */
+  public signedGrants(): Promise<Array<{ hash: string; signed: unknown }>> {
+    return this.exclusive(async () => (await this.store.grants()).grants.map((grant) => ({ hash: grant.hash, signed: grant.signed })));
+  }
+
+  /** Stores a signed checkpoint as evidence (the store names it by its checkpoint hash). */
+  public putCheckpoint(signed: SignedCheckpoint): Promise<{ ok: true; hash: string } | ProjectRefused> {
+    return this.exclusive(async () => {
+      const stored = await this.store.putCheckpoint(signed);
+      return 'ok' in stored ? stored : storeRefused(stored);
+    });
+  }
+
+  /** Every stored checkpoint that reads back. */
+  public checkpoints(): Promise<SignedCheckpoint[]> {
+    return this.exclusive(async () => (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint));
+  }
+
+  /** The cells the hub with this writer id holds at the roster head (the base cell and those granted with hub.grant), or undefined. */
+  public hubCells(hubWriter: string): Promise<readonly string[] | undefined> {
+    return this.exclusive(async () => {
+      const { roster } = await this.foldNow();
+      const device = deviceKeyOf(roster.members, hubWriter);
+      return device === undefined ? undefined : hubCellsAt(roster.members, device.member, roster.positions.length - 1);
     });
   }
 
@@ -665,6 +879,25 @@ export class ReplicaProject {
 
   private now(): Date {
     return this.deps.now?.() ?? new Date();
+  }
+
+  /** Reads what other windows wrote since the store last looked; refused like open when a file went backwards. */
+  private async refreshed(): Promise<void> {
+    const refreshed = await this.store.refresh();
+    if (!('ok' in refreshed)) throw new ReplicaProjectError(storeRefused(refreshed));
+  }
+
+  /** The blobs an entry's body names, when this device can open it: the body's own blob and a compaction's state blob. */
+  private citedBlobs(entry: SealedEntry): string[] {
+    const key = this.keys.epochKey(entry.header.stream, entry.header.epoch);
+    if (key === undefined) return [];
+    const plain = openBody(key, entry.header, Buffer.from(entry.body, 'base64url'));
+    const body = plain === undefined ? undefined : parseJson(plain);
+    if (!isRecord(body)) return [];
+    const found: string[] = [];
+    if (typeof body.blob === 'string' && HASH_PATTERN.test(body.blob)) found.push(body.blob);
+    if (body.kind === 'doc.compact' && isRecord(body.data) && typeof body.data.stateBlob === 'string' && HASH_PATTERN.test(body.data.stateBlob)) found.push(body.data.stateBlob);
+    return found;
   }
 
   private async foldNow(): Promise<ProjectState> {
@@ -899,4 +1132,42 @@ function rosterSignature(roster: RosterState): string {
   let grants = 0;
   for (const cell of roster.cells.cells.values()) grants += cell.grants.length;
   return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants)].join('|');
+}
+
+/**
+ * The replica a one-shot hub sync reads and writes (32-23): this project's store through its read accessors, entries from the hub through
+ * ingestForeign (the decode check), grants through putGrants, and the roster as this device folds it. hubSync.ts imports nothing from this file, so
+ * the hub's tests bundle the sync without the fold or Yjs (D-27).
+ */
+export function syncLocalOf(project: ReplicaProject): SyncLocal {
+  const settle = <T>(value: T | ProjectRefused): T => {
+    if (isProjectRefused(value)) throw new ReplicaProjectError(value);
+    return value;
+  };
+  return {
+    project: project.projectId,
+    writer: project.deviceWriter,
+    roster: async () => rosterView((await project.state()).roster),
+    heads: () => project.heads(),
+    head: (stream, writer) => project.head(stream, writer),
+    holds: (hashes) => project.holds(hashes),
+    entriesAfter: (stream, writer, seq) => project.entriesAfter(stream, writer, seq),
+    blob: (hash) => project.blob(hash),
+    wantedBlobs: () => project.wantedBlobs(),
+    blobsCitedBy: (hashes) => project.blobsCitedBy(hashes),
+    grants: () => project.signedGrants(),
+    async ingest(entries, blobs) {
+      const result = settle(await project.ingestForeign(entries, blobs));
+      return { added: result.added, notStored: result.deferred + result.flooded + result.dropped };
+    },
+    async putGrants(grants) {
+      settle(await project.putGrants(grants));
+    },
+    checkpoints: () => project.checkpoints(),
+    async putCheckpoint(signed) {
+      settle(await project.putCheckpoint(signed));
+    },
+    covered: (hub) => project.hubCells(hub),
+    missingDeps: () => project.missingDeps()
+  };
 }

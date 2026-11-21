@@ -4,17 +4,27 @@
 // The steps, in order, each one safe to run again (D-34):
 //   verify       today's four ledgers are checked exactly as today's host checks them: products.jsonl with its signed head mark from SecretStorage,
 //                decisions.jsonl, calculator.jsonl, and the unsigned wargame ledger. A broken ledger stops here with today's sentence and its way out
-//                (Set Aside the Product Ledger, or Use This Branch's Ledger), before anything is written (D-30). So does a product labelled above
-//                the base cell (BASE_CELL_LABEL, W-1): everything a conversion writes goes into the base cell, which everyone admitted receives.
+//                (Set Aside the Product Ledger, or Use This Branch's Ledger), before anything is written (D-30). So does a label the conversion needs
+//                that the clearance the lead declares (options.leadClearance) does not cover: not-cleared-for-label, the D-19 sentence for each such
+//                label with the products that carry it. With no clearance declared only org/Public is covered (D-68).
 //   genesis      the shared project is made with this device's person as the staff lead (ReplicaProject.createSharedProject, which reuses a genesis
 //                this device already wrote and pinned).
-//   import       one project.import per legacy file present, carrying the legacy head (the last entry digest of a signed ledger, the sha256 of the
-//                file for the wargame ledger), the entry count, the product ledger's signed head mark, and the whole file (D-31, D-46). An import of
-//                the ledger is looked up first and never sealed twice: a second seal is a second signed header at one seq, a fork (Pitfall 4).
-//   reconstruct  each product becomes a live text written by the lead's device and, when its current text is known and its pins can be named, one
-//                version whose text is the original's (D-32). Every one of these entries cites the products import in its deps, which is how the
-//                projection tells an imported product. Approvals and releases stay as their original signed entries inside the import. A product
-//                file changed since an earlier run wrote its text stops the conversion product-changed, before anything is written (MJ-09).
+//   cells        the lead's declared clearance is written to the roster when it differs, then one cell per label in use (each product's label, and
+//                org/Internal for the calculator and wargame ledgers) and the lead-only legacy cell when the product ledger or the decision log is
+//                present (labelCells.ts; D-15, D-16, D-20). A cell this device already holds for the label is reused, so a label never gets two.
+//   import       per D-20: the whole product ledger (its file and signed head mark) and the whole decision log go into the legacy cell; each label
+//                cell holding products gets a products import of scope cell carrying only its products' lines, byte for byte, with the whole
+//                ledger's head and count; the calculator and wargame ledgers go whole into the org/Internal cell. Nothing goes into the base cell. Each
+//                import is looked up by ledger, scope and stream first and never sealed twice: a second seal is a second signed header at one seq.
+//                A product any of whose lines names a product the cell's label does not cover (in meta.dependsOn) has none of its lines in the cell
+//                import: a signed line cannot be edited, and the name must not reach a device cleared only for the cell (D-18, D-23; CR-02). It is
+//                listed withheld, and the cell carries it as its live text (and a version when one can be made); the legacy cell keeps every line.
+//   reconstruct  each product becomes a live text in the cell for its label (appendProductEntry) and, when its current text is known and its pins
+//                can be named, one version whose text is the original's (proposeVersion; D-32). Every one of these entries cites its cell's products
+//                import, which is how the projection tells an imported product. A pin to a product whose label its own does not cover leaves the
+//                product with its live text only (pin-above-cell, D-18). The lead's role change is a roster entry and cites nothing. Approvals and
+//                releases stay as their original signed entries inside the imports. A product file changed since an earlier run wrote its text
+//                stops the conversion product-changed, before anything is written (MJ-09).
 //   move-legacy  the four originals move to .planning/staff/legacy/ keeping their paths under .planning/staff; nothing is deleted, the head mark in
 //                SecretStorage is left as it is, and a file already in the legacy folder is never written over (D-33).
 //   projections  the product files are written from the fold and the decisions, calculator and wargame ledgers back from their imports at their
@@ -30,17 +40,18 @@
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, rename } from 'node:fs/promises';
 import * as path from 'node:path';
+import { dominates } from '../../domain/gate/dominance';
+import { SCALE_PRESETS } from '../../domain/gate/labels';
+import type { Label, ScaleTable } from '../../domain/gate/labels';
 import { canonicalBytes } from '../../domain/team/canonical';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import { verifyPayload } from '../../domain/team/signedPayload';
 import { isRecord } from '../../domain/team/validate';
 import { clientIdOf } from '../../domain/replica/clientIds';
 import { createLocalDoc, docText, localInsert, snapshotOf } from '../../domain/replica/doc';
-import { SEALED_OVERHEAD, openBlob, sealBlob } from '../../domain/replica/entry';
-import { MAX_STATE_BYTES } from '../../domain/replica/kindSchemas/doc';
+import { openBlob } from '../../domain/replica/entry';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
-import type { RosterState } from '../../domain/replica/roster';
-import { epochAt } from '../../domain/replica/rosterCells';
+import { DEFAULT_PRODUCT_LABEL, importScopeOf, labelFromText, labelText, sameLabel } from '../../domain/replica/productCells';
 import { deviceAt, memberAt } from '../../domain/replica/rosterMembers';
 import { verifyEntry } from '../../domain/replica/verify';
 import { replicaVersionHash } from '../../domain/replica/versions';
@@ -59,15 +70,19 @@ import { identityDir as identityDirOf } from '../../team/identity';
 import { localKeyStatus } from '../../team/keyHistory';
 import { readWhole, snapshotOfBytes, writeIfUnchanged } from '../staffFiles';
 import { LEDGER_DIR, LEDGER_FILE, LEDGER_HEAD_SECRET_PREFIX, STAFF_SETTINGS_FILE, USE_BRANCH_LEDGER_WAY_OUT, WARGAME_DIR, WARGAME_FILE, unreadableText } from '../staffHost';
+import { NOT_CLEARED_TEXT, appendProductEntry, cellLabelTexts, ensureLabelCell, ensureLegacyCell, proposeVersion } from './labelCells';
+import type { ProductWriteResult } from './labelCells';
+import { clearedFor, updateMember } from './membership';
+import type { Gate, SharedProjectHost } from './membership';
 import { IMPORTED_PRODUCTS_LEDGER, PROJECTION_LEFT_REASONS, ledgerLinesOf, projectionEntry, writeProjections } from './projection';
 import type { PassthroughLedger, ProjectionEntry, ProjectionInput, ProjectionWrite } from './projection';
-import { ReplicaProject, isProjectRefused, projectFile } from './replicaProject';
+import { ReplicaProject, projectFile } from './replicaProject';
 import type { ReplicaProjectDeps } from './replicaProject';
 import { ReplicaStore } from './store';
 
 // ---- the steps and the ledgers ---------------------------------------------------------------------------------------------------------------------
 
-export const MIGRATION_STEPS = ['verify', 'genesis', 'import', 'reconstruct', 'move-legacy', 'projections', 'complete'] as const;
+export const MIGRATION_STEPS = ['verify', 'genesis', 'cells', 'import', 'reconstruct', 'move-legacy', 'projections', 'complete'] as const;
 export type MigrationStep = (typeof MIGRATION_STEPS)[number];
 
 export type LegacyLedgerId = 'products' | 'decisions' | 'calculator' | 'wargame';
@@ -119,10 +134,8 @@ function brokenText(ledger: LegacyLedgerId, broken: { seq: number; reason: strin
 }
 
 /**
- * The one label the base cell may carry (W-1). Every person admitted to a shared project is on the base cell, whatever clearance the staff lead declares
- * for them, and a conversion writes every product, its text, its version and the whole product ledger there. So only a product labelled org/Public, which
- * every declared clearance may read, can be converted; a project holding any other label is refused before anything is written, until products can
- * be kept in a cell for their label.
+ * The label of the base cell, which carries the roster and project-level entries only (D-21). Products are no longer kept there: each goes into the
+ * cell for its label (D-15, D-16), so a conversion no longer refuses a label for the base cell's sake.
  */
 export const BASE_CELL_LABEL = 'org/Public';
 
@@ -132,7 +145,7 @@ export const MIGRATION_REFUSALS = {
   'already-shared': 'This project is already multi-user, so nothing was changed.',
   'no-staff-project': 'This folder holds no staff project (there is no .planning/staff folder), so there is nothing to make multi-user. Nothing was changed.',
   'ledger-changed': 'A ledger changed after this project started becoming multi-user, so the conversion stopped and nothing more was written. Ask your staff lead for help: the shared history already holds the ledger as it was.',
-  'label-above-base': `This project was not made multi-user, because some of its products are labelled above ${BASE_CELL_LABEL}. Everyone admitted to a shared project receives its products, whatever clearance the staff lead declares for them, so such a product could reach a person not cleared for it. Nothing was written. Keep this project on one machine for now, or ask each product's owner to propose it again labelled ${BASE_CELL_LABEL} if nothing in it needs a higher label (that makes a new version, which needs its gate checks and approval again).`,
+  'not-cleared-for-label': 'This project was not made multi-user, because some of its parts carry a label your declared clearance does not cover. Nothing was written.',
   'product-changed': 'A product file changed after this project started becoming multi-user, so the conversion stopped and nothing more was written. The file was left as it is, with the change in it. To finish, copy the file somewhere safe, put back the text it had when the conversion started (git or your backups hold it), and run Make This Staff Project Multi-User again. Your copy keeps the change.',
   'project-refused': 'The shared project could not be made, so the conversion stopped.'
 } as const;
@@ -143,6 +156,8 @@ export interface MigrationRefused {
   ledger?: LegacyLedgerId;
   /** product-changed: the product file, from the project root. */
   file?: string;
+  /** not-cleared-for-label: each label the declared clearance does not cover, as people read it. */
+  labels?: string[];
 }
 
 const refuse = (reason: MigrationRefusal, message?: string, ledger?: LegacyLedgerId): MigrationRefused =>
@@ -155,16 +170,53 @@ const productChanged = (file: string): MigrationRefused =>
 // The products a label refusal names before it says how many more there are.
 const LABEL_LIST_LIMIT = 10;
 
-/** The products of a verified product ledger labelled above the base cell (W-1), by name, each with its current label. */
-export function productsAboveBaseCell(replay: LedgerReplay): Array<{ product: string; label: string }> {
-  return [...replay.products].filter(([, state]) => state.meta.label !== BASE_CELL_LABEL).map(([product, state]) => ({ product, label: state.meta.label }))
-    .sort((a, b) => (a.product < b.product ? -1 : a.product > b.product ? 1 : 0));
+// The calculator and wargame ledgers name no product; they are kept in the org/Internal cell (D-20), today's default product label.
+const LEDGERS_LABEL = DEFAULT_PRODUCT_LABEL;
+const LEDGERS_AT_LEDGERS_LABEL: readonly LegacyLedgerId[] = ['calculator', 'wargame'];
+const LEDGERS_ONLY_TEXT = 'No product has that label: the calculator or wargame ledger of this project is kept at it.';
+const ORG_PUBLIC: Label = { scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] };
+
+/** A label a conversion needs: its text as people read it, the label when the scales know it, and the products that carry it (sorted). */
+export interface NeededLabel { readonly text: string; readonly label?: Label; readonly products: string[] }
+
+/** The labels a conversion of these ledgers needs, sorted by text: each product's label, and org/Internal when a calculator or wargame ledger is present. */
+export function neededLabels(ledgers: readonly LegacyRead[], scales: ScaleTable = SCALE_PRESETS): NeededLabel[] {
+  const out = new Map<string, { text: string; label?: Label; products: string[] }>();
+  const add = (raw: string, product?: string): void => {
+    const label = labelFromText(raw, scales);
+    const text = label === undefined ? raw : labelText(label);
+    const item = out.get(text) ?? { text, ...(label === undefined ? {} : { label }), products: [] };
+    if (product !== undefined) item.products.push(product);
+    out.set(text, item);
+  };
+  const replay = ledgers.find((item) => item.ledger === IMPORTED_PRODUCTS_LEDGER)?.replay;
+  for (const [product, state] of replay?.products ?? []) add(state.meta.label, product);
+  if (ledgers.some((item) => LEDGERS_AT_LEDGERS_LABEL.includes(item.ledger))) add(LEDGERS_LABEL);
+  return [...out.values()].sort((a, b) => (a.text < b.text ? -1 : a.text > b.text ? 1 : 0)).map((item) => ({ ...item, products: [...item.products].sort() }));
 }
 
-function labelRefusal(above: ReadonlyArray<{ product: string; label: string }>): MigrationRefused {
-  const named = above.slice(0, LABEL_LIST_LIMIT).map((item) => `${item.product} (${item.label})`).join(', ');
-  const more = above.length > LABEL_LIST_LIMIT ? `, and ${above.length - LABEL_LIST_LIMIT} more` : '';
-  return refuse('label-above-base', `${MIGRATION_REFUSALS['label-above-base']} Labelled above ${BASE_CELL_LABEL}: ${named}${more}.`, 'products');
+/** The gate a conversion decides labels with: the scales given (the presets when none), no mappings, and the clock. */
+function gateFor(scales: ScaleTable | undefined, now: (() => Date) | undefined): Gate {
+  const table = scales ?? SCALE_PRESETS;
+  return { scales: table, context: { scales: table, mappings: [], now: (now?.() ?? new Date()).getTime() } };
+}
+
+/** May a lead with this declared clearance (or none) convert a part carrying the label (D-19, D-68), by the rule labelCells.ts makes cells with? */
+function covers(leadClearance: unknown, label: Label | undefined, gate: Gate): boolean {
+  if (label === undefined) return false;
+  if (leadClearance === undefined) return sameLabel(label, ORG_PUBLIC);
+  return clearedFor(leadClearance, { cell: '', base: false, label, known: true }, false, gate);
+}
+
+/** The not-cleared-for-label refusal: the sentence, then for each label the D-19 sentence and the products carrying it (at most ten named). */
+function notCleared(labels: readonly NeededLabel[]): MigrationRefused {
+  const parts = labels.map((item) => {
+    if (item.products.length === 0) return `${NOT_CLEARED_TEXT(item.text)} ${LEDGERS_ONLY_TEXT}`;
+    const named = item.products.slice(0, LABEL_LIST_LIMIT).join(', ');
+    const more = item.products.length > LABEL_LIST_LIMIT ? `, and ${item.products.length - LABEL_LIST_LIMIT} more` : '';
+    return `${NOT_CLEARED_TEXT(item.text)} Products with that label: ${named}${more}.`;
+  });
+  return { refused: 'not-cleared-for-label', message: `${MIGRATION_REFUSALS['not-cleared-for-label']} ${parts.join(' ')}`, labels: labels.map((item) => item.text) };
 }
 
 export function isMigrationRefused(value: unknown): value is MigrationRefused {
@@ -267,13 +319,24 @@ export function verifyLegacyBytes(ledger: LegacyLedgerId, bytes: Buffer, status:
   }
 }
 
+/** What verify is told: the clearance the lead declares (the command asks for it), the scales (the presets when absent) and the clock. */
+export interface VerifyOptions {
+  leadClearance?: unknown;
+  scales?: ScaleTable;
+  now?: () => Date;
+}
+
+/** Today's ledgers verified, and the labels a conversion of them needs, sorted (product labels, and org/Internal for the calculator or wargame). */
+export interface VerifiedLedgers { ok: true; ledgers: LegacyRead[]; labels: string[] }
+
 /**
  * Verifies today's four ledgers exactly as today's host does (D-30), writing nothing. Each is read from its usual path, or from its legacy path once
  * an interrupted conversion has moved it there. A ledger that is absent is skipped, except the product ledger when its head mark says it held entries
  * (today's host reads that as cut short or deleted). The first ledger that does not verify, or cannot be read whole, refuses with today's sentence.
- * A product ledger whose products carry a label above the base cell is refused label-above-base, naming them (W-1).
+ * A label the conversion needs that options.leadClearance does not cover (with none declared, anything but org/Public) is refused
+ * not-cleared-for-label, with the D-19 sentence for each such label naming its products (D-19, D-21, D-68). A run resumed is given the same options.
  */
-export async function verifyLegacyLedgers(root: string, deps: VerifyDeps): Promise<{ ok: true; ledgers: LegacyRead[] } | MigrationRefused> {
+export async function verifyLegacyLedgers(root: string, deps: VerifyDeps, options: VerifyOptions = {}): Promise<VerifiedLedgers | MigrationRefused> {
   const status = await deps.staffKeyStatus();
   const ledgers: LegacyRead[] = [];
   for (const ledger of LEGACY_LEDGERS) {
@@ -293,11 +356,13 @@ export async function verifyLegacyLedgers(root: string, deps: VerifyDeps): Promi
     if (at === undefined) continue;
     ledgers.push({ ledger: ledger.ledger, path: at, bytes, head: verified.head, count: verified.count, ...(mark.text === undefined ? {} : { mark: mark.text }), ...(verified.replay ? { replay: verified.replay } : {}) });
   }
-  // Every product goes into the base cell, which everyone admitted receives (W-1): a label above it is refused here, before the command asks anything.
-  const replay = ledgers.find((item) => item.ledger === 'products')?.replay;
-  const above = replay === undefined ? [] : productsAboveBaseCell(replay);
-  if (above.length > 0) return labelRefusal(above);
-  return { ok: true, ledgers };
+  // Each product goes into the cell for its label (D-15), which only a lead declared cleared for it may make (D-19): checked here, before anything is
+  // written and before the command asks anything.
+  const needed = neededLabels(ledgers, options.scales);
+  const gate = gateFor(options.scales, options.now);
+  const uncovered = needed.filter((item) => !covers(options.leadClearance, item.label, gate));
+  if (uncovered.length > 0) return notCleared(uncovered);
+  return { ok: true, ledgers, labels: needed.map((item) => item.text) };
 }
 
 // ---- the conversion --------------------------------------------------------------------------------------------------------------------------------
@@ -316,16 +381,45 @@ export interface MigrationOptions {
   labelMapHash?: string;
   /** The lead's member id: derived from this device's writer id when absent. */
   leadMember?: string;
+  /**
+   * The clearance the staff lead declares for themselves (D-19; the command asks for it): written to the roster when it differs, and every label the
+   * conversion needs must be one it covers. With none, only org/Public is covered (D-68). A resumed run is given the same clearance again.
+   */
+  leadClearance?: unknown;
+  /** The label scales: SCALE_PRESETS when absent. */
+  scales?: ScaleTable;
 }
 
+/** One whole import of a legacy ledger. */
 export interface ImportedLedger { readonly ledger: LegacyLedgerId; readonly legacyHead: string; readonly count: number; readonly entry: string; readonly marked: boolean }
+/** A products import of scope cell (D-20): the label cell it is in, its entry and how many of the ledger's lines it carries. */
+export interface ScopedLedger { readonly ledger: LegacyLedgerId; readonly cell: string; readonly entry: string; readonly lines: number }
+/** A cell the conversion uses: a label cell (label, as people read it) or the legacy cell (legacy, its labels), with the products it holds. */
+export interface MigrationCell { readonly cell: string; readonly label?: string; readonly legacy?: string[]; readonly products: string[] }
+/** A product given a live text but no version, and why. pin-above-cell: it pins a product whose label its own does not cover (D-18). */
+export interface UnversionedProduct { readonly product: string; readonly reason: 'pin-above-cell' }
+/**
+ * A product whose ledger lines were left out of its cell's products import, and why. names-above-cell: a line names (in meta.dependsOn) a product whose
+ * label the cell's does not cover, so sealing it there would put that name on every device cleared only for the cell (D-23; CR-02). The lines stay in
+ * the lead-only legacy cell; the cell carries the product as its live text.
+ */
+export interface WithheldProduct { readonly product: string; readonly cell: string; readonly lines: number; readonly reason: 'names-above-cell' }
 
 export interface MigrationResult {
   readonly ok: true;
   /** The last step done; `complete` when the whole conversion is done. */
   readonly completed: MigrationStep;
   readonly project?: string;
+  /** The label cells, sorted by label, then the legacy cell. */
+  readonly cells: MigrationCell[];
+  /** One item per legacy ledger present: its whole import. */
   readonly imported: ImportedLedger[];
+  /** The products import of each label cell holding products. */
+  readonly scoped: ScopedLedger[];
+  /** Products whose lines were left out of their cell's products import (CR-02), in the order of the cells, then by product. */
+  readonly withheld: WithheldProduct[];
+  /** Products reconstructed with a live text only for a reason the conversion names. */
+  readonly unversioned: UnversionedProduct[];
   /** Every product of the imported ledger, and the ones reconstructed with a version (the others have a live text only; see the summary). */
   readonly products: string[];
   readonly versions: string[];
@@ -429,24 +523,147 @@ function appended(result: Awaited<ReturnType<ReplicaProject['appendOwn']>>): str
   throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${result.message}`));
 }
 
-/** The import step: one project.import per legacy file present, each looked up before anything is sealed (P-31-26). */
-async function importLedgers(project: ReplicaProject, ledgers: readonly LegacyRead[]): Promise<ImportedLedger[]> {
-  const out: ImportedLedger[] = [];
-  for (const read of ledgers) {
-    const found = await project.findOwn('project.import', (data) => isRecord(data) && data.ledger === read.ledger);
-    if (found !== undefined) {
-      const data = found.data as { legacyHead: string; count: number; mark?: string };
-      // The same ledger imported with another head: the ledger changed since; a second import would make two histories of one ledger.
-      if (data.legacyHead !== read.head || data.count !== read.count) throw new Stop(refuse('ledger-changed', undefined, read.ledger));
-      out.push({ ledger: read.ledger, legacyHead: read.head, count: read.count, entry: found.hash, marked: data.mark !== undefined });
-      continue;
+/** Where the conversion keeps things: each label cell by label text, the legacy cell, and each product's label text. */
+interface Placement {
+  readonly cells: MigrationCell[];
+  readonly byLabel: ReadonlyMap<string, string>;
+  readonly legacy?: string;
+  readonly labelOf: ReadonlyMap<string, string>;
+}
+
+/** A cell refusal turned into a conversion refusal. */
+function cellRefused(made: { reason: string; message: string }, item?: NeededLabel): Stop {
+  return new Stop(made.reason === 'not-cleared-for-label' && item !== undefined ? notCleared([item]) : refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${made.message}`));
+}
+
+/**
+ * The cells step (D-15, D-16, D-19, D-20): the lead's declared clearance written to the roster when given and not already the same, then one label
+ * cell per needed label (in label order) and the legacy cell for every product label when the product ledger or the decision log is present. Each is
+ * reused when this device already holds one for that label (labelCells.ts), so a run interrupted after any of them makes no second one.
+ */
+async function makeCells(shared: SharedProjectHost, ledgers: readonly LegacyRead[], leadMember: string, options: MigrationOptions): Promise<Placement> {
+  const { project } = shared;
+  if (options.leadClearance !== undefined) {
+    const { roster } = await project.state();
+    const record = memberAt(roster.members, leadMember, roster.positions.length - 1);
+    const same = record?.clearance !== undefined && canonicalBytes(record.clearance).equals(canonicalBytes(options.leadClearance));
+    if (!same) {
+      const changed = await updateMember(shared, { member: leadMember, clearance: options.leadClearance });
+      if (!changed.ok) throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${changed.message}`));
     }
-    const data: Record<string, unknown> = { ledger: read.ledger, legacyHead: read.head, count: read.count, file: read.bytes.toString('base64url'), ...(read.mark === undefined ? {} : { mark: read.mark }) };
-    const problem = validateProjectData('project.import', data, 'import');
-    if (problem !== undefined) throw new Error(`The ${read.ledger} ledger was not imported: ${problem}.`);
-    out.push({ ledger: read.ledger, legacyHead: read.head, count: read.count, entry: appended(await project.appendOwn('project.import', data)), marked: read.mark !== undefined });
   }
-  return out;
+  const needed = neededLabels(ledgers, options.scales);
+  const cells: MigrationCell[] = [];
+  const byLabel = new Map<string, string>();
+  const labelOf = new Map<string, string>();
+  for (const item of needed) {
+    const made = await ensureLabelCell(shared, item.text);
+    if (!made.ok) throw cellRefused(made, item);
+    byLabel.set(item.text, made.cell);
+    cells.push({ cell: made.cell, label: item.text, products: [...item.products] });
+    for (const product of item.products) labelOf.set(product, item.text);
+  }
+  if (!ledgers.some((item) => item.ledger === IMPORTED_PRODUCTS_LEDGER || item.ledger === 'decisions')) return { cells, byLabel, labelOf };
+  const labels = needed.filter((item) => item.products.length > 0).map((item) => item.text);
+  const made = await ensureLegacyCell(shared, labels);
+  if (!made.ok) throw cellRefused(made);
+  cells.push({ cell: made.cell, legacy: labels, products: [...labelOf.keys()].sort() });
+  return { cells, byLabel, legacy: made.cell, labelOf };
+}
+
+/** The product a ledger line names, or undefined for a line that is not a ledger entry. */
+function productOfLine(line: string): string | undefined {
+  try {
+    const value = JSON.parse(line) as unknown;
+    const payload = isRecord(value) ? value.payload : undefined;
+    return isRecord(payload) && typeof payload.product === 'string' ? payload.product : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Every product a ledger line names: its own, and each product of meta.dependsOn. Empty for a line that is not a ledger entry. */
+function productsNamedBy(line: string): string[] {
+  try {
+    const value = JSON.parse(line) as unknown;
+    const payload = isRecord(value) ? value.payload : undefined;
+    if (!isRecord(payload)) return [];
+    const named = typeof payload.product === 'string' ? [payload.product] : [];
+    const dependsOn = isRecord(payload.meta) && Array.isArray(payload.meta.dependsOn) ? payload.meta.dependsOn : [];
+    // Anything in dependsOn that is not a plain product name counts as naming something unknown, which no cell covers.
+    for (const item of dependsOn) named.push(isRecord(item) && typeof item.product === 'string' ? item.product : '');
+    return named;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The lines of a product ledger naming one of the products, each byte for byte as in the file, joined with a newline and ending with one (D-20), except
+ * every line of a product any of whose lines names a product `covered` refuses (CR-02): signed lines cannot be edited, so such a product's lines are
+ * all left out (a part of a product's lines would not replay), and counted in `withheld` by product.
+ */
+function cellFileOf(bytes: Buffer, products: ReadonlySet<string>, covered: (product: string) => boolean): { file: Buffer; lines: number; withheld: Map<string, number> } {
+  const ofCell = bytes.toString('utf8').split('\n').filter((line) => line.trim() !== '' && products.has(productOfLine(line) ?? ''));
+  const above = new Set<string>();
+  for (const line of ofCell) if (!productsNamedBy(line).every(covered)) above.add(productOfLine(line) as string);
+  const withheld = new Map<string, number>();
+  const kept = ofCell.filter((line) => {
+    const product = productOfLine(line) as string;
+    if (!above.has(product)) return true;
+    withheld.set(product, (withheld.get(product) ?? 0) + 1);
+    return false;
+  });
+  return { file: Buffer.from(kept.length === 0 ? '' : `${kept.join('\n')}\n`, 'utf8'), lines: kept.length, withheld };
+}
+
+/**
+ * Seals one project.import into a stream, unless one of that ledger and scope is already there: looked up by ledger, scope and stream before
+ * anything is sealed (P-31-26). One found with another head or count means the ledger changed since: ledger-changed.
+ */
+async function sealImport(project: ReplicaProject, read: LegacyRead, stream: string, scope: 'whole' | 'cell', file: Buffer, lines?: number): Promise<string> {
+  const found = (await project.findOwnAll('project.import', (data) => isRecord(data) && data.ledger === read.ledger && importScopeOf(data) === scope))
+    .filter((item) => item.stream === stream);
+  if (found.length > 0) {
+    const data = found[0].data as { legacyHead: string; count: number };
+    // The same ledger imported with another head: the ledger changed since; a second import would make two histories of one ledger.
+    if (data.legacyHead !== read.head || data.count !== read.count) throw new Stop(refuse('ledger-changed', undefined, read.ledger));
+    return found[0].hash;
+  }
+  const data: Record<string, unknown> = {
+    ledger: read.ledger, legacyHead: read.head, count: read.count, file: file.toString('base64url'), scope,
+    ...(scope === 'cell' ? { lines } : read.mark === undefined ? {} : { mark: read.mark })
+  };
+  const problem = validateProjectData('project.import', data, 'import');
+  if (problem !== undefined) throw new Error(`The ${read.ledger} ledger was not imported: ${problem}.`);
+  return appended(await project.appendOwn('project.import', data, { stream }));
+}
+
+/**
+ * The import step (D-20): the product ledger and the decision log whole into the legacy cell, the calculator and wargame ledgers whole into the
+ * org/Internal cell, and into each label cell holding products a products import of scope cell with only its products' lines, less the lines of a
+ * product that names a product the cell's label does not cover (cellFileOf; CR-02), which are listed withheld. Nothing goes into the base cell.
+ */
+async function importLedgers(project: ReplicaProject, ledgers: readonly LegacyRead[], placement: Placement, gate: Gate): Promise<{ imported: ImportedLedger[]; scoped: ScopedLedger[]; withheld: WithheldProduct[] }> {
+  const imported: ImportedLedger[] = [];
+  const scoped: ScopedLedger[] = [];
+  const withheld: WithheldProduct[] = [];
+  for (const read of ledgers) {
+    const stream = LEDGERS_AT_LEDGERS_LABEL.includes(read.ledger) ? placement.byLabel.get(LEDGERS_LABEL) : placement.legacy;
+    if (stream === undefined) throw new Error(`The ${read.ledger} ledger has no part of the project to go into.`);
+    const entry = await sealImport(project, read, stream, 'whole', read.bytes);
+    imported.push({ ledger: read.ledger, legacyHead: read.head, count: read.count, entry, marked: read.mark !== undefined });
+    if (read.ledger !== IMPORTED_PRODUCTS_LEDGER) continue;
+    for (const cell of placement.cells) {
+      if (cell.label === undefined || cell.products.length === 0) continue;
+      // The same rule a pin across cells is decided with (D-18): a product the conversion holds whose label the cell's label covers.
+      const covered = (product: string): boolean => labelCovers(cell.label, placement.labelOf.get(product), gate);
+      const { file, lines, withheld: left } = cellFileOf(read.bytes, new Set(cell.products), covered);
+      for (const [product, count] of [...left].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) withheld.push({ product, cell: cell.cell, lines: count, reason: 'names-above-cell' });
+      scoped.push({ ledger: read.ledger, cell: cell.cell, entry: await sealImport(project, read, cell.cell, 'cell', file, lines), lines });
+    }
+  }
+  return { imported, scoped, withheld };
 }
 
 /** One product as the reconstruct step reads it, before it writes anything: the body read from its file, the updates and the version that body gives. */
@@ -463,11 +680,29 @@ interface ProductPlan {
   readonly replicaHash?: string;
 }
 
+/** Does the citing label cover the cited one (D-18): the same label always, otherwise by Phase 70 dominance, as the cell order decides a pin? */
+function labelCovers(citing: string | undefined, cited: string | undefined, gate: Gate): boolean {
+  if (citing === undefined || cited === undefined) return false;
+  if (citing === cited) return true;
+  const from = labelFromText(citing, gate.scales);
+  const to = labelFromText(cited, gate.scales);
+  if (from === undefined || to === undefined) return false;
+  return dominates({ scale: from.scale, level: from.level, compartments: from.compartments, releasability: from.releasability }, to, gate.context);
+}
+
+/** The hash of a product entry written, or a stop with the refusal's sentence. */
+function writtenHash(result: ProductWriteResult): string {
+  if (result.ok) return result.hash;
+  throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${result.message}`));
+}
+
 /**
  * The reconstruct step (D-32). The lead first gets the section roles the products need, so its device counts as each product's owner side (a staff lead
- * alone does not). Then, per product, in dependency order: product.create with the ledger's roles, a doc.client in the lead's slot, the text in
- * doc.update pieces, and, when the file's body is exactly the current version's text and every pin names a reconstructed version, version.propose with
- * that text and its header in a sealed blob. Each entry cites the products import; each is looked up before it is written.
+ * alone does not); that roster entry cites nothing. Then, per product, in dependency order, in the cell for its label (appendProductEntry): product.create
+ * with the ledger's roles, a doc.client in the lead's slot, the text in doc.update pieces, and, when the file's body is exactly the current version's
+ * text and every pin names a reconstructed version, version.propose with that text and its header in a sealed blob (proposeVersion). Each entry cites
+ * its cell's products import; each is looked up before it is written. A product that pins a product whose label its own does not cover gets no version
+ * and is listed unversioned with pin-above-cell (D-18), decided before anything is written.
  *
  * MJ-09: every product file is read and checked against what an earlier run already wrote for it before anything is written. The updates an earlier
  * run wrote use the product's client from clock 0, so they must be the first of the updates the body read now gives, byte for byte, and a version it
@@ -475,10 +710,11 @@ interface ProductPlan {
  * the step stops product-changed naming the file: a second update over the same clocks would fold into a mix of the old text and the new, and the
  * projections step would then write that over the edited file.
  */
-async function reconstruct(project: ReplicaProject, root: string, replay: LedgerReplay, importEntry: string, leadMember: string): Promise<{ products: string[]; versions: string[] }> {
+async function reconstruct(shared: SharedProjectHost, root: string, replay: LedgerReplay, placement: Placement, cellImports: ReadonlyMap<string, string>, leadMember: string, gate: Gate): Promise<{ products: string[]; versions: string[]; unversioned: UnversionedProduct[] }> {
+  const { project } = shared;
   const products = replay.products;
   const sections = [...new Set([...products.values()].map((state) => state.record.section))].sort((a, b) => STAFF_SECTION_IDS.indexOf(a) - STAFF_SECTION_IDS.indexOf(b));
-  let { roster } = await project.state();
+  const { roster } = await project.state();
   const slot = deviceAt(roster.members, project.deviceWriter, roster.positions.length - 1)?.slot ?? 1;
   const own = await ownEntries(project, ['product.create', 'doc.client', 'doc.update', 'version.propose']);
   const has = (kind: string, match: (data: Record<string, unknown>) => boolean): boolean => own.some((item) => item.kind === kind && match(item.data));
@@ -487,6 +723,7 @@ async function reconstruct(project: ReplicaProject, root: string, replay: Ledger
   // Read and check every product first, so a changed file stops the step before it writes anything.
   const replicaHashes = new Map<string, string>();
   const plans: ProductPlan[] = [];
+  const unversioned: UnversionedProduct[] = [];
   for (const name of dependencyOrder(products)) {
     const state = products.get(name) as ProductState;
     const relative = staffProductPath(state.record.section, name);
@@ -499,6 +736,10 @@ async function reconstruct(project: ReplicaProject, root: string, replay: Ledger
     const updates = chunksOf(body).map((piece) => Buffer.from(localInsert(doc, docText(doc).length, piece)).toString('base64url'));
     const written = new Set(own.filter((item) => item.kind === 'doc.update' && item.data.product === name).map((item) => item.data.update));
     if (written.size > updates.length || !updates.slice(0, written.size).every((update) => written.has(update))) throw new Stop(productChanged(relative));
+    // A pin to a product whose label this product's label does not cover would be refused by the fold (D-18): the product keeps its live text only.
+    const ownLabel = placement.labelOf.get(name);
+    const pinAbove = state.meta.dependsOn.some((dependency) => dependency.product !== name && products.has(dependency.product) && !labelCovers(ownLabel, placement.labelOf.get(dependency.product), gate));
+    if (pinAbove) unversioned.push({ product: name, reason: 'pin-above-cell' });
     // Today's ledger keeps only the hash of each version; the text is known only while the file's body is still the current version's.
     const pins: Pin[] = [];
     for (const dependency of state.meta.dependsOn) {
@@ -506,7 +747,7 @@ async function reconstruct(project: ReplicaProject, root: string, replay: Ledger
       if (pinned === undefined) break;
       pins.push({ product: dependency.product, hash: pinned });
     }
-    const replicaHash = productHash(body, state.meta.dependsOn) === state.record.hash && pins.length === state.meta.dependsOn.length ? replicaVersionHash(body, pins) : undefined;
+    const replicaHash = !pinAbove && productHash(body, state.meta.dependsOn) === state.record.hash && pins.length === state.meta.dependsOn.length ? replicaVersionHash(body, pins) : undefined;
     // A version an earlier run proposed holds the text that run read: a body that no longer gives it has changed since (an empty file filled in, say).
     const proposed = own.filter((item) => item.kind === 'version.propose' && item.data.product === name).map((item) => item.data.hash);
     if (proposed.length > 0 && (replicaHash === undefined || !proposed.includes(replicaHash))) throw new Stop(productChanged(relative));
@@ -517,43 +758,36 @@ async function reconstruct(project: ReplicaProject, root: string, replay: Ledger
   const at = roster.positions.length - 1;
   const roles = memberAt(roster.members, leadMember, at)?.roles ?? [];
   const wanted = ['member', ...sections.map((section) => `section_lead:${section}`)];
-  if (!wanted.every((role) => roles.includes(role))) {
-    appended(await project.appendOwn('member.update', { member: leadMember, roles: [...new Set([...roles, ...wanted])] }, { deps: [importEntry] }));
-    ({ roster } = await project.state());
-  }
-  const position = roster.positions.length - 1;
-  const stream = project.projectId;
-  const epoch = epochAt(roster.cells, stream, position);
-  const key = epoch === undefined ? undefined : project.keys.epochKey(stream, epoch);
-  if (epoch === undefined || key === undefined) throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} This computer does not hold the key of the project's base cell.`));
+  // A roster entry: it cites no import, because the base cell carries nothing of the legacy ledgers (D-15).
+  if (!wanted.every((role) => roles.includes(role))) appended(await project.appendOwn('member.update', { member: leadMember, roles: [...new Set([...roles, ...wanted])] }));
 
   const versions: string[] = [];
-  const deps = { deps: [importEntry] };
   for (const plan of plans) {
     const { name, state, body, clientId, doc, pins, replicaHash } = plan;
     const { section, roles: productRoles } = state.record;
+    const label = placement.labelOf.get(name) as string;
+    const importEntry = cellImports.get(placement.byLabel.get(label) as string);
+    if (importEntry === undefined) throw new Error(`The cell of ${name} holds no products import.`);
+    const deps = [importEntry];
     if (!has('product.create', (data) => data.product === name)) {
-      appended(await project.appendOwn('product.create', { product: name, section, roles: { ...productRoles }, title: name }, deps));
+      writtenHash(await appendProductEntry(shared, 'product.create', { product: name, section, roles: { ...productRoles }, title: name }, { label, deps }));
     }
     if (!has('doc.client', (data) => data.product === name && data.clientId === clientId)) {
-      appended(await project.appendOwn('doc.client', { product: name, clientId, actor: { kind: 'person' } }, deps));
+      writtenHash(await appendProductEntry(shared, 'doc.client', { product: name, clientId, actor: { kind: 'person' } }, { deps }));
     }
     for (const update of plan.updates) {
-      if (!has('doc.update', (data) => data.product === name && data.update === update)) appended(await project.appendOwn('doc.update', { product: name, update }, deps));
+      if (!has('doc.update', (data) => data.product === name && data.update === update)) writtenHash(await appendProductEntry(shared, 'doc.update', { product: name, update }, { deps }));
     }
     if (replicaHash === undefined) continue;
     if (has('version.propose', (data) => data.product === name && data.hash === replicaHash)) { versions.push(name); continue; }
     const header = { kind: state.meta.kind, label: state.meta.label, profile: state.meta.profile, level: state.meta.level };
-    const plain = canonicalBytes({ text: body, header });
+    const proposedNow = await proposeVersion(shared, { product: name, text: body, header, pins, snapshot: snapshotOf(doc), deps });
     // A text larger than a version may hold stays a live text only.
-    if (plain.length + SEALED_OVERHEAD > MAX_STATE_BYTES) continue;
-    const blob = sealBlob(key, stream, epoch, plain);
-    const stored = await project.ingestForeign([], [blob]);
-    if (isProjectRefused(stored)) throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${stored.message}`));
-    appended(await project.appendOwn('version.propose', { product: name, hash: replicaHash, textBlob: blob.hash, snapshot: Buffer.from(snapshotOf(doc)).toString('base64url'), pins }, deps));
+    if (!proposedNow.ok && proposedNow.reason === 'version-too-large') continue;
+    if (!proposedNow.ok) throw new Stop(refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${proposedNow.message}`));
     versions.push(name);
   }
-  return { products: [...products.keys()].sort(), versions: versions.sort() };
+  return { products: [...products.keys()].sort(), versions: versions.sort(), unversioned };
 }
 
 /** The move-legacy step: rename each original into the legacy folder, only when it is at its usual path and the legacy path is free (D-33). */
@@ -613,7 +847,8 @@ export async function projectionInputOf(project: ReplicaProject, deps: ReplicaPr
       if (isRecord(parsed) && typeof parsed.text === 'string') texts.set(data.hash, parsed.text);
     } catch { /* an unreadable version blob: the fold already refused that version */ }
   }
-  return { fold, entries, roster: ctx.roster, texts };
+  // The label of each label cell this device holds, so the projection shows a product with its cell's label (D-17).
+  return { fold, entries, roster: ctx.roster, texts, cellLabels: await cellLabelTexts(project) };
 }
 
 async function writeMarker(root: string, imports: number, at: string): Promise<void> {
@@ -636,12 +871,16 @@ export async function makeMultiUser(root: string, deps: MigrationDeps, options: 
   const absolute = path.resolve(root);
   const notices = multiUserNoticeLines();
   const result = (completed: MigrationStep, rest: Partial<Omit<MigrationResult, 'ok' | 'completed' | 'notices'>> = {}): MigrationResult =>
-    ({ ok: true, completed, imported: [], products: [], versions: [], moved: [], notices, ...rest });
+    ({ ok: true, completed, cells: [], imported: [], scoped: [], withheld: [], unversioned: [], products: [], versions: [], moved: [], notices, ...rest });
 
   if (!(await exists(path.join(absolute, '.planning', 'staff')))) return refuse('no-staff-project');
   if (await migrationComplete(absolute)) return refuse('already-shared');
 
-  const verified = await verifyLegacyLedgers(absolute, deps);
+  const verified = await verifyLegacyLedgers(absolute, deps, {
+    ...(options.leadClearance === undefined ? {} : { leadClearance: options.leadClearance }),
+    ...(options.scales === undefined ? {} : { scales: options.scales }),
+    ...(deps.now === undefined ? {} : { now: deps.now })
+  });
   if (!('ok' in verified)) return verified;
   if (options.stopAfter === 'verify') return result('verify');
 
@@ -658,27 +897,33 @@ export async function makeMultiUser(root: string, deps: MigrationDeps, options: 
     const lead = project.anchor.lead.member;
     if (options.stopAfter === 'genesis') return result('genesis', { project: project.projectId });
 
-    const imported = await importLedgers(project, verified.ledgers);
-    if (options.stopAfter === 'import') return result('import', { project: project.projectId, imported });
+    const shared: SharedProjectHost = { project, deps, ...(options.scales === undefined ? {} : { scales: options.scales }) };
+    const placement = await makeCells(shared, verified.ledgers, lead, options);
+    const { cells } = placement;
+    if (options.stopAfter === 'cells') return result('cells', { project: project.projectId, cells });
+
+    const gate = gateFor(options.scales, deps.now);
+    const { imported, scoped, withheld } = await importLedgers(project, verified.ledgers, placement, gate);
+    if (options.stopAfter === 'import') return result('import', { project: project.projectId, cells, imported, scoped, withheld });
 
     const products = verified.ledgers.find((item) => item.ledger === IMPORTED_PRODUCTS_LEDGER);
-    const productsImport = imported.find((item) => item.ledger === IMPORTED_PRODUCTS_LEDGER);
-    const rebuilt = products?.replay !== undefined && productsImport !== undefined
-      ? await reconstruct(project, absolute, products.replay, productsImport.entry, lead)
-      : { products: [], versions: [] };
-    if (options.stopAfter === 'reconstruct') return result('reconstruct', { project: project.projectId, imported, ...rebuilt });
+    const cellImports = new Map(scoped.map((item) => [item.cell, item.entry] as const));
+    const rebuilt = products?.replay !== undefined
+      ? await reconstruct(shared, absolute, products.replay, placement, cellImports, lead, gate)
+      : { products: [], versions: [], unversioned: [] };
+    if (options.stopAfter === 'reconstruct') return result('reconstruct', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt });
 
     const moved = await moveLegacy(absolute, imported);
-    if (options.stopAfter === 'move-legacy') return result('move-legacy', { project: project.projectId, imported, ...rebuilt, moved });
+    if (options.stopAfter === 'move-legacy') return result('move-legacy', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt, moved });
 
     const projections = await writeProjections(absolute, await projectionInputOf(project, deps), PASSTHROUGH_LEDGERS);
     // A product file edited after reconstruct read it is left with the edit (MJ-09); the conversion does not finish over it, and a rerun names it.
     const edited = projections.left.find((item) => item.reason === PROJECTION_LEFT_REASONS['text-changed']);
     if (edited !== undefined) return productChanged(edited.path);
-    if (options.stopAfter === 'projections') return result('projections', { project: project.projectId, imported, ...rebuilt, moved, projections });
+    if (options.stopAfter === 'projections') return result('projections', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt, moved, projections });
 
     await writeMarker(absolute, imported.length, (deps.now?.() ?? new Date()).toISOString());
-    return result('complete', { project: project.projectId, imported, ...rebuilt, moved, projections });
+    return result('complete', { project: project.projectId, cells, imported, scoped, withheld, ...rebuilt, moved, projections });
   } catch (error) {
     if (error instanceof Stop) return error.refusal;
     throw error;

@@ -503,6 +503,7 @@ test('MJ-08: startHistoryAgain sets a rolled-back store aside, keeps project.jso
   const started = await ReplicaProject.startHistoryAgain(lead.root, lead.deps);
   assert.ok(started !== undefined && !isProjectRefused(started));
   assert.equal(started.carried, 1, 'the genesis line that is still there');
+  assert.ok(started.setAside !== null, 'the store folder was there, so it was set aside');
   assert.ok(existsSync(path.join(lead.root, started.setAside, 'project.json')), 'the old folder is set aside whole');
   assert.ok(existsSync(path.join(lead.root, ...REPLICA_PROJECT_FILE.split('/'))), 'the folder is still a shared project');
   const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
@@ -514,8 +515,10 @@ test('MJ-08: startHistoryAgain sets a rolled-back store aside, keeps project.jso
 // ---- Task 4: the notices every multi-user result shows ------------------------------------------------------------------------------------------
 
 test('multiUserNoticeLines gives the two label notices and the declared-people sentence in that order, with no em-dash; the refusal texts are plain (the setting\'s name is checked in staffMultiUserManifest)', () => {
-  assert.deepEqual(multiUserNoticeLines(), [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, 'People and clearances in this project are declared by the staff lead, not verified.']);
-  assert.equal(multiUserNoticeLines()[2], MULTI_USER_DECLARED_TEXT);
+  assert.deepEqual(multiUserNoticeLines(), [CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT, MULTI_USER_DECLARED_TEXT]);
+  // The third line's load-bearing phrases: who declared the people, and that nobody checked them.
+  assert.match(multiUserNoticeLines()[2], /declared by the staff lead/);
+  assert.match(multiUserNoticeLines()[2], /not verified/);
   // A fresh array each time, so a caller cannot change what the next result shows.
   multiUserNoticeLines().push('changed');
   assert.equal(multiUserNoticeLines().length, 3);

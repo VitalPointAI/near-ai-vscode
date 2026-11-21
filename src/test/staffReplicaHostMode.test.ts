@@ -5,26 +5,34 @@
 // secret, while the reads of the decision log, the wargame ledger, the event log and the logistics files still answer.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import type { StaffSectionId } from '../domain/staff/doctrine';
 import type { PlanningFactor } from '../domain/staff/logistics';
-import { REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
+import { REPLICA_DIR, REPLICA_PROJECT_FILE, SHARED_PROJECT_REFUSAL, sharedCheckFailedText } from '../domain/staff/multiUser';
 import type { PersonActor } from '../domain/staff/release';
 import type { DeviceIdentity } from '../team/identity';
 import { isMigrationRefused, ledgerHeadKey, makeMultiUser } from '../staff/replica/migrate';
 import type { MigrationDeps } from '../staff/replica/migrate';
 import type { ProjectedProductState } from '../staff/replica/projection';
-import { ReplicaProject } from '../staff/replica/replicaProject';
+import { isProjectRefused, ReplicaProject } from '../staff/replica/replicaProject';
+import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
+import { STORE_REFUSALS } from '../staff/replica/store';
+import { markKey } from '../staff/replica/marks';
+import { cellOrderHook } from '../staff/replica/membership';
+import { cellLabelTexts } from '../staff/replica/labelCells';
+import { bringIn, orgClearance, syncTo } from './helpers/labelCellWorld';
+import type { Seat as CellSeat } from './helpers/labelCellWorld';
+import { memberAt } from '../domain/replica/rosterMembers';
 import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
 import type { StaffEvent } from '../domain/staff/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
 import type { ValidationLogEntry } from '../domain/staff/logistics';
 import { EVENTS_FILE, LEDGER_DIR, productPath, SHARED_PROJECT_UNAVAILABLE, SharedProjectError, StaffHost } from '../staff/staffHost';
-import type { StaffCaller, StaffTeamInfo } from '../staff/staffHost';
+import type { StaffCaller, StaffResult, StaffTeamInfo } from '../staff/staffHost';
 import { callLogistics, callTool, CLEAN_BODY, hashIn, J3_TEAM, J5_TEAM, memorySecrets, trusting, writeBody, writeFactors } from './helpers/staffFixtures';
 import type { StaffWorld } from './helpers/staffFixtures';
 
@@ -97,7 +105,7 @@ function full(): Promise<Env> {
     const env = await freshEnv('template');
     const world = worldOf(env);
     await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
-    // Labelled org/Public: Make Multi-User refuses a product labelled above the base cell (W-1).
+    // Labelled org/Public: Make Multi-User puts it into the org/Public cell, which the lead's declared clearance (org/Internal) covers (D-15, D-19).
     const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
     must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE, options: OPTIONS, dissent: DISSENT }, 'lead-planner'), 'submit');
@@ -137,7 +145,7 @@ async function cloneOf(source: Env, label: string): Promise<Env> {
 }
 
 async function migrate(env: Env): Promise<void> {
-  const result = await makeMultiUser(env.root, env.deps, { name: 'Exercise Northwind' });
+  const result = await makeMultiUser(env.root, env.deps, { name: 'Exercise Northwind' , leadClearance: { scale: 'org', level: 'Internal', compartments: [], releasability: [] } });
   assert.ok(!isMigrationRefused(result), isMigrationRefused(result) ? result.message : '');
 }
 
@@ -446,4 +454,355 @@ test('a replica project file that cannot be checked (a stat error other than its
   // An error code that is not a plain errno name is not echoed.
   assert.match(sharedCheckFailedText('bad code; rm -rf'), /failed with an unknown error\./);
   assert.match(sharedCheckFailedText(undefined), /failed with an unknown error\./);
+});
+
+// ---- 32-05: the host follows its shared project's store (D-09) ----------------------------------------------------------------------------------
+// A window keeps its staff host across Start Again, run there or in another window. The host keeps the project it opened together with the store's
+// identity (the store folder's device and inode numbers and the roster head this device's mark names) and opens the project again when it changed.
+
+/** The project's replica store folder. */
+const storeDirOf = (root: string): string => path.join(root, ...REPLICA_DIR.split('/'));
+
+/** This device's file in the project's base stream: the file a rollback of this device's own history cuts. */
+async function ownBaseFile(env: Env): Promise<string> {
+  const project = (JSON.parse(readFileSync(path.join(env.root, ...REPLICA_PROJECT_FILE.split('/')), 'utf8')) as { anchor: { project: string } }).anchor.project;
+  const { writer } = await ReplicaProject.localDevice(env.deps);
+  return path.join(storeDirOf(env.root), 'streams', project, `${writer}.jsonl`);
+}
+
+/** Cuts the last whole line of a stream file and gives back the text it had, so a test can put it back. */
+function cutLastLine(file: string): string {
+  const text = readFileSync(file, 'utf8');
+  const lines = text.split('\n');
+  assert.ok(lines.length >= 3 && lines[lines.length - 1] === '', 'at least two whole lines');
+  writeFileSync(file, `${lines.slice(0, -2).join('\n')}\n`);
+  return text;
+}
+
+/** Counts ReplicaProject.open and keeps every project it opened, until restore(). */
+function countOpens(): { readonly opened: ReplicaProject[]; count(): number; restore(): void } {
+  const original = ReplicaProject.open.bind(ReplicaProject);
+  const opened: ReplicaProject[] = [];
+  const spy = mock.method(ReplicaProject, 'open', async (root: string, deps: ReplicaProjectDeps) => {
+    const result = await original(root, deps);
+    if (result instanceof ReplicaProject) opened.push(result);
+    return result;
+  });
+  return { opened, count: () => spy.mock.callCount(), restore: () => spy.mock.restore() };
+}
+
+test('Start Again while the host holds a cached project: after another window sets the rolled-back store aside and starts it again, the host shows the products again without a reload', async () => {
+  const env = await cloneOf(await full(), 'start-again-held');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    assert.deepEqual([...first.products.keys()].sort(), [...PRODUCTS].sort());
+    // This device's base stream file loses its last line: the store is refused rolled-back, and the host says so.
+    cutLastLine(await ownBaseFile(env));
+    const refused = await host.replay();
+    assert.ok(refused.broken, 'a rolled-back store reads as broken');
+    assert.ok(refused.broken.reason.includes(STORE_REFUSALS['rolled-back']), refused.broken.reason);
+    assert.equal(refused.products.size, 0);
+    // Another window starts this computer's shared history again, without telling the host.
+    const started = await ReplicaProject.startHistoryAgain(env.root, env.deps);
+    assert.ok(started !== undefined && !isProjectRefused(started), started === undefined ? 'no shared project' : isProjectRefused(started) ? started.message : '');
+    const again = await host.replay();
+    assert.equal(again.broken, undefined, again.broken?.reason);
+    assert.deepEqual(again.products, first.products, 'the products read again, as before the rollback');
+  } finally {
+    await host.close();
+  }
+});
+
+test('a store folder replaced by a copy of itself (a new folder, the same content) is opened again by a host that was told nothing, and the replay is unchanged', async () => {
+  const env = await cloneOf(await full(), 'store-copied');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    assert.equal(opens.count(), 1);
+    const dir = storeDirOf(env.root);
+    const before = lstatSync(dir).ino;
+    cpSync(dir, `${dir}.copy`, { recursive: true });
+    renameSync(dir, `${dir}.old`);
+    renameSync(`${dir}.copy`, dir);
+    assert.notEqual(lstatSync(dir).ino, before, 'a new folder');
+    const again = await host.replay();
+    assert.equal(opens.count(), 2, 'the host opened the project again on the new folder');
+    assert.equal(again.broken, undefined, again.broken?.reason);
+    assert.deepEqual(again.products, first.products);
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+/** The roster head this device's mark names for the project's store (read, not verified). */
+function markHead(env: Env): string | null {
+  const text = env.secrets.values.get(markKey(storeDirOf(env.root)));
+  return text === undefined ? null : (JSON.parse(text) as { signed: { payload: { rosterHead: string | null } } }).signed.payload.rosterHead;
+}
+
+test('five replays with nothing changed outside open the shared project once', async () => {
+  const env = await cloneOf(await full(), 'open-once');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    for (let read = 0; read < 4; read += 1) assert.deepEqual((await host.replay()).products, first.products);
+    assert.equal(opens.count(), 1, 'one open for five reads');
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+test('a roster change another window makes: folded by the host\'s own read it moves the mark without a reopen; recorded by the other window it makes the next read open the project again', async () => {
+  const env = await cloneOf(await full(), 'roster-change');
+  await migrate(env);
+  const { writer } = await ReplicaProject.localDevice(env.deps);
+  const lead = `mbr-${writer.slice(0, 16)}`;
+  // Another window of this install: a second project object on the same folder, opened before the count starts.
+  const other = await ReplicaProject.open(env.root, env.deps);
+  assert.ok(other instanceof ReplicaProject, isProjectRefused(other) ? other.message : 'no shared project');
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    const headBefore = markHead(env);
+    // The other window writes a roster change and does not fold it: the mark still names the old head.
+    const renamed = await other.appendOwn('member.update', { member: lead, name: 'Exercise Lead North' });
+    assert.ok('ok' in renamed, 'ok' in renamed ? '' : renamed.message);
+    assert.equal(markHead(env), headBefore, 'the other window has not recorded the change');
+    // The host's own read folds it and records the new head in the mark: that is not an outside change.
+    assert.deepEqual((await host.replay()).products, first.products);
+    assert.equal(markHead(env), renamed.hash, 'the host\'s read moved the mark\'s roster head');
+    assert.deepEqual((await host.replay()).products, first.products);
+    assert.equal(opens.count(), 1, 'the host\'s own mark write never counts as an outside change');
+    // The other window writes again and folds it: the mark's roster head moves under the host, so its next read opens the project again.
+    const again = await other.appendOwn('member.update', { member: lead, name: 'Exercise Lead South' });
+    assert.ok('ok' in again, 'ok' in again ? '' : again.message);
+    await other.state();
+    assert.equal(markHead(env), again.hash);
+    const after = await host.replay();
+    assert.equal(after.broken, undefined, after.broken?.reason);
+    assert.deepEqual(after.products, first.products);
+    assert.equal(opens.count(), 2, 'opened again after the outside change');
+    const { roster } = await opens.opened[1].state();
+    assert.equal(memberAt(roster.members, lead, roster.positions.length - 1)?.name, 'Exercise Lead South', 'the project the host opened again shows the change');
+    assert.equal(opens.count(), 2);
+  } finally {
+    opens.restore();
+    await other.close();
+    await host.close();
+  }
+});
+
+test('invalidateShared closes the opened project once and the next read opens it again; on a host that opened nothing it is harmless', async () => {
+  const unshared = await cloneOf(await full(), 'invalidate-unshared');
+  const plain = worldOf(unshared, true).host;
+  const before = await plain.replay();
+  await plain.invalidateShared();
+  await plain.invalidateShared();
+  assert.deepEqual(await plain.replay(), before, 'a project that is not shared reads as before');
+  assert.equal(existsSync(storeDirOf(unshared.root)), false, 'and no store was made');
+
+  const env = await cloneOf(await full(), 'invalidate');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(opens.count(), 1);
+    const closed = mock.method(opens.opened[0], 'close');
+    await host.invalidateShared();
+    assert.equal(closed.mock.callCount(), 1, 'the old project is closed');
+    await host.invalidateShared();
+    assert.equal(closed.mock.callCount(), 1, 'a second call has nothing to close');
+    const again = await host.replay();
+    assert.equal(opens.count(), 2, 'the next read opens the project again');
+    assert.deepEqual(again.products, first.products);
+    assert.notEqual(opens.opened[1], opens.opened[0]);
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+test('a read whose fold is refused (the store rolled back under the host) drops the opened project, so the next read opens it again and reads it once the folder is put back', async () => {
+  const env = await cloneOf(await full(), 'refused-drop');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    const first = await host.replay();
+    assert.equal(first.broken, undefined, first.broken?.reason);
+    assert.equal(opens.count(), 1);
+    const file = await ownBaseFile(env);
+    const whole = cutLastLine(file);
+    const refused = await host.replay();
+    assert.ok(refused.broken?.reason.includes(STORE_REFUSALS['rolled-back']), refused.broken?.reason);
+    assert.equal(opens.count(), 1, 'the refusal came from the project the host held');
+    const closed = mock.method(opens.opened[0], 'close');
+    const still = await host.replay();
+    assert.ok(still.broken?.reason.includes(STORE_REFUSALS['rolled-back']), still.broken?.reason);
+    assert.equal(opens.count(), 2, 'the next read opened the project again instead of reusing the refused one');
+    assert.ok(closed.mock.callCount() <= 1);
+    // The newer copy of the file is put back: the next read opens the project and shows the products.
+    writeFileSync(file, whole);
+    const back = await host.replay();
+    assert.equal(back.broken, undefined, back.broken?.reason);
+    assert.deepEqual(back.products, first.products);
+    assert.equal(opens.count(), 3);
+  } finally {
+    opens.restore();
+    await host.close();
+  }
+});
+
+test('close() goes through invalidateShared and ends the decode worker of the project the host opened', async () => {
+  const env = await cloneOf(await full(), 'close-through');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  const opens = countOpens();
+  try {
+    assert.equal((await host.replay()).broken, undefined);
+    const project = opens.opened[0];
+    // A project makes its decode worker on the first entry from outside; this one holds only its own, so it is given a stand-in worker to end.
+    let ended = 0;
+    const held = project as unknown as { ownDecoder?: { close(): Promise<void> } };
+    held.ownDecoder = { close: async () => { ended += 1; } };
+    const invalidate = mock.method(host, 'invalidateShared');
+    const closed = mock.method(project, 'close');
+    await host.close();
+    assert.equal(invalidate.mock.callCount(), 1, 'close() goes through invalidateShared');
+    assert.equal(closed.mock.callCount(), 1, 'the project is closed once');
+    assert.equal(ended, 1, 'its decode worker ended');
+    assert.equal(held.ownDecoder, undefined);
+  } finally {
+    opens.restore();
+  }
+});
+
+// ---- 32-11 (D-23): the host shows every cell this device holds, each with its label, and nothing of a cell it does not hold -------------------------
+
+const ESTIMATE = 'estimate';
+// A canary phrase only the org/Internal product's text holds: no text a member below that cell reads may hold it.
+const CANARY = 'Northwind ford crossing';
+const ESTIMATE_BODY = `# Estimate\n\nThe ${CANARY} takes one battalion at a time.\n`;
+
+/**
+ * The lead converts a project with the concept of operations (org/Public, released), an estimate (org/Internal, draft, its text holding the canary)
+ * and a calculator record, the lead's declared clearance org/Internal; the lead's open project as a label cell seat, and the cells by label.
+ */
+async function labelledLead(label: string): Promise<{ env: Env; lead: CellSeat; cells: { base: string; public: string; internal: string } }> {
+  const env = await freshEnv(label);
+  const world = worldOf(env);
+  await writeBody(world.root, 'j5', CONOPS, CLEAN_BODY);
+  const hash = hashIn(must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: CONOPS, kind: 'plan', label: 'org/Public' }, 'lead-planner'), 'propose'));
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__verdict', { product: CONOPS, gate: 'guard', verdict: 'CLEARED', hash }, 'release-guard'), 'verdict');
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__submit', { product: CONOPS, decisionFor: DECISION_ROLE }, 'lead-planner'), 'submit');
+  for (const action of ['approve', 'release'] as const) {
+    const decided = await world.host.decide(world.person(), { product: CONOPS, action, hash });
+    assert.ok(decided.ok, decided.ok ? '' : decided.message);
+  }
+  await writeBody(world.root, 'j5', ESTIMATE, ESTIMATE_BODY);
+  must(await callTool(world, J5_TEAM, 'mcp__staff-products__propose', { product: ESTIMATE, kind: 'estimate', label: 'org/Internal' }, 'lead-planner'), 'propose estimate');
+  await writeFactors(world.root, [FUEL]);
+  must(await callLogistics(world, J4_TEAM, 'calc_run', FUEL_CALC, 'log-plans-officer'), 'calc_run');
+  await migrate(env);
+  const now = (): Date => new Date(NOW);
+  const deps = { ...env.deps, cellOrder: cellOrderHook({ now }) };
+  const opened = await ReplicaProject.open(env.root, deps);
+  assert.ok(opened instanceof ReplicaProject, isProjectRefused(opened) ? opened.message : 'no shared project');
+  const lead: CellSeat = { at: { root: env.root, global: env.global, secrets: env.secrets as CellSeat['at']['secrets'], deps, clock: { now: now() } }, p: opened, host: { project: opened, deps }, member: `mbr-${opened.deviceWriter.slice(0, 16)}`, writer: opened.deviceWriter, results: [] };
+  const byLabel = new Map([...(await cellLabelTexts(opened))].map(([cell, text]) => [text, cell]));
+  const cells = { base: opened.projectId, public: byLabel.get('org/Public') as string, internal: byLabel.get('org/Internal') as string };
+  assert.ok(cells.public !== undefined && cells.internal !== undefined, `the lead holds both label cells (${[...byLabel.keys()].join(', ')})`);
+  return { env, lead, cells };
+}
+
+/** The text of a host result: what a member reads, whether it is an answer or a refusal. */
+const textOf = (result: StaffResult): string => (result.ok ? result.text : result.message);
+
+/** Today's staff host over a label cell seat's folder, with the replica storage the extension gives it, signed by that install's device. */
+async function seatHost(seat: CellSeat): Promise<StaffHost> {
+  const { signer } = await ReplicaProject.localDevice(seat.at.deps);
+  const clock = { now: Date.parse('2026-11-21T08:00:00.000Z') };
+  return new StaffHost({ root: seat.at.root, signer: async () => signer, keyStatus: async () => trusting(signer), headStore: seat.at.secrets, now: () => { clock.now += 1000; return clock.now; }, replica: { globalStorageDir: seat.at.global } });
+}
+
+/** Every text a member reads of the host: the status of each product it lists, the list of every section, the replay, the registry and the queue. */
+async function everyText(host: StaffHost, root: string): Promise<string[]> {
+  const replay = await host.replay();
+  const texts = [JSON.stringify([...replay.products]), JSON.stringify(replay.broken ?? null)];
+  const listed = await host.list(caller(root), { all: true });
+  texts.push(textOf(listed));
+  for (const product of replay.products.keys()) texts.push(textOf(await host.status(caller(root), product)));
+  const snapshot = await host.snapshot();
+  texts.push(JSON.stringify(snapshot.registry), JSON.stringify(snapshot.decisions), JSON.stringify(snapshot.ledgerProblem ?? null));
+  return texts;
+}
+
+test('not cleared: on the lead the shared read lists both products with their own labels; on a member cleared only for org/Public it lists the org/Public product alone and no text holds the other cell', async () => {
+  const { env, lead, cells } = await labelledLead('not-cleared');
+  const leadHost = worldOf(env, true).host;
+  const m = await bringIn(lead, 'not-cleared-m', 'M. Member', orgClearance('Public'));
+  await syncTo(lead, m, [cells.base, cells.public]);
+  const memberHost = await seatHost(m);
+  try {
+    // The lead: every product of every cell it holds, each with its cell's label.
+    const leadReplay = await leadHost.replay();
+    assert.equal(leadReplay.broken, undefined, leadReplay.broken?.reason);
+    assert.deepEqual([...leadReplay.products.keys()].sort(), [CONOPS, ESTIMATE].sort());
+    const conopsStatus = await leadHost.status(caller(env.root), CONOPS);
+    assert.ok(conopsStatus.ok && textOf(conopsStatus).includes('Label: org/Public.'), textOf(conopsStatus));
+    const estimateStatus = await leadHost.status(caller(env.root), ESTIMATE);
+    assert.ok(estimateStatus.ok && textOf(estimateStatus).includes('Label: org/Internal.'), textOf(estimateStatus));
+    const leadList = await leadHost.list(caller(env.root), { all: true });
+    assert.ok(textOf(leadList).includes(CONOPS) && textOf(leadList).includes(ESTIMATE), textOf(leadList));
+
+    // The member: the org/Public product alone, with the lead's state and history.
+    const memberReplay = await memberHost.replay();
+    assert.equal(memberReplay.broken, undefined, memberReplay.broken?.reason);
+    assert.deepEqual([...memberReplay.products.keys()], [CONOPS]);
+    assert.deepEqual(withoutImported(memberReplay.products.get(CONOPS)), withoutImported(leadReplay.products.get(CONOPS)), 'the lead\'s state and history of the concept of operations');
+    const memberStatus = await memberHost.status(caller(m.at.root), CONOPS);
+    assert.ok(memberStatus.ok && textOf(memberStatus).includes('Label: org/Public.'), textOf(memberStatus));
+    for (const text of await everyText(memberHost, m.at.root)) {
+      for (const word of [ESTIMATE, 'org/Internal', CANARY]) assert.equal(text.includes(word), false, `a member's text holds "${word}": ${text.slice(0, 300)}`);
+    }
+  } finally {
+    await leadHost.close();
+    await memberHost.close();
+    await lead.p.close();
+  }
+});
+
+test('a member cleared for org/Internal holding both label cells but not the legacy cell: the shared read lists both products, each with its own label, as the lead sees them', async () => {
+  const { env, lead, cells } = await labelledLead('both-cells');
+  const leadHost = worldOf(env, true).host;
+  const m = await bringIn(lead, 'both-cells-m', 'M. Member', orgClearance('Internal'));
+  await syncTo(lead, m, [cells.base, cells.public, cells.internal]);
+  const memberHost = await seatHost(m);
+  try {
+    const leadReplay = await leadHost.replay();
+    const memberReplay = await memberHost.replay();
+    assert.equal(memberReplay.broken, undefined, memberReplay.broken?.reason);
+    assert.deepEqual([...memberReplay.products.keys()].sort(), [CONOPS, ESTIMATE].sort());
+    for (const product of [CONOPS, ESTIMATE]) assert.deepEqual(withoutImported(memberReplay.products.get(product)), withoutImported(leadReplay.products.get(product)), product);
+    const estimate = await memberHost.status(caller(m.at.root), ESTIMATE);
+    assert.ok(estimate.ok && textOf(estimate).includes('Label: org/Internal.'), textOf(estimate));
+  } finally {
+    await leadHost.close();
+    await memberHost.close();
+    await lead.p.close();
+  }
 });

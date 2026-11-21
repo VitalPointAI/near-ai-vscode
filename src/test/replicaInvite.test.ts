@@ -2,22 +2,22 @@
 // text from any channel. One named test per refusal, the invited -> join-requested transition (DESIGN 15.1), the safety code on both screens, and the
 // welcome file that lets a new device catch up on the roster with only the grants addressed to it.
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import test from 'node:test';
 import { sealBlob } from '../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { grantHash } from '../domain/replica/cellKeys';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import {
-  INVITE_REFUSALS, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest, buildWelcome, checkAdmittedRequest, checkJoinRequest, inviteAnchor, inviteSafetyCode, joinMac, joinSecretHash, newJoinSecret, readInvite,
-  readWelcome
+  HUB_JOIN_INFO, INVITE_REFUSALS, WELCOME_MAX_BYTES, buildHubJoin, buildInvite, buildJoinRequest, buildWelcome, checkAdmittedRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac,
+  inviteAnchor, inviteSafetyCode, joinMac, joinRequestHash, joinSecretHash, newJoinSecret, readHubJoin, readInvite, readWelcome
 } from '../domain/replica/invite';
-import type { InvitePayload, JoinRequestPayload, WelcomeFile } from '../domain/replica/invite';
+import type { HubJoinMacFields, HubJoinPayload, InviteHub, InvitePayload, JoinRequestPayload, WelcomeFile } from '../domain/replica/invite';
 import { foldRoster } from '../domain/replica/roster';
 import { canonicalBytes } from '../domain/team/canonical';
 import { MAX_PAYLOAD_BYTES, signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
-import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_NOW, createRosterWorld } from './helpers/replicaRosterWorld';
+import { DEMO_CLEARANCE, INVITE_EXPIRES, ROSTER_NOW, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import { streamId } from './helpers/replicaWorld';
 import type { Written } from './helpers/replicaWorld';
@@ -547,4 +547,217 @@ test('buildWelcome leaves out and counts an unreadable grant, keeps every readab
   assert.doesNotThrow(() => buildWelcome({ genesis: genesis.entry, roster: world.entries, blobs: [], grants: [{ not: 'a grant' }], writer: joiner.writer, cells: [world.project] }));
   const foreign = { header: { ...genesis.entry.header, stream: 'f'.repeat(32) }, body: genesis.entry.body };
   assert.throws(() => buildWelcome({ genesis: genesis.entry, roster: [...world.entries, foreign], blobs: [], grants: [], writer: joiner.writer, cells: [world.project] }), /welcome/i);
+});
+
+// ---- 32-15: the invitation's hub field (D-47), the hub check key, the hub MAC and the hub join envelope (D-48). ----
+
+const HUB_DEVICE = rosterDevice('HUB', 'hub');
+const HUB: InviteHub = { address: 'hub.example.org:8443', certPin: createHash('sha256').update('pin/hub').digest('hex'), writer: HUB_DEVICE.writer };
+
+// The lead's invitation for a project on a hub: the same as invited(), with the hub field.
+function invitedThroughHub(hub: unknown = HUB): Invited & { signed: SignedPayload<InvitePayload> } {
+  const state = invited();
+  const signed = buildInvite(state.world.lead.signer, {
+    genesisHash: state.genesis.hash, project: state.world.project, name: state.world.projectName, lead: { member: state.world.lead.member, x25519: state.world.lead.x25519 },
+    invite: INVITE_ID, secret: state.secret, expiresAt: INVITE_EXPIRES, now: NOW, hub: hub as InviteHub
+  });
+  return { ...state, signed, inviteText: asFile(signed), invite: signed.payload };
+}
+
+// The joiner's side of a join through the hub: the Phase 31 request, then the envelope with the MAC under the check key it derives from the secret.
+function joinThroughHub(state: Invited): { request: SignedPayload<JoinRequestPayload>; join: SignedPayload<HubJoinPayload>; checkKey: string; fields: HubJoinMacFields } {
+  const request = requestOf(answer(state));
+  const checkKey = hubJoinCheckKey(state.invite.secret, state.invite.invite);
+  const fields: HubJoinMacFields = { hub: HUB.writer, project: state.invite.project, invite: state.invite.invite, request: joinRequestHash(request) };
+  const join = buildHubJoin(state.joiner.signer, { hub: HUB.writer, project: state.invite.project, request, hubMac: hubJoinMac(checkKey, fields), now: NOW });
+  return { request, join, checkKey, fields };
+}
+
+test('D-47: an invitation may name its hub (address, certificate pin, hub writer id), and readInvite returns the same hub', () => {
+  const state = invitedThroughHub();
+  assert.deepEqual(state.signed.payload.hub, HUB);
+  const read = readInvite(state.inviteText, NOW);
+  assert.equal(reasonOf(read), 'ok');
+  const invite = (read as { ok: true; invite: InvitePayload }).invite;
+  assert.deepEqual(invite.hub, HUB);
+  // The hub is a fresh copy, and it is covered by the signature.
+  assert.notEqual(invite.hub, state.signed.payload.hub);
+  const changed = clone(state.signed) as unknown as { payload: { hub: Json } };
+  changed.payload.hub.address = 'other.example.org:8443';
+  refusedAs(readInvite(asFile(changed), NOW), 'bad-signature');
+  // Only the three named fields are copied from the builder's input, so an extra property of the caller's object never reaches the file.
+  const extra = { ...HUB, note: 'x' } as unknown as InviteHub;
+  assert.deepEqual(invitedThroughHub(extra).signed.payload.hub, HUB);
+});
+
+test('D-47: a Phase 31 invitation with no hub reads exactly as before, with no hub key at all', () => {
+  const state = invited();
+  const read = readInvite(state.inviteText, NOW);
+  assert.equal(reasonOf(read), 'ok');
+  const invite = (read as { ok: true; invite: InvitePayload }).invite;
+  assert.equal('hub' in invite, false);
+  assert.equal('hub' in state.invite, false);
+  // The result Phase 31 gave for this file, field by field.
+  assert.deepEqual(invite, {
+    genesisHash: state.genesis.hash, project: state.world.project, name: state.world.projectName,
+    lead: { member: state.world.lead.member, writer: state.world.lead.writer, publicKey: state.world.lead.publicKey, x25519: state.world.lead.x25519 },
+    inviter: { member: state.world.lead.member, writer: state.world.lead.writer, publicKey: state.world.lead.publicKey, x25519: state.world.lead.x25519 },
+    invite: INVITE_ID, secret: state.secret, expiresAt: INVITE_EXPIRES
+  });
+  // A file signed in the Phase 31 shape directly (no inviter, no hub) reads the same way.
+  const { inviter: _inviter, ...old } = state.invite;
+  assert.deepEqual((readInvite(asFile(signPayload(state.world.lead.signer, 'staff-invite', old, { now: () => NOW })), NOW) as { ok: true; invite: InvitePayload }).invite, invite);
+});
+
+test('D-47: a hub with an extra key, a missing key, a bad pin, a bad address or a bad writer id is malformed, as read and as built', () => {
+  const state = invited();
+  const bad: Array<[string, unknown]> = [
+    ['an extra key', { ...HUB, extra: 'x' }],
+    ['a missing key', { address: HUB.address, certPin: HUB.certPin }],
+    ['a bad pin', { ...HUB, certPin: 'z'.repeat(64) }],
+    ['a short pin', { ...HUB, certPin: 'a'.repeat(63) }],
+    ['a bad address', { ...HUB, address: 'hub.example.org' }],
+    ['a URL for an address', { ...HUB, address: 'https://hub.example.org:8443' }],
+    ['a hub id for the writer', { ...HUB, writer: 'hub-0123456789abcdef' }],
+    ['not an object', 'hub.example.org:8443'],
+    ['a list', [HUB]],
+    ['null', null]
+  ];
+  for (const [what, hub] of bad) {
+    const signed = signPayload(state.world.lead.signer, 'staff-invite', { ...state.invite, hub }, { now: () => NOW });
+    refusedAs(readInvite(asFile(signed), NOW), 'malformed');
+    // The builder copies only the three named fields, so an extra key is dropped there (the test above); every other bad hub is refused.
+    if (what !== 'an extra key') assert.throws(() => invitedThroughHub(hub), /The invitation was not made/, what);
+  }
+  // A __proto__ key inside the hub is an extra key.
+  const text = asFile(invitedThroughHub().signed).replace('"address":', '"__proto__":{"x":1},"address":');
+  refusedAs(readInvite(text, NOW), 'malformed');
+});
+
+test('D-48: hubJoinCheckKey is HKDF-SHA256 of the secret with info near-ai/hub-join/v1 and the invite id, 32 bytes, one per invitation, and reveals neither the secret nor its hash', () => {
+  assert.equal(HUB_JOIN_INFO, 'near-ai/hub-join/v1');
+  const secret = newJoinSecret();
+  const key = hubJoinCheckKey(secret, 'inv-1');
+  assert.match(key, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(Buffer.from(key, 'base64url').length, 32);
+  const expected = Buffer.from(hkdfSync('sha256', Buffer.from(secret, 'base64url'), Buffer.alloc(0), Buffer.concat([Buffer.from('near-ai/hub-join/v1', 'utf8'), Buffer.from('inv-1', 'utf8')]), 32)).toString('base64url');
+  assert.equal(key, expected);
+  assert.equal(hubJoinCheckKey(secret, 'inv-1'), key, 'the same inputs give the same key');
+  assert.notEqual(hubJoinCheckKey(secret, 'inv-2'), key);
+  assert.notEqual(hubJoinCheckKey(newJoinSecret(), 'inv-1'), key);
+  assert.notEqual(key, secret);
+  assert.notEqual(Buffer.from(key, 'base64url').toString('hex'), joinSecretHash(secret));
+  assert.notEqual(Buffer.from(key, 'base64url').toString('hex'), Buffer.from(secret, 'base64url').toString('hex'));
+  for (const [badSecret, badInvite] of [['short', 'inv-1'], [secret, 'Not A Slug'], [secret, '']]) {
+    assert.throws(() => hubJoinCheckKey(badSecret, badInvite), /^Error: The hub check key was not made: /);
+  }
+});
+
+test('D-48: joinRequestHash is sha256 hex of the canonical signed join request, the same for its text, its parsed value and any key order', () => {
+  const state = invited();
+  const text = answer(state);
+  const request = requestOf(text);
+  const hash = joinRequestHash(request);
+  assert.equal(hash, createHash('sha256').update(canonicalBytes(request)).digest('hex'));
+  assert.equal(joinRequestHash(text), hash);
+  const reordered = Object.fromEntries(Object.entries(request).reverse());
+  assert.equal(joinRequestHash(reordered), hash);
+  const changed = clone(request);
+  changed.payload.name = 'Someone Else';
+  assert.notEqual(joinRequestHash(changed), hash);
+  assert.throws(() => joinRequestHash('not json'), /^Error: /);
+});
+
+test('D-48: hubJoinMac is HMAC-SHA256 under the check key over the hub, project, invite and request hash; checkHubJoinMac accepts it and refuses any one field changed or a MAC of the wrong length', () => {
+  const state = invitedThroughHub();
+  const { request, checkKey, fields } = joinThroughHub(state);
+  const mac = hubJoinMac(checkKey, fields);
+  const expected = createHmac('sha256', Buffer.from(checkKey, 'base64url')).update(canonicalBytes({ ...fields })).digest('base64url');
+  assert.equal(mac, expected);
+  assert.equal(checkHubJoinMac(checkKey, fields, mac), true);
+  assert.equal(fields.request, joinRequestHash(request));
+  const changed: Array<[keyof HubJoinMacFields, string]> = [
+    ['hub', rosterDevice('OTHER-HUB', 'hub').writer], ['project', '0'.repeat(32)], ['invite', 'inv-other'], ['request', '0'.repeat(64)]
+  ];
+  for (const [field, value] of changed) assert.equal(checkHubJoinMac(checkKey, { ...fields, [field]: value }, mac), false, field);
+  const bytes = Buffer.from(mac, 'base64url');
+  assert.equal(checkHubJoinMac(checkKey, fields, bytes.subarray(0, 31).toString('base64url')), false);
+  assert.equal(checkHubJoinMac(checkKey, fields, Buffer.concat([bytes, Buffer.from([1])]).toString('base64url')), false);
+  for (const junk of ['', 'not a mac!', 7, null]) assert.equal(checkHubJoinMac(checkKey, fields, junk as string), false);
+  assert.equal(checkHubJoinMac('short', fields, mac), false);
+  assert.equal(checkHubJoinMac(hubJoinCheckKey(newJoinSecret(), INVITE_ID), fields, mac), false, 'another invitation\'s check key');
+});
+
+test('D-48: a hub MAC never verifies as the Phase 31 MAC and the Phase 31 MAC never verifies as a hub MAC', () => {
+  const state = invitedThroughHub();
+  const { request, checkKey, fields, join } = joinThroughHub(state);
+  const phase31Mac = request.payload.mac;
+  const hubMac = join.payload.hubMac;
+  assert.notEqual(hubMac, phase31Mac);
+  assert.equal(checkHubJoinMac(checkKey, fields, phase31Mac), false);
+  // The secret itself is not the check key: a MAC under the secret over the hub fields does not pass, and the check key does not make the Phase 31 MAC.
+  assert.equal(checkHubJoinMac(state.secret, fields, hubJoinMac(state.secret, fields)), true, 'the function is only a MAC');
+  assert.equal(checkHubJoinMac(checkKey, fields, hubJoinMac(state.secret, fields)), false);
+  assert.notEqual(joinMac(checkKey, request.payload), phase31Mac);
+  // A request whose Phase 31 MAC is replaced by the hub MAC is refused by the lead's check with the real secret.
+  const swapped = { ...request.payload, mac: hubMac };
+  const resigned = signPayload(state.joiner.signer, 'staff-join-request', swapped, { now: () => NOW });
+  refusedAs(checkJoinRequest(asFile(resigned), { invite: state.invite, secret: state.secret }), 'wrong-secret');
+  // The honest request still passes the lead's check: the hub path adds a MAC and changes nothing in Phase 31.
+  assert.equal(reasonOf(checkJoinRequest(asFile(request), { invite: state.invite, secret: state.secret })), 'ok');
+});
+
+test('D-48: buildHubJoin signs the hub join envelope with the joining device; readHubJoin accepts it for its own request, and the hub needs only the check key', () => {
+  const state = invitedThroughHub();
+  const { request, join, checkKey, fields } = joinThroughHub(state);
+  assert.equal(join.purpose, 'staff-hub-join');
+  assert.equal(join.signer.publicKey, state.joiner.publicKey);
+  assert.deepEqual(join.payload, { v: 1, hub: HUB.writer, project: state.invite.project, invite: INVITE_ID, request: joinRequestHash(request), hubMac: hubJoinMac(checkKey, fields) });
+  // The hub's side: the envelope and the request as they arrive in one post, then the MAC with the check key it was registered with.
+  const read = readHubJoin(asFile(join), asFile(request));
+  assert.equal(reasonOf(read), 'ok');
+  const accepted = read as { ok: true; join: HubJoinPayload; writer: string };
+  assert.deepEqual(accepted.join, join.payload);
+  assert.equal(accepted.writer, state.joiner.writer);
+  assert.equal(checkHubJoinMac(checkKey, { hub: accepted.join.hub, project: accepted.join.project, invite: accepted.join.invite, request: accepted.join.request }, accepted.join.hubMac), true);
+  // Nothing the hub receives (the registration, the envelope and the request) carries the join secret or its roster hash.
+  const received = JSON.stringify({ register: { invite: INVITE_ID, expiresAt: INVITE_EXPIRES, checkKey }, join, request });
+  assert.equal(received.includes(state.secret), false);
+  assert.equal(received.includes(joinSecretHash(state.secret)), false);
+  // A device other than the request's own cannot make the envelope.
+  assert.throws(() => buildHubJoin(state.world.device('MALLORY', 'mbr-mallory').signer, { hub: HUB.writer, project: state.invite.project, request, hubMac: join.payload.hubMac, now: NOW }), /^Error: The hub join was not made: /);
+});
+
+test('D-48: readHubJoin refuses an envelope signed by another device, for another request or invitation, with a changed field, or of the wrong shape', () => {
+  const state = invitedThroughHub();
+  const { request, join } = joinThroughHub(state);
+  const mallory = state.world.device('MALLORY', 'mbr-mallory');
+  // Another device signs an envelope for the joiner's request: wrong-device.
+  refusedAs(readHubJoin(asFile(signPayload(mallory.signer, 'staff-hub-join', join.payload, { now: () => NOW })), request), 'wrong-device');
+  // The joiner's envelope offered with another request of the same device (another nonce): the request hash does not match.
+  const other = requestOf(answer(state));
+  refusedAs(readHubJoin(asFile(join), other), 'wrong-device');
+  // An envelope naming another invitation than its request.
+  refusedAs(readHubJoin(asFile(signPayload(state.joiner.signer, 'staff-hub-join', { ...join.payload, invite: 'inv-other' }, { now: () => NOW })), request), 'wrong-device');
+  // Any changed field breaks the signature.
+  for (const field of ['hub', 'project', 'hubMac'] as const) {
+    const changed = clone(join);
+    changed.payload[field] = field === 'hub' ? rosterDevice('OTHER-HUB', 'hub').writer : field === 'project' ? '0'.repeat(32) : Buffer.alloc(32, 9).toString('base64url');
+    refusedAs(readHubJoin(asFile(changed), request), 'bad-signature');
+  }
+  // A request whose own signature does not hold is refused too.
+  const forgedRequest = clone(request);
+  forgedRequest.payload.name = 'Someone Else';
+  const forJoin = signPayload(state.joiner.signer, 'staff-hub-join', { ...join.payload, request: joinRequestHash(forgedRequest) }, { now: () => NOW });
+  refusedAs(readHubJoin(asFile(forJoin), forgedRequest), 'bad-signature');
+  // Wrong shapes.
+  const base = join.payload as unknown as Json;
+  for (const payload of [{ ...base, extra: 1 }, { ...base, v: 2 }, { ...base, hub: 'hub-0123456789abcdef' }, { ...base, request: 'x' }, { ...base, hubMac: 'short' }, { ...base, project: 'p' }]) {
+    refusedAs(readHubJoin(asFile(signPayload(state.joiner.signer, 'staff-hub-join', payload, { now: () => NOW })), request), 'malformed');
+  }
+  // Another purpose: hubMac is not an exempt path of a join request, so a fixed value stands in for the random one.
+  refusedAs(readHubJoin(asFile(signPayload(state.joiner.signer, 'staff-join-request', { ...base, hubMac: Buffer.alloc(32).toString('base64url') }, { now: () => NOW })), request), 'malformed');
+  for (const input of ['not json', 'null', '{}', 'x'.repeat(MAX_PAYLOAD_BYTES + 1)]) refusedAs(readHubJoin(input, request), input.length > MAX_PAYLOAD_BYTES ? 'too-large' : 'malformed');
+  refusedAs(readHubJoin(asFile(join), 'not json'), 'malformed');
+  refusedAs(readHubJoin(asFile(join), { payload: {} }), 'malformed');
 });

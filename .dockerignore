@@ -1,5 +1,8 @@
-# Allow-list for the relay image, built from the repository root: everything is left out unless a line below lets it in.
-# relay/state, relay/secrets, .git and .planning never enter the build context. Phase 71 adds !src/agent and what it imports.
+# Allow-list for the relay and hub images, built from the repository root: everything is left out unless a line below lets it in.
+# relay/state, relay/secrets, hub/state, hub/secrets, hub/test, .git and .planning never enter the build context.
+# The !src/ lines are the extension's hub-side closure the hub bundles (D-27, D-33), one file per line, sorted. Do not edit them by hand:
+# hub/test/dockerContext.test.ts fails until they equal hubSideClosure (hub/test/helpers/closure.ts) on the tree.
+# Phase 71 adds !src/agent and what it imports for the relay.
 *
 !relay/package.json
 !relay/package-lock.json
@@ -7,3 +10,50 @@
 !relay/tsconfig.json
 !relay/scripts
 !relay/src
+!hub/package.json
+!hub/package-lock.json
+!hub/.npmrc
+!hub/tsconfig.json
+!hub/scripts
+!hub/src
+!src/domain/redaction.ts
+!src/domain/replica/causal.ts
+!src/domain/replica/cellKeys.ts
+!src/domain/replica/chain.ts
+!src/domain/replica/checkpoint.ts
+!src/domain/replica/clientIds.ts
+!src/domain/replica/digest.ts
+!src/domain/replica/entry.ts
+!src/domain/replica/equivocation.ts
+!src/domain/replica/hubFile.ts
+!src/domain/replica/invite.ts
+!src/domain/replica/kindSchemas/doc.ts
+!src/domain/replica/kindSchemas/integrity.ts
+!src/domain/replica/kindSchemas/obs.ts
+!src/domain/replica/kindSchemas/project.ts
+!src/domain/replica/kindSchemas/registers.ts
+!src/domain/replica/kindSchemas/roster.ts
+!src/domain/replica/kindSchemas/runs.ts
+!src/domain/replica/kindSchemas/shared.ts
+!src/domain/replica/kindSchemas/versions.ts
+!src/domain/replica/kindSchemas/watches.ts
+!src/domain/replica/kinds.ts
+!src/domain/replica/order.ts
+!src/domain/replica/roster.ts
+!src/domain/replica/rosterCells.ts
+!src/domain/replica/rosterMembers.ts
+!src/domain/replica/rosterView.ts
+!src/domain/replica/safetyCode.ts
+!src/domain/replica/safetyWords.ts
+!src/domain/replica/transport.ts
+!src/domain/replica/updateGuard.ts
+!src/domain/replica/verify.ts
+!src/domain/staff/doctrine.ts
+!src/domain/state/keys.ts
+!src/domain/team/canonical.ts
+!src/domain/team/keyStatus.ts
+!src/domain/team/policy.ts
+!src/domain/team/secrets.ts
+!src/domain/team/signedPayload.ts
+!src/domain/team/types.ts
+!src/domain/team/validate.ts
