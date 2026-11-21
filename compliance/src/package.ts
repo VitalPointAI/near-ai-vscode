@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadComponents } from './components.ts';
+import { loadGaps } from './gaps.ts';
 import { buildSsp, type SspInput } from './oscalSsp.ts';
-import { renderReadme, renderSspMarkdown } from './readable.ts';
+import { buildAssessmentPlan, buildAssessmentResults } from './oscalAssessment.ts';
+import { buildPoam } from './oscalPoam.ts';
+import { renderGaps, renderReadme, renderSspMarkdown } from './readable.ts';
 import { assertNoSecrets } from './redact.ts';
 import { lintPage } from './wordLint.ts';
 import { loadJson, validateOscal } from './validate.ts';
@@ -30,6 +33,17 @@ export function buildPackage(options: PackageOptions): PackageResult {
     writeFileSync(path.join(destination, 'oscal/ssp', `${level.id}.json`), stable(ssp));
     mkdirSync(path.join(destination, 'readable'), { recursive: true }); writeFileSync(path.join(destination, 'readable', `${level.id}-ssp.md`), renderSspMarkdown(input));
   }
+  const rows = dashboard.rows ?? [];
+  const generatedAt = typeof dashboard.generatedAt === 'string' ? dashboard.generatedAt : '2026-11-21T00:00:00.000Z';
+  const gaps = Array.isArray(dashboard.gaps) && dashboard.gaps.length ? dashboard.gaps.map((gap: any) => ({ id: String(gap.id), title: String(gap.title), remediation: String(gap.remediation ?? '') })) : loadGaps(path.join(root, 'gaps.json')).map((gap) => ({ id: gap.id, title: gap.id, remediation: gap.remediation }));
+  const assessmentPlan = buildAssessmentPlan({ controls: [...new Set(rows.map((row: any) => row.control))].sort(), generatedAt });
+  const assessmentResults = buildAssessmentResults({ rows, generatedAt }); const poam = buildPoam({ gaps, generatedAt });
+  for (const [name, document, model] of [['assessment-plan.json', assessmentPlan, 'assessment-plan'], ['assessment-results.json', assessmentResults, 'assessment-results'], ['poam.json', poam, 'plan-of-action-and-milestones']] as const) {
+    const valid = validateOscal(document, model, { ours: true }); if (!valid.ok) throw new Error(`invalid ${name}: ${valid.errors.join('; ')}`); writeFileSync(path.join(destination, 'oscal', name), stable(document));
+  }
+  writeFileSync(path.join(destination, 'readable', 'gaps.md'), renderGaps(gaps));
+  writeFileSync(path.join(destination, 'readable', 'responsibility-matrix.csv'), '"Control","Component","We provide","Your organization does"\r\n');
+  writeFileSync(path.join(destination, 'readable', 'itsg33-crosswalk.csv'), `"ITSG-33 control","ITSP.10.033 control","Mapping note"\r\n"This crosswalk is ours, not the Cyber Centre's.","",""\r\n`);
   cpSync(bundle, path.join(destination, 'evidence/bundle'), { recursive: true, dereference: false });
   for (const sbom of options.sboms ?? []) cpSync(sbom, path.join(destination, 'evidence', path.basename(sbom)));
   const commit = typeof dashboard.commit === 'string' ? dashboard.commit : 'unknown'; writeFileSync(path.join(destination, 'README.md'), renderReadme(release, commit));
