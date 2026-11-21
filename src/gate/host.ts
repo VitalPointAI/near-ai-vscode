@@ -10,15 +10,18 @@ import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
 import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionOutcome, DecisionRecord } from '../domain/gate/record';
+import type { DecisionOutcome, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import type { SecretStorageLike } from '../services/auth';
-import { applyPolicyDraft, ensurePolicyBundle, resetPolicyToDefaults } from './bundleStore';
+import { BundleStoreError, applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
+import { OrganizationStore, OrganizationStoreError, loadLayeredPolicy, recompose } from './organizationStore';
+import type { LayeredPolicy, OrganizationEvent, PolicyLayersView } from './organizationStore';
 import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
 import type { LogKind } from './decisionLog';
-import type { SessionRoute } from './sessionMark';
+import { routePolicyFor } from './sessionMark';
+import type { RoutePolicyNow, SessionRoute } from './sessionMark';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { labelMapKey, moveLabelEntry, resolveLabel, setLabelEntry } from '../domain/gate/labelMap';
 import { joinLabels, raiseMark, sameMark } from '../domain/gate/dominance';
@@ -167,6 +170,8 @@ export class GateHost {
    * and each raise dropped is recorded in that project's decision log as a label.set that was denied, so Sign Again not writing it is never silent.
    */
   private readonly refusedRaises = new Map<string, { readonly root: string; readonly raises: Map<string, Label[]> }>();
+  /** Both policy layers as the last load composed them (41-09): your organization's, the personal one, the effective policy and the notices. */
+  private layers: PolicyLayersView = { organization: { state: 'none' }, ignored: [], migration: [] };
 
   public constructor(private readonly options: GateHostOptions) {}
 
@@ -184,8 +189,38 @@ export class GateHost {
   /** What every decision reads now. A bundle that has expired since it was checked reads as expired, so a long session never runs on an old policy, and one that has expired stays expired when the clock is set back. */
   public bundleState(): BundleState {
     const state = this.current;
-    if (state.state === 'valid' && Date.parse(state.expiresAt) <= this.now()) return failedClosed('expired');
+    // When your organization's rules end first, their own sentence and contact are shown, never the personal expiry sentence (D-14).
+    if (state.state === 'valid' && Date.parse(state.expiresAt) <= this.now()) return this.layers.expiry ?? failedClosed('expired');
     return state;
+  }
+
+  /** Both layers, the effective policy, the ignored personal settings and the migration changes, as the last load composed them (41-13, 41-14). */
+  public policyLayers(): PolicyLayersView {
+    return this.layers;
+  }
+
+  /** Records a policy event (a proposal applied or exported, the migration notice shown) with the current state, in the install log and the open project's. */
+  public recordPolicyEvent(event: BundleEvent, detail?: string): void {
+    this.announce(event, this.bundleState(), detail);
+  }
+
+  /**
+   * NEAR AI: Add Your Organization's Rules (FND-01, D-11 to D-14). Takes an enrolment file or a rules file from your organization; a first enrolment and a
+   * key handover need `wordsConfirmed` (the twelve words were compared aloud). Every decision reads the composed policy from the next one on. A file that
+   * is refused is recorded as policy.organization-refused, and the plain OrganizationStoreError is thrown with nothing changed.
+   */
+  public async acceptOrganizationFile(text: string, confirmation: { readonly wordsConfirmed?: boolean }): Promise<BundleState> {
+    await this.start();
+    let accepted;
+    try {
+      accepted = await new OrganizationStore(this.options.globalStorageDir, this.options.secrets, this.storeOptions()).accept(text, confirmation, this.now());
+    } catch (error) {
+      if (error instanceof OrganizationStoreError && error.refused) this.announce('policy.organization-refused', this.bundleState(), error.reason);
+      throw error;
+    }
+    const layered = await recompose(this.options.globalStorageDir, this.options.secrets, await loadPersonalLayer(this.options.globalStorageDir, this.options.secrets, this.storeOptions()), this.storeOptions());
+    this.settle(layered, accepted.event === undefined ? [] : [accepted.event]);
+    return this.current;
   }
 
   /**
@@ -224,7 +259,7 @@ export class GateHost {
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
       // Each record goes to the log of its own kind (owner decision after PR 4a): model requests to the model-request log, everything else here.
-      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(record); } catch { /* reported once above */ } } } },
+      sink: { record: (record) => { if (usable) { try { void this.logWithKey(key, root, kindOfRecord(record)).append(this.withPolicyVersion(record, policyVersionOf(this.policyLayers()))); } catch { /* reported once above */ } } } },
       actor: { ...request.actor, deviceFingerprint: this.deviceFingerprint() },
       presence: request.presence,
       context: request.context,
@@ -232,6 +267,7 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
+      routePolicy: (now) => this.routePolicyNow(now),
       // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
       labels: (folder: string) => this.labelsFor(folder)
     };
@@ -353,6 +389,7 @@ export class GateHost {
         rule: event.event,
         ...(event.reason === undefined || event.reason === '' ? {} : { reason: event.reason.slice(0, 500) }),
         bundleHash: this.current.state === 'valid' ? this.current.hash : '',
+        policyVersion: policyVersionOf(this.policyLayers()),
         // One shape for every label event (PR #87 review round 3): `label` the target, `mark` the chat's mark after the event, `from` the mark before it. With a
         // mark, the target is always the mark's strictest label, whoever records it (PR #87 review), as label.mark-raised records it.
         ...((): { label?: Label } => {
@@ -577,13 +614,14 @@ export class GateHost {
         record: (record) => {
           try {
             const root = this.projectRootNow();
-            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(record);
+            void this.logWithKey(root === undefined ? INSTALL_LOG_KEY : projectLogKey(root), root, kindOfRecord(record)).append(this.withPolicyVersion(record, policyVersionOf(this.policyLayers())));
           } catch { /* a record that cannot be kept never changes a request (D-21) */ }
         }
       },
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
       productVersion: this.options.productVersion,
+      routePolicy: (now) => this.routePolicyNow(now),
       attestation: { failed: false }
     };
   }
@@ -593,10 +631,12 @@ export class GateHost {
     await this.start();
     const result = await resetPolicyToDefaults(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
     await this.seedFromMarker();
-    this.current = result.state;
-    this.announce(result.event ?? 'policy.reset', result.state);
-    this.changed();
-    return result;
+    const layered = await recompose(this.options.globalStorageDir, this.options.secrets, result, this.storeOptions());
+    // Under your organization's layer only the personal layer was re-signed, and the record says so (D-21); the organization files are never touched.
+    const underOrganization = layered.layers.organization.state !== 'none';
+    const event: BundleEvent = (result.event ?? 'policy.reset') === 'policy.reset' && underOrganization ? 'policy.reset-personal' : result.event ?? 'policy.reset';
+    this.settle(layered, [], { event });
+    return { ...result, state: layered.state, ...(result.event === undefined ? {} : { event }) };
   }
 
   /**
@@ -606,12 +646,20 @@ export class GateHost {
    */
   public async applyPolicyDraft(draftText: string, baseHash: string): Promise<PolicyEditResult> {
     await this.start();
-    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, { baseHash }, this.storeOptions());
+    // The draft is checked against your organization's layer in force (D-20); while that layer fails, nothing can be edited (D-21). A draft made from the
+    // composed policy names the composed hash, which stands for the personal layer it was composed from.
+    const organization = this.layers.organization;
+    if (organization.state === 'failed') throw new BundleStoreError(`Nothing was changed: your policy cannot be trusted right now, so it cannot be edited. ${organization.sentence}`);
+    const personal = this.layers.personal;
+    const base = organization.state === 'valid' && personal !== undefined && this.current.state === 'valid' && baseHash === this.current.hash ? personal.hash : baseHash;
+    const input = organization.state === 'valid'
+      ? { baseHash: base, organization: { document: organization.document, hash: organization.hash, issuerFingerprint: organization.document.issuer.fingerprint } }
+      : { baseHash: base };
+    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, input, this.storeOptions());
     await this.seedFromMarker();
-    this.current = result.state;
-    this.announce(result.event ?? 'policy.edit', result.state, `The policy changed from ${result.oldHash} to ${result.newHash}.`);
-    this.changed();
-    return result;
+    const layered = await recompose(this.options.globalStorageDir, this.options.secrets, result, this.storeOptions());
+    this.settle(layered, [], { event: result.event ?? 'policy.edit', detail: `The policy changed from ${result.oldHash} to ${result.newHash}.` });
+    return { ...result, state: layered.state };
   }
 
   public onDidChange(listener: () => void): () => void {
@@ -690,6 +738,25 @@ export class GateHost {
     }
   }
 
+  /**
+   * The route policy of a request decided now (D-36): from this host's own layers, or none when no effective policy is in force (a failed-closed state
+   * already routes with the failed-closed table). A policy that cannot be worked out throws, so the client refuses the request as a failed route check
+   * (route.deny); it is never decided as if no policy existed (WR-02).
+   */
+  private routePolicyNow(now: number): RoutePolicyNow | undefined {
+    const layers = this.policyLayers();
+    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
+  }
+
+  /**
+   * A record as this host's sinks append it (D-10): a copy whose authorizations[0].policy.version is `version`, every other field as it was, so every record
+   * a runtime writes (tool calls, mark raises, refusals before the gate, model requests) names the policy version without agent/gateAdapter.ts knowing it.
+   */
+  private withPolicyVersion(record: DecisionRecord, version: PolicyRecordVersion): DecisionRecord {
+    const [first, ...rest] = record.authorizations;
+    return first === undefined ? record : { ...record, authorizations: [{ ...first, policy: { ...first.policy, version } }, ...rest] };
+  }
+
   private deviceFingerprint(): string {
     return this.current.state === 'valid' ? this.current.signer.fingerprint : DEVICE_UNKNOWN;
   }
@@ -738,18 +805,31 @@ export class GateHost {
   }
 
   private async begin(): Promise<BundleState> {
-    let result: BundleResult;
+    let result: LayeredPolicy & { readonly event?: BundleEvent };
     try {
-      result = await ensurePolicyBundle(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
+      result = await loadLayeredPolicy(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
     } catch (error) {
-      result = { state: failedClosed('identity-unavailable', detailOf(error)) };
+      const state = failedClosed('identity-unavailable', detailOf(error));
+      result = { state, layers: { organization: { state: 'none' }, ignored: [], migration: [] }, events: [] };
     }
     await this.seedFromMarker();
     this.current = result.state;
+    this.layers = result.layers;
     this.settled = true;
     this.announce(result.event, result.state);
+    // Your organization's events the load found (a layer rolled forward or refused) are recorded once, at start.
+    for (const found of result.events) this.announce(found.event, result.state, found.detail);
     this.changed();
     return result.state;
+  }
+
+  // Takes a layered result as the policy in force: seeds the clock, records the events, tells the listeners.
+  private settle(layered: LayeredPolicy, before: readonly OrganizationEvent[], personal?: { readonly event: BundleEvent; readonly detail?: string }): void {
+    this.current = layered.state;
+    this.layers = layered.layers;
+    if (personal !== undefined) this.announce(personal.event, layered.state, personal.detail);
+    for (const found of [...before, ...layered.events]) this.announce(found.event, layered.state, found.detail);
+    this.changed();
   }
 
   // The bundle's own events are per install: they go to the install-level log in global storage whether or not a folder is open, and also to the open
@@ -773,7 +853,8 @@ export class GateHost {
         outcome,
         rule,
         ...(reason === undefined ? {} : { reason }),
-        bundleHash: state.state === 'valid' ? state.hash : ''
+        bundleHash: state.state === 'valid' ? state.hash : '',
+        policyVersion: policyVersionOf(this.policyLayers())
       });
       const named = { ...record, api: { ...record.api, operation: name } };
       const root = this.projectRootNow();
@@ -792,6 +873,17 @@ export class GateHost {
       try { listener(); } catch { /* a listener never breaks the host */ }
     }
   }
+}
+
+/**
+ * The version of the policy every record names (D-10): bundle-2 while an effective policy is in force and either your organization's layer is valid or the
+ * stored personal layer is a version 2 one; bundle-1 otherwise, a failed-closed state included. The one function that decides it. Pure.
+ */
+export function policyVersionOf(layers: PolicyLayersView): PolicyRecordVersion {
+  if (layers.effective === undefined || layers.failedLayer !== undefined || layers.organization.state === 'failed') return 'bundle-1';
+  if (layers.organization.state === 'valid') return 'bundle-2';
+  const stored = layers.personal?.stored;
+  return typeof stored === 'object' && stored !== null && (stored as { readonly bundleVersion?: unknown }).bundleVersion === 2 ? 'bundle-2' : 'bundle-1';
 }
 
 /**

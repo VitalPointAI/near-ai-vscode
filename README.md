@@ -1462,17 +1462,34 @@ copy of Open-GSD to a project that doesn't already have one.
   never kept by anyone else.
 - **Your policy.** A signed policy file in this extension's own storage, never
   in your project, sets the most the agent may do, and your settings only
-  narrow it. **NEAR AI: Show Policy** shows it, read only. If it is missing,
-  changed or expired, only reading and planning run until you run
-  **NEAR AI: Reset Policy to Defaults**, which asks first and keeps your old
-  file. A policy written for a newer version of the extension is never reset
-  for you: it says to update the extension, and until then only reading and
-  planning run. Every model request is checked against its routing before anything is
+  narrow it. Your organization can hand every computer its rules as a signed
+  file: **NEAR AI: Add Your Organization's Rules** opens it and shows twelve
+  words to compare with the ones your organization's security contact reads
+  to you, and your own rules can then only narrow your organization's.
+  **NEAR AI: Policy** opens the policy page, "Your organization's rules" (or
+  "Your rules" without them), read only: a change is shown there as a
+  proposal first, applied to your own rules or saved as a file for your
+  organization, and the page has **Edit my rules**, **Show as stored** and
+  **Reset my rules**, which resets your own rules only. If the policy is
+  missing, changed or expired, only reading and planning run until you choose
+  **Reset my rules**, which asks first and keeps your old file. A policy
+  written for a newer version of the extension is never reset for you: it
+  says to update the extension, and until then only reading and planning run.
+  Protected B sent to a server your policy names as local now needs a TLS pin
+  and a Protected B authorization naming that server. Content marked
+  Controlled goods (Canada), ITAR or US export-controlled (EAR) stays on this
+  computer under the starting rules. A fresh install, and the renewal of
+  starting rules nobody edited, get these entries: an upgraded install whose
+  starting rules nobody edited gets them when its policy is next renewed, in
+  the last 30 days before it ends, and an edited policy gets them through a
+  change on the policy page. Your organization's rules can carry
+  export-control decisions, but nothing grants access with them yet, and
+  meeting those programs stays your organization's obligation. Every model request is checked against its routing before anything is
   sent and leaves a record in a log of its own; on a fresh install nothing
   changes where requests go. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
 - **Labels and clearances.** **NEAR AI: Set Label** labels a file, a folder or
   the project, and agents cannot read what your clearances do not cover. Add a
-  clearance with **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy Draft**.
+  clearance in **NEAR AI: Policy** with **Edit my rules**, then **Apply my draft**.
   A chat's label rises with what its agents read and decides where its content
   is sent. Content at a level that needs a private cloud model goes to NEAR AI
   Cloud only over a connection proven to end inside its private hardware, and

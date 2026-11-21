@@ -2,7 +2,7 @@
 // `now`), no vscode, no package. `dominates` is true only when all five hold: (1) the clearance is on the label's scale, or a bundle mapping covers it;
 // (2) its level is at least the label's; (3) it holds every label compartment; (4) it meets the label's releasability (an empty clearance releasability
 // cannot read a label that restricts releasability); (5) it has not expired. Anything unknown, malformed or missing is no access, never a guess.
-import { RELEASABILITY_NONE, expiryMs, labelKey, levelIndex } from './labels';
+import { RELEASABILITY_NONE, expiryMs, labelKey, levelIndex, parseLabelKey, scaleOf } from './labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
 
 export interface DominanceContext {
@@ -11,6 +11,38 @@ export interface DominanceContext {
   readonly mappings: readonly ScaleMapping[];
   /** Epoch milliseconds, supplied by the caller so this module stays pure. */
   readonly now: number;
+}
+
+/** The two fields a ranking reads: a label's (or clearance's) scale and level. */
+export type LabelLevel = Pick<Label, 'scale' | 'level'>;
+
+/**
+ * Whether `label` is on the same scale as `floor` and at least as high, both levels known on `scales` (D-35): the one level ranking every label check
+ * uses. Across scales, or with an unknown level on either side, it is false. Pure: the caller passes the scales (the active policy's, see labelAlgebra.ts).
+ */
+export function atLeast(label: LabelLevel, floor: LabelLevel, scales: ScaleTable): boolean {
+  if (label.scale !== floor.scale) return false;
+  const rank = levelIndex(scales, label.scale, label.level);
+  const floorRank = levelIndex(scales, floor.scale, floor.level);
+  return rank >= 0 && floorRank >= 0 && rank >= floorRank;
+}
+
+/** The scale part of a `scale/level` text: the text before the first slash, or the whole text when it has none. */
+function scalePart(text: string): string {
+  const at = text.indexOf('/');
+  return at < 0 ? text : text.slice(0, at);
+}
+
+/**
+ * Whether the `scale/level` text `label` is below the text `floor` on the floor's scale (D-35): the two texts name the same scale and `label` is not at
+ * least `floor` on `scales`. A text that does not parse is not at least anything, so an unknown level on the floor's scale counts as below; a label on
+ * another scale is never below (the caller's other checks govern it). The one check the staff importers, the store and the feeds use.
+ */
+export function belowOnScale(label: string, floor: string, scales: ScaleTable): boolean {
+  if (scalePart(label) !== scalePart(floor)) return false;
+  const read = parseLabelKey(label, scales);
+  const least = parseLabelKey(floor, scales);
+  return !(read !== undefined && least !== undefined && atLeast(read, least, scales));
 }
 
 /** Why a clearance does not dominate a label, in the order they are checked. Later UI words each refusal plainly from this closed list. */
@@ -142,6 +174,75 @@ function sameLabel(a: Label, b: Label): boolean {
 /** True when two marks hold the same labels, in any order. */
 export function sameMark(a: Mark, b: Mark): boolean {
   return a.length === b.length && a.every((label) => b.some((other) => sameLabel(label, other)));
+}
+
+/** Whether `mark` already holds `floor` (D-35): raising it by every label of `floor` changes nothing. The chat label's covers and not-lower checks. */
+export function markAtLeast(mark: Mark, floor: Mark, scales: ScaleTable): boolean {
+  let raised: Mark = mark;
+  for (const label of floor) raised = raiseMark(raised, label, scales);
+  return sameMark(raised, mark);
+}
+
+function sortedIntersection(a: readonly string[], b: readonly string[]): readonly string[] {
+  return Object.freeze([...new Set(a.filter((token) => b.includes(token)))].sort());
+}
+
+/** The earlier of two expiries (absent means never); null when either cannot be read, so the caller fails closed. */
+function earlierExpiry(a: string | undefined, b: string | undefined): string | undefined | null {
+  if (a !== undefined && Number.isNaN(expiryMs(a))) return null;
+  if (b !== undefined && Number.isNaN(expiryMs(b))) return null;
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return expiryMs(b) < expiryMs(a) ? b : a;
+}
+
+function levelLabel(place: { readonly scale: string; readonly level: string }): Label {
+  return { scale: place.scale, level: place.level, compartments: [], releasability: [], handling: [] };
+}
+
+/**
+ * The highest level of `under`'s scale, at or below `under`'s own, from which every mapping it would satisfy reaches only what `over` reaches too. A meet
+ * placed on `under`'s scale must not reach a third scale through a mapping `over` cannot follow. Undefined when even the lowest level satisfies one.
+ */
+function narrowedUnder(under: Clearance, over: Clearance, context: DominanceContext): string | undefined {
+  const levels = scaleOf(context.scales, under.scale)?.levels ?? [];
+  const top = levelIndex(context.scales, under.scale, under.level);
+  for (let rank = top; rank >= 0; rank -= 1) {
+    const reaches = context.mappings.filter((mapping) => mapping.from.scale === under.scale && levelIndex(context.scales, mapping.from.scale, mapping.from.level) <= rank);
+    if (reaches.every((mapping) => scaleAndLevel(over, levelLabel(mapping.covers), context) === undefined)) return levels[rank];
+  }
+  return undefined;
+}
+
+/**
+ * The meet of two clearances (D-35): the widest clearance that dominates nothing either input does not, which 41-10 uses as the effective clearance (the
+ * personal layer met with the roster's). On one scale it is the lower level; across scales it is the side the other covers through a signed mapping
+ * (never a new ranking), held below any mapping of that side the other cannot follow. Compartments and releasability are the shared tokens and the expiry
+ * the earlier one (absent means never). Neither side covering the other, an unknown scale or level, or an unreadable expiry gives undefined: no clearance.
+ */
+export function meetClearance(a: Clearance, b: Clearance, scales: ScaleTable, mappings: readonly ScaleMapping[]): Clearance | undefined {
+  if (levelIndex(scales, a.scale, a.level) < 0 || levelIndex(scales, b.scale, b.level) < 0) return undefined;
+  const expiresAt = earlierExpiry(a.expiresAt, b.expiresAt);
+  if (expiresAt === null) return undefined;
+  const context: DominanceContext = { scales, mappings, now: 0 };
+  let place: { readonly scale: string; readonly level: string } | undefined;
+  if (a.scale === b.scale) {
+    place = atLeast(a, b, scales) ? b : a;
+  } else {
+    for (const [over, under] of [[a, b], [b, a]] as const) {
+      if (scaleAndLevel(over, levelLabel(under), context) !== undefined) continue;
+      const level = narrowedUnder(under, over, context);
+      if (level !== undefined) { place = { scale: under.scale, level }; break; }
+    }
+  }
+  if (place === undefined) return undefined;
+  const base = {
+    scale: place.scale,
+    level: place.level,
+    compartments: sortedIntersection(a.compartments, b.compartments),
+    releasability: sortedIntersection(a.releasability, b.releasability)
+  };
+  return Object.freeze(expiresAt === undefined ? base : { ...base, expiresAt });
 }
 
 /**

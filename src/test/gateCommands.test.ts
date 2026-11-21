@@ -12,6 +12,8 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, SCALE_PRESETS_CAVEAT_TEXT } from '../doma
 import type { DecisionRecord } from '../domain/gate/record';
 import { POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY, projectLogKey } from '../gate/decisionLog';
+import { SessionMark } from '../domain/gate/dominance';
+import { GateHost } from '../gate/host';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -116,7 +118,7 @@ test('Show Policy opens a read-only document with the hash, the self-declared cl
   const filesBefore = (await readdir(gateDir(storage))).sort();
   const bytesBefore = await readFile(path.join(gateDir(storage), POLICY_BUNDLE_FILE), 'utf8');
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   assert.equal(stub.shownDocuments.length, 1);
   const shown = stub.shownDocuments[0] as { uri: string; text: string };
   assert.ok(shown.uri.startsWith('near-ai-policy:'));
@@ -154,7 +156,7 @@ test('Show Policy for a policy that failed shows the sentence, says only reading
   await writeFile(file, (await readFile(file, 'utf8')).replace('"Restricted"', '"Restricteb"'), 'utf8');
   await started(first.secrets, first.storage);
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = (stub.shownDocuments[0] as { text: string }).text;
   assert.ok(text.includes(BUNDLE_FAILURES['bad-signature']));
   assert.match(text, /only reading and planning/);
@@ -166,7 +168,7 @@ test('policyDocumentText for a policy that failed is exactly the title, the note
   const expected = [
     'Your NEAR AI policy',
     '',
-    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, run NEAR AI: Reset Policy to Defaults.',
+    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open NEAR AI: Policy and choose Reset my rules, which resets your own rules only.',
     '',
     'State: not usable, so only reading and planning are allowed',
     sentence
@@ -182,21 +184,21 @@ test('S6: Show Policy for a policy written for a newer version says to update an
   for (const reason of ['needs-update', 'unknown-field', 'unsupported-version', 'vocabulary-unknown'] as const) {
     const text = gateCommands.policyDocumentText(failedClosed(reason), 0);
     assert.match(text, /update the extension/i, reason);
-    assert.ok(!/Reset Policy to Defaults/.test(text), reason);
+    assert.ok(!/Reset my rules/.test(text), reason);
     assert.match(text, /State: not usable, so only reading and planning are allowed/);
   }
-  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset Policy to Defaults/);
+  assert.match(gateCommands.policyDocumentText(failedClosed('expired'), 0), /Reset my rules/);
 });
 
 test('S6 (PR #143 review): an unknown setting in the person\'s own policy names both ways on, update or Reset with what it discards; another signer\'s never offers Reset', () => {
   const own = gateCommands.policyDocumentText({ ...failedClosed('unknown-field'), ownPolicy: true }, 0);
   assert.match(own, /If a newer version of NEAR AI wrote it, update the extension/);
-  assert.match(own, /NEAR AI: Reset Policy to Defaults signs a fresh default policy and keeps the old file beside it; every change you made to the policy is discarded/);
+  assert.match(own, /Reset my rules in NEAR AI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded/);
   const other = gateCommands.policyDocumentText(failedClosed('unknown-field'), 0);
   assert.match(other, /update the extension/);
-  assert.ok(!/Reset Policy to Defaults/.test(other));
+  assert.ok(!/Reset my rules/.test(other));
   // A policy written for a newer version is never offered Reset, even the person's own.
-  assert.ok(!/Reset Policy to Defaults/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
+  assert.ok(!/Reset my rules/.test(gateCommands.policyDocumentText({ ...failedClosed('needs-update'), ownPolicy: true }, 0)));
 });
 
 test('policyDocumentText lists each MCP server\'s label ceiling, and says when none is set (WP-GATE)', () => {
@@ -523,3 +525,64 @@ test('a window that was activated with no folder gives the policy\'s events to t
   assert.equal((await recordsOf(storage, opened)).filter((record) => record.api.operation === 'policy.reset').length, 1);
   assert.equal((await installRecordsOf(storage)).filter((record) => record.api.operation === 'policy.reset').length, 1);
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// D-62: reserved export compartments read as words after the level on the label screens; records keep the tokens
+
+function orgLabel(level: string, compartments: string[] = [], handling: string[] = []): import('../domain/gate/labels').Label {
+  return { scale: 'org', level, compartments, releasability: [], handling } as import('../domain/gate/labels').Label;
+}
+
+test('D-62: a reserved compartment is shown as its words after the level', () => {
+  assert.equal(gateCommands.labelShown(orgLabel('Internal', ['ITAR'])), 'Organization: Internal · ITAR');
+  const cgp = gateCommands.labelShown(orgLabel('Internal', ['CGP']));
+  assert.equal(cgp, 'Organization: Internal · Controlled goods (Canada)');
+  assert.ok(!cgp.includes('CGP') && !cgp.includes('compartments'), cgp);
+  assert.ok(gateCommands.labelShown(orgLabel('Internal', ['EAR'])).endsWith('· US export-controlled (EAR)'));
+  // The words come from the label module: none is spelled in gateCommands.ts.
+  const source = readFileSync(path.join(__dirname, '..', '..', 'src', 'services', 'gateCommands.ts'), 'utf8');
+  for (const spelled of [/Controlled goods/, /US export-controlled/, /\bITAR\b/, /\bCGP\b/, /\bEAR\b/]) assert.doesNotMatch(source, spelled);
+});
+
+test('D-62: reserved and other compartments together, and a label with no reserved compartment reads as before', () => {
+  assert.equal(gateCommands.labelShown(orgLabel('Internal', ['CGP', 'PROJ-X'], ['local-only'])), 'Organization: Internal · Controlled goods (Canada), compartments PROJ-X, local-only');
+  assert.equal(gateCommands.labelShown(orgLabel('Internal', ['PROJ-X', 'PROJ-Y'], ['local-only'])), 'Organization: Internal, compartments PROJ-X, PROJ-Y, local-only');
+  assert.equal(gateCommands.labelShown(orgLabel('Internal')), 'Organization: Internal');
+});
+
+test('D-62: labelsShown joins each label the same way, on the Lower This Chat\'s Label picker and its messages', async () => {
+  const both = [orgLabel('Restricted', ['CGP']), { scale: 'ca-protected', level: 'Protected B', compartments: ['ITAR'], releasability: [], handling: [] } as import('../domain/gate/labels').Label];
+  assert.equal(gateCommands.labelsShown(both), `${gateCommands.labelShown(both[0]!)}, ${gateCommands.labelShown(both[1]!)}`);
+  assert.equal(gateCommands.labelsShown(both), 'Organization: Restricted · Controlled goods (Canada), Canada, Protected: Protected B · ITAR');
+  // Through the command: the picker's title shows the words; the label.declassify record keeps the tokens (next test).
+  const { host, root, storage } = await chatHost();
+  const session = new SessionMark([orgLabel('Restricted', ['CGP'])]);
+  const chat = { id: 'conv-d62', root, mark: () => session, defaultLabel: () => orgLabel('Public'), prepareLowering: () => undefined };
+  stub.quickPickAnswers.length = 0;
+  stub.quickPickRequests.length = 0;
+  stub.inputAnswers.length = 0;
+  stub.notifications.length = 0;
+  stub.quickPickAnswers.push('Organization: Internal');
+  stub.inputAnswers.push('Reviewed by the security desk.');
+  assert.equal(await gateCommands.lowerChatLabel(host, chat), true);
+  assert.equal(stub.quickPickRequests.at(-1)?.title, "Lower this chat's label from Organization: Restricted · Controlled goods (Canada)");
+  assert.ok(stub.notifications.some((entry) => entry.message.startsWith("This chat's label is now Organization: Internal.")));
+  await host.flush();
+  const declassify = (await recordsOf(storage, root)).filter((record) => record.authorizations[0]?.policy.name === 'label.declassify');
+  assert.equal(declassify.length, 1);
+  assert.ok(JSON.stringify(declassify[0]).includes('Lowered from Organization: Restricted, compartments CGP to Organization: Internal: Reviewed by the security desk.'), 'the record keeps the token');
+  assert.ok(!JSON.stringify(declassify[0]).includes('Controlled goods'), 'no shown words in the record');
+});
+
+test('D-62: records keep the tokens: labelRecorded is today\'s form with every compartment as a token', () => {
+  assert.equal(gateCommands.labelRecorded(orgLabel('Internal', ['CGP'])), 'Organization: Internal, compartments CGP');
+  assert.equal(gateCommands.labelRecorded(orgLabel('Internal', ['CGP', 'PROJ-X'], ['local-only'])), 'Organization: Internal, compartments CGP, PROJ-X, local-only');
+});
+
+async function chatHost(): Promise<{ host: GateHost; root: string; storage: string }> {
+  const root = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-project-'));
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-gate-cmd-'));
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.0.0-test', projectRoot: root, home: storage });
+  assert.equal((await host.start()).state, 'valid');
+  return { host, root, storage };
+}

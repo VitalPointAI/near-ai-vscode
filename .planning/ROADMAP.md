@@ -350,21 +350,21 @@ Order: (1) the **coherence safety patch**, one small PR in the patch line for ei
 **Plans:** 15 plans in 5 waves (planned 2026-11-20; starts after the coherence safety patch merges; decisions D-01 to D-64 in `41-CONTEXT.md`, owner confirmations listed there)
 
 Plans:
-- [ ] 41-01-PLAN.md: Wave 1. Contract: bundle v2 document, feature ids, endpoints and the localHosts migration, authorizations (with the export-control kinds), sections (with exportControl in report mode), every new id and signing purpose, CGP, ITAR and EAR local-only in the starting rules
-- [ ] 41-02-PLAN.md: Wave 2. Layers that only narrow: the narrowing table, composition, wider personal values clamped and listed
-- [ ] 41-03-PLAN.md: Wave 2. Enrolment file, twelve words read aloud, the issuer script
-- [ ] 41-04-PLAN.md: Wave 2. One label module: staff observations, guard scan and the chat label rank through it
-- [ ] 41-05-PLAN.md: Wave 2. Model passport schema in report mode, shipped passports, use tier
-- [ ] 41-06-PLAN.md: Wave 2. Organization modes, term() and the people section
-- [ ] 41-07-PLAN.md: Wave 2. ModelEndpoint and LocalServerAdmin, NearAiClient as the first adapter
-- [ ] 41-08-PLAN.md: Wave 2. Proposals and the policy editor shell
-- [ ] 41-09-PLAN.md: Wave 3. Organization store and host: the pin, updates, rollback, Reset of the personal layer only, v2 writes
-- [ ] 41-10-PLAN.md: Wave 3. decideRoute over endpoints, authorizations, residency, accredited devices and passports; TrustFacts
-- [ ] 41-11-PLAN.md: Wave 3. Copy lint with a baseline that only shrinks
-- [ ] 41-12-PLAN.md: Wave 3. Architecture test with a baseline that only shrinks
-- [ ] 41-13-PLAN.md: Wave 4. Private, TEE only and Team Mode inputs through decideRoute; the trust line on every answer
-- [ ] 41-14-PLAN.md: Wave 4. Add your organization's rules, NEAR AI: Policy, notices and palette
-- [ ] 41-15-PLAN.md: Wave 5. Copy sweep, SECURITY.md, README, CHANGELOG, baselines tight, requirements, full suite
+- [x] 41-01-PLAN.md: Wave 1. Contract: bundle v2 document, feature ids, endpoints and the localHosts migration, authorizations (with the export-control kinds), sections (with exportControl in report mode), every new id and signing purpose, CGP, ITAR and EAR local-only in the starting rules
+- [x] 41-02-PLAN.md: Wave 2. Layers that only narrow: the narrowing table, composition, wider personal values clamped and listed
+- [x] 41-03-PLAN.md: Wave 2. Enrolment file, twelve words read aloud, the issuer script
+- [x] 41-04-PLAN.md: Wave 2. One label module: staff observations, guard scan and the chat label rank through it
+- [x] 41-05-PLAN.md: Wave 2. Model passport schema in report mode, shipped passports, use tier
+- [x] 41-06-PLAN.md: Wave 2. Organization modes, term() and the people section
+- [x] 41-07-PLAN.md: Wave 2. ModelEndpoint and LocalServerAdmin, NearAiClient as the first adapter
+- [x] 41-08-PLAN.md: Wave 2. Proposals and the policy editor shell
+- [x] 41-09-PLAN.md: Wave 3. Organization store and host: the pin, updates, rollback, Reset of the personal layer only, v2 writes
+- [x] 41-10-PLAN.md: Wave 3. decideRoute over endpoints, authorizations, residency, accredited devices and passports; TrustFacts
+- [x] 41-11-PLAN.md: Wave 3. Copy lint with a baseline that only shrinks
+- [x] 41-12-PLAN.md: Wave 3. Architecture test with a baseline that only shrinks
+- [x] 41-13-PLAN.md: Wave 4. Private, TEE only and Team Mode inputs through decideRoute; the trust line on every answer
+- [x] 41-14-PLAN.md: Wave 4. Add your organization's rules, NEAR AI: Policy, notices and palette
+- [x] 41-15-PLAN.md: Wave 5. Copy sweep, SECURITY.md, README, CHANGELOG, baselines tight, requirements, full suite
 
 ### Guided setup: viable options, a plain recommendation and local models (Phases 32.1 and 32.2, added 2026-11-20)
 

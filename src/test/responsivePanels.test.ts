@@ -336,3 +336,16 @@ test('Team Studio\'s dashboard reads in light, dark and high contrast themes: th
   // The focus is drawn on the star's label, since the radio itself is not seen.
   assert.match(sheet, /\.stars input:focus-visible \+ label \{ outline: 1px solid var\(--accent\);/);
 });
+
+test('41-15: the chat trust badge and its three-part line wrap instead of cutting text off at narrow widths', () => {
+  const chat = css('chat/chat.css');
+  const badge = /\.trust-badge \{[^}]*\}/.exec(chat)![0];
+  for (const rule of [/display: inline-flex;/, /flex-wrap: wrap;/, /max-width: 100%;/]) assert.match(badge, rule);
+  assert.doesNotMatch(badge, /text-overflow: ellipsis|overflow: hidden|white-space: nowrap/);
+  const parts = /\.trust-badge > span \{[^}]*\}/.exec(chat)?.[0] ?? '';
+  assert.match(parts, /min-width: 0;/);
+  assert.match(parts, /overflow-wrap: anywhere;/);
+  // The line's parts are spans inside the badge button, so the rule reaches each of them.
+  const script = readFileSync(path.join(MEDIA, 'chat', 'trustBadge.js'), 'utf8');
+  for (const part of ['trust-runs-on', 'trust-title', 'trust-allowed', 'trust-separator']) assert.match(script, new RegExp(`el\\(doc, 'span', '${part}'`), part);
+});

@@ -20,6 +20,7 @@ import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import type { GateHost } from '../gate/host';
 import type { CompletionEvent, ToolCall } from '../services/nearAiClient';
 import { newTestRun } from './helpers/gatedRuns';
+import { autoApplyPolicyEditor } from './helpers/policyEditorFake';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -42,7 +43,8 @@ async function started(): Promise<Started> {
   await writeFile(path.join(root, 'secret', 'plan.md'), `${SECRET}\n`);
   stub.setWorkspaceFolders([root]);
   const secrets = new MemorySecrets();
-  const host = gateCommands.registerGate(createFakeContext(storage, secrets) as never, { notify: () => undefined });
+  // D-44: Apply Policy Draft shows the draft on the policy page; this stand-in presses its Apply, as a person would.
+  const host = gateCommands.registerGate(createFakeContext(storage, secrets) as never, { notify: () => undefined, policyEditor: autoApplyPolicyEditor() });
   await host.state();
   const changes = [0];
   host.onDidChange(() => { changes[0] = (changes[0] ?? 0) + 1; });
@@ -120,7 +122,7 @@ async function readAsAgent(s: Started, file: string): Promise<string> {
 test('tracer: a person adds a Protected B clearance through Edit Policy and Apply Policy Draft, and Set Label then accepts that label', async () => {
   const s = await started();
   assert.equal(await setLabelPB(s), false, 'refused before the clearance exists');
-  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /NEAR AI: Edit Policy first/);
+  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /open NEAR AI: Policy and choose Edit my rules/);
   const before = s.host.bundleState();
   assert.equal(before.state, 'valid');
   const draft = await editPolicy(s);
@@ -240,7 +242,7 @@ test('a self-added clearance that expires during a chat: the next read of conten
   assert.equal(await setLabelPB(s), true);
   assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(SECRET), 'read while the clearance holds');
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   assert.ok(stub.shownDocuments[0]?.text.includes(`ca-protected/Protected B, until ${ends}`), 'Show Policy shows the expiry');
   await new Promise((resolve) => setTimeout(resolve, 1700));
   assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(`Not allowed: This file is labelled Canada, Protected: Protected B, and your clearance for it ended on ${ends.slice(0, 10)}\\.`));
@@ -249,7 +251,7 @@ test('a self-added clearance that expires during a chat: the next read of conten
 test('Show Policy says what is live: clearances are checked on reads, each chat\'s label decides where its content is sent, and unlabelled content takes the default label', async () => {
   const s = await started();
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = stub.shownDocuments[0]?.text ?? '';
   assert.ok(text.includes(gateCommands.POLICY_ROUTING_TEXT));
   assert.equal((gateCommands as Record<string, unknown>)['POLICY_LABELS_NOT_USED_TEXT'], undefined, 'the old sentence is gone');
@@ -270,7 +272,7 @@ test('every message Edit Policy, Apply Policy Draft and Show Policy show where c
   const s = await started();
   const texts: string[] = [];
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   texts.push(stub.shownDocuments[0]?.text ?? '');
   const draft = await editPolicy(s);
   texts.push(stub.notifications.find((entry) => entry.level === 'info')?.message ?? '');
@@ -289,7 +291,7 @@ test('every message Edit Policy, Apply Policy Draft and Show Policy show where c
 test('Show Policy names the command that changes the policy (Edit Policy) beside the one that resets it, and stays read-only', async () => {
   await started();
   stub.shownDocuments.length = 0;
-  await stub.commands.get('nearAi.policy.show')?.();
+  await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = stub.shownDocuments[0]?.text ?? '';
-  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, run NEAR AI: Edit Policy; to go back to the default, run NEAR AI: Reset Policy to Defaults\./);
+  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, open NEAR AI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only\./);
 });

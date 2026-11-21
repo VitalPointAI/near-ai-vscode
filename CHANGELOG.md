@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Your organization's rules
+
+Your organization can now hand every computer its rules as one signed file, and every feature
+reads them the same way. Your own settings on this computer can only make them stricter.
+
+- **Add your organization's rules.** **NEAR AI: Add Your Organization's Rules** opens the file
+  your organization's security contact sends and shows twelve words to compare with the twelve
+  words they read to you. Only **The twelve words match** takes the rules; anything else changes
+  nothing. Later versions of the rules are taken only when the same key signed them and they are
+  newer.
+- **One policy page.** **NEAR AI: Policy** opens "Your organization's rules" (or "Your rules"),
+  read only, with who set them. A change is shown there first, one plain sentence per setting:
+  apply it to your own rules, or save it as a file for your organization. **Edit my rules**,
+  **Apply my draft**, **Show as stored** and **Reset my rules** are on the page, and the old
+  Show, Edit, Apply and Reset commands left the Command Palette.
+- **Reset touches your own rules only.** Under your organization's rules, Reset signs fresh
+  starting rules for your own settings and leaves your organization's rules as they are.
+- **Wider personal settings are ignored and listed.** A setting of yours that is wider than your
+  organization allows has no effect, and one notice lists it; a change that would make a setting
+  wider is refused, naming it.
+- **One list of where AI may run.** Your policy's local servers are now listed with every other
+  place AI may run, with the same effect as before, and a notice says so once. Protected B sent
+  to a server your policy names as local now needs a TLS pin and a Protected B authorization
+  naming that server.
+- **Private means checked.** `nearAi.privacyMode`, private agent teams and private members all
+  ask the same check, and its choice now reads "Only verified private hardware or this computer".
+- **A trust line under each answer.** Beside the badge, one line says where the answer ran, what
+  was checked and what allowed it.
+- **Export-controlled content stays here by default.** Content marked Controlled goods (Canada),
+  ITAR or US export-controlled (EAR) stays on this computer under the starting rules. A fresh
+  install, and the renewal of starting rules nobody edited, get these entries: an upgraded install
+  whose starting rules nobody edited gets them when its policy is next renewed, in the last 30 days
+  before it ends, and an edited policy gets them through a change on the policy page. Your
+  organization's rules can carry export-control decisions; they are used to allow access in a
+  later release.
+
 ### Fixes
 
 - **Content that must stay local no longer reaches a host by a broad pattern or plain http.** A
@@ -26,8 +62,8 @@
 - **A newer policy asks you to update, never to reset.** A policy that needs a feature or setting
   this version does not know still runs reading and planning only, and now says to update the
   extension instead of offering to reset the policy to its defaults, which would have discarded its
-  rules. For your own policy with a setting this version does not know, Show Policy still offers the
-  reset, saying what it discards.
+  rules. For your own policy with a setting this version does not know, the policy page still offers
+  Reset my rules, saying what it discards.
 - **Labels read by name.** Labels now show the scale's name with the level ("Organization:
   Internal", "Canada, Classified: Confidential"), and the organization's Confidential level reads
   "Sensitive" so it is never mistaken for the classified one. Stored labels are unchanged, and the

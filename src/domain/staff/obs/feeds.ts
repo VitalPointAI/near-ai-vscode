@@ -11,7 +11,8 @@ import { isNamedPerson } from '../release';
 import type { PersonActor } from '../release';
 import { bool, childPath, choice, fail, field, fields, int, list, optionalField, reading, slug, templateLabel, text } from './read';
 import type { ObsFailure, ObsParsed } from './read';
-import { labelAtLeast } from './observation';
+import { belowOnScale } from '../../gate/dominance';
+import { activeScales } from '../../gate/labelAlgebra';
 
 // ---- Classes, categories, formats and transports ------------------------------------------------------------------------------------------------
 
@@ -207,13 +208,14 @@ export function parseFeedDescriptor(value: unknown, path = ''): ObsParsed<FeedDe
     const transport = choice(FEED_TRANSPORTS, field(raw, 'transport'), at('transport'));
     if (licenceClass === 'partner-only' && transport !== 'partner') fail('local-only', at('transport'));
     const label = optionalField(raw, 'label', path, templateLabel);
-    if (label !== undefined && !labelAtLeast(label, LICENCE_CLASS_RULES[licenceClass].floorLabel) && label.startsWith('org/')) fail('label-too-low', at('label'));
+    // Ranked by the label module on the active policy's scales (D-35); the licence floors are all organization labels.
+    if (label !== undefined && belowOnScale(label, LICENCE_CLASS_RULES[licenceClass].floorLabel, activeScales())) fail('label-too-low', at('label'));
     const feedLabel = label ?? LICENCE_CLASS_RULES[licenceClass].defaultLabel;
     const channels = list(field(raw, 'channels'), at('channels'), FEED_MAX_CHANNELS, readChannel);
     if (channels.length === 0) fail('missing-field', at('channels'));
     channels.forEach((channel, index) => {
       if (channels.findIndex((other) => other.id === channel.id) !== index) fail('duplicate-entry', `${at('channels')}[${index}].id`);
-      if (channel.label !== undefined && channel.label.split('/')[0] === feedLabel.split('/')[0] && !labelAtLeast(channel.label, feedLabel)) fail('label-too-low', `${at('channels')}[${index}].label`);
+      if (channel.label !== undefined && belowOnScale(channel.label, feedLabel, activeScales())) fail('label-too-low', `${at('channels')}[${index}].label`);
       if (channel.discipline !== null && PARTNER_ONLY_DISCIPLINES.includes(channel.discipline) && !simulated) fail('partner-simulation-only', `${at('channels')}[${index}].discipline`);
     });
     const decay = optionalField(raw, 'decay', path, (v, where) => {

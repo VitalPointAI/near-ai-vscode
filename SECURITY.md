@@ -64,7 +64,11 @@ version" below). A model on a host your organization names as local counts
 only when the policy names that exact host and it is reached over https; a
 `*.` pattern or plain http does not. Otherwise nothing is sent, and the
 refusal says so. Set
-`nearAi.privacyMode` to `tee-only` to hold every request to that check.
+`nearAi.privacyMode` to `tee-only` to hold every request to that check. The
+setting's own words for that choice say what private means: "Only verified private hardware or this computer: NEAR AI private hardware, checked each time it is used, or a model on this computer."
+Agent teams and members marked private decide through the same check, as
+one private floor: whichever asks for private work, the request goes only
+where that check passes.
 
 **Where private models come from.** Military staff teams are marked private,
 and every private model NEAR AI offers today comes from developers in the
@@ -187,6 +191,26 @@ before this version have no badge. The kept badges hold a state, plain reasons
 and a time, never a fingerprint, a signing address or the answer's text, and
 they sync with the chat; when two copies disagree about an answer, the weaker
 state is kept.
+
+#### The trust line
+
+Beside each badge a line says three things, always in this order: where the
+answer ran, what was checked, and what allowed the request. For example:
+
+- "Runs on NEAR AI private hardware · Verified · Allowed for Organization: Internal"
+- "Runs on your organization's server · Not checked yet · Allowed for Canada, Protected: Protected B by Alex Example's authorization pb-2027-01 until 31 Mar 2027 (self-signed on this computer)"
+
+Where it ran is one of: this computer, your organization's server, your
+organization's server (private hardware), NEAR AI private hardware, a Cohere
+vault in its region, an outside provider (named when it is known), or a place
+your rules do not name. A local model on any address other than this
+computer's own is never called this computer. What was checked is the
+badge's own state, or "Not checked yet" before its check runs, so the line
+never says more than the checks proved. What allowed it names the label the
+request was decided at, every authorization that allowed it (whose it is, its
+id and its end date) and the model approval, when there is one. An answer
+shown again after a reload says "What allowed it is not kept for an answer shown again",
+because a kept badge holds only its state, plain reasons and a time.
 
 ### What the agent can do without asking
 
@@ -364,8 +388,9 @@ is what that file and the records beside it do in this version.
   device identity in every folder, not only for Team Mode, because it signs the
   first policy file with it.
 - **When it cannot be trusted.** If the file is missing, unsigned, changed or
-  expired, only reading and planning run until you run **NEAR AI: Reset Policy
-  to Defaults**, and the project's key folder stays off limits in every case.
+  expired, only reading and planning run until you open **NEAR AI: Policy** and
+  choose **Reset my rules**, and the project's key folder stays off limits in
+  every case.
   A policy written for a newer version (one that names a feature in its
   `requires` list, or a version or action list this version does not know)
   is never applied in part and never ignored: only reading and planning run, and
@@ -373,9 +398,9 @@ is what that file and the records beside it do in this version.
   because a reset would discard every rule the policy holds. A setting this
   version does not know is refused the same way, and the sentence names both
   ways on: update the extension if a newer version wrote it, or, only for a
-  policy signed by this computer's own key, **NEAR AI: Show Policy** offers
-  Reset, saying it keeps the old file and discards every change made to the
-  policy. A policy signed by any other key is never offered Reset.
+  policy signed by this computer's own key, **NEAR AI: Policy** offers
+  **Reset my rules**, saying it keeps the old file and discards every change
+  made to the policy. A policy signed by any other key is never offered Reset.
   The status bar says "Policy: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
   missing counts as a changed one. A file signed by a key this computer does
@@ -384,16 +409,21 @@ is what that file and the records beside it do in this version.
   signs a policy by itself only on a true first install, when nothing shows an
   earlier one: no remembered policy in this computer's secret storage, no
   policy file, no record naming an earlier policy and no key history without
-  its key. Only that command re-signs a policy that failed. It asks you to
-  confirm, keeps the old file beside the new one, and records the reset.
-- **Reading it.** **NEAR AI: Show Policy** opens the policy in plain words and
-  as stored. The view is read only, and editing it changes nothing.
-- **Changing it.** **NEAR AI: Edit Policy** opens an unsigned draft of the
-  policy in force, kept in this extension's storage and never in your project.
-  **NEAR AI: Apply Policy Draft** checks it, sets the signer and the dates
-  itself, signs it with your device key and records the change with the old and
-  new policy hashes. A draft that is not valid, or that was made before the
-  policy changed (a reset, or an edit in another window), changes nothing.
+  its key. Only **Reset my rules** re-signs a policy that failed, and it
+  resets your own rules only: your organization's rules and files stay as they
+  are. It asks you to confirm, keeps the old file beside the new one, and
+  records the reset.
+- **Reading it.** **NEAR AI: Policy** opens the policy page (see below).
+  **Show as stored** on that page opens the policy in plain words and as
+  stored. The view is read only, and editing it changes nothing.
+- **Changing it.** **Edit my rules** on the policy page opens an unsigned draft
+  of your own rules, kept in this extension's storage and never in your
+  project. **Apply my draft** on the page, or **Apply** in the message beside
+  the draft, shows the change on the page first; **Apply to my rules** there
+  checks it, sets the signer and the dates itself, signs it with your device
+  key and records the change with the old and new policy hashes. A draft that
+  is not valid, or that was made before the policy changed (a reset, or an edit
+  in another window), changes nothing.
 - **No network.** Nothing in a decision needs the network, so the policy
   works the same offline.
 - **Decision records.** Each decision, allowed, asked or refused, is written
@@ -471,8 +501,8 @@ is what that file and the records beside it do in this version.
   default label; a link from there into the project keeps the project file's
   label. While a label file holds reads, only reads of the project are held:
   reads of those runtime files go on. You can set only a label your own clearance covers;
-  to add a clearance, use **NEAR AI: Edit Policy** and **NEAR AI: Apply Policy
-  Draft**. An agent cannot read a file whose label your clearances do not
+  to add a clearance, open **NEAR AI: Policy** and use **Edit my rules**, then
+  **Apply my draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read
   a command does not show (a path built in a variable) is not seen. A glob in a
   command (such as `secret/*.md`) is checked against every labelled file it
@@ -488,6 +518,97 @@ above it is refused before anything is sent, at every tier, with
 
 Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+
+#### Your organization's rules on this computer
+
+Your organization can hand its rules to every computer that uses NEAR AI.
+Its security contact gives you a signed `.near-org-enrolment` file, and
+**NEAR AI: Add Your Organization's Rules** opens it. The file is read as
+hostile input: a file larger than 64 KiB is refused before it is read, and
+nothing in it is used until its signature checks out against the key it
+names.
+
+Before that key is trusted, NEAR AI shows twelve words computed from it,
+under its own domain (`near-ai/org-issuer/v1`), so they cannot be mistaken
+for words made for anything else. The question reads "Use the rules from
+Example Organization on this computer?" with your organization's name, and
+the details say: "Ask your organization's security contact to read their
+twelve words. Compare them with these:" followed by the words and the key's
+fingerprint. Compare them with the twelve words your organization's security
+contact reads to you over a channel you trust, such as a call you placed to
+a number you already know. The only button is **The twelve words match**.
+Closing the question, or any other answer, writes nothing.
+
+Once you confirm, the key and the date of the last rules you accepted are
+kept in VS Code's secret storage on this computer, not in a file on disk.
+If that record disappears from secret storage while your organization's
+rules are still on this computer, NEAR AI does not fall back to your own
+rules: only reading and planning run until you open your organization's
+enrolment file again and compare the twelve words.
+From then on a newer version of your organization's rules is accepted only
+when that key signed it and it is newer than the rules in use; an older one
+is refused. A handover to a new key must be signed by the key in use, and
+you compare the new key's twelve words the same way. Rules signed with this
+computer's own key are never taken as your organization's.
+If the rules file on this computer goes missing, or an older one is put in
+its place, opening the current rules file or enrolment file again writes it
+back without changing the key in use.
+
+Your organization's rules end on the date they carry. When they have ended,
+only reading and planning run until your organization sends current ones,
+and the status bar says why, for example: "Your organization's rules ended on 2027-01-31. Ask Security desk (security@example.org) for the current rules."
+The tool your organization uses to make these files, `scripts/org-issuer.mjs`,
+keeps its key in a passphrase-protected file on the issuing computer, never
+on yours. The key file is sealed with AES-256-GCM under a key that scrypt
+derives from the passphrase (N = 2^17, r = 8, p = 1, a random 16-byte salt
+and 12-byte nonce for each file), so someone who copies the file must pay
+that cost for every passphrase they try. The tool opens a new key file again
+with its passphrase before it says done, and refuses a key file that is not
+sealed this way, including an unencrypted key.
+
+#### Layers, the policy page and versions
+
+**Layers that only narrow.** The policy in force is your organization's rules
+narrowed by your own rules on this computer. Your own rules can make a rule
+stricter and never wider: each setting has one declared direction, and a
+personal value wider than your organization's is ignored, and listed once in
+one notice, for example: "These personal settings are wider than your organization allows and have no effect: labels.routing.levels.org/Internal (yours: any-cloud, allowed: local-only)."
+A change you apply that would make a setting wider is refused, naming the
+setting: "Your organization's rules do not allow labels.routing.levels.org/Internal to be wider than local-only."
+A project's rules are part of the same design and can only narrow too, but
+no project carries rules of its own in this version. Without your
+organization's rules, your own rules are the policy, as before.
+
+**Reset touches your own rules only.** **Reset my rules** signs fresh starting
+rules for your own rules with this computer's key. Your organization's rules,
+and the files that hold them, stay as they are.
+
+**The policy page.** **NEAR AI: Policy** opens one page, titled "Your organization's rules"
+when your organization's rules are on this computer and "Your rules" when
+they are not. It shows the rules in force, section by section, read only, and
+says who set them. A change to the rules, such as a draft of your own rules,
+is shown there first as a proposal, one plain sentence per setting, each marked **Wider** or **Stricter**; nothing changes until you
+choose. A change to your own rules is applied with **Apply to my rules**. A
+change to your organization's rules cannot be made on this computer, because
+your organization keeps its key elsewhere: **Save a file for your organization**
+writes it as a signed `.near-policy-proposal` file to send to your
+organization's contacts, and nothing changes here. **Discard** drops a
+proposal, and a proposal made from rules that changed while it was shown can
+only be discarded. **Edit my rules**, **Apply my draft**, **Show as stored** and
+**Reset my rules** are on the same page; Edit my rules and Apply my draft are
+there only while your own rules can be read and this computer holds the key
+that signs them.
+
+**Versions.** A policy file an earlier version wrote (version 1) is read as it
+is and never rewritten on its own; the first change you apply writes
+version 2. A fresh install and a reset still sign version 1 starting rules. A
+policy that lists in its `requires` a feature this version does not have, or
+names a newer version of NEAR AI, is never reset for you; the sentence says to
+update, for example: "Your policy file needs version 0.5.0 or later of NEAR AI. Update the NEAR AI extension to use it. Until then only reading and planning run, and your policy file is left as it is."
+
+**Leaving.** There is no command to leave your organization. Removing its
+rules means removing everything this extension keeps on this computer, its
+saved secrets included, so ask your organization's security contact first.
 
 ### Classification labels and routing
 
@@ -509,8 +630,8 @@ Confidential, Restricted), `ca-protected` (Protected A, B and C),
 Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how NEAR AI reads them. Your organization's security officer should confirm both before you rely on them.
 
 **Clearances.** An agent reads a labelled file only when a clearance in your
-policy covers its label; add one with **NEAR AI: Edit Policy** and **NEAR AI:
-Apply Policy Draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+policy covers its label; add one in **NEAR AI: Policy** with **Edit my rules**,
+then **Apply my draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 **The chat's label.** Each chat has a label that rises with what its agents,
 helpers included, read: reading a Confidential file makes the chat
@@ -573,7 +694,8 @@ its policy.
 
 **Local means this computer.** Local-only means a model on this computer
 (localhost, 127.0.0.1 or [::1]) unless your organization names another host in
-its policy's local hosts, with two limits. Content at a local-only level (Protected
+its policy's list of places (see [Where AI may run](#where-ai-may-run)), with
+two limits. Content at a local-only level (Protected
 B, `org/Restricted` and NATO Restricted by default) goes to a named host only
 when the policy names that exact host, not a `*.` pattern, and the runtime is
 reached over https; otherwise it is refused with `route.local-host-not-exact`.
@@ -606,6 +728,113 @@ above it is refused before anything is sent, at every tier, with
 `label.mcp-ceiling`; see "MCP connections" below.
 
 Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
+
+#### Where AI may run
+
+**One list of places.** Your policy holds one list of every place AI may run:
+your organization's servers, private hardware and outside providers, each
+with the highest label it may receive and the region it is in. It replaces
+the local hosts of earlier versions (`routing.localHosts`). A policy that
+named local hosts is moved to the list once, with the same effect as before,
+and says so once: "Your policy's local servers are now listed with every other place AI may run, with the same effect as before."
+When a host can no longer take a level, the notice names the host and the
+level, and those levels then need a pinned connection and an authorization
+from your organization. With no list (the starting rules), the places are
+this computer and NEAR AI Cloud, and nothing changes where requests go.
+
+**What a place in the list means.** A place your rules list is reached only
+over https; a plain http connection to it is refused (`route.endpoint-pin`).
+This computer is the only exception. Only NEAR AI Cloud's own host may be
+listed as NEAR AI private hardware (`nearai-tee`). Only a model NEAR AI's
+catalog marks as running in private hardware counts as running in a place
+your rules list as NEAR AI private hardware; any other model on that host is
+forwarded to an outside provider, with no stated region, and no
+authorization naming that place covers it.
+
+**What the list decides.** After a chat's label allows a request, these
+refuse it, each recorded with its rule id:
+
+- a place the list does not name, for content that may not go to any cloud
+  (`route.endpoint-unknown`);
+- content above the highest label the place may receive
+  (`route.endpoint-ceiling`);
+- Protected B (and NATO Restricted), sent to any server that is not this
+  computer, without a TLS pin for that server or, on private hardware, a
+  fresh proof of the connection (`route.endpoint-pin`);
+- the same content without a Protected B authorization that names that
+  server (`route.authorization-missing`);
+- a place outside the regions your rules require for a level
+  (`route.residency`).
+
+So Protected B needs a TLS pin or a verified connection plus a Protected B
+authorization naming that server, for every server that is not this
+computer. This is a change: Protected B used to reach a server your policy
+named as local with an exact name over https alone; it now needs both.
+
+**Residency.** Your rules can require that content at a level runs only in
+some regions (Canada, the European Union or the United States). Every place
+but this computer is checked, and a place whose region is `unstated` never
+satisfies such a rule. A residency exception authorization can allow one
+place for a while.
+
+**Rules that only record in this version.** Content at Protected C, a
+Canadian classified level, or NATO Confidential and above runs only on this
+computer. When no authorization says your organization approved this
+computer for that work, the request is recorded as one that rule would
+refuse (`route.accredited-device`) and the chat says once that this computer
+is not recorded as accredited for that label; it is not refused unless your organization's
+rules turn on `requireAccreditedDevice`. Model approvals work the same way:
+a model your rules have not approved for the work is recorded
+(`route.passport`) and never refused in this version.
+A step that only records never refuses, even when its check cannot be made;
+it is then recorded as one that would refuse.
+
+**Authorizations.** An authorization is one signed record that allows one
+thing for a while:
+
+- a server for Protected B (`protected-b`, at most 365 days);
+- a model for a use its approval does not cover (`t1-risk`, at most 90 days);
+- this computer for work that stays on it (`accredited-device`, at most 365
+  days);
+- a place outside the regions your rules require (`residency-exception`, at
+  most 90 days);
+- a label made lower (`declassify`, with no fixed end);
+- a person, for export-controlled content (`export-person`, at most five
+  years, less for some regimes' exemptions);
+- an AI service, for export-controlled content (`export-endpoint`, at most
+  365 days).
+
+Under your organization's rules only authorizations signed by a key your
+organization lists count. Without your organization's rules, one signed on
+this computer counts for your own rules, and the trust line says
+"(self-signed on this computer)" until your organization's issuer can sign
+them.
+
+#### Export-controlled content
+
+Content can carry one of three markings for export-controlled work, shown
+after the level: Controlled goods (Canada), ITAR, and US export-controlled
+(EAR), for example "Organization: Internal · ITAR". In policy files and
+records they are the compartments `CGP`, `ITAR` and `EAR`.
+
+Under the starting rules, content marked Controlled goods (Canada), ITAR or
+US export-controlled (EAR) stays on this computer: the starting rules route
+all three to local-only. A fresh install, and the renewal of starting rules
+nobody edited, get these entries. An install upgraded from an earlier version
+whose starting rules nobody edited gets them when its policy is next renewed,
+in the last 30 days before the policy ends; until then those markings are
+routed by their level. A policy someone edited is not changed in place; it
+gets them through a change on the policy page. Under your organization's
+rules, your organization decides.
+
+Your organization's rules can now carry its export-control decisions: who
+may see such content and which AI services may receive it. Nothing grants
+access with them yet; a later release uses them. Until then the two
+authorization kinds for them and the rule `route.export-control` are shapes
+that are read and recorded only, and never decide a request. Meeting the
+Controlled Goods Program or the ITAR is your organization's obligation, and
+your officials decide. NEAR AI does not make your organization compliant
+with either.
 
 ### Sub-agents nobody is watching
 
@@ -1224,12 +1453,20 @@ Every chat message passes one check before it leaves VS Code, in this order:
    anything running until `NEAR AI: Resume`. The state survives reloads.
 2. **Daily spend limit.** With `nearAi.dailySpendLimitUsd` set, requests stop
    once today's recorded spend reaches the limit.
-3. **TEE-only mode.** Blocks models NEAR forwards to another provider.
+3. **TEE-only mode.** The outbound check no longer decides where a request
+   goes. With `nearAi.privacyMode` at `tee-only` it asks the same route check
+   every request passes whether the model is allowed, so the chat can say so
+   before anything is sent, and the route check decides again when the
+   request is sent. A model NEAR forwards to another provider is refused by it.
 4. **Privacy check on the new message.** What looks like a credential (API key,
    token, password, private key) or a private-file path is blocked; what looks
    like personal data asks for confirmation. A blocked message can be sent once
    with an explicit override that is bound to that exact message and expires
    after a minute.
+
+The outbound check keeps its own checks for credentials, personal data and
+private-file paths; where a request may go is the route check's alone (see
+[Classification labels and routing](#classification-labels-and-routing)).
 
 Earlier turns of a conversation are not re-checked; each was checked when it
 was sent. Since 0.4.27 Team Studio's model calls (drafting a team with AI, and
@@ -1923,7 +2160,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
-  (through **NEAR AI: Edit Policy**; for example
+  (through **Edit my rules** in **NEAR AI: Policy**; for example
   `{ "partner": { "scale": "org", "level": "Internal", "compartments": [], "releasability": [] } }`).
   A ceiling has a clearance's shape: a level on one of the policy's scales,
   compartments, releasability and an optional `expiresAt`. Every call to a
@@ -2205,13 +2442,19 @@ health check connects only to itself; and no hub source file names a client netw
 | Facts the agent saves with Remember are not reviewed when saved, and later runs start with the relevant ones | Each fact is labeled "verify before relying on it"; review, correct or reset memory with **Manage Project Memory** |
 | Shell reads and network exits are checked from a command's text: a path built in a variable, or a program that reads a labelled file and sends it itself, is not seen | A planned sandbox around the shell |
 | Local-only trusts the address your local runtime is configured with, unless it is loopback | Name only hosts you control in the policy |
-| Labels and the policy are signed by your own key, so they protect against mistakes, not against you | Verified credentials and organization-signed policies are planned |
+| Labels and the policy are signed by your own key, so they protect against mistakes, not against you | Your organization's rules, signed by its own key, now narrow your own; verified credentials are planned |
 | An MCP server's and the cybersecurity host tools' effects are their declarations | A server or tool that does more than it declares is not seen |
 | The label file is readable by anyone who can read the project | Do not use a compartment name that is itself secret |
 | The outbound check catches labelled text copied into a network call, not a paraphrase or an encoding | A planned sandbox around the shell |
 | The check of an answer's attestation and signature runs after the answer, so it cannot stop that answer's request; a failed check stops the next ones. | The connection is proven before anything is sent, and each request is pinned to it |
 | The check that a connection ends inside the enclave relies on NEAR AI Cloud's attestation and Intel's root of trust. Like the answer check, it does not check the platform's TCB status, certificate revocation or which code the enclave runs. | Use cloud.near.ai/verify or NEAR's verifier for a full check |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
+| The twelve words protect your organization's key only when its security contact reads them to you over a channel you trust | Compare them in person or on a call you placed to a number you already know; never over the channel the file came through |
+| Your organization's rules can carry export-control decisions, but nothing grants access with them yet, and NEAR AI does not make your organization compliant with the Controlled Goods Program or the ITAR | Your organization's officials decide; a later release uses these decisions to allow access |
+| Your organization's server does not load your organization's rules yet | Its rules reach this computer as a signed file you add with **NEAR AI: Add Your Organization's Rules** |
+| Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second; model approvals refuse in a later release |
+| Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count |
+| There is no command to leave your organization | Ask your organization's security contact |
 
 ## How changes reach a release
 

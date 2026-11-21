@@ -197,7 +197,7 @@ test('Set Label refuses a label the person\'s own clearance does not cover and n
   const s = await started();
   assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'ca-protected', level: 'Protected B' }), false);
   const warned = stub.notifications.find((entry) => entry.level === 'warn');
-  assert.match(warned?.message ?? '', /NEAR AI: Edit Policy first/);
+  assert.match(warned?.message ?? '', /open NEAR AI: Policy and choose Edit my rules/);
   assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
 });
 

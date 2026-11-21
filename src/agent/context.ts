@@ -1,5 +1,6 @@
 import { contextLevel } from '../domain/continuity';
-import type { AgentMessage, CompletionEvent, ToolDefinition } from '../services/nearAiClient';
+import type { AgentMessage } from '../domain/provider/messages';
+import type { ModelEndpoint } from '../domain/provider/endpoint';
 import { withSpendTag } from '../services/spendLedger';
 
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -8,7 +9,7 @@ export const DEFAULT_THRESHOLDS = { warningRemaining: 35, criticalRemaining: 25 
 const KEEP_RECENT_TOOL_RESULTS = 8;
 const TRIM_TOOL_RESULT_CHARS = 2_000;
 
-type Client = { streamCompletion(model: string, messages: AgentMessage[], tools: ToolDefinition[], signal?: AbortSignal): AsyncGenerator<CompletionEvent> };
+type Client = Pick<ModelEndpoint, 'streamCompletion'>;
 
 /** A rough token count (about four characters per token), used when the provider has not reported one yet. */
 export function estimateTokens(messages: AgentMessage[]): number {

@@ -5,7 +5,8 @@
 // restores trust with NEAR AI: Reset Policy to Defaults (which is itself recorded as policy.reset).
 //
 // What it looks at, in order, and stops at the first hit:
-//   1. a policy file or a kept-aside copy of one in the gate folder (a file that exists and does not verify is never the start of a new install);
+//   1. a policy file or a kept-aside copy of one in the gate folder (a file that exists and does not verify is never the start of a new install), or an
+//      organization folder holding anything (your organization's rules were stored here, Phase 41 D-13);
 //   2. a decision log or a model-request log in the gate folder holding a record that names a bundle hash (a policy was valid once; a log of failed starts
 //      names none, so a start that failed before it ever had a policy does not lock the install out);
 //   3. a key history with records in the identity folder while the secret store holds no device key (the key was lost, the history was not).
@@ -24,6 +25,8 @@ export const MODEL_REQUEST_LOGS_FOLDER = 'model-requests';
 /** The policy file's name and the prefix of a kept-aside copy (bundleStore.ts owns them; a test keeps them equal). */
 const POLICY_FILE = 'policy-bundle.json';
 const ASIDE_MARK = `${POLICY_FILE}.replaced-`;
+/** The folder your organization's rules live in under the gate folder. organizationStore.ts owns the name as ORGANIZATION_DIR_NAME; a test keeps the two equal. */
+export const ORGANIZATION_RULES_FOLDER = 'organization';
 const MAX_LOG_FILES = 40;
 /** A log file is read in full up to this size; a larger one is read from its end, where the newest records are. */
 const MAX_SCAN_BYTES = 6 * 1024 * 1024;
@@ -81,6 +84,10 @@ export async function earlierInstallEvidence(gateFolder: string, identityFolder:
   const names = await namesIn(gateFolder);
   if (names === 'unreadable') return 'the policy folder could not be read';
   if (names.some((name) => name === POLICY_FILE || name.startsWith(ASIDE_MARK))) return 'a policy file is already stored here';
+  // Your organization's folder with anything in it means this computer was enrolled before; one that cannot be read counts too.
+  const organization = await namesIn(path.join(gateFolder, ORGANIZATION_RULES_FOLDER));
+  if (organization === 'unreadable') return 'your organization\'s rules folder could not be read';
+  if (organization.length > 0) return 'your organization\'s rules are stored here';
   // Both kinds of log name the policy's hash, so either one remembers an earlier valid policy.
   // Each reason names the kind of log it is about (PR #81 review), so a diagnostic never blames the decision logs for the model-request folder.
   for (const [folder, kind] of [[DECISION_LOGS_FOLDER, 'decision'], [MODEL_REQUEST_LOGS_FOLDER, 'model-request']] as const) {

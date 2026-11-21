@@ -17,6 +17,8 @@ import { MANIFEST_IS_A_CLAIM_TEXT, RUNS_ON_THIS_MACHINE_TEXT } from '../domain/g
 import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '../gate/decisionLog';
 import { redactCredentialArguments } from '../domain/redaction';
 import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_UNCHECKED_TEXT } from '../agent/outboundCheck';
+import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
+import { ENROLMENT_FILE_EXTENSION, ISSUER_WORDS_DOMAIN, ISSUER_WORDS_MATCH, MAX_ENROLMENT_FILE_BYTES, issuerWordsPrompt, issuerWordsQuestion, organizationEndedText } from '../domain/gate/enrolment';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SECURITY = readFileSync(path.join(ROOT, 'SECURITY.md'), 'utf8');
@@ -61,18 +63,23 @@ test('the policy section carries the code\'s clearance text word for word, and t
   assert.ok(policySection.includes(CLEARANCE_SELF_ASSERTED_TEXT));
 });
 
-test('the commands the docs name are the ones package.json contributes, and the failure sentences name the same reset command', () => {
+test('the commands the docs name are the ones package.json contributes, and the failure sentences name the same policy page and its reset', () => {
+  // D-44 (41-14): Show Policy and Reset Policy to Defaults stay contributed (off the palette); the docs and sentences name the policy page and its button.
   const reset = commandName('nearAi.policy.reset');
   const show = commandName('nearAi.policy.show');
+  const policy = commandName('nearAi.policy.open');
   assert.equal(reset, 'NEAR AI: Reset Policy to Defaults');
   assert.equal(show, 'NEAR AI: Show Policy');
+  assert.equal(policy, 'NEAR AI: Policy');
   for (const text of [policySection, readmePolicy]) {
-    assert.ok(flat(text).includes(reset), 'Reset Policy to Defaults');
-    assert.ok(flat(text).includes(show), 'Show Policy');
+    assert.ok(flat(text).includes(`**${policy}**`), 'NEAR AI: Policy');
+    assert.ok(flat(text).includes('**Reset my rules**'), 'the page\'s reset');
+    assert.ok(flat(text).includes('**Show as stored**'), 'the page\'s stored view');
   }
-  assert.ok(flat(README).includes(reset) && flat(README).includes(show));
+  assert.ok(flat(README).includes(policy) && flat(README).includes('Reset my rules'));
+  // Every failure sentence that offers a reset names the policy page and says it resets your own rules (D-21).
   for (const sentence of Object.values(BUNDLE_FAILURES)) {
-    if (sentence.includes('Reset Policy to Defaults')) assert.ok(sentence.includes(reset), sentence);
+    if (/reset/i.test(sentence)) assert.ok(sentence.includes(`Open ${policy} and choose Reset my rules`) && sentence.includes('it resets your own rules only'), sentence);
   }
 });
 
@@ -86,7 +93,7 @@ test('the policy section says what the code does: own storage not the project, o
     'allows what your settings allow',
     'only reading and planning run',
     'Deleting the file does not reset a policy',
-    'Only that command re-signs a policy that failed',
+    'Only **Reset my rules** re-signs a policy that failed, and it resets your own rules only',
     'keeps the old file beside the new one',
     'records the reset',
     'Nothing in a decision needs the network',
@@ -365,8 +372,9 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   const edit = commandName('nearAi.policy.edit');
   const applyDraft = commandName('nearAi.policy.applyDraft');
   assert.deepEqual([setLabel, edit, applyDraft], ['NEAR AI: Set Label', 'NEAR AI: Edit Policy', 'NEAR AI: Apply Policy Draft']);
+  // D-44: Edit Policy and Apply Policy Draft left the palette; the docs name the page and its two buttons that run them.
   const words = flat(policySection);
-  for (const phrase of [setLabel, edit, applyDraft, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
+  for (const phrase of [setLabel, `open **${commandName('nearAi.policy.open')}** and use **Edit my rules**, then **Apply my draft**`, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
     'anyone who can read the project can read its labels, compartment names included', 'only ever makes a label stricter', 'signed again only after you confirm',
     'or that was deleted, stops agents reading the project', 'through the file tools, searches or a command that names it',
     'Decision records hold the labels involved and stay on this computer', 'Where a labelled chat\'s content may be sent is in']) {
@@ -376,9 +384,10 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   assert.doesNotMatch(policySection, /NEAR organization/);
 });
 
-test('README names Set Label, Lower This Chat\'s Label, Edit Policy and Apply Policy Draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
+test('README names Set Label, Lower This Chat\'s Label and the policy page\'s Edit my rules and Apply my draft, says a chat\'s label decides where its content is sent, and links the policy section', () => {
   const words = flat(readmePolicy);
-  for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.edit', 'nearAi.policy.applyDraft']) assert.ok(words.includes(commandName(id)), id);
+  for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.open']) assert.ok(words.includes(commandName(id)), id);
+  assert.ok(words.includes(`Add a clearance in **${commandName('nearAi.policy.open')}** with **Edit my rules**, then **Apply my draft**.`), 'the clearance sentence names the page');
   assert.ok(words.includes('decides where its content is sent'));
   assert.ok(!words.includes('does not change where content is sent yet'), 'the 4b sentence is gone');
   assert.ok(words.includes('(SECURITY.md#classification-labels-and-routing)'));
@@ -475,7 +484,8 @@ test('Known limitations lists the section-12 gaps that apply in 4c', () => {
 test('README carries the first sentence of LABELS_NOT_ACCREDITATION_TEXT and the three label commands, and Set Label shows the same constant', () => {
   const words = flat(readmePolicy);
   assert.ok(words.includes(LABELS_NOT_ACCREDITATION_TEXT.split('. ')[0] ?? ''));
-  for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.edit']) assert.ok(words.includes(commandName(id)), id);
+  for (const id of ['nearAi.label.set', 'nearAi.label.lowerChat', 'nearAi.policy.open']) assert.ok(words.includes(commandName(id)), id);
+  assert.ok(words.includes('**Edit my rules**'));
   const commands = readFileSync(path.join(ROOT, 'src', 'services', 'gateCommands.ts'), 'utf8');
   assert.ok(commands.includes('placeHolder: LABELS_NOT_ACCREDITATION_TEXT'), 'Set Label shows the constant itself');
 });
@@ -658,6 +668,398 @@ test('PR #143 review: SECURITY.md says classified levels stay here whatever tier
   const security = flat(SECURITY);
   assert.match(security, /This holds whatever tier the policy gives those levels: no cloud and no other host is accredited for them today/);
   assert.match(security, /A model on a host your organization names as local counts only when the policy names that exact host and it is reached over https; a `\*\.` pattern or plain http does not\./);
-  assert.match(security, /only for a policy signed by this computer's own key, \*\*NEAR AI: Show Policy\*\* offers Reset/);
+  assert.match(security, /only for a policy signed by this computer's own key, \*\*NEAR AI: Policy\*\* offers \*\*Reset my rules\*\*/);
   assert.match(flat(README), /a host your organization names exactly and reaches over https/);
+});
+
+// ---- Phase 41 (D-46): the docs say what the organization policy foundation does, word for word with the code ----
+
+const ORGANIZATION_RULES_HEADING = "#### Your organization's rules on this computer";
+
+test("Phase 41: the policy section says how your organization's rules reach this computer", () => {
+  assert.equal(SECURITY.split(`\n${ORGANIZATION_RULES_HEADING}\n`).length - 1, 1, 'the block exists once');
+  const block = sectionOf(SECURITY, ORGANIZATION_RULES_HEADING);
+  assert.ok(policySection.includes(block), 'the block sits inside the policy section');
+  const words = flat(block);
+  assert.equal(MAX_ENROLMENT_FILE_BYTES, 64 * 1024, 'the cap the text names');
+  const contact = 'Security desk (security@example.org)';
+  for (const phrase of [
+    ISSUER_WORDS_DOMAIN,
+    `\`${ENROLMENT_FILE_EXTENSION}\``,
+    '64 KiB',
+    'secret storage',
+    `**${commandName('nearAi.organization.addRules')}**`,
+    issuerWordsPrompt([]).trim(),
+    issuerWordsQuestion('Example Organization'),
+    `**${ISSUER_WORDS_MATCH}**`,
+    organizationEndedText('2027-01-31', contact)
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  assert.equal(commandName('nearAi.organization.addRules'), "NEAR AI: Add Your Organization's Rules");
+  assert.ok(!block.includes(EM_DASH));
+  assert.doesNotMatch(block, /NEAR (AI )?organization/i);
+});
+
+// ---- D-44 (41-14 took Show, Edit, Apply Policy Draft, Reset and Show Policy as Stored off the palette): every user sentence points to NEAR AI: Policy ----
+
+/** A command that left the palette, with or without the brand prefix. */
+const LEFT_THE_PALETTE = /(?:NEAR AI:\s*)?(?:Show Policy|Edit Policy|Apply Policy Draft|Reset Policy to Defaults)/;
+/** The page's own button words (media/policy/policy.js), read from the page so the docs and sentences use the page's words. */
+const POLICY_PAGE = readFileSync(path.join(ROOT, 'media', 'policy', 'policy.js'), 'utf8');
+
+test('D-44: no user sentence names a command that left the palette', async () => {
+  const { copySourceFiles, extractCopy } = await import('./helpers/copyLintScan');
+  const files = copySourceFiles(ROOT).filter((file) => file !== 'package.json');
+  assert.ok(files.some((file) => file.startsWith('media/')) && files.some((file) => file.startsWith('src/')), 'src and media are both read');
+  const found: string[] = [];
+  for (const file of files) {
+    for (const { text } of extractCopy(readFileSync(path.join(ROOT, file), 'utf8'), file)) if (LEFT_THE_PALETTE.test(text)) found.push(`${file}: ${text.slice(0, 120)}`);
+  }
+  assert.deepEqual(found, []);
+  // The check has teeth: the extractor finds a planted sentence in a source and in a page script.
+  assert.ok(extractCopy("export const PLANTED_TEXT = 'Run NEAR AI: Edit Policy first.';", 'src/x.ts').some(({ text }) => LEFT_THE_PALETTE.test(text)));
+  assert.ok(extractCopy("node.textContent = 'Use Reset Policy to Defaults';", 'media/x.js').some(({ text }) => LEFT_THE_PALETTE.test(text)));
+});
+
+test('D-44, D-21: every swept sentence names the policy page by its contributed name, and every reset offer resets your own rules only', async () => {
+  const policy = commandName('nearAi.policy.open');
+  assert.equal(policy, 'NEAR AI: Policy');
+  for (const button of ['Edit my rules', 'Apply my draft', 'Reset my rules', 'Show as stored']) assert.ok(POLICY_PAGE.includes(`'${button}'`), `the page's ${button} button`);
+  const uninstall = installVscodeStub(createVscodeStub());
+  let commands: typeof import('../services/gateCommands');
+  try {
+    commands = await import('../services/gateCommands');
+  } finally {
+    uninstall();
+  }
+  const { STALE_DRAFT_TEXT, POLICY_DRAFT_SHAPE_TEXT } = await import('../gate/bundleStore');
+  const { localHostPatternNotice, ROUTE_CHECK_FAILED_TEXT } = await import('../domain/gate/routing');
+  const { mcpCeilingText, mcpCeilingUnjudgedText } = await import('../agent/gateAdapter');
+  const { FAILED_CLOSED_LABEL_TEXT, ADD_CLEARANCE_HINT } = await import('../agent/gateLabels');
+  const { NO_SIGNING_KEY_TEXT } = await import('../gate/labelMapStore');
+  const label = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [], handling: [] };
+  const ceiling = { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] };
+  const resets = Object.values(BUNDLE_FAILURES).filter((sentence) => /reset/i.test(sentence));
+  assert.ok(resets.length > 0, 'some failure sentences offer a reset');
+  // The safety patch's update sentences never offer one (S6); every other offer names the page and its button, and says it touches your own rules only.
+  for (const sentence of resets) {
+    assert.ok(sentence.includes(`Open ${policy} and choose Reset my rules`), sentence);
+    assert.ok(sentence.includes('it resets your own rules only'), sentence);
+  }
+  const swept: Array<[string, string]> = [
+    ...resets.map((sentence): [string, string] => ['BUNDLE_FAILURES', sentence]),
+    ['BUNDLE_FAILURES unknown-field', BUNDLE_FAILURES['unknown-field']],
+    ['STALE_DRAFT_TEXT', STALE_DRAFT_TEXT],
+    ['the draft shape error', POLICY_DRAFT_SHAPE_TEXT],
+    ['NO_DRAFT_TEXT', commands.NO_DRAFT_TEXT],
+    ['editPolicyNotice', commands.editPolicyNotice(ceiling as never)],
+    ['NO_LABELS_WHILE_FAILED_TEXT', commands.NO_LABELS_WHILE_FAILED_TEXT],
+    ['notYourClearanceText', commands.notYourClearanceText(label as never)],
+    ['FAILED_CLOSED_LABEL_TEXT', FAILED_CLOSED_LABEL_TEXT],
+    ['ADD_CLEARANCE_HINT', ADD_CLEARANCE_HINT],
+    ['localHostPatternNotice', localHostPatternNotice(['*.example.test'])],
+    ['ROUTE_CHECK_FAILED_TEXT', ROUTE_CHECK_FAILED_TEXT],
+    ['mcpCeilingText', mcpCeilingText('example-server', label as never, ceiling as never)],
+    ['mcpCeilingUnjudgedText', mcpCeilingUnjudgedText('example-server')],
+    ['NO_SIGNING_KEY_TEXT', NO_SIGNING_KEY_TEXT]
+  ];
+  for (const [name, sentence] of swept) {
+    assert.ok(sentence.includes(policy), `${name} names ${policy}: ${sentence}`);
+    assert.doesNotMatch(sentence, LEFT_THE_PALETTE, name);
+    assert.ok(!sentence.includes(EM_DASH), name);
+    assert.doesNotMatch(sentence, /NEAR (AI )?organization/i, name);
+  }
+  // A pointer to change rules names the page's Edit my rules (or Apply my draft for a waiting draft).
+  for (const [name, sentence] of swept.filter(([name]) => /STALE|NO_DRAFT|shape|notYourClearance|ADD_CLEARANCE|localHost|mcpCeilingText$/.test(name))) {
+    assert.ok(sentence.includes('Edit my rules'), `${name}: ${sentence}`);
+  }
+  assert.ok(commands.editPolicyNotice(ceiling as never).includes(`Apply my draft in ${policy}`));
+});
+
+// ---- Phase 41 (D-46): the rest of SECURITY.md, README and CHANGELOG, each new sentence checked against the code ----
+
+const LAYERS_HEADING = '#### Layers, the policy page and versions';
+const PLACES_HEADING = '#### Where AI may run';
+const EXPORT_HEADING = '#### Export-controlled content';
+const TRUST_LINE_HEADING = '#### The trust line';
+const routingSection = sectionOf(SECURITY, LABELS_HEADING);
+const changelogUnreleased = CHANGELOG.split(/\n(?=## )/).find((section) => section.startsWith('## Unreleased')) ?? '';
+const changelogOrganization = sectionOf(changelogUnreleased.startsWith('\n') ? changelogUnreleased : `\n${changelogUnreleased}`, "### Your organization's rules");
+/** Prose only: inline code is an identifier for administrators (`accredited-device`), not a claim, so the clean-text counters read the words around it. */
+const prose = (text: string): string => flat(text).replace(/`[^`]*`/g, ' ');
+
+async function editorTitles(): Promise<{ own: string; organization: string }> {
+  const uninstall = installVscodeStub(createVscodeStub());
+  try {
+    const editor = await import('../services/policyEditor');
+    return { own: editor.POLICY_EDITOR_TITLE_OWN, organization: editor.POLICY_EDITOR_TITLE };
+  } finally {
+    uninstall();
+  }
+}
+
+test('Phase 41: layers, Reset and the policy page', async () => {
+  const { PROPOSAL_FILE_EXTENSION } = await import('../domain/gate/proposal');
+  const { ignoredSettingsNotice, widerThanOrganizationText } = await import('../domain/gate/layers');
+  const { needsUpdateSentence } = await import('../domain/gate/bundle');
+  const titles = await editorTitles();
+  const block = sectionOf(SECURITY, LAYERS_HEADING);
+  assert.ok(policySection.includes(block), 'inside the policy section');
+  const words = flat(block);
+  const setting = { key: 'labels.routing.levels.org/Internal', yours: 'any-cloud', allowed: 'local-only', layer: 'personal' } as const;
+  for (const phrase of [
+    `"${titles.organization}"`, `"${titles.own}"`, `**${commandName('nearAi.policy.open')}**`, `\`${PROPOSAL_FILE_EXTENSION}\``,
+    ignoredSettingsNotice([setting as never]) ?? '', widerThanOrganizationText(setting as never),
+    '**Reset touches your own rules only.**', "Your organization's rules, and the files that hold them, stay as they are.",
+    'is never reset for you', needsUpdateSentence('0.5.0'),
+    'A policy file an earlier version wrote (version 1) is read as it is and never rewritten on its own; the first change you apply writes version 2.',
+    'There is no command to leave your organization.',
+    '**Apply to my rules**', '**Save a file for your organization**', '**Discard**', '**Wider**', '**Stricter**',
+    '**Edit my rules**', '**Apply my draft**', '**Show as stored**', '**Reset my rules**'
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  // The page's own words: each button the text names is the page's.
+  for (const label of ['Apply to my rules', 'Save a file for your organization', 'Discard', 'Edit my rules', 'Apply my draft', 'Show as stored', 'Reset my rules', 'Wider', 'Stricter']) {
+    assert.ok(POLICY_PAGE.includes(`'${label}'`), `${label} is the page's word`);
+  }
+  assert.equal(titles.organization, "Your organization's rules");
+  assert.equal(titles.own, 'Your rules');
+});
+
+test('Phase 41: authorizations, each kind with its longest life, and self-signed until your organization signs them', async () => {
+  const { AUTHORIZATION_KINDS, MAX_DAYS_BY_KIND, SELF_SIGNED_TEXT } = await import('../domain/gate/authorizations');
+  const words = flat(sectionOf(SECURITY, PLACES_HEADING));
+  assert.ok(routingSection.includes(sectionOf(SECURITY, PLACES_HEADING)), 'inside the routing section');
+  assert.ok(words.includes(`"(${SELF_SIGNED_TEXT})"`), SELF_SIGNED_TEXT);
+  for (const kind of AUTHORIZATION_KINDS) {
+    const days = MAX_DAYS_BY_KIND[kind];
+    assert.ok(words.includes(days === undefined ? `(\`${kind}\`,` : `(\`${kind}\`, at most ${String(days)} days)`), `${kind}: ${String(days)}`);
+  }
+  assert.ok(words.includes('(`declassify`, with no fixed end)'));
+  assert.ok(words.includes('(`export-person`, at most five years'));
+  assert.ok(words.includes('Under your organization\'s rules only authorizations signed by a key your organization lists count.'));
+});
+
+test('Phase 41: one list of where AI may run, the Protected B rule, residency and the rules that only record', async () => {
+  const { ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD } = await import('../domain/gate/routing');
+  const { migrationNoticeText } = await import('../gate/organizationStore');
+  const block = sectionOf(SECURITY, PLACES_HEADING);
+  const words = flat(block);
+  const known = new Set<string>([...ROUTE_RULES, ...ROUTE_RULES_NAMED_AHEAD]);
+  for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency', 'route.accredited-device', 'route.passport']) {
+    assert.ok(words.includes(`\`${id}\``), id);
+    assert.ok(known.has(id), `${id} is a rule the code names`);
+  }
+  for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency']) assert.ok((ROUTE_RULES as readonly string[]).includes(id), `${id} refuses`);
+  assert.ok((ROUTE_RULES_NAMED_AHEAD as readonly string[]).includes('route.passport'), 'model approvals are still named ahead');
+  const notice = migrationNoticeText([{ host: 'llm.example.test', kind: 'org-plain', lost: [] } as never]) ?? '';
+  for (const phrase of [
+    notice, '`routing.localHosts`',
+    'So Protected B needs a TLS pin or a verified connection plus a Protected B authorization naming that server, for every server that is not this computer.',
+    'a place whose region is `unstated` never satisfies such a rule',
+    'is not refused unless your organization\'s rules turn on `requireAccreditedDevice`',
+    'is recorded (`route.passport`) and never refused in this version',
+    'nothing changes where requests go'
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  assert.match(notice, /^Your policy's local servers are now listed with every other place AI may run, with the same effect as before\.$/);
+});
+
+test('Phase 41: private means verified, in the setting\'s own words', () => {
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { configuration: unknown } };
+  const blocks = (Array.isArray(manifest.contributes.configuration) ? manifest.contributes.configuration : [manifest.contributes.configuration]) as Array<{ properties: Record<string, { enum?: string[]; enumDescriptions?: string[] }> }>;
+  const setting = blocks.map((block) => block.properties['nearAi.privacyMode']).find((entry) => entry !== undefined);
+  const teeOnly = setting?.enumDescriptions?.[setting.enum?.indexOf('tee-only') ?? -1] ?? '';
+  assert.ok(teeOnly.startsWith('Only verified private hardware or this computer'), teeOnly);
+  const words = flat(sectionOf(SECURITY, '### Which models are private'));
+  assert.ok(words.includes(`"${teeOnly}"`), 'the setting\'s words, whole');
+  assert.ok(words.includes('Agent teams and members marked private decide through the same check'));
+});
+
+test('Phase 41: the trust line, three parts in TRUST_LINE_TEXT\'s words and trustLine\'s own output', async () => {
+  const { TRUST_LINE_TEXT, trustLine } = await import('../domain/gate/trust');
+  const { SCALE_PRESETS } = await import('../domain/gate/labels');
+  const block = sectionOf(SECURITY, TRUST_LINE_HEADING);
+  assert.ok(sectionOf(SECURITY, BADGE_HEADING).includes(block), 'inside the trust badge section');
+  const words = flat(block);
+  const label = (scale: string, level: string) => ({ scale, level, compartments: [], releasability: [], handling: [] });
+  const verified = trustLine({ place: { class: 'nearai-tee', region: 'unstated' }, verification: 'verified-private', allowedBy: [{ kind: 'routing', label: 'org/Internal' }], label: label('org', 'Internal'), wouldRefuse: [] } as never, SCALE_PRESETS);
+  const authorized = trustLine({
+    place: { class: 'org-plain', region: 'CA', endpointId: 'hq-server' }, verification: 'not-checked', label: label('ca-protected', 'Protected B'), wouldRefuse: [],
+    allowedBy: [{ kind: 'routing', label: 'ca-protected/Protected B' }, { kind: 'authorization', authorizationKind: 'protected-b', id: 'pb-2027-01', name: 'Alex Example', expiresAt: '2027-03-31T00:00:00.000Z', selfSigned: true, label: 'ca-protected/Protected B' }]
+  } as never, SCALE_PRESETS);
+  for (const line of [verified.text, authorized.text]) assert.ok(words.includes(`"${line}"`), line);
+  assert.ok(verified.text.split(TRUST_LINE_TEXT.partSeparator).length === 3, 'three parts');
+  for (const place of Object.values(TRUST_LINE_TEXT.places)) assert.ok(words.includes(place), place);
+  assert.ok(words.includes(TRUST_LINE_TEXT.verified['not-checked']));
+  const { TRUST_BADGE_TEXT } = await import('../domain/gate/trustBadge');
+  assert.ok(words.includes(`"${TRUST_BADGE_TEXT.allowedNotKept}"`));
+});
+
+test('Phase 41: the outbound check keeps its own checks and no longer decides where a request goes', () => {
+  const words = flat(sectionOf(SECURITY, '## The outbound check'));
+  assert.ok(words.includes('The outbound check no longer decides where a request goes.'));
+  assert.ok(words.includes('The outbound check keeps its own checks for credentials, personal data and private-file paths; where a request may go is the route check\'s alone'));
+  assert.doesNotMatch(words, /Blocks models NEAR forwards to another provider\./, 'the old step 3 is gone');
+});
+
+test('D-62 to D-64: export-controlled content in plain words, the starting rules read from code', async () => {
+  const { EXPORT_COMPARTMENT_SHOWN, RESERVED_EXPORT_COMPARTMENTS } = await import('../domain/gate/labels');
+  const block = sectionOf(SECURITY, EXPORT_HEADING);
+  assert.ok(routingSection.includes(block), 'inside the routing section');
+  const words = flat(block);
+  assert.deepEqual([...RESERVED_EXPORT_COMPARTMENTS].sort(), ['CGP', 'EAR', 'ITAR']);
+  for (const token of RESERVED_EXPORT_COMPARTMENTS) {
+    assert.equal(DEFAULT_ROUTING.compartments[token], 'local-only', `the starting rules keep ${token} on this computer`);
+    assert.ok(words.includes(EXPORT_COMPARTMENT_SHOWN[token]), EXPORT_COMPARTMENT_SHOWN[token]);
+    assert.equal(words.split(`\`${token}\``).length - 1, 1, `${token} as a token once, in code formatting`);
+  }
+  const shown = `${EXPORT_COMPARTMENT_SHOWN.CGP}, ${EXPORT_COMPARTMENT_SHOWN.ITAR} or ${EXPORT_COMPARTMENT_SHOWN.EAR}`;
+  for (const phrase of [
+    `Under the starting rules, content marked ${shown} stays on this computer`,
+    'A policy someone edited is not changed in place; it gets them through a change on the policy page.',
+    'Under your organization\'s rules, your organization decides.',
+    'Your organization\'s rules can now carry its export-control decisions: who may see such content and which AI services may receive it. Nothing grants access with them yet',
+    'the rule `route.export-control` are shapes that are read and recorded only, and never decide a request',
+    'Meeting the Controlled Goods Program or the ITAR is your organization\'s obligation, and your officials decide.'
+  ]) assert.ok(words.includes(flat(phrase)), phrase);
+  const { ROUTE_RULES } = await import('../domain/gate/routing');
+  assert.ok(!(ROUTE_RULES as readonly string[]).includes('route.export-control'), 'never returned in this version, as the text says');
+  const readme = flat(readmePolicy);
+  assert.ok(readme.includes(`Content marked ${shown} stays on this computer under the starting rules`));
+  assert.ok(readme.includes('nothing grants access with them yet'));
+});
+
+// W1 (Phase 41 verification): the export entries reach an upgraded install only when unedited starting rules are renewed (bundle.ts renewalPayload and
+// isDefaultBundle, held by gateBundle's D-62 tests), so README and CHANGELOG say so as SECURITY.md does, with the renewal window read from code.
+test('W1, D-62: SECURITY.md, README and CHANGELOG say an upgraded install gets the export entries when its starting rules are renewed', async () => {
+  const { RENEW_WINDOW_DAYS, SELF_SIGNED_LIFETIME_DAYS } = await import('../domain/gate/bundle');
+  assert.equal(RENEW_WINDOW_DAYS, 30, 'the docs say the last 30 days');
+  assert.equal(SELF_SIGNED_LIFETIME_DAYS, 365);
+  const fresh = 'A fresh install, and the renewal of starting rules nobody edited, get these entries';
+  const security = flat(sectionOf(SECURITY, EXPORT_HEADING));
+  const readme = flat(readmePolicy);
+  const exportBullet = flat(changelogOrganization.split('\n- ').find((bullet) => bullet.includes('Controlled goods (Canada)')) ?? '');
+  for (const [name, text] of [['SECURITY.md', security], ['README', readme], ['CHANGELOG', exportBullet]] as const) {
+    assert.ok(text.includes(fresh), `${name}: ${fresh}`);
+    assert.match(text, new RegExp(`whose starting rules nobody edited gets them when its policy is next renewed, in the last ${String(RENEW_WINDOW_DAYS)} days before`), name);
+    assert.ok(text.includes('change on the policy page'), `${name}: an edited policy gets them by a change`);
+  }
+  assert.ok(security.includes('until then those markings are routed by their level'));
+});
+
+// WR-04: SECURITY.md describes the issuer key file as scripts/org-issuer.mjs seals it.
+test('WR-04: SECURITY.md describes the issuer key file sealing the script uses', () => {
+  const script = readFileSync(path.join(ROOT, 'scripts', 'org-issuer.mjs'), 'utf8');
+  assert.ok(script.includes("kdf: 'scrypt', N: 2 ** 17, r: 8, p: 1, cipher: 'aes-256-gcm', saltBytes: 16, nonceBytes: 12"), 'the sealing in the script');
+  assert.doesNotMatch(script, /aes-256-cbc|privateKeyEncoding/, 'no PKCS#8 PBKDF2 key file is written');
+  const block = flat(sectionOf(SECURITY, ORGANIZATION_RULES_HEADING));
+  for (const phrase of [
+    'The key file is sealed with AES-256-GCM under a key that scrypt derives from the passphrase (N = 2^17, r = 8, p = 1, a random 16-byte salt and 12-byte nonce for each file)',
+    'The tool opens a new key file again with its passphrase before it says done, and refuses a key file that is not sealed this way, including an unencrypted key.'
+  ]) assert.ok(block.includes(phrase), phrase);
+});
+
+test('D-64: no compliance claim in any new text, and the counter has teeth', async () => {
+  const { countHits } = await import('./helpers/copyLintScan');
+  const claims = (text: string): number => countHits([{ text: prose(text) }], 'SECURITY.md')['SECURITY.md']?.['compliance-claim'] ?? 0;
+  assert.equal(claims('NEAR AI is ITAR compliant.'), 1, 'a planted claim is counted');
+  assert.equal(claims('This computer is accredited for Protected C.'), 1, 'a planted claim is counted');
+  assert.equal(claims('NEAR AI does not make your organization compliant with either.'), 0, 'a negated sentence is allowed');
+  for (const [name, text] of newDocsBlocks()) assert.equal(claims(text), 0, name);
+});
+
+/** Every block of copy Phase 41 added to SECURITY.md, README and CHANGELOG. */
+function newDocsBlocks(): Array<[string, string]> {
+  const limitationRows = limitations.split('\n').filter((line) => /twelve words protect|export-control decisions|server does not load|Model approvals, and the rule|self-signed on this computer until|no command to leave/.test(line));
+  assert.equal(limitationRows.length, 6, 'the six new Known limitations rows');
+  const privacy = flat(sectionOf(SECURITY, '### Which models are private'));
+  const outbound = flat(sectionOf(SECURITY, '## The outbound check'));
+  return [
+    ['organization rules block', sectionOf(SECURITY, ORGANIZATION_RULES_HEADING)],
+    ['layers block', sectionOf(SECURITY, LAYERS_HEADING)],
+    ['places block', sectionOf(SECURITY, PLACES_HEADING)],
+    ['export block', sectionOf(SECURITY, EXPORT_HEADING)],
+    ['trust line block', sectionOf(SECURITY, TRUST_LINE_HEADING)],
+    ['private paragraph', privacy.slice(privacy.indexOf("The setting's own words"), privacy.indexOf('**Where private models come from.**'))],
+    ['outbound check', outbound.slice(outbound.indexOf('3. **TEE-only mode.**'), outbound.indexOf('Earlier turns of a conversation'))],
+    ['Known limitations rows', limitationRows.join('\n')],
+    ['README policy bullet', readmePolicy],
+    ['CHANGELOG organization section', changelogOrganization]
+  ];
+}
+
+test('Phase 41: Known limitations has a row for each new gap', () => {
+  const rows = limitations.split('\n');
+  for (const start of [
+    "| The twelve words protect your organization's key only when its security contact reads them to you over a channel you trust |",
+    "| Your organization's rules can carry export-control decisions, but nothing grants access with them yet, and NEAR AI does not make your organization compliant with the Controlled Goods Program or the ITAR |",
+    "| Your organization's server does not load your organization's rules yet |",
+    '| Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it |',
+    '| Authorizations are self-signed on this computer until your organization\'s issuer can sign them |',
+    '| There is no command to leave your organization |'
+  ]) assert.ok(rows.some((row) => row.startsWith(start)), start);
+  assert.ok(flat(limitations).includes("Your organization's officials decide"));
+});
+
+test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
+  const titles = await editorTitles();
+  const readme = flat(readmePolicy);
+  for (const phrase of [`"${titles.organization}"`, `**${commandName('nearAi.organization.addRules')}**`, `**${commandName('nearAi.policy.open')}**`, 'twelve words',
+    'Protected B sent to a server your policy names as local now needs a TLS pin and a Protected B authorization naming that server.']) {
+    assert.ok(readme.includes(phrase), phrase);
+  }
+  assert.ok(readmePolicy.startsWith('- **Your policy.**'));
+  // CHANGELOG: the section sits under Unreleased, above Fixes.
+  const unreleased = changelogUnreleased;
+  assert.ok(unreleased.indexOf("### Your organization's rules") >= 0 && unreleased.indexOf("### Your organization's rules") < unreleased.indexOf('### Fixes'), 'above Fixes');
+  const entry = flat(changelogOrganization);
+  for (const phrase of [
+    'Protected B sent to a server your policy names as local now needs a TLS pin and a Protected B authorization naming that server.',
+    `**${commandName('nearAi.organization.addRules')}**`, `**${commandName('nearAi.policy.open')}**`, `"${titles.organization}"`, '**Reset my rules**'
+  ]) assert.ok(entry.includes(phrase), phrase);
+  const exportBullets = changelogOrganization.split('\n- ').filter((bullet) => bullet.includes('Controlled goods (Canada)'));
+  assert.equal(exportBullets.length, 1, 'one export bullet');
+  assert.match(flat(exportBullets[0] ?? ''), /stays on this computer under the starting rules[^]*later release/);
+  for (const line of changelogOrganization.split('\n').filter((text) => text.startsWith('- '))) assert.match(line, /^- \*\*[^*]+\*\*/, `each bullet leads with a bold sentence: ${line.slice(0, 60)}`);
+  assert.doesNotMatch(entry, /\b(?:decideRoute|composeLayers|bundleVersion|route\.[a-z-]+|PR #\d+)\b/, 'no internal names');
+});
+
+test('Phase 41: SECURITY.md and README send people to the policy page, never to a command that left the palette', () => {
+  for (const [name, text] of [['SECURITY.md', SECURITY], ['README', README]] as const) {
+    assert.doesNotMatch(text, LEFT_THE_PALETTE, `${name} names no command that left the palette`);
+    assert.ok(text.includes(`**${commandName('nearAi.policy.open')}**`), `${name} names the policy page`);
+    assert.ok(text.includes('**Reset my rules**'), `${name} names the page's reset`);
+  }
+});
+
+test('Phase 41: the new text is clean: no em-dash, no provider name before organization, no bare team', async () => {
+  const { countHits } = await import('./helpers/copyLintScan');
+  const hits = (text: string) => countHits([{ text: prose(text) }], 'SECURITY.md')['SECURITY.md'] ?? {};
+  assert.equal(hits('Ask the team.')['bare-team'], 1, 'the bare team counter has teeth');
+  assert.equal(hits(['Ask', 'NEAR', 'organization.'].join(' '))['provider-organization'], 1, 'the provider counter has teeth');
+  for (const [name, text] of newDocsBlocks()) {
+    assert.ok(text.length > 100, name);
+    assert.ok(!text.includes(EM_DASH), `${name}: no em-dash`);
+    const found = hits(text);
+    assert.equal(found['provider-organization'] ?? 0, 0, `${name}: never the provider's name before organization`);
+    assert.equal(found['bare-team'] ?? 0, 0, `${name}: no bare team`);
+    assert.equal(found['em-dash'] ?? 0, 0, name);
+  }
+});
+
+test('Phase 41 review: SECURITY.md says what the review fixes do (CR-01, WR-01, CR-02, WR-03, WR-05, IN-07)', async () => {
+  const { DAMAGED_PIN_TEXT } = await import('../gate/organizationStore');
+  const { ENDPOINT_SCHEME_TEXT } = await import('../domain/gate/routing');
+  const { isNearCloudEndpoint } = await import('../domain/config');
+  const text = flat(SECURITY);
+  for (const sentence of [
+    "If that record disappears from secret storage while your organization's rules are still on this computer, NEAR AI does not fall back to your own rules: only reading and planning run until you open your organization's enrolment file again and compare the twelve words.",
+    'If the rules file on this computer goes missing, or an older one is put in its place, opening the current rules file or enrolment file again writes it back without changing the key in use.',
+    'A place your rules list is reached only over https; a plain http connection to it is refused (`route.endpoint-pin`). This computer is the only exception.',
+    "Only NEAR AI Cloud's own host may be listed as NEAR AI private hardware (`nearai-tee`).",
+    "Only a model NEAR AI's catalog marks as running in private hardware counts as running in a place your rules list as NEAR AI private hardware; any other model on that host is forwarded to an outside provider, with no stated region, and no authorization naming that place covers it.",
+    'A step that only records never refuses, even when its check cannot be made; it is then recorded as one that would refuse.'
+  ]) assert.ok(text.includes(sentence), sentence);
+  // The code the sentences describe.
+  assert.match(DAMAGED_PIN_TEXT, /enrolment file again/);
+  assert.match(ENDPOINT_SCHEME_TEXT, /^Nothing was sent\. .*https connections only/);
+  assert.equal(isNearCloudEndpoint('https://example.org'), false);
 });

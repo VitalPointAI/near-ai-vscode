@@ -4,6 +4,7 @@ import { AuthService } from './auth';
 import type { ModelInfo } from './nearAiClient';
 import { ProfileStore } from './profileStore';
 import { createNearAiProvider } from './providerFactory';
+import type { PrivateRoute } from './privateRoute';
 
 export interface ActiveProvider {
   profile: OrganizationProfile;
@@ -67,7 +68,7 @@ export function clientFor(active: ActiveProvider, model: string): { client: Reso
  * The route a run's requests take, for private team members: a local runtime, or NEAR AI Cloud, attested only when the cloud client
  * talks to NEAR's own endpoint (compared as a resolved URL, so an empty value, a trailing slash, or /v1 all count).
  */
-export function privateRouteFor(provider: Pick<ResolvedProvider, 'provider' | 'baseUrl'>, local: boolean): { kind: 'near' | 'local'; attestation: boolean } {
+export function privateRouteFor(provider: Pick<ResolvedProvider, 'provider' | 'baseUrl'>, local: boolean): PrivateRoute {
   if (local || provider.provider === 'local') return { kind: 'local', attestation: false };
   return { kind: 'near', attestation: isNearCloudEndpoint(provider.baseUrl) };
 }

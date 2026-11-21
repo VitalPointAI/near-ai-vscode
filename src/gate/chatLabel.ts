@@ -2,11 +2,11 @@
 // signed with this person's device key under the purpose label-declassify, and a merge applies one only when it verifies against this computer's key sources
 // with the key valid at the signing time, names this chat, its from-mark covers the other copy's mark, and the other copy was not used after it. Anything
 // else keeps the joined, higher label. Node only, no vscode.
-import { raiseMark, sameMark } from '../domain/gate/dominance';
+import { markAtLeast } from '../domain/gate/dominance';
 import type { Mark } from '../domain/gate/dominance';
 import { parseLabel } from '../domain/gate/labels';
 import { activeScales } from '../domain/gate/labelAlgebra';
-import type { Label } from '../domain/gate/labels';
+import type { Label, ScaleTable } from '../domain/gate/labels';
 import { NO_KNOWN_KEYS, combineKeyStatus, teamKeyStatus } from '../domain/team/keyStatus';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import { signPayload, verifyPayload } from '../domain/team/signedPayload';
@@ -59,29 +59,16 @@ export function chatLoweringKeys(local: KeyStatusLookup, team?: { readonly state
   return combineKeyStatus(local, own);
 }
 
-function markOf(value: unknown): Mark | undefined {
+function markOf(value: unknown, scales: ScaleTable): Mark | undefined {
   if (!Array.isArray(value) || value.length === 0 || value.length > 16) return undefined;
   const out: Label[] = [];
   for (const entry of value) {
     // Coherence review S7: read on the active policy's scales, so a lowering on a custom scale can be read (the presets only while it failed closed).
-    const parsed = parseLabel(entry, activeScales());
+    const parsed = parseLabel(entry, scales);
     if (!parsed.ok) return undefined;
     out.push(parsed.value);
   }
   return out;
-}
-
-/** `mark` raised by every label of `by`. */
-function raiseBy(mark: Mark, by: Mark): Mark {
-  let raised: Mark = mark;
-  const scales = activeScales();
-  for (const label of by) raised = raiseMark(raised, label, scales);
-  return raised;
-}
-
-/** Whether `mark` already holds `held`: raising it by `held` changes nothing. */
-function covers(mark: Mark, held: Mark): boolean {
-  return sameMark(raiseBy(mark, held), mark);
 }
 
 /** Judges one signed lowering a copy of the chat holds and the other does not (D-58). Never throws. */
@@ -100,15 +87,17 @@ export function judgeChatLowering(envelope: unknown, context: LoweringContext, k
     }
   }
   const payload = verdict.payload as Partial<ChatLowering> | null;
-  const from = markOf(payload?.from);
-  const to = markOf(payload?.to);
+  // One reading of the active policy's scales per judgement: the marks are parsed and ranked by the label module on the same scales (D-35).
+  const scales = activeScales();
+  const from = markOf(payload?.from, scales);
+  const to = markOf(payload?.to, scales);
   if (payload === null || typeof payload !== 'object' || from === undefined || to === undefined || typeof payload.chatId !== 'string') return reject('does-not-verify');
   if (payload.chatId !== context.chatId) return reject('another-chat');
   // The signed target is checked again here, not trusted because it verifies (PR #87 review): it is below its from-mark, and never below the project.
-  if (!covers(from, to) || sameMark(raiseBy(to, from), to)) return reject('not-lower');
-  if (context.projectMark !== undefined && !covers(to, context.projectMark)) return reject('below-project');
+  if (!markAtLeast(from, to, scales) || markAtLeast(to, from, scales)) return reject('not-lower');
+  if (context.projectMark !== undefined && !markAtLeast(to, context.projectMark, scales)) return reject('below-project');
   // The from-mark covers the other copy's mark: raising it by that mark changes nothing, so the lowering undoes no raise made there.
-  if (!covers(from, context.otherMark)) return reject('higher-mark');
+  if (!markAtLeast(from, context.otherMark, scales)) return reject('higher-mark');
   // Times are compared as times, never as text: a time either side cannot read is refused (fail closed).
   const signed = Date.parse(verdict.signedAt);
   const otherUsed = Date.parse(context.otherLastUsedAt);

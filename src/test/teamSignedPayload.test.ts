@@ -79,7 +79,16 @@ const SAMPLES: Record<PayloadPurpose, unknown> = {
   // Phase 32 (D-60): a device's answer to the hub's session challenge, the operator's hub file and a joining device's hub join envelope.
   'staff-hub-session': { v: 1, hub: 'a'.repeat(64), project: '1'.repeat(32), challenge: bytes64url(32, 10), keying: bytes64url(32, 11) },
   'staff-hub-file': { v: 1, hub: 'hub-aaaaaaaaaaaaaaaa', address: 'hub.example.org:8443', certPin: 'b'.repeat(64), publicKey: bytes64url(32, 12), writer: 'a'.repeat(64), x25519: bytes64url(32, 13), x25519Sig: bytes64url(64, 14), enrolment: 'enr-0123456789abcdef', enrolmentSecret: bytes64url(32, 15), expiresAt: '2026-11-27T12:00:00.000Z' },
-  'staff-hub-join': { v: 1, hub: 'a'.repeat(64), project: '1'.repeat(32), invite: 'inv-1', request: 'c'.repeat(64), hubMac: bytes64url(32, 16) }
+  'staff-hub-join': { v: 1, hub: 'a'.repeat(64), project: '1'.repeat(32), invite: 'inv-1', request: 'c'.repeat(64), hubMac: bytes64url(32, 16) },
+  // Phase 41 (D-10): your organization's enrolment file, its policy layer, one authorization record and a proposed change (fictional organization).
+  'org-enrolment': {
+    v: 1, organization: { name: 'Example Organization', contacts: [{ topic: 'security', name: 'Security desk', how: 'security@example.org' }] },
+    issuer: { publicKey: bytes64url(32, 11) }, issuedAt: '2026-11-20T00:00:00.000Z', expiresAt: '2027-11-20T00:00:00.000Z', serial: 1,
+    layer: { v: 1, purpose: 'org-policy-layer', signer: { fingerprint: `dev-${'0'.repeat(32)}`, publicKey: bytes64url(32, 11) }, signedAt: '2026-11-20T00:00:00.000Z', payload: { bundleVersion: 2, layer: 'organization' }, sig: bytes64url(64, 12) }
+  },
+  'org-policy-layer': { bundleVersion: 2, vocabulary: 1, layer: 'organization', requires: ['agents@1', 'labels@1', 'layers@1'], people: { v: 1, signers: [{ name: 'Alex Example', role: 'Security officer', publicKey: bytes64url(32, 13), fingerprint: `dev-${'1'.repeat(32)}` }] } },
+  'policy-authorization': { v: 1, id: 'pb-2026-001', kind: 'protected-b', subject: { endpoint: 'models-example-org' }, scope: { labels: ['ca-protected/Protected B'] }, conditions: [], evidence: 'TRA-2026-11', namedPerson: { name: 'Alex Example', role: 'Security officer' }, issuedAt: '2026-11-20T00:00:00.000Z', expiresAt: '2027-11-20T00:00:00.000Z' },
+  'policy-proposal': { v: 1, base: 'a'.repeat(64), target: 'organization', changes: [{ section: 'labels', key: 'routing.levels.org/Internal', before: 'attested-cloud', after: 'local-only' }] }
 };
 
 function failure(verdict: ReturnType<typeof verifyPayload>): PayloadFailureReason | 'ok' {
@@ -136,7 +145,31 @@ test('every purpose round-trips, signed by the device identity and by a plain ag
     assert.equal(failure(agentVerdict), 'ok', purpose);
     if (agentVerdict.ok) assert.deepEqual(agentVerdict.payload, SAMPLES[purpose]);
   }
-  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark', 'staff-hub-session', 'staff-hub-file', 'staff-hub-join']);
+  assert.deepEqual([...PAYLOAD_PURPOSES], ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark', 'staff-hub-session', 'staff-hub-file', 'staff-hub-join', 'org-enrolment', 'org-policy-layer', 'policy-authorization', 'policy-proposal']);
+});
+
+test('Phase 41 (D-10): the purpose list ends with the four organization purposes; each verifies its own sample, is wrong-purpose for every other, and an edited purpose is bad-signature', () => {
+  const agent = agentSigner();
+  const phase41: PayloadPurpose[] = ['org-enrolment', 'org-policy-layer', 'policy-authorization', 'policy-proposal'];
+  assert.deepEqual([...PAYLOAD_PURPOSES].slice(-4), phase41);
+  assert.ok(!(PAYLOAD_PURPOSES as readonly string[]).includes('org-release'), 'org-release is reserved by name only (D-16)');
+  for (const purpose of phase41) {
+    const envelope = signPayload(agent, purpose, SAMPLES[purpose]);
+    const verdict = verifyPayload(envelope, { purpose, status: ACTIVE(agent) });
+    assert.equal(failure(verdict), 'ok', purpose);
+    if (verdict.ok) assert.deepEqual(verdict.payload, SAMPLES[purpose]);
+    for (const other of PAYLOAD_PURPOSES) {
+      if (other === purpose) continue;
+      assert.equal(failure(verifyPayload(envelope, { purpose: other, status: ACTIVE(agent) })), 'wrong-purpose', `${purpose} offered as ${other}`);
+    }
+    const swapped = { ...envelope, purpose: phase41[(phase41.indexOf(purpose) + 1) % phase41.length] };
+    assert.equal(failure(verifyPayload(swapped, { purpose: swapped.purpose, status: ACTIVE(agent) })), 'bad-signature', purpose);
+  }
+  // A policy bundle is not an organization layer, and an organization layer is not a policy bundle.
+  const bundle = signPayload(agent, 'policy-bundle', SAMPLES['policy-bundle']);
+  assert.equal(failure(verifyPayload(bundle, { purpose: 'org-policy-layer', status: ACTIVE(agent) })), 'wrong-purpose');
+  const layer = signPayload(agent, 'org-policy-layer', SAMPLES['org-policy-layer']);
+  assert.equal(failure(verifyPayload(layer, { purpose: 'policy-bundle', status: ACTIVE(agent) })), 'wrong-purpose');
 });
 
 test('D-49: each Phase 31 purpose signs and verifies its own sample, and the same envelope offered for any other purpose is refused wrong-purpose', () => {
@@ -166,7 +199,8 @@ test('D-49: each Phase 31 purpose signs and verifies its own sample, and the sam
 test('D-60: each Phase 32 purpose signs and verifies its own sample, and the same envelope offered for any other purpose is refused wrong-purpose', () => {
   const agent = agentSigner();
   const phase32: PayloadPurpose[] = ['staff-hub-session', 'staff-hub-file', 'staff-hub-join'];
-  assert.deepEqual(PAYLOAD_PURPOSES.slice(-3), phase32);
+  // Phase 41 (D-03) appends its four purposes after these three.
+  assert.deepEqual(PAYLOAD_PURPOSES.slice(-7, -4), phase32);
   for (const purpose of phase32) {
     const envelope = signPayload(agent, purpose, SAMPLES[purpose]);
     const verdict = verifyPayload(envelope, { purpose, status: ACTIVE(agent) });

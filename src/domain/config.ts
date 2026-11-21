@@ -1,15 +1,15 @@
 import { ActionPolicy, ActionPolicyMode, defaultActionPolicy } from './policy';
-import { SovereigntyMode } from './privacy';
 
 export type AuthMode = 'apiKey' | 'nearAccount';
-
+/** nearAi.privacyMode (D-37): tee-only is one input of the private floor (floorFor), which decideRoute applies; the values and setting id are unchanged. */
+export type PrivacyModeSetting = 'standard' | 'tee-only';
 
 export interface NearAiSettings {
   baseUrl: string;
   authMode: AuthMode;
   defaultModel: string;
   actionPolicy: ActionPolicy;
-  privacyMode: Extract<SovereigntyMode, 'standard' | 'tee-only'>;
+  privacyMode: PrivacyModeSetting;
   /** 0 means no limit. */
   dailySpendLimitUsd: number;
 }
