@@ -1,0 +1,4 @@
+import { filterRows } from '../../compliance/lib.mjs';
+import StateBadge from './StateBadge';
+import styles from './styles.module.css';
+export default function LevelPage({ dashboard, levelId }) { const rows = filterRows(dashboard.rows ?? [], { level: levelId }); const level = dashboard.levels?.find((item) => item.id === levelId); return <section className={styles.section}><h2>{level?.title ?? levelId}</h2>{level?.notes?.profileDifferences?.length ? <details><summary>English and French profile differences</summary><ul>{level.notes.profileDifferences.map((item) => <li key={item}>{item}</li>)}</ul></details> : null}<table><thead><tr><th>Control</th><th>State</th><th>Reason</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.level}-${row.control}`}><th scope="row">{row.label}: {row.title}</th><td><StateBadge state={row.state} /></td><td>{row.reasonText}</td></tr>)}</tbody></table></section>; }

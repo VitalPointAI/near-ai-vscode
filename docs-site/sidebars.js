@@ -29,6 +29,7 @@ export default {
       label: 'Security',
       items: ['security/trust-model', 'security/policy.synced', ...folder('Security documents', 'security/documents')]
     },
+    ...folder('Accreditation', 'accreditation'),
     {
       type: 'category',
       label: 'Architecture',

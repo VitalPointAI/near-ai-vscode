@@ -1,0 +1,6 @@
+.section { margin-block: 1.5rem; }
+.section table { width: 100%; }
+.section th, .section td { vertical-align: top; padding: .55rem; }
+.drawer { border: 1px solid var(--ifm-color-emphasis-300); border-radius: .4rem; padding: 1rem; }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; margin-block: 1rem; }
+.badge { font-weight: 600; }
