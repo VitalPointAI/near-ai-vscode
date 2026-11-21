@@ -7,6 +7,8 @@ const COMMANDS = Object.freeze([
   'dashboard',
   'validate',
   'word-lint',
+  'package',
+  'pr-summary',
 ] as const);
 const commandName = /^[a-z][a-z0-9-]*$/;
 
