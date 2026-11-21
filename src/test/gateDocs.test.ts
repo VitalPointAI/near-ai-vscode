@@ -1044,3 +1044,22 @@ test('Phase 41: the new text is clean: no em-dash, no provider name before organ
     assert.equal(found['em-dash'] ?? 0, 0, name);
   }
 });
+
+test('Phase 41 review: SECURITY.md says what the review fixes do (CR-01, WR-01, CR-02, WR-03, WR-05, IN-07)', async () => {
+  const { DAMAGED_PIN_TEXT } = await import('../gate/organizationStore');
+  const { ENDPOINT_SCHEME_TEXT } = await import('../domain/gate/routing');
+  const { isNearCloudEndpoint } = await import('../domain/config');
+  const text = flat(SECURITY);
+  for (const sentence of [
+    "If that record disappears from secret storage while your organization's rules are still on this computer, NEAR AI does not fall back to your own rules: only reading and planning run until you open your organization's enrolment file again and compare the twelve words.",
+    'If the rules file on this computer goes missing, or an older one is put in its place, opening the current rules file or enrolment file again writes it back without changing the key in use.',
+    'A place your rules list is reached only over https; a plain http connection to it is refused (`route.endpoint-pin`). This computer is the only exception.',
+    "Only NEAR AI Cloud's own host may be listed as NEAR AI private hardware (`nearai-tee`).",
+    "Only a model NEAR AI's catalog marks as running in private hardware counts as running in a place your rules list as NEAR AI private hardware; any other model on that host is forwarded to an outside provider, with no stated region, and no authorization naming that place covers it.",
+    'A step that only records never refuses, even when its check cannot be made; it is then recorded as one that would refuse.'
+  ]) assert.ok(text.includes(sentence), sentence);
+  // The code the sentences describe.
+  assert.match(DAMAGED_PIN_TEXT, /enrolment file again/);
+  assert.match(ENDPOINT_SCHEME_TEXT, /^Nothing was sent\. .*https connections only/);
+  assert.equal(isNearCloudEndpoint('https://example.org'), false);
+});

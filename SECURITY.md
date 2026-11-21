@@ -541,11 +541,18 @@ Closing the question, or any other answer, writes nothing.
 
 Once you confirm, the key and the date of the last rules you accepted are
 kept in VS Code's secret storage on this computer, not in a file on disk.
+If that record disappears from secret storage while your organization's
+rules are still on this computer, NEAR AI does not fall back to your own
+rules: only reading and planning run until you open your organization's
+enrolment file again and compare the twelve words.
 From then on a newer version of your organization's rules is accepted only
 when that key signed it and it is newer than the rules in use; an older one
 is refused. A handover to a new key must be signed by the key in use, and
 you compare the new key's twelve words the same way. Rules signed with this
 computer's own key are never taken as your organization's.
+If the rules file on this computer goes missing, or an older one is put in
+its place, opening the current rules file or enrolment file again writes it
+back without changing the key in use.
 
 Your organization's rules end on the date they carry. When they have ended,
 only reading and planning run until your organization sends current ones,
@@ -735,6 +742,15 @@ level, and those levels then need a pinned connection and an authorization
 from your organization. With no list (the starting rules), the places are
 this computer and NEAR AI Cloud, and nothing changes where requests go.
 
+**What a place in the list means.** A place your rules list is reached only
+over https; a plain http connection to it is refused (`route.endpoint-pin`).
+This computer is the only exception. Only NEAR AI Cloud's own host may be
+listed as NEAR AI private hardware (`nearai-tee`). Only a model NEAR AI's
+catalog marks as running in private hardware counts as running in a place
+your rules list as NEAR AI private hardware; any other model on that host is
+forwarded to an outside provider, with no stated region, and no
+authorization naming that place covers it.
+
 **What the list decides.** After a chat's label allows a request, these
 refuse it, each recorded with its rule id:
 
@@ -770,6 +786,8 @@ is not recorded as accredited for that label; it is not refused unless your orga
 rules turn on `requireAccreditedDevice`. Model approvals work the same way:
 a model your rules have not approved for the work is recorded
 (`route.passport`) and never refused in this version.
+A step that only records never refuses, even when its check cannot be made;
+it is then recorded as one that would refuse.
 
 **Authorizations.** An authorization is one signed record that allows one
 thing for a while:
