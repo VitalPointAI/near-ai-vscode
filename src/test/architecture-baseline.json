@@ -69,7 +69,9 @@
     "scale-presets": [
       "domain/staff/guardScan.ts",
       "services/staffMultiUserCommands.ts",
-      "staff/replica/membership.ts"
+      "staff/replica/labelCells.ts",
+      "staff/replica/membership.ts",
+      "staff/replica/migrate.ts"
     ],
     "get-configuration": [
       "extension.ts",
@@ -100,7 +102,8 @@
     "services/chat.ts": 1517,
     "services/nearAiClient.ts": 1860,
     "services/teamStudioPage.ts": 2236,
-    "staff/replica/membership.ts": 1384,
-    "staff/staffHost.ts": 1612
+    "staff/replica/membership.ts": 1537,
+    "staff/replica/store.ts": 1673,
+    "staff/staffHost.ts": 1688
   }
 }

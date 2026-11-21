@@ -69,6 +69,15 @@
   "src/domain/replica/checkpoint.ts": {
     "mode-word": 1
   },
+  "src/domain/replica/hubFile.ts": {
+    "glossary": 20
+  },
+  "src/domain/replica/hubWitness.ts": {
+    "glossary": 3
+  },
+  "src/domain/replica/productCells.ts": {
+    "glossary": 2
+  },
   "src/domain/replica/projectFold.ts": {
     "glossary": 2,
     "mode-word": 3
@@ -160,7 +169,7 @@
     "bare-team": 1
   },
   "src/services/staffMultiUserCommands.ts": {
-    "glossary": 9,
+    "glossary": 10,
     "mode-word": 3
   },
   "src/services/staffScenario.ts": {
@@ -210,12 +219,23 @@
   "src/services/workspaceCommands.ts": {
     "bare-team": 1
   },
+  "src/staff/replica/hubMembership.ts": {
+    "glossary": 54,
+    "mode-word": 10
+  },
+  "src/staff/replica/hubTransport.ts": {
+    "glossary": 11
+  },
+  "src/staff/replica/labelCells.ts": {
+    "glossary": 1,
+    "mode-word": 1
+  },
   "src/staff/replica/membership.ts": {
     "mode-word": 13
   },
   "src/staff/replica/migrate.ts": {
     "glossary": 7,
-    "mode-word": 2
+    "mode-word": 1
   },
   "src/staff/replica/projection.ts": {
     "glossary": 1,
@@ -223,6 +243,12 @@
   },
   "src/staff/replica/replicaProject.ts": {
     "mode-word": 5
+  },
+  "src/staff/replica/singleCopy.ts": {
+    "mode-word": 1
+  },
+  "src/staff/replica/store.ts": {
+    "mode-word": 1
   },
   "src/team/gitTransport.ts": {
     "bare-team": 1

@@ -75,12 +75,22 @@ async function mustRun(command: string, args: string[], options: { cwd?: string;
   return result;
 }
 
+// The hub's secrets folder (Phase 32) points at a folder that does not exist, so every Compose run here proves the relay needs no hub secret.
+const absentHubSecretsDir = (): string => path.join(secretsDir, 'no-hub-secrets-here');
+
 function composeEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith('NEAR_AI_RELAY_') && !name.startsWith('RELAY_') && !name.startsWith('COMPOSE_')) env[name] = value;
+    if (!/^(NEAR_AI_RELAY_|NEAR_AI_HUB_|RELAY_|HUB_|COMPOSE_)/.test(name)) env[name] = value;
   }
-  return { ...env, NEAR_AI_RELAY_IMAGE: IMAGE, NEAR_AI_RELAY_PUBLISH_PORT: String(hostPort), NEAR_AI_RELAY_SECRETS_DIR: secretsDir, ...extra };
+  return {
+    ...env,
+    NEAR_AI_RELAY_IMAGE: IMAGE,
+    NEAR_AI_RELAY_PUBLISH_PORT: String(hostPort),
+    NEAR_AI_RELAY_SECRETS_DIR: secretsDir,
+    NEAR_AI_HUB_SECRETS_DIR: absentHubSecretsDir(),
+    ...extra,
+  };
 }
 
 function compose(args: string[], extra: Record<string, string> = {}): Promise<Result> {
@@ -234,7 +244,18 @@ describe('relay container image and Compose project', { timeout: 1_200_000 }, ()
   test('the .dockerignore is an allow-list that keeps state, secrets, git and planning files out of the build context', () => {
     const lines = readFileSync(path.join(REPO_ROOT, '.dockerignore'), 'utf8').split('\n').map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
     assert.equal(lines[0], '*');
-    assert.deepEqual(lines.slice(1), ['!relay/package.json', '!relay/package-lock.json', '!relay/.npmrc', '!relay/tsconfig.json', '!relay/scripts', '!relay/src']);
+    // The relay's six lines come first, exactly and in order. The hub's lines follow them (Phase 32); the whole exact list, hub and src lines
+    // included, is pinned by hub/test/dockerContext.test.ts, so together the two suites check no less than the old exact list did.
+    assert.deepEqual(lines.slice(1, 7), ['!relay/package.json', '!relay/package-lock.json', '!relay/.npmrc', '!relay/tsconfig.json', '!relay/scripts', '!relay/src']);
+    assert.ok(lines.slice(1).every((line) => line.startsWith('!')), 'after * every line lets a literal path in');
+    for (const line of lines.slice(1)) {
+      const pattern = line.slice(1).replace(/^\/+/, '').replace(/\/+$/, '');
+      assert.doesNotMatch(pattern, /[*?[\\]/, `${line} is not a literal path`);
+      assert.ok(pattern !== '' && pattern !== '.' && !pattern.split('/').includes('..'), `${line} is not a plain path inside the repository`);
+      for (const kept of ['relay/state', 'relay/secrets', '.git', '.planning']) {
+        assert.ok(pattern !== kept && !kept.startsWith(`${pattern}/`) && !pattern.startsWith(`${kept}/`), `${line} lets ${kept} into the build context`);
+      }
+    }
   });
 
   test('Compose config: read-only root, all capabilities dropped, no-new-privileges, uid 65532, loopback publish, /tmp tmpfs, Teams secret', async () => {
@@ -368,7 +389,8 @@ describe('relay container image and Compose project', { timeout: 1_200_000 }, ()
     assert.equal(row.State, 'running');
     assert.equal(row.Health, 'healthy');
     const services = (await mustRun('docker', ['compose', '-p', PROJECT, '-f', COMPOSE_FILE, 'ps', '--services'], { env: composeEnv() })).stdout.split('\n').filter(Boolean);
-    assert.deepEqual(services, ['relay'], 'the Signal sidecar is not running by default');
+    assert.deepEqual(services, ['relay'], 'neither the Signal sidecar nor the hub is running by default');
+    assert.ok(!existsSync(absentHubSecretsDir()), 'the relay started with no hub secret file anywhere');
 
     const { status, body } = await healthz();
     assert.equal(status, 200);

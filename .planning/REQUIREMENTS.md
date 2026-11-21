@@ -769,8 +769,8 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **MUS-04**: Genesis, linear single-writer roster, join by signed file with a safety code.
 - [ ] **MUS-05**: Per-cell keys wrapped to cleared devices; rekey on removal.
 - [ ] **MUS-06**: Verified, idempotent migration of today's ledgers; unchanged behaviour for projects that stay single-machine.
-- [ ] **MUS-07**: The hub as its own Compose service: append checks, live push, presence, checkpoints, invitations.
-- [ ] **MUS-08**: Malicious-hub detection, rollback refusal, ciphertext only for ungranted cells, operator backup and restore.
+- [x] **MUS-07**: The hub as its own Compose service: append checks, live push, presence, checkpoints, invitations.
+- [x] **MUS-08**: Malicious-hub detection, rollback refusal, ciphertext only for ungranted cells, operator backup and restore.
 - [ ] **MUS-09**: Live multi-user staff projects in the extension: editor binding, presence, sync states, contested UI, docs.
 - [ ] **MUS-10**: Git per-writer refs, sealed bundle files and LAN peer links, converging with the hub.
 - [ ] **MUS-11**: Shared run summaries and claims; observation slices with coalescing and budgets.

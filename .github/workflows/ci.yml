@@ -1,5 +1,5 @@
 # Required checks for every PR into main. The job names (lint, test, e2e, release-content, audit,
-# secret-scan, relay) are the branch protection's required status checks: do not rename them without
+# secret-scan, relay, hub) are the branch protection's required status checks: do not rename them without
 # updating branch protection, CI_CHECKS in scripts/lib/workflow.mjs and
 # docs/development-workflow.md in the same PR. The docs job runs on every PR too but is not yet
 # required; making it required is the owner's change to the branch protection (and CI_CHECKS).
@@ -245,4 +245,76 @@ jobs:
         run: npm test
       - name: Build the relay image and check its hardening
         if: steps.has_relay.outputs.present == 'true'
+        run: npm run test:container
+
+  # Your organization's sync hub (hub/) is its own package on its own Node version, built like the relay,
+  # so it gets its own job too. The install runs no dependency scripts.
+  hub:
+    name: hub
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: hub
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The detection step below reads the base commit and main's history, not only this commit.
+          fetch-depth: 0
+      # The same hotfix rule as the job above, keyed on hub/package.json: a hotfix/x.y.z branch whose
+      # commit and base commit both lack the hub passes without running anything else; any other change
+      # without the hub fails, and a push to main never skips. Every later step is guarded by this
+      # output. The branch name and base commit come in through env, never pasted into the script.
+      - name: Check that this commit has the hub
+        id: has_hub
+        working-directory: .
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -f hub/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"
+          fi
+          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] \
+            && git cat-file -e "$base^{commit}" 2>/dev/null && ! git cat-file -e "$base:hub/package.json" 2>/dev/null; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=hub checks skipped::hub/package.json is neither on this commit of $BRANCH nor on its base commit (a hotfix from a release older than the hub), so the hub checks were skipped."
+          else
+            echo "::error title=hub missing::hub/package.json is not on this commit. Only a hotfix/x.y.z branch from a release older than the hub, whose base commit has no hub either, may skip the hub checks."
+            exit 1
+          fi
+      # The hub's refusal of an older Node is tested with a real Node 24 (hub/test/workspace.test.ts). Install it first and keep its
+      # path; the 26.13.1 install after it comes first on PATH for every later step.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_hub.outputs.present == 'true'
+        with:
+          node-version: '24'
+      - name: Keep Node 24 for the hub's older-Node refusal tests
+        if: steps.has_hub.outputs.present == 'true'
+        run: echo "NEAR_AI_HUB_OLD_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_hub.outputs.present == 'true'
+        with:
+          node-version: '26.13.1'
+          cache: npm
+          cache-dependency-path: hub/package-lock.json
+      - if: steps.has_hub.outputs.present == 'true'
+        run: npm ci --ignore-scripts
+      - if: steps.has_hub.outputs.present == 'true'
+        run: npm audit --omit=dev --audit-level=high
+      - if: steps.has_hub.outputs.present == 'true'
+        run: npm run lint
+      - if: steps.has_hub.outputs.present == 'true'
+        run: npm test
+      - name: Build the hub image and check its hardening and its Compose service
+        if: steps.has_hub.outputs.present == 'true'
         run: npm run test:container

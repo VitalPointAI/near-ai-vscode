@@ -25,22 +25,33 @@ export const PAYLOAD_DOMAIN = 'near-ai-vscode/signed-payload/v1';
 export const PAYLOAD_VERSION = 1;
 // Phase 31 (D-49) adds the four from staff-invite, in order: the lead's invite file, a joining device's answer to it, a cell grant (the wraps of one cell
 // epoch, committed by hash from cell.create and cell.rekey) and the replica store's high-water mark kept in SecretStorage.
-// Phase 41 (D-10) appends the last four, in order: your organization's enrolment file (signed by the issuer key itself), your organization's policy layer,
-// one authorization record signed by a named person, and a proposed policy change exported for your organization's contacts. Their key material sits only
-// under `publicKey` and `sig`, the names the secret scanner exempts, so they need no GENERATED_PATHS entry. The name `org-release` is reserved for an
-// issuer-signed release from your organization (D-16) and is deliberately not a purpose yet: no code path may sign or accept one.
-export const PAYLOAD_PURPOSES = ['policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica', 'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark', 'org-enrolment', 'org-policy-layer', 'policy-authorization', 'policy-proposal'] as const;
+// Phase 32 (D-60) adds the next three, in order: a device's answer to the sync hub's session challenge, the operator's hub file signed by the hub's
+// own key, and a joining device's hub join envelope (src/domain/replica/hubFile.ts and invite.ts).
+// Phase 41 (D-10, D-03) appends the last four, in order: your organization's enrolment file (signed by the issuer key itself), your organization's policy
+// layer, one authorization record signed by a named person, and a proposed policy change exported for your organization's contacts. Their key material
+// sits only under `publicKey` and `sig`, the names the secret scanner exempts, so they need no GENERATED_PATHS entry. The name `org-release` is reserved
+// for an issuer-signed release from your organization (D-16) and is deliberately not a purpose yet: no code path may sign or accept one.
+export const PAYLOAD_PURPOSES = [
+  'policy-bundle', 'grant', 'approval-answer', 'key-record', 'label-map', 'label-declassify', 'staff-ledger', 'staff-ledger-head', 'staff-decision', 'staff-replica',
+  'staff-invite', 'staff-join-request', 'staff-cell-grant', 'staff-replica-mark',
+  'staff-hub-session', 'staff-hub-file', 'staff-hub-join',
+  'org-enrolment', 'org-policy-layer', 'policy-authorization', 'policy-proposal'
+] as const;
 export type PayloadPurpose = typeof PAYLOAD_PURPOSES[number];
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
 
 // The fields of a payload, per purpose, that hold freshly generated random bytes as base64url: a cell grant's key wraps and sealed label, the invite's
 // one-time join secret and the lead's X25519 key, and a join request's X25519 key, its binding signature and its MAC. Random base64url can match a
 // token pattern by chance (about 5 in 100,000 wraps), which would refuse an admission or a rekey at random. Only these exact paths skip the token
-// patterns, and only for pure base64url text; private key material is still refused everywhere.
+// patterns, and only for pure base64url text; private key material is still refused everywhere. Phase 32 (D-60): the hub session answer's challenge
+// and TLS keying material, the hub file's X25519 key, its binding signature and the one-time enrolment secret, and the hub join envelope's MAC.
 const GENERATED_PATHS: Partial<Record<PayloadPurpose, RegExp>> = {
   'staff-cell-grant': /^\$\.(?:labelSealed|wraps\[\d+\]\.wrap)$/,
   'staff-invite': /^\$\.(?:secret|lead\.x25519)$/,
-  'staff-join-request': /^\$\.(?:x25519|x25519Sig|mac)$/
+  'staff-join-request': /^\$\.(?:x25519|x25519Sig|mac)$/,
+  'staff-hub-session': /^\$\.(?:challenge|keying)$/,
+  'staff-hub-file': /^\$\.(?:x25519|x25519Sig|enrolmentSecret)$/,
+  'staff-hub-join': /^\$\.hubMac$/
 };
 const PUBLIC_KEY_BYTES = 32;
 

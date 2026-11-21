@@ -60,6 +60,7 @@ A PR can merge only when all of these hold:
 | `audit` | CI: `npm audit --omit=dev --audit-level=high` |
 | `secret-scan` | CI: `scripts/secret-scan.mjs` over all tracked files and every line the PR's commits add |
 | `relay` | CI: the messaging relay in `relay/` on Node 26.13.1: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests and the container hardening tests |
+| `hub` | CI: your organization's sync hub in `hub/` on Node 26.13.1, built like `relay`: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests, the image build and the container and Compose hardening tests |
 | `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor. Runs on every PR; not a required check until the owner adds it to the branch protection (section 8) |
 | `agent-review` | Commit status set by `near-ai-reviewer` from `.github/workflows/agent-review.yml` after CI passes (section 4) |
 | One approval | Branch protection: one approving review, posted by `near-ai-reviewer` when the review passes; for a change to the gates, only after the owner approves (section 7) |
@@ -67,7 +68,9 @@ A PR can merge only when all of these hold:
 | No conflicts | GitHub reports the PR mergeable |
 | Conversations resolved | Branch protection: every review thread resolved |
 
-These eight check names are the required status checks in the branch protection (section 8);
+These nine check names are the required status checks in the branch protection (section 8).
+`hub` becomes required when the owner adds it to `main`'s branch protection after Phase 32 merges
+(section 8); until then the merge and tag scripts already wait for it, because it is in `CI_CHECKS`.
 `docs` runs on every PR too, and becomes required once the owner adds it there.
 Renaming a CI job means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and
 this page in the same PR.
@@ -76,7 +79,7 @@ this page in the same PR.
 
 `.github/workflows/ci.yml` runs on every PR into `main`, on every push to `main`, and by hand.
 
-- The eight jobs run **in parallel**; the slowest (e2e or relay) takes a few minutes.
+- The nine jobs run **in parallel**; the slowest (e2e, relay or hub) takes a few minutes.
 - `npm ci` uses the setup-node npm cache; the VS Code download for e2e is cached weekly.
 - A new push to a PR **cancels** the superseded run. Runs on `main` (and runs started by hand)
   each get their own concurrency group, so none is ever cancelled or replaced while queued.
@@ -86,6 +89,9 @@ this page in the same PR.
   container image, so it needs Docker, which the GitHub runner provides. It also installs a Node 24
   only to prove the relay refuses it (`NEAR_AI_RELAY_OLD_NODE`); those tests fail rather than skip
   in CI.
+- `hub` is built the same way for the sync hub in `hub/`: its own lockfile, Node 26.13.1, a Node 24
+  kept only for the hub's older-Node refusal tests (`NEAR_AI_HUB_OLD_NODE`), and the hub image
+  build with its container and Compose hardening tests.
 - Every action is pinned to a full commit SHA; the workflow token is read-only and checkouts do
   not keep credentials.
 
@@ -209,7 +215,7 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
 
 - refuses unless the PR is open, not a draft, targets `main`, and its branch follows the naming
   rules;
-- refuses unless every required check (the seven CI jobs, `agent-review`, and anything else branch
+- refuses unless every required check (the eight CI jobs, `agent-review`, and anything else branch
   protection requires) is green on the current head, and no other check failed. The CI jobs
   count only from the `CI` workflow, so a job of the same name elsewhere cannot stand in for
   one, and `agent-review` counts only as a commit status set by `near-ai-reviewer`
@@ -350,7 +356,7 @@ earlier do). All three paths are needed:
   does not, so `release-content` in CI and the `build` job of the Release workflow refuse the
   package.
 
-Do not copy `relay/` or `.dockerignore` into the hotfix branch. A tag older than the messaging
+Do not copy `relay/`, `hub/` or `.dockerignore` into the hotfix branch. A tag older than the messaging
 relay has no `relay/` folder, and the copied `ci.yml` handles that: the `relay` job's first step
 skips every other relay step and passes, with the note "relay checks skipped" in the job log, only
 when all three hold:
@@ -365,6 +371,10 @@ satisfied without a human step. (The PR's own run tests the hotfix merged with `
 relay, so the relay checks run there.) A change that deletes `relay/package.json` fails the `relay`
 job on every branch, `hotfix/x.y.z` included, because its base commit still has it, and a push to
 `main` never skips.
+
+The `hub` job follows the same rule, keyed on `hub/package.json`: on a hotfix from a tag older than
+the sync hub it passes with the note "hub checks skipped", and a change that deletes
+`hub/package.json` fails it on every branch.
 
 Check the staged diff before committing: it should only add or update workflow and gate files.
 If `main` changed a script the old code still relies on (for example the vendoring or SBOM
@@ -381,7 +391,7 @@ gh run list --workflow ci.yml --branch hotfix/<next> --limit 1   # wait until it
 
 Then tag the hotfix head. `tag-release.mjs` refuses unless the commit is the head of
 `hotfix/<next>`, the newest CI run on that exact commit (not the PR's run) has finished with
-all seven jobs green, and the owner's `agent-review` on it is success. A run that is queued or
+all eight jobs green, and the owner's `agent-review` on it is success. A run that is queued or
 still running is waited for; one that was cancelled, failed to start or has a failed job is
 refused, with the run id to re-run. The Release workflow also accepts only the head of
 `hotfix/<version>`:
@@ -578,9 +588,9 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 - `main` protection: a PR is required with one approving review (the owner cannot approve their
   own PRs, so the approval comes from `near-ai-reviewer`, posted by the agent review workflow),
   required checks `lint`, `test`, `e2e`,
-  `release-content`, `audit`, `secret-scan` and `relay` from GitHub Actions, plus `agent-review`
-  (CI also runs `docs`, which is not in this list yet: to require it, add
-  `{"context": "docs", "app_id": 15368}` to the checks below, and `docs` to `CI_CHECKS` in
+  `release-content`, `audit`, `secret-scan`, `relay` and `hub` from GitHub Actions, plus `agent-review`
+  (the owner adds `hub` after Phase 32 merges; CI also runs `docs`, which is not in this list yet: to
+  require it, add `{"context": "docs", "app_id": 15368}` to the checks below, and `docs` to `CI_CHECKS` in
   `scripts/lib/workflow.mjs` in a PR merged at the same time);
   branches must be up to date; admins included; linear history; no force pushes or deletion;
   conversations must be resolved.
@@ -599,7 +609,7 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
   owners can create one. A tag push runs the `release.yml` of the tagged commit, so this is what
   keeps an unreviewed commit from carrying its own release workflow.
 
-`main` protection (the seven CI checks are pinned to GitHub Actions, app id 15368, so another app
+`main` protection (the eight CI checks are pinned to GitHub Actions, app id 15368, so another app
 cannot report them):
 
 ```bash
@@ -609,7 +619,8 @@ gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
    {"context": "lint", "app_id": 15368}, {"context": "test", "app_id": 15368},
    {"context": "e2e", "app_id": 15368}, {"context": "release-content", "app_id": 15368},
    {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
-   {"context": "relay", "app_id": 15368}, {"context": "agent-review"}]},
+   {"context": "relay", "app_id": 15368}, {"context": "hub", "app_id": 15368},
+   {"context": "agent-review"}]},
  "enforce_admins": true,
  "required_pull_request_reviews": {"required_approving_review_count": 1, "dismiss_stale_reviews": true},
  "restrictions": null,

@@ -390,7 +390,7 @@ test('D-31 tracer: a project.import carrying a 300 KB legacy file and its signed
   assert.deepEqual([...result.applied].sort(), [genesis.hash, imported.hash].sort());
   assert.deepEqual([result.refused, result.held, result.rejected], [[], [], []]);
   assert.deepEqual(projectOf(result)[0].imports, [{
-    ledger: 'products', legacyHead: HASH('c'), count: 12, entry: imported.hash, member: 'mbr-lead', writer: world.writerOf('L1'), fileHash: sha256Hex(file), marked: true
+    ledger: 'products', legacyHead: HASH('c'), count: 12, entry: imported.hash, member: 'mbr-lead', writer: world.writerOf('L1'), fileHash: sha256Hex(file), marked: true, scope: 'whole'
   }]);
   // Without the blob the import waits for it and lists nothing.
   const withoutBlob = foldEntries([genesis.entry, imported.entry], world.ctx({ blobs: () => undefined }), REDUCERS);

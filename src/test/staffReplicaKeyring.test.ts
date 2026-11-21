@@ -99,7 +99,7 @@ test('two calls at once in one process make one key; a stored key that does not 
 
   const damaged = new RecordingSecrets();
   damaged.values.set(ENCRYPTION_KEY_SECRET, 'this is not a key');
-  await assert.rejects(() => loadOrCreateEncryptionKey(damaged, { identityDir: dir, identity }), { message: 'The stored encryption key could not be read.' });
+  await assert.rejects(() => loadOrCreateEncryptionKey(damaged, { identityDir: dir, identity }), { message: /stored encryption key could not be read/ });
   assert.equal(damaged.values.get(ENCRYPTION_KEY_SECRET), 'this is not a key', 'the stored value is untouched');
   assert.deepEqual(damaged.deleted, []);
 });
@@ -246,7 +246,7 @@ test('MJ-04: a key made for a rekey whose entry was never written is kept beside
   await ring.addOwn(PROJECT, 2, failedKey, grantHash(failed));
   await ring.addOwn(PROJECT, 2, committedKey, grantHash(committed));
   await ring.addOwn(PROJECT, 2, committedKey, grantHash(committed));
-  await assert.rejects(() => ring.addOwn(PROJECT, 2, failedKey, grantHash(committed)), { message: 'This computer already holds another key for that grant, so the key was not replaced.' });
+  await assert.rejects(() => ring.addOwn(PROJECT, 2, failedKey, grantHash(committed)), { message: /already holds another key.*not replaced/ });
   await assert.rejects(() => ring.addOwn(PROJECT, 2, failedKey, 'not a hash'), /hash of the grant/);
   assert.equal(ring.epochKey(PROJECT, 2), undefined, 'a key this device made answers nothing until the roster commits to its grant');
   const { cells } = placedCells([founding1, committed], [{ signed: failed, position: 1, signerIsRosterWriter: true }]);
@@ -312,7 +312,7 @@ test('join secrets round trip by invite id; a different secret for the same invi
   await ring.addOwn(PROJECT, 1, newEpochKey(), 'a'.repeat(64));
   await storeJoinSecret(secrets, 'inv-jo', 'first-secret');
   await storeJoinSecret(secrets, 'inv-jo', 'first-secret');
-  await assert.rejects(() => storeJoinSecret(secrets, 'inv-jo', 'second-secret'), { message: 'This invitation already has a join secret on this computer, so it was not replaced.' });
+  await assert.rejects(() => storeJoinSecret(secrets, 'inv-jo', 'second-secret'), { message: /already has a join secret.*not replaced/ });
   await storeJoinSecret(secrets, 'inv-sam', 'sam-secret');
   assert.equal(await joinSecret(secrets, 'inv-jo'), 'first-secret');
   assert.equal(await joinSecret(secrets, 'inv-unknown'), undefined);

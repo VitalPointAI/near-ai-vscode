@@ -147,6 +147,39 @@ reads them the same way. Your own settings on this computer can only make them s
   time each write their own findings file, which the lead combines, instead of writing parts of one
   shared file. Update Team offers the new research team wording.
 
+### Military staff teams
+
+- **Labelled products in shared staff projects.** A shared staff project now keeps each product
+  in a part of its own for its label, and gives that part only to the computers of people whose
+  declared clearance covers the label. The part every member holds carries only the list of
+  people, so it never holds product text. Products made without a label are `org/Internal`.
+- **Make This Staff Project Multi-User converts labelled projects.** Projects with products above
+  `org/Public` are no longer refused. You are asked to declare your own clearance first, and the
+  conversion is refused only for labels your declared clearance does not cover, naming the
+  products that carry them. The old product ledger and decision log are kept whole in a part only
+  you, and a deputy cleared for every label in them, can open.
+- **Projects made multi-user with 0.4.35 keep working.** Their products stay where they are. To
+  give those products parts of their own, make a single-machine copy and make that copy
+  multi-user again.
+- **The single-machine copy says what it left out.** A copy made on a computer that is not cleared
+  for every part of the project says "Parts of this project you are not cleared for were not
+  copied."
+- **Your organization can run a sync hub for multi-user staff projects.** The hub is a small
+  service in `hub/` that runs beside the relay, as its own service under the Compose profile
+  `hub`. It checks every change against the project's member list, sends changes and who is
+  active to members at once, and signs checkpoints. It holds no model credential, opens no
+  outbound connection and is never in the VSIX.
+- **The hub reads only the member list and the parts it is granted.** Everything else it stores
+  and passes on stays sealed. The staff lead grants it a part only after confirming that the hub,
+  and anyone who takes over its server, will be able to read that part.
+- **Members' computers notice a hub that misbehaves.** A hub that withholds changes, delays
+  them, rolls back to an older history or shows different people different histories is named on
+  the computers that see it, and a restore from an old backup is refilled by those computers.
+- **An operator guide for the hub.** `relay/README.md` covers certificates and pins, the secret
+  files, running it with Compose, hub files, backups, the restore drill and upgrades.
+- **Not usable from the editor yet.** This release ships the hub for operators only. Connecting a
+  staff project to it from the editor comes in a later release.
+
 
 ## 0.4.35
 

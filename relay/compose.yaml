@@ -1,5 +1,6 @@
-# The relay and its optional Signal sidecar. Run from the repository root:
+# The relay, its optional Signal sidecar and your organization's optional sync hub. Run from the repository root:
 #   docker compose -f relay/compose.yaml up -d --build
+# The hub has its own profile, settings, secrets and volume (see the hub service below); either service runs without the other.
 # Variables (all prefixed NEAR_AI_RELAY_ because the relay refuses unknown RELAY_ settings and an operator's shell may hold them):
 #   NEAR_AI_RELAY_IMAGE         image name to build and run (default near-ai-relay:local)
 #   NEAR_AI_RELAY_PUBLISH_PORT  host port on 127.0.0.1 (default 8080)
@@ -73,11 +74,78 @@ services:
     volumes:
       - signal-config:/home/.local/share/signal-cli
 
+  # Your organization's sync hub for shared staff projects (D-25). Off by default; start it alone, without the relay:
+  #   docker compose -f relay/compose.yaml --profile hub up -d hub
+  # Variables (prefixed NEAR_AI_HUB_ because the hub refuses unknown HUB_ settings and an operator's shell may hold them):
+  #   NEAR_AI_HUB_IMAGE            image name to build and run (default near-ai-hub:local)
+  #   NEAR_AI_HUB_PUBLISH_ADDRESS  host address the TLS port is published on (default 127.0.0.1, so nothing outside this machine reaches the
+  #                                hub until you choose an interface, D-31)
+  #   NEAR_AI_HUB_PUBLISH_PORT     host port (default 8443)
+  #   NEAR_AI_HUB_PUBLIC_ADDRESS   the host name or address, with an optional :port, that members' computers use to reach the hub; passed as
+  #                                HUB_PUBLIC_ADDRESS (empty means not set)
+  #   NEAR_AI_HUB_SECRETS_DIR      folder holding the hub's four secret files (default relay/secrets/hub)
+  # The four secret files: hub_tls_cert and hub_tls_key (your organization's certificate and its key, or a self-signed pair), and
+  # hub_signing_key and hub_encryption_key (each one line printed by: docker run --rm near-ai-hub:local /app/bin.mjs --generate-key signing,
+  # then the same with encryption). Compose ignores uid, gid and mode on file secrets and keeps the host file's owner and mode, so give each
+  # file to uid 65532 with mode 0400 (sudo chown 65532:65532 secrets/hub/*; sudo chmod 0400 secrets/hub/*). Never add those keys here.
+  # The hub ends TLS itself (D-29). A reverse proxy in front of it, if any, must pass TCP through and never end TLS, or members' computers
+  # cannot bind their session to the hub's.
+  hub:
+    profiles: ["hub"]
+    build:
+      context: ..
+      dockerfile: hub/Dockerfile
+    image: ${NEAR_AI_HUB_IMAGE:-near-ai-hub:local}
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: 512m
+    ports:
+      - "${NEAR_AI_HUB_PUBLISH_ADDRESS:-127.0.0.1}:${NEAR_AI_HUB_PUBLISH_PORT:-8443}:8443"
+    environment:
+      HUB_HOST: 0.0.0.0
+      HUB_PORT: "8443"
+      HUB_STATE_DIR: /var/lib/near-ai-hub
+      HUB_PUBLIC_ADDRESS: ${NEAR_AI_HUB_PUBLIC_ADDRESS:-}
+      HUB_TLS_CERT_FILE: /run/secrets/hub_tls_cert
+      HUB_TLS_KEY_FILE: /run/secrets/hub_tls_key
+      HUB_SIGNING_KEY_FILE: /run/secrets/hub_signing_key
+      HUB_ENCRYPTION_KEY_FILE: /run/secrets/hub_encryption_key
+    # The hub's database. Its keys are secret files, never in this volume (D-30).
+    volumes:
+      - hub-state:/var/lib/near-ai-hub
+    tmpfs:
+      - /tmp:size=16m,uid=65532,gid=65532,mode=0700
+    secrets:
+      - hub_tls_cert
+      - hub_tls_key
+      - hub_signing_key
+      - hub_encryption_key
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "/app/bin.mjs", "--healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 secrets:
-  # The file must exist before `up` (Compose cannot make a file secret optional).
+  # Each file must exist before `up` of the service that uses it (Compose cannot make a file secret optional). The relay needs no hub file
+  # and the hub needs no relay file.
   teams_app_secret:
     file: ${NEAR_AI_RELAY_SECRETS_DIR:-./secrets}/teams_app_secret
+  hub_tls_cert:
+    file: ${NEAR_AI_HUB_SECRETS_DIR:-./secrets/hub}/hub_tls_cert
+  hub_tls_key:
+    file: ${NEAR_AI_HUB_SECRETS_DIR:-./secrets/hub}/hub_tls_key
+  hub_signing_key:
+    file: ${NEAR_AI_HUB_SECRETS_DIR:-./secrets/hub}/hub_signing_key
+  hub_encryption_key:
+    file: ${NEAR_AI_HUB_SECRETS_DIR:-./secrets/hub}/hub_encryption_key
 
 volumes:
   relay-state:
   signal-config:
+  hub-state:
