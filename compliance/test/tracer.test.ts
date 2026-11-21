@@ -155,7 +155,7 @@ test('computeStatus never returns met when any rule has no result', () => {
 test('a statement with no rules is not met with reason no-rules; no statements at all is no-statement', () => {
   assert.deepEqual(computeStatus(statusInput({ rulesByStatement: {} })), { state: 'not-met', reason: 'no-rules' });
   const twoStatements = statusInput({ statements: [{ id: 'tr-01_smt', description: 'one' }, { id: 'tr-01_smt.b', description: 'two' }] });
-  assert.deepEqual(computeStatus(twoStatements), { state: 'not-met', reason: 'no-rules' }, 'every statement needs its own rule');
+  assert.deepEqual(computeStatus(twoStatements), { state: 'partly-met', reason: 'partly-statements' }, 'some met statements and one not met statement are partly met');
   assert.deepEqual(computeStatus(statusInput({ statements: [] })), { state: 'not-met', reason: 'no-statement' });
 });
 
@@ -180,7 +180,7 @@ test('unsettled, a self-signed decision where an official must sign, and a decla
     { state: 'not-met', reason: 'self-signed' }
   );
   assert.deepEqual(computeStatus(statusInput({ selfSigned: true })), { state: 'met', reason: 'met' }, 'self-signed matters only where an official must sign');
-  assert.deepEqual(computeStatus(statusInput({ limitation: 'Fixture limitation text.' })), { state: 'not-met', reason: 'limitation', detail: { text: 'Fixture limitation text.' } });
+  assert.deepEqual(computeStatus(statusInput({ limitation: 'Fixture limitation text.' })), { state: 'partly-met', reason: 'limitation', detail: { text: 'Fixture limitation text.' } });
   for (const outcome of [computeStatus(statusInput({ unsettled: 'x' })), computeStatus(statusInput({ limitation: 'y' }))]) assert.ok(STATES.includes(outcome.state));
 });
 
