@@ -1,0 +1,30 @@
+{
+  "families": {
+    "ac": { "responsibility": "shared", "reason": "The product enforces technical access decisions while your organization assigns people and permissions." },
+    "at": { "responsibility": "your-organization", "reason": "Your organization trains the people who use and administer the product." },
+    "au": { "responsibility": "shared", "reason": "The product records its own events while your organization operates and reviews its audit program." },
+    "ca": { "responsibility": "your-organization", "reason": "Your organization authorizes and assesses its deployment." },
+    "cm": { "responsibility": "shared", "reason": "The repository supplies controlled changes and your organization approves its release process." },
+    "cp": { "responsibility": "shared", "reason": "The product supplies recovery mechanisms and your organization owns continuity decisions." },
+    "ia": { "responsibility": "shared", "reason": "The product checks technical identities while your organization enrols and administers them." },
+    "ir": { "responsibility": "shared", "reason": "The product preserves technical incident material while your organization leads incident response." },
+    "ma": { "responsibility": "your-organization", "reason": "Your organization maintains the computers where the product runs." },
+    "mp": { "responsibility": "your-organization", "reason": "Your organization manages media and its physical handling." },
+    "pe": { "responsibility": "your-organization", "reason": "Your organization controls facilities and physical access." },
+    "pl": { "responsibility": "shared", "reason": "The product supplies planning inputs and your organization owns its plans." },
+    "pm": { "responsibility": "your-organization", "reason": "Your organization operates the security program." },
+    "ps": { "responsibility": "your-organization", "reason": "Your organization performs personnel screening and management." },
+    "pt": { "responsibility": "your-organization", "reason": "Your organization governs privacy obligations." },
+    "ra": { "responsibility": "shared", "reason": "The product supplies technical risk evidence and your organization accepts and treats risk." },
+    "sa": { "responsibility": "shared", "reason": "The product supplies development evidence and your organization governs acquisition decisions." },
+    "sc": { "responsibility": "shared", "reason": "The product supplies technical safeguards and your organization configures the environment." },
+    "si": { "responsibility": "shared", "reason": "The product detects and corrects its technical conditions while your organization runs operations." },
+    "sr": { "responsibility": "shared", "reason": "The repository supplies supply-chain evidence and your organization selects and accepts suppliers." },
+    "itsp171": { "responsibility": "your-organization", "reason": "This overlay records organization obligations until later content work supplies statements." },
+    "cgp": { "responsibility": "your-organization", "reason": "Your organization remains accountable for controlled-goods decisions." },
+    "itar": { "responsibility": "your-organization", "reason": "Your organization remains accountable for export-control decisions." },
+    "ear": { "responsibility": "your-organization", "reason": "Your organization remains accountable for export-control decisions." },
+    "bcc": { "responsibility": "shared", "reason": "The product and your organization share baseline cyber-centre safeguards." }
+  },
+  "exceptions": []
+}

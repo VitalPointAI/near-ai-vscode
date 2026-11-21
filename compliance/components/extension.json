@@ -1,0 +1,18 @@
+{
+  "component-definition": {
+    "uuid": "2479263e-bbf8-4ebd-93c6-598e9e806b8e",
+    "metadata": { "title": "Near AI for VS Code extension", "last-modified": "2026-11-21T00:00:00Z", "version": "0.1.0", "oscal-version": "1.2.1" },
+    "components": [{
+      "uuid": "f8ae2380-33e6-4dc8-87b2-ccfef0d80e34", "type": "software", "title": "Extension", "description": "The locally installed VS Code extension.",
+      "props": [{ "name": "component-id", "ns": "urn:near-ai-vscode:compliance", "value": "extension" }],
+      "control-implementations": [{
+        "uuid": "d55a638d-f760-436d-8b9c-8fa08bc0c8f8", "source": "catalogs/itsp-10-033/catalog.json", "description": "Statements about the extension.",
+        "implemented-requirements": [{
+          "uuid": "33be1778-a005-4a66-a043-82a9b662193b", "control-id": "ac-03", "description": "The gate decides each request before the settings layer can allow it.",
+          "props": [{ "name": "responsibility", "ns": "urn:near-ai-vscode:compliance", "value": "product" }],
+          "statements": [{ "uuid": "d9774e0e-c2f4-4b67-a1ca-6e2970880bd6", "statement-id": "ac-03_smt.gate", "description": "The extension sends each tool request through its gate decision function. The floor remains enforced and no setting can turn it off.", "remarks": "Your organization assigns the approvals and grants the gate evaluates." }]
+        }]
+      }]
+    }]
+  }
+}

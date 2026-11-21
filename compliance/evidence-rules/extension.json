@@ -1,0 +1,6 @@
+{
+  "rules": [{
+    "id": "extension.ac-03.gate-decision", "component": "extension", "control": "ac-03", "statement": "ac-03_smt.gate", "kind": "test",
+    "test": { "file": "src/test/gateDecide.test.ts", "path": [], "name": "tracer: a protected write in fully-autonomous goes through decide() to an ask with no grant, and comes out as a valid decision record" }
+  }]
+}
