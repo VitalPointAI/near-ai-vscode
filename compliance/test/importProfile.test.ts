@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { importSource } from '../src/import/itsp-10-033-01.ts';
+import type { Fetcher } from '../src/import/lib/fetch.ts';
 import { validateOscal } from '../src/validate.ts';
 
 const en = readFileSync(new URL('./fixtures/import/itsp1003301/profile-en.html', import.meta.url), 'utf8');
@@ -30,6 +31,15 @@ test('returns an OSCAL 1.2.1 profile importing the ITSP catalogue', async () => 
   assert.equal(profile.profile.metadata['oscal-version'], '1.2.1');
   assert.equal(profile.profile.imports[0].href, '../catalogs/itsp-10-033/catalog.json');
   assert.deepEqual(validateOscal(profile, 'profile', { ours: true }), { ok: true, errors: [] });
+});
+
+test('live mode uses the injected guarded fetcher and declares profile/report destinations', async () => {
+  const calls: string[] = [];
+  const fetcher: Fetcher = { get: async (url) => { calls.push(url); return { url, body: Buffer.from(calls.length === 1 ? en : fr), status: 200 }; } };
+  const live = await importSource({ fetcher, lang: 'both' });
+  assert.equal(live.file, 'profiles/itsp-10-033-01-medium.json');
+  assert.equal(live.reportFile, 'import-reports/itsp-10-033-01.json');
+  assert.equal(calls.length, 2);
 });
 
 test('records the French page rows that differ from the English selections', async () => {
