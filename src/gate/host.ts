@@ -738,14 +738,14 @@ export class GateHost {
     }
   }
 
-  /** The route policy of a request decided now (D-36): from this host's own layers; one that cannot be worked out gives none, decided as the patch did. */
+  /**
+   * The route policy of a request decided now (D-36): from this host's own layers, or none when no effective policy is in force (a failed-closed state
+   * already routes with the failed-closed table). A policy that cannot be worked out throws, so the client refuses the request as a failed route check
+   * (route.deny); it is never decided as if no policy existed (WR-02).
+   */
   private routePolicyNow(now: number): RoutePolicyNow | undefined {
-    try {
-      const layers = this.policyLayers();
-      return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
-    } catch {
-      return undefined;
-    }
+    const layers = this.policyLayers();
+    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
   }
 
   /**
