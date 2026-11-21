@@ -13,3 +13,7 @@ test('generator starts with empty gap output until bundle enrichment', () => ass
 test('generator starts with empty collector output until bundle enrichment', () => assert.deepEqual(buildDashboard(input()).collectors, []));
 test('generator starts with empty matrix output until bundle enrichment', () => assert.deepEqual(buildDashboard(input()).matrix, []));
 test('generator stamps its dashboard schema version', () => assert.equal(buildDashboard(input()).schemaVersion, 1));
+test('generator preserves the source kind for readers', () => assert.equal(buildDashboard(input()).source.kind, 'main'));
+test('generator has no text index before official text is emitted', () => assert.deepEqual(buildDashboard(input()).textIndex, []));
+test('generator has no refused acceptances without a bundle acceptance check', () => assert.deepEqual(buildDashboard(input()).refusedAcceptances, []));
+test('generator preserves its commit as the dashboard head', () => assert.equal(buildDashboard(input()).commit, commit));
