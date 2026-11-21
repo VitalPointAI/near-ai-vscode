@@ -2,7 +2,7 @@
 // under gate/organization/, the layered load every decision reads, and the host's accept, Apply and Reset. Real files in temp folders and in-memory
 // secret stores; every key is made at test time from a label (policyFixtures). Fictional names only. The host tests live here: there is no gateHost file.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -15,7 +15,7 @@ import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore'
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
 import {
-  ENROLMENT_RECORD_FILE, NOT_ENROLLED_TEXT, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, migrationNoticeText,
+  DAMAGED_PIN_TEXT, ENROLMENT_RECORD_FILE, NOT_ENROLLED_TEXT, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, migrationNoticeText,
   previewOrganizationFile, setOrganizationWriteProbe
 } from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
@@ -215,7 +215,7 @@ test('D-13: a crash after the layer file and before the pin leaves this computer
   });
 });
 
-test('D-13: a pending pin with no layer file is not enrolled; a layer file with no pin is ignored', async () => {
+test('D-13, CR-01: a pending pin with no layer file is not enrolled; a layer file with no pin fails closed as a damaged pin', async () => {
   await withWorld(async (world) => {
     const pending = { kind: 'enrol', publicKey: issuerKey().publicKey, serial: 1, issuedAt: new Date(FIXED_NOW).toISOString(), layerHash: 'a'.repeat(64) };
     await world.secrets.store(ORGANIZATION_ISSUER_SECRET, JSON.stringify({ v: 1, pending }));
@@ -225,15 +225,21 @@ test('D-13: a pending pin with no layer file is not enrolled; a layer file with 
     assert.notEqual(levelOf(host, 'org/Internal'), 'local-only');
   });
   await withWorld(async (world) => {
-    // This computer has its own policy; then a rules file appears with no pin (a disk writer, or a first enrolment that never committed).
+    // This computer has its own policy; then a rules file appears with no pin. A first enrolment that never committed leaves its pending pin (above),
+    // so files with no pin at all mean the pin was lost: the whole policy fails closed, never the personal layer alone (CR-01).
     assert.equal((await hostOf(world).start()).state, 'valid');
     await mkdir(organizationFolder(world), { recursive: true });
+    const empty = hostOf(world);
+    assert.equal((await empty.start()).state, 'valid', 'an empty organization folder says nothing (allowed side)');
+    assert.equal(empty.policyLayers().organization.state, 'none');
     const text = rulesTextFor(issuerKey(), sectionsWith('org/Public', 'local-only'));
     await writeFile(layerFile(world), text);
     const host = hostOf(world);
-    assert.equal((await host.start()).state, 'valid');
-    assert.equal(host.policyLayers().organization.state, 'none', 'a layer with no pin is ignored');
-    assert.equal(levelOf(host, 'org/Public'), 'any-cloud');
+    const failed = failedOf(await host.start());
+    assert.equal(failed.sentence, DAMAGED_PIN_TEXT);
+    assert.equal(failed.ownPolicy, undefined, 'never the personal layer\'s reset mark');
+    const view = host.policyLayers().organization;
+    assert.equal(view.state === 'failed' ? view.reason : view.state, 'damaged-pin');
     assert.equal(await readFile(layerFile(world), 'utf8'), text, 'and left on disk as it was');
   });
 });
@@ -598,5 +604,190 @@ test('a preview reads a file the way accept does, with the words for an enrolmen
     assert.equal(await exists(organizationFolder(world)), false, 'nothing was written');
     await host.acceptOrganizationFile(enrolment, { wordsConfirmed: true });
     assert.equal((await previewOrganizationFile(world.storage, world.secrets, enrolment, world.clock.now)).kind, 'same');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Code review fixes (41-REVIEW.md CR-01, WR-01, IN-01)
+
+test('CR-01: the pin removed from secret storage while your organization\'s rules are on disk fails closed, and opening the enrolment file again repairs it', async () => {
+  await withWorld(async (world) => {
+    await enrolled(world);
+    world.secrets.values.delete(ORGANIZATION_ISSUER_SECRET);
+    const next = hostOf(world);
+    const failed = failedOf(await next.start());
+    assert.equal(failed.sentence, DAMAGED_PIN_TEXT);
+    assert.equal(failed.ownPolicy, undefined, 'never the personal layer\'s reset mark');
+    assert.equal(next.policyLayers().failedLayer, 'organization');
+    const view = next.policyLayers().organization;
+    assert.equal(view.state === 'failed' ? view.reason : view.state, 'damaged-pin', 'not the personal layer alone');
+
+    // The way out the sentence names: the enrolment file, its words compared again (allowed side).
+    const preview = await previewOrganizationFile(world.storage, world.secrets, enrolmentTextFor(issuerKey()), world.clock.now);
+    assert.equal(preview.kind, 'enrol');
+    assert.equal((await next.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true })).state, 'valid');
+    assert.equal(levelOf(next, 'org/Internal'), 'local-only');
+    assert.equal(pinOf(world)?.['pending'], undefined);
+  });
+});
+
+test('CR-01, D-57: a crash while enrolling again over a lost pin still fails closed; only a first enrolment\'s crash reads as not enrolled', async () => {
+  await withWorld(async (world) => {
+    await enrolled(world);
+    world.secrets.values.delete(ORGANIZATION_ISSUER_SECRET);
+    const host = hostOf(world);
+    assert.equal((await host.start()).state, 'failed-closed');
+    setOrganizationWriteProbe((step) => { if (step === 'layer-written') throw new Error('the window closed'); });
+    await assert.rejects(host.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true }), /the window closed/);
+    setOrganizationWriteProbe(undefined);
+    assert.equal(world.secrets.values.has(ORGANIZATION_ISSUER_SECRET), false, 'no pending pin is stored over a lost pin');
+
+    const after = hostOf(world);
+    assert.equal(failedOf(await after.start()).sentence, DAMAGED_PIN_TEXT, 'still failed closed, never the personal layer alone');
+    assert.equal((await after.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true })).state, 'valid', 'the next confirmed enrolment repairs it');
+    assert.equal(levelOf(after, 'org/Internal'), 'local-only');
+  });
+  await withWorld(async (world) => {
+    // A pin that does not read is repaired the same way, and a crash during that keeps it failed closed too.
+    await enrolled(world);
+    await world.secrets.store(ORGANIZATION_ISSUER_SECRET, '{ "not": "a pin" }');
+    const host = hostOf(world);
+    assert.equal(failedOf(await host.start()).sentence, DAMAGED_PIN_TEXT);
+    setOrganizationWriteProbe((step) => { if (step === 'layer-written') throw new Error('the window closed'); });
+    await assert.rejects(host.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true }), /the window closed/);
+    setOrganizationWriteProbe(undefined);
+    assert.equal(failedOf(await hostOf(world).start()).sentence, DAMAGED_PIN_TEXT);
+  });
+});
+
+test('CR-01, D-57: a first enrolment whose files cannot be taken back keeps its pending pin, so it reads as not enrolled rather than a lost pin', async () => {
+  await withWorld(async (world) => {
+    const host = hostOf(world);
+    await host.start();
+    const store = world.secrets.store.bind(world.secrets);
+    let failCommit = false;
+    world.secrets.store = async (key: string, value: string): Promise<void> => {
+      if (failCommit && key === ORGANIZATION_ISSUER_SECRET && !value.includes('"pending"')) throw new Error('the secret store refused');
+      await store(key, value);
+    };
+    setOrganizationWriteProbe(async (step) => {
+      if (step !== 'layer-written') return;
+      // The files cannot be removed (a read-only folder), and the commit of the pin fails.
+      await chmod(organizationFolder(world), 0o500);
+      failCommit = true;
+    });
+    try {
+      await assert.rejects(host.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true }), (error: unknown) => {
+        assert.ok(error instanceof OrganizationStoreError);
+        assert.match(error.message, /^Nothing was changed/);
+        return true;
+      });
+    } finally {
+      setOrganizationWriteProbe(undefined);
+      failCommit = false;
+      await chmod(organizationFolder(world), 0o700);
+    }
+    const left = await readdir(organizationFolder(world));
+    if (left.length > 0) assert.equal((pinOf(world)?.['pending'] as { kind?: string } | undefined)?.kind, 'enrol', 'files left behind keep the pending first enrolment');
+    const after = hostOf(world);
+    assert.equal((await after.start()).state, 'valid', 'never a lock-out');
+    assert.equal(after.policyLayers().organization.state, 'none', 'not enrolled');
+    assert.equal((await after.acceptOrganizationFile(enrolmentTextFor(issuerKey()), { wordsConfirmed: true })).state, 'valid', 'and enrolling again works');
+    assert.equal(levelOf(after, 'org/Internal'), 'local-only');
+  });
+});
+
+test('WR-01: the rules file and record missing from this computer are written again from the enrolment file in use, without moving the pin', async () => {
+  await withWorld(async (world) => {
+    await enrolled(world);
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    const enrolment = enrolmentTextFor(issuerKey());
+    assert.equal((await previewOrganizationFile(world.storage, world.secrets, enrolment, world.clock.now)).kind, 'same', 'intact files: nothing to do (allowed side)');
+    await rm(layerFile(world));
+    await rm(path.join(organizationFolder(world), ENROLMENT_RECORD_FILE));
+    const host = hostOf(world);
+    assert.equal(failedOf(await host.start()).reason, 'missing');
+
+    assert.equal(String((await previewOrganizationFile(world.storage, world.secrets, enrolment, world.clock.now)).kind), 'repair');
+    assert.equal((await host.acceptOrganizationFile(enrolment, {})).state, 'valid', 'no words: the file is the one the pin names');
+    assert.equal(levelOf(host, 'org/Internal'), 'local-only');
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin, 'the pin did not move');
+    assert.equal(await exists(path.join(organizationFolder(world), ENROLMENT_RECORD_FILE)), true, 'the record is written again');
+    assert.ok((await installOperations(host, world)).includes('policy.organization-updated'));
+
+    const next = hostOf(world);
+    assert.equal((await next.start()).state, 'valid', 'and at the next start');
+    const view = next.policyLayers().organization;
+    assert.equal(view.state === 'valid' ? view.name : undefined, EXAMPLE_ORGANIZATION.name);
+    assert.equal((await previewOrganizationFile(world.storage, world.secrets, enrolment, world.clock.now)).kind, 'same');
+  });
+});
+
+test('WR-01: a rules file replaced by an older signed one is written again from the current rules file; the older one is still refused', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    const old = await readFile(layerFile(world), 'utf8');
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const current = rulesTextFor(issuerKey(), sectionsWith('org/Public', 'attested-cloud'), { now: FIXED_NOW + DAY_MS });
+    assert.equal((await host.acceptOrganizationFile(current, {})).state, 'valid');
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    await writeFile(layerFile(world), old);
+    const next = hostOf(world);
+    assert.equal(failedOf(await next.start()).reason, 'replaced');
+
+    await assert.rejects(next.acceptOrganizationFile(old, {}), (error: unknown) => error instanceof OrganizationStoreError && error.reason === 'older', 'the older file is refused (refused side)');
+    assert.equal(String((await previewOrganizationFile(world.storage, world.secrets, current, world.clock.now)).kind), 'repair');
+    assert.equal((await next.acceptOrganizationFile(current, {})).state, 'valid');
+    assert.equal(levelOf(next, 'org/Public'), 'attested-cloud');
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin, 'the pin did not move');
+    assert.equal((await hostOf(world).start()).state, 'valid', 'and at the next start');
+  });
+});
+
+test('WR-01, D-57: an update that stops after the old layer is kept aside and before the new one is written leaves the old rules in force, never missing', async () => {
+  await withWorld(async (world) => {
+    const host = await enrolled(world);
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const newer = rulesTextFor(issuerKey(), sectionsWith('org/Public', 'attested-cloud'), { now: FIXED_NOW + DAY_MS });
+    setOrganizationWriteProbe((step, kind) => { if (String(step) === 'old-kept' && kind === 'update') throw new Error('the window closed'); });
+    await assert.rejects(host.acceptOrganizationFile(newer, {}), /the window closed/);
+    setOrganizationWriteProbe(undefined);
+    assert.equal(await exists(layerFile(world)), true, 'the layer file is never missing');
+
+    const next = hostOf(world);
+    assert.equal((await next.start()).state, 'valid', 'the old rules, not failed closed as missing');
+    assert.equal(levelOf(next, 'org/Internal'), 'local-only');
+    assert.equal(levelOf(next, 'org/Public'), 'any-cloud', 'the update did not happen');
+    assert.equal((await next.acceptOrganizationFile(newer, {})).state, 'valid', 'and can be given again');
+    assert.equal(levelOf(next, 'org/Public'), 'attested-cloud');
+    assert.equal(pinOf(world)?.['pending'], undefined);
+  });
+});
+
+test('IN-01: a same-key enrolment update keeps the higher serial, so a handover made before it and abandoned is refused', async () => {
+  await withWorld(async (world) => {
+    const old = issuerKey('serial-old');
+    const fresh = issuerKey('serial-new');
+    const host = hostOf(world);
+    await host.start();
+    assert.equal((await host.acceptOrganizationFile(enrolmentTextFor(old), { wordsConfirmed: true })).state, 'valid');
+    world.clock.now = FIXED_NOW + DAY_MS;
+    // Your organization made a handover (serial 2), abandoned it, and sent the old key's own enrolment file again (serial 3) with newer rules.
+    const abandoned = rotationTextFor(old, fresh, { now: FIXED_NOW + DAY_MS, serial: 2 });
+    const update = enrolmentTextFor(old, { now: FIXED_NOW + DAY_MS, serial: 3, sections: sectionsWith('org/Public', 'attested-cloud') });
+    assert.equal((await host.acceptOrganizationFile(update, {})).state, 'valid');
+    assert.equal(pinOf(world)?.['serial'], 3, 'the higher serial is kept');
+    assert.equal(levelOf(host, 'org/Public'), 'attested-cloud');
+
+    const preview = await previewOrganizationFile(world.storage, world.secrets, abandoned, world.clock.now);
+    assert.equal(preview.kind === 'refused' ? preview.reason : preview.kind, 'older-file');
+    await assert.rejects(host.acceptOrganizationFile(abandoned, { wordsConfirmed: true }), (error: unknown) => error instanceof OrganizationStoreError && error.reason === 'older-file');
+    assert.equal(pinOf(world)?.['publicKey'], old.publicKey, 'the abandoned handover did not apply');
+
+    // A handover made after the update (serial 4) is taken (allowed side).
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    assert.equal((await host.acceptOrganizationFile(rotationTextFor(old, fresh, { now: FIXED_NOW + 2 * DAY_MS, serial: 4 }), { wordsConfirmed: true })).state, 'valid');
+    assert.equal(pinOf(world)?.['publicKey'], fresh.publicKey);
+    assert.equal(pinOf(world)?.['serial'], 4);
   });
 });
