@@ -34,10 +34,10 @@ export async function run(argv: readonly string[], context: { readonly fetcher?:
   const outRoot = outIndex === -1 ? 'compliance' : options[outIndex + 1];
   const lang = langIndex === -1 ? 'both' : options[langIndex + 1];
   if (!outRoot || (offlineIndex !== -1 && !options[offlineIndex + 1]) || !['en', 'fr', 'both'].includes(lang)) return 2;
-  const importer = await import(`../import/${moduleName}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both'; readonly fetcher?: Fetcher }) => Promise<ImportResult> };
+  const importer = await import(`../import/${moduleName}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both'; readonly outRoot?: string; readonly fetcher?: Fetcher }) => Promise<ImportResult> };
   if (!importer.importSource) return 2;
   const offlinePages = offlineIndex === -1 ? undefined : JSON.parse(readFileSync(path.join(options[offlineIndex + 1], 'pages.json'), 'utf8')) as Record<string, string>;
-  const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both', fetcher: context.fetcher });
+  const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both', outRoot, fetcher: context.fetcher });
   writeImportResult(outRoot, result, SOURCE_REGISTRY);
   if (result.rawBytes) writeRawResult(outRoot, result.file ?? path.join('catalogs', `${result.sourceId}.json`), result.rawBytes);
   const reports = result.reports ?? (result.reportFile ? [{ file: result.reportFile, content: result.report }] : []);
