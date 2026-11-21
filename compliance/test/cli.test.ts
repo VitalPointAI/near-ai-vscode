@@ -1,2 +1,2 @@
 import assert from 'node:assert/strict'; import { test } from 'node:test'; import { main } from '../src/cli.ts';
-test('unknown command exits two',async()=>assert.equal(await main(['nosuch']),2)); test('missing command exits two',async()=>assert.equal(await main([]),2)); test('invalid command names exit two',async()=>assert.equal(await main(['../licence-check']),2));
+test('unknown command exits two',async()=>assert.equal(await main(['nosuch']),2)); test('missing command exits two',async()=>assert.equal(await main([]),2)); test('invalid command names exit two',async()=>assert.equal(await main(['../licence-check']),2)); test('registered cross-check validates its required paths', async()=>assert.equal(await main(['cross-check']),2));
