@@ -31,9 +31,25 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const ALLOWED_HOSTS = new Set(['repo1.maven.org', 'github.com']);
 const ARCHIVES = new Set(['zip', 'tar.gz']);
 
-test('only known CI binaries are pinned, oscal-cli among them', () => {
-  for (const name of Object.keys(pins)) assert.ok(['grype', 'oscal-cli', 'syft'].includes(name), `unexpected tool ${name}`);
-  assert.ok(Object.hasOwn(pins, 'oscal-cli'));
+test('exactly the three CI binaries are pinned: oscal-cli, syft and grype', () => {
+  assert.deepEqual(Object.keys(pins).sort(), ['grype', 'oscal-cli', 'syft']);
+});
+
+test('syft is 1.57.2 and grype is 0.122.1, linux amd64 tarballs from their immutable GitHub releases', () => {
+  const expected = {
+    syft: { version: '1.57.2', sha256: 'ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b' },
+    grype: { version: '0.122.1', sha256: 'f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538' }
+  } as const;
+  for (const [name, want] of Object.entries(expected)) {
+    const pin = pins[name];
+    const release = `https://github.com/anchore/${name}/releases/download/v${want.version}/`;
+    assert.equal(pin.version, want.version, `${name}: version`);
+    assert.equal(pin.url, `${release}${name}_${want.version}_linux_amd64.tar.gz`, `${name}: url`);
+    assert.equal(pin.checksumUrl, `${release}${name}_${want.version}_checksums.txt`, `${name}: checksums file`);
+    assert.equal(pin.sha256, want.sha256, `${name}: sha256`);
+    assert.equal(pin.archive, 'tar.gz');
+    assert.equal(pin.bin, name);
+  }
 });
 
 test('every tool has a semantic version, an https address on Maven Central or GitHub, a 64-hex SHA-256 and a known archive kind', () => {
@@ -88,4 +104,34 @@ test('the installer reads the address and hash for the named tool from tool-pins
   assert.match(installerCode, /tool-pins\.json/);
   assert.match(installerCode, /^set -eu$/m);
   assert.match(installer, /^#!\/bin\/sh$/m);
+});
+
+// Trestle (D-04): installed in CI with --require-hashes --no-deps, so every wheel must be listed, pinned and hashed.
+const requirements = readFileSync(path.join(CI_DIR, 'trestle-requirements.txt'), 'utf8');
+const requirementLines = requirements
+  .split('\n')
+  .map((line) => line.trim())
+  .filter((line) => line !== '' && !line.startsWith('#'));
+const REQUIREMENT = /^([a-z0-9]+(?:-[a-z0-9]+)*)==([A-Za-z0-9.]+)((?:\s+--hash=sha256:[0-9a-f]{64})+)$/;
+
+test('every non-comment line of trestle-requirements.txt is name==version with at least one --hash=sha256: of 64 hex', () => {
+  assert.ok(requirementLines.length >= 10, 'the transitive wheels are listed, not only Trestle');
+  for (const line of requirementLines) {
+    assert.match(line, REQUIREMENT, line);
+    assert.match(line, /--hash=sha256:[0-9a-f]{64}/, line);
+  }
+  assert.doesNotMatch(requirements, /\\\s*$/m, 'no line continuations that could hide a line from this check');
+});
+
+test('trestle-requirements.txt pins compliance-trestle 5.2.0 once, lists each package once, with no markers, extras or options', () => {
+  assert.equal(requirementLines.filter((line) => line.startsWith('compliance-trestle==')).length, 1);
+  assert.ok(requirementLines.includes(
+    'compliance-trestle==5.2.0 --hash=sha256:f13bbfcb6d947758a6838b8595f479c8d9ab699589f6d6ee93e64ab383999d18'
+  ));
+  const names = requirementLines.map((line) => line.split('==')[0]);
+  assert.equal(new Set(names).size, names.length, 'no package is listed twice');
+  for (const line of requirementLines) assert.doesNotMatch(line, /[;[\]@]|^-|\s-[^-]|--(?!hash=)/, line);
+  for (const needed of ['pydantic', 'pydantic-core', 'cryptography', 'paramiko', 'ruamel-yaml', 'securesystemslib']) {
+    assert.ok(names.includes(needed), `${needed} is pinned`);
+  }
 });
