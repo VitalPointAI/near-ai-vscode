@@ -11,7 +11,7 @@ import { buildDashboard } from '../src/dashboard.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const report = () => readFileSync(path.join(ROOT, 'compliance', 'test', 'fixtures', 'content', 'gate-report.ndjson'), 'utf8').trim().split('\n').map(JSON.parse);
+const report = () => readFileSync(path.join(ROOT, 'compliance', 'test', 'fixtures', 'content', 'gate-report.ndjson'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 const input = (rows = report()) => ({ commit: 'a'.repeat(40), head: 'a'.repeat(40), generatedAt: '2026-11-21T00:00:00Z', now: new Date('2026-11-21T00:00:00Z'), levels: [{ id: 'protected-b', title: 'Protected B', controls: ['ac-03'], components: ['extension'] }], components: loadComponents(path.join(ROOT, 'compliance', 'components')).components, rules: loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules')), observations: [], testRows: rows });
 
 test('a real extension statement, rule, and gate report exist for ac-03', () => {
