@@ -6,11 +6,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProductTextOutput } from '../domain/replica/textFold';
-import type { LiveReplicator, LiveStatus } from '../staff/replica/liveReplicator';
+import { HubTransportError } from '../staff/replica/hubTransport';
+import type { LiveReplicator, LiveStatus, LiveTransport } from '../staff/replica/liveReplicator';
 import { ProductEditor } from '../staff/replica/productEditing';
 import type { ReplicaProject } from '../staff/replica/replicaProject';
 import { HUB_NODE_REASON, hubNodeOrSkip, hubNodeRule, startHubChild } from './helpers/hubChild';
-import { createLiveWorld } from './helpers/liveWorld';
+import { FakeTimers, createLiveWorld, settle } from './helpers/liveWorld';
 
 const SENTENCE = 'Enemy forces hold the bridge.';
 const PRODUCT = 'intel-estimate';
@@ -148,6 +149,132 @@ test('tracer: A types one sentence, it is stored first, pushed through a real hu
       assert.equal(ra.status.state, 'live');
       assert.equal(rb.status.state, 'live');
       await reaches(rb, (status) => status.pulled >= 2, 'B stored the registration and the update');
+      editor.close();
+    } finally {
+      await world.close();
+    }
+  } finally {
+    await server.dispose();
+  }
+});
+
+/** A transport whose server never answers: every call waits until close(), which ends it as unreachable. Counts opens and closes. */
+function silentServer(project: string, hub: string): { open: () => LiveTransport; opened: () => number; closed: () => number } {
+  let opened = 0;
+  let closed = 0;
+  const open = (): LiveTransport => {
+    opened += 1;
+    const waiting: Array<(error: Error) => void> = [];
+    let gone = false;
+    const never = <T>(): Promise<T> => new Promise<T>((_, reject) => { if (gone) reject(new HubTransportError('unreachable')); else waiting.push(reject); });
+    const transport = {
+      project,
+      hub,
+      hubHeads: () => never(),
+      entries: () => never(),
+      append: () => never(),
+      getBlob: () => never(),
+      grant: () => never(),
+      askCheckpoint: () => never(),
+      events: () => never(),
+      close: () => {
+        closed += 1;
+        gone = true;
+        for (const reject of waiting.splice(0)) reject(new HubTransportError('unreachable'));
+      }
+    };
+    return transport as unknown as LiveTransport;
+  };
+  return { open, opened: () => opened, closed: () => closed };
+}
+
+test('the replicator gives up connecting after its give-up time, retries on its timers with back-off, and Sync Now retries at once from 1 s again', async () => {
+  const world = await createLiveWorld({ people: [{ label: 'gale', name: 'Avery Lead' }] });
+  try {
+    const timers = new FakeTimers();
+    const hubWriter = 'e'.repeat(64);
+    const server = silentServer(world.lead.project.projectId, hubWriter);
+    const seen: LiveStatus[] = [];
+    const replicator = world.replicator(world.lead, {
+      hub: { id: 'hub-0011223344556677', writer: hubWriter, certPin: 'f'.repeat(64) }, address: () => Promise.resolve('127.0.0.1:9'),
+      open: server.open, timers, now: () => timers.date(), giveUpMs: 3000
+    });
+    replicator.onStatus((status) => seen.push(status));
+    await replicator.start();
+    await settle();
+    assert.equal(replicator.status.state, 'connecting');
+    assert.equal(server.opened(), 1);
+    await timers.advance(2999);
+    assert.equal(replicator.status.state, 'connecting', 'not before the give-up time');
+    await timers.advance(1);
+    assert.equal(replicator.status.state, 'offline');
+    assert.equal(replicator.status.reason, 'timeout');
+    assert.equal(replicator.status.retryAt, timers.now() + 1000);
+    assert.equal(server.closed(), 1, 'the connection that never answered is closed');
+    await timers.advance(1000);
+    assert.equal(replicator.status.state, 'connecting', 'the timed retry');
+    assert.equal(server.opened(), 2);
+    await timers.advance(3000);
+    assert.equal(replicator.status.state, 'offline');
+    assert.equal(replicator.status.retryAt, timers.now() + 2000, 'the second wait doubles');
+    replicator.syncNow();
+    await settle();
+    assert.equal(replicator.status.state, 'connecting', 'Sync Now retries at once');
+    assert.equal(server.opened(), 3);
+    await timers.advance(3000);
+    assert.equal(replicator.status.retryAt, timers.now() + 1000, 'after Sync Now the wait is 1 s again');
+    assert.ok(seen.some((status) => status.state === 'offline' && status.retryAt !== undefined), 'every change is reported with its retry time');
+    await replicator.stop();
+    assert.equal(replicator.status.state, 'single-machine');
+    assert.equal(timers.pending, 0, 'stop leaves no timer');
+  } finally {
+    await world.close();
+  }
+});
+
+test('offline and back over the real hub: B shows offline within the give-up time when the hub stops, A\'s change made offline is kept, and Sync Now brings both back live', async (t) => {
+  const node = hubNodeOrSkip(t);
+  if (node === undefined) return;
+  const server = await startHubChild(node);
+  try {
+    const world = await createLiveWorld({ people: [{ label: 'avery', name: 'Avery Lead' }, { label: 'blake', name: 'Blake Rivers' }], hub: { fileText: await server.hubFileText() } });
+    try {
+      const [a, b] = world.devices;
+      const logA: string[] = [];
+      const logB: string[] = [];
+      const giveUpMs = 3000;
+      const ra = world.replicator(a, { log: (line) => logA.push(line), giveUpMs });
+      const rb = world.replicator(b, { log: (line) => logB.push(line), giveUpMs });
+      await ra.start();
+      await until(ra, 'live');
+      await rb.start();
+      await until(rb, 'live');
+      await logged(logA, 'exchange stream-open done synced');
+      await logged(logB, 'exchange stream-open done synced');
+
+      const stoppedAt = Date.now();
+      await server.stop();
+      await until(rb, 'offline', giveUpMs);
+      const tookMs = Date.now() - stoppedAt;
+      assert.ok(tookMs <= giveUpMs, `B showed offline after ${tookMs} ms`);
+      await until(ra, 'offline', giveUpMs);
+      assert.ok(rb.status.retryAt !== undefined, 'offline names when it tries again');
+
+      // A types while the server is gone: the change is stored on A and waits there.
+      const stream = a.project.projectId;
+      const text = 'The bridge is held at dawn.';
+      const editor = await ProductEditor.open(a.project, { stream, product: PRODUCT, actor: { kind: 'person' } }, { onAppended: () => ra.localAppended() });
+      editor.insert(0, text);
+      assert.deepEqual(await editor.flush(), { appended: 1, queued: 0 });
+      assert.equal(await foldText(a.project, stream, PRODUCT), text);
+      assert.equal(ra.status.state, 'offline');
+
+      await server.restart();
+      rb.syncNow();
+      ra.syncNow();
+      await until(ra, 'live', 10_000);
+      await until(rb, 'live', 10_000);
+      await textReaches(b.project, stream, PRODUCT, text);
       editor.close();
     } finally {
       await world.close();

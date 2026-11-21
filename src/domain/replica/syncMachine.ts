@@ -13,8 +13,9 @@
 //   attention        a person must act
 //   needs-update     the project needs a newer version of the extension
 //
-// The happy path: start with a server --> connecting --connected--> authenticating --session-ok--> catching-up --caught-up--> live, and a synced
-// exchange keeps live. Start without a server stays single-machine; stop from any state ends in single-machine.
+// No state waits silently (DESIGN 15.3): connecting and authenticating give up to offline after CONNECT_GIVE_UP_MS, offline retries on its own
+// back-off timer up to MAX_BACKOFF_MS and at once on Sync Now or a network change, refused and attention wait for the lead, and needs-update waits
+// for an update of the extension. syncTimerOf names the one timer a state runs; the transition rows are listed above transition().
 
 export const SYNC_STATES = ['single-machine', 'connecting', 'authenticating', 'catching-up', 'live', 'offline', 'refused', 'attention', 'needs-update'] as const;
 export type SyncState = typeof SYNC_STATES[number];
@@ -77,26 +78,79 @@ function enter(state: SyncState, now: number, attempt: number, extra: { retryAt?
   return next;
 }
 
-/** The next state. An event a state has no row for leaves it unchanged (the same object is returned). */
-export function transition(current: SyncMachineState, event: SyncEvent, now: number): SyncMachineState {
-  if (event.kind === 'stop') return enter('single-machine', now, 0);
-  switch (current.state) {
-    case 'single-machine':
-      if (event.kind === 'start') return event.hasHub ? enter('connecting', now, 0) : current;
-      return current;
-    case 'connecting':
-      if (event.kind === 'connected') return enter('authenticating', now, current.attempt);
-      return current;
-    case 'authenticating':
-      if (event.kind === 'session-ok') return enter('catching-up', now, current.attempt);
-      return current;
-    case 'catching-up':
-      if (event.kind === 'caught-up' || (event.kind === 'exchange' && event.outcome === 'synced')) return enter('live', now, 0, { findings: event.kind === 'exchange' ? event.findings : [] });
-      return current;
-    case 'live':
-      if (event.kind === 'exchange' && event.outcome === 'synced') return { ...current, findings: [...(event.findings ?? [])] };
-      return current;
+/** Offline after a failed try: the try counts, and the next one is due after the back-off (or the server's own wait, when longer). */
+function wentOffline(current: SyncMachineState, now: number, reason: string, retryAfterMs = 0): SyncMachineState {
+  const wait = Math.max(backoffMs(current.attempt), Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? Math.min(retryAfterMs, MAX_BACKOFF_MS) : 0);
+  return enter('offline', now, current.attempt + 1, { retryAt: now + wait, reason });
+}
+
+/** Where an exchange outcome leads from a state that is trying to connect or is live. */
+function afterExchange(current: SyncMachineState, event: Extract<SyncEvent, { kind: 'exchange' }>, now: number): SyncMachineState {
+  const findings = event.findings ?? [];
+  switch (event.outcome) {
+    case 'synced':
+      if (current.state === 'live') return { ...current, findings: [...findings] };
+      return enter('live', now, 0, { findings });
+    case 'offline':
+      return wentOffline(current, now, event.reason ?? 'unreachable', event.retryAfterMs);
+    case 'refused':
+      return enter('refused', now, 0, { reason: event.reason ?? 'session-refused', findings });
+    case 'attention':
+      return enter('attention', now, 0, { reason: event.reason ?? findings[0] ?? 'attention', findings });
+    case 'needs-update':
+      return enter('needs-update', now, 0, { reason: event.reason ?? 'needs-update' });
     default:
       return current;
   }
+}
+
+/**
+ * The next state. An event a state has no row for leaves it unchanged, and the same object is returned. The rows:
+ *   any             --stop--> single-machine
+ *   single-machine  --start with a server--> connecting
+ *   connecting      --connected--> authenticating
+ *   authenticating  --session-ok--> catching-up
+ *   catching-up     --caught-up--> live
+ *   connecting, authenticating, catching-up, live: an exchange outcome leads to live (synced), offline, refused, attention or needs-update;
+ *                   lost leads to offline; connecting and authenticating give up to offline on timeout
+ *   offline         --retry (the back-off timer), sync-now or network-change--> connecting (sync-now and network-change reset the attempts)
+ *   refused, attention --lead-acted--> connecting
+ *   needs-update    --updated--> connecting (nothing else but stop leaves it)
+ */
+export function transition(current: SyncMachineState, event: SyncEvent, now: number): SyncMachineState {
+  if (event.kind === 'stop') return enter('single-machine', now, 0);
+  const state = current.state;
+  switch (state) {
+    case 'single-machine':
+      return event.kind === 'start' && event.hasHub ? enter('connecting', now, 0) : current;
+    case 'connecting':
+    case 'authenticating':
+    case 'catching-up':
+    case 'live':
+      if (event.kind === 'exchange') return afterExchange(current, event, now);
+      if (event.kind === 'lost') return wentOffline(current, now, 'lost');
+      if (event.kind === 'timeout' && (state === 'connecting' || state === 'authenticating')) return wentOffline(current, now, 'timeout');
+      if (state === 'connecting' && event.kind === 'connected') return enter('authenticating', now, current.attempt);
+      if (state === 'authenticating' && event.kind === 'session-ok') return enter('catching-up', now, current.attempt);
+      if (state === 'catching-up' && event.kind === 'caught-up') return enter('live', now, 0);
+      return current;
+    case 'offline':
+      if (event.kind === 'retry') return enter('connecting', now, current.attempt);
+      if (event.kind === 'sync-now' || event.kind === 'network-change') return enter('connecting', now, 0);
+      return current;
+    case 'refused':
+    case 'attention':
+      return event.kind === 'lead-acted' ? enter('connecting', now, 0) : current;
+    case 'needs-update':
+      return event.kind === 'updated' ? enter('connecting', now, 0) : current;
+    default:
+      return current;
+  }
+}
+
+/** The one timer a state runs, when it has one: connecting and authenticating give up after giveUpMs; offline retries at retryAt. */
+export function syncTimerOf(current: SyncMachineState, giveUpMs: number = CONNECT_GIVE_UP_MS): { event: 'timeout' | 'retry'; at: number } | undefined {
+  if (current.state === 'connecting' || current.state === 'authenticating') return { event: 'timeout', at: current.since + giveUpMs };
+  if (current.state === 'offline' && current.retryAt !== undefined) return { event: 'retry', at: current.retryAt };
+  return undefined;
 }
