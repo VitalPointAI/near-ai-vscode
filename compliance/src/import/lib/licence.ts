@@ -19,7 +19,14 @@ const sourceId = (catalog: unknown): string | undefined => {
   return record(prop) && typeof prop.value === 'string' ? prop.value : undefined;
 };
 const proseControl = (catalog: unknown): string | undefined => {
-  const controls = record(catalog) && record(catalog.catalog) && Array.isArray(catalog.catalog.controls) ? catalog.catalog.controls : [];
+  const root = record(catalog) && record(catalog.catalog) ? catalog.catalog : undefined;
+  const controls: unknown[] = [];
+  const collect = (value: unknown): void => {
+    if (!record(value)) return;
+    if (Array.isArray(value.controls)) controls.push(...value.controls);
+    if (Array.isArray(value.groups)) value.groups.forEach(collect);
+  };
+  collect(root);
   for (const control of controls) {
     if (!record(control)) continue;
     const containsProse = (value: unknown): boolean => {
