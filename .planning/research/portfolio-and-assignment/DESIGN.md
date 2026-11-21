@@ -317,7 +317,7 @@ A screen that says "posted" while the code allows declining would be a lie, so b
 
 | Concept key | Military | Public service | Corporate and software | Capital projects |
 |---|---|---|---|---|
-| `position` | Billet (position) | Position | Position (created silently; shown only to the lead) | Role |
+| `position` | Position | Position | Position (created silently; shown only to the lead) | Role |
 | `group` | Section, staff, unit | Directorate, branch, unit | Team | Project office |
 | `join` | Posting | Assignment | Invitation | Appointment |
 | `joined` | Posted | Assigned | Invited | Appointed |
@@ -331,7 +331,7 @@ A screen that says "posted" while the code allows declining would be a lie, so b
 | `handover` | Handover; relief in place (a whole team or watch); transfer of authority (command) | Handover | Hand over ownership | Handover of the appointment |
 | `relieved` | Relieved | Assignment ended | Removed | Appointment ended |
 | `lead` | Staff lead (commander's representative) | Responsible manager | Team lead | Project leader |
-| `member` | Staff officer | Employee | Member | Project team member |
+| `member` | Staff officer (also Staff member, Defence team member) | Employee (also Defence team member) | Member | Project team member |
 
 > **Superseded 2026-11-20 (coherence review):** the Corporate `position` word was "Seat on the team"; "seat" never appears on main screens (`GLOSSARY.md`, section 2), and positions in invitation mode are silent. The Corporate `group`, `tasker`, `dual` and `lead` words ("Team", "Team admin", "Member of two teams", "Team lead") are kept for now, as the glossary's mode-word list does, but they collide with "team means agents only" (glossary section 4); see open question O1 in section 9. The Capital `position` word "Role" is a mode word for positions, not one of the retired "role" meanings.
 
@@ -539,7 +539,7 @@ The Portfolio Room is a webview built from Staff Room components, extending CAP 
 
 | View | Content | Answers |
 |---|---|---|
-| Tree and heat map | The organization tree with each node's latest status, as-of age, mode and terms crosswalk (hover: "Billet (Military) = Position (Public service)") | Where is everything, and how fresh is it |
+| Tree and heat map | The organization tree with each node's latest status, as-of age, mode and terms crosswalk (hover: "Staff officer (Military) = Employee (Public service)") | Where is everything, and how fresh is it |
 | Pipeline and gates | Gate state per project on its path; gate calendar of each deciding body with packages due; complexity and risk level against the unit's capacity class (flagging projects that need a higher approval) | What is coming to which board, and what needs higher approval |
 | Strategic alignment | Projects against capabilities and results-framework outcomes; outcomes with no project and projects with no outcome | Are we funding the strategy |
 | Prioritization | Ranked list under the active criteria set, score spread per item, sensitivity band, efficient frontier chart, mandatory items marked | What should go first, and how sure are we |
