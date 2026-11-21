@@ -589,19 +589,19 @@ Design: `.planning/research/compliance-dashboard/DESIGN.md`. Accreditation (secu
   5. A change to an official source page is reported within a week; the importer lists every difference from the unofficial conversions. (ACCR-02)
   6. The incident response plan, supported-versions table, threat model and data-flow diagrams exist with review dates; the relay image is scanned and has an SBOM; releases carry attestations; CODEOWNERS covers gate paths; `docs` is a required check. (ACCR-12)
 **Research flags**: Treasury Board Directive on Security Management Appendix B clauses; whether the Cyber Centre will publish a machine-readable catalogue; the Unclassified reference set (CAN/DGSI 104 versus CPCSC Level 1); ITSP.40.111 status of Ed25519 and scrypt; which repository settings a read-only token can read.
-**Plans:** 19 plans in 6 waves (planned 2026-11-21; decisions D-01 to D-50 in `44-CONTEXT.md`, owner confirmations listed there; the catalogue data lands first in its own data PR (44-16, D-42) and every workflow change last (44-19, D-33); owner checkpoints in 44-06, 44-09, 44-16 and 44-19)
+**Plans:** 9/19 plans executed in 6 waves (planned 2026-11-21; decisions D-01 to D-50 in `44-CONTEXT.md`, owner confirmations listed there; the catalogue data lands first in its own data PR (44-16, D-42) and every workflow change last (44-19, D-33); owner checkpoints in 44-06, 44-09, 44-16 and 44-19)
 **UI hint**: yes (docs site pages only; no extension UI)
 
 Plans:
-- [ ] 44-01-PLAN.md: Wave 1. Package skeleton and the tracer: a fixture control from catalogue through a statement, an evidence rule and a per-test report row to a computed state in the dashboard JSON; vendored OSCAL schema; no status in any source; VSIX exclusions
-- [ ] 44-02-PLAN.md: Wave 1. Per-test report from the runner, secret scan of a folder with a JSON summary, compliance trust roots as gate paths
-- [ ] 44-03-PLAN.md: Wave 1. Incident response plan, supported versions, threat model, data-flow diagrams, crypto inventory, Controlled goods and ITAR guidance page; the gap register and POA&M items
-- [ ] 44-04-PLAN.md: Wave 2. Status engine: six states, tailoring, known limitations, unsettled and self-signed rows, signed expiring risk acceptances, gap states
-- [ ] 44-05-PLAN.md: Wave 2. Dashboard contract and view library, organization overlay merged in memory, components loader and responsibility, output word lint with Phase 41 parity
-- [ ] 44-06-PLAN.md: Wave 2. Importer foundation: source registry, licence gate, polite fetch, Cyber Centre page helpers, normalized page hash and weekly watch (owner checks parse5 and yaml)
-- [ ] 44-07-PLAN.md: Wave 2. Collectors in the run: mapped tests with every reason, CI checks, secret scan, required documents, crypto inventory
-- [ ] 44-08-PLAN.md: Wave 2. Collectors for the supply chain and GitHub: audits, SBOMs and the relay image scan, release integrity, attestations, settings, review trail, code scanning
-- [ ] 44-09-PLAN.md: Wave 2. CI tool pins for oscal-cli, Syft, Grype and Compliance Trestle (owner checks them before they run)
+- [x] 44-01-PLAN.md: Wave 1. Package skeleton and the tracer: a fixture control from catalogue through a statement, an evidence rule and a per-test report row to a computed state in the dashboard JSON; vendored OSCAL schema; no status in any source; VSIX exclusions
+- [x] 44-02-PLAN.md: Wave 1. Per-test report from the runner, secret scan of a folder with a JSON summary, compliance trust roots as gate paths
+- [x] 44-03-PLAN.md: Wave 1. Incident response plan, supported versions, threat model, data-flow diagrams, crypto inventory, Controlled goods and ITAR guidance page; the gap register and POA&M items
+- [x] 44-04-PLAN.md: Wave 2. Status engine: six states, tailoring, known limitations, unsettled and self-signed rows, signed expiring risk acceptances, gap states
+- [x] 44-05-PLAN.md: Wave 2. Dashboard contract and view library, organization overlay merged in memory, components loader and responsibility, output word lint with Phase 41 parity
+- [x] 44-06-PLAN.md: Wave 2. Importer foundation: source registry, licence gate, polite fetch, Cyber Centre page helpers, normalized page hash and weekly watch (owner checks parse5 and yaml)
+- [x] 44-07-PLAN.md: Wave 2. Collectors in the run: mapped tests with every reason, CI checks, secret scan, required documents, crypto inventory
+- [x] 44-08-PLAN.md: Wave 2. Collectors for the supply chain and GitHub: audits, SBOMs and the relay image scan, release integrity, attestations, settings, review trail, code scanning
+- [x] 44-09-PLAN.md: Wave 2. CI tool pins for oscal-cli, Syft, Grype and Compliance Trestle (owner checks them before they run)
 - [ ] 44-10-PLAN.md: Wave 3. ITSP.10.033 catalogue importer, English and French
 - [ ] 44-11-PLAN.md: Wave 3. ITSP.10.033-01 Medium profile with its English and French differences, the Protected A profile, the NIST base catalogue and the cross-check
 - [ ] 44-12-PLAN.md: Wave 3. ITSP.10.171 and -01, baseline controls with the Unclassified and CPCSC Level 1 profiles, ITSG-33 Profile 3 and our Annex 3A crosswalk
@@ -1774,7 +1774,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 41. Organization policy foundation (F1) | 0/15 | Planned (after the coherence safety patch; before 32.1, 32.2, 33.1, 36 and 37) | - |
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
-| 44. Accreditation evidence and compliance dashboard | 0/TBD | Not started (no dependency in flight; may run beside any phase) | - |
+| 44. Accreditation evidence and compliance dashboard | 9/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
