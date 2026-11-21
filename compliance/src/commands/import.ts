@@ -8,6 +8,7 @@ const IMPORT_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   cgp: 'cgp',
   itar: 'itar',
   'nist-oscal-content-v1-6-0': 'nist-800-53',
+  'baseline-controls-v1-2': 'baseline-controls',
 });
 
 interface ImportResult {
