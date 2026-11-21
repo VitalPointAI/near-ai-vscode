@@ -3,10 +3,28 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { SOURCE_REGISTRY } from '../import/lib/sourceRegistry.ts';
 import { writeImportResult } from '../import/lib/write.ts';
 
+const IMPORT_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  cgp: 'cgp',
+  itar: 'itar',
+});
+
+interface ImportResult {
+  readonly sourceId: string;
+  readonly catalog: unknown;
+  readonly file?: string;
+  readonly rawBytes?: Buffer;
+  readonly reports?: readonly { readonly file: string; readonly content: unknown }[];
+  readonly reportFile?: string;
+  readonly report?: unknown;
+}
+
 /** Dispatches a future per-source importer while keeping all writes behind writeImportResult. */
 export async function run(argv: readonly string[]): Promise<number> {
   const [source, ...options] = argv;
-  if (!source || !/^[a-z0-9-]+$/.test(source) || !SOURCE_REGISTRY.some((entry) => entry.id === source)) return 2;
+  if (!source || !/^[a-z0-9-]+$/.test(source)) return 2;
+  const isAlias = Object.hasOwn(IMPORT_ALIASES, source);
+  const moduleName = isAlias ? IMPORT_ALIASES[source] : source;
+  if (!isAlias && !SOURCE_REGISTRY.some((entry) => entry.id === source)) return 2;
   const outIndex = options.indexOf('--out-root');
   const offlineIndex = options.indexOf('--offline');
   const langIndex = options.indexOf('--lang');
@@ -14,13 +32,14 @@ export async function run(argv: readonly string[]): Promise<number> {
   const lang = langIndex === -1 ? 'both' : options[langIndex + 1];
   if (!outRoot || (offlineIndex !== -1 && !options[offlineIndex + 1]) || !['en', 'fr', 'both'].includes(lang)) return 2;
   try {
-    const importer = await import(`../import/${source}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both' }) => Promise<{ sourceId: string; catalog: unknown; file?: string; rawBytes?: Buffer; reports?: readonly { readonly file: string; readonly content: unknown }[] }> };
+    const importer = await import(`../import/${moduleName}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both' }) => Promise<ImportResult> };
     if (!importer.importSource) return 2;
     const offlinePages = offlineIndex === -1 ? undefined : JSON.parse(readFileSync(path.join(options[offlineIndex + 1], 'pages.json'), 'utf8')) as Record<string, string>;
     const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both' });
     writeImportResult(outRoot, result, SOURCE_REGISTRY);
     if (result.rawBytes) writeRawResult(outRoot, result.file ?? path.join('catalogs', `${result.sourceId}.json`), result.rawBytes);
-    writeReports(outRoot, result.reports ?? []);
+    const reports = result.reports ?? (result.reportFile ? [{ file: result.reportFile, content: result.report }] : []);
+    writeReports(outRoot, reports);
     return 0;
   } catch { return 2; }
 }

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { run as runImport } from '../src/commands/import.ts';
 import { importSource } from '../src/import/cgp.ts';
 
 const pageUrl = 'https://laws-lois.justice.gc.ca/eng/acts/D-1.5/page-3.html#h-419174';
@@ -38,6 +41,21 @@ test('returns the excluded Act definition in the CGP import report contract', as
   assert.equal(result.reportFile, 'import-reports/cgp.json');
   assert.deepEqual(result.report.excluded, [{ id: 'cgp-37-3', reason: 'definition' }]);
   assert.deepEqual(result.report.sourceIds, ['defence-production-act', 'controlled-goods-regulations']);
+});
+
+test('the cgp command alias writes its catalogue and report', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'near-ai-cgp-command-'));
+  try {
+    const offline = join(scratch, 'offline');
+    const output = join(scratch, 'output');
+    mkdirSync(offline);
+    writeFileSync(join(offline, 'pages.json'), JSON.stringify(cgpPages()));
+    assert.equal(await runImport(['cgp', '--offline', offline, '--out-root', output]), 0);
+    assert.equal(JSON.parse(readFileSync(join(output, 'catalogs/cgp/catalog.json'), 'utf8')).catalog.metadata.title, 'Controlled Goods Program requirements');
+    assert.deepEqual(JSON.parse(readFileSync(join(output, 'import-reports/cgp.json'), 'utf8')).sourceIds, ['defence-production-act', 'controlled-goods-regulations']);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test('the Controlled goods profile imports every generated CGP requirement', () => {

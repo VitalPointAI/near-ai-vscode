@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { run as runImport } from '../src/commands/import.ts';
 import { importSource, ITAR_REQUIREMENTS, sectionRequestUrl } from '../src/import/itar.ts';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/import/itar/${name}`, import.meta.url), 'utf8');
@@ -30,6 +33,21 @@ test('returns the eCFR dates in the ITAR import report contract', async () => {
   const result = await importSource({ offlinePages: pages() }) as unknown as { reportFile: string; report: { titleAsOf: Record<string, string> } };
   assert.equal(result.reportFile, 'import-reports/itar.json');
   assert.deepEqual(result.report.titleAsOf, { '15': '2026-11-19', '22': '2026-11-20' });
+});
+
+test('the itar command alias writes its catalogue and report', async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'near-ai-itar-command-'));
+  try {
+    const offline = join(scratch, 'offline');
+    const output = join(scratch, 'output');
+    mkdirSync(offline);
+    writeFileSync(join(offline, 'pages.json'), JSON.stringify(pages()));
+    assert.equal(await runImport(['itar', '--offline', offline, '--out-root', output]), 0);
+    assert.equal(JSON.parse(readFileSync(join(output, 'catalogs/itar/catalog.json'), 'utf8')).catalog.metadata.title, 'ITAR and EAR requirements');
+    assert.deepEqual(JSON.parse(readFileSync(join(output, 'import-reports/itar.json'), 'utf8')).titleAsOf, { '15': '2026-11-19', '22': '2026-11-20' });
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test('reports a missing listed requirement rather than silently dropping it', async () => {
