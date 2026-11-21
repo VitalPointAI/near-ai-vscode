@@ -1,3 +1,6 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const COMMANDS = Object.freeze([
   'import',
   'licence-check',
@@ -26,4 +29,8 @@ export async function main(argv: readonly string[], options: { readonly write?: 
   }
 }
 
-if (import.meta.main) process.exitCode = await main(process.argv.slice(2));
+export function isDirectInvocation(argv: readonly string[], entryPath: string): boolean {
+  return Boolean(argv[1] && path.resolve(argv[1]) === entryPath);
+}
+
+if (import.meta.main || isDirectInvocation(process.argv, fileURLToPath(import.meta.url))) process.exitCode = await main(process.argv.slice(2));

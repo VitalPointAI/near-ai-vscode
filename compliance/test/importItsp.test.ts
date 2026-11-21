@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { importSource } from '../src/import/itsp-10-033.ts';
 import { run, writeRawResult } from '../src/commands/import.ts';
+import type { Fetcher } from '../src/import/lib/fetch.ts';
 import { validateOscal } from '../src/validate.ts';
 
 const fixtures = new URL('./fixtures/import/itsp10033/', import.meta.url);
@@ -43,6 +44,29 @@ test('the CLI writes the licence-gated result under the requested root', async (
   assert.equal(code, 0);
   const output = JSON.parse(readFileSync(path.join(root, 'catalogs/itsp-10-033/catalog.json'), 'utf8'));
   assert.equal(output.catalog.groups[0].controls[0].id, 'xa-01');
+});
+
+test('live mode fetches the landing page and every discovered family through the injected guarded fetcher', async () => {
+  const calls: string[] = [];
+  const fetcher: Fetcher = { get: async (url) => {
+    calls.push(url);
+    const body = pages[url];
+    if (!body) throw new Error(`missing fixture for ${url}`);
+    return { url, body: Buffer.from(body), status: 200 };
+  } };
+  const result: any = await importSource({ fetcher, lang: 'en' });
+  assert.equal(result.catalog.catalog.groups[0].controls[0].id, 'xa-01');
+  assert.deepEqual(calls, [
+    'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033',
+    'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xa-en.html',
+    'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xb-en.html'
+  ]);
+});
+
+test('import command exposes a live-fetch failure instead of silently returning code two', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'itsp-live-failure-'));
+  const fetcher: Fetcher = { get: async () => { throw new Error('network unavailable'); } };
+  await assert.rejects(run(['itsp-10-033', '--lang', 'en', '--out-root', root], { fetcher }), /network unavailable/);
 });
 
 test('the same offline pages produce byte-identical output', async () => {

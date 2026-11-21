@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DefaultTreeAdapterTypes } from 'parse5';
 import { mainOf, parseHtml, controlSections } from './lib/cyberHtml.ts';
+import { createFetcher, type Fetcher } from './lib/fetch.ts';
 import { newCatalog, newGroup } from './lib/oscalBuild.ts';
 import { controlFromSection, pairFrench, type ParsedControl } from './lib/itspControl.ts';
 
@@ -15,32 +16,41 @@ const children = (node: Node): Node[] => 'childNodes' in node ? node.childNodes 
 const text = (node: Node): string => ('value' in node ? node.value : children(node).map(text).join('')).replace(/\s+/g, ' ').trim();
 const attr = (node: Element, name: string) => node.attrs.find((item) => item.name === name)?.value;
 
-export interface ImportContext { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: Lang; }
+export interface ImportContext { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: Lang; readonly fetcher?: Fetcher; }
 export interface ImportReport { readonly retrievedAt: string; readonly pages: readonly { url: string; lang: 'en' | 'fr'; sha256: string; dateModified: string }[]; readonly families: readonly { id: string; controls: number; activities: number; enhancements: number; canadaSpecific: number }[]; readonly unrecognizedEnhancements: readonly { family: string; position: number; text: string }[]; readonly frenchOnly: readonly string[]; readonly englishOnly: readonly string[]; readonly frenchFailures: readonly { page: string; reason: string }[]; }
 
 function normalPage(html: string): string { return text(mainOf(parseHtml(html))).replace(/\s+/g, ' ').trim(); }
-function page(context: ImportContext, url: string): string { const value = context.offlinePages?.[url]; if (!value) throw new Error(`offline page missing: ${url}`); return value; }
+type PageReader = (url: string) => Promise<string>;
+function pageReader(context: ImportContext): PageReader {
+  if (context.offlinePages) return async (url) => {
+    const value = context.offlinePages?.[url];
+    if (!value) throw new Error(`offline page missing: ${url}`);
+    return value;
+  };
+  const fetcher = context.fetcher ?? createFetcher({ fetchImpl: globalThis.fetch as any });
+  return async (url) => (await fetcher.get(url, { accept: 'text/html' })).body.toString('utf8');
+}
 function links(html: string, url: string): string[] { const out: string[] = []; const walk = (node: Node) => { if (element(node) && node.tagName === 'a') { const href = attr(node, 'href'); if (href) out.push(new URL(href, url).toString()); } children(node).forEach(walk); }; walk(mainOf(parseHtml(html))); return [...new Set(out)]; }
 function dateModified(html: string): string { let date = ''; const walk = (node: Node) => { if (element(node) && node.tagName === 'time' && attr(node, 'property') === 'dateModified') date = text(node); children(node).forEach(walk); }; walk(mainOf(parseHtml(html))); return date || 'unknown'; }
 function familyId(control: ParsedControl): string { return control.id.split('-')[0]; }
 
-function readEnglish(context: ImportContext) {
-  const landingHtml = page(context, landing);
+async function readEnglish(page: PageReader) {
+  const landingHtml = await page(landing);
   const urls = links(landingHtml, landing).filter((url) => /family-/i.test(url));
   const pages = [{ url: landing, lang: 'en' as const, sha256: createHash('sha256').update(normalPage(landingHtml)).digest('hex'), dateModified: 'unknown' }];
   const controls: ParsedControl[] = [];
-  for (const url of urls) { const html = page(context, url); controls.push(...controlSections(mainOf(parseHtml(html))).map((section) => controlFromSection(section, 'en'))); pages.push({ url, lang: 'en', sha256: createHash('sha256').update(normalPage(html)).digest('hex'), dateModified: dateModified(html) }); }
+  for (const url of urls) { const html = await page(url); controls.push(...controlSections(mainOf(parseHtml(html))).map((section) => controlFromSection(section, 'en'))); pages.push({ url, lang: 'en', sha256: createHash('sha256').update(normalPage(html)).digest('hex'), dateModified: dateModified(html) }); }
   return { controls, pages };
 }
 
-function readFrench(context: ImportContext) {
-  const landingHtml = page(context, frenchLanding);
+async function readFrench(page: PageReader) {
+  const landingHtml = await page(frenchLanding);
   const urls = links(landingHtml, frenchLanding).filter((url) => /famille-/i.test(url));
   const pages = [{ url: frenchLanding, lang: 'fr' as const, sha256: createHash('sha256').update(normalPage(landingHtml)).digest('hex'), dateModified: 'unknown' }];
   const controls: ParsedControl[] = [];
   const failures: { page: string; reason: string }[] = [];
   for (const url of urls) try {
-    const html = page(context, url);
+    const html = await page(url);
     const sections = controlSections(mainOf(parseHtml(html)));
     if (!sections.length) throw new Error('French page has no control headings');
     controls.push(...sections.map((section) => controlFromSection(section, 'fr')));
@@ -62,8 +72,9 @@ function addFrenchParts(english: ParsedControl, french: ParsedControl): void {
 /** Imports the official-shaped ITSP.10.033 pages without letting markup become rendered HTML. */
 export async function importSource(context: ImportContext) {
   if (context.lang === 'fr') throw new Error('French import requires authoritative English text');
-  const english = readEnglish(context);
-  const french = context.lang === 'both' ? readFrench(context) : { controls: [], pages: [], failures: [] };
+  const page = pageReader(context);
+  const english = await readEnglish(page);
+  const french = context.lang === 'both' ? await readFrench(page) : { controls: [], pages: [], failures: [] };
   const pairing = pairFrench(english.controls, french.controls);
   pairing.pairs.forEach(({ english: base, french: translated }) => addFrenchParts(base, translated));
   const version = english.pages.find((entry) => entry.dateModified !== 'unknown')?.dateModified ?? 'unknown';
