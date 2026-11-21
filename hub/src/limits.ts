@@ -48,6 +48,12 @@ export const LIMITS = Object.freeze({
   sessionCallsPerSession: 2,
   joinPerMinute: 10,
   enrolPerMinute: 10,
+  /**
+   * Join requests waiting at the hub (D-30, IN-06): distinct requests received within the 7-day keep, per invitation and per project. Beyond either
+   * the hub refuses invite-full, so anyone holding an invitation cannot flood the lead with requests from ever new device keys.
+   */
+  pendingJoinsPerInvite: 8,
+  pendingJoinsPerProject: 64,
   /** The most buckets one map keeps. */
   maxTrackedBuckets: 10_000,
 });
