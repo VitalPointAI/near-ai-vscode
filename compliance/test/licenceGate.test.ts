@@ -61,3 +61,11 @@ test('the catalogue scan reports external prose with its file and control', () =
   writeFileSync(file, JSON.stringify({ catalog: { props: [{ name: 'source-id', value: 'can-dgsi-104' }], controls: [{ id: 'dg-01', parts: [{ prose: 'outside-licence prose' }] }] } }));
   assert.throws(() => checkCatalogTextLicence(root, SOURCE_REGISTRY), /catalog\.json.*dg-01/);
 });
+
+test('the licence gate refuses prose inside a grouped control', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'licence-grouped-control-'));
+  assert.throws(
+    () => writeImportResult(root, { sourceId: 'can-dgsi-104', catalog: { catalog: { metadata: { props: [{ name: 'source-id', value: 'can-dgsi-104' }] }, groups: [{ id: 'group', title: 'group', controls: [{ id: 'dg-01', parts: [{ prose: 'prose must not bypass the licence gate' }] }] }] } } }, SOURCE_REGISTRY),
+    /can-dgsi-104/
+  );
+});
