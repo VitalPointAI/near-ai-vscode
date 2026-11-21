@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { lintDashboard, lintPage, lintText } from '../src/wordLint.ts';
+test('finds a longest export claim once', () => { const hits = lintText('This build is ITAR compliant.'); assert.deepEqual(hits.filter((hit) => hit.rule === 'compliance-claim').map((hit) => hit.phrase), ['ITAR compliant']); });
+test('finds accredited phrase', () => assert.equal(lintText('The system is accredited for Protected B.').length, 1));
+test('finds certified phrase', () => assert.equal(lintText('The product is certified.').length, 1));
+test('accepts a negated claim in its sentence', () => assert.equal(lintText('The product is not certified.').length, 0));
+test('accepts a preceding negation in its sentence', () => assert.equal(lintText('Nothing here makes a system accredited.').length, 0));
+test('does not carry negation across sentences', () => assert.equal(lintText('This is not a promise. The system is certified.').length, 1));
+test('finds an em dash', () => assert.equal(lintText('A reader sees an \u2014 punctuation.')[0].rule, 'em-dash'));
+test('finds the provider organization wording built at run time', () => { const text = ['NEAR', 'AI organization'].join(' '); assert.equal(lintText(text)[0].rule, 'provider-organization'); });
+test('reports claims in our dashboard fields with JSON paths', () => { const hits = lintDashboard({ rows: [{ title: 'Official certified text', reasonText: 'Certified output', components: [{ statement: 'The product is compliant.' }] }], gaps: [{ remediation: 'Become accredited', title: 'Open gap' }], matrix: [{ youDo: 'Be certified' }] }); assert.deepEqual(hits.filter((hit) => hit.rule === 'compliance-claim').map((hit) => hit.path), ['$.rows[0].reasonText', '$.rows[0].components[0].statement', '$.gaps[0].remediation', '$.matrix[0].youDo']); });
+test('does not lint official dashboard text', () => assert.equal(lintDashboard({ rows: [{ title: 'Official certified title' }], controls: [{ title: 'Certified official', parts: [{ prose: 'Compliant official text.' }] }] }).length, 0));
+test('lints Markdown prose but skips metadata, imports and fenced code', () => { const page = '---\ntitle: certified\n---\nimport x from "certified";\n```ts\nconst x = "certified";\n```\nThis product is certified.'; assert.equal(lintPage(page, 'page.mdx').length, 1); });
