@@ -17,6 +17,7 @@
     "service:install": "sh scripts/install-service.sh",
     "service:uninstall": "sh scripts/uninstall-service.sh",
     "compliance:refresh": "node scripts/compliance-refresh.mjs",
+    "refresh-timer:install": "sh scripts/install-refresh-timer.sh",
     "audit": "npm audit --audit-level=high"
   },
   "devDependencies": {

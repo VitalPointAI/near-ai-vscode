@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh NEAR AI documentation evidence every 15 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=15m
+Persistent=true
+Unit=near-ai-docs-refresh.service
+
+[Install]
+WantedBy=timers.target
