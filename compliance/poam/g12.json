@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "cm-03"
+  ],
+  "gap": "G12",
+  "id": "g12",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "The owner makes docs a required check on main"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Make the docs check (and later the compliance check) required on main; the owner changes this repository setting, and the gap closes when the settings collector sees it.",
+  "title": "The docs build is not a required check"
+}

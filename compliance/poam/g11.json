@@ -1,0 +1,22 @@
+{
+  "controls": [
+    "au-06",
+    "au-11",
+    "si-04"
+  ],
+  "gap": "G11",
+  "id": "g11",
+  "milestones": [
+    {
+      "phase": "84",
+      "title": "Relay log retention and forwarding in the operator runbook"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "Guidance on what the extension records, where and for how long"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Document what each component logs, where and for how long, and give your organization an option to forward logs to its own monitoring; keeping and reviewing them is shared.",
+  "title": "No central log forwarding or retention guidance"
+}

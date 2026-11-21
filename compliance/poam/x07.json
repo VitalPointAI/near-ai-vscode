@@ -1,0 +1,19 @@
+{
+  "controls": [
+    "ir-04",
+    "ir-06",
+    "cgp-10-h",
+    "itar-127.12"
+  ],
+  "gap": "X7",
+  "id": "x07",
+  "milestones": [
+    {
+      "phase": "45",
+      "title": "Incident detection, clocks and contact notification for export-controlled content"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Open an incident when controlled content may have reached an ineligible place, show the regulators' clocks, and notify your organization's export-control contact.",
+  "title": "No incident flow for a possible release"
+}

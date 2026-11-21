@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-08",
+    "sr-11"
+  ],
+  "gap": "G13",
+  "id": "g13",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "TCB status, revocation and measurement checks for model attestation"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Check the platform's TCB status, certificate revocation and the enclave's measurements against the provider's published build; until then the security policy says so and points to the provider's full verifier.",
+  "title": "The attestation checks do not check TCB status, certificate revocation or enclave measurements"
+}

@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "cm-02",
+    "si-02",
+    "sr-03"
+  ],
+  "gap": "G10",
+  "id": "g10",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "Exact saves, install scripts off where possible, and security update alerts for the root package"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Save exact versions for the root package, turn install scripts off where the build allows it, and turn on alerts for security updates only.",
+  "title": "Root installs run dependency install scripts, development dependencies use ranges, and there are no automated update alerts"
+}

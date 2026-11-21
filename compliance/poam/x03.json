@@ -1,0 +1,19 @@
+{
+  "controls": [
+    "ac-04",
+    "sa-09",
+    "cgp-37-2",
+    "itar-120.56-a"
+  ],
+  "gap": "X3",
+  "id": "x03",
+  "milestones": [
+    {
+      "phase": "45",
+      "title": "Export-endpoint decisions enforced in the route check"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Refuse every send of controlled content to an endpoint that no signed export-endpoint decision covers, in the route check.",
+  "title": "Endpoints carry a highest label and a region, but no export eligibility"
+}
