@@ -1,6 +1,6 @@
 // Builds the dashboard JSON the Accreditation pages read (44-01). Every state in it comes from computeStatus; this file only gathers inputs and
 // arranges rows. 44-04 adds the multi-component aggregate and 44-05 adds fields (never renames these).
-import { computeStatus } from './status.ts';
+import { aggregateControl, computeStatus, summarizeLevel } from './status.ts';
 import { evaluateObservationRule, evaluateTestRule, type RuleContext } from './rules.ts';
 import { REASONS, STATES, type ComponentRow, type DashboardInput, type DashboardRow, type EvidenceRule, type RuleResult, type State } from './model.ts';
 export interface DashboardBuildInput extends DashboardInput {
@@ -55,9 +55,14 @@ function controlState(components: readonly ComponentRow[], level: string, contro
     const outcome = computeStatus({ control, component: '', level, responsibility: 'product', statements: [], rulesByStatement: {}, results: {}, head: input.head, now: input.now });
     return { state: outcome.state, reason: outcome.reason, ...(outcome.detail ? { detail: outcome.detail } : {}) };
   }
-  let worst = components[0];
-  for (const row of components) if (STATE_RANK[row.state] < STATE_RANK[worst.state]) worst = row;
-  return { state: worst.state, reason: worst.reason, ...(worst.detail ? { detail: worst.detail } : {}) };
+  // Preserve the exact outcome (including stale date and inherited provider) when
+  // there is only one component; aggregateControl is for a genuine combination.
+  if (components.length === 1) {
+    const only = components[0];
+    return { state: only.state, reason: only.reason, ...(only.detail ? { detail: only.detail } : {}) };
+  }
+  const aggregate = aggregateControl(components);
+  return { state: aggregate.state, reason: aggregate.reason, ...(aggregate.detail ? { detail: aggregate.detail } : {}) };
 }
 
 /** Builds the dashboard: one row per level and control in scope, each with one component row per component that implements the control. */
@@ -112,14 +117,15 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
         } as DashboardComponentRow;
         componentRows.push(component);
       }
-      const outcome = controlState(componentRows, level.id, control, input);
+      const computed = controlState(componentRows, level.id, control, input);
+      const outcome = level.claim === false ? { state: 'not-met' as const, reason: 'appliance-only' as const } : computed;
       const info = input.controls?.[control] ?? { label: control.toUpperCase(), title: control };
       rows.push({ level: level.id, control, label: info.label, family: control.split('-')[0], title: info.title, ...outcome, reasonText: fillReason(outcome.reason, outcome.detail), components: componentRows });
     }
   }
   const levels = input.levels.map((level) => ({
     id: level.id, title: level.title, kind: level.kind ?? 'level', profile: level.profile ?? '', claim: level.claim ?? false,
-    components: level.components, overlays: level.overlays ?? [], counts: countStates(rows.filter((row) => row.level === level.id))
+    components: level.components, overlays: level.overlays ?? [], counts: summarizeLevel(rows.filter((row) => row.level === level.id))
   }));
   return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows, gaps: [], collectors: [], matrix: [], textIndex: [], refusedAcceptances: [] };
 }
