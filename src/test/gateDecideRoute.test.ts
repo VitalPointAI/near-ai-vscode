@@ -5,13 +5,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { parseEndpoints } from '../domain/gate/endpoints';
+import { migrateLocalHosts, parseEndpoints } from '../domain/gate/endpoints';
 import type { PolicyEndpoint } from '../domain/gate/endpoints';
 import type { Mark } from '../domain/gate/dominance';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import {
-  DEFAULT_ROUTING, PRIVATE_FLOOR_TEXT, ROUTE_REFUSALS, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD, decideRoute as decideRouteOnce, effectiveClearances, endpointOf, parseRouting
+  DEFAULT_ROUTING, ENDPOINT_SCHEME_TEXT, PRIVATE_FLOOR_TEXT, ROUTE_REFUSALS, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD, decideRoute as decideRouteOnce, effectiveClearances, endpointOf, parseRouting
 } from '../domain/gate/routing';
 import type { RouteDecision, RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
 import type { AuthorizationBody } from '../domain/gate/authorizations';
@@ -105,7 +105,9 @@ test('the place of a request: loopback is this computer, NEAR AI Cloud\'s endpoi
   assert.deepEqual(endpointOf(NEAR_CLOUD, []), { class: 'forwarded', region: 'unstated', implicit: true, tlsPins: [] });
   assert.equal(endpointOf({ ...NEAR_TEE, model: undefined }, [])?.class, 'forwarded', 'an unknown model is not private');
   const listed = endpoints({ id: 'near', class: 'nearai-tee', host: 'cloud-api.near.ai', scheme: 'https', tlsPins: [], region: 'US', maxLabel: ['org/Confidential'], provider: 'nearai' });
-  assert.deepEqual(endpointOf(NEAR_CLOUD, listed), { id: 'near', class: 'nearai-tee', region: 'US', provider: 'nearai', implicit: false, tlsPins: [] });
+  assert.deepEqual(endpointOf(NEAR_TEE, listed), { id: 'near', class: 'nearai-tee', region: 'US', provider: 'nearai', implicit: false, tlsPins: [] });
+  // CR-02: the entry is NEAR AI's private hardware, so a model NEAR AI forwards elsewhere is forwarded, with no region and no id, even on that host.
+  assert.deepEqual(endpointOf(NEAR_CLOUD, listed), { class: 'forwarded', region: 'unstated', implicit: true, tlsPins: [] });
   assert.equal(endpointOf(LOCAL_REMOTE, []), undefined);
   assert.equal(endpointOf({ ...LOCAL_REMOTE, host: 'not a host' }, listed), undefined);
   // Through decideRoute: a loopback model and NEAR AI Cloud's private hardware carry their implicit place.
@@ -460,4 +462,107 @@ test('D-63: no decision in this file returned route.export-control; it stays nam
   assert.equal(RULES_SEEN.has('route.export-control'), false);
   assert.ok((ROUTE_RULES_NAMED_AHEAD as readonly string[]).includes('route.export-control'));
   assert.equal((ROUTE_RULES as readonly string[]).includes('route.export-control'), false);
+});
+
+// ---- Code review fixes (41-REVIEW CR-02, WR-03, WR-05) ----
+
+/** NEAR AI Cloud's own host, listed as its private hardware in Canada (the shape D-24 gives NEAR AI Cloud). */
+const NEAR_CA = { id: 'near-ca', class: 'nearai-tee', host: 'cloud-api.near.ai', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Confidential'] };
+
+test('CR-02: a model NEAR AI forwards, on NEAR AI Cloud\'s host listed as its private hardware in Canada, is forwarded with no region, so a Canada residency rule refuses it', () => {
+  const policy = policyWith({ endpoints: endpoints(NEAR_CA), residency: { v: 1, required: ['CA'] } });
+  const forwarded = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD, undefined, undefined, policy);
+  assert.deepEqual({ allowed: forwarded.allowed, rule: forwarded.rule, reason: forwarded.reason }, { allowed: false, rule: 'route.residency', reason: ROUTE_REFUSALS['route.residency'] });
+  assert.deepEqual(endpointOf(NEAR_CLOUD, endpoints(NEAR_CA)), { class: 'forwarded', region: 'unstated', implicit: true, tlsPins: [] });
+  // A model the catalog does not know is not private either.
+  assert.equal(decideRoute(markOf(org('Public')), DEFAULT_ROUTING, { ...NEAR_TEE, model: undefined }, undefined, undefined, policy).rule, 'route.residency');
+  // The allowed side: a TEE model runs in the listed private hardware in Canada, at any-cloud and at an attested-cloud level.
+  const tee = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_TEE, undefined, undefined, policy);
+  assert.deepEqual({ allowed: tee.allowed, rule: tee.rule, endpoint: tee.endpoint }, { allowed: true, rule: 'route.any-cloud', endpoint: { id: 'near-ca', class: 'nearai-tee', region: 'CA', implicit: false, tlsPins: [] } });
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, NEAR_TEE_BOUND, undefined, undefined, policy).allowed, true);
+  // With no residency rule the forwarded model still goes at any-cloud, and its place says forwarded, with no region and no id.
+  const open = decideRoute(markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD, undefined, undefined, policyWith({ endpoints: endpoints(NEAR_CA) }));
+  assert.deepEqual({ allowed: open.allowed, endpoint: open.endpoint }, { allowed: true, endpoint: { class: 'forwarded', region: 'unstated', implicit: true, tlsPins: [] } });
+});
+
+test('CR-02: a forwarded model on a listed private-hardware entry keeps the entry\'s ceiling, takes the limits of a forwarding service, and no authorization naming the entry covers it', () => {
+  // A routing table your organization relaxed, so the table itself sends org Restricted and Protected B to any cloud.
+  const relaxed = routingWith({ 'org/Restricted': 'any-cloud', 'ca-protected/Protected B': 'any-cloud' });
+  const wide = endpoints({ ...NEAR_CA, maxLabel: ['ca-protected/Protected B', 'org/Restricted'] });
+  const restricted = decideRoute(markOf(org('Restricted')), relaxed, NEAR_CLOUD, undefined, undefined, policyWith({ endpoints: wide }));
+  assert.deepEqual({ allowed: restricted.allowed, rule: restricted.rule, reason: restricted.reason }, { allowed: false, rule: 'route.endpoint-ceiling', reason: ROUTE_REFUSALS['route.endpoint-ceiling'] });
+  assert.equal(decideRoute(markOf(org('Restricted')), relaxed, NEAR_TEE, undefined, undefined, policyWith({ endpoints: wide })).allowed, true);
+  // The entry's own ceiling still holds for the forwarded model.
+  const capped = endpoints({ ...NEAR_CA, maxLabel: ['org/Public'] });
+  assert.equal(decideRoute(markOf(org('Internal')), routingWith({ 'org/Internal': 'any-cloud' }), NEAR_CLOUD, undefined, undefined, policyWith({ endpoints: capped })).rule, 'route.endpoint-ceiling');
+  // Protected B: the authorization names the entry for its private hardware, so it never covers a model NEAR AI forwards, even over a proven connection.
+  const policy = policyWith({ endpoints: wide, authorizations: [pbFor('near-ca', { scope: { labels: ['ca-protected/Protected B'] } })] });
+  const forwarded = decideRoute(markOf(PROTECTED_B), relaxed, { ...NEAR_CLOUD, binding: NEAR_TEE_BOUND.binding }, undefined, undefined, policy);
+  assert.deepEqual({ allowed: forwarded.allowed, rule: forwarded.rule }, { allowed: false, rule: 'route.authorization-missing' });
+  const tee = decideRoute(markOf(PROTECTED_B), relaxed, NEAR_TEE_BOUND, undefined, undefined, policy);
+  assert.deepEqual({ allowed: tee.allowed, rule: tee.rule, id: tee.endpoint?.id }, { allowed: true, rule: 'route.any-cloud', id: 'near-ca' });
+});
+
+/** Your organization's plain server, listed over https. */
+const LLM = { id: 'llm', class: 'org-plain', host: 'llm.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Confidential'] };
+const LLM_HTTP: RouteFacts = { ...LOCAL_OK, host: 'http://llm.example.org:8080/v1' };
+const LLM_HTTPS: RouteFacts = { ...LOCAL_OK, host: 'https://llm.example.org/v1' };
+
+test('WR-03: a place your rules list over https refuses a plain http connection at every level (route.endpoint-pin); over https it goes', () => {
+  const routing = routingWith({}, 'llm.example.org');
+  const policy = policyWith({ endpoints: endpoints(LLM) });
+  assert.ok(ENDPOINT_SCHEME_TEXT.startsWith('Nothing was sent. '));
+  for (const level of ['Public', 'Internal', 'Confidential']) {
+    const refused = decideRoute(markOf(org(level)), routing, LLM_HTTP, undefined, undefined, policy);
+    assert.deepEqual({ allowed: refused.allowed, rule: refused.rule, reason: refused.reason }, { allowed: false, rule: 'route.endpoint-pin', reason: ENDPOINT_SCHEME_TEXT }, level);
+    assert.equal(decideRoute(markOf(org(level)), routing, LLM_HTTPS, undefined, undefined, policy).allowed, true, level);
+  }
+  // Without a policy the safety patch decides as before.
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LLM_HTTP).allowed, true);
+  // A host your list does not name declared no scheme: content at any-cloud still goes to it over http.
+  assert.equal(decideRoute(markOf(org('Public')), routing, { ...LOCAL_OK, host: 'http://other.example.org:8080/v1' }, undefined, undefined, policy).allowed, true);
+  // This computer is not on the network: a local entry declared https still takes plain http on loopback.
+  const laptop = endpoints({ id: 'laptop', class: 'local', host: '127.0.0.1', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Restricted'] });
+  assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ endpoints: laptop })).allowed, true);
+});
+
+test('WR-03: a localHosts host migrated to your list is listed over https, so a runtime reached over plain http is refused from this version; over https it goes', () => {
+  const routing = routingWith({}, 'llm.example.org');
+  const migrated = migrateLocalHosts(routing, SCALE_PRESETS).endpoints;
+  assert.equal(migrated[0]?.scheme, 'https');
+  const policy = policyWith({ endpoints: migrated });
+  const refused = decideRoute(markOf(org('Internal')), routing, LLM_HTTP, undefined, undefined, policy);
+  assert.deepEqual({ allowed: refused.allowed, rule: refused.rule, reason: refused.reason }, { allowed: false, rule: 'route.endpoint-pin', reason: ENDPOINT_SCHEME_TEXT });
+  assert.equal(decideRoute(markOf(org('Internal')), routing, LLM_HTTPS, undefined, undefined, policy).allowed, true);
+});
+
+/** A value whose every read throws: a section or record the step cannot read. */
+function unreadable<T>(): T {
+  const fail = (): never => { throw new Error('unreadable'); };
+  return new Proxy({}, { get: fail, has: fail, ownKeys: fail, getOwnPropertyDescriptor: fail, getPrototypeOf: fail }) as T;
+}
+
+test('WR-05: a passport step that throws is recorded as route.passport and never refuses', () => {
+  const policy = policyWith({ models: unreadable() });
+  for (const [mark, facts] of [[markOf(org('Internal')), NEAR_TEE_BOUND], [markOf(org('Public')), NEAR_CLOUD], [markOf(SECRET), LOCAL_OK]] as const) {
+    const decision = decideRoute(mark, DEFAULT_ROUTING, facts, undefined, undefined, policy);
+    assert.equal(decision.allowed, true, decision.rule);
+    assert.ok(decision.wouldRefuse?.includes('route.passport'), decision.rule);
+    assert.equal(decision.allowedBy?.some((record) => record.kind === 'model-approval'), false);
+  }
+});
+
+test('WR-05: an accredited-device check that throws covers nothing: only reported unless your organization turns refusal on, and a readable authorization still covers', () => {
+  const broken: VerifiedAuthorization = { get body(): AuthorizationBody { throw new Error('unreadable'); }, selfSigned: false };
+  const reported = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [broken] }));
+  assert.deepEqual({ allowed: reported.allowed, wouldRefuse: reported.wouldRefuse, notAccredited: reported.notAccredited }, { allowed: true, wouldRefuse: ['route.accredited-device'], notAccredited: SECRET });
+  const enforced = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [broken], organization: true, requireAccreditedDevice: true }));
+  assert.deepEqual({ allowed: enforced.allowed, rule: enforced.rule }, { allowed: false, rule: 'route.accredited-device' });
+  const good = verified(authorizationFor({ kind: 'accredited-device', id: 'accredited-device-9', subject: { device: 'device-1' } }));
+  const covered = decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, policyWith({ deviceId: 'device-1', authorizations: [broken, good], organization: true, requireAccreditedDevice: true }));
+  assert.deepEqual({ allowed: covered.allowed, wouldRefuse: covered.wouldRefuse }, { allowed: true, wouldRefuse: undefined });
+  // A device id that cannot be read: the same, reported or refused, never thrown.
+  const noDevice = (extra: Partial<RoutePolicy>): RoutePolicy => Object.defineProperty({ ...policyWith(extra) }, 'deviceId', { get(): string { throw new Error('unreadable'); } }) as RoutePolicy;
+  assert.deepEqual(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, noDevice({})).wouldRefuse, ['route.accredited-device']);
+  assert.equal(decideRoute(markOf(SECRET), DEFAULT_ROUTING, LOCAL_OK, undefined, undefined, noDevice({ organization: true, requireAccreditedDevice: true })).rule, 'route.accredited-device');
 });

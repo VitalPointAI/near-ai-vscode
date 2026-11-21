@@ -1358,6 +1358,35 @@ test('41-13: the gate host gives each runtime and its route for requests outside
   await host.flush();
 });
 
+test('WR-02: a route policy the host cannot work out is a failed check: the request is refused (route.deny) and recorded, never decided without the policy', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-route-policy-throws-'));
+  const host = new GateHost({ globalStorageDir: storage, secrets: new MemorySecrets(), productVersion: '0.4.40-test' });
+  await host.start();
+  const local = await localClient();
+  const records: DecisionRecord[] = [];
+  const route = (): SessionRoute => ({ ...host.sessionRouteWithoutContext(), sink: { record: (record) => { records.push(record); } } });
+  // The allowed side: with layers the host can read, a request for a model on this computer goes.
+  assert.equal((await withSessionRoute(route(), () => ask(local.client, 'local-model'))).text, 'ok');
+  assert.equal(local.content.length, 1);
+  // Layers that throw when read: the route policy throws rather than giving none, which would decide as if no policy existed.
+  Object.defineProperty(host, 'policyLayers', { configurable: true, value: () => { throw new Error('unreadable layers'); } });
+  try {
+    assert.throws(() => host.sessionRouteWithoutContext().routePolicy?.(host.now()), /unreadable layers/);
+    const runtime = await host.runtimeFor({ actor: { kind: 'agent', sessionId: 'route-policy-throws', agentLabel: 'agent' }, presence: 'person', context: 'interactive' });
+    assert.throws(() => runtime.routePolicy?.(host.now()), /unreadable layers/);
+    await assert.rejects(
+      () => withSessionRoute(route(), () => ask(local.client, 'local-model')),
+      (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.deny' && error.message === ROUTE_CHECK_FAILED_TEXT
+    );
+    assert.equal(local.content.length, 1, 'nothing more was sent');
+    assert.equal(ruleOf(records[records.length - 1]), 'route.deny');
+    assert.equal(validateDecisionRecord(records[records.length - 1]).ok, true);
+  } finally {
+    delete (host as unknown as Record<string, unknown>)['policyLayers'];
+  }
+  await host.flush();
+});
+
 // ---- 41-13 Task 3 (D-26, D-33, D-34, D-42): Protected B over the pinned connection, residency and reports through the client ----
 
 const PROTECTED_B: Label = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [], handling: [] };

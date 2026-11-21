@@ -179,7 +179,7 @@ export function fixtureEndpoints(): Array<Record<string, unknown>> {
     { id: 'lab-example-org', class: 'org-plain', host: '*.lab.example.org', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected A', 'nato/NATO Unclassified', 'org/Restricted'] },
     { id: 'laptop', class: 'local', host: 'localhost', scheme: 'http-loopback', tlsPins: [], region: 'CA', maxLabel: ['ca-classified/Top Secret', 'ca-protected/Protected C', 'nato/Cosmic Top Secret', 'org/Restricted'], provider: 'ollama' },
     { id: 'models-example-org', class: 'org-plain', host: 'models.example.org', scheme: 'https', tlsPins: ['d'.repeat(64), 'e'.repeat(64)], region: 'CA', maxLabel: ['ca-protected/Protected B', 'nato/NATO Restricted', 'org/Restricted'] },
-    { id: 'nearai-private', class: 'nearai-tee', host: 'private.example.net', scheme: 'https', tlsPins: [], region: 'US', maxLabel: ['ca-protected/Protected B', 'org/Confidential'], provider: 'nearai' },
+    { id: 'nearai-private', class: 'nearai-tee', host: 'cloud-api.near.ai', scheme: 'https', tlsPins: [], region: 'US', maxLabel: ['ca-protected/Protected B', 'org/Confidential'], provider: 'nearai' },
     { id: 'vendor-enclave', class: 'vendor-tee', host: 'enclave.example.net', scheme: 'https', tlsPins: [], region: 'EU', maxLabel: ['ca-protected/Protected B', 'org/Confidential'], attestation: 'vendor-tee-v1' },
     { id: 'vendor-region', class: 'vendor-region', host: 'ca.example.net', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['ca-protected/Protected A', 'org/Internal'], provider: 'example' }
   ];
