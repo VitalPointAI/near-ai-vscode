@@ -1,0 +1,11 @@
+{
+  "oscal-cli": {
+    "version": "3.2.0",
+    "url": "https://repo1.maven.org/maven2/dev/metaschema/oscal/oscal-cli-enhanced/3.2.0/oscal-cli-enhanced-3.2.0-oscal-cli.zip",
+    "sha256": "e001b353ee245da6f4ff0ad930c4dfaa88083c63243ca004bd5f5bcef44e8ec8",
+    "checksumUrl": "https://repo1.maven.org/maven2/dev/metaschema/oscal/oscal-cli-enhanced/3.2.0/oscal-cli-enhanced-3.2.0-oscal-cli.zip.sha256",
+    "archive": "zip",
+    "bin": "bin/oscal-cli",
+    "java": ">=11"
+  }
+}

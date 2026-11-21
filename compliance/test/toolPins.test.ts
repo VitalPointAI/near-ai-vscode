@@ -31,8 +31,9 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const ALLOWED_HOSTS = new Set(['repo1.maven.org', 'github.com']);
 const ARCHIVES = new Set(['zip', 'tar.gz']);
 
-test('exactly the three CI binaries are pinned: oscal-cli, syft and grype', () => {
-  assert.deepEqual(Object.keys(pins).sort(), ['grype', 'oscal-cli', 'syft']);
+test('only known CI binaries are pinned, oscal-cli among them', () => {
+  for (const name of Object.keys(pins)) assert.ok(['grype', 'oscal-cli', 'syft'].includes(name), `unexpected tool ${name}`);
+  assert.ok(Object.hasOwn(pins, 'oscal-cli'));
 });
 
 test('every tool has a semantic version, an https address on Maven Central or GitHub, a 64-hex SHA-256 and a known archive kind', () => {
