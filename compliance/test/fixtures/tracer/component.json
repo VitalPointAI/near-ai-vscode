@@ -1,0 +1,54 @@
+{
+  "component-definition": {
+    "components": [
+      {
+        "control-implementations": [
+          {
+            "description": "Fixture implementation of the tracer catalogue.",
+            "implemented-requirements": [
+              {
+                "control-id": "tr-01",
+                "description": "The fixture component records each tracer event.",
+                "props": [
+                  {
+                    "name": "responsibility",
+                    "ns": "urn:near-ai-vscode:compliance",
+                    "value": "product"
+                  }
+                ],
+                "statements": [
+                  {
+                    "description": "Each tracer event is recorded by the fixture component.",
+                    "statement-id": "tr-01_smt",
+                    "uuid": "6044e7f7-9c20-4187-a520-fdca8a18f8fa"
+                  }
+                ],
+                "uuid": "ef5bcb5b-e6d9-4d99-a25c-52db4064c985"
+              }
+            ],
+            "source": "catalog.json",
+            "uuid": "530fc87a-38ea-4651-af88-dfa3a6091329"
+          }
+        ],
+        "description": "A component written for the tracer tests.",
+        "props": [
+          {
+            "name": "component-id",
+            "ns": "urn:near-ai-vscode:compliance",
+            "value": "tracer-fixture"
+          }
+        ],
+        "title": "Tracer fixture component",
+        "type": "software",
+        "uuid": "b6789683-3f3a-4ea4-b11e-1dedcce8f4c1"
+      }
+    ],
+    "metadata": {
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1",
+      "title": "Tracer fixture component definition",
+      "version": "0.1.0"
+    },
+    "uuid": "7802c825-ecae-494e-b3f9-7d7e2f979efd"
+  }
+}
