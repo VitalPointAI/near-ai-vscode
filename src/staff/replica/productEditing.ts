@@ -6,7 +6,9 @@
 // change is never lost and the fold never sees a clock gap.
 //
 // Client ids (Pitfall 2): every session takes a fresh id, the lowest of this device's slot that the fold has not registered for the product and no
-// other session of this process holds, so a crash between writing an update and recording it can never make two sessions reuse clocks. The editor
+// other session of this process holds, so a crash between writing an update and recording it can never make two sessions reuse clocks. The fold's
+// verdict on the registration is read before the first update is written: a client-collision (the id registered first under another actor, such as
+// an agent run on this device) or any other refusal stops the session with its PRODUCT_EDIT_REFUSALS sentence, the change kept queued. The editor
 // binding (33-04) drives this class; batching of a typing burst and chunking of a large paste are its part, not this file's.
 import { deviceAt } from '../../domain/replica/rosterMembers';
 import { applyRemote, createLocalDoc, docText, localDelete, localInsert } from '../../domain/replica/doc';
@@ -157,6 +159,14 @@ export class ProductEditor {
     if (update.length > 0) this.queue.push(update);
   }
 
+  /** Why the fold refused this session's registration, or undefined when it took it. */
+  private async registrationVerdict(hash: string): Promise<ProductEditRefusal | undefined> {
+    const { fold } = await this.project.state();
+    const refused = fold.refused.find((item) => item.hash === hash) ?? fold.rejected.find((item) => item.hash === hash);
+    if (refused === undefined) return undefined;
+    return refused.reason === 'client-collision' ? 'client-collision' : 'registration-refused';
+  }
+
   private async flushNow(): Promise<{ appended: number; queued: number }> {
     let appended = 0;
     if (this.queue.length === 0 || this.stoppedBy !== undefined || this.closedNow) return { appended, queued: this.queue.length };
@@ -164,6 +174,13 @@ export class ProductEditor {
     if (!this.registered) {
       const registration = await this.project.appendOwn('doc.client', { product, clientId: this.clientId, actor }, { stream, actor });
       if (!('ok' in registration)) return { appended, queued: this.queue.length };
+      // The registration is checked by the fold before any update uses it: an update under an id this session does not own would be refused,
+      // or, worse, read as another actor's text.
+      const verdict = await this.registrationVerdict(registration.hash);
+      if (verdict !== undefined) {
+        this.stoppedBy = verdict;
+        return { appended, queued: this.queue.length };
+      }
       this.registered = true;
     }
     while (this.queue.length > 0) {

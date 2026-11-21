@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { entryHash } from '../../domain/replica/entry';
+import type { SealedEntry } from '../../domain/replica/entry';
 import { readHubFile } from '../../domain/replica/hubFile';
 import { hubMemoryOf } from '../../staff/replica/hubSync';
 import type { HubMemory, SyncLocal } from '../../staff/replica/hubSync';
@@ -20,6 +22,7 @@ import type { MembershipResult, SharedProjectHost } from '../../staff/replica/me
 import { ReplicaProject, isProjectRefused, syncLocalOf } from '../../staff/replica/replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from '../../staff/replica/replicaProject';
 import { MemorySecrets, orgClearance } from './labelCellWorld';
+import { createFakeTransport } from './replicaFakeTransport';
 
 export interface LiveInstall { root: string; global: string; secrets: MemorySecrets; deps: ReplicaProjectDeps }
 
@@ -132,6 +135,23 @@ export async function createLiveWorld(options: { people: ReadonlyArray<{ label: 
       for (const item of devices) await item.project.close();
     }
   };
+}
+
+/**
+ * Carries one device's own entries of one stream to another device through the fake transport (pushed, then pulled), leaving out the entries whose
+ * hash is in `withhold`, and stores them on the other device through its decode check. A test holds back an entry to deliver it later.
+ */
+export async function carryThroughFake(from: LiveDevice, to: LiveDevice, stream: string, withhold: ReadonlySet<string> = new Set()): Promise<void> {
+  const writer = from.project.deviceWriter;
+  const entries = (await from.project.entriesAfter(stream, writer, -1)).filter((entry) => !withhold.has(entryHash(entry.header)));
+  const transport = createFakeTransport();
+  const pushed = await transport.push(entries, []);
+  assert.equal(pushed.refused.length, 0, 'the fake transport takes every entry');
+  const pulled: SealedEntry[] = [];
+  for await (const item of transport.pull([{ stream, writer, fromSeq: 0 }])) if ('header' in item) pulled.push(item);
+  assert.equal(pulled.length, entries.length);
+  const stored = await to.project.ingestForeign(pulled, []);
+  assert.ok(!isProjectRefused(stored), 'the entries are taken');
 }
 
 /** A manual clock: timers run only when the test advances time, in deadline order. */
