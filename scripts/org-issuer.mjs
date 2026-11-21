@@ -4,9 +4,12 @@
 // compiled signer in dist/ (the same code the extension checks with), and reads every file it writes back with the extension's own reader before it says
 // done.
 //
-// Kept offline: run it on a computer that holds the key file and nothing else of your organization's. The key file is encrypted with a passphrase
-// (PKCS#8, AES-256-CBC), written once with mode 0600, and never overwritten. The passphrase comes from the environment variable
-// NEAR_ORG_ISSUER_PASSPHRASE or from the first line of --passphrase-file <file>; it is at least 12 characters, never an argument, and never printed.
+// Kept offline: run it on a computer that holds the key file and nothing else of your organization's. The key file is a small JSON file (version 2)
+// whose private key is sealed with AES-256-GCM under a key derived from the passphrase with scrypt (N = 2^17, r = 8, p = 1, 16-byte random salt,
+// 12-byte random nonce); it is written once with mode 0600, never overwritten, and create-key opens it again with the passphrase before it says done.
+// A key file that is not sealed this way (an unencrypted key, an older format, other scrypt costs) is refused. The passphrase comes from the
+// environment variable NEAR_ORG_ISSUER_PASSPHRASE or from the first line of --passphrase-file <file>; it is at least 12 characters, never an
+// argument, and never printed.
 //
 //   npm run compile
 //   node scripts/org-issuer.mjs create-key --out <key file>
@@ -23,7 +26,7 @@
 // For rotate, the new key's passphrase comes from NEAR_ORG_ISSUER_NEW_PASSPHRASE or --new-passphrase-file, else it is the same passphrase.
 //
 // Exit codes: 0 done, 1 refused (one plain sentence on stderr, nothing written), 2 usage.
-import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, scryptSync, sign as cryptoSign } from 'node:crypto';
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -31,6 +34,15 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEY_KIND = 'near-ai-org-issuer-key';
+const KEY_FILE_VERSION = 2;
+/**
+ * WR-04: the one sealing the key file accepts. Fixed, not read from the file, so a file that names a cheaper cost is refused rather than opened.
+ * N = 2^17 with r = 8 needs 128 MiB and about a third of a second per try on a current computer; maxmem leaves room above that.
+ */
+const SEAL = Object.freeze({ kdf: 'scrypt', N: 2 ** 17, r: 8, p: 1, cipher: 'aes-256-gcm', saltBytes: 16, nonceBytes: 12, tagBytes: 16, keyBytes: 32 });
+const SCRYPT_MAXMEM = 256 * 1024 * 1024;
+const SEALED_FIELDS = ['cipher', 'ciphertext', 'kdf', 'N', 'nonce', 'p', 'r', 'salt', 'tag'];
+const KEY_FILE_FIELDS = ['createdAt', 'kind', 'privateKey', 'publicKey', 'v'];
 const MIN_PASSPHRASE = 12;
 const MAX_KEY_FILE_BYTES = 16 * 1024;
 const MAX_INPUT_BYTES = 2 * 1024 * 1024;
@@ -135,27 +147,86 @@ function readJson(file, what) {
   return undefined;
 }
 
-/** The key file's public part, checked; the private key stays encrypted. */
+function sameKeys(value, names) {
+  const keys = Object.keys(value).sort();
+  const want = [...names].sort();
+  return keys.length === want.length && keys.every((name, index) => name === want[index]);
+}
+
+/** The wrapping key for the private key, from the passphrase and the file's salt. */
+function wrappingKey(passphrase, salt) {
+  return scryptSync(passphrase.normalize('NFC'), salt, SEAL.keyBytes, { N: SEAL.N, r: SEAL.r, p: SEAL.p, maxmem: SCRYPT_MAXMEM });
+}
+
+/** Ties the ciphertext to the public key and the sealing it names, so neither can be swapped without the open failing. */
+function sealedHeader(publicKey, sealed) {
+  return Buffer.from(JSON.stringify([KEY_KIND, KEY_FILE_VERSION, publicKey, sealed.kdf, sealed.N, sealed.r, sealed.p, sealed.salt, sealed.cipher, sealed.nonce]), 'utf8');
+}
+
+/** Seals the 32-byte private key with the passphrase. */
+function seal(publicKey, privateKeyBytes, passphrase) {
+  const salt = randomBytes(SEAL.saltBytes);
+  const nonce = randomBytes(SEAL.nonceBytes);
+  const sealed = { kdf: SEAL.kdf, N: SEAL.N, r: SEAL.r, p: SEAL.p, salt: salt.toString('base64url'), cipher: SEAL.cipher, nonce: nonce.toString('base64url') };
+  const key = wrappingKey(passphrase, salt);
+  try {
+    const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: SEAL.tagBytes });
+    cipher.setAAD(sealedHeader(publicKey, sealed));
+    const ciphertext = Buffer.concat([cipher.update(privateKeyBytes), cipher.final()]);
+    return { ...sealed, ciphertext: ciphertext.toString('base64url'), tag: cipher.getAuthTag().toString('base64url') };
+  } finally {
+    key.fill(0);
+  }
+}
+
+/** The key file's public part and sealed private key, checked; the private key stays sealed. */
 function readKeyFile(dist, file) {
   const text = readSmall(file, MAX_KEY_FILE_BYTES, 'key file');
+  const name = path.basename(file);
   let key;
-  try { key = JSON.parse(text); } catch { refuse(`The key file ${path.basename(file)} is not a key file from this tool.`); }
-  const ok = key !== null && typeof key === 'object' && key.v === 1 && key.kind === KEY_KIND && typeof key.publicKey === 'string'
-    && dist.canonical.isStrictBase64url(key.publicKey, 32) && typeof key.privateKeyPem === 'string';
-  if (!ok) refuse(`The key file ${path.basename(file)} is not a key file from this tool.`);
+  try { key = JSON.parse(text); } catch { refuse(`The key file ${name} is not a key file from this tool.`); }
+  if (key === null || typeof key !== 'object' || Array.isArray(key) || key.kind !== KEY_KIND) refuse(`The key file ${name} is not a key file from this tool.`);
+  // WR-04: an unencrypted key, or the older PKCS#8 file this tool once wrote, is never opened, so a key someone decrypted "for now" stops working.
+  if (key.v !== KEY_FILE_VERSION || Object.prototype.hasOwnProperty.call(key, 'privateKeyPem') || typeof key.privateKey === 'string') {
+    refuse(`The key file ${name} does not keep its key sealed with scrypt and AES-256-GCM as this tool does. Nothing was written: make a new key with create-key and enrol with it, or hand over to it with rotate.`);
+  }
+  const sealed = key.privateKey;
+  const { isStrictBase64url } = dist.canonical;
+  const ok = sameKeys(key, KEY_FILE_FIELDS) && typeof key.publicKey === 'string' && isStrictBase64url(key.publicKey, 32)
+    && typeof key.createdAt === 'string'
+    && sealed !== null && typeof sealed === 'object' && !Array.isArray(sealed) && sameKeys(sealed, SEALED_FIELDS)
+    && sealed.kdf === SEAL.kdf && sealed.N === SEAL.N && sealed.r === SEAL.r && sealed.p === SEAL.p && sealed.cipher === SEAL.cipher
+    && isStrictBase64url(sealed.salt, SEAL.saltBytes) && isStrictBase64url(sealed.nonce, SEAL.nonceBytes)
+    && isStrictBase64url(sealed.tag, SEAL.tagBytes) && isStrictBase64url(sealed.ciphertext, 32);
+  if (!ok) refuse(`The key file ${name} is not a key file from this tool, or its sealing is not the one this tool uses.`);
   return key;
 }
 
 /** Opens the key with its passphrase and returns the one signer shape every builder takes. The private key never leaves this function's closure. */
 function signerFor(dist, file, passphrase) {
   const key = readKeyFile(dist, file);
-  let privateKey;
+  const sealed = key.privateKey;
+  const wrap = wrappingKey(passphrase, Buffer.from(sealed.salt, 'base64url'));
+  let seed;
   try {
-    privateKey = createPrivateKey({ key: key.privateKeyPem, format: 'pem', passphrase });
+    const decipher = createDecipheriv('aes-256-gcm', wrap, Buffer.from(sealed.nonce, 'base64url'), { authTagLength: SEAL.tagBytes });
+    decipher.setAAD(sealedHeader(key.publicKey, sealed));
+    decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
+    seed = Buffer.concat([decipher.update(Buffer.from(sealed.ciphertext, 'base64url')), decipher.final()]);
   } catch {
     refuse(`The passphrase does not open the key file ${path.basename(file)}. Nothing was written.`);
+  } finally {
+    wrap.fill(0);
   }
-  if (privateKey.asymmetricKeyType !== 'ed25519' || createPublicKey(privateKey).export({ format: 'jwk' }).x !== key.publicKey) {
+  let privateKey;
+  try {
+    privateKey = createPrivateKey({ key: { kty: 'OKP', crv: 'Ed25519', d: seed.toString('base64url'), x: key.publicKey }, format: 'jwk' });
+  } catch {
+    privateKey = undefined;
+  } finally {
+    seed.fill(0);
+  }
+  if (privateKey === undefined || privateKey.asymmetricKeyType !== 'ed25519' || createPublicKey(privateKey).export({ format: 'jwk' }).x !== key.publicKey) {
     refuse(`The key file ${path.basename(file)} is damaged: its key does not match the public key it names. Nothing was written.`);
   }
   const raw = Buffer.from(key.publicKey, 'base64url');
@@ -202,19 +273,31 @@ function createKey(dist, options) {
   const out = options['--out'];
   const passphrase = passphraseFrom('NEAR_ORG_ISSUER_PASSPHRASE', '--passphrase-file', options);
   if (existsSync(out)) refuse(`${path.basename(out)} already exists. Nothing was written: a key file is never replaced.`);
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase }
-  });
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const raw = publicKey.export({ format: 'jwk' }).x;
-  const file = { v: 1, kind: KEY_KIND, publicKey: raw, privateKeyPem: privateKey, createdAt: new Date().toISOString() };
+  const seed = Buffer.from(privateKey.export({ format: 'jwk' }).d, 'base64url');
+  let sealed;
+  try { sealed = seal(raw, seed, passphrase); } finally { seed.fill(0); }
+  const file = { v: KEY_FILE_VERSION, kind: KEY_KIND, publicKey: raw, privateKey: sealed, createdAt: new Date().toISOString() };
   try {
     writeFileSync(out, `${JSON.stringify(file, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   } catch (error) {
     if (error && error.code === 'EEXIST') refuse(`${path.basename(out)} already exists. Nothing was written: a key file is never replaced.`);
     refuse(`${path.basename(out)} could not be written. Nothing was written.`);
   }
-  const back = readKeyFile(dist, out);
-  if (back.publicKey !== raw) refuse(`${path.basename(out)} did not read back. Keep it offline and make a new key file.`);
+  // WR-04: the file on disk is opened again with the passphrase before the tool says done. A key file this run just made that does not open is of no
+  // use to anyone (nothing has been signed with it yet), so it is removed rather than left to be kept offline by mistake.
+  let opened;
+  try {
+    opened = signerFor(dist, out, passphrase);
+  } catch (error) {
+    opened = undefined;
+    if (!(error instanceof Refusal)) throw error;
+  }
+  if (opened === undefined || opened.publicKey !== raw) {
+    try { unlinkSync(out); } catch { /* reported below */ }
+    refuse(`${path.basename(out)} did not open again with the passphrase and was removed. Make a new key file.`);
+  }
   console.log(`Wrote ${path.basename(out)}. Keep it offline, with its passphrase stored apart from it.`);
   printWords(dist, raw, 'Your organization\'s key reads as these twelve words:');
 }

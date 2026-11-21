@@ -192,7 +192,7 @@ const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 test('D-44: a proposal on your own rules is shown and applied', async () => {
   const state = ownState();
-  const h = harness({ state });
+  const h = harness({ state, signer: deviceKey() });
   const outcome = h.editor.openPolicyProposal(widenInternal);
   await settle();
   const shown = h.lastState();
@@ -213,6 +213,28 @@ test('D-44: a proposal on your own rules is shown and applied', async () => {
   assert.match(String(h.calls.record[0]?.detail['proposalHash']), /^[0-9a-f]{64}$/);
   assert.equal(await outcome, 'applied');
   assert.equal(h.lastState().proposal, undefined, 'after applying, the rules are shown with no proposal');
+});
+
+test('IN-08, D-44: Apply is not offered on your own rules when this device has no signing key, and a forged Apply does nothing', async () => {
+  const state = ownState();
+  const unsigned = harness({ state });
+  const outcome = unsigned.editor.openPolicyProposal(widenInternal);
+  await settle();
+  const shown = unsigned.lastState();
+  assert.equal(shown.title, 'Your rules');
+  assert.equal(shown.proposal.changes.length, 1, 'the proposal is still shown');
+  assert.deepEqual(shown.actions, ['discard'], 'no Apply without a key to sign your rules');
+  await unsigned.send({ type: 'apply', id: shown.proposal.id });
+  assert.equal(unsigned.calls.applyPersonal.length, 0);
+  assert.equal(unsigned.calls.record.length, 0);
+  assert.equal(await settled(outcome), false, 'the proposal waits');
+  await unsigned.send({ type: 'discard', id: shown.proposal.id });
+  assert.equal(await outcome, 'discarded');
+  // The same proposal on a device with its key offers Apply.
+  const signed = harness({ state, signer: deviceKey() });
+  void signed.editor.openPolicyProposal(widenInternal);
+  await settle();
+  assert.deepEqual(signed.lastState().actions, ['apply', 'discard']);
 });
 
 test('the panel has one CSP with a fresh nonce, base.css and the page script, and a title with no brand prefix', async () => {
@@ -245,7 +267,7 @@ test('the panel has one CSP with a fresh nonce, base.css and the page script, an
 });
 
 test('D-47: an apply that does not name the shown proposal changes nothing', async () => {
-  const h = harness({ state: ownState() });
+  const h = harness({ state: ownState(), signer: deviceKey() });
   const outcome = h.editor.openPolicyProposal(widenInternal);
   await settle();
   const id = h.lastState().proposal.id as string;
@@ -403,7 +425,7 @@ test('D-47: a proposal goes stale when your rules change under it', async () => 
   await h.send({ type: 'discard', id });
   assert.equal(await outcome, 'discarded');
   // A change that races the click is caught when Apply is pressed.
-  const racing = harness({ state });
+  const racing = harness({ state, signer: deviceKey() });
   const raced = racing.editor.openPolicyProposal(widenInternal);
   await settle();
   racing.swap({ ...state, personalHash: 'e'.repeat(64) });
@@ -452,7 +474,7 @@ test('D-47: closing the page discards the proposal', async () => {
 });
 
 test('D-47: a newer proposal replaces the shown one', async () => {
-  const h = harness({ state: ownState() });
+  const h = harness({ state: ownState(), signer: deviceKey() });
   const first = h.editor.openPolicyProposal(widenInternal);
   await settle();
   const firstId = h.lastState().proposal.id as string;
@@ -475,7 +497,7 @@ test('D-47: a newer proposal replaces the shown one', async () => {
 });
 
 test('D-44: a refusal from applying is shown and nothing else changes', async () => {
-  const h = harness({ state: ownState(), applyAnswer: { ok: false, text: 'Nothing was changed. Your rules cannot be trusted right now.' } });
+  const h = harness({ state: ownState(), signer: deviceKey(), applyAnswer: { ok: false, text: 'Nothing was changed. Your rules cannot be trusted right now.' } });
   const outcome = h.editor.openPolicyProposal(widenInternal);
   await settle();
   const id = h.lastState().proposal.id as string;
@@ -530,7 +552,10 @@ test('D-44: Show as stored and Reset are page buttons, and other messages are ig
     await h.send(ignored);
   }
   assert.equal(h.calls.showStored + h.calls.reset, 2);
-  assert.equal(h.calls.applyPersonal.length + h.calls.record.length + h.calls.signer + h.saveCalls.length, 0);
+  // IN-08: the signer is asked whether this device has one, to decide whether Apply is offered; none here, so only Discard is, and nothing was applied,
+  // recorded or saved.
+  assert.equal(h.calls.applyPersonal.length + h.calls.record.length + h.saveCalls.length, 0);
+  assert.deepEqual(h.lastState().actions, ['discard']);
   assert.equal(h.lastState().proposal.id, id);
   assert.equal(await settled(outcome), false);
 });

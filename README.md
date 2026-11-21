@@ -1478,7 +1478,11 @@ copy of Open-GSD to a project that doesn't already have one.
   Protected B sent to a server your policy names as local now needs a TLS pin
   and a Protected B authorization naming that server. Content marked
   Controlled goods (Canada), ITAR or US export-controlled (EAR) stays on this
-  computer under the starting rules; your organization's rules can carry
+  computer under the starting rules. A fresh install, and the renewal of
+  starting rules nobody edited, get these entries: an upgraded install whose
+  starting rules nobody edited gets them when its policy is next renewed, in
+  the last 30 days before it ends, and an edited policy gets them through a
+  change on the policy page. Your organization's rules can carry
   export-control decisions, but nothing grants access with them yet, and
   meeting those programs stays your organization's obligation. Every model request is checked against its routing before anything is
   sent and leaves a record in a log of its own; on a fresh install nothing

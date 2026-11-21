@@ -927,6 +927,36 @@ test('D-62 to D-64: export-controlled content in plain words, the starting rules
   assert.ok(readme.includes('nothing grants access with them yet'));
 });
 
+// W1 (Phase 41 verification): the export entries reach an upgraded install only when unedited starting rules are renewed (bundle.ts renewalPayload and
+// isDefaultBundle, held by gateBundle's D-62 tests), so README and CHANGELOG say so as SECURITY.md does, with the renewal window read from code.
+test('W1, D-62: SECURITY.md, README and CHANGELOG say an upgraded install gets the export entries when its starting rules are renewed', async () => {
+  const { RENEW_WINDOW_DAYS, SELF_SIGNED_LIFETIME_DAYS } = await import('../domain/gate/bundle');
+  assert.equal(RENEW_WINDOW_DAYS, 30, 'the docs say the last 30 days');
+  assert.equal(SELF_SIGNED_LIFETIME_DAYS, 365);
+  const fresh = 'A fresh install, and the renewal of starting rules nobody edited, get these entries';
+  const security = flat(sectionOf(SECURITY, EXPORT_HEADING));
+  const readme = flat(readmePolicy);
+  const exportBullet = flat(changelogOrganization.split('\n- ').find((bullet) => bullet.includes('Controlled goods (Canada)')) ?? '');
+  for (const [name, text] of [['SECURITY.md', security], ['README', readme], ['CHANGELOG', exportBullet]] as const) {
+    assert.ok(text.includes(fresh), `${name}: ${fresh}`);
+    assert.match(text, new RegExp(`whose starting rules nobody edited gets them when its policy is next renewed, in the last ${String(RENEW_WINDOW_DAYS)} days before`), name);
+    assert.ok(text.includes('change on the policy page'), `${name}: an edited policy gets them by a change`);
+  }
+  assert.ok(security.includes('until then those markings are routed by their level'));
+});
+
+// WR-04: SECURITY.md describes the issuer key file as scripts/org-issuer.mjs seals it.
+test('WR-04: SECURITY.md describes the issuer key file sealing the script uses', () => {
+  const script = readFileSync(path.join(ROOT, 'scripts', 'org-issuer.mjs'), 'utf8');
+  assert.ok(script.includes("kdf: 'scrypt', N: 2 ** 17, r: 8, p: 1, cipher: 'aes-256-gcm', saltBytes: 16, nonceBytes: 12"), 'the sealing in the script');
+  assert.doesNotMatch(script, /aes-256-cbc|privateKeyEncoding/, 'no PKCS#8 PBKDF2 key file is written');
+  const block = flat(sectionOf(SECURITY, ORGANIZATION_RULES_HEADING));
+  for (const phrase of [
+    'The key file is sealed with AES-256-GCM under a key that scrypt derives from the passphrase (N = 2^17, r = 8, p = 1, a random 16-byte salt and 12-byte nonce for each file)',
+    'The tool opens a new key file again with its passphrase before it says done, and refuses a key file that is not sealed this way, including an unencrypted key.'
+  ]) assert.ok(block.includes(phrase), phrase);
+});
+
 test('D-64: no compliance claim in any new text, and the counter has teeth', async () => {
   const { countHits } = await import('./helpers/copyLintScan');
   const claims = (text: string): number => countHits([{ text: prose(text) }], 'SECURITY.md')['SECURITY.md']?.['compliance-claim'] ?? 0;

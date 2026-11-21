@@ -3,7 +3,7 @@
 // passphrase are made at test time; nothing here is key material.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createPrivateKey, createPublicKey, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, scryptSync } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -54,7 +54,26 @@ function keyIn(dir, name = 'issuer-key.json', env) {
 }
 
 const organization = { name: 'Example Organization', contacts: [{ topic: 'security', name: 'Security desk', how: 'security@example.org' }] };
-const PEM_HEAD = /^-{5}BEGIN ENCRYPTED PRIVATE KEY-{5}\n/;
+const SCRYPT = { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+
+/**
+ * Opens a key file the way its format is documented, written here independently of the tool (WR-04): scrypt over the passphrase and the file's salt,
+ * then AES-256-GCM with the file's nonce and tag, bound to the public key and the sealing it names. Returns the 32-byte private key, or throws.
+ */
+function openKeyFile(key, passphrase) {
+  const sealed = key.privateKey;
+  const wrap = scryptSync(passphrase.normalize('NFC'), Buffer.from(sealed.salt, 'base64url'), 32, SCRYPT);
+  const header = JSON.stringify([key.kind, key.v, key.publicKey, sealed.kdf, sealed.N, sealed.r, sealed.p, sealed.salt, sealed.cipher, sealed.nonce]);
+  const decipher = createDecipheriv('aes-256-gcm', wrap, Buffer.from(sealed.nonce, 'base64url'), { authTagLength: 16 });
+  decipher.setAAD(Buffer.from(header, 'utf8'));
+  decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
+  return Buffer.concat([decipher.update(Buffer.from(sealed.ciphertext, 'base64url')), decipher.final()]);
+}
+
+function publicKeyOf(seed, publicKey) {
+  const opened = createPrivateKey({ key: { kty: 'OKP', crv: 'Ed25519', d: seed.toString('base64url'), x: publicKey }, format: 'jwk' });
+  return createPublicKey(opened).export({ format: 'jwk' }).x;
+}
 
 test('create-key writes a passphrase-protected key file once', () => {
   const dir = folder();
@@ -62,17 +81,14 @@ test('create-key writes a passphrase-protected key file once', () => {
   const made = run(['create-key', '--out', file]);
   assert.equal(made.status, 0, made.stderr);
   const key = JSON.parse(readFileSync(file, 'utf8'));
-  assert.deepEqual(Object.keys(key).sort(), ['createdAt', 'kind', 'privateKeyPem', 'publicKey', 'v']);
-  assert.equal(key.v, 1);
+  assert.deepEqual(Object.keys(key).sort(), ['createdAt', 'kind', 'privateKey', 'publicKey', 'v']);
+  assert.equal(key.v, 2);
   assert.equal(key.kind, 'near-ai-org-issuer-key');
   assert.equal(key.publicKey.length, 43);
-  assert.match(key.privateKeyPem, PEM_HEAD);
   assert.ok(!Number.isNaN(Date.parse(key.createdAt)));
-  // The passphrase opens it and gives the key the file names; without the passphrase it does not open.
-  const opened = createPrivateKey({ key: key.privateKeyPem, format: 'pem', passphrase: PASSPHRASE });
-  assert.equal(createPublicKey(opened).export({ format: 'jwk' }).x, key.publicKey);
-  assert.throws(() => createPrivateKey({ key: key.privateKeyPem, format: 'pem' }));
-  assert.throws(() => createPrivateKey({ key: key.privateKeyPem, format: 'pem', passphrase: OTHER_PASSPHRASE }));
+  // The passphrase opens it and gives the key the file names; another passphrase does not open it.
+  assert.equal(publicKeyOf(openKeyFile(key, PASSPHRASE), key.publicKey), key.publicKey);
+  assert.throws(() => openKeyFile(key, OTHER_PASSPHRASE));
   if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.ok(made.stdout.includes(enrolment.issuerWordsText(enrolment.issuerWords(key.publicKey))));
 
@@ -101,7 +117,7 @@ test('create-key writes a passphrase-protected key file once', () => {
   writeFileSync(passFile, `${OTHER_PASSPHRASE}\nsecond line ignored\n`);
   assert.equal(run(['create-key', '--out', fromFile, '--passphrase-file', passFile], {}).status, 0);
   const second = JSON.parse(readFileSync(fromFile, 'utf8'));
-  assert.doesNotThrow(() => createPrivateKey({ key: second.privateKeyPem, format: 'pem', passphrase: OTHER_PASSPHRASE }));
+  assert.doesNotThrow(() => openKeyFile(second, OTHER_PASSPHRASE));
   assert.notEqual(second.publicKey, key.publicKey);
 
   assert.equal(run([]).status, 2);
@@ -235,6 +251,88 @@ test('refusals write nothing', () => {
   const update = path.join(dir, 'large.near-org-rules');
   assert.equal(run(['sign-layer', '--key', key.file, '--rules', large, '--out', update]).status, 0);
   assert.equal(enrolment.verifyOrganizationLayer(readFileSync(update, 'utf8'), { issuerPublicKey: key.publicKey, now: Date.now() }).ok, true);
+});
+
+/** Seals a private key the way the tool does but with a scrypt cost of the caller's choosing, to show the tool refuses any cost but its own. */
+function sealedWith(publicKey, seed, passphrase, N) {
+  const salt = randomBytes(16).toString('base64url');
+  const nonce = randomBytes(12).toString('base64url');
+  const sealed = { kdf: 'scrypt', N, r: 8, p: 1, salt, cipher: 'aes-256-gcm', nonce };
+  const wrap = scryptSync(passphrase.normalize('NFC'), Buffer.from(salt, 'base64url'), 32, { ...SCRYPT, N });
+  const cipher = createCipheriv('aes-256-gcm', wrap, Buffer.from(nonce, 'base64url'), { authTagLength: 16 });
+  cipher.setAAD(Buffer.from(JSON.stringify(['near-ai-org-issuer-key', 2, publicKey, 'scrypt', N, 8, 1, salt, 'aes-256-gcm', nonce]), 'utf8'));
+  const ciphertext = Buffer.concat([cipher.update(seed), cipher.final()]);
+  return { ...sealed, ciphertext: ciphertext.toString('base64url'), tag: cipher.getAuthTag().toString('base64url') };
+}
+
+test('the key file is sealed with scrypt and AES-256-GCM, and anything else is refused (WR-04)', () => {
+  const dir = folder();
+  const key = keyIn(dir);
+  const text = readFileSync(key.file, 'utf8');
+  const file = JSON.parse(text);
+  const rules = json(dir, 'rules.json', fixtures.organizationSections());
+
+  // The sealing named in the file is the strong one, with a fresh salt and nonce per key file.
+  const sealed = file.privateKey;
+  assert.deepEqual(Object.keys(sealed).sort(), ['N', 'cipher', 'ciphertext', 'kdf', 'nonce', 'p', 'r', 'salt', 'tag']);
+  assert.deepEqual([sealed.kdf, sealed.N, sealed.r, sealed.p, sealed.cipher], ['scrypt', 2 ** 17, 8, 1, 'aes-256-gcm']);
+  assert.equal(Buffer.from(sealed.salt, 'base64url').length, 16);
+  assert.equal(Buffer.from(sealed.nonce, 'base64url').length, 12);
+  assert.equal(Buffer.from(sealed.tag, 'base64url').length, 16);
+  const other = JSON.parse(readFileSync(keyIn(dir, 'other-key.json').file, 'utf8')).privateKey;
+  assert.notEqual(other.salt, sealed.salt);
+  assert.notEqual(other.nonce, sealed.nonce);
+
+  // No plaintext key in the file: the private key opened with the passphrase appears in no common encoding, and no PEM block is there.
+  const seed = openKeyFile(file, PASSPHRASE);
+  assert.equal(seed.length, 32);
+  for (const encoded of [seed.toString('hex'), seed.toString('base64'), seed.toString('base64url')]) assert.ok(!text.includes(encoded), 'no plaintext key');
+  assert.ok(!text.includes('PRIVATE KEY'));
+  assert.ok(!text.includes('-----'));
+
+  // Round trip: the passphrase opens the file and signs rules the extension accepts under the key the file names.
+  const good = path.join(dir, 'good.near-org-rules');
+  assert.equal(run(['sign-layer', '--key', key.file, '--rules', rules, '--out', good]).status, 0);
+  assert.equal(enrolment.verifyOrganizationLayer(readFileSync(good, 'utf8'), { issuerPublicKey: key.publicKey, now: Date.now() }).ok, true);
+
+  // A wrong passphrase is refused and writes nothing.
+  const wrong = path.join(dir, 'wrong.near-org-rules');
+  const refusedWrong = run(['sign-layer', '--key', key.file, '--rules', rules, '--out', wrong], { NEAR_ORG_ISSUER_PASSPHRASE: OTHER_PASSPHRASE });
+  assert.equal(refusedWrong.status, 1);
+  assert.match(refusedWrong.stderr, /passphrase does not open/);
+  assert.equal(existsSync(wrong), false);
+
+  // Key files made some other way, each with the right public key, are refused before any signing.
+  const pair = generateKeyPairSync('ed25519');
+  const publicKey = pair.publicKey.export({ format: 'jwk' }).x;
+  const plainPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const olderPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase: PASSPHRASE });
+  const pairSeed = Buffer.from(pair.privateKey.export({ format: 'jwk' }).d, 'base64url');
+  const base = { kind: 'near-ai-org-issuer-key', publicKey, createdAt: new Date().toISOString() };
+  const refusedFiles = [
+    ['an unencrypted key in the older layout', { v: 1, ...base, privateKeyPem: plainPem }, /does not keep its key sealed/],
+    ['an unencrypted key in the new layout', { v: 2, ...base, privateKey: plainPem }, /does not keep its key sealed/],
+    ['the older PBKDF2 key file', { v: 1, ...base, privateKeyPem: olderPem }, /does not keep its key sealed/],
+    ['an unknown version', { v: 3, ...base, privateKey: sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 17) }, /does not keep its key sealed/],
+    ['a cheaper scrypt cost', { v: 2, ...base, privateKey: sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 14) }, /sealing is not the one/],
+    ['another cipher named', { v: 2, ...base, privateKey: { ...sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 17), cipher: 'aes-256-cbc' } }, /sealing is not the one/],
+    ['an extra field', { v: 2, ...base, privateKey: sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 17), note: 'x' }, /not a key file from this tool/],
+    ['another kind', { v: 2, ...base, kind: 'something-else', privateKey: sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 17) }, /not a key file from this tool/],
+    ['a public key swapped for another', { v: 2, ...base, publicKey: key.publicKey, privateKey: sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 17) }, /passphrase does not open/]
+  ];
+  for (const [name, content, sentence] of refusedFiles) {
+    const keyFile = json(dir, `refused-${refusedFiles.findIndex((entry) => entry[0] === name)}.json`, content);
+    const out = path.join(dir, `refused-${name.replace(/[^a-z]+/g, '-')}.near-org-rules`);
+    const result = run(['sign-layer', '--key', keyFile, '--rules', rules, '--out', out]);
+    assert.equal(result.status, 1, `${name}: ${result.stderr}`);
+    assert.match(result.stderr, sentence, name);
+    assert.equal(existsSync(out), false, `${name}: no output file`);
+  }
+  // The same sealing at the tool's own cost opens and signs: the refusals above are about the format, not the key.
+  const proper = json(dir, 'proper.json', { v: 2, ...base, privateKey: sealedWith(publicKey, pairSeed, PASSPHRASE, 2 ** 17) });
+  const signed = path.join(dir, 'proper.near-org-rules');
+  assert.equal(run(['sign-layer', '--key', proper, '--rules', rules, '--out', signed]).status, 0);
+  assert.equal(enrolment.verifyOrganizationLayer(readFileSync(signed, 'utf8'), { issuerPublicKey: publicKey, now: Date.now() }).ok, true);
 });
 
 test('no secret reaches the screen', () => {

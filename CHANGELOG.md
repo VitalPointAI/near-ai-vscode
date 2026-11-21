@@ -31,7 +31,10 @@ reads them the same way. Your own settings on this computer can only make them s
 - **A trust line under each answer.** Beside the badge, one line says where the answer ran, what
   was checked and what allowed it.
 - **Export-controlled content stays here by default.** Content marked Controlled goods (Canada),
-  ITAR or US export-controlled (EAR) stays on this computer under the starting rules. Your
+  ITAR or US export-controlled (EAR) stays on this computer under the starting rules. A fresh
+  install, and the renewal of starting rules nobody edited, get these entries: an upgraded install
+  whose starting rules nobody edited gets them when its policy is next renewed, in the last 30 days
+  before it ends, and an edited policy gets them through a change on the policy page. Your
   organization's rules can carry export-control decisions; they are used to allow access in a
   later release.
 
