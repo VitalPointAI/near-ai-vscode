@@ -125,7 +125,7 @@ test('owner 2026-11-20: no mode word is the bare word team', () => {
       assert.ok(!word.includes(emDash), `${mode} ${concept} ${word}`);
       for (const match of word.matchAll(/team/gi)) {
         const before = word.slice(0, match.index).trimEnd().split(/\s+/).pop()?.toLowerCase() ?? '';
-        const allowed = before === 'work' || (mode === 'capital' && before === 'project');
+        const allowed = before === 'work' || (mode === 'capital' && before === 'project') || ((mode === 'military' || mode === 'public-service') && before === 'defence');
         assert.ok(allowed, `${mode} ${concept}: "${word}" uses the bare word team`);
       }
     }
@@ -313,4 +313,15 @@ test('D-40: ORGANIZATION_SETTING_KEYS lists exactly the settings the parser acce
   for (const key of ['invented', 'joiningModel', 'handoverRequired', 'invitationExpiryDays', 'allowedModes', 'constructor', 'toString']) {
     assert.equal(outcome(over(['corporate'], { ...every, [key]: false })), `unknown-field people.organization.settings.${key}`, key);
   }
+});
+
+test('owner 2026-11-21: the Military words are confirmed; position is Position; member also Staff member or Defence team member', () => {
+  for (const concept of CONCEPT_KEYS) assert.equal(MODES.military.words[concept].source?.status, 'confirmed-by-owner', concept);
+  assert.equal(term('position', 'military'), 'Position');
+  assert.equal(MODES.military.words.position.also, undefined);
+  assert.equal(term('member', 'military'), 'Staff officer');
+  assert.deepEqual(MODES.military.words.member.also, ['Staff member', 'Defence team member']);
+  assert.equal(term('member', 'public-service'), 'Employee');
+  assert.deepEqual(MODES['public-service'].words.member.also, ['Defence team member']);
+  assert.equal(MODES['public-service'].words.member.source?.status, 'confirmed-by-owner');
 });
