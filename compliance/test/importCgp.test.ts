@@ -34,3 +34,12 @@ test('the Controlled goods profile imports every generated CGP requirement', () 
   const profile = JSON.parse(readFileSync(new URL('../profiles/overlay-cgp.json', import.meta.url), 'utf8')) as { profile: { imports: Array<{ href: string; 'include-all': Record<string, never> }> } };
   assert.deepEqual(profile.profile.imports, [{ href: '../catalogs/cgp/catalog.json', 'include-all': {} }]);
 });
+
+test('imports every listed Regulation paragraph and errors if one is absent', async () => {
+  const regulationsUrl = 'https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/page-1.html';
+  const regulations = readFileSync(new URL('./fixtures/import/cgp/cgr.html', import.meta.url), 'utf8');
+  const result = await importSource({ offlinePages: { [pageUrl]: fixture, [regulationsUrl]: regulations } });
+  const ids = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string }> }> } }).catalog.groups.flatMap((group) => group.controls.map((control) => control.id));
+  assert.ok(ids.includes('cgp-10-h'));
+  assert.ok(ids.includes('cgp-23'));
+});
