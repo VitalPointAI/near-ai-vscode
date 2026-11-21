@@ -214,3 +214,136 @@ test('a tracked symlink to a directory does not crash the scan, and only A..B ra
   assert.notEqual(dots.status, 0);
   assert.match(dots.output, /--range must be <from>\.\.<to>/);
 });
+
+// Phase 44 (D-24): --dir scans a folder that is not tracked (the evidence bundle, before it is uploaded) with the same rules, and --json prints one
+// line of counts only, so a workflow can read the result without parsing the human text.
+
+/** A plain folder (no git) holding the given files. */
+function folder(files) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'secret-scan-dir-'));
+  roots.push(dir);
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    writeFileSync(path.join(dir, name), content);
+  }
+  return dir;
+}
+/** A scan with stdout and stderr kept apart, run from `cwd`. */
+function scanApart(cwd, ...args) {
+  const result = spawnSync(process.execPath, [SCANNER, ...args], { cwd, encoding: 'utf8' });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+const JSON_FIELDS = ['allowlisted', 'clean', 'commits', 'files', 'findings', 'marked', 'mode', 'rules'];
+/** The one JSON line --json prints on stdout. */
+function jsonLine(stdout) {
+  const lines = stdout.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, `one line on stdout, got: ${stdout}`);
+  const summary = JSON.parse(lines[0]);
+  assert.deepEqual(Object.keys(summary).sort(), JSON_FIELDS);
+  return summary;
+}
+
+test('--dir finds a key in a folder that is not tracked, and --json reports it as counts with no part of the value', () => {
+  const cwd = folder({ 'outside.txt': 'not scanned\n' });
+  const bundle = folder({ 'evidence/rows.json': `{"note":"${TOKEN}"}\n`, 'manifest.json': '{"files":1}\n' });
+  const human = scanApart(cwd, '--dir', bundle);
+  assert.equal(human.status, 1, human.stdout + human.stderr);
+  assert.match(human.stderr, /evidence\/rows\.json:1\s+\[github-token\]/);
+  assert.ok(!`${human.stdout}${human.stderr}`.includes(TOKEN), 'masked');
+  const json = scanApart(cwd, '--dir', bundle, '--json');
+  assert.equal(json.status, 1);
+  const summary = jsonLine(json.stdout);
+  assert.deepEqual(summary, { mode: 'dir', files: 2, commits: 0, findings: 1, rules: { 'github-token': 1 }, allowlisted: 0, marked: 0, clean: false });
+  const body = TOKEN.slice(4);
+  assert.ok(!json.stdout.includes(body) && !json.stderr.includes(body), 'no part of the fake value is printed');
+});
+
+test('--dir over a clean folder exits 0 and --json reports clean with the file count', () => {
+  const bundle = folder({ 'a.json': '{}\n', 'deep/er/b.ndjson': '{"status":"passed"}\n', 'c.txt': 'hello\n' });
+  const human = scanApart(bundle, '--dir', '.');
+  assert.equal(human.status, 0, human.stdout + human.stderr);
+  assert.match(human.stdout, /Secret scan clean: 3 files in \./);
+  const json = scanApart(bundle, '--dir', '.', '--json');
+  assert.equal(json.status, 0, json.stderr);
+  assert.equal(json.stderr, '');
+  assert.deepEqual(jsonLine(json.stdout), { mode: 'dir', files: 3, commits: 0, findings: 0, rules: {}, allowlisted: 0, marked: 0, clean: true });
+});
+
+test('--dir: a symlink is a finding and is never followed', () => {
+  const outside = folder({ 'secret.txt': `token ${TOKEN}\n` });
+  const bundle = folder({ 'ok.txt': 'fine\n', 'sub/also.txt': 'fine\n' });
+  symlinkSync(path.join(outside, 'secret.txt'), path.join(bundle, 'link-to-file.txt'));
+  symlinkSync(outside, path.join(bundle, 'sub', 'link-to-folder'));
+  const json = scanApart(bundle, '--dir', '.', '--json');
+  assert.equal(json.status, 1, json.stdout + json.stderr);
+  const summary = jsonLine(json.stdout);
+  assert.deepEqual(summary.rules, { symlink: 2 }, 'the linked file is not read, so its key is not seen');
+  assert.equal(summary.files, 2);
+  const human = scanApart(bundle, '--dir', '.');
+  assert.match(human.stderr, /link-to-file\.txt\s+\[symlink\]/);
+  assert.match(human.stderr, /sub\/link-to-folder\s+\[symlink\]/);
+  // The folder given must itself be a real folder, not a link to one.
+  const linked = path.join(folder({}), 'linked-bundle');
+  symlinkSync(bundle, linked);
+  const refused = scanApart(bundle, '--dir', linked);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /--dir/);
+});
+
+test('--dir: a file above 16 MiB is a finding, binary files are skipped, and a secret file name is reported', () => {
+  const bundle = folder({ 'blob.bin': `\0binary\ntoken ${TOKEN}\n`, 'config/.env': 'NAME=value\n', 'small.txt': 'fine\n' });
+  writeFileSync(path.join(bundle, 'huge.json'), Buffer.alloc(16 * 1024 * 1024 + 1, 0x61));
+  const json = scanApart(bundle, '--dir', '.', '--json');
+  assert.equal(json.status, 1, json.stdout + json.stderr);
+  const summary = jsonLine(json.stdout);
+  assert.deepEqual(summary.rules, { 'secret-file-name': 1, 'too-large': 1 });
+  assert.equal(summary.files, 4);
+  const human = scanApart(bundle, '--dir', '.');
+  assert.match(human.stderr, /huge\.json\s+\[too-large\]/);
+  assert.match(human.stderr, /config\/\.env\s+\[secret-file-name\]/);
+});
+
+test('--dir ignores the tracked-file allowlist and the tracked files, and cannot be combined with --range', () => {
+  const { dir, write, commit } = fixture();
+  write('.github/secret-scan-allow.txt', 'fixture.ts github-token # fake GitHub token for a masking test\n');
+  write('fixture.ts', `const fake = "${TOKEN}";\n`);
+  const base = commit('an allowlisted fixture');
+  assert.equal(scan(dir).status, 0, 'allowlisted in the tracked scan');
+  const bundle = folder({ 'fixture.ts': `const fake = "${TOKEN}";\n` });
+  const json = scanApart(dir, '--dir', bundle, '--json');
+  assert.equal(json.status, 1, 'the allowlist names tracked paths and does not apply to a folder');
+  assert.deepEqual(jsonLine(json.stdout).rules, { 'github-token': 1 });
+  write('tracked-key.txt', `key ${TOKEN}\n`);
+  commit('a key in a tracked file');
+  const clean = scanApart(dir, '--dir', folder({ 'a.txt': 'fine\n' }), '--json');
+  assert.equal(clean.status, 0, 'the tracked files are not part of a folder scan');
+  assert.equal(jsonLine(clean.stdout).files, 1);
+  const both = scanApart(dir, '--dir', bundle, '--range', `${base}..HEAD`);
+  assert.notEqual(both.status, 0);
+  assert.match(both.stderr, /--dir.*--range|--range.*--dir/);
+  assert.equal(both.stdout, '');
+});
+
+test('--json for the tracked and range scans: the same shape, with mode tracked or range, and the human output is unchanged without it', () => {
+  const { dir, write, commit } = fixture();
+  const marker = ['secret-scan', 'allow'].join(': ');
+  write('.github/secret-scan-allow.txt', 'fixture.ts github-token # fake GitHub token for a masking test\n');
+  write('fixture.ts', `const fake = "${TOKEN}";\n`);
+  write('README.md', 'hello\n');
+  const base = commit('base');
+  write('kept.txt', `fake = "${TOKEN}" // ${marker}\n`);
+  commit('a marked fake key');
+  const human = scanApart(dir);
+  assert.equal(human.status, 0);
+  assert.match(human.stdout, /^Lines marked "secret-scan: allow" that match a rule/);
+  assert.match(human.stdout, /Secret scan clean: 4 tracked files\. Allowlisted fixtures: 1\.\n$/);
+  const tracked = scanApart(dir, '--json');
+  assert.equal(tracked.status, 0, tracked.stderr);
+  assert.deepEqual(jsonLine(tracked.stdout), { mode: 'tracked', files: 4, commits: 0, findings: 0, rules: {}, allowlisted: 1, marked: 1, clean: true });
+  write('leak.txt', `key ${TOKEN}\n`);
+  commit('a leak');
+  const range = scanApart(dir, '--range', `${base}..HEAD`, '--json');
+  assert.equal(range.status, 1);
+  assert.deepEqual(jsonLine(range.stdout), { mode: 'range', files: 5, commits: 2, findings: 2, rules: { 'github-token': 2 }, allowlisted: 1, marked: 1, clean: false });
+  assert.ok(!range.stdout.includes(TOKEN.slice(4)) && !range.stderr.includes(TOKEN.slice(4)));
+});
