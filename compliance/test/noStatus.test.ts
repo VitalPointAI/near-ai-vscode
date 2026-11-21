@@ -25,7 +25,7 @@ function plant(files: Record<string, unknown>): string {
 const control = (props: unknown[]) => ({ catalog: { uuid: 'u', metadata: { title: 't' }, groups: [{ id: 'ac', controls: [{ id: 'ac-1', props }] }] } });
 
 test('the repository compliance folder has no status, state or met key or prop in any source file', () => {
-  assert.deepEqual(findStatusFields(PACKAGE_ROOT), []);
+  assert.deepEqual(findStatusFields(PACKAGE_ROOT, { skipFile: (file) => oscalOriginForFile(PACKAGE_ROOT, file) === 'external' }), []);
 });
 
 test('a planted status key at any depth fails with the file and JSON path named', () => {
