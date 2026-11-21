@@ -16,6 +16,7 @@ import type { Collector, CollectorContext, FetchJson } from './collectors/types.
 import { buildDashboard, type DashboardBuildInput } from './dashboard.ts';
 import type { Observation, TestReportRow } from './model.ts';
 import { writeManifest } from './manifest.ts';
+import { verifyManifest } from './manifest.ts';
 import { assertNoSecrets, redactObservation, redactTestRow } from './redact.ts';
 
 /** Stable order is part of the public bundle contract. */
@@ -31,7 +32,7 @@ export interface BundleInputs {
   readonly collectors: Readonly<Record<string, unknown>>;
   readonly dashboard?: Partial<DashboardBuildInput>;
 }
-export interface BundleContext { readonly now?: Date; readonly fetchJson?: FetchJson; readonly readFile?: (file: string) => Promise<string>; }
+export interface BundleContext { readonly now?: Date; readonly fetchJson?: FetchJson; readonly readFile?: (file: string) => Promise<string>; readonly previous?: string; }
 export interface BundleResult { readonly observations: readonly Observation[]; readonly testRows: readonly TestReportRow[]; readonly collectors: readonly { readonly id: string; readonly ran: boolean; readonly ok: boolean; readonly error?: string; readonly lastCollectedAt?: string }[]; readonly dashboard: ReturnType<typeof buildDashboard>; }
 
 const stable = (value: unknown): string => `${JSON.stringify(value, (_key, child) => child && typeof child === 'object' && !Array.isArray(child) ? Object.fromEntries(Object.entries(child).sort(([a], [b]) => a.localeCompare(b))) : child, 2)}\n`;
@@ -44,7 +45,7 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
   const output = safeOut(out); rmSync(output, { recursive: true, force: true }); mkdirSync(path.join(output, 'dashboard'), { recursive: true });
   const now = supplied.now ?? new Date();
   const context: CollectorContext = { now, commit: inputs.commit, ...(inputs.runUrl ? { runUrl: inputs.runUrl } : {}), ...(supplied.fetchJson ? { fetchJson: supplied.fetchJson } : {}), readFile: supplied.readFile ?? ((file) => Promise.resolve(readFileSync(path.resolve(inputs.repoRoot, file), 'utf8'))) };
-  const observations: Observation[] = []; const testRows: TestReportRow[] = [];
+  const observations: Observation[] = []; const testRows: TestReportRow[] = []; const carried: string[] = [];
   const collectorRows: { id: string; ran: boolean; ok: boolean; error?: string; lastCollectedAt?: string }[] = [];
   for (const collector of COLLECTORS) {
     if (!(collector.id in inputs.collectors)) { collectorRows.push({ id: collector.id, ran: false, ok: false }); continue; }
@@ -56,6 +57,24 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
       collectorRows.push({ id: collector.id, ran: true, ok: true, ...(redacted[0] ? { lastCollectedAt: redacted.map((row) => row.collectedAt).sort().at(-1) } : {}) });
     } catch (error) { collectorRows.push({ id: collector.id, ran: true, ok: false, error: codeOf(error) }); }
   }
+  if (supplied.previous) {
+    const verified = verifyManifest(supplied.previous);
+    if (!verified.ok) throw new Error(`previous bundle does not verify: ${verified.errors.join('; ')}`);
+    const previousFile = path.join(path.resolve(supplied.previous), 'observations.json');
+    const previous = JSON.parse(readFileSync(previousFile, 'utf8')) as { observations?: unknown };
+    if (!Array.isArray(previous.observations)) throw new Error('previous observations.json is invalid');
+    const ran = new Set(collectorRows.filter((row) => row.ran).map((row) => row.id));
+    for (const raw of previous.observations) {
+      const observation = redactObservation(raw as Observation);
+      if (!ran.has(observation.collector) && COLLECTORS.some((collector) => collector.id === observation.collector)) {
+        observations.push(observation); if (!carried.includes(observation.collector)) carried.push(observation.collector);
+      }
+    }
+    for (const row of collectorRows) if (!row.ran) {
+      const dates = observations.filter((item) => item.collector === row.id).map((item) => item.collectedAt).sort();
+      if (dates.length) { row.ok = true; row.lastCollectedAt = dates.at(-1); }
+    }
+  }
   const dashboardInput: DashboardBuildInput = {
     commit: inputs.commit, generatedAt: now.toISOString(), now, head: inputs.commit, levels: [], components: [], rules: [], observations,
     testRows: testRows.map(redactTestRow), source: { kind: inputs.kind === 'pr' ? 'local' : inputs.kind, ref: inputs.commit }, ...(inputs.runUrl ? { runUrl: inputs.runUrl } : {}), ...inputs.dashboard
@@ -63,7 +82,7 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
   const dashboard = buildDashboard(dashboardInput);
   // These fields are presentation data, never source inputs. Their values stay schema-safe.
   const enriched = { ...dashboard, collectors: collectorRows.map((row) => ({ id: row.id, window: COLLECTORS.find((item) => item.id === row.id)!.window, ...(row.lastCollectedAt ? { lastCollectedAt: row.lastCollectedAt } : {}), ...(row.ran ? { passed: row.ok } : {}) })) };
-  writeFileSync(path.join(output, 'observations.json'), stable({ schemaVersion: 1, commit: inputs.commit, generatedAt: now.toISOString(), kind: inputs.kind, observations, carried: [] }));
+  writeFileSync(path.join(output, 'observations.json'), stable({ schemaVersion: 1, commit: inputs.commit, generatedAt: now.toISOString(), kind: inputs.kind, observations, carried: carried.sort() }));
   writeFileSync(path.join(output, 'test-rows.json'), stable(testRows.map(redactTestRow)));
   writeFileSync(path.join(output, 'collectors.json'), stable(collectorRows));
   writeFileSync(path.join(output, 'dashboard', 'dashboard.json'), stable(enriched));

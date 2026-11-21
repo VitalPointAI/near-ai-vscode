@@ -12,13 +12,13 @@ function githubFetch(token: string): FetchJson { return async (url, init = {}) =
 }; }
 
 export async function run(args: readonly string[]): Promise<number> {
-  const inputFile = option(args, '--inputs'); const out = option(args, '--out');
+  const inputFile = option(args, '--inputs'); const out = option(args, '--out'); const previous = option(args, '--previous');
   if (!inputFile || !out) return 2;
   try {
     const inputs = JSON.parse(readFileSync(inputFile, 'utf8')) as BundleInputs;
     const runUrl = inputs.runUrl ?? (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined);
     const token = process.env.GITHUB_TOKEN; const fetchJson = token ? githubFetch(token) : undefined;
-    await runBundle({ ...inputs, ...(runUrl ? { runUrl } : {}), repoRoot: inputs.repoRoot ? path.resolve(inputs.repoRoot) : process.cwd() }, out, { fetchJson });
+    await runBundle({ ...inputs, ...(runUrl ? { runUrl } : {}), repoRoot: inputs.repoRoot ? path.resolve(inputs.repoRoot) : process.cwd() }, out, { fetchJson, ...(previous ? { previous: path.resolve(previous) } : {}) });
     return 0;
   } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); return 1; }
 }
