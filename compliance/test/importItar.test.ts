@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { run as runImport } from '../src/commands/import.ts';
 import { importSource, ITAR_REQUIREMENTS, sectionRequestUrl } from '../src/import/itar.ts';
+import { validateOscal } from '../src/validate.ts';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/import/itar/${name}`, import.meta.url), 'utf8');
 const titleUrl = 'https://www.ecfr.gov/api/versioner/v1/titles.json';
@@ -58,6 +59,13 @@ test('reports a missing listed requirement rather than silently dropping it', as
 test('uses a separate ITAR and EAR group', async () => {
   const result = await importSource({ offlinePages: pages() });
   assert.deepEqual((result.catalog as { catalog: { groups: Array<{ id: string }> } }).catalog.groups.map((group) => group.id), ['itar', 'ear']);
+});
+
+test('emits OSCAL catalogue groups, controls and statement parts', async () => {
+  const result = await importSource({ offlinePages: pages() });
+  assert.deepEqual(validateOscal(result.catalog, 'catalog', { ours: true }), { ok: true, errors: [] });
+  const part = (result.catalog as any).catalog.groups[0].controls[0].parts[0];
+  assert.equal(part.name, 'statement');
 });
 
 test('carries the catalogue output path', async () => assert.equal((await importSource({ offlinePages: pages() })).file, 'catalogs/itar/catalog.json'));

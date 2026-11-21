@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { run as runImport } from '../src/commands/import.ts';
 import { importSource } from '../src/import/cgp.ts';
+import { validateOscal } from '../src/validate.ts';
 
 const pageUrl = 'https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html';
 const fixture = readFileSync(new URL('./fixtures/import/cgp/dpa-part-2.html', import.meta.url), 'utf8');
@@ -75,6 +76,13 @@ test('keeps Act and Regulation requirements in distinct catalogue groups', async
   const groups = (result.catalog as { catalog: { groups: Array<{ id: string; controls: Array<{ id: string }> }> } }).catalog.groups;
   assert.deepEqual(groups.map((group) => group.id), ['dpa', 'cgr']);
   assert.ok(groups.find((group) => group.id === 'cgr')!.controls.some((control) => control.id === 'cgp-10-h'));
+});
+
+test('emits OSCAL catalogue groups, controls and statement parts', async () => {
+  const result = await importSource({ offlinePages: cgpPages() });
+  assert.deepEqual(validateOscal(result.catalog, 'catalog', { ours: true }), { ok: true, errors: [] });
+  const part = (result.catalog as any).catalog.groups[0].controls[0].parts[0];
+  assert.deepEqual(part.name, 'statement');
 });
 
 test('names the absent Regulation paragraph when an expected requirement is missing', async () => {
