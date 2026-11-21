@@ -123,10 +123,10 @@ test('every non-comment line of trestle-requirements.txt is name==version with a
   assert.doesNotMatch(requirements, /\\\s*$/m, 'no line continuations that could hide a line from this check');
 });
 
-test('trestle-requirements.txt pins compliance-trestle 5.2.0 once, lists each package once, with no markers, extras or options', () => {
+test('trestle-requirements.txt pins owner-approved compliance-trestle 5.2.1 once, lists each package once, with no markers, extras or options', () => {
   assert.equal(requirementLines.filter((line) => line.startsWith('compliance-trestle==')).length, 1);
   assert.ok(requirementLines.includes(
-    'compliance-trestle==5.2.0 --hash=sha256:f13bbfcb6d947758a6838b8595f479c8d9ab699589f6d6ee93e64ab383999d18'
+    'compliance-trestle==5.2.1 --hash=sha256:4f870ba0d98b89f7196ae275daa522d990753e4aeaad26d8651237cc7d6a5479'
   ));
   const names = requirementLines.map((line) => line.split('==')[0]);
   assert.equal(new Set(names).size, names.length, 'no package is listed twice');
