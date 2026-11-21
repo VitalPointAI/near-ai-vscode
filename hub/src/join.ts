@@ -7,6 +7,7 @@
 // States of one invitation on the hub:
 //   (none) --register by a lead or deputy device--> registered
 //   registered --join post that passes every check--> registered, with an accepted request (the same request again is held, not a failure)
+//   registered, 8 requests waiting for it or 64 for the project --join post of a new request--> refused invite-full (D-30), nothing kept or counted
 //   registered --join post whose hub MAC fails--> registered with one more failure; the 5th failure locks it for good (the lead makes a new one)
 //   registered --the roster records member.admit naming it--> used     --the roster records invite.void--> voided
 //   registered --the hub's clock passes its expiry--> expired
@@ -14,7 +15,7 @@
 // invitation again with the same check key is held; with another check key it is refused and the first is kept.
 //
 // Order of the join checks (Pitfall 7, T-32-101, T-32-102): the per-address bucket and the 64 KiB body cap (both in routes.ts, before the body is
-// read), the shape, the invitation's standing from the store and the roster fold, readHubJoin (both signatures, the envelope signed by the request's
+// read), the shape, the invitation's standing from the store and the roster fold, the waiting-request caps (D-30), readHubJoin (both signatures, the envelope signed by the request's
 // own device, request hash and invite agreeing), this hub's writer id, the project's genesis, and last the hub MAC in constant time. Failures are
 // counted in the store, so the count and the lock survive a restart.
 //
@@ -30,6 +31,7 @@ import type { HubIdentity } from './enrol';
 import type { EventHub, Scheduler, Timer } from './live/events';
 import { INVITE_LOCK_AFTER } from './store/hubStore';
 import type { HubStore } from './store/hubStore';
+import { LIMITS } from './limits';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** An accepted join request is kept this long after it was accepted (D-48). */
@@ -50,6 +52,8 @@ export const JOIN_REFUSALS = {
   'invite-used': INVITE_REFUSALS['invite-used'],
   'invite-voided': INVITE_REFUSALS['invite-voided'],
   'invite-locked': 'Too many join requests for this invitation did not match it, so the hub takes no more for it. Ask the staff lead for a new invitation.',
+  // D-30, word for word: more distinct requests wait for this invitation, or for the project, than LIMITS allows.
+  'invite-full': 'This invitation has too many people waiting. Ask the staff lead for a new one.',
   'wrong-hub': 'This join request was made for another hub, so this hub did not take it.',
   'wrong-project': INVITE_REFUSALS['wrong-project'],
   'bad-signature': INVITE_REFUSALS['bad-signature'],
@@ -68,6 +72,8 @@ const STATUS: Readonly<Record<JoinRefusal, number>> = {
   'invite-used': 403,
   'invite-voided': 403,
   'invite-locked': 403,
+  // 403, not 429: waiting does not help, and the client hears 429 as "wait and try again" (hub-busy).
+  'invite-full': 403,
   'wrong-hub': 403,
   'wrong-project': 403,
   'bad-signature': 403,
@@ -200,6 +206,9 @@ export class JoinDesk {
     if (standing === 'used' || record.usedAt !== undefined) return refuse('invite-used');
     if (record.lockedAt !== undefined) return refuse('invite-locked');
     if (now > record.expiresAt) return refuse('invite-expired');
+    // D-30: checked before any signature, with the hash the post claims; checked again below with the verified hash, so a false claim gains nothing.
+    const claimed = isRecord(named) ? own(named, 'request') : undefined;
+    if (this.full(project, invite, typeof claimed === 'string' ? claimed : undefined, now)) return refuse('invite-full');
 
     const read = this.checks.readHubJoin(joinValue, requestValue);
     if (!read.ok) return refuse(read.reason === 'bad-signature' || read.reason === 'wrong-device' ? read.reason : 'malformed');
@@ -214,6 +223,8 @@ export class JoinDesk {
       return refuse('wrong-secret');
     }
 
+    // No await since the check above, so no other post can be stored between this check and the store.
+    if (this.full(project, invite, read.join.request, now)) return refuse('invite-full');
     const stored = this.store.putJoinRequest({ project, requestHash: read.join.request, invite, body: canonicalize(requestValue), receivedAt: now });
     // Accepted now: the 7 days run from here. A request held from before keeps its first acceptance.
     this.store.acceptJoinRequest(project, read.join.request, now);
@@ -223,6 +234,20 @@ export class JoinDesk {
       this.events.publish(project, (device) => current.isRosterWriter(device), 'join-request', { project, invite });
     }
     return { ok: true, status: 202, project, invite, held: stored === 'held' };
+  }
+
+  /**
+   * True when a new request would pass a cap (D-30): the distinct requests received within the 7-day keep number LIMITS.pendingJoinsPerInvite for
+   * this invitation or LIMITS.pendingJoinsPerProject for the project. A request already stored is never full: sent again it stays held.
+   */
+  private full(project: string, invite: string, requestHash: string | undefined, now: number): boolean {
+    const rows = this.store.joinRequests(project);
+    if (requestHash !== undefined && rows.some((row) => row.requestHash === requestHash)) return false;
+    const cutoff = now - JOIN_REQUEST_KEEP_MS;
+    const waiting = rows.filter((row) => row.receivedAt >= cutoff);
+    const forInvite = new Set(waiting.filter((row) => row.invite === invite).map((row) => row.requestHash)).size;
+    const forProject = new Set(waiting.map((row) => row.requestHash)).size;
+    return forInvite >= LIMITS.pendingJoinsPerInvite || forProject >= LIMITS.pendingJoinsPerProject;
   }
 
   /** GET /v1/projects/:p/join-requests: the requests accepted in the last 7 days, for a device of the lead or the deputy only. */
