@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   OSCAL_MODELS, OSCAL_ROOT_DEFINITIONS, OSCAL_SCHEMA_FILE, SCHEMAS_DIR,
-  createValidators, loadJson, modelOf, validateOscal, validateOurs, type OscalModel
+  createValidators, loadJson, modelOf, oscalOriginForFile, validateOscal, validateOurs, type OscalModel
 } from '../src/validate.ts';
 import { OSCAL_VERSION } from '../src/model.ts';
 
@@ -70,6 +70,12 @@ test('a generated document must be stamped 1.2.1; a vendored one stamped 1.2.3 p
   const otherLine = fixture('catalog.json');
   otherLine.catalog.metadata['oscal-version'] = '1.1.2';
   assert.equal(validateOscal(otherLine, 'catalog', { ours: false }).ok, false, 'a vendored document must be on the 1.2 line the schema describes');
+});
+
+test('only the pinned NIST catalogue path is an external OSCAL source', () => {
+  assert.equal(oscalOriginForFile('/data/compliance', '/data/compliance/catalogs/nist-800-53-r5/catalog-min.json'), 'external');
+  assert.equal(oscalOriginForFile('/data/compliance', '/data/compliance/catalogs/nist-800-53-r5/other.json'), 'generated');
+  assert.equal(oscalOriginForFile('/data/compliance', '/data/compliance/catalogs/itsp-10-033/catalog.json'), 'generated');
 });
 
 test('validateOscal returns at most five errors and never throws on a non-object', () => {

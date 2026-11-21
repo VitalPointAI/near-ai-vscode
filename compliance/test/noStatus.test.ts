@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { findStatusFields, validateOscal } from '../src/validate.ts';
+import { findStatusFields, oscalOriginForFile, validateOscal } from '../src/validate.ts';
 import { SOURCE_DIRS, SOURCE_FILES } from '../src/model.ts';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,6 +73,15 @@ test('the publisher withdrawal marker on a control under catalogs passes; anothe
     ['under our own namespace', { 'catalogs/c.json': control([{ ...withdrawn, ns: 'urn:near-ai-vscode:compliance' }]) }]
   ];
   for (const [label, files] of cases) assert.equal(findStatusFields(plant(files)).length, 1, label);
+});
+
+test('the exact pinned external NIST path may retain publisher lifecycle fields without exempting generated files', () => {
+  const root = plant({
+    'catalogs/nist-800-53-r5/catalog-min.json': { catalog: { metadata: { state: 'publisher lifecycle' } } },
+    'catalogs/ours/catalog.json': { catalog: { metadata: { state: 'not allowed' } } }
+  });
+  const fields = findStatusFields(root, { skipFile: (file) => oscalOriginForFile(root, file) === 'external' });
+  assert.deepEqual(fields.map((field) => field.file), ['catalogs/ours/catalog.json']);
 });
 
 test('only OSCAL mapping provenance may carry its required lifecycle status, whose value the OSCAL schema validates', () => {
