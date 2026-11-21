@@ -23,7 +23,9 @@ test('the registry carries the CKAN record and licence for every Cyber Centre pu
   assert.equal(entry('itsp-10-033').licenceEvidence.kind, 'ckan');
   assert.equal((entry('itsp-10-033').licenceEvidence as { recordId: string }).recordId, 'ddad8760-bf9b-47aa-890d-67da202aca6a');
   assert.equal(entry('baseline-controls-v1-2').licence, 'ca-ogl-lgo');
-  assert.equal(entry('itsg-33').pages[0].url.includes('it-security-risk-management-lifecycle-approach-itsg-33'), true);
+  assert.equal(entry('itsg-33').pages[0].url, 'https://cyber.gc.ca/en/guidance/overview-itsg-33');
+  assert.ok(entry('itsg-33').pages.some((page) => page.url === 'https://www.cyber.gc.ca/en/guidance/annex-3a-security-control-catalogue-itsg-33'));
+  assert.ok(entry('itsg-33').pages.some((page) => page.url === 'https://www.cyber.gc.ca/en/guidance/annex-4a-profile-3-secret-medium-integrity-medium-availability-itsg-33'));
 });
 
 test('licence-check accepts the recorded CKAN licence and writes an ok row for each record', async () => {
