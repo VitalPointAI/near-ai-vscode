@@ -1,0 +1,118 @@
+{
+  "catalog": {
+    "controls": [
+      {
+        "id": "itsp171-03.01.01",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.01.02",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.01.20",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.01.22",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.05.01",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.05.02",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.05.03",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.08.03",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.10.01",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.10.07",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.13.01",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.14.01",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      },
+      {
+        "id": "itsp171-03.14.02",
+        "links": [
+          {
+            "href": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "props": [
+        {
+          "name": "source-id",
+          "value": "cpcsc-level-1"
+        }
+      ]
+    }
+  }
+}

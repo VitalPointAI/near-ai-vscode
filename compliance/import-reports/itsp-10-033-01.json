@@ -1,0 +1,922 @@
+{
+  "rows": [
+    {
+      "control": "ac-01",
+      "value": "Selected",
+      "placeholder": "C.1 C.2 frequency [at a frequency no longer than annually]",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02",
+      "value": "Selected",
+      "placeholder": "(J) frequency [at a frequency no longer than monthly]",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.02",
+      "value": "Selected",
+      "placeholder": "time period [not to exceed 48 hours after no longer being required]",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.03",
+      "value": "Selected",
+      "placeholder": "a. b. time period [not to exceed 30 days]c. time period [not to exceed 24 hours]",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-02.13",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.02",
+      "value": "Selected",
+      "placeholder": "[1] privileged commands [creation and deletion ofPKIofficers and administrators accounts][2] actions [examples are:PKIchanges to administrators and security officers; global administrator actions in cloud tenancies; domain administrator actions in single-forest systems]",
+      "note": "Organizations must assess which administrative actions are capable of creating the entire available Injury. These actions are candidates for dual authorization"
+    },
+    {
+      "control": "ac-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "Control enhancement (04) clarifies the Access Enforcement security control by detailing the policy that should be used for access enforcement to Protected B information. That is, while the system may be authorized to processPB, not all information will necessarily bePB. Therefore,DACwill be used to establish and enforce access controls overPBinformation to “need to know.”Examples ofDACinclude Windows groups (at the file object level) and document management systems that allow document access permissions to be modified by the owner."
+    },
+    {
+      "control": "ac-03.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-03.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.16",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.18",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.22",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.24",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.25",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.26",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.27",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.28",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.29",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.30",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.31",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-04.32",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-06.10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-07",
+      "value": "Selected",
+      "placeholder": "A. number [of a maximum of 5]A. time period [period of at least 5 minutes]",
+      "note": "NA"
+    },
+    {
+      "control": "ac-07.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-07.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-07.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-07.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-09.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-09.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-09.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-09.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-11.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-12.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-12.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-12.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-13",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-14",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-14.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-15",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "In the context of this profile, the objective of this control is to achieve consistent labeling of Protected B material to the maximum extent supported by available, automated mechanisms (for example, email system enforcing classification labels). Since not all information on the system will be sensitive, labeling will help prevent the accidental distribution of Protected B information by providing filter mechanisms with a differentiator."
+    },
+    {
+      "control": "ac-16.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-16.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.08",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-17.400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-18",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-18.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-18.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-18.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-18.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-18.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-19.400",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-20",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-20.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-20.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-20.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-20.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-20.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-21",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-21.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-21.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-21.400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific"
+    },
+    {
+      "control": "ac-21.401",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific"
+    },
+    {
+      "control": "ac-22",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-24",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-24.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-24.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ac-25",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    }
+  ],
+  "counts": {
+    "Selected": 52,
+    "Not selected": 83,
+    "NA": 16
+  },
+  "differences": [],
+  "frenchFailures": [
+    {
+      "page": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/proposition-profil-dactivites-controles-organisationnels-securite-protection-vie-privee-incidence-moyenne-itsp10033-01",
+      "reason": "ITSP.10.033-01 table is missing Valeurs de remplacement suggérées column"
+    }
+  ]
+}

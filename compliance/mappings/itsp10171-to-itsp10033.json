@@ -1,0 +1,2125 @@
+{
+  "mapping-collection": {
+    "uuid": "00000000-0000-4000-8000-000000000002",
+    "metadata": {
+      "title": "ITSP.10.171 to ITSP.10.033 mapping",
+      "version": "1.0",
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1"
+    },
+    "provenance": {
+      "method": "automation",
+      "matching-rationale": "syntactic",
+      "status": "draft",
+      "mapping-description": "Identifier references parsed from the published ITSP.10.171 requirements."
+    },
+    "mappings": [
+      {
+        "uuid": "00000000-0000-4000-8000-000000000171",
+        "source-resource": {
+          "type": "catalog",
+          "href": "../catalogs/itsp-10-171/catalog.json"
+        },
+        "target-resource": {
+          "type": "catalog",
+          "href": "../catalogs/itsp-10-033/catalog.json"
+        },
+        "maps": [
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003e8",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003e9",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003ea",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003eb",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-02.13"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003ec",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003ed",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003ee",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003ef",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-09.04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f0",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f1",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f2",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.07"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f3",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.07"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-06.10"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f4",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.10"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-11"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f5",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.10"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-11.01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f6",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.12"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-17"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f7",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.12"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-17"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f8",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.12"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-17.04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003f9",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.16"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-18"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003fa",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.16"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-18"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003fb",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.16"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-18.03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003fc",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.18"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-19"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003fd",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.18"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-19.05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003fe",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.20"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-20"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-0000000003ff",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.20"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-20"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000400",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.01.20"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-20.02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000401",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.02.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "at-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000402",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.02.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "at-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000403",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.02.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "at-02.03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000404",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000405",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-03.01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000406",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.03"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-11"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000407",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000408",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-06.03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000409",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-09"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000040a",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.03.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-09.04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000040b",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000040c",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-04.02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000040d",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-07"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000040e",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-07.01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000040f",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-07.05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000410",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.10"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-08"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000411",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.10"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-08.01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000412",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.04.12"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-02.07"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000413",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000414",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.03"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000415",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.03"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-02.02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000416",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-02.08"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000417",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000418",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-04.04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000419",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.05.07"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-05.01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000041a",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.06.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ir-05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000041b",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.06.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ir-06"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000041c",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.07.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ma-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000041d",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.07.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ma-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000041e",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.07.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ma-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000041f",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.07.04"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ma-03.03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000420",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.08.05"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "mp-05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000421",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.08.09"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cp-09"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000422",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.08.09"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cp-09.08"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000423",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.09.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ps-04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000424",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.10.07"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "pe-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000425",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.11.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ra-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000426",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.11.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ra-03"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000427",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.11.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ra-05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000428",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.11.02"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ra-05.02"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000429",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.13.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sc-07.05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000042a",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.13.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sc-08"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000042b",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.13.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sc-08"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000042c",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.13.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sc-28"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000042d",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.13.08"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sc-28.01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000042e",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.14.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "si-04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000042f",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.14.06"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "si-04.04"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000430",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.14.09"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "si-400"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000431",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.14.09"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "si-400"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000432",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.14.09"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "si-400.05"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000433",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ac-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000434",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "at-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000435",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "au-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000436",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ca-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000437",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "cm-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000438",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ia-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000439",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ir-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000043a",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ma-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000043b",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "mp-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000043c",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "pe-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000043d",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "pl-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000043e",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ps-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-00000000043f",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "ra-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000440",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sa-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000441",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "sc-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "uuid": "00000000-0000-4000-8000-000000000442",
+            "relationship": "intersects-with",
+            "sources": [
+              {
+                "type": "control",
+                "id-ref": "itsp171-03.15.01"
+              }
+            ],
+            "targets": [
+              {
+                "type": "control",
+                "id-ref": "si-01"
+              }
+            ],
+            "props": [
+              {
+                "name": "ours",
+                "ns": "urn:near-ai-vscode:compliance",
+                "value": "true"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
