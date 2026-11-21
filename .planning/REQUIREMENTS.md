@@ -846,6 +846,43 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 |-------------|-------|
 | LMOD-01 … LMOD-07 | Phase 32.2: planned |
 
+## Phase 44 requirements: Accreditation evidence and compliance dashboard (0.4.x)
+
+**Defined:** 2026-11-21 from `.planning/research/compliance-dashboard/DESIGN.md` (section 18) and `CGP-ITAR.md` (sections 10 to 14), added when Phase 44 was planned.
+**Core value:** Anyone preparing a security assessment of a system that uses this product can see, per level, the exact controls, what the product does for each with live evidence, what your organization must do, and every gap with its remediation, and can download a release's documentation package in OSCAL and readable form. Your organization decides; nothing here is an authorization.
+
+- [ ] **ACCR-01**: The `compliance/` package holds the NIST 800-53 Rev. 5 catalogue, the Canadian catalogue and profiles in OSCAL JSON with an attribution `NOTICE`, source addresses, retrieval dates and hashes, and validates against the OSCAL schemas.
+- [ ] **ACCR-02**: A maintainer-run importer builds the ITSP.10.033 catalogue and ITSP.10.033-01 profile from the official pages and reports every disagreement with the two unofficial conversions; a weekly job detects upstream changes.
+- [ ] **ACCR-03**: Component definitions exist for the extension, relay, release pipeline and model endpoints (hub and appliance as placeholders), each control with an implementation statement and one responsibility value.
+- [ ] **ACCR-04**: Evidence rules tie statements to collectors; a check fails when a mapped test is missing, skipped or not run.
+- [ ] **ACCR-05**: Collectors produce a redacted evidence bundle with a hash manifest on every merge to `main` and on a daily schedule (CI checks, mapped tests, audits, SBOMs, secret scan, workflow hardening, repository settings, review and approval trail, release integrity, documentation checks).
+- [ ] **ACCR-06**: The status engine computes the six states from evidence and freshness only; no source file carries a status; Stale counts as not met.
+- [ ] **ACCR-07**: Docs-site Accreditation section: overview, one page per level, gaps, responsibility matrix, evidence and package pages, reading generated JSON refreshed without a rebuild.
+- [ ] **ACCR-08**: Every gap shows remediation, owner and the phase or POA&M item; risk acceptances are signed, expire and never show as Met.
+- [ ] **ACCR-09**: Each release attaches the documentation package (OSCAL SSP draft, assessment plan and results, POA&M, resolved profiles, responsibility matrix, ITSG-33 crosswalk, evidence bundle, README) with checksums and artifact attestations.
+- [ ] **ACCR-10**: The pull request job summarizes control state changes; a drop from Met without a reviewed tailoring or POA&M change fails it once D5's switch is made.
+- [ ] **ACCR-11**: Nothing generated says compliant, accredited or certified about the product; the evidence bundle holds no secrets or organization data; an organization overlay is merged locally only.
+- [ ] **ACCR-12**: Gaps G1, G4, G5, G6, G7, G9 and G12 from the design are closed or have a dated POA&M item.
+- [ ] **ACCR-13**: Controlled goods (Canada) and ITAR overlays: requirement catalogues from the official texts with source hashes and an unofficial-representation notice, mapped to ITSP.10.033 and NIST SP 800-53 controls and to product statements, shown as two Accreditation pages with the same six states (`CGP-ITAR.md`, section 10).
+- [ ] **ACCR-14**: The copy lint refuses "ITAR compliant", "CGP compliant" and similar phrases about the product; rows that depend on unsettled questions (TEEs, encrypted storage at third parties) are never Met; a docs page gives the interim settings and what the product cannot stop (`CGP-ITAR.md`, sections 10.3 and 11).
+
+| Requirement | Phase | Plans |
+|-------------|-------|-------|
+| ACCR-01 | Phase 44 | 44-01, 44-06, 44-10, 44-11, 44-12, 44-16 |
+| ACCR-02 | Phase 44 | 44-06, 44-10, 44-11, 44-12, 44-16 |
+| ACCR-03 | Phase 44 | 44-05, 44-18 |
+| ACCR-04 | Phase 44 | 44-01, 44-02, 44-07, 44-18 |
+| ACCR-05 | Phase 44 | 44-02, 44-07, 44-08, 44-14, 44-19 |
+| ACCR-06 | Phase 44 | 44-01, 44-04 |
+| ACCR-07 | Phase 44 | 44-01, 44-05, 44-14, 44-15 |
+| ACCR-08 | Phase 44 | 44-03, 44-04, 44-14, 44-15, 44-18 |
+| ACCR-09 | Phase 44 | 44-09, 44-17, 44-19 |
+| ACCR-10 | Phase 44 | 44-17, 44-19 |
+| ACCR-11 | Phase 44 | 44-02, 44-05, 44-14, 44-15, 44-17 |
+| ACCR-12 | Phase 44 | 44-03, 44-04, 44-08, 44-09, 44-18, 44-19 |
+| ACCR-13 | Phase 44 | 44-06, 44-13, 44-15, 44-16, 44-18 |
+| ACCR-14 | Phase 44 | 44-03, 44-04, 44-05, 44-13, 44-18 |
+
 ## Later milestones: draft requirements (not mapped to phases yet)
 
 Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are reserved so the outlines can be cited; each set is reviewed and mapped to phases when its milestone starts. Not counted in any coverage figure above.

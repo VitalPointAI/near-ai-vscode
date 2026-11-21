@@ -1,0 +1,75 @@
+---
+phase: "44"
+slug: "accreditation-evidence-and-compliance-dashboard"
+status: draft
+nyquist_compliant: false
+wave_0_complete: false
+created: "2026-11-21"
+---
+
+# Phase 44: Validation Strategy
+
+> Per-phase validation contract for feedback sampling during execution. The per-requirement test map is in `44-RESEARCH.md`, section "Validation Architecture"; the per-task map is filled from the plans.
+
+---
+
+## Test Infrastructure
+
+| Property | Value |
+|----------|-------|
+| **Framework** | `node:test` through `node scripts/run-tests.mjs`; `compliance/` TypeScript tests run by Node 24 type stripping; docs-site view tests are `.mjs` |
+| **Config file** | `compliance/package.json`, `compliance/tsconfig.json` (created in Wave 1) |
+| **Quick run command** | `systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 choom -n 1000 -- timeout 300 env NODE_OPTIONS=--max-old-space-size=1536 node scripts/run-tests.mjs compliance/test/<file>.test.ts` |
+| **Full suite command** | `systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 choom -n 1000 -- timeout 1800 env NODE_OPTIONS=--max-old-space-size=1536 node scripts/run-tests.mjs compliance/test/*.test.ts docs-site/test/*.test.mjs scripts/test/*.test.mjs` plus `npm --prefix compliance run lint` (collector tests are `compliance/test/collector*.test.ts`, flat, per 44-01's planning choice 4) |
+| **Estimated runtime** | about 60 seconds for the compliance suite; the docs build about 5 minutes |
+
+---
+
+## Sampling Rate
+
+- **After every task commit:** the single test file for the changed module, plus `npm --prefix compliance run lint` (`tsc --noEmit`).
+- **After every plan wave:** all `compliance/test/**` and `docs-site/test/*`; `scripts/test/*` when a gate script changed; the docs build (capped, `timeout 900`, `--max-old-space-size=2048`) when the site changed.
+- **Before verification:** the full suite once, root `npm run lint`, `npm run verify:release` (the VSIX excludes `compliance/` and `docs/security/`), the docs build, then the pinned `oscal-cli` and Trestle import in CI on a real package.
+- **Always blocking when touched:** `licenceGate`, `noStatus`, `status`, `redaction`, `overlayIsolation`, `wordLintParity`, `workflow-files`.
+- **Max feedback latency:** 60 seconds for a single test file.
+
+---
+
+## Per-Task Verification Map
+
+Filled from the plans' `<automated>` blocks once the plans pass the checker. Each ACCR id maps to at least one test file in `44-RESEARCH.md`, "Phase Requirements to Test Map".
+
+---
+
+## Wave 0 Requirements (land in the first wave)
+
+- [ ] `compliance/package.json`, lockfile, `tsconfig.json`, `.npmrc`; `npm --prefix compliance ci --ignore-scripts`
+- [ ] Vendored OSCAL 1.2.1 schemas with source address and SHA-256 under `compliance/schemas/`
+- [ ] `compliance/test/fixtures/`: synthetic HTML (never copied Government text), a fixture bundle, a fixture test report with a skipped test, a sample organization overlay with marker strings
+- [ ] `docs-site/test/` folder
+- [ ] The opt-in per-test report (`NEAR_AI_TEST_REPORT`) in `scripts/run-tests.mjs`
+
+---
+
+## Manual-Only Verifications
+
+| Behavior | Requirement | Why Manual | Test Instructions |
+|----------|-------------|------------|-------------------|
+| Licence records re-read before committing Government text | ACCR-01 | Network and a person's judgement on a changed record | Run the importer's licence check; confirm every record says `ca-ogl-lgo`; stop if not |
+| The 12 English and French profile differences | ACCR-02 | Needs the Cyber Centre's answer | Review the importer's difference list in the data PR |
+| `docs` made a required check | ACCR-12 | Repository setting only the owner can change | Owner adds `docs` to branch protection; the settings collector shows it |
+| Package imports into Compliance Trestle | ACCR-09 | Runs in CI on a release, not locally | Check the release workflow's Trestle step on the first tagged release |
+| Pages read well in light, dark and high-contrast themes and by keyboard | ACCR-07 | Visual check | Open the Accreditation section on the local docs site |
+
+---
+
+## Validation Sign-Off
+
+- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
+- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
+- [ ] Wave 0 covers all MISSING references
+- [ ] No watch-mode flags
+- [ ] Feedback latency under 60 s
+- [ ] `nyquist_compliant: true` set in frontmatter
+
+**Approval:** pending
