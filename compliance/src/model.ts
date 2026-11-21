@@ -245,6 +245,12 @@ export interface ComponentRow {
   readonly detail?: Readonly<Partial<Record<ReasonPlaceholder, string>>>;
   readonly responsibility: Responsibility;
   readonly evidence: readonly RuleResult[];
+  readonly reasonText?: string;
+  readonly statement?: string;
+  readonly limitation?: string;
+  readonly unsettled?: string;
+  readonly requiresOfficialSignature?: boolean;
+  readonly inheritedFrom?: string;
 }
 
 /** One control at one level. Its state comes from computeStatus only. */
@@ -255,6 +261,10 @@ export interface DashboardRow {
   readonly reason: ReasonCode;
   readonly detail?: Readonly<Partial<Record<ReasonPlaceholder, string>>>;
   readonly components: readonly ComponentRow[];
+  readonly label?: string;
+  readonly family?: string;
+  readonly title?: string;
+  readonly reasonText?: string;
 }
 
 /** The generated dashboard JSON (44-05 adds fields, never renames these). */
@@ -263,6 +273,26 @@ export interface Dashboard {
   readonly generatedAt: string;
   readonly commit: string;
   readonly rows: readonly DashboardRow[];
+  readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string };
+  readonly levels: readonly DashboardLevel[];
+  readonly gaps: readonly unknown[];
+  readonly collectors: readonly unknown[];
+  readonly matrix: readonly unknown[];
+  readonly textIndex: readonly unknown[];
+  readonly refusedAcceptances: readonly unknown[];
+}
+
+export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
+
+export interface DashboardLevel {
+  readonly id: string;
+  readonly title: string;
+  readonly kind: 'level' | 'overlay';
+  readonly profile: string;
+  readonly claim: boolean;
+  readonly components: readonly string[];
+  readonly overlays: readonly string[];
+  readonly counts: DashboardCounts;
 }
 
 /** A level (or overlay) in scope: its controls and the components assessed for it. */
@@ -271,6 +301,10 @@ export interface LevelInput {
   readonly title: string;
   readonly controls: readonly string[];
   readonly components: readonly string[];
+  readonly kind?: 'level' | 'overlay';
+  readonly profile?: string;
+  readonly claim?: boolean;
+  readonly overlays?: readonly string[];
 }
 
 /** A component and what it implements, as loaded from its OSCAL component definition (44-05). */
@@ -297,6 +331,13 @@ export interface DashboardInput {
   readonly observations: readonly Observation[];
   /** The commit being judged. */
   readonly head: string;
+}
+
+/** Extra producer inputs added by the dashboard contract. */
+export interface DashboardBuildInput extends DashboardInput {
+  readonly source?: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string };
+  readonly runUrl?: string;
+  readonly controls?: Readonly<Record<string, { readonly label: string; readonly title: string }>>;
 }
 
 /**

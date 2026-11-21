@@ -1,0 +1,232 @@
+{
+  "$id": "urn:near-ai-vscode:compliance:schema:dashboard",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Dashboard",
+  "description": "The generated dashboard file the Accreditation pages read (D-29, version 1). Every state in it comes from the status engine; the pages only show it. Official control text is not in it: it is in the per-family text files named by textIndex.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "commit", "source", "levels", "rows", "gaps", "collectors", "matrix", "textIndex", "refusedAcceptances"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedAt": { "$ref": "#/definitions/time" },
+    "commit": { "$ref": "#/definitions/commit" },
+    "runUrl": { "$ref": "#/definitions/httpsUrl" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["main", "scheduled", "release", "local"] },
+        "ref": { "$ref": "#/definitions/shortText" }
+      }
+    },
+    "levels": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/level" } },
+    "rows": { "type": "array", "maxItems": 50000, "items": { "$ref": "#/definitions/row" } },
+    "gaps": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/definitions/gap" } },
+    "collectors": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/collector" } },
+    "matrix": { "type": "array", "maxItems": 50000, "items": { "$ref": "#/definitions/matrixRow" } },
+    "textIndex": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/definitions/textFile" } },
+    "refusedAcceptances": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/definitions/refusedAcceptance" } }
+  },
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" },
+    "levelId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "gapId": { "type": "string", "pattern": "^[A-Z][A-Z0-9-]{0,15}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" },
+    "time": { "type": "string", "format": "date-time" },
+    "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}(?:T[0-9:.]+(?:Z|[+-]\\d{2}:\\d{2}))?$" },
+    "httpsUrl": { "type": "string", "maxLength": 2048, "pattern": "^https://[^\\s]+$" },
+    "shortText": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
+    "relativeFile": { "type": "string", "maxLength": 255, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[A-Za-z0-9._/-]{1,255}$" },
+    "state": { "type": "string", "enum": ["met", "partly-met", "not-met", "stale", "not-applicable", "your-organizations-responsibility"] },
+    "responsibility": { "type": "string", "enum": ["product", "shared", "your-organization", "inherited", "not-applicable"] },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "met", "no-statement", "no-rules", "missing-result", "test-missing-file", "test-missing-name", "test-skipped", "test-todo", "test-failed",
+        "test-not-run", "observation-failed", "stale", "your-organization", "inherited", "not-applicable", "not-applicable-unreviewed",
+        "partly-statements", "limitation", "unsettled", "self-signed", "risk-accepted", "appliance-only"
+      ]
+    },
+    "window": { "type": "string", "enum": ["head", "audit", "settings", "harness", "document", "attestation"] },
+    "detail": {
+      "description": "The values of the reason sentence's placeholders.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "maxLength": 300 },
+        "reason": { "type": "string", "maxLength": 2000 },
+        "text": { "type": "string", "maxLength": 2000 },
+        "question": { "type": "string", "maxLength": 2000 },
+        "provider": { "type": "string", "maxLength": 300 }
+      }
+    },
+    "counts": {
+      "description": "One count per state, plus notMetTotal (not met and stale: a level summary counts Stale as not met) and metTotal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["met", "partly-met", "not-met", "stale", "not-applicable", "your-organizations-responsibility", "notMetTotal", "metTotal"],
+      "properties": {
+        "met": { "type": "integer", "minimum": 0 },
+        "partly-met": { "type": "integer", "minimum": 0 },
+        "not-met": { "type": "integer", "minimum": 0 },
+        "stale": { "type": "integer", "minimum": 0 },
+        "not-applicable": { "type": "integer", "minimum": 0 },
+        "your-organizations-responsibility": { "type": "integer", "minimum": 0 },
+        "notMetTotal": { "type": "integer", "minimum": 0 },
+        "metTotal": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "level": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "kind", "profile", "claim", "components", "overlays", "counts"],
+      "properties": {
+        "id": { "$ref": "#/definitions/levelId" },
+        "title": { "$ref": "#/definitions/shortText" },
+        "kind": { "type": "string", "enum": ["level", "overlay"] },
+        "profile": { "type": "string", "maxLength": 255 },
+        "claim": { "type": "boolean" },
+        "components": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/id" } },
+        "overlays": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/levelId" } },
+        "counts": { "$ref": "#/definitions/counts" },
+        "notes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profileDifferences": { "type": "array", "maxItems": 500, "items": { "$ref": "#/definitions/text" } },
+            "text": { "$ref": "#/definitions/text" }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "description": "One evidence rule's result: what, when, which commit, the CI run.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "passed", "reason", "collectedAt", "window"],
+      "properties": {
+        "rule": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,95}$" },
+        "kind": { "type": "string", "enum": ["test", "observation"] },
+        "passed": { "type": "boolean" },
+        "reason": { "$ref": "#/definitions/reason" },
+        "collectedAt": { "$ref": "#/definitions/time" },
+        "commit": { "$ref": "#/definitions/commit" },
+        "runUrl": { "$ref": "#/definitions/httpsUrl" },
+        "window": { "$ref": "#/definitions/window" }
+      }
+    },
+    "componentRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "state", "reason", "reasonText", "responsibility", "evidence"],
+      "properties": {
+        "component": { "$ref": "#/definitions/id" },
+        "state": { "$ref": "#/definitions/state" },
+        "reason": { "$ref": "#/definitions/reason" },
+        "detail": { "$ref": "#/definitions/detail" },
+        "reasonText": { "$ref": "#/definitions/text" },
+        "responsibility": { "$ref": "#/definitions/responsibility" },
+        "evidence": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/evidence" } },
+        "statement": { "$ref": "#/definitions/text" },
+        "limitation": { "$ref": "#/definitions/text" },
+        "unsettled": { "$ref": "#/definitions/shortText" },
+        "requiresOfficialSignature": { "type": "boolean" },
+        "inheritedFrom": { "$ref": "#/definitions/shortText" }
+      }
+    },
+    "row": {
+      "description": "One control at one level.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "control", "label", "family", "title", "state", "reason", "reasonText", "components"],
+      "properties": {
+        "level": { "$ref": "#/definitions/levelId" },
+        "control": { "$ref": "#/definitions/id" },
+        "label": { "$ref": "#/definitions/shortText" },
+        "family": { "type": "string", "pattern": "^[a-z0-9]{1,32}$" },
+        "title": { "$ref": "#/definitions/shortText" },
+        "state": { "$ref": "#/definitions/state" },
+        "reason": { "$ref": "#/definitions/reason" },
+        "detail": { "$ref": "#/definitions/detail" },
+        "reasonText": { "$ref": "#/definitions/text" },
+        "gap": { "$ref": "#/definitions/gapId" },
+        "components": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/componentRow" } }
+      }
+    },
+    "milestone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "title": { "$ref": "#/definitions/shortText" },
+        "phase": { "type": "string", "pattern": "^[0-9]{1,3}(?:\\.[0-9]{1,2})?$" },
+        "targetDate": { "$ref": "#/definitions/date" }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "state", "overdue", "levelsBlocked", "controls", "remediation", "ownerRole"],
+      "properties": {
+        "id": { "$ref": "#/definitions/gapId" },
+        "title": { "$ref": "#/definitions/shortText" },
+        "state": { "type": "string", "enum": ["open", "planned", "in-progress", "closed", "risk-accepted"] },
+        "overdue": { "type": "boolean" },
+        "levelsBlocked": { "type": "integer", "minimum": 0 },
+        "controls": { "type": "array", "maxItems": 500, "items": { "$ref": "#/definitions/id" } },
+        "remediation": { "$ref": "#/definitions/text" },
+        "ownerRole": { "$ref": "#/definitions/shortText" },
+        "phase": { "type": "string", "pattern": "^[0-9]{1,3}(?:\\.[0-9]{1,2})?$" },
+        "poam": { "$ref": "#/definitions/id" },
+        "milestones": { "type": "array", "maxItems": 50, "items": { "$ref": "#/definitions/milestone" } },
+        "acceptedUntil": { "$ref": "#/definitions/date" }
+      }
+    },
+    "collector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "window"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "window": { "$ref": "#/definitions/window" },
+        "lastCollectedAt": { "$ref": "#/definitions/time" },
+        "passed": { "type": "boolean" },
+        "silentSince": { "$ref": "#/definitions/time" }
+      }
+    },
+    "matrixRow": {
+      "description": "One row of the customer responsibility matrix: what we provide and what your organization does.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["control", "component", "responsibility", "weProvide", "youDo"],
+      "properties": {
+        "control": { "$ref": "#/definitions/id" },
+        "component": { "$ref": "#/definitions/id" },
+        "responsibility": { "$ref": "#/definitions/responsibility" },
+        "weProvide": { "type": "string", "maxLength": 20000 },
+        "youDo": { "type": "string", "maxLength": 20000 }
+      }
+    },
+    "textFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["catalog", "family", "file"],
+      "properties": {
+        "catalog": { "$ref": "#/definitions/levelId" },
+        "family": { "type": "string", "pattern": "^[a-z0-9]{1,32}$" },
+        "file": { "$ref": "#/definitions/relativeFile" }
+      }
+    },
+    "refusedAcceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "reason"],
+      "properties": {
+        "file": { "$ref": "#/definitions/relativeFile" },
+        "reason": { "$ref": "#/definitions/shortText" }
+      }
+    }
+  }
+}
