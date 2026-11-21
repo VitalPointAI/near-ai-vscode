@@ -10,7 +10,7 @@ type Element = DefaultTreeAdapterTypes.Element;
 type Lang = 'en' | 'fr' | 'both';
 const sourceId = 'itsp-10-033';
 const landing = 'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033';
-const frenchLanding = 'https://www.cyber.gc.ca/fr/conseils/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033';
+const frenchLanding = 'https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033';
 const element = (node: Node): node is Element => 'tagName' in node;
 const children = (node: Node): Node[] => 'childNodes' in node ? node.childNodes : [];
 const text = (node: Node): string => ('value' in node ? node.value : children(node).map(text).join('')).replace(/\s+/g, ' ').trim();
@@ -31,12 +31,21 @@ function pageReader(context: ImportContext): PageReader {
   return async (url) => (await fetcher.get(url, { accept: 'text/html' })).body.toString('utf8');
 }
 function links(html: string, url: string): string[] { const out: string[] = []; const walk = (node: Node) => { if (element(node) && node.tagName === 'a') { const href = attr(node, 'href'); if (href) out.push(new URL(href, url).toString()); } children(node).forEach(walk); }; walk(mainOf(parseHtml(html))); return [...new Set(out)]; }
+function familyLinks(html: string, landingPage: string): string[] {
+  const base = new URL(landingPage); const prefix = `${base.pathname.replace(/\/$/, '')}/`;
+  const excluded = new Set(['foreword-overview-introduction', 'avant-propos-vue-densmble-introduction', 'concepts-structure', 'controls-assurance-activities-families', 'controles-activites-dassurance']);
+  return links(html, landingPage).filter((url) => {
+    const candidate = new URL(url);
+    const suffix = candidate.pathname.startsWith(prefix) ? candidate.pathname.slice(prefix.length) : '';
+    return candidate.origin === base.origin && (/\/(?:family|famille)-/i.test(candidate.pathname) || (Boolean(suffix) && !suffix.includes('/') && !excluded.has(suffix)));
+  });
+}
 function dateModified(html: string): string { let date = ''; const walk = (node: Node) => { if (element(node) && node.tagName === 'time' && attr(node, 'property') === 'dateModified') date = text(node); children(node).forEach(walk); }; walk(mainOf(parseHtml(html))); return date || 'unknown'; }
 function familyId(control: ParsedControl): string { return control.id.split('-')[0]; }
 
 async function readEnglish(page: PageReader) {
   const landingHtml = await page(landing);
-  const urls = links(landingHtml, landing).filter((url) => /family-/i.test(url));
+  const urls = familyLinks(landingHtml, landing);
   const pages = [{ url: landing, lang: 'en' as const, sha256: createHash('sha256').update(normalPage(landingHtml)).digest('hex'), dateModified: 'unknown' }];
   const controls: ParsedControl[] = [];
   for (const url of urls) { const html = await page(url); controls.push(...controlSections(mainOf(parseHtml(html))).map((section) => controlFromSection(section, 'en'))); pages.push({ url, lang: 'en', sha256: createHash('sha256').update(normalPage(html)).digest('hex'), dateModified: dateModified(html) }); }
@@ -45,7 +54,7 @@ async function readEnglish(page: PageReader) {
 
 async function readFrench(page: PageReader) {
   const landingHtml = await page(frenchLanding);
-  const urls = links(landingHtml, frenchLanding).filter((url) => /famille-/i.test(url));
+  const urls = familyLinks(landingHtml, frenchLanding);
   const pages = [{ url: frenchLanding, lang: 'fr' as const, sha256: createHash('sha256').update(normalPage(landingHtml)).digest('hex'), dateModified: 'unknown' }];
   const controls: ParsedControl[] = [];
   const failures: { page: string; reason: string }[] = [];
