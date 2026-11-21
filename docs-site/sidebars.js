@@ -27,7 +27,7 @@ export default {
     {
       type: 'category',
       label: 'Security',
-      items: ['security/trust-model', 'security/policy.synced']
+      items: ['security/trust-model', 'security/policy.synced', ...folder('Security documents', 'security/documents')]
     },
     {
       type: 'category',
