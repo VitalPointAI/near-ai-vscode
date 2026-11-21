@@ -5,6 +5,8 @@ node_modules/
 # Copies of the repository's documents made by scripts/sync-docs.mjs at every build
 /content/**/*.synced.md
 /static/synced/
+/static/compliance/
+/.compliance-overlay
 # Folders the sync fills entirely (with their generated _category_.json files)
 /content/architecture/codebase/
 /content/architecture/design/

@@ -1,0 +1,11 @@
+---
+sidebar_position: 5
+title: Classified
+---
+
+import AccreditationData from '@site/src/components/accreditation/AccreditationData';
+import LevelPage from '@site/src/components/accreditation/LevelPage';
+
+Your organization decides whether a system that uses this product may operate at this level. The product makes no claim; this appliance-only list shows reference rows and what your organization must decide. It is not an authorization.
+
+<AccreditationData>{(dashboard) => <LevelPage dashboard={dashboard} levelId="classified" />}</AccreditationData>

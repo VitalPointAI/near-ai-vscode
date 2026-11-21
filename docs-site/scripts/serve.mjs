@@ -9,9 +9,9 @@
 // Usage: node scripts/serve.mjs [--port 3210] [--host 127.0.0.1] [--dir build]
 
 import { createServer } from 'node:http';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -28,6 +28,11 @@ function option(name, fallback) {
 const host = option('host', '127.0.0.1');
 const port = Number(option('port', '3210'));
 const dir = resolve(here, '..', option('dir', 'build'));
+const overlaySetting = process.env.NEAR_AI_COMPLIANCE_OVERLAY_DIR || (existsSync(resolve(here, '..', '.compliance-overlay')) ? readFileSync(resolve(here, '..', '.compliance-overlay'), 'utf8').trim() : '');
+let overlayDir = '';
+if (overlaySetting) {
+  try { overlayDir = realpathSync(overlaySetting); if (!lstatSync(overlayDir).isDirectory()) overlayDir = ''; } catch { overlayDir = ''; }
+}
 
 if (!LOOPBACK.has(host)) {
   console.error(`Refusing to bind to ${host}: the docs server only listens on this computer (127.0.0.1, ::1 or localhost).`);
@@ -44,11 +49,32 @@ if (!existsSync(resolve(dir, 'index.html'))) {
 
 const serveFiles = sirv(dir, { dev: true, etag: true, dotfiles: false, extensions: ['html'] });
 const notFound = resolve(dir, '404.html');
+const within = (root, path) => { const value = relative(root, path); return value && !value.startsWith('..') && !value.startsWith('../'); };
+function overlayFiles() {
+  if (!overlayDir) return null;
+  const files = [];
+  for (const name of readdirSync(overlayDir).filter((item) => item.endsWith('.json')).slice(0, 64)) {
+    const path = resolve(overlayDir, name);
+    try {
+      const stat = lstatSync(path); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) continue;
+      const actual = realpathSync(path); if (!within(overlayDir, actual)) continue;
+      files.push({ path: name, bytes: stat.size, overlay: JSON.parse(readFileSync(actual, 'utf8')) });
+    } catch { /* A malformed or changed private file is not served. */ }
+  }
+  return files;
+}
 
 const server = createServer((req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
+  if (req.url?.split('?')[0] === '/_overlay/index.json' && overlayDir) {
+    const expected = `${host.includes(':') ? `[${host}]` : host}:${port}`;
+    if (req.headers.host !== expected) { res.statusCode = 403; res.end(); return; }
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.statusCode = 405; res.setHeader('Allow', 'GET, HEAD'); res.end(); return; }
+    const body = JSON.stringify({ files: overlayFiles() ?? [] });
+    res.statusCode = 200; res.setHeader('Content-Type', 'application/json; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.end(req.method === 'HEAD' ? undefined : body); return;
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.statusCode = 405;
     res.setHeader('Allow', 'GET, HEAD');

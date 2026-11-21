@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh NEAR AI documentation evidence
+
+[Service]
+Type=oneshot
+WorkingDirectory=@SITE_DIR@
+ExecStart=@NODE@ @SITE_DIR@/scripts/compliance-refresh.mjs
+MemoryMax=256M
+NoNewPrivileges=yes
+UMask=0077

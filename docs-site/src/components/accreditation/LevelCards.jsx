@@ -1,0 +1,4 @@
+import { isOld, levelCounts, STATE_WORDS } from '../../compliance/lib.mjs';
+import StateBadge from './StateBadge';
+import styles from './styles.module.css';
+export default function LevelCards({ dashboard }) { const old = isOld(dashboard.generatedAt); return <section className={styles.section}>{old ? <p role="status">Evidence is older than 24 hours. Review the collection time before relying on it.</p> : null}<p>Evidence collected {dashboard.generatedAt}; commit {dashboard.commit?.slice(0, 12)}.</p><div className={styles.cards}>{(dashboard.levels ?? []).map((level) => { const counts = levelCounts(dashboard, level.id); return <article className={styles.card} key={level.id}><h2>{level.title}</h2><ul>{Object.keys(STATE_WORDS).map((state) => <li key={state}><StateBadge state={state} />: {counts[state]}</li>)}</ul></article>; })}</div></section>; }
