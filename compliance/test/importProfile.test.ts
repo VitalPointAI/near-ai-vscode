@@ -39,6 +39,12 @@ test('records the French page rows that differ from the English selections', asy
   ]);
 });
 
+test('maps French selection labels before recording a disagreement', async () => {
+  const differences = (await result()).report.differences;
+  assert.equal(differences[0]?.fr, 'Not selected');
+  assert.equal(differences.every((difference) => !difference.fr.includes('sélectionné')), true);
+});
+
 test('puts non-empty source placeholders and notes into OSCAL alteration props', async () => {
   const profile = (await result()).catalog.profile;
   assert.deepEqual(profile.modify.alters.find((alter: any) => alter['control-id'] === 'xa-02').adds[0].props.map((prop: any) => prop.name), ['profile-suggestion', 'suggested-placeholder', 'profile-note']);
