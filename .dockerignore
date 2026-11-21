@@ -25,6 +25,7 @@
 !src/domain/replica/digest.ts
 !src/domain/replica/entry.ts
 !src/domain/replica/equivocation.ts
+!src/domain/replica/features.ts
 !src/domain/replica/hubFile.ts
 !src/domain/replica/invite.ts
 !src/domain/replica/kindSchemas/doc.ts
