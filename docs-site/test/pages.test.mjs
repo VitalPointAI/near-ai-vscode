@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { lintPage } from '../../compliance/src/wordLint.ts';
 
 const pages = join(new URL('..', import.meta.url).pathname, 'content/accreditation');
-const expected = ['index.mdx', 'unclassified.mdx', 'protected-a.mdx', 'protected-b.mdx', 'classified.mdx', 'controlled-goods-canada.mdx', 'itar.mdx'];
+const expected = ['index.mdx', 'unclassified.mdx', 'protected-a.mdx', 'protected-b.mdx', 'classified.mdx', 'controlled-goods-canada.mdx', 'itar.mdx', 'gaps.mdx', 'responsibility-matrix.mdx', 'evidence.mdx', 'package.mdx'];
 test('has each level and overlay page', () => expected.forEach((name) => assert.ok(readdirSync(pages).includes(name), name)));
 test('each accreditation page has a sidebar position', () => readdirSync(pages).filter((name) => name.endsWith('.mdx')).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /sidebar_position:/, name)));
 test('level pages open with the organization decision', () => ['unclassified.mdx', 'protected-a.mdx', 'protected-b.mdx', 'classified.mdx'].forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /Your organization decides/, name)));
@@ -14,3 +14,7 @@ test('unclassified calls this good practice rather than accreditation', () => as
 test('classified says the appliance makes no claim', () => assert.match(readFileSync(join(pages, 'classified.mdx'), 'utf8'), /makes no claim/));
 test('pages have no prohibited claim wording', () => readdirSync(pages).filter((name) => name.endsWith('.mdx')).forEach((name) => assert.deepEqual(lintPage(readFileSync(join(pages, name), 'utf8'), name), [], name)));
 test('level pages use the shared data reader', () => expected.slice(0, 7).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /AccreditationData/, name)));
+test('supporting pages open with the organization decision', () => expected.slice(7).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /Your organization decides/, name)));
+test('the matrix component uses the safe CSV helper', () => assert.match(readFileSync(new URL('../src/components/accreditation/ResponsibilityMatrix.jsx', import.meta.url), 'utf8'), /toCsv/));
+test('the package page explains release verification', () => assert.match(readFileSync(new URL('../src/components/accreditation/PackageInfo.jsx', import.meta.url), 'utf8'), /gh attestation verify/));
+test('the README describes the local refresh', () => assert.match(readFileSync(new URL('../README.md', import.meta.url), 'utf8'), /compliance:refresh/));

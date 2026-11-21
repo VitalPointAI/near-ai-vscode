@@ -1,5 +1,13 @@
 # The documentation site
 
+## Accreditation evidence
+
+The Accreditation section is an evidence view, not an authorization. It reads the local public dashboard at view time. Refresh a hash-verified bundle without rebuilding the site with `npm run compliance:refresh`; the command writes the public dashboard into both `static/compliance/` and an existing `build/compliance/` directory.
+
+Your organization's private overlay stays outside the repository and build: point `NEAR_AI_COMPLIANCE_OVERLAY_DIR` at a folder of overlay JSON files when running `npm run serve`, or place that folder path in the git-ignored `.compliance-overlay` file. The preview server does not provide the overlay endpoint.
+
+An owner can install the optional fifteen-minute refresh timer with `npm run refresh-timer:install` after reviewing its generated systemd user units.
+
 `docs-site/` is the documentation site for NEAR AI for VS Code: how to use the extension, and how
 it is built, secured, tested and released. It is built with [Docusaurus 3](https://docusaurus.io/)
 and, for now, is read on this computer only.
