@@ -1,0 +1,1 @@
+{"rules":[{"id":"relay.cm-07.state-dir","component":"relay","control":"cm-07","statement":"cm-07_smt.state-dir","kind":"test","test":{"file":"relay/test/stateDir.test.ts","path":[],"name":"the relay started on a path that does not exist yet creates it 0700 with relay.db 0600 and stops on SIGTERM with exit 0"}}]}
