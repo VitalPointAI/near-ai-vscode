@@ -25,27 +25,40 @@ export function isFresh(result: RuleResult, head: string, now: Date): boolean {
 const resultPassed = (result: RuleResult): boolean => result.passed === true && result.reason === 'met';
 const failureReason = (result: RuleResult): ReasonCode => (result.reason === 'met' ? 'missing-result' : result.reason);
 
+/** A current verified acceptance keeps an unmet row unmet while showing the review date (D-20). */
+function withRiskAcceptance(input: StatusInput, outcome: StatusOutcome): StatusOutcome {
+  const acceptance = input.riskAcceptance;
+  if (
+    acceptance !== undefined
+    && outcome.state === 'not-met'
+    && acceptance.controls.includes(input.control)
+    && (acceptance.levels === undefined || acceptance.levels.includes(input.level))
+    && Date.parse(acceptance.expiresAt) > input.now.getTime()
+  ) return { state: 'not-met', reason: 'risk-accepted', detail: { date: acceptance.expiresAt } };
+  return outcome;
+}
+
 /** Computes one level, control and component's state from evidence and the clock only. */
 export function computeStatus(input: StatusInput): StatusOutcome {
   if (input.responsibility === 'your-organization') return { state: 'your-organizations-responsibility', reason: 'your-organization' };
   if (input.responsibility === 'inherited') return { state: 'your-organizations-responsibility', reason: 'inherited' };
-  if (input.responsibility === 'not-applicable') return { state: 'not-met', reason: 'not-applicable-unreviewed' };
-  if (input.responsibility !== 'product' && input.responsibility !== 'shared') return { state: 'not-met', reason: 'no-statement' };
+  if (input.responsibility === 'not-applicable') return withRiskAcceptance(input, { state: 'not-met', reason: 'not-applicable-unreviewed' });
+  if (input.responsibility !== 'product' && input.responsibility !== 'shared') return withRiskAcceptance(input, { state: 'not-met', reason: 'no-statement' });
 
   const statements = input.statements ?? [];
-  if (statements.length === 0) return { state: 'not-met', reason: 'no-statement' };
+  if (statements.length === 0) return withRiskAcceptance(input, { state: 'not-met', reason: 'no-statement' });
 
   const rules = statements.map((statement) => (Object.hasOwn(input.rulesByStatement ?? {}, statement.id) ? input.rulesByStatement[statement.id] : []) ?? []);
-  if (rules.some((list) => list.length === 0)) return { state: 'not-met', reason: 'no-rules' };
+  if (rules.some((list) => list.length === 0)) return withRiskAcceptance(input, { state: 'not-met', reason: 'no-rules' });
 
   const results: RuleResult[] = [];
   for (const rule of rules.flat()) {
     const result = Object.hasOwn(input.results ?? {}, rule.id) ? input.results[rule.id] : undefined;
-    if (!result) return { state: 'not-met', reason: 'missing-result' };
+    if (!result) return withRiskAcceptance(input, { state: 'not-met', reason: 'missing-result' });
     results.push(result);
   }
   const failed = results.find((result) => !resultPassed(result));
-  if (failed) return { state: 'not-met', reason: failureReason(failed) };
+  if (failed) return withRiskAcceptance(input, { state: 'not-met', reason: failureReason(failed) });
 
   let outcome: StatusOutcome = { state: 'met', reason: 'met' };
   const stale = results.filter((result) => !isFresh(result, input.head, input.now));
@@ -56,9 +69,9 @@ export function computeStatus(input: StatusInput): StatusOutcome {
 
   // Never upward: each of these can only keep a row at or below not met in 44-01.
   const unsettled = input.unsettled ?? statements.find((statement) => statement.unsettled)?.unsettled;
-  if (unsettled) return { state: 'not-met', reason: 'unsettled', detail: { question: unsettled } };
-  if (input.selfSigned === true && statements.some((statement) => statement.requiresOfficialSignature === true)) return { state: 'not-met', reason: 'self-signed' };
+  if (unsettled) return withRiskAcceptance(input, { state: 'not-met', reason: 'unsettled', detail: { question: unsettled } });
+  if (input.selfSigned === true && statements.some((statement) => statement.requiresOfficialSignature === true)) return withRiskAcceptance(input, { state: 'not-met', reason: 'self-signed' });
   const limitation = input.limitation ?? statements.find((statement) => statement.limitation)?.limitation;
-  if (limitation) return { state: 'not-met', reason: 'limitation', detail: { text: limitation } };
+  if (limitation) return withRiskAcceptance(input, { state: 'not-met', reason: 'limitation', detail: { text: limitation } });
   return outcome;
 }
