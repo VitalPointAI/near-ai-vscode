@@ -222,7 +222,7 @@ test('D-41 rule 5: the provider\'s name before organization is counted in its th
 // ---- Rule 2: mode words (Task 3) ----
 
 test('D-41 rule 2: a mode word spelled in copy is counted', () => {
-  for (const word of ['Report for duty', 'Work team admin', 'Tasking authority', 'Billet', 'Dual-hatted', 'Relief in place', 'Commander\'s decision']) {
+  for (const word of ['Report for duty', 'Work team admin', 'Tasking authority', 'Defence team member', 'Dual-hatted', 'Relief in place', 'Commander\'s decision']) {
     assert.deepEqual(one(`Choose ${word} below.`), { 'mode-word': 1 }, word);
   }
   // The table is where the words live: modes.ts and terms.ts are never scanned.
@@ -250,7 +250,7 @@ test('D-41 rule 2 reads MODES: the mode word list is the multi-word words of MOD
 
 test('owner 2026-11-20 rule 6: a bare team is counted', () => {
   for (const word of ['team', 'Teams', 'team\'s', 'Team Mode', 'Team Studio', 'team-lead']) assert.equal(one(`Open the ${word} page.`)['bare-team'], 1, word);
-  for (const word of ['agent team', 'work team', 'Agent teams', 'Microsoft Teams', 'agent-team', 'steam', 'teammate']) {
+  for (const word of ['agent team', 'work team', 'Agent teams', 'Microsoft Teams', 'agent-team', 'Defence team', 'steam', 'teammate']) {
     assert.equal(one(`Open the ${word} page.`)['bare-team'], undefined, word);
   }
   assert.equal(one('A team and two agent teams and Teams.')['bare-team'], 2);
