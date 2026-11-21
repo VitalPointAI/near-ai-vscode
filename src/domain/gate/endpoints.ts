@@ -2,13 +2,13 @@
 // Each entry names one place by class, exact host (a `*.` pattern only for your organization's own plain servers), scheme, TLS pins, region and the
 // highest label it may receive (`maxLabel`, at most one level per scale; a scale not listed means nothing from that scale reaches it). The parser refuses
 // every entry that would let content go where the routing rules never may: a level that stays on this computer off this computer, the levels no third
-// party may hold on a third party's service, and anything above the pattern ceiling on a pattern host.
+// party may hold on a third party's service, and anything above the pattern ceiling on a pattern host. Only NEAR AI Cloud's own host may be `nearai-tee`.
 // `migrateLocalHosts` reads a v1 policy's `routing.localHosts` as endpoints at today's effect (D-27), except the levels that now need a pinned connection and
 // a signed authorization (Protected B and NATO Restricted on the shipped scales, D-52), and lists each loss.
 // routing.ts is imported for isThisComputerOnly and THIS_COMPUTER_ONLY_LEVELS, used only inside functions, never at module load, so 41-10's routing.ts may
 // import this file without a load-time cycle; RoutingTable is a type only. Nothing here imports bundle.ts.
-import { isLoopbackHost } from '../config';
-import { levelIndex, scaleOf } from './labels';
+import { isLoopbackHost, isNearCloudEndpoint } from '../config';
+import { levelIndex, scaleOf, splitLabelKey } from './labels';
 import type { Label, ScaleTable } from './labels';
 import { THIS_COMPUTER_ONLY_LEVELS, isThisComputerOnly } from './routing';
 import type { RoutingTable, RoutingTier } from './routing';
@@ -92,15 +92,6 @@ export function isLoopbackEndpointHost(host: string): boolean {
   return host === IPV6_LOOPBACK || isLoopbackHost(host);
 }
 
-/** `scale/level` split at the first slash (a scale id has none), or undefined when it is not one. */
-function splitLabelKey(key: string): { readonly scale: string; readonly level: string } | undefined {
-  const slash = key.indexOf('/');
-  if (slash <= 0) return undefined;
-  const scale = key.slice(0, slash);
-  const level = key.slice(slash + 1);
-  return SCALE_ID_PATTERN.test(scale) && level !== '' ? { scale, level } : undefined;
-}
-
 /** The ceiling entry of a list for one scale, as a level index on `scales`; -1 when the list names nothing on that scale. */
 function ceilingIndex(list: readonly string[], scale: string, scales: ScaleTable): number {
   for (const key of list) {
@@ -119,6 +110,16 @@ function atOrAboveListed(scale: string, level: string, scales: ScaleTable, liste
     if (listed.includes(`${scale}/${found.levels[index] as string}`)) return true;
   }
   return false;
+}
+
+/**
+ * Whether a place of this class may ever receive the level, whatever its ceiling says (D-25): nothing that stays on this computer goes to any other class,
+ * and no vendor, forwarding service or closed API receives THIRD_PARTY_REFUSED_LEVELS or a level above one on its scale. A scale `scales` does not hold
+ * gives nothing. Every listed entry's ceiling already obeys this; routing asks it again of a place that is not what its entry says (CR-02).
+ */
+export function classMayHold(endpointClass: EndpointClass, label: Pick<Label, 'scale' | 'level'>, scales: ScaleTable): boolean {
+  if (endpointClass !== 'local' && atOrAboveListed(label.scale, label.level, scales, THIS_COMPUTER_ONLY_LEVELS)) return false;
+  return !(THIRD_PARTY_CLASSES.includes(endpointClass) && atOrAboveListed(label.scale, label.level, scales, THIRD_PARTY_REFUSED_LEVELS));
 }
 
 function parseChoice<T extends string>(value: unknown, path: string, allowed: readonly T[]): Parsed<T> {
@@ -159,14 +160,13 @@ function parseMaxLabel(value: unknown, path: string, scales: ScaleTable, endpoin
     const where = `${path}[${String(index)}]`;
     const key: unknown = value[index];
     if (typeof key !== 'string') return refused('wrong-type', where);
+    // The label module's one splitter (41-04), with the shape a ceiling key must have: a scale id and a level that is not empty.
     const parts = splitLabelKey(key);
-    if (parts === undefined) return refused('wrong-type', where);
+    if (parts === undefined || !SCALE_ID_PATTERN.test(parts.scale) || parts.level === '') return refused('wrong-type', where);
     if (levelIndex(scales, parts.scale, parts.level) < 0) return refused('not-allowed-here', where);
     if (seenScales.includes(parts.scale)) return refused('duplicate', where);
     if (out.length > 0 && key < (out[out.length - 1] as string)) return refused('not-sorted', where);
-    // Nothing that stays on this computer goes anywhere else, whatever the class.
-    if (endpointClass !== 'local' && atOrAboveListed(parts.scale, parts.level, scales, THIS_COMPUTER_ONLY_LEVELS)) return refused('not-allowed-here', where);
-    if (THIRD_PARTY_CLASSES.includes(endpointClass) && atOrAboveListed(parts.scale, parts.level, scales, THIRD_PARTY_REFUSED_LEVELS)) return refused('not-allowed-here', where);
+    if (!classMayHold(endpointClass, parts, scales)) return refused('not-allowed-here', where);
     if (isPattern(host)) {
       const cap = ceilingIndex(PATTERN_HOST_CEILING, parts.scale, scales);
       if (cap < 0 || levelIndex(scales, parts.scale, parts.level) > cap) return refused('not-allowed-here', where);
@@ -218,6 +218,9 @@ function parseEndpoint(value: unknown, scales: ScaleTable, path: string): Parsed
     if (typeof provider !== 'string' || !TOKEN_PATTERN.test(provider)) return refused('wrong-type', childPath(path, 'provider'));
     out['provider'] = provider;
   }
+  // IN-07: NEAR AI's private hardware is reached only at NEAR AI Cloud's own host, so no other host may claim it; the trust line and residency read the
+  // class and region an entry declares.
+  if (endpointClass.value === 'nearai-tee' && !isNearCloudEndpoint(`https://${host.value}`)) return refused('not-allowed-here', childPath(path, 'host'));
   return { ok: true, value: Object.freeze(out) as unknown as PolicyEndpoint };
 }
 
@@ -325,7 +328,9 @@ function uniqueId(base: string, taken: Set<string>): string {
  * Reads a v1 `routing.localHosts` list as endpoints at the effect the safety patch gave it (D-27): each non-loopback host becomes an org-plain https entry
  * with no pins and region unstated, whose ceiling on each scale is the longest run of levels from the bottom that the routing table sends to any cloud or
  * attested cloud, and for an exact host also the local-only levels that need neither this computer nor an authorization. Pattern hosts are capped at
- * PATTERN_HOST_CEILING. A loopback entry makes nothing. Ids are `local-` and the host, with `-2`, `-3` for a collision in sorted host order.
+ * PATTERN_HOST_CEILING. A loopback entry makes nothing. Ids are `local-` and the host, with `-2`, `-3` for a collision in sorted host order. Routing refuses
+ * a plain http connection to a listed host (WR-03); the client already refuses plain http to every host but this computer, so `https` is the protection
+ * each request to a migrated host has, not a new one.
  */
 export function migrateLocalHosts(routing: RoutingTable, scales: ScaleTable): { readonly endpoints: readonly PolicyEndpoint[]; readonly changes: readonly MigrationChange[] } {
   const endpoints: PolicyEndpoint[] = [];

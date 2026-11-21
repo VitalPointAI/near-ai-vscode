@@ -10,7 +10,7 @@ import { authorizationCovers } from './authorizations';
 import type { AuthorizationBody, AuthorizationKind, AuthorizationQuestion } from './authorizations';
 import { markDominated, meetClearance } from './dominance';
 import type { Mark } from './dominance';
-import { endpointCeilingAllows, findEndpoint, needsEndpointAuthorization } from './endpoints';
+import { classMayHold, endpointCeilingAllows, findEndpoint, needsEndpointAuthorization } from './endpoints';
 import type { EndpointClass, EndpointRegion, PolicyEndpoint } from './endpoints';
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
@@ -481,6 +481,12 @@ export const ROUTE_REFUSALS_NAMED_AHEAD: Readonly<Record<NamedAheadRouteRule, st
   'route.export-control': 'Nothing was sent. This content is marked Controlled goods (Canada), ITAR or US export-controlled (EAR), and your organization has not approved this AI service, or you sending it there, for that marking. Use a model on this computer, or ask your organization\'s export-control contact.'
 });
 
+/**
+ * The reason of a request to a place your rules list over https that was made over plain http (WR-03). It is recorded under route.endpoint-pin, the rule
+ * for a connection that is not the one your rules require.
+ */
+export const ENDPOINT_SCHEME_TEXT = 'Nothing was sent. Your organization\'s rules list this AI service for https connections only, and this connection uses plain http. Point the runtime at the service\'s https address, or use a model on this computer.';
+
 /** The reason of a request whose route could not be worked out (a mark that cannot be read, a routing table that throws): refused, never guessed. */
 export const ROUTE_CHECK_FAILED_TEXT = 'Nothing was sent. The route for this request could not be worked out, so it was refused rather than guessed. Try again; if it keeps happening, reload the window, or open NEAR AI: Policy to see whether your policy needs attention.';
 
@@ -521,7 +527,10 @@ export interface RoutePolicy {
   readonly now: number;
 }
 
-/** Where a request goes: a listed entry, or an implicit place (this computer, NEAR AI Cloud's own endpoint) that has no id and adds no ceiling. */
+/**
+ * Where a request goes: a listed entry, or an implicit place with no id (this computer, NEAR AI Cloud's own endpoint, or a model forwarded from a listed
+ * private-hardware entry, CR-02). Only a listed entry, or the entry a forwarded model was asked of, adds a ceiling.
+ */
 export interface RouteEndpoint {
   readonly id?: string;
   readonly class: EndpointClass;
@@ -673,16 +682,31 @@ function decideByTable(mark: Mark, routing: RoutingTable, facts: RouteFacts, def
   return { ...decision, reason: `Nothing was sent. ${PRIVATE_FLOOR_TEXT} ${decision.reason.replace(/^Nothing was sent\. /, '')}` };
 }
 
-/** A listed entry and the place it gives, or an implicit place with no entry. */
+/** A listed entry and the place it gives, or an implicit place with no entry. `listed` is the entry the host matched, whose ceiling and scheme apply. */
 interface Place {
   readonly endpoint: RouteEndpoint;
   readonly listed?: PolicyEndpoint;
+}
+
+/**
+ * CR-02: whether a model runs in the private hardware a listed entry names. NEAR AI's private hardware runs only the models NEAR AI's catalog marks TEE;
+ * every other model there is forwarded to an outside provider. Your organization's or a vendor's private hardware runs a model its catalog marks TEE or one
+ * the runtime serves itself (`local`). An unknown model runs in none.
+ */
+function runsInEntryHardware(entryClass: EndpointClass, model: RouteFacts['model']): boolean {
+  const boundary = model?.privacyBoundary;
+  if (entryClass === 'nearai-tee') return boundary === 'tee';
+  if (entryClass === 'org-tee' || entryClass === 'vendor-tee') return boundary === 'tee' || boundary === 'local';
+  return true;
 }
 
 function placeOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'model'>, endpoints: readonly PolicyEndpoint[]): Place | undefined {
   const found = findEndpoint(endpoints, facts.host);
   if (found.kind === 'listed') {
     const entry = found.endpoint;
+    // CR-02: a model that does not run in the entry's private hardware is forwarded: no region (so no residency rule is met), no id (so no authorization
+    // or residency exception naming the entry covers it), and no pin. The entry's ceiling still applies, with a forwarding service's limits.
+    if (!runsInEntryHardware(entry.class, facts.model)) return { endpoint: implicitPlace('forwarded'), listed: entry };
     const endpoint: RouteEndpoint = entry.provider === undefined
       ? { id: entry.id, class: entry.class, region: entry.region, implicit: false, tlsPins: entry.tlsPins }
       : { id: entry.id, class: entry.class, region: entry.region, provider: entry.provider, implicit: false, tlsPins: entry.tlsPins };
@@ -699,8 +723,9 @@ function implicitPlace(placeClass: EndpointClass): RouteEndpoint {
 }
 
 /**
- * Where a request goes (D-24): the entry findEndpoint gives for its host (an exact host first, then a `*.` pattern); this computer for a loopback host no
- * entry names; NEAR AI Cloud's own endpoint with no entry as its private hardware for a TEE model and as forwarded for any other; otherwise undefined.
+ * Where a request goes (D-24): the entry findEndpoint gives for its host (an exact host first, then a `*.` pattern), or forwarded for a model that does not
+ * run in a listed entry's private hardware (CR-02); this computer for a loopback host no entry names; NEAR AI Cloud's own endpoint with no entry as its
+ * private hardware for a TEE model and as forwarded for any other; otherwise undefined.
  */
 export function endpointOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'model'>, endpoints: readonly PolicyEndpoint[]): RouteEndpoint | undefined {
   return placeOf(facts, endpoints)?.endpoint;
@@ -708,9 +733,10 @@ export function endpointOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'mo
 
 /**
  * The policy steps, run only on a request the safety patch's checks allowed, in the order of D-36: the place (route.endpoint-unknown), its ceiling
- * (route.endpoint-ceiling), a pin or binding (route.endpoint-pin), an authorization (route.authorization-missing), an accredited device
- * (route.accredited-device, reported unless your organization turns refusal on), residency (route.residency), the passport (route.passport, reported
- * only) and clearance (route.clearance). The first refusing step decides; a step that only reports never hides a later refusal.
+ * (route.endpoint-ceiling), https to a listed place and a pin or binding (route.endpoint-pin), an authorization (route.authorization-missing), an accredited
+ * device (route.accredited-device, reported unless your organization turns refusal on), residency (route.residency), the passport (route.passport, reported
+ * only) and clearance (route.clearance). The first refusing step decides; a step that only reports never hides a later refusal, and never refuses even
+ * when its check throws (WR-05). The private floor (S4) is part of the safety patch's checks, so its refusal comes first and keeps its words.
  */
 function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy): RouteDecision {
   const labels: readonly Label[] = mark.length === 0 ? (defaultLabel === undefined ? [] : [defaultLabel]) : mark;
@@ -720,9 +746,15 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
   const endpoint = place?.endpoint;
   // Step 1: a place your rules do not name. Above any-cloud every request needs one.
   if (endpoint === undefined && decision.tier !== 'any-cloud') return refuse(decision.tier, 'route.endpoint-unknown');
-  // Step 2: a listed entry's ceiling holds every label of the mark; an implicit place adds none.
+  // Step 2: a listed entry's ceiling holds every label of the mark, and the place's own class may hold it (a model forwarded from a private-hardware entry
+  // takes a forwarding service's limits, CR-02); an implicit place adds none.
   const listed = place?.listed;
-  if (listed !== undefined && !labels.every((label) => endpointCeilingAllows(listed, label, policy.scales))) return refuse(decision.tier, 'route.endpoint-ceiling');
+  if (listed !== undefined && endpoint !== undefined
+    && !labels.every((label) => endpointCeilingAllows(listed, label, policy.scales) && classMayHold(endpoint.class, label, policy.scales))) {
+    return refuse(decision.tier, 'route.endpoint-ceiling');
+  }
+  // Step 2b (WR-03): a place your rules list is reached only over https, at every level; this computer is not on the network, so a local entry is not.
+  if (listed !== undefined && listed.class !== 'local' && !usesHttps(facts.host)) return { allowed: false, tier: decision.tier, rule: 'route.endpoint-pin', reason: ENDPOINT_SCHEME_TEXT };
   const local = endpoint?.class === 'local';
   const use = facts.use?.toLowerCase();
   // The levels that need a pinned or proven connection and a named authorization off this computer (D-26, D-52): Protected B, and the other local-only
@@ -751,20 +783,15 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
     }
   }
   // Step 5 (D-34): a this-computer-only level (only this computer reaches here) on a device no accredited-device authorization names is reported, and
-  // refused only when your organization's layer is present and turns the switch on.
+  // refused only when your organization's layer is present and turns the switch on. A check that cannot be made covers nothing (WR-05).
   const wouldRefuse = new Set<ReportedRouteRule>();
   let notAccredited: Label | undefined;
-  for (const label of labels.filter((candidate) => isThisComputerOnly(candidate))) {
-    const key = labelKey(label);
-    const device = policy.deviceId;
-    const found = device === undefined ? [] : covering(policy, { kind: 'accredited-device', subject: { device }, project: policy.project, label: key, use });
-    if (found.length > 0) {
-      for (const record of found) addRecord(allowedBy, authorizationRecord(record, key));
-      continue;
-    }
+  const device = accreditedDevice(policy, labels, use);
+  for (const record of device.records) addRecord(allowedBy, record);
+  if (device.missing !== undefined) {
     if (policy.organization && policy.requireAccreditedDevice) return refuse(decision.tier, 'route.accredited-device');
     wouldRefuse.add('route.accredited-device');
-    notAccredited ??= label;
+    notAccredited = device.missing;
   }
   // Step 6 (D-33, T-41-101): residency for every place but this computer; a host no entry names (only at any-cloud) counts as unstated.
   if (!local) {
@@ -772,23 +799,17 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
     if (!residency.ok) return refuse(decision.tier, 'route.residency');
     if (residency.exception !== undefined) addRecord(allowedBy, authorizationRecord(residency.exception));
   }
-  // Step 7 (D-42): the model's passport, report only whatever the section's mode says, until 74.1. No place counts as a closed API, the widest class.
+  // Step 7 (D-42): the model's passport, report only whatever the section's mode says, until 74.1. No place counts as a closed API, the widest class. A
+  // passport check that throws is reported as would refuse and never refuses (WR-05).
   if (policy.models !== undefined) {
-    const modelId = facts.model?.id ?? '';
-    const resolved = resolvePassport(policy.models, modelId, policy.now);
-    const requestUse: UseTier = facts.use ?? 'T1';
-    const subject = resolved?.passport.id ?? modelId;
-    const risks = policy.authorizations.filter((candidate) => keysOf(labels).every((key) => authorizationCovers(candidate.body, {
-      kind: 't1-risk', subject: { model: subject }, project: policy.project, label: key, use: 't1'
-    }, policy.now)));
-    const verdict = passportCovers({ resolved, use: requestUse, endpointClass: endpoint?.class ?? 'closed-api', t1RiskCovers: risks.length > 0, now: policy.now });
-    if (!verdict.covers) {
-      wouldRefuse.add('route.passport');
-    } else if (resolved !== undefined) {
-      addRecord(allowedBy, Object.freeze({ kind: 'model-approval' as const, passport: resolved.passport.id, maxTier: resolved.maxTier, expiresAt: resolved.passport.expiresAt }));
-      // A use above the passport's tier went only because a named person accepted the risk: that record allowed it too.
-      if (USE_TIERS.indexOf(requestUse) > USE_TIERS.indexOf(resolved.maxTier)) for (const risk of risks) addRecord(allowedBy, authorizationRecord(risk));
+    let passport: PassportStep;
+    try {
+      passport = passportStep(policy.models, policy, facts, labels, endpoint);
+    } catch {
+      passport = { covers: false, records: [] };
     }
+    if (!passport.covers) wouldRefuse.add('route.passport');
+    for (const record of passport.records) addRecord(allowedBy, record);
   }
   // Step 8 (D-35, D-53): clearance, only with a roster clearance. The personal clearance alone already decided every read that raised the mark.
   if (policy.rosterClearances !== undefined) {
@@ -802,6 +823,59 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
   if (notAccredited !== undefined) out.notAccredited = notAccredited;
   if (pinTo !== undefined) out.pinTo = pinTo;
   return out;
+}
+
+/** What the accredited-device step found: the records of the authorizations that cover this device, and the first label none covers. */
+interface AccreditedDeviceStep {
+  readonly records: readonly AllowingRecord[];
+  readonly missing?: Label;
+}
+
+/**
+ * The accredited-device check of step 5 (D-34) for each this-computer-only label of the mark. A label whose check throws (an unreadable device id, label or
+ * authorization) is covered by nothing, so it is reported, or refused where your organization turns refusal on, and never thrown past the step (WR-05).
+ */
+function accreditedDevice(policy: RoutePolicy, labels: readonly Label[], use: string | undefined): AccreditedDeviceStep {
+  const records: AllowingRecord[] = [];
+  let missing: Label | undefined;
+  for (const label of labels) {
+    try {
+      if (!isThisComputerOnly(label)) continue;
+      const key = labelKey(label);
+      const device = policy.deviceId;
+      const found = device === undefined ? [] : covering(policy, { kind: 'accredited-device', subject: { device }, project: policy.project, label: key, use });
+      if (found.length > 0) {
+        records.push(...found.map((record) => authorizationRecord(record, key)));
+        continue;
+      }
+    } catch { /* covered by nothing: reported below */ }
+    missing ??= label;
+  }
+  return missing === undefined ? { records } : { records, missing };
+}
+
+/** What the passport step found: whether the model's passport covers the request, and the records that allowed it when it does. */
+interface PassportStep {
+  readonly covers: boolean;
+  readonly records: readonly AllowingRecord[];
+}
+
+/** The passport check of step 7 (D-42). It decides nothing: the caller only reports a passport that does not cover the request. */
+function passportStep(models: ModelsSection, policy: RoutePolicy, facts: RouteFacts, labels: readonly Label[], endpoint: RouteEndpoint | undefined): PassportStep {
+  const modelId = facts.model?.id ?? '';
+  const resolved = resolvePassport(models, modelId, policy.now);
+  const requestUse: UseTier = facts.use ?? 'T1';
+  const subject = resolved?.passport.id ?? modelId;
+  const risks = policy.authorizations.filter((candidate) => keysOf(labels).every((key) => authorizationCovers(candidate.body, {
+    kind: 't1-risk', subject: { model: subject }, project: policy.project, label: key, use: 't1'
+  }, policy.now)));
+  const verdict = passportCovers({ resolved, use: requestUse, endpointClass: endpoint?.class ?? 'closed-api', t1RiskCovers: risks.length > 0, now: policy.now });
+  if (!verdict.covers) return { covers: false, records: [] };
+  if (resolved === undefined) return { covers: true, records: [] };
+  const records: AllowingRecord[] = [Object.freeze({ kind: 'model-approval' as const, passport: resolved.passport.id, maxTier: resolved.maxTier, expiresAt: resolved.passport.expiresAt })];
+  // A use above the passport's tier went only because a named person accepted the risk: that record allowed it too.
+  if (USE_TIERS.indexOf(requestUse) > USE_TIERS.indexOf(resolved.maxTier)) records.push(...risks.map((risk) => authorizationRecord(risk)));
+  return { covers: true, records };
 }
 
 /** The `scale/level` keys an authorization is asked about: one per label, or a single question with no label for a mark with none. */
@@ -833,9 +907,18 @@ function freshBindingFor(facts: RouteFacts): boolean {
   return isBindingFresh(facts.binding, facts.now) && facts.binding !== undefined && sameHost(facts.binding.host, facts.host);
 }
 
-/** The verified authorizations that cover the question now; each verified against its one key source before it got here (D-15). */
+/**
+ * The verified authorizations that cover the question now; each verified against its one key source before it got here (D-15). One that cannot be read
+ * covers nothing, so it can never widen a decision.
+ */
 function covering(policy: RoutePolicy, question: AuthorizationQuestion): readonly VerifiedAuthorization[] {
-  return policy.authorizations.filter((candidate) => authorizationCovers(candidate.body, question, policy.now));
+  return policy.authorizations.filter((candidate) => {
+    try {
+      return authorizationCovers(candidate.body, question, policy.now);
+    } catch {
+      return false;
+    }
+  });
 }
 
 function authorizationRecord(found: VerifiedAuthorization, label?: string): AllowingRecord {

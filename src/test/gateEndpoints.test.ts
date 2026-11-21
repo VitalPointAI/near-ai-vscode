@@ -169,6 +169,17 @@ test('D-24: attestation is required for org-tee and vendor-tee and refused elsew
   assert.equal(one({ provider: 7 }), 'wrong-type endpoints[0].provider');
 });
 
+test('IN-07: an entry may claim NEAR AI\'s private hardware (nearai-tee) only for NEAR AI Cloud\'s own host', () => {
+  const near = (host: string): string => one({ id: 'near', class: 'nearai-tee', host, maxLabel: ['org/Confidential'] });
+  assert.equal(near('cloud-api.near.ai'), 'ok');
+  for (const host of ['models.example.org', 'private.example.net', 'api.near.ai', 'near.ai', 'cloud-api.near.ai.example.org', 'xcloud-api.near.ai', '127.0.0.1']) {
+    assert.ok(near(host).startsWith('not-allowed-here endpoints[0]'), host);
+  }
+  assert.equal(near('models.example.org'), 'not-allowed-here endpoints[0].host');
+  // NEAR AI Cloud's host may still be listed as another class, which claims no private hardware.
+  assert.equal(one({ id: 'near', class: 'forwarded', host: 'cloud-api.near.ai', maxLabel: ['org/Public'] }), 'ok');
+});
+
 test('endpointCeilingAllows compares scale and level only, and a scale the ceiling does not list allows nothing', () => {
   const endpoint = { maxLabel: ['ca-protected/Protected A', 'org/Confidential'] };
   const label = (scale: string, level: string): { scale: string; level: string } => ({ scale, level });

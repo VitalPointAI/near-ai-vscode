@@ -86,6 +86,23 @@ test('with no place on the decision, the place comes from the client: this compu
   assert.deepEqual({ label: fromDefault.label, allowedBy: fromDefault.allowedBy }, { label: org('Internal'), allowedBy: [{ kind: 'routing', label: 'org/Internal' }] });
 });
 
+test('CR-02: on NEAR AI Cloud\'s host listed as its private hardware in Canada, a forwarded model\'s line says an outside provider, not private hardware; a TEE model\'s place is the entry in Canada', () => {
+  const listed = parseEndpoints([{ id: 'near-ca', class: 'nearai-tee', host: 'cloud-api.near.ai', scheme: 'https', tlsPins: [], region: 'CA', maxLabel: ['org/Confidential'] }], SCALE_PRESETS);
+  assert.equal(listed.ok, true);
+  if (!listed.ok) return;
+  const mark = [org('Public')];
+  const policy = policyWith({ endpoints: listed.value });
+  const cloud: RouteFacts = { ...NEAR_TEE_BOUND, model: { id: 'example/forwarded', privacyBoundary: 'cloud' } };
+  const forwarded = trustFactsFor(decideRoute(mark, DEFAULT_ROUTING, cloud, undefined, undefined, policy), cloud, { mark, routing: DEFAULT_ROUTING }, { forwardedTo: 'example-host.example' });
+  assert.deepEqual(forwarded.place, { class: 'forwarded', region: 'unstated', forwardedTo: 'example-host.example' });
+  const forwardedLine = trustLine(forwarded, SCALE_PRESETS).runsOn;
+  assert.equal(forwardedLine, 'Runs on outside provider (example-host.example)');
+  assert.ok(!forwardedLine.includes('private hardware') && !forwardedLine.includes('Canada'), forwardedLine);
+  const tee = trustFactsFor(decideRoute(mark, DEFAULT_ROUTING, NEAR_TEE_BOUND, undefined, undefined, policy), NEAR_TEE_BOUND, { mark, routing: DEFAULT_ROUTING });
+  assert.deepEqual(tee.place, { class: 'nearai-tee', region: 'CA', endpointId: 'near-ca' });
+  assert.equal(trustLine(tee, SCALE_PRESETS).runsOn, 'Runs on NEAR AI private hardware');
+});
+
 test('Runs on: this computer', () => {
   assert.equal(runsOn({ class: 'local', region: 'CA' }), 'Runs on this computer');
 });
