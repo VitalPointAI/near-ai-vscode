@@ -3,7 +3,7 @@
 // temporary folders, an in-memory secret store, an in-memory memento and the recording vscode stub. Fictional names only (Example Organization).
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -241,6 +241,20 @@ test('D-14: a newer rules file from your organization\'s key is used without the
   assert.equal(await addRules(file), 'unchanged');
   assert.deepEqual(infos(), ['These are the rules already in use. Nothing was changed.']);
   assert.deepEqual(window.host.bundleState(), before);
+});
+
+test('WR-01: when the rules file is missing, opening the enrolment file in use again writes it back without the words', async () => {
+  const pc = await computer();
+  await enrolledWindow(pc);
+  const pin = pc.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+  await rm(path.join(gateDir(pc.storage), ORGANIZATION_DIR_NAME, ORGANIZATION_LAYER_FILE));
+  const window = await windowOf(pc);
+  assert.equal(window.host.bundleState().state, 'failed-closed', 'the missing file fails the policy closed');
+  assert.equal(await addRules(await fileWith(enrolmentTextFor(issuerKey()))), 'updated');
+  assert.equal(stub.messageOptions.some((entry) => entry.modal === true), false, 'no words: the file is the one the pin names');
+  assert.equal(levelOf(window.host, 'org/Internal'), 'local-only');
+  assert.equal(pc.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin, 'the pin did not move');
+  assert.equal(await addRules(await fileWith(enrolmentTextFor(issuerKey()))), 'unchanged', 'once written back, the same file changes nothing');
 });
 
 test('D-14: an older, foreign or broken file is refused with the preview\'s sentence, recorded, and changes nothing', async () => {

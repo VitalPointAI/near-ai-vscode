@@ -9,11 +9,19 @@
 // them nor roll the layer back: a layer file that is older than the pin, or as old with another hash, fails the whole policy closed as replaced. The order
 // of every change (D-13, D-57): the pin is stored with a `pending` record, the files are written, read back and verified, then the pin is committed.
 // A crash before the commit of a first enrolment leaves the computer not enrolled (a pending first enrolment is no pin); a crash during an update or a
-// key handover finishes at the next start from the pending record (its words were confirmed before it was written). A layer file with no pin is ignored.
+// key handover finishes at the next start from the pending record (its words were confirmed before it was written). An old file is copied aside before
+// the new one replaces it atomically, so there is never a moment with no layer file.
+//
+// Files in the organization folder with no pin at all are never what this store leaves behind: a first enrolment stores its pending pin before any
+// file, and a failed one removes its files before it removes that pin (or keeps the pending pin when a file could not be removed). So no pin beside
+// those files means the pin was lost (secret storage cleared or switched), and the load fails closed as a damaged pin rather than dropping your
+// organization's rules (CR-01). Opening your organization's enrolment file again repairs it; while it is written no pending pin is stored, so a
+// crash during that repair still reads as a damaged pin, never as not enrolled.
 //
 // An organization layer that fails for any reason fails the whole policy closed with your organization's own sentence and contact (D-21): there is never
 // a fallback to the personal layer alone, and its failed state never carries the mark that lets a surface offer the personal reset as its fix.
-import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
@@ -197,7 +205,8 @@ function committedPin(pin: OrganizationPin): OrganizationPin {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // The test probe (D-57)
 
-export type OrganizationWriteStep = 'pin-pending' | 'layer-written' | 'pin-committed';
+/** `old-kept` follows the copy of a file that is about to be replaced; it is reached only when there was a file to keep. */
+export type OrganizationWriteStep = 'pin-pending' | 'old-kept' | 'layer-written' | 'pin-committed';
 export type OrganizationWriteProbe = (step: OrganizationWriteStep, kind: OrganizationChangeKind) => void | Promise<void>;
 
 let writeProbe: OrganizationWriteProbe | undefined;
@@ -248,8 +257,14 @@ export interface OrganizationEvent {
   readonly detail?: string;
 }
 
+/**
+ * `repair`: the file is the one the pin names, but the copy on this computer was missing, or another file stood in its place, so the files were written
+ * again from it. The pin did not move.
+ */
+export type OrganizationFileKind = OrganizationChangeKind | 'same' | 'repair';
+
 export interface OrganizationAcceptResult {
-  readonly kind: OrganizationChangeKind | 'same';
+  readonly kind: OrganizationFileKind;
   /** Absent for `same`: nothing was written. */
   readonly event?: OrganizationEvent;
 }
@@ -257,7 +272,7 @@ export interface OrganizationAcceptResult {
 /** What a file would do on this computer, for the confirmation step (41-14). Never throws. */
 export type OrganizationFilePreview =
   | {
-    readonly kind: OrganizationChangeKind | 'same';
+    readonly kind: OrganizationFileKind;
     readonly name?: string;
     readonly contacts: readonly PolicyContact[];
     /** The twelve words, for an enrolment file. */
@@ -367,7 +382,8 @@ function readEnrolmentText(text: string, context: ReadContext): FileReading {
   // The pinned key's own enrolment file: an update of its layer, read like a rules file.
   if (read.layer.hash === pin.layerHash) return { ok: true, facts: { ...base, kind: 'same', serial: pin.serial } };
   if (Number.isNaN(last) || issued <= last) return refusedFile('older', ORGANIZATION_LAYER_REFUSALS.older);
-  return { ok: true, facts: { ...base, kind: 'update', serial: pin.serial } };
+  // The higher serial is kept (IN-01), so a handover your organization made before this file and then abandoned no longer reads as newer.
+  return { ok: true, facts: { ...base, kind: 'update', serial: Math.max(pin.serial, enrolment.serial) } };
 }
 
 function readLayerValue(value: unknown, context: ReadContext): FileReading {
@@ -431,6 +447,10 @@ export interface OrganizationFailed {
 
 export interface OrganizationStoreOptions {
   readonly now?: () => Date;
+}
+
+function damagedPin(): OrganizationFailed {
+  return failedOrganization('damaged-pin', 'malformed', DAMAGED_PIN_TEXT, false);
 }
 
 function failedOrganization(
@@ -503,9 +523,11 @@ export class OrganizationStore {
 
   private async loadAt(effective: number): Promise<OrganizationLoad> {
     const read = await readOrganizationPin(this.secrets);
-    // No committed pin is no organization layer: a layer file left on disk without one is ignored (D-13).
-    if (read.state === 'absent' || read.state === 'pending-enrol') return { state: 'none' };
-    if (read.state === 'damaged') return failedOrganization('damaged-pin', 'malformed', DAMAGED_PIN_TEXT, false);
+    // A first enrolment that did not commit is no organization layer, whatever files it wrote (D-13, D-57): its pending pin is the evidence.
+    if (read.state === 'pending-enrol') return { state: 'none' };
+    // No pin at all beside files of your organization means the pin was lost, never a crash of this store: fail closed (CR-01).
+    if (read.state === 'absent') return (await this.folderHoldsFiles()) ? damagedPin() : { state: 'none' };
+    if (read.state === 'damaged') return damagedPin();
     const pin = read.pin;
     const pendingKey = pin.pending?.kind === 'rotate' ? pin.pending.publicKey : undefined;
     const record = await this.readRecord(pendingKey === undefined ? [pin.publicKey] : [pin.publicKey, pendingKey]);
@@ -565,6 +587,16 @@ export class OrganizationStore {
     });
   }
 
+  // True when the organization folder holds anything (the rule installEvidence.ts reads too). A folder that cannot be read throws: the load fails closed.
+  private async folderHoldsFiles(): Promise<boolean> {
+    try {
+      return (await readdir(this.folder)).length > 0;
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
   private async readLayer(): Promise<{ readonly state: 'ok'; readonly value: unknown } | { readonly state: 'missing' | 'too-large' | 'unreadable' }> {
     let text: string;
     try {
@@ -619,8 +651,9 @@ export class OrganizationStore {
   /**
    * Takes a file a person gave this computer: an enrolment file or a rules file from your organization (D-11 to D-14). Under bundle.lock it reads the
    * pin and the file again, refuses what the pin does not allow, and needs `wordsConfirmed` for a first enrolment and a key handover (D-12). Then, in
-   * order: the pin with `pending`, the files (old ones kept aside as .replaced-<ms>), the read-back, the committed pin. Any failure puts back the old
-   * files and the old pin and throws OrganizationStoreError ("Nothing was changed ..."). Returns the event to record, none when the file is the one in use.
+   * order: the pin with `pending`, the files (old ones copied aside as .replaced-<ms> first), the read-back, the committed pin. Any failure puts back the
+   * old files and the old pin and throws OrganizationStoreError ("Nothing was changed ..."). The file in use whose copy on this computer is missing or
+   * replaced is written again without moving the pin (`repair`, WR-01). Returns the event to record, none when the file is the one in use and intact.
    */
   public async accept(text: string, confirmation: { readonly wordsConfirmed?: boolean }, nowMs: number): Promise<OrganizationAcceptResult> {
     if (!Number.isFinite(nowMs)) throw new OrganizationStoreError('Nothing was changed: the clock gave no valid time.', { reason: 'clock' });
@@ -639,17 +672,84 @@ export class OrganizationStore {
         throw new OrganizationStoreError(message, { reason: reading.reason, refused: true });
       }
       const facts = reading.facts;
-      if (facts.kind === 'same') return { kind: 'same' };
+      if (facts.kind === 'same') {
+        const repairs = await this.repairsFor(facts, context, nowMs);
+        if (repairs.length === 0 || context.pin.state !== 'pinned') return { kind: 'same' };
+        await this.repair(repairs, context.pin.pin, nowMs, context.lastValidAt);
+        return { kind: 'repair', event: { event: 'policy.organization-updated', detail: repairDetail(facts.issuedAt, facts.publicKey) } };
+      }
       if ((facts.kind === 'enrol' || facts.kind === 'rotate') && confirmation.wordsConfirmed !== true) {
         throw new OrganizationStoreError(WORDS_NOT_CONFIRMED_TEXT, { reason: 'words-not-confirmed' });
       }
-      await this.write({ ...facts, kind: facts.kind }, context, nowMs);
+      // An enrolment over a lost or damaged pin (files of your organization are here, or the stored pin does not read) stores no pending pin, so a crash
+      // before its commit still reads as a damaged pin and never as not enrolled (CR-01). A folder that cannot be read counts as holding files.
+      const recovering = facts.kind === 'enrol'
+        && (context.pin.state === 'damaged' || (context.pin.state === 'absent' && await this.folderHoldsFiles().catch(() => true)));
+      await this.write({ ...facts, kind: facts.kind }, context, nowMs, recovering);
       const event: OrganizationEventId = facts.kind === 'enrol' ? 'policy.enrolled' : 'policy.organization-updated';
       return { kind: facts.kind, event: { event, detail: changeDetail(facts.issuedAt, facts.publicKey) } };
     });
   }
 
-  private async write(facts: FileFacts & { readonly kind: OrganizationChangeKind }, context: ReadContext, nowMs: number): Promise<void> {
+  /**
+   * The files to write again for a file that is the one the pin names (WR-01): the layer when the copy on disk does not read back as the pinned layer
+   * (or as a pending change's layer, which the next load finishes), and, for an enrolment file, the record when it does not verify against the pinned
+   * key. Empty when nothing needs writing, or the file is not exactly the pinned one (same key, same hash, same issuedAt). Reads only.
+   */
+  public async repairsFor(facts: FileFacts, context: ReadContext, nowMs: number): Promise<readonly FileToWrite[]> {
+    if (facts.kind !== 'same' || context.pin.state !== 'pinned') return [];
+    const pin = context.pin.pin;
+    if (facts.publicKey !== pin.publicKey || facts.layerHash !== pin.layerHash || facts.issuedAt !== pin.lastIssuedAt) return [];
+    const files: FileToWrite[] = [];
+    if (!(await this.layerOnDiskIsPinned(pin, nowMs, context.lastValidAt))) files.push({ file: this.layerFile, text: layerTextOf(facts.layer) });
+    if (facts.enrolment !== undefined && (await this.readRecord([pin.publicKey])) === undefined) files.push({ file: this.recordFile, text: layerTextOf(facts.enrolment) });
+    return files;
+  }
+
+  private async layerOnDiskIsPinned(pin: OrganizationPin, nowMs: number, lastValidAt: number | undefined): Promise<boolean> {
+    const raw = await this.readLayer();
+    if (raw.state !== 'ok') return false;
+    const expected: Array<readonly [string, string]> = [[pin.publicKey, pin.layerHash]];
+    if (pin.pending !== undefined) expected.push([pin.pending.publicKey, pin.pending.layerHash]);
+    return expected.some(([issuerPublicKey, hash]) => {
+      const read = verifyOrganizationLayer(raw.value, {
+        issuerPublicKey, now: nowMs, lastIssuedAt: pin.lastIssuedAt, ...(lastValidAt === undefined ? {} : { lastValidAt })
+      });
+      return read.ok && read.hash === hash;
+    });
+  }
+
+  // Writes the pinned files again (WR-01). The pin does not move; a failure puts back what was there and throws "Nothing was changed".
+  private async repair(files: readonly FileToWrite[], pin: OrganizationPin, nowMs: number, lastValidAt: number | undefined): Promise<void> {
+    const touched: Touched[] = [];
+    try {
+      await this.writeKeepingOld(files, nowMs, touched, undefined);
+      for (const entry of files) if ((await readFile(entry.file, 'utf8')) !== entry.text) throw new Error('A file did not read back as written.');
+      if (!(await this.layerOnDiskIsPinned(pin, nowMs, lastValidAt))) throw new Error('Your organization\'s rules did not read back as written.');
+    } catch (error) {
+      await restoreFiles(touched);
+      throw new OrganizationStoreError(FILES_NOT_SAVED_TEXT, { reason: 'write-failed', cause: error });
+    }
+  }
+
+  // Writes each file over the one there after copying the old one aside as .replaced-<ms> (WR-01). The replace is atomic, so a crash at any point leaves
+  // the old file or the new one in its place, never none. What was done goes into `touched` for restoreFiles.
+  private async writeKeepingOld(files: readonly FileToWrite[], nowMs: number, touched: Touched[], kind: OrganizationChangeKind | undefined): Promise<void> {
+    await mkdir(this.folder, { recursive: true, mode: 0o700 });
+    for (const entry of files) {
+      const aside = await asideFor(entry.file, nowMs);
+      if (aside === undefined) {
+        touched.push({ file: entry.file });
+      } else {
+        await copyFile(entry.file, aside, fsConstants.COPYFILE_EXCL);
+        touched.push({ file: entry.file, aside });
+        if (kind !== undefined) await probeStep('old-kept', kind);
+      }
+      await writeFileAtomic(entry.file, entry.text);
+    }
+  }
+
+  private async write(facts: FileFacts & { readonly kind: OrganizationChangeKind }, context: ReadContext, nowMs: number, recovering: boolean): Promise<void> {
     let previous: string | undefined;
     try {
       previous = await this.secrets.get(ORGANIZATION_ISSUER_SECRET);
@@ -658,25 +758,23 @@ export class OrganizationStore {
     }
     const pinned = context.pin.state === 'pinned' ? committedPin(context.pin.pin) : undefined;
     const pending: PendingOrganizationPin = { kind: facts.kind, publicKey: facts.publicKey, serial: facts.serial, issuedAt: facts.issuedAt, layerHash: facts.layerHash };
+    const pendingText = JSON.stringify(pinned === undefined ? { v: 1, pending } : { ...pinned, pending });
     const restorePin = async (): Promise<void> => { await storePinText(this.secrets, previous === '' ? undefined : previous).catch(() => undefined); };
-    try {
-      await storePinText(this.secrets, JSON.stringify(pinned === undefined ? { v: 1, pending } : { ...pinned, pending }));
-    } catch (error) {
-      await restorePin();
-      throw new OrganizationStoreError(PIN_NOT_SAVED_TEXT, { reason: 'unavailable', cause: error });
-    }
-    const files = [{ file: this.layerFile, text: `${JSON.stringify(facts.layer)}\n` }];
-    if (facts.enrolment !== undefined) files.push({ file: this.recordFile, text: `${JSON.stringify(facts.enrolment)}\n` });
-    const touched: Array<{ readonly file: string; readonly aside?: string }> = [];
-    try {
-      await probeStep('pin-pending', facts.kind);
-      await mkdir(this.folder, { recursive: true, mode: 0o700 });
-      for (const entry of files) {
-        const aside = await asideFor(entry.file, nowMs);
-        if (aside !== undefined) await rename(entry.file, aside);
-        touched.push(aside === undefined ? { file: entry.file } : { file: entry.file, aside });
-        await writeFileAtomic(entry.file, entry.text);
+    if (!recovering) {
+      try {
+        await storePinText(this.secrets, pendingText);
+      } catch (error) {
+        await restorePin();
+        throw new OrganizationStoreError(PIN_NOT_SAVED_TEXT, { reason: 'unavailable', cause: error });
       }
+    }
+    const files = [{ file: this.layerFile, text: layerTextOf(facts.layer) }];
+    if (facts.enrolment !== undefined) files.push({ file: this.recordFile, text: layerTextOf(facts.enrolment) });
+    const touched: Touched[] = [];
+    try {
+      // In a recovery nothing is stored at this step: the lost or damaged pin stays as it was until the commit.
+      await probeStep('pin-pending', facts.kind);
+      await this.writeKeepingOld(files, nowMs, touched, facts.kind);
       await probeStep('layer-written', facts.kind);
       // Read back from disk: the layer must verify against the key the pin will hold and have the hash the pending record names.
       const back = verifyOrganizationLayer(await readFile(this.layerFile, 'utf8'), {
@@ -690,18 +788,52 @@ export class OrganizationStore {
       await probeStep('pin-committed', facts.kind);
     } catch (error) {
       if (error instanceof StoppedByProbe) throw error.cause;
-      for (const entry of touched.reverse()) {
-        if (entry.aside !== undefined) await rename(entry.aside, entry.file).catch(() => undefined);
-        else await rm(entry.file, { force: true }).catch(() => undefined);
-      }
-      await restorePin();
+      const restored = await restoreFiles(touched);
+      // A first enrolment whose files could not all be taken back keeps its pending pin, so what is left reads as not enrolled (D-57) and never as a lost
+      // pin that locks this computer (CR-01). Every other change puts back the pin it found.
+      if (!restored && pinned === undefined && !recovering) await storePinText(this.secrets, pendingText).catch(() => undefined);
+      else await restorePin();
       throw error instanceof OrganizationStoreError ? error : new OrganizationStoreError(FILES_NOT_SAVED_TEXT, { reason: 'write-failed', cause: error });
     }
   }
 }
 
+/** A file to write in the organization folder, with its full text. */
+export interface FileToWrite {
+  readonly file: string;
+  readonly text: string;
+}
+
+interface Touched {
+  readonly file: string;
+  /** The copy of the file that was there before, when there was one. */
+  readonly aside?: string;
+}
+
+function layerTextOf(envelope: unknown): string {
+  return `${JSON.stringify(envelope)}\n`;
+}
+
+// Puts back what writeKeepingOld changed, newest first: the kept copy over the file, or the new file removed. False when any step failed.
+async function restoreFiles(touched: readonly Touched[]): Promise<boolean> {
+  let restored = true;
+  for (const entry of [...touched].reverse()) {
+    try {
+      if (entry.aside !== undefined) await rename(entry.aside, entry.file);
+      else await rm(entry.file, { force: true });
+    } catch {
+      restored = false;
+    }
+  }
+  return restored;
+}
+
 function changeDetail(issuedAt: string, publicKey: string): string {
   return `Your organization's rules issued at ${issuedAt}, key ${issuerFingerprintHex(publicKey).replace(/ /g, '').slice(0, 16)}.`;
+}
+
+function repairDetail(issuedAt: string, publicKey: string): string {
+  return `${changeDetail(issuedAt, publicKey).slice(0, -1)}, written again on this computer.`;
 }
 
 function updatedEvent(issuedAt: string, publicKey: string): OrganizationEvent {
@@ -731,12 +863,15 @@ async function asideFor(file: string, nowMs: number): Promise<string | undefined
 /** What a file would do on this computer, read the way accept reads it, with nothing written. Never throws. */
 export async function previewOrganizationFile(globalStorageDir: string, secrets: SecretStorageLike, text: string, nowMs: number): Promise<OrganizationFilePreview> {
   try {
-    const context = await new OrganizationStore(globalStorageDir, secrets).readContext(nowMs);
+    const store = new OrganizationStore(globalStorageDir, secrets);
+    const context = await store.readContext(nowMs);
     const reading = readOrganizationFile(text, context);
     if (!reading.ok) return { kind: 'refused', reason: reading.reason, sentence: reading.sentence };
     const facts = reading.facts;
+    // The file in use whose copy on this computer is missing or replaced is a repair, which accept writes (WR-01).
+    const kind = facts.kind === 'same' && (await store.repairsFor(facts, context, nowMs)).length > 0 ? 'repair' : facts.kind;
     return {
-      kind: facts.kind,
+      kind,
       ...(facts.name === undefined ? {} : { name: facts.name }),
       contacts: facts.contacts,
       ...(facts.words === undefined ? {} : { words: facts.words }),
