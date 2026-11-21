@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { SOURCE_REGISTRY } from '../import/lib/sourceRegistry.ts';
 import { writeImportResult } from '../import/lib/write.ts';
 
@@ -9,14 +9,30 @@ export async function run(argv: readonly string[]): Promise<number> {
   if (!source || !/^[a-z0-9-]+$/.test(source) || !SOURCE_REGISTRY.some((entry) => entry.id === source)) return 2;
   const outIndex = options.indexOf('--out-root');
   const offlineIndex = options.indexOf('--offline');
+  const langIndex = options.indexOf('--lang');
   const outRoot = outIndex === -1 ? 'compliance' : options[outIndex + 1];
-  if (!outRoot || (offlineIndex !== -1 && !options[offlineIndex + 1])) return 2;
+  const lang = langIndex === -1 ? 'both' : options[langIndex + 1];
+  if (!outRoot || (offlineIndex !== -1 && !options[offlineIndex + 1]) || !['en', 'fr', 'both'].includes(lang)) return 2;
   try {
-    const importer = await import(`../import/${source}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>> }) => Promise<{ sourceId: string; catalog: unknown; file?: string }> };
+    const importer = await import(`../import/${source}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both' }) => Promise<{ sourceId: string; catalog: unknown; file?: string; reports?: readonly { readonly file: string; readonly content: unknown }[] }> };
     if (!importer.importSource) return 2;
     const offlinePages = offlineIndex === -1 ? undefined : JSON.parse(readFileSync(path.join(options[offlineIndex + 1], 'pages.json'), 'utf8')) as Record<string, string>;
-    const result = await importer.importSource({ offlinePages });
+    const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both' });
     writeImportResult(outRoot, result, SOURCE_REGISTRY);
+    writeReports(outRoot, result.reports ?? []);
     return 0;
   } catch { return 2; }
+}
+
+/** Writes source-neutral importer reports under the same lexical output boundary as catalogues. */
+function writeReports(outRoot: string, reports: readonly { readonly file: string; readonly content: unknown }[]): void {
+  mkdirSync(outRoot, { recursive: true });
+  const root = realpathSync(outRoot);
+  for (const report of reports) {
+    if (path.isAbsolute(report.file)) throw new Error('import report must be relative');
+    const target = path.resolve(root, report.file);
+    if (target !== root && !target.startsWith(root + path.sep)) throw new Error('import report escapes its root');
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, JSON.stringify(report.content, null, 2) + '\n', { encoding: 'utf8', mode: 0o644 });
+  }
 }
