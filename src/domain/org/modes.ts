@@ -91,34 +91,35 @@ function guess(note: string): WordSource {
 }
 
 // What would confirm a best-guess word: public sources only, by title. None of them was read for this table, so none is cited as confirming a word.
-const CAF_PERSONNEL = 'Confirm against the current public Queen\'s Regulations and Orders for the Canadian Forces and the public CAF personnel administration orders.';
-const ALLIED_STAFF = 'Confirm against the current public NATO glossary (AAP-06) or a public allied joint staff publication.';
 const PUBLIC_SERVICE_STAFFING = 'Confirm against the Public Service Employment Act and the current public Treasury Board staffing and people management policies.';
 const PUBLIC_SERVICE_ORGANIZATION = 'Confirm against the current public organization charts and delegation instruments of a federal department.';
+
+// Owner decision 2026-11-21: every Military word below is confirmed (position is Position; member is Staff officer, also Staff member or Defence team member).
+const ownerMilitary: WordSource = { status: 'confirmed-by-owner', note: 'Owner decision 2026-11-21: confirmed for Military mode.' };
 
 const MILITARY: ModeRow = Object.freeze({
   name: 'Military',
   words: Object.freeze({
-    position: word('Billet', { also: ['Position'], source: guess(`Common allied word for an established staff position. ${CAF_PERSONNEL}`) }),
-    group: word('Section', { also: ['Staff', 'Unit'], source: guess(`Staff sections and units as Canadian and allied headquarters name them. ${ALLIED_STAFF}`) }),
-    join: word('Posting', { source: guess(`The CAF word for moving a member to a position. ${CAF_PERSONNEL}`) }),
-    joined: word('Posted', { source: guess(`Follows from posting. ${CAF_PERSONNEL}`) }),
-    report: word('Report for duty', { source: guess(`Common service usage for taking up a posting. ${CAF_PERSONNEL}`) }),
-    unable: word('Report unable', { source: guess(`Product wording: a posted member cannot decline, only report why they cannot report. Confirm the phrase with the owner. ${CAF_PERSONNEL}`) }),
-    tasker: word('Tasking authority', { source: guess(`Common staff usage for whoever may task a position. ${ALLIED_STAFF}`) }),
-    delegate: word('Delegate tasking authority', { source: guess(`Built on tasking authority. ${ALLIED_STAFF}`) }),
-    acting: word('Acting', { also: ['Acting while so employed'], source: guess(`CAF usage for holding a higher position for a time. ${CAF_PERSONNEL}`) }),
-    temporary: word('Temporary duty', { also: ['Attached posting'], source: guess(`Common service usage for a time-limited posting or attachment. ${CAF_PERSONNEL}`) }),
-    dual: word('Dual-hatted', { source: guess(`Common allied usage for one person holding two positions. ${ALLIED_STAFF}`) }),
+    position: word('Position', { source: ownerMilitary }),
+    group: word('Section', { also: ['Staff', 'Unit'], source: ownerMilitary }),
+    join: word('Posting', { source: ownerMilitary }),
+    joined: word('Posted', { source: ownerMilitary }),
+    report: word('Report for duty', { source: ownerMilitary }),
+    unable: word('Report unable', { source: ownerMilitary }),
+    tasker: word('Tasking authority', { source: ownerMilitary }),
+    delegate: word('Delegate tasking authority', { source: ownerMilitary }),
+    acting: word('Acting', { also: ['Acting while so employed'], source: ownerMilitary }),
+    temporary: word('Temporary duty', { also: ['Attached posting'], source: ownerMilitary }),
+    dual: word('Dual-hatted', { source: ownerMilitary }),
     handover: word('Handover', {
       also: ['Relief in place', 'Transfer of authority'],
       source: { status: 'confirmed-by-owner', note: 'Owner decision 2026-11-20 (portfolio design D11): handover for one position, relief in place for a whole unit or watch, transfer of authority for command.' }
     }),
-    relieved: word('Relieved', { source: guess(`Common service usage for leaving a position. ${CAF_PERSONNEL}`) }),
-    lead: word('Staff lead', { source: guess(`Product wording for the commander's representative who decides membership. Confirm the phrase with the owner. ${ALLIED_STAFF}`) }),
-    member: word('Staff officer', { source: guess(`Common allied usage for a member of a headquarters staff. ${ALLIED_STAFF}`) }),
-    people: word('Roster', { source: guess(`Military usage for the signed list of people (glossary section 2). ${CAF_PERSONNEL}`) }),
-    decision: word('Commander\'s decision', { source: guess(`Common allied usage for the decision a commander takes on a staff product. ${ALLIED_STAFF}`) })
+    relieved: word('Relieved', { source: ownerMilitary }),
+    lead: word('Staff lead', { source: ownerMilitary }),
+    member: word('Staff officer', { also: ['Staff member', 'Defence team member'], source: ownerMilitary }),
+    people: word('Roster', { source: ownerMilitary }),
+    decision: word('Commander\'s decision', { source: ownerMilitary })
   }),
   behaviour: Object.freeze({
     joiningModel: 'assignment', mayDecline: false, whoMayPost: 'lead-and-delegates', instrumentRequired: false, acting: true, temporary: 'yes',
@@ -143,7 +144,7 @@ const PUBLIC_SERVICE: ModeRow = Object.freeze({
     handover: word('Handover', { source: guess(`Plain usage for passing a position on. ${PUBLIC_SERVICE_ORGANIZATION}`) }),
     relieved: word('Assignment ended', { source: guess(`Follows from assignment. ${PUBLIC_SERVICE_STAFFING}`) }),
     lead: word('Responsible manager', { source: guess(`Usual federal word for the manager accountable for a unit. ${PUBLIC_SERVICE_ORGANIZATION}`) }),
-    member: word('Employee', { source: guess(`Usual federal word for a person in the public service. ${PUBLIC_SERVICE_STAFFING}`) }),
+    member: word('Employee', { also: ['Defence team member'], source: { status: 'confirmed-by-owner', note: 'Owner decision 2026-11-21: Employee, also Defence team member.' } }),
     people: word('People', { source: guess(`Plain word for the signed list of people (glossary section 2). ${PUBLIC_SERVICE_ORGANIZATION}`) }),
     decision: word('Approved by the delegated authority', { source: guess(`Usual federal wording for an approval under delegation. ${PUBLIC_SERVICE_ORGANIZATION}`) })
   }),
