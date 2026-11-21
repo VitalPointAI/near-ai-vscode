@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { prSummary, renderPrSummary } from '../src/prSummary.ts';
 
-const fixture = (name: string) => JSON.parse(readFileSync(path.resolve(`compliance/test/fixtures/prsummary/${name}`), 'utf8'));
-const main = fixture('main-dashboard.json'); const pr = fixture('pr-inputs.json'); const changed = readFileSync(path.resolve('compliance/test/fixtures/prsummary/changed-files.txt'), 'utf8').trim().split('\n');
+const fixtureUrl = (name: string) => new URL(`./fixtures/prsummary/${name}`, import.meta.url);
+const fixture = (name: string) => JSON.parse(readFileSync(fixtureUrl(name), 'utf8'));
+const main = fixture('main-dashboard.json'); const pr = fixture('pr-inputs.json'); const changed = readFileSync(fixtureUrl('changed-files.txt'), 'utf8').trim().split('\n');
 
 test('reports a removed mapped test as a Not met drop with its reason', () => { const result = prSummary(main, pr, changed); assert.match(renderPrSummary(result), /AC-1.*Not met.*test-missing-name/s); });
 test('reports a 25-hour audit as Stale', () => { const result = prSummary(main, pr, changed); assert.match(renderPrSummary(result), /AU-2.*Stale/s); });

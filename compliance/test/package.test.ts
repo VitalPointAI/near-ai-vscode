@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { buildPackage } from '../src/package.ts';
+import { fileURLToPath } from 'node:url';
+import { buildPackage as buildPackageFromSource, type PackageOptions } from '../src/package.ts';
 import { validateOscal } from '../src/validate.ts';
 
-const fixture = path.resolve('compliance/test/fixtures/package/bundle');
+const fixture = fileURLToPath(new URL('./fixtures/package/bundle', import.meta.url));
+const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
+const buildPackage = (options: PackageOptions) => buildPackageFromSource({ ...options, sourceRoot });
 const output = () => mkdtempSync(path.join(tmpdir(), 'near-ai-package-'));
 
 test('buildPackage writes a release folder with a README and checksums', () => {
