@@ -1,7 +1,7 @@
 # Phase 44: Accreditation evidence and compliance dashboard - Context
 
 **Gathered:** 2026-11-21
-**Status:** Decided on the owner's behalf. The owner accepted the compliance dashboard design (`.planning/research/compliance-dashboard/DESIGN.md`, PR #144) with all its defaults, and the Controlled Goods Program and ITAR extension (`CGP-ITAR.md`, PR #146). The owner was not available for questions, so the planning agent took the recommended option on every open point and recorded it here as D-01 to D-40. Decisions the owner should confirm are listed at the end under "For the owner to confirm", each with the default the plans use. Decisions already made by the owner are marked (owner). D-41 to D-50 were added after `44-RESEARCH.md` and change nothing the owner accepted.
+**Status:** Accepted by the owner on 2026-11-21 (see "Owner decisions" at the end). First decided on the owner's behalf. The owner accepted the compliance dashboard design (`.planning/research/compliance-dashboard/DESIGN.md`, PR #144) with all its defaults, and the Controlled Goods Program and ITAR extension (`CGP-ITAR.md`, PR #146). The owner was not available for questions, so the planning agent took the recommended option on every open point and recorded it here as D-01 to D-40. Decisions the owner should confirm are listed at the end under "For the owner to confirm", each with the default the plans use. Decisions already made by the owner are marked (owner). D-41 to D-50 were added after `44-RESEARCH.md` and change nothing the owner accepted.
 **Source:** `DESIGN.md` (sections 3 to 18) and `CGP-ITAR.md` (sections 10 to 14) in `.planning/research/compliance-dashboard/`, the Phase 44 entry in `.planning/ROADMAP.md`, the coherence review (`.planning/research/coherence/`: GLOSSARY section 5, the copy lint), what Phase 41 built (copy lint with `COMPLIANCE_CLAIMS`, architecture test, `authorizations[]`), what Phase 32 built (`hub/` and its CI job), and `origin/main` at 1bf565b5.
 
 <domain>
@@ -172,3 +172,11 @@ Not in this phase: an in-extension organization view (after Phase 41, on `author
 
 *Phase: 44-accreditation-evidence-and-compliance-dashboard*
 *Context gathered: 2026-11-21*
+
+## Owner decisions (2026-11-21)
+
+The owner accepted every default listed above, and explicitly confirmed the three that are hard to undo:
+
+1. **Government text in the public repository:** control text is stored only for sources whose open licence is re-checked at import (ITSP.10.033 and -01, ITSP.10.171 and -01, ITSG-33, ITSP.50.103, the small-organization baseline, NIST, the Controlled Goods law and regulations, and the US CFR text); CAN/DGSI 104, CPCSC Level 1 and the PSPC and Treasury Board pages are ids and links only.
+2. **Attestation scope:** only release packages are attested.
+3. **Risk acceptances:** the existing signed-payload format with purpose `compliance-risk-acceptance`, with no signers listed at first.
