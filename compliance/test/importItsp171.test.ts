@@ -53,6 +53,7 @@ test('produces a valid ITSP.10.171 catalogue through the importer entry point', 
 test('stamps the standards-required mapping provenance', () => {
   const mapping: any = parseItsp171(pages).mapping['mapping-collection'];
   assert.deepEqual(mapping.provenance, { method: 'automation', 'matching-rationale': 'syntactic', status: 'draft', 'mapping-description': 'Identifier references parsed from the published ITSP.10.171 requirements.' });
+  assert.deepEqual(validateOscal({ 'mapping-collection': mapping }, 'mapping-collection', { ours: true }), { ok: true, errors: [] });
 });
 
 test('the contractor overlay imports the catalogue with include-all and validates', () => {

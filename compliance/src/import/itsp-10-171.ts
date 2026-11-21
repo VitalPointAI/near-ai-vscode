@@ -82,7 +82,7 @@ export function parseItsp171(pages: PageSet): Itsp171Result {
   const unmatchedAssessmentIds = [...assessment.keys()].filter((id) => !seen.has(id)).sort();
   return {
     catalog, unmatchedAssessmentIds, requirementsWithoutSourceControls,
-    mapping: { 'mapping-collection': { uuid: '00000000-0000-4000-8000-000000000002', metadata: { title: 'ITSP.10.171 to ITSP.10.033 mapping', version: '1.0', 'last-modified': '2026-11-21T00:00:00Z', 'oscal-version': '1.2.1' }, provenance: { method: 'automation', 'matching-rationale': 'syntactic', status: 'draft', 'mapping-description': 'Identifier references parsed from the published ITSP.10.171 requirements.' }, mappings: mappingRows } },
+    mapping: { 'mapping-collection': { uuid: '00000000-0000-4000-8000-000000000002', metadata: { title: 'ITSP.10.171 to ITSP.10.033 mapping', version: '1.0', 'last-modified': '2026-11-21T00:00:00Z', 'oscal-version': '1.2.1' }, provenance: { method: 'automation', 'matching-rationale': 'syntactic', status: 'draft', 'mapping-description': 'Identifier references parsed from the published ITSP.10.171 requirements.' }, mappings: [{ uuid: '00000000-0000-4000-8000-000000000171', 'source-resource': { type: 'catalog', href: '../catalogs/itsp-10-171/catalog.json' }, 'target-resource': { type: 'catalog', href: '../catalogs/itsp-10-033/catalog.json' }, maps: mappingRows.map((row, index) => ({ uuid: `00000000-0000-4000-8000-${(1000 + index).toString(16).padStart(12, '0')}`, relationship: 'intersects-with', sources: [{ type: 'control', 'id-ref': row['source-uuid'] }], targets: [{ type: 'control', 'id-ref': row['target-uuid'] }], props: row.props })) }] } },
     report: { unmatchedAssessmentIds, requirementsWithoutSourceControls }
   };
 }
