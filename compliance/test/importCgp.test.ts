@@ -5,9 +5,12 @@ import { importSource } from '../src/import/cgp.ts';
 
 const pageUrl = 'https://laws-lois.justice.gc.ca/eng/acts/D-1.5/page-3.html#h-419174';
 const fixture = readFileSync(new URL('./fixtures/import/cgp/dpa-part-2.html', import.meta.url), 'utf8');
+const regulationsUrl = 'https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/page-1.html';
+const regulations = readFileSync(new URL('./fixtures/import/cgp/cgr.html', import.meta.url), 'utf8');
+const cgpPages = () => ({ [pageUrl]: fixture, [regulationsUrl]: regulations });
 
 test('imports CGP-37-2 from the Act subsection selected by number', async () => {
-  const result = await importSource({ offlinePages: { [pageUrl]: fixture } });
+  const result = await importSource({ offlinePages: cgpPages() });
   const controls = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string; title: string; parts: Array<{ prose: string }>; links: Array<{ href: string }> }> }> } }).catalog.groups.flatMap((group) => group.controls);
   const requirement = controls.find((control) => control.id === 'cgp-37-2');
   assert.ok(requirement, 'CGP-37-2 is a requirement, not a definition');
@@ -17,13 +20,13 @@ test('imports CGP-37-2 from the Act subsection selected by number', async () => 
 });
 
 test('does not turn subsection 37(3) definitions into requirements', async () => {
-  const result = await importSource({ offlinePages: { [pageUrl]: fixture } });
+  const result = await importSource({ offlinePages: cgpPages() });
   const serialized = JSON.stringify(result.catalog);
   assert.doesNotMatch(serialized, /cgp-37-3/);
 });
 
 test('stamps source provenance and an accurate-reproduction notice', async () => {
-  const result = await importSource({ offlinePages: { [pageUrl]: fixture } });
+  const result = await importSource({ offlinePages: cgpPages() });
   const catalog = (result.catalog as unknown as { catalog: { metadata: { props: Array<{ name: string; value: string }>; 'last-modified': string } } }).catalog;
   assert.equal(catalog.metadata.props.find((prop) => prop.name === 'source-id')?.value, 'defence-production-act');
   assert.ok(catalog.metadata['last-modified']);
@@ -36,9 +39,7 @@ test('the Controlled goods profile imports every generated CGP requirement', () 
 });
 
 test('imports every listed Regulation paragraph and errors if one is absent', async () => {
-  const regulationsUrl = 'https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/page-1.html';
-  const regulations = readFileSync(new URL('./fixtures/import/cgp/cgr.html', import.meta.url), 'utf8');
-  const result = await importSource({ offlinePages: { [pageUrl]: fixture, [regulationsUrl]: regulations } });
+  const result = await importSource({ offlinePages: cgpPages() });
   const ids = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string }> }> } }).catalog.groups.flatMap((group) => group.controls.map((control) => control.id));
   assert.ok(ids.includes('cgp-10-h'));
   assert.ok(ids.includes('cgp-23'));

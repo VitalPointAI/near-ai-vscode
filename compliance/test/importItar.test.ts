@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { importSource } from '../src/import/itar.ts';
+import { importSource, ITAR_REQUIREMENTS, sectionRequestUrl } from '../src/import/itar.ts';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/import/itar/${name}`, import.meta.url), 'utf8');
 const titleUrl = 'https://www.ecfr.gov/api/versioner/v1/titles.json';
 const page22 = 'https://www.ecfr.gov/api/versioner/v1/full/2026-11-20/title-22.xml?part=120&section=120.54';
 const page15 = 'https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-15.xml?part=734&section=734.18';
-const pages = () => ({ [titleUrl]: fixture('titles.json'), [page22]: fixture('section-120.54.xml'), [page15]: fixture('section-734.18.xml') });
+const pages = () => Object.fromEntries([
+  [titleUrl, fixture('titles.json')],
+  ...ITAR_REQUIREMENTS.map(([, title, part, section]) => [sectionRequestUrl(title === 22 ? '2026-11-20' : '2026-11-19', title, part, section), fixture(title === 22 ? 'section-120.54.xml' : 'section-734.18.xml')])
+]);
 
 test('imports the selected ITAR and EAR paragraph using each title as-of date', async () => {
   const result = await importSource({ offlinePages: pages() });
