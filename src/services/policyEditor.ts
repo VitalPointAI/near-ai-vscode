@@ -188,10 +188,15 @@ function pageActionsOf(): PageAction[] {
   return deps.applyDraft !== undefined && deps.hasDraft?.() === true ? ['edit-own', 'apply-draft'] : ['edit-own'];
 }
 
+/**
+ * The proposal's buttons. Apply only on your own rules and only while this device has the key that signs them (D-44, IN-08): without it the host could
+ * not sign the change, so only Discard is offered. Export is for your organization's rules, which your organization signs.
+ */
 function actionsOf(): Action[] {
   if (pending === undefined) return [];
   if (pending.stale || pending.changes.length === 0) return ['discard'];
-  return pending.target === 'personal' ? ['apply', 'discard'] : ['export', 'discard'];
+  if (pending.target !== 'personal') return ['export', 'discard'];
+  return host?.deps.signer() === undefined ? ['discard'] : ['apply', 'discard'];
 }
 
 async function post(): Promise<void> {
