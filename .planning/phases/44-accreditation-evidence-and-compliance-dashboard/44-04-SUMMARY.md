@@ -134,4 +134,3 @@ Dashboard and content-validation plans can consume computed row summaries, tailo
 ## Self-Check: PASSED
 
 All listed implementation artifacts exist and all three task commits are ancestors of HEAD.
-
