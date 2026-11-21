@@ -1,4 +1,4 @@
-const COMMANDS = Object.freeze(['import', 'licence-check', 'watch'] as const);
+const COMMANDS = Object.freeze(['import', 'licence-check', 'watch', 'bundle', 'dashboard', 'validate', 'word-lint'] as const);
 const commandName = /^[a-z][a-z0-9-]*$/;
 
 export async function main(argv: readonly string[], options: { readonly write?: (text: string) => void } = {}): Promise<number> {
