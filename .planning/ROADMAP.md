@@ -385,11 +385,30 @@ Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agre
   7. One mode table sets words and joining behaviour together: a staff officer's setup suggests Military mode and the Staff Room then says "Post a person"; a policy fixing Public service shows the mode as set by your organization; a software project keeps "Invite", unchanged. (ORG-01, ORG-02, ORG-03, ORG-04)
 **Research flags**: (1) Open owner decisions D1 to D4, D6, D7 and D9. (2) Exact probe ports and signature endpoints per local server, checked against current releases. (3) Mapping of personal information to Protected A or B to be confirmed by your organization's security officer before rollout.
 **Undo cost**: Low to medium: an optional `onboarding` bundle key and a `setupGuide` entry in `project.json`.
-**Plans:** 0 plans
+**Plans:** 20 plans in 6 waves (planned 2026-11-21; decisions D-01 to D-44 in `32.1-CONTEXT.md`, owner confirmations listed there; plan 01 is the shared contract Phase 32.2 builds on)
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 32.1 to break down)
+- [ ] 32.1-01-PLAN.md: Wave 1. Shared contract alone: step and option registry, viability reducer, device class seam, server probe table and adapter registry, answers, record event ids, guide policy accessor
+- [ ] 32.1-02-PLAN.md: Wave 2. Answers to a proposed label, stop rules, pure `recommend()` over the real `decideRoute`
+- [ ] 32.1-03-PLAN.md: Wave 2. Option cards from `TrustFacts`, mode suggestion (ORG-04), landing resolver
+- [ ] 32.1-04-PLAN.md: Wave 2. Viability host: probes, ordered identification, fixed test request, NEAR AI check, memory-only device provider, 90-second ceiling
+- [ ] 32.1-05-PLAN.md: Wave 2. Announced servers: DNS wire codec with fuzz test, one-shot mDNS, DNS SRV
+- [ ] 32.1-06-PLAN.md: Wave 2. Confirmed scans of listed ranges, network facts, certificate pin, approval as a proposal
+- [ ] 32.1-07-PLAN.md: Wave 2. Hash-chained local audit (`auditChain.ts`, `setupAuditLog.ts`) and the guide record
+- [ ] 32.1-08-PLAN.md: Wave 2. Webview kit: typed protocol, several scripts per page, accessibility scan helper
+- [ ] 32.1-09-PLAN.md: Wave 2. Staff "where" question and discovery `locality` removed, derived locality
+- [ ] 32.1-10-PLAN.md: Wave 2. Project layer store and sink, project-scoped Canada wired into the gate (owner D14)
+- [ ] 32.1-11-PLAN.md: Wave 3. Session reducer, page messages, change list, screen models
+- [ ] 32.1-12-PLAN.md: Wave 3. Apply engine: label raise only, clearance gap as proposal, connections, proposals, choice reason
+- [ ] 32.1-15-PLAN.md: Wave 3. Registered steps, landing host, context keys, first-run guarantee, exercise flag
+- [ ] 32.1-13-PLAN.md: Wave 4. Get Started host and controller; success criteria 1 to 5 as scenarios
+- [ ] 32.1-14-PLAN.md: Wave 4. The Get Started page on the kit, keyboard, screen reader and reduced motion
+- [ ] 32.1-16-PLAN.md: Wave 4. Discovery in the guide: found servers listed as not approved
+- [ ] 32.1-17-PLAN.md: Wave 5. Front door wiring, hidden aliases, legacy step forwarding, walkthrough checklist
+- [ ] 32.1-18-PLAN.md: Wave 5. Chat welcome: one Get Started button
+- [ ] 32.1-19-PLAN.md: Wave 5. SECURITY.md, README, docs site, CHANGELOG
+- [ ] 32.1-20-PLAN.md: Wave 6. Close-out: First Project page removed, end-to-end scenario, baselines tightened, full suite once, UAT and verification
 
 ### Phase 32.2: Local model manager (INSERTED)
 **Goal**: On the appliance or any capable computer, a person sees what local models the machine can run and how fast, installs the recommended Western models with verified hashes and accepted licences, assigns them to the tiers, and the guide then offers local AI as a viable option.
@@ -403,11 +422,27 @@ Plans:
   4. PRC-origin and passport-less models install only into the research lane's list and never appear in a tier selector; removal asks first and names the tiers affected; every action is recorded. (LMOD-04, LMOD-05, LMOD-07)
 **Research flags**: (1) Open owner decisions D5, D8, D10 and D11. (2) Whether Ollama's model layer digest equals the GGUF file's sha256. (3) Unified memory figures on Strix Halo (GTT limits) and GB10 (`nvidia-smi` reports no memory) from Phase 85.
 **Undo cost**: Low: a catalogue inside `ceiling.models` and the manager's own folder.
-**Plans:** 0 plans
+**Plans:** 17 plans in 7 waves (planned 2026-11-21; decisions D-01 to D-36 in `32.2-CONTEXT.md`; starts from 32.1-01's merge on its own branch, later plans wait for named 32.1 plans)
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 32.2 to break down)
+- [ ] 32.2-01-PLAN.md: Wave 1. GGUF header reader, memory and fit bands, speed estimate, device bandwidth table
+- [ ] 32.2-02-PLAN.md: Wave 1. Hardware detection with unified memory (Strix Halo, GB10, Apple), fixed tools, no shell
+- [ ] 32.2-03-PLAN.md: Wave 1. Shipped local catalogue and local passport rows (hashes fetched at execution), served ids
+- [ ] 32.2-04-PLAN.md: Wave 1. Local model state machine, job rules, record specs, page protocol
+- [ ] 32.2-05-PLAN.md: Wave 2. Download engine: allowlist with redirect checks, disk check, streaming hash, range reads
+- [ ] 32.2-06-PLAN.md: Wave 2. Optional `listModels`, list-only adapters, finding servers (after 32.1-04)
+- [ ] 32.2-07-PLAN.md: Wave 2. Tool-calling and embedding tests, benchmark (after 32.1-04)
+- [ ] 32.2-08-PLAN.md: Wave 2. Records through the 32.1 audit log (after 32.1-07)
+- [ ] 32.2-09-PLAN.md: Wave 2. Optional model signature check (after 32.1-10)
+- [ ] 32.2-10-PLAN.md: Wave 3. Install, update, remove; Ollama blob push with digest check; llama.cpp models folder
+- [ ] 32.2-11-PLAN.md: Wave 3. Models by job service and recommendations
+- [ ] 32.2-12-PLAN.md: Wave 4. Manager service, view model, estimates
+- [ ] 32.2-13-PLAN.md: Wave 5. Local AI feeds the guide's viability; Get Started step
+- [ ] 32.2-14-PLAN.md: Wave 5. The Local models page (after 32.1-08)
+- [ ] 32.2-15-PLAN.md: Wave 6. Command, wiring, model picker link (after 32.1-17, 32.1-18, 32.1-20)
+- [ ] 32.2-16-PLAN.md: Wave 6. SECURITY.md, README, CHANGELOG, docs site (after 32.1-19)
+- [ ] 32.2-17-PLAN.md: Wave 7. Close-out: end-to-end scenario, full suite once, UAT and verification (after 32.1-20)
 
 ### Cohere Model Vault: a third inference endpoint (Phases 36 and 37, added 2026-11-20)
 
@@ -1692,8 +1727,8 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 33.1. Assigned positions and handover | 0/TBD | Not started (after Phase 33, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
-| 32.1. Guided setup with viable options and a plain recommendation | 0/TBD | Not started (after Phases 32 and 41, before Phase 36) | - |
-| 32.2. Local model manager | 0/TBD | Not started (after 32.1's shared contract) | - |
+| 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
+| 32.2. Local model manager | 0/17 | Planned 2026-11-21 (after 32.1-01, the shared contract) | - |
 | 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phases 32 and 41; may run beside 33 to 35) | - |
 | 37. Cohere Encrypted Vault as an attested endpoint | 0/TBD | Not started (after Phase 36) | - |
 | 38. Organization tree, publications and label-safe roll-up | 0/TBD | Not started (portfolio view; after drop B) | - |
