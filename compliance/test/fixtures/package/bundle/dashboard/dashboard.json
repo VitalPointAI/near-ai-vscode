@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-21T00:00:00.000Z",
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source": { "kind": "release", "ref": "v0.4.99" },
+  "levels": [
+    { "id": "protected-b", "title": "Protected B", "kind": "level", "profile": "profiles/protected-b.json", "claim": true, "components": ["extension"], "overlays": [], "counts": { "met": 1, "partly-met": 0, "not-met": 0, "stale": 0, "not-applicable": 0, "your-organizations-responsibility": 0, "notMetTotal": 0, "metTotal": 1 } }
+  ],
+  "rows": [
+    { "level": "protected-b", "control": "ac-01", "label": "AC-1", "family": "ac", "title": "Fixture access control", "state": "met", "reason": "met", "reasonText": "Evidence shows every statement for this control backed by passing, current results. Your organization decides whether that is enough.", "components": [{ "component": "extension", "state": "met", "reason": "met", "reasonText": "Evidence shows every statement for this control backed by passing, current results. Your organization decides whether that is enough.", "responsibility": "product", "evidence": [], "statement": "The product checks access." }] }
+  ],
+  "gaps": [], "collectors": [], "matrix": [], "textIndex": [], "refusedAcceptances": []
+}
