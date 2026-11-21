@@ -105,3 +105,30 @@ test('records source hashes and page dates for every imported family', async () 
   assert.equal(report.pages.every((page: any) => /^[a-f0-9]{64}$/.test(page.sha256)), true);
   assert.equal(report.pages.filter((page: any) => page.dateModified !== 'unknown').every((page: any) => page.dateModified === '2026-11-20'), true);
 });
+
+test('pairs French text with English controls by id despite different landing-page order', async () => {
+  const result: any = await importSource({ offlinePages: pages, lang: 'both' });
+  const xa = result.catalog.catalog.groups.find((group: any) => group.id === 'xa').controls[0];
+  assert.equal(xa.title, 'Access management');
+  const frenchTitle = xa.parts.find((part: any) => part.name === 'title' && part.props?.[0]?.value === 'fr');
+  assert.equal(frenchTitle.prose, 'Gestion des accès');
+  assert.equal(xa.parts.some((part: any) => part.props?.some((prop: any) => prop.name === 'lang' && prop.value === 'fr')), true);
+});
+
+test('reports ids that exist in only one language and malformed French pages', async () => {
+  const result: any = await importSource({ offlinePages: pages, lang: 'both' });
+  const report = result.reports[0].content;
+  assert.deepEqual(report.frenchOnly, ['xa-02']);
+  assert.deepEqual(report.englishOnly, ['xa-400', 'xb-01']);
+  assert.deepEqual(report.frenchFailures, [{ page: 'https://www.cyber.gc.ca/fr/conseils/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/famille-xb-fr.html', reason: 'French page has no control headings' }]);
+});
+
+test('English-only imports contain no French parts', async () => {
+  const result: any = await importSource({ offlinePages: pages, lang: 'en' });
+  const control = result.catalog.catalog.groups.find((group: any) => group.id === 'xa').controls[0];
+  assert.equal(control.parts.some((part: any) => part.props?.some((prop: any) => prop.name === 'lang' && prop.value === 'fr')), false);
+});
+
+test('refuses a French-only import because English is authoritative', async () => {
+  await assert.rejects(() => importSource({ offlinePages: pages, lang: 'fr' }), /authoritative English/);
+});
