@@ -1,0 +1,1 @@
+{"catalog":"fixture","family":"tr","attribution":{"source":"Example source","url":"https://example.invalid/control-text","licence":"Example licence","retrievedAt":"2026-11-21T00:00:00Z","notice":"Fictional test content."},"controls":[{"id":"tr-01","label":"TR-01","title":"Tracer fixture control","parts":[{"name":"a","prose":"Official fixture text.","lang":"en"}]}]}

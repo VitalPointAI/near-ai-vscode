@@ -13,6 +13,7 @@ import { levelCounts, parseDashboard, STATE_WORDS as VIEW_STATE_WORDS } from '..
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TRACER = path.join(TEST_DIR, 'fixtures', 'tracer');
 const DASHBOARD_FIXTURE = path.join(TEST_DIR, 'fixtures', 'dashboard', 'dashboard.json');
+const CONTROL_TEXT_FIXTURE = path.join(TEST_DIR, 'fixtures', 'dashboard', 'text', 'fixture', 'tr.json');
 const readJson = (file: string): any => JSON.parse(readFileSync(file, 'utf8'));
 const readNdjson = (file: string): TestReportRow[] => readFileSync(file, 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line));
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -147,4 +148,11 @@ test('the hand-checked fixture dashboard validates, has two levels and one overl
     assert.ok(row.reasonText.length > 0, `${row.level} ${row.control}`);
     for (const component of row.components) assert.ok(component.reasonText.length > 0);
   }
+});
+
+test('the control text, bundle manifest, refresh record and organization overlay fixtures satisfy their strict schemas', () => {
+  assert.equal(validateOurs(readJson(CONTROL_TEXT_FIXTURE), 'control-text').ok, true);
+  assert.equal(validateOurs({ schemaVersion: 1, createdAt: '2026-11-21T00:00:00Z', commit: COMMIT, files: [{ path: 'dashboard.json', sha256: 'b'.repeat(64), bytes: 1 }] }, 'bundle-manifest').ok, true);
+  assert.equal(validateOurs({ source: 'main', commit: COMMIT, fetchedAt: '2026-11-21T00:00:00Z', manifest: 'verified', attestation: 'not-checked' }, 'refresh').ok, true);
+  assert.equal(validateOurs(readJson(path.join(TEST_DIR, 'fixtures', 'overlay', 'answers.json')), 'overlay').ok, true);
 });

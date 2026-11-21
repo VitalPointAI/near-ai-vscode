@@ -48,10 +48,18 @@ export function toCsv(rows, columns) {
 const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 function safe(value) { if (Array.isArray(value)) return value.every(safe); if (value && typeof value === 'object') return Object.keys(value).every((key) => !PROTOTYPE_KEYS.has(key) && safe(value[key])); return true; }
 const OVERLAY_KEYS = new Set(['kind', 'v', 'organization', 'answers', 'evidence', 'decisions']);
+const ANSWER_KEYS = new Set(['control', 'component', 'text']);
+const EVIDENCE_KEYS = new Set(['control', 'component', 'collectedAt', 'passed', 'windowDays', 'ref']);
+const DECISION_KEYS = new Set(['control', 'selfSigned']);
+function onlyKeys(values, allowed) { return Array.isArray(values) && values.every((value) => value && typeof value === 'object' && Object.keys(value).every((key) => allowed.has(key))); }
+function validOverlay(overlay) {
+  return overlay && typeof overlay === 'object' && Object.keys(overlay).every((key) => OVERLAY_KEYS.has(key)) && overlay.kind === 'organization-overlay' && overlay.v === 1 &&
+    typeof overlay.organization === 'string' && onlyKeys(overlay.answers, ANSWER_KEYS) && onlyKeys(overlay.evidence, EVIDENCE_KEYS) && onlyKeys(overlay.decisions, DECISION_KEYS);
+}
 export function parseOverlayIndex(json) {
   if (!json || !safe(json)) return { ok: false, reason: 'unsafe-key' };
   const files = Array.isArray(json.files) ? json.files : Array.isArray(json) ? json : null;
-  if (!files || files.length > 64 || files.some((file) => !file || typeof file.path !== 'string' || file.bytes > 1024 * 1024 || !safe(file) || Object.keys(file).some((key) => !['path', 'bytes', 'overlay'].includes(key)) || (file.overlay && (Object.keys(file.overlay).some((key) => !OVERLAY_KEYS.has(key)) || Object.keys(file.overlay).some((key) => /state/i.test(key)))))) return { ok: false, reason: 'bad-overlay-index' };
+  if (!files || files.length > 64 || files.some((file) => !file || typeof file.path !== 'string' || file.bytes > 1024 * 1024 || !safe(file) || Object.keys(file).some((key) => !['path', 'bytes', 'overlay'].includes(key)) || !validOverlay(file.overlay))) return { ok: false, reason: 'bad-overlay-index' };
   return { ok: true, files };
 }
 
