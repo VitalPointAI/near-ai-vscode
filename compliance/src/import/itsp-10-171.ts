@@ -1,5 +1,6 @@
 import { mainOf, parseHtml } from './lib/cyberHtml.ts';
 import { newCatalog } from './lib/oscalBuild.ts';
+import { createFetcher, type Fetcher } from './lib/fetch.ts';
 
 type PageSet = Readonly<Record<string, string>>;
 type Element = { tagName?: string; attrs?: readonly { name: string; value: string }[]; childNodes?: readonly Element[]; value?: string };
@@ -70,8 +71,15 @@ export function parseItsp171(pages: PageSet): Itsp171Result {
   };
 }
 
-export async function importSource(context: { readonly offlinePages?: PageSet }): Promise<{ sourceId: string; catalog: unknown; file: string }> {
-  if (!context.offlinePages) throw new Error('ITSP.10.171 importer requires fetched or offline pages');
-  const result = parseItsp171(context.offlinePages);
-  return { sourceId: 'itsp-10-171', catalog: result.catalog, file: 'catalogs/itsp-10-171/catalog.json' };
+export async function importSource(context: { readonly offlinePages?: PageSet; readonly fetcher?: Fetcher }): Promise<{ sourceId: string; catalog: unknown; file: string; reports: readonly { file: string; content: unknown }[] }> {
+  const pages = context.offlinePages ?? await (async () => {
+    const fetcher = context.fetcher ?? createFetcher({ fetchImpl: globalThis.fetch as any });
+    const [requirements, assessment] = await Promise.all([
+      fetcher.get('https://www.cyber.gc.ca/en/guidance/protecting-specified-information-non-government-canada-systems-and-organizations-itsp10171', { accept: 'text/html' }),
+      fetcher.get('https://www.cyber.gc.ca/en/guidance/assessing-security-requirements-specified-information-itsp10171-01', { accept: 'text/html' })
+    ]);
+    return { requirements: requirements.body.toString('utf8'), assessment: assessment.body.toString('utf8') };
+  })();
+  const result = parseItsp171(pages);
+  return { sourceId: 'itsp-10-171', catalog: result.catalog, file: 'catalogs/itsp-10-171/catalog.json', reports: [{ file: 'mappings/itsp10171-to-itsp10033.json', content: result.mapping }, { file: 'import-reports/itsp-10-171.json', content: result.report }] };
 }
