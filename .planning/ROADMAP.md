@@ -589,7 +589,7 @@ Design: `.planning/research/compliance-dashboard/DESIGN.md`. Accreditation (secu
   5. A change to an official source page is reported within a week; the importer lists every difference from the unofficial conversions. (ACCR-02)
   6. The incident response plan, supported-versions table, threat model and data-flow diagrams exist with review dates; the relay image is scanned and has an SBOM; releases carry attestations; CODEOWNERS covers gate paths; `docs` is a required check. (ACCR-12)
 **Research flags**: Treasury Board Directive on Security Management Appendix B clauses; whether the Cyber Centre will publish a machine-readable catalogue; the Unclassified reference set (CAN/DGSI 104 versus CPCSC Level 1); ITSP.40.111 status of Ed25519 and scrypt; which repository settings a read-only token can read.
-**Plans:** 9/19 plans executed in 6 waves (planned 2026-11-21; decisions D-01 to D-50 in `44-CONTEXT.md`, owner confirmations listed there; the catalogue data lands first in its own data PR (44-16, D-42) and every workflow change last (44-19, D-33); owner checkpoints in 44-06, 44-09, 44-16 and 44-19)
+**Plans:** 15/19 plans executed in 6 waves (planned 2026-11-21; decisions D-01 to D-50 in `44-CONTEXT.md`, owner confirmations listed there; the catalogue data lands first in its own data PR (44-16, D-42) and every workflow change last (44-19, D-33); owner checkpoints in 44-06, 44-09, 44-16 and 44-19)
 **UI hint**: yes (docs site pages only; no extension UI)
 
 Plans:
@@ -602,12 +602,12 @@ Plans:
 - [x] 44-07-PLAN.md: Wave 2. Collectors in the run: mapped tests with every reason, CI checks, secret scan, required documents, crypto inventory
 - [x] 44-08-PLAN.md: Wave 2. Collectors for the supply chain and GitHub: audits, SBOMs and the relay image scan, release integrity, attestations, settings, review trail, code scanning
 - [x] 44-09-PLAN.md: Wave 2. CI tool pins for oscal-cli, Syft, Grype and Compliance Trestle (owner checks them before they run)
-- [ ] 44-10-PLAN.md: Wave 3. ITSP.10.033 catalogue importer, English and French
-- [ ] 44-11-PLAN.md: Wave 3. ITSP.10.033-01 Medium profile with its English and French differences, the Protected A profile, the NIST base catalogue and the cross-check
-- [ ] 44-12-PLAN.md: Wave 3. ITSP.10.171 and -01, baseline controls with the Unclassified and CPCSC Level 1 profiles, ITSG-33 Profile 3 and our Annex 3A crosswalk
-- [ ] 44-13-PLAN.md: Wave 3. Controlled Goods and ITAR requirement catalogues, our mappings with unsettled and official-signature rows, overlay profiles
-- [ ] 44-14-PLAN.md: Wave 3. Evidence bundle with manifest and redaction, and the full dashboard generator
-- [ ] 44-15-PLAN.md: Wave 3. The Accreditation section of the docs site, compliance:refresh, the loopback overlay view and the refresh timer
+- [x] 44-10-PLAN.md: Wave 3. ITSP.10.033 catalogue importer, English and French
+- [x] 44-11-PLAN.md: Wave 3. ITSP.10.033-01 Medium profile with its English and French differences, the Protected A profile, the NIST base catalogue and the cross-check
+- [x] 44-12-PLAN.md: Wave 3. ITSP.10.171 and -01, baseline controls with the Unclassified and CPCSC Level 1 profiles, ITSG-33 Profile 3 and our Annex 3A crosswalk
+- [x] 44-13-PLAN.md: Wave 3. Controlled Goods and ITAR requirement catalogues, our mappings with unsettled and official-signature rows, overlay profiles
+- [x] 44-14-PLAN.md: Wave 3. Evidence bundle with manifest and redaction, and the full dashboard generator
+- [x] 44-15-PLAN.md: Wave 3. The Accreditation section of the docs site, compliance:refresh, the loopback overlay view and the refresh timer
 - [ ] 44-16-PLAN.md: Wave 4. Catalogue data in its own PR after the licence re-check and the owner's review
 - [ ] 44-17-PLAN.md: Wave 4. Release documentation package and the pull request summary
 - [ ] 44-18-PLAN.md: Wave 5. Component definitions, statements, evidence rules and overlay statements on the real catalogues
@@ -1774,7 +1774,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 41. Organization policy foundation (F1) | 0/15 | Planned (after the coherence safety patch; before 32.1, 32.2, 33.1, 36 and 37) | - |
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
-| 44. Accreditation evidence and compliance dashboard | 9/19 | In Progress (no dependency in flight; may run beside any phase) | - |
+| 44. Accreditation evidence and compliance dashboard | 15/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
