@@ -36,7 +36,8 @@ export function buildPackage(options: PackageOptions): PackageResult {
   const rows = dashboard.rows ?? [];
   const generatedAt = typeof dashboard.generatedAt === 'string' ? dashboard.generatedAt : '2026-11-21T00:00:00.000Z';
   const gaps = Array.isArray(dashboard.gaps) && dashboard.gaps.length ? dashboard.gaps.map((gap: any) => ({ id: String(gap.id), title: String(gap.title), remediation: String(gap.remediation ?? '') })) : loadGaps(path.join(root, 'gaps.json')).map((gap) => ({ id: gap.id, title: gap.id, remediation: gap.remediation }));
-  const assessmentPlan = buildAssessmentPlan({ controls: [...new Set(rows.map((row: any) => row.control))].sort(), generatedAt });
+  const controls = [...new Set<string>(rows.map((row: any) => String(row.control)))].sort();
+  const assessmentPlan = buildAssessmentPlan({ controls, generatedAt });
   const assessmentResults = buildAssessmentResults({ rows, generatedAt }); const poam = buildPoam({ gaps, generatedAt });
   for (const [name, document, model] of [['assessment-plan.json', assessmentPlan, 'assessment-plan'], ['assessment-results.json', assessmentResults, 'assessment-results'], ['poam.json', poam, 'plan-of-action-and-milestones']] as const) {
     const valid = validateOscal(document, model, { ours: true }); if (!valid.ok) throw new Error(`invalid ${name}: ${valid.errors.join('; ')}`); writeFileSync(path.join(destination, 'oscal', name), stable(document));

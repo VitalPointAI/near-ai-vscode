@@ -13,4 +13,9 @@ test('omits unchanged rows', () => { const result = prSummary(main, pr, changed)
 test('reports no state changes plainly', () => { assert.match(renderPrSummary(prSummary(main, main, [])), /No control changed state/); });
 test('counts drops without a review change', () => { assert.equal(prSummary(main, pr, changed).dropsWithoutReview, 2); });
 test('recognizes tailoring or POA&M review changes', () => { assert.equal(prSummary(main, pr, ['compliance/tailoring/ac-1.json']).dropsWithoutReview, 0); });
-test('caps rendered rows at fifty', () => { const many = { ...pr, rows: Array.from({ length: 60 }, (_, index) => ({ level: 'protected-b', control: `ac-${index}`, label: `AC-${index}`, state: 'not-met', reason: 'no-rules', reasonText: 'No rule.', components: [] })) }; const prior = { ...main, rows: many.rows.map((row) => ({ ...row, state: 'met' })) }; assert.match(renderPrSummary(prSummary(prior, many, [])), /10 more/); });
+test('caps rendered rows at fifty', () => {
+  const rows = Array.from({ length: 60 }, (_, index) => ({ level: 'protected-b', control: `ac-${index}`, label: `AC-${index}`, state: 'not-met', reason: 'no-rules', reasonText: 'No rule.', components: [] }));
+  const many = { ...pr, rows };
+  const prior = { ...main, rows: rows.map((row) => ({ ...row, state: 'met' })) };
+  assert.match(renderPrSummary(prSummary(prior, many, [])), /10 more/);
+});
