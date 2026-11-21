@@ -44,3 +44,15 @@ test('imports every listed Regulation paragraph and errors if one is absent', as
   assert.ok(ids.includes('cgp-10-h'));
   assert.ok(ids.includes('cgp-23'));
 });
+
+test('keeps Act and Regulation requirements in distinct catalogue groups', async () => {
+  const result = await importSource({ offlinePages: cgpPages() });
+  const groups = (result.catalog as { catalog: { groups: Array<{ id: string; controls: Array<{ id: string }> }> } }).catalog.groups;
+  assert.deepEqual(groups.map((group) => group.id), ['dpa', 'cgr']);
+  assert.ok(groups.find((group) => group.id === 'cgr')!.controls.some((control) => control.id === 'cgp-10-h'));
+});
+
+test('names the absent Regulation paragraph when an expected requirement is missing', async () => {
+  const missing = regulations.replace('<p>(j) Provide a list on request.</p>', '');
+  await assert.rejects(() => importSource({ offlinePages: { [pageUrl]: fixture, [regulationsUrl]: missing } }), /cgp-10-j/);
+});
