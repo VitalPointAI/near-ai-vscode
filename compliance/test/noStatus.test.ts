@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { findStatusFields, validateOscal } from '../src/validate.ts';
+import { findStatusFields, oscalOriginForFile, validateOscal } from '../src/validate.ts';
 import { SOURCE_DIRS, SOURCE_FILES } from '../src/model.ts';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,7 +25,7 @@ function plant(files: Record<string, unknown>): string {
 const control = (props: unknown[]) => ({ catalog: { uuid: 'u', metadata: { title: 't' }, groups: [{ id: 'ac', controls: [{ id: 'ac-1', props }] }] } });
 
 test('the repository compliance folder has no status, state or met key or prop in any source file', () => {
-  assert.deepEqual(findStatusFields(PACKAGE_ROOT), []);
+  assert.deepEqual(findStatusFields(PACKAGE_ROOT, { skipFile: (file) => oscalOriginForFile(PACKAGE_ROOT, file) === 'external' }), []);
 });
 
 test('a planted status key at any depth fails with the file and JSON path named', () => {
@@ -75,6 +75,15 @@ test('the publisher withdrawal marker on a control under catalogs passes; anothe
   for (const [label, files] of cases) assert.equal(findStatusFields(plant(files)).length, 1, label);
 });
 
+test('the exact pinned external NIST path may retain publisher lifecycle fields without exempting generated files', () => {
+  const root = plant({
+    'catalogs/nist-800-53-r5/catalog-min.json': { catalog: { metadata: { state: 'publisher lifecycle' } } },
+    'catalogs/ours/catalog.json': { catalog: { metadata: { state: 'not allowed' } } }
+  });
+  const fields = findStatusFields(root, { skipFile: (file) => oscalOriginForFile(root, file) === 'external' });
+  assert.deepEqual(fields.map((field) => field.file), ['catalogs/ours/catalog.json']);
+});
+
 test('only OSCAL mapping provenance may carry its required lifecycle status, whose value the OSCAL schema validates', () => {
   const mapping = { 'mapping-collection': { provenance: { status: 'draft' } } };
   assert.deepEqual(findStatusFields(plant({ 'mappings/ours.json': mapping })), []);
@@ -96,6 +105,10 @@ test('missing source folders and files are skipped by name, and files outside th
   });
   assert.deepEqual(findStatusFields(root), []);
   assert.ok(SOURCE_DIRS.length === 10 && SOURCE_FILES.length === 3);
+});
+
+test('the newline-delimited licence-check audit record is excluded from source JSON validation', () => {
+  assert.deepEqual(findStatusFields(plant({ 'import-reports/licence-check.json': '{"id":"source","ok":true}\n{"id":"source-2","ok":true}\n' })), []);
 });
 
 test('a source file that is not valid JSON is an error naming the file, never a silent pass', () => {

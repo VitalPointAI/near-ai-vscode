@@ -1,11 +1,14 @@
 import path from 'node:path';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { SOURCE_REGISTRY } from '../import/lib/sourceRegistry.ts';
+import type { Fetcher } from '../import/lib/fetch.ts';
 import { writeImportResult } from '../import/lib/write.ts';
 
 const IMPORT_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   cgp: 'cgp',
   itar: 'itar',
+  'nist-oscal-content-v1-6-0': 'nist-800-53',
+  'baseline-controls-v1-2': 'baseline-controls',
 });
 
 interface ImportResult {
@@ -19,7 +22,7 @@ interface ImportResult {
 }
 
 /** Dispatches a future per-source importer while keeping all writes behind writeImportResult. */
-export async function run(argv: readonly string[]): Promise<number> {
+export async function run(argv: readonly string[], context: { readonly fetcher?: Fetcher } = {}): Promise<number> {
   const [source, ...options] = argv;
   if (!source || !/^[a-z0-9-]+$/.test(source)) return 2;
   const isAlias = Object.hasOwn(IMPORT_ALIASES, source);
@@ -31,17 +34,15 @@ export async function run(argv: readonly string[]): Promise<number> {
   const outRoot = outIndex === -1 ? 'compliance' : options[outIndex + 1];
   const lang = langIndex === -1 ? 'both' : options[langIndex + 1];
   if (!outRoot || (offlineIndex !== -1 && !options[offlineIndex + 1]) || !['en', 'fr', 'both'].includes(lang)) return 2;
-  try {
-    const importer = await import(`../import/${moduleName}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both' }) => Promise<ImportResult> };
-    if (!importer.importSource) return 2;
-    const offlinePages = offlineIndex === -1 ? undefined : JSON.parse(readFileSync(path.join(options[offlineIndex + 1], 'pages.json'), 'utf8')) as Record<string, string>;
-    const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both' });
-    writeImportResult(outRoot, result, SOURCE_REGISTRY);
-    if (result.rawBytes) writeRawResult(outRoot, result.file ?? path.join('catalogs', `${result.sourceId}.json`), result.rawBytes);
-    const reports = result.reports ?? (result.reportFile ? [{ file: result.reportFile, content: result.report }] : []);
-    writeReports(outRoot, reports);
-    return 0;
-  } catch { return 2; }
+  const importer = await import(`../import/${moduleName}.ts`) as { importSource?: (context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly lang?: 'en' | 'fr' | 'both'; readonly outRoot?: string; readonly fetcher?: Fetcher }) => Promise<ImportResult> };
+  if (!importer.importSource) return 2;
+  const offlinePages = offlineIndex === -1 ? undefined : JSON.parse(readFileSync(path.join(options[offlineIndex + 1], 'pages.json'), 'utf8')) as Record<string, string>;
+  const result = await importer.importSource({ offlinePages, lang: lang as 'en' | 'fr' | 'both', outRoot, fetcher: context.fetcher });
+  writeImportResult(outRoot, result, SOURCE_REGISTRY);
+  if (result.rawBytes) writeRawResult(outRoot, result.file ?? path.join('catalogs', `${result.sourceId}.json`), result.rawBytes);
+  const reports = result.reports ?? (result.reportFile ? [{ file: result.reportFile, content: result.report }] : []);
+  writeReports(outRoot, reports);
+  return 0;
 }
 
 /** Replaces the checked catalogue serialization with verified importer bytes without a JSON round-trip. */

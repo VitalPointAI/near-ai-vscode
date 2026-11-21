@@ -25,5 +25,7 @@ export async function importSource(context: { readonly fetcher?: Fetcher; readon
     const fetcher = context.fetcher ?? createFetcher({ fetchImpl: globalThis.fetch as any }); return fetcher.get(url, { maxBytes: 16 * 1024 * 1024 });
   };
   const catalog = await importNist({ fetch, write: (bytes) => { rawBytes = bytes; }, expectedHash: PINNED_FULL_SHA256 });
+  const metadata = (catalog as { catalog?: { metadata?: { props?: unknown[] } } }).catalog?.metadata;
+  if (metadata) metadata.props = [...(metadata.props ?? []), { name: 'source-id', ns: 'urn:near-ai-vscode:compliance', value: 'nist-oscal-content-v1-6-0' }];
   return { sourceId: 'nist-oscal-content-v1-6-0', catalog, file: 'catalogs/nist-800-53-r5/catalog-min.json', rawBytes };
 }

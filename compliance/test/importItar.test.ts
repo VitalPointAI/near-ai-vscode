@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { run as runImport } from '../src/commands/import.ts';
 import { importSource, ITAR_REQUIREMENTS, sectionRequestUrl } from '../src/import/itar.ts';
+import { validateOscal } from '../src/validate.ts';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/import/itar/${name}`, import.meta.url), 'utf8');
 const titleUrl = 'https://www.ecfr.gov/api/versioner/v1/titles.json';
@@ -60,4 +61,45 @@ test('uses a separate ITAR and EAR group', async () => {
   assert.deepEqual((result.catalog as { catalog: { groups: Array<{ id: string }> } }).catalog.groups.map((group) => group.id), ['itar', 'ear']);
 });
 
+test('emits OSCAL catalogue groups, controls and statement parts', async () => {
+  const result = await importSource({ offlinePages: pages() });
+  assert.deepEqual(validateOscal(result.catalog, 'catalog', { ours: true }), { ok: true, errors: [] });
+  const part = (result.catalog as any).catalog.groups[0].controls[0].parts[0];
+  assert.equal(part.name, 'statement');
+});
+
 test('carries the catalogue output path', async () => assert.equal((await importSource({ offlinePages: pages() })).file, 'catalogs/itar/catalog.json'));
+
+test('fetches live eCFR pages through the injected guarded fetcher once per URL', async () => {
+  const supplied = pages();
+  const fetched: string[] = [];
+  const result = await importSource({
+    fetcher: {
+      get: async (url) => {
+        fetched.push(url);
+        const body = supplied[url];
+        if (!body) throw new Error(`unexpected URL ${url}`);
+        return { url, status: 200, body: Buffer.from(body) };
+      }
+    }
+  });
+  assert.equal((result.catalog as { catalog: { groups: unknown[] } }).catalog.groups.length, 2);
+  assert.equal(fetched.length, new Set(fetched).size, 'each live URL is fetched once');
+  assert.deepEqual(new Set(fetched), new Set(Object.keys(supplied)));
+});
+
+test('parses the current eCFR DIV section element by its semantic number and paragraph marker', async () => {
+  const current12054 = '<DIV8 N="120.54" TYPE="SECTION"><HEAD>§ 120.54 Exemptions.</HEAD><P>(a) Current heading.</P><P>(5) <I>Current</I> eCFR paragraph only.</P></DIV8>';
+  const supplied = { ...pages(), [page22]: current12054 };
+  const result = await importSource({ offlinePages: supplied });
+  const controls = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string; parts: Array<{ prose: string }> }> }> } }).catalog.groups.flatMap((group) => group.controls);
+  assert.match(controls.find((control) => control.id === 'itar-120.54-a5')?.parts[0].prose ?? '', /^\(5\)CurrenteCFR paragraph only\.$/);
+});
+
+test('retains the current unnumbered section 120.55 requirement', async () => {
+  const page12055 = sectionRequestUrl('2026-11-20', 22, '120', '120.55');
+  const supplied = { ...pages(), [page12055]: '<DIV8 N="120.55" TYPE="SECTION"><P><I>Access information</I> current requirement.</P></DIV8>' };
+  const result = await importSource({ offlinePages: supplied });
+  const controls = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string; parts: Array<{ prose: string }> }> }> } }).catalog.groups.flatMap((group) => group.controls);
+  assert.match(controls.find((control) => control.id === 'itar-120.55')?.parts[0].prose ?? '', /Access informationcurrent requirement\./);
+});

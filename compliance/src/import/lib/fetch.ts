@@ -1,4 +1,4 @@
-export const ALLOWED_HOSTS = Object.freeze(['www.cyber.gc.ca', 'open.canada.ca', 'laws-lois.justice.gc.ca', 'www.ecfr.gov', 'raw.githubusercontent.com', 'www.canada.ca', 'www.tbs-sct.canada.ca'] as const);
+export const ALLOWED_HOSTS = Object.freeze(['www.cyber.gc.ca', 'cyber.gc.ca', 'open.canada.ca', 'laws-lois.justice.gc.ca', 'www.ecfr.gov', 'raw.githubusercontent.com', 'www.canada.ca', 'www.tbs-sct.canada.ca'] as const);
 
 export interface FetchResponse { readonly status: number; readonly url: string; readonly headers: { get(name: string): string | null }; arrayBuffer(): Promise<ArrayBuffer>; }
 export interface Fetcher { get(url: string, options?: { readonly maxBytes?: number; readonly accept?: string; readonly browserAgent?: boolean }): Promise<{ readonly url: string; readonly body: Buffer; readonly status: number }>; }
@@ -8,6 +8,7 @@ const REQUEST_GAP_MS = 400;
 const TIMEOUT_MS = 30_000;
 const USER_AGENT = 'NEAR AI compliance importer/0.1 (+https://github.com/nearai/near-ai-vscode)';
 const BROWSER_AGENT = 'Mozilla/5.0 (compatible; NEAR AI compliance importer/0.1)';
+const sameCyberCentreHost = (left: string, right: string) => ['cyber.gc.ca', 'www.cyber.gc.ca'].includes(left) && ['cyber.gc.ca', 'www.cyber.gc.ca'].includes(right);
 
 function permitted(url: URL): void {
   if (url.protocol !== 'https:') throw new Error('fetcher accepts https URLs only');
@@ -42,7 +43,7 @@ export function createFetcher(options: { readonly fetchImpl: (url: string, init:
           const location = response.headers.get('location');
           if (!location) throw new Error(`redirect without location from ${url.hostname}`);
           const next = new URL(location, url);
-          if (next.hostname !== url.hostname) throw new Error(`redirect changes host from ${url.hostname} to ${next.hostname}`);
+          if (next.hostname !== url.hostname && !sameCyberCentreHost(next.hostname, url.hostname)) throw new Error(`redirect changes host from ${url.hostname} to ${next.hostname}`);
           permitted(next);
           url = next;
           continue;

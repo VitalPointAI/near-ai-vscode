@@ -6,10 +6,12 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { importSource } from '../src/import/itsp-10-033.ts';
 import { run, writeRawResult } from '../src/commands/import.ts';
+import type { Fetcher } from '../src/import/lib/fetch.ts';
 import { validateOscal } from '../src/validate.ts';
 
 const fixtures = new URL('./fixtures/import/itsp10033/', import.meta.url);
-const pages = JSON.parse(readFileSync(new URL('pages.json', fixtures), 'utf8')) as Record<string, string>;
+const fixturePages = JSON.parse(readFileSync(new URL('pages.json', fixtures), 'utf8')) as Record<string, string>;
+const pages = Object.fromEntries(Object.entries(fixturePages).flatMap(([url, body]) => [[url, body], [url.replace('/fr/conseils/', '/fr/orientation/'), body]])) as Record<string, string>;
 
 async function imported() {
   return importSource({ offlinePages: pages });
@@ -43,6 +45,38 @@ test('the CLI writes the licence-gated result under the requested root', async (
   assert.equal(code, 0);
   const output = JSON.parse(readFileSync(path.join(root, 'catalogs/itsp-10-033/catalog.json'), 'utf8'));
   assert.equal(output.catalog.groups[0].controls[0].id, 'xa-01');
+});
+
+test('live mode fetches the landing page and every discovered family through the injected guarded fetcher', async () => {
+  const calls: string[] = [];
+  const fetcher: Fetcher = { get: async (url) => {
+    calls.push(url);
+    const body = pages[url];
+    if (!body) throw new Error(`missing fixture for ${url}`);
+    return { url, body: Buffer.from(body), status: 200 };
+  } };
+  const result: any = await importSource({ fetcher, lang: 'en' });
+  assert.equal(result.catalog.catalog.groups[0].controls[0].id, 'xa-01');
+  assert.deepEqual(calls, [
+    'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033',
+    'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xa-en.html',
+    'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xb-en.html'
+  ]);
+});
+
+test('accepts the current publication family-link shape instead of only synthetic family URLs', async () => {
+  const currentLanding = 'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033';
+  const currentXa = `${currentLanding}/access-control`;
+  const currentXb = `${currentLanding}/audit-accountability`;
+  const landingHtml = pages[currentLanding].replace('family-xa-en.html', '/en/guidance/cyber-security-privacy-risk-management/itsp10033/access-control').replace('family-xb-en.html', '/en/guidance/cyber-security-privacy-risk-management/itsp10033/audit-accountability');
+  const result: any = await importSource({ offlinePages: { ...pages, [currentLanding]: landingHtml, [currentXa]: pages['https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xa-en.html'], [currentXb]: pages['https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xb-en.html'] }, lang: 'en' });
+  assert.equal(result.catalog.catalog.groups[0].controls[0].id, 'xa-01');
+});
+
+test('import command exposes a live-fetch failure instead of silently returning code two', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'itsp-live-failure-'));
+  const fetcher: Fetcher = { get: async () => { throw new Error('network unavailable'); } };
+  await assert.rejects(run(['itsp-10-033', '--lang', 'en', '--out-root', root], { fetcher }), /network unavailable/);
 });
 
 test('the same offline pages produce byte-identical output', async () => {
@@ -120,7 +154,19 @@ test('reports ids that exist in only one language and malformed French pages', a
   const report = result.reports[0].content;
   assert.deepEqual(report.frenchOnly, ['xa-02']);
   assert.deepEqual(report.englishOnly, ['xa-400', 'xb-01']);
-  assert.deepEqual(report.frenchFailures, [{ page: 'https://www.cyber.gc.ca/fr/conseils/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/famille-xb-fr.html', reason: 'French page has no control headings' }]);
+  assert.deepEqual(report.frenchFailures, [{ page: 'https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/famille-xb-fr.html', reason: 'French page has no control headings' }]);
+});
+
+test('keeps the authoritative English catalogue when the French landing page is unavailable', async () => {
+  const fetcher: Fetcher = { get: async (url) => {
+    if (url === 'https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033') throw new Error('GET French landing returned 404');
+    const body = pages[url];
+    if (!body) throw new Error(`missing fixture for ${url}`);
+    return { url, body: Buffer.from(body), status: 200 };
+  } };
+  const result: any = await importSource({ fetcher, lang: 'both' });
+  assert.equal(result.catalog.catalog.groups[0].controls[0].id, 'xa-01');
+  assert.deepEqual(result.reports[0].content.frenchFailures, [{ page: 'https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033', reason: 'GET French landing returned 404' }]);
 });
 
 test('English-only imports contain no French parts', async () => {

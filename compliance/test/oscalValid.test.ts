@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   OSCAL_MODELS, OSCAL_ROOT_DEFINITIONS, OSCAL_SCHEMA_FILE, SCHEMAS_DIR,
-  createValidators, loadJson, modelOf, validateOscal, validateOurs, type OscalModel
+  createValidators, loadJson, modelForSourceFile, modelOf, oscalOriginForFile, validateOscal, validateOurs, type OscalModel
 } from '../src/validate.ts';
 import { OSCAL_VERSION } from '../src/model.ts';
 
@@ -72,6 +72,12 @@ test('a generated document must be stamped 1.2.1; a vendored one stamped 1.2.3 p
   assert.equal(validateOscal(otherLine, 'catalog', { ours: false }).ok, false, 'a vendored document must be on the 1.2 line the schema describes');
 });
 
+test('only the pinned NIST catalogue path is an external OSCAL source', () => {
+  assert.equal(oscalOriginForFile('/data/compliance', '/data/compliance/catalogs/nist-800-53-r5/catalog-min.json'), 'external');
+  assert.equal(oscalOriginForFile('/data/compliance', '/data/compliance/catalogs/nist-800-53-r5/other.json'), 'generated');
+  assert.equal(oscalOriginForFile('/data/compliance', '/data/compliance/catalogs/itsp-10-033/catalog.json'), 'generated');
+});
+
 test('validateOscal returns at most five errors and never throws on a non-object', () => {
   const broken = fixture('catalog.json');
   for (let index = 0; index < 12; index += 1) broken.catalog[`extra-${index}`] = index;
@@ -88,6 +94,15 @@ test('modelOf names the model from the root key, and nothing for an unknown or d
   assert.equal(modelOf({ unknown: {} }), undefined);
   assert.equal(modelOf({ catalog: {}, profile: {} }), undefined);
   assert.equal(modelOf(null), undefined);
+});
+
+test('only the recognised link-only CPCSC report is excluded from OSCAL model inference', () => {
+  const root = '/data/compliance';
+  const cpcsc = { catalog: { metadata: { props: [{ name: 'source-id', value: 'cpcsc-level-1' }] }, controls: [{ id: 'itsp171-03.01.01', links: [{ href: 'https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html' }] }] } };
+  assert.equal(modelForSourceFile(root, `${root}/import-reports/cpcsc-level-1.json`, cpcsc), undefined);
+  assert.equal(modelForSourceFile(root, `${root}/import-reports/other.json`, cpcsc), 'catalog');
+  assert.equal(modelForSourceFile(root, `${root}/import-reports/cpcsc-level-1.json`, { catalog: { ...cpcsc.catalog, controls: [{ ...cpcsc.catalog.controls[0], title: 'not a typed report' }] } }), 'catalog');
+  assert.equal(modelForSourceFile(root, `${root}/import-reports/cpcsc-level-1.json`, { catalog: { ...cpcsc.catalog, controls: [{ id: 'itsp171-03.01.01', links: [], parts: [{ prose: 'not link only' }] }] } }), 'catalog');
 });
 
 test('validateOurs accepts the tracer rules file and refuses an unknown key, a status key, a test rule without name and a kind mismatch', () => {

@@ -1,0 +1,2947 @@
+{
+  "profile": {
+    "imports": [
+      {
+        "href": "../catalogs/itsp-10-033/catalog.json",
+        "include-controls": [
+          {
+            "with-ids": [
+              "ac-01",
+              "ac-02",
+              "ac-02.01",
+              "ac-02.02",
+              "ac-02.03",
+              "ac-02.04",
+              "ac-02.05",
+              "ac-02.07",
+              "ac-02.10",
+              "ac-02.13",
+              "ac-03",
+              "ac-03.02",
+              "ac-03.04",
+              "ac-03.09",
+              "ac-04",
+              "ac-05",
+              "ac-06",
+              "ac-06.01",
+              "ac-06.02",
+              "ac-06.05",
+              "ac-06.07",
+              "ac-06.09",
+              "ac-06.10",
+              "ac-07",
+              "ac-08",
+              "ac-11",
+              "ac-11.01",
+              "ac-12",
+              "ac-14",
+              "ac-16",
+              "ac-16.02",
+              "ac-16.05",
+              "ac-17",
+              "ac-17.01",
+              "ac-17.02",
+              "ac-17.03",
+              "ac-17.04",
+              "ac-17.400",
+              "ac-18",
+              "ac-18.01",
+              "ac-18.03",
+              "ac-18.04",
+              "ac-19",
+              "ac-19.05",
+              "ac-20",
+              "ac-20.01",
+              "ac-20.02",
+              "ac-20.04",
+              "ac-21",
+              "ac-21.400",
+              "ac-21.401",
+              "ac-22"
+            ]
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1",
+      "title": "ITSP.10.033-01 Medium profile",
+      "version": "ITSP.10.033-01"
+    },
+    "modify": {
+      "alters": [
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "C.1 C.2 frequency [at a frequency no longer than annually]"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "(J) frequency [at a frequency no longer than monthly]"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "time period [not to exceed 48 hours after no longer being required]"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "a. b. time period [not to exceed 30 days]c. time period [not to exceed 24 hours]"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.11"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.12"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-02.13"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "[1] privileged commands [creation and deletion ofPKIofficers and administrators accounts][2] actions [examples are:PKIchanges to administrators and security officers; global administrator actions in cloud tenancies; domain administrator actions in single-forest systems]"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "Organizations must assess which administrative actions are capable of creating the entire available Injury. These actions are candidates for dual authorization"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "Control enhancement (04) clarifies the Access Enforcement security control by detailing the policy that should be used for access enforcement to Protected B information. That is, while the system may be authorized to processPB, not all information will necessarily bePB. Therefore,DACwill be used to establish and enforce access controls overPBinformation to “need to know.”Examples ofDACinclude Windows groups (at the file object level) and document management systems that allow document access permissions to be modified by the owner."
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.11"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.12"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.13"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.14"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-03.15"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.11"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.12"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.13"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.14"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.15"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.16"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.17"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.18"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.19"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.20"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.21"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.22"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.23"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.24"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.25"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.26"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.27"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.28"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.29"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.30"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.31"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-04.32"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-06.10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "A. number [of a maximum of 5]A. time period [period of at least 5 minutes]"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-07.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-07.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-07.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-07.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-09.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-09.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-09.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-09.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-11"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-11.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-12"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-12.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-12.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-12.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-13"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-14"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-14.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-15"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "In the context of this profile, the objective of this control is to achieve consistent labeling of Protected B material to the maximum extent supported by available, automated mechanisms (for example, email system enforcing classification labels). Since not all information on the system will be sensitive, labeling will help prevent the accidental distribution of Protected B information by providing filter mechanisms with a differentiator."
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-16.10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.06"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.07"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.08"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.09"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.10"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-17.400"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-18"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-18.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-18.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-18.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-18.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-18.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-19.400"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-20"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-20.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-20.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-20.03"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-20.04"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-20.05"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-21"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-21.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-21.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "GCspecific"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-21.400"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "GCspecific"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-21.401"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-22"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-23"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-24"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-24.01"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-24.02"
+        },
+        {
+          "adds": [
+            {
+              "props": [
+                {
+                  "name": "suggested-placeholder",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                },
+                {
+                  "name": "profile-note",
+                  "ns": "urn:near-ai-vscode:compliance",
+                  "value": "NA"
+                }
+              ]
+            }
+          ],
+          "control-id": "ac-25"
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000000000001"
+  }
+}
