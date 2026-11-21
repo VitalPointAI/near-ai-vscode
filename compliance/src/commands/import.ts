@@ -7,6 +7,7 @@ import { writeImportResult } from '../import/lib/write.ts';
 const IMPORT_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   cgp: 'cgp',
   itar: 'itar',
+  'nist-oscal-content-v1-6-0': 'nist-800-53',
 });
 
 interface ImportResult {
