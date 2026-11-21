@@ -1,0 +1,1 @@
+{"catalog":{"uuid":"00000000-0000-4000-8000-000000000010","metadata":{"title":"NIST sample","version":"5","last-modified":"2026-01-01T00:00:00Z","oscal-version":"1.2.3"},"groups":[{"id":"g","title":"g","controls":[{"id":"ac-01","title":"A"},{"id":"sa-24","title":"B"},{"id":"ia-04.400","title":"C"}]}]}}
