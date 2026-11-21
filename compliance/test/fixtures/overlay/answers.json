@@ -1,0 +1,1 @@
+{"kind":"organization-overlay","v":1,"organization":"Example Organization ORBITAL-ORG-7Q","answers":[{"control":"ac-6","component":"example-component","text":"ORBITAL-ANSWER-4K"}],"evidence":[{"control":"ac-6","component":"example-component","collectedAt":"2026-11-21T11:00:00Z","passed":true,"windowDays":7,"ref":"ORBITAL-EVIDENCE-9M"}],"decisions":[]}

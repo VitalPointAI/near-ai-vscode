@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1, "generatedAt": "2026-11-21T11:00:00Z", "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source": { "kind": "main", "ref": "refs/heads/main" },
+  "levels": [
+    { "id": "fixture", "title": "Fixture level", "kind": "level", "profile": "profiles/fixture.json", "claim": true, "components": [], "overlays": [], "counts": { "met": 1, "partly-met": 1, "not-met": 1, "stale": 1, "not-applicable": 1, "your-organizations-responsibility": 1, "notMetTotal": 2, "metTotal": 1 } },
+    { "id": "second", "title": "Second level", "kind": "level", "profile": "profiles/second.json", "claim": false, "components": [], "overlays": [], "counts": { "met": 0, "partly-met": 0, "not-met": 0, "stale": 0, "not-applicable": 0, "your-organizations-responsibility": 0, "notMetTotal": 0, "metTotal": 0 } },
+    { "id": "overlay", "title": "Example overlay", "kind": "overlay", "profile": "", "claim": false, "components": [], "overlays": ["fixture"], "counts": { "met": 0, "partly-met": 0, "not-met": 0, "stale": 0, "not-applicable": 0, "your-organizations-responsibility": 0, "notMetTotal": 0, "metTotal": 0 } }
+  ],
+  "rows": [
+    { "level": "fixture", "control": "ac-1", "label": "AC-1", "family": "ac", "title": "Fixture met", "state": "met", "reason": "met", "reasonText": "Evidence shows this fixture.", "components": [] },
+    { "level": "fixture", "control": "ac-2", "label": "AC-2", "family": "ac", "title": "Fixture partly met", "state": "partly-met", "reason": "partly-statements", "reasonText": "Some evidence is present.", "components": [] },
+    { "level": "fixture", "control": "ac-3", "label": "AC-3", "family": "ac", "title": "Fixture not met", "state": "not-met", "reason": "no-rules", "reasonText": "No rule is available.", "components": [] },
+    { "level": "fixture", "control": "ac-4", "label": "AC-4", "family": "ac", "title": "Fixture stale", "state": "stale", "reason": "stale", "reasonText": "Evidence is old.", "components": [] },
+    { "level": "fixture", "control": "ac-5", "label": "AC-5", "family": "ac", "title": "Fixture not applicable", "state": "not-applicable", "reason": "not-applicable", "reasonText": "The scope does not apply.", "components": [] },
+    { "level": "fixture", "control": "ac-6", "label": "AC-6", "family": "ac", "title": "Fixture organization", "state": "your-organizations-responsibility", "reason": "your-organization", "reasonText": "Your organization decides.", "components": [] }
+  ],
+  "gaps": [{ "id": "GAP-1", "title": "Example gap", "state": "open", "overdue": false, "levelsBlocked": 1, "controls": ["ac-3"], "remediation": "Add an evidence rule.", "ownerRole": "Maintainer" }],
+  "collectors": [], "matrix": [], "textIndex": [], "refusedAcceptances": []
+}
