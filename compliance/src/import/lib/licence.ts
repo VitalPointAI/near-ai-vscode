@@ -11,8 +11,11 @@ export function mayStoreText(entry: SourceEntry): boolean {
 type UnknownRecord = Record<string, unknown>;
 const record = (value: unknown): value is UnknownRecord => typeof value === 'object' && value !== null && !Array.isArray(value);
 const sourceId = (catalog: unknown): string | undefined => {
-  if (!record(catalog) || !record(catalog.catalog) || !Array.isArray(catalog.catalog.props)) return undefined;
-  const prop = catalog.catalog.props.find((candidate) => record(candidate) && candidate.name === 'source-id' && typeof candidate.value === 'string');
+  if (!record(catalog) || !record(catalog.catalog)) return undefined;
+  // Older generated data used the invalid root location; keep it readable while new
+  // output uses OSCAL's valid catalog.metadata.props location.
+  const props = Array.isArray(catalog.catalog.props) ? catalog.catalog.props : record(catalog.catalog.metadata) && Array.isArray(catalog.catalog.metadata.props) ? catalog.catalog.metadata.props : [];
+  const prop = props.find((candidate) => record(candidate) && candidate.name === 'source-id' && typeof candidate.value === 'string');
   return record(prop) && typeof prop.value === 'string' ? prop.value : undefined;
 };
 const proseControl = (catalog: unknown): string | undefined => {

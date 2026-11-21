@@ -1,0 +1,6 @@
+{
+  "targets": ["ac-02", "ac-03", "au-02", "cm-02", "cp-09", "ir-01", "mp-02", "sa-09", "sc-07", "si-02", "si-03", "si-04", "si-05"],
+  "mappings": [
+    {"source":"bcc-3.1","target":"ir-01","relation":"semantic","ours":true}, {"source":"bcc-3.2","target":"ac-02","relation":"semantic","ours":true}, {"source":"bcc-3.3","target":"cp-09","relation":"semantic","ours":true}, {"source":"bcc-3.4","target":"si-02","relation":"semantic","ours":true}, {"source":"bcc-3.5","target":"si-03","relation":"semantic","ours":true}, {"source":"bcc-3.6","target":"cm-02","relation":"semantic","ours":true}, {"source":"bcc-3.7","target":"ac-03","relation":"semantic","ours":true}, {"source":"bcc-3.8","target":"au-02","relation":"semantic","ours":true}, {"source":"bcc-3.9","target":"sc-07","relation":"semantic","ours":true}, {"source":"bcc-3.10","target":"si-04","relation":"semantic","ours":true}, {"source":"bcc-3.11","target":"sa-09","relation":"semantic","ours":true}, {"source":"bcc-3.12","target":"si-05","relation":"semantic","ours":true}, {"source":"bcc-3.13","target":"mp-02","relation":"semantic","ours":true}
+  ]
+}
