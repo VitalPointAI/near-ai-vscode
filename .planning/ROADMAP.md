@@ -268,14 +268,14 @@ Plans:
   2. The Staff Room shows who is online and what they work on, the sync control shows every connection state in one plain sentence with one action, and an offline banner explains that work is kept and may become contested. (MUS-09)
   3. Two- and three-person scenarios over a real hub pass: co-edit, propose, guard, approve on another machine with equal digests; approve offline and reject online shows contested until a fresh decision; a late joiner loads from a compaction. (MUS-09)
   4. A two-compartment label leak test over the hub passes, README and SECURITY describe multi-user staff projects with the self-declared and not-accreditation sentences, and drop A is released in 0.4.x. (MUS-09)
-**Plans:** 17 plans in 8 waves (planned 2026-11-21; a tracer first, POST-01 and `hub.readmit` settled in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
+**Plans:** 20 plans in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
 **UI hint**: yes
 
 Plans:
 - [ ] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
 - [ ] 33-02-PLAN.md: Wave 1. Phase 32 follow-ups: join request cap (IN-06), Start Again count check (IN-02), withheld products notice
-- [ ] 33-03-PLAN.md: Wave 2. POST-01 `roster.require` with the fold-wide stop, `hub.readmit`, and the signed session features
-- [ ] 33-04-PLAN.md: Wave 2. Editor binding: no echo, undo only your own changes, read-only header, take or restore, Show Who Wrote This
+- [ ] 33-03-PLAN.md: Wave 2. POST-01 `roster.require` with the fold-wide stop, and `hub.readmit` with the witness clearing
+- [ ] 33-04-PLAN.md: Wave 2. Editor binding core: no echo, undo only your own changes, read-only header, resync, seeded fuzz
 - [ ] 33-05-PLAN.md: Wave 2. Shared version acts, contested read model, changed-while-deciding refusal
 - [ ] 33-06-PLAN.md: Wave 2. Server address store, compactor for late joiners, live projection of unopened products
 - [ ] 33-07-PLAN.md: Wave 3. Hub rules: needs-update for appends and sessions, per-entry blob-missing, restore mode
@@ -284,11 +284,14 @@ Plans:
 - [ ] 33-10-PLAN.md: Wave 4. Editor live service: one replicator per install, bindings, projector, compactor, join requests, Sync Now
 - [ ] 33-11-PLAN.md: Wave 5. Share with people step, server commands with re-admit, invitation files, preview switch retired
 - [ ] 33-12-PLAN.md: Wave 5. Presence sealed per cell, people list, cursors with names
-- [ ] 33-13-PLAN.md: Wave 5. Staff Room live: people, sync sentence, offline banner, contested and join cards, status word
+- [ ] 33-13-PLAN.md: Wave 5. Staff Room live: people, sync sentence, offline banner, contested and join cards
 - [ ] 33-14-PLAN.md: Wave 6. Two- and three-person scenarios over a real hub, leak test with presence, CI step (gate path)
 - [ ] 33-15-PLAN.md: Wave 6. README, SECURITY.md, operator guide and CHANGELOG with the word-for-word docs test (gate path)
 - [ ] 33-16-PLAN.md: Wave 7. Close-out: tight baselines, every check once, verification record, integration PR after the owner's gate approval
 - [ ] 33-17-PLAN.md: Wave 8. Drop A release PR `release/0.4.36` prepared green; the owner approves merge, tag and publish
+- [ ] 33-18-PLAN.md: Wave 1. Wire pieces: feature registry, signed session features, server pin words
+- [ ] 33-19-PLAN.md: Wave 3. Editor binding in VS Code: adapter, undo keybindings, take or restore, Show Who Wrote This
+- [ ] 33-20-PLAN.md: Wave 5. Sync word in the one NEAR AI status item
 
 **Note (2026-11-20)**: plan POST-01 into this phase: a generic `roster.require` feature check, so a client that lacks a feature a project needs refuses to fold it instead of ignoring entries it does not know. It must be in the field before Phase 33.1 ships positions, because an older client that ignored a relief would keep accepting the relieved holder's writes (`.planning/research/portfolio-and-assignment/DESIGN.md`, 3.9).
 
