@@ -2,8 +2,17 @@
 // arranges rows. 44-04 adds the multi-component aggregate and 44-05 adds fields (never renames these).
 import { computeStatus } from './status.ts';
 import { evaluateObservationRule, evaluateTestRule, type RuleContext } from './rules.ts';
-import { REASONS, STATES, type ComponentRow, type Dashboard, type DashboardBuildInput, type DashboardCounts, type DashboardRow, type EvidenceRule, type RuleResult, type State } from './model.ts';
-export type { DashboardBuildInput } from './model.ts';
+import { REASONS, STATES, type ComponentRow, type DashboardInput, type DashboardRow, type EvidenceRule, type RuleResult, type State } from './model.ts';
+export interface DashboardBuildInput extends DashboardInput {
+  readonly source?: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string };
+  readonly runUrl?: string;
+  readonly controls?: Readonly<Record<string, { readonly label: string; readonly title: string }>>;
+  readonly levels: readonly (DashboardInput['levels'][number] & { readonly kind?: 'level' | 'overlay'; readonly profile?: string; readonly claim?: boolean; readonly overlays?: readonly string[] })[];
+}
+export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
+export type DashboardComponentRow = ComponentRow & Readonly<{ reasonText: string; statement?: string; limitation?: string; unsettled?: string; requiresOfficialSignature?: boolean; inheritedFrom?: string }>;
+export type DashboardOutputRow = DashboardRow & Readonly<{ label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
+export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly unknown[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
 
 export const DASHBOARD_SCHEMA_VERSION = 1 as const;
 
@@ -67,10 +76,10 @@ export function fillReason(reason: keyof typeof REASONS, detail?: Readonly<Recor
 export function buildDashboard(input: DashboardBuildInput): Dashboard {
   const results = evaluateRules(input);
   const components = new Map(input.components.map((component) => [component.id, component]));
-  const rows: DashboardRow[] = [];
+  const rows: DashboardOutputRow[] = [];
   for (const level of input.levels) {
     for (const control of level.controls) {
-      const componentRows: ComponentRow[] = [];
+      const componentRows: DashboardComponentRow[] = [];
       for (const componentId of level.components) {
         const implemented = components.get(componentId)?.implemented.find((requirement) => requirement.control === control);
         if (!implemented) continue;
@@ -100,7 +109,7 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
           ...(implemented.statements[0]?.unsettled ? { unsettled: implemented.statements[0].unsettled } : {}),
           ...(implemented.statements[0]?.requiresOfficialSignature ? { requiresOfficialSignature: true } : {}),
           ...(implemented.inheritedFrom ? { inheritedFrom: implemented.inheritedFrom } : {})
-        } as ComponentRow;
+        } as DashboardComponentRow;
         componentRows.push(component);
       }
       const outcome = controlState(componentRows, level.id, control, input);
