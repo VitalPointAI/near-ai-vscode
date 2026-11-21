@@ -587,7 +587,9 @@ export function fitComment(review, footer = '', limit = 65_000) {
  * secret-scan allowlist, the gate and review scripts, SECURITY.md, the agent commands). CI runs the
  * PR's own copies of some of these, so a PR can weaken the checks it is judged by; merge-pr points
  * them out, and the automatic review approves them only after the owner approves the `agent-review-gates`
- * environment (.github/workflows/agent-review.yml, job owner-approval).
+ * environment (.github/workflows/agent-review.yml, job owner-approval). Phase 44 adds the compliance trust roots: compliance/tailoring/ decides
+ * which controls are Not applicable, compliance/catalogs/ and compliance/sources.json carry the official control text and its licence evidence,
+ * and compliance/attestations/ holds who may sign a risk acceptance (a PR that could add a signer could accept its own risk).
  */
 export const GATE_PATHS = Object.freeze([
   /^\.github\//,
@@ -599,7 +601,11 @@ export const GATE_PATHS = Object.freeze([
   /^scripts\/test\//,
   /^scripts\/vendor-libs\.mjs$/,
   /^SECURITY\.md$/,
-  /^\.claude\/commands\//
+  /^\.claude\/commands\//,
+  /^compliance\/tailoring\//,
+  /^compliance\/sources\.json$/,
+  /^compliance\/catalogs\//,
+  /^compliance\/attestations\//
 ]);
 
 export function gateFileChanges(paths) {

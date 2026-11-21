@@ -329,6 +329,31 @@ test('a change to the gate tests or the vendor step is a gate change', () => {
     ['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs']);
 });
 
+// Phase 44 (DESIGN section 9, pitfall 2): the compliance trust roots wait for the owner. Tailoring decides what is Not applicable, the catalogues
+// and sources.json carry the official text and its licence evidence, and attestations hold who may sign a risk acceptance.
+const COMPLIANCE_TRUST_ROOTS = [
+  'compliance/tailoring/protected-b.json',
+  'compliance/sources.json',
+  'compliance/catalogs/itsp-10-033/catalog.json',
+  'compliance/attestations/signers.json',
+];
+
+test('a change to a compliance trust root (tailoring, sources, catalogues, attestations) is a gate change', () => {
+  for (const file of COMPLIANCE_TRUST_ROOTS) assert.deepEqual(gateFileChanges([file]), [file], file);
+});
+
+test('other compliance files are not gate changes, and the trust-root patterns reach no further than their own folder or file', () => {
+  const others = [
+    'compliance/components/extension.json',
+    'compliance/evidence-rules/extension.json',
+    'compliance/src/status.ts',
+    'compliance/sources.json.bak',
+    'docs/security/threat-model.md',
+    'src/compliance/tailoring/x.json',
+  ];
+  assert.deepEqual(gateFileChanges([...others, ...COMPLIANCE_TRUST_ROOTS, 'src/extension.ts']), COMPLIANCE_TRUST_ROOTS);
+});
+
 test('tagging needs a CI run that tested the commit itself, not only a pull request merge', () => {
   const prOnly = greenCommit();
   assert.match(gate(prOnly, { exactCommitCi: true }).problems.join('\n'), /gh workflow run ci\.yml/);
