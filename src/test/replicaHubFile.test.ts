@@ -7,10 +7,11 @@ import type { KeyObject } from 'node:crypto';
 import test from 'node:test';
 import { x25519BindingBytes } from '../domain/replica/cellKeys';
 import {
-  CHALLENGE_BYTES, HUB_FILE_EXTENSION, HUB_FILE_MAX_BYTES, HUB_FILE_REFUSALS, SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, SESSION_REFUSALS, buildHubFile, buildSessionAnswer, certPinOf,
+  CHALLENGE_BYTES, HUB_FILE_EXTENSION, HUB_FILE_MAX_BYTES, HUB_FILE_REFUSALS, SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, SESSION_REFUSALS, SESSION_VERSION, buildHubFile, buildSessionAnswer, certPinOf,
   checkEnrolmentMac, enrolmentMac, hubIdOf, isHubAddress, readHubFile, readSessionAnswer, spkiPin
 } from '../domain/replica/hubFile';
 import type { BuildHubFileInput, EnrolmentMacFields, HubFilePayload, SessionAnswerPayload, SessionExpectation } from '../domain/replica/hubFile';
+import { KNOWN_REPLICA_FEATURES, MAX_FEATURES } from '../domain/replica/features';
 import { canonicalBytes } from '../domain/team/canonical';
 import { writerIdOf } from '../domain/replica/entry';
 import { signPayload } from '../domain/team/signedPayload';
@@ -309,9 +310,9 @@ test('tracer: a device answers the hub\'s challenge for one project on one TLS c
   const world = sessionWorld();
   const signed = answerOf(world);
   assert.equal(signed.purpose, 'staff-hub-session');
-  assert.deepEqual(signed.payload, { v: 1, hub: world.hub.writer, project: world.project, challenge: world.challenge.toString('base64url'), keying: world.keying.toString('base64url') });
+  assert.deepEqual(signed.payload, { v: 2, hub: world.hub.writer, project: world.project, challenge: world.challenge.toString('base64url'), keying: world.keying.toString('base64url'), features: [] });
   const read = readSessionAnswer(asFile(signed), world.expected);
-  assert.deepEqual(read, { ok: true, publicKey: world.device.publicKey, writer: world.device.writer });
+  assert.deepEqual(read, { ok: true, publicKey: world.device.publicKey, writer: world.device.writer, features: [] });
   // The expected values may be given as bytes or as base64url text, and the answer as text or as a parsed value.
   const asText: SessionExpectation = { ...world.expected, challenge: world.challenge.toString('base64url'), keying: world.keying.toString('base64url') };
   assert.equal(reasonOf(readSessionAnswer(signed, asText)), 'ok');
@@ -365,7 +366,8 @@ test('malformed: an answer of the wrong shape, another purpose, text that is not
     ['a long keying value', { ...base, keying: randomBytes(48).toString('base64url') }],
     ['a hub that is not a writer id', { ...base, hub: hubIdOf(world.hub.writer) }],
     ['a project that is not a stream id', { ...base, project: 'project-1' }],
-    ['another version', { ...base, v: 2 }]
+    ['the version before features', { ...base, v: 1 }],
+    ['a later version', { ...base, v: 3 }]
   ];
   for (const [what, payload] of cases) assert.equal(reasonOf(readSessionAnswer(sign(payload), world.expected)), 'malformed', what);
   const hubFileSigned = asFile(signPayload(world.device.signer, 'staff-hub-file', base, { now: () => NOW }));
@@ -375,6 +377,105 @@ test('malformed: an answer of the wrong shape, another purpose, text that is not
   for (const overrides of [{ challenge: randomBytes(16) }, { keying: 'short' }, { hub: 'hub-1' }, { project: 'x' }]) {
     assert.throws(() => answerOf(world, overrides), /^Error: The session answer was not made: /);
   }
+});
+
+// ---- The features a device announces in its session answer (D-07, D-49, POST-01): signed, sorted, unique, at most MAX_FEATURES name@N ids. ----
+const featuresAnswerOf = (world: SessionWorld, features: readonly string[]): SignedPayload<SessionAnswerPayload> =>
+  buildSessionAnswer(world.device.signer, { hub: world.hub.writer, project: world.project, challenge: world.challenge, keying: world.keying, features, now: NOW });
+// A hand-signed payload, so the reader sees exactly what a hostile device could send.
+const signedSession = (world: SessionWorld, payload: unknown): string => asFile(signPayload(world.device.signer, 'staff-hub-session', payload, { now: () => NOW }));
+const sessionBase = (world: SessionWorld): Record<string, unknown> => ({ ...(answerOf(world).payload as unknown as Record<string, unknown>) });
+const featuresOf = (result: ReturnType<typeof readSessionAnswer>): readonly string[] | undefined => (result.ok ? result.features : undefined);
+
+test('features tracer: a device signs the features it folds, sorted, and the hub reads them back from the answer', () => {
+  const world = sessionWorld();
+  const signed = featuresAnswerOf(world, ['require@1', 'replica@2']);
+  assert.equal(signed.payload.v, 2);
+  assert.deepEqual(signed.payload.features, ['replica@2', 'require@1']);
+  const read = readSessionAnswer(asFile(signed), world.expected);
+  assert.deepEqual(read, { ok: true, publicKey: world.device.publicKey, writer: world.device.writer, features: ['replica@2', 'require@1'] });
+  // The whole registry this build folds, as the client will announce it.
+  assert.deepEqual(featuresOf(readSessionAnswer(asFile(featuresAnswerOf(world, KNOWN_REPLICA_FEATURES)), world.expected)), [...KNOWN_REPLICA_FEATURES]);
+});
+
+test('features: an answer built without features signs an empty list, and a version 2 answer with no features field reads as an empty announcement', () => {
+  const world = sessionWorld();
+  const built = answerOf(world);
+  assert.deepEqual(built.payload.features, []);
+  assert.deepEqual(featuresOf(readSessionAnswer(asFile(built), world.expected)), []);
+  const base = sessionBase(world);
+  delete base.features;
+  assert.deepEqual(Object.keys(base).sort(), ['challenge', 'hub', 'keying', 'project', 'v']);
+  assert.deepEqual(featuresOf(readSessionAnswer(signedSession(world, base), world.expected)), []);
+});
+
+test('features: at most MAX_FEATURES ids; sixteen are read and seventeen are refused malformed, by the reader and the builder', () => {
+  assert.equal(MAX_FEATURES, 16);
+  const world = sessionWorld();
+  const ids = (count: number): string[] => Array.from({ length: count }, (_, index) => `f${String(index).padStart(2, '0')}@1`);
+  assert.deepEqual(featuresOf(readSessionAnswer(signedSession(world, { ...sessionBase(world), features: ids(16) }), world.expected)), ids(16));
+  assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...sessionBase(world), features: ids(17) }), world.expected)), 'malformed');
+  assert.throws(() => featuresAnswerOf(world, ids(17)), /^Error: The session answer was not made: /);
+});
+
+test('features: an unsorted list or a duplicate id is refused malformed by the reader, and the builder refuses a duplicate', () => {
+  const world = sessionWorld();
+  for (const features of [['require@1', 'replica@2'], ['cells@1', 'require@1', 'hub@1'], ['hub@1', 'hub@1'], ['cells@1', 'hub@1', 'hub@1']]) {
+    assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...sessionBase(world), features }), world.expected)), 'malformed', features.join(','));
+  }
+  assert.throws(() => featuresAnswerOf(world, ['hub@1', 'cells@1', 'hub@1']), /^Error: The session answer was not made: /);
+});
+
+test('features: an id that is not name@N, or a features field that is not a list of text, is refused malformed by the reader and the builder', () => {
+  const world = sessionWorld();
+  const badIds: unknown[] = ['Require@1', 'require', 'require@0', 'require@01', 'require@1000', '1require@1', 'require@1 ', '', 7, null, ['require@1']];
+  for (const id of badIds) {
+    assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...sessionBase(world), features: [id] }), world.expected)), 'malformed', String(id));
+    if (typeof id === 'string') assert.throws(() => featuresAnswerOf(world, [id]), /^Error: The session answer was not made: /, id);
+  }
+  for (const features of [null, 'require@1', { 0: 'require@1' }, 1]) {
+    assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...sessionBase(world), features }), world.expected)), 'malformed', JSON.stringify(features));
+    assert.throws(() => featuresAnswerOf(world, features as never), /^Error: The session answer was not made: /);
+  }
+});
+
+test('features: SESSION_VERSION is 2, and a version 1 answer is refused malformed with or without a features field', () => {
+  assert.equal(SESSION_VERSION, 2);
+  const world = sessionWorld();
+  const old = sessionBase(world);
+  delete old.features;
+  assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...old, v: 1 }), world.expected)), 'malformed');
+  assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...old, v: 1, features: ['require@1'] }), world.expected)), 'malformed');
+  assert.equal(reasonOf(readSessionAnswer(signedSession(world, { ...old, v: '2', features: [] }), world.expected)), 'malformed');
+});
+
+test('features: a features list changed after signing, added to or emptied, is caught by the signature', () => {
+  const world = sessionWorld();
+  const signed = featuresAnswerOf(world, ['replica@2']);
+  for (const features of [['replica@2', 'require@1'], [], ['cells@1']]) {
+    const copy = JSON.parse(asFile(signed)) as SignedPayload<SessionAnswerPayload>;
+    copy.payload.features = features;
+    assert.equal(reasonOf(readSessionAnswer(asFile(copy), world.expected)), 'bad-signature', features.join(','));
+  }
+  // Dropping the field after signing is caught the same way.
+  const dropped = JSON.parse(asFile(signed)) as { payload: Record<string, unknown> };
+  delete dropped.payload.features;
+  assert.equal(reasonOf(readSessionAnswer(asFile(dropped), world.expected)), 'bad-signature');
+});
+
+test('features: the builder signs a copy, so a caller changing its list later never changes the answer, and the read features are a fresh list', () => {
+  const world = sessionWorld();
+  const mine = ['require@1', 'cells@1'];
+  const signed = featuresAnswerOf(world, mine);
+  mine.push('hub@1');
+  mine.sort();
+  assert.deepEqual(signed.payload.features, ['cells@1', 'require@1']);
+  const parsed = JSON.parse(asFile(signed)) as unknown;
+  const read = readSessionAnswer(parsed, world.expected);
+  assert.equal(read.ok, true);
+  const features = featuresOf(read) as string[];
+  assert.notEqual(features, (parsed as { payload: { features: string[] } }).payload.features);
+  assert.deepEqual(features, ['cells@1', 'require@1']);
 });
 
 test('every session refusal is one plain sentence that says what to do, with no em-dash, and no refusal carries the challenge or the keying material', () => {
