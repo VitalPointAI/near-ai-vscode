@@ -1,0 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { prSummary, renderPrSummary } from '../prSummary.ts';
+const option = (args: readonly string[], name: string) => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
+export async function run(args: readonly string[]): Promise<number> { const prBundle = option(args, '--pr-bundle'); const main = option(args, '--main-dashboard'); const changed = option(args, '--changed'); const out = option(args, '--out'); if (!prBundle || !main || !changed || !out) return 2; try { const pr = JSON.parse(readFileSync(path.join(prBundle, 'dashboard', 'dashboard.json'), 'utf8')); const result = prSummary(JSON.parse(readFileSync(main, 'utf8')), pr, readFileSync(changed, 'utf8').split(/\r?\n/).filter(Boolean)); writeFileSync(out, renderPrSummary(result)); return args.includes('--fail-on-drop') && result.dropsWithoutReview ? 1 : 0; } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); return 1; } }
