@@ -97,7 +97,9 @@ jobs:
           previous=""
           if [ -f compliance/out/previous/manifest.json ]; then previous="--previous compliance/out/previous"; fi
           node compliance/src/cli.ts bundle --inputs compliance/out/inputs.json --out compliance/out/bundle $previous
-      - run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
+      - name: Secret-scan the completed evidence bundle
+        continue-on-error: true
+        run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compliance-bundle

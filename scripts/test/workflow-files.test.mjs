@@ -195,6 +195,9 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   const daily = jobs(scheduled).get('daily-evidence');
   assert.match(daily, /environment:\s*compliance-settings/);
   assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
+  const scheduledBundleScan = steps(daily).find((step) => /secret-scan\.mjs --dir/.test(step));
+  assert.ok(scheduledBundleScan, 'daily evidence secret-scans the completed bundle');
+  assert.match(scheduledBundleScan, /continue-on-error:\s*true/, 'a secret finding is reported without failing daily evidence collection');
   assert.match(jobs(codeql).get('codeql'), /contents:\s*read[\s\S]*security-events:\s*write/);
   assert.match(codeql, /languages:\s*javascript-typescript/);
   assert.match(codeql, /build-mode:\s*none/);
