@@ -4,10 +4,18 @@
 // Many tests make a workspace with mkdtemp(os.tmpdir()) and do not remove it; on 2026-11-14 tens of thousands of `near-ai-*` folders filled the
 // inodes of /tmp and every later test failed with ENOSPC. Pointing TMPDIR (which os.tmpdir() honours) at a per-run folder cleans up after all of
 // them at once, including tests written later, instead of relying on each test's own `finally`.
+//
+// Phase 44 (D-22, D-46): with NEAR_AI_TEST_REPORT=<path> set, the run also writes a per-test report to that file (a relative path is resolved
+// against the working directory, and its folder is made): one JSON line per leaf test with the fields file, path (the suite names, outermost
+// first), name, status (passed, failed, skipped or todo), skip (the skip reason or null) and ms, written by scripts/test-report-reporter.mjs. The
+// console output stays the spec output Node prints by default, and the exit code is unchanged. The variable is removed from the tests'
+// environment, so a test that starts this runner nested never writes into the same report (pitfall 10). Use it without reporter flags of your own.
+// Unset or empty, the run is exactly as before.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const runDir = mkdtempSync(path.join(tmpdir(), 'near-ai-test-run-'));
 let cleaned = false;
@@ -23,7 +31,17 @@ process.on('exit', cleanup);
 // 0.4.25: the tests run in a process group of their own (not on Windows, which has none), so that after an error of the runner's own it can tell
 // when every test process has exited. `node --test` exits on SIGTERM before the test files it started have, so waiting for it alone is not enough.
 const grouped = process.platform !== 'win32';
-const child = spawn(process.execPath, ['--test', ...process.argv.slice(2)], { stdio: 'inherit', detached: grouped, env: { ...process.env, TMPDIR: runDir, TEMP: runDir, TMP: runDir } });
+const reportPath = process.env.NEAR_AI_TEST_REPORT ? path.resolve(process.env.NEAR_AI_TEST_REPORT) : '';
+/** Node reads reporter flags only before the file names, so they go first. */
+const reportFlags = [];
+if (reportPath) {
+  mkdirSync(path.dirname(reportPath), { recursive: true });
+  const reporter = path.join(path.dirname(fileURLToPath(import.meta.url)), 'test-report-reporter.mjs');
+  reportFlags.push(`--test-reporter=${reporter}`, `--test-reporter-destination=${reportPath}`, '--test-reporter=spec', '--test-reporter-destination=stdout');
+}
+const childEnv = { ...process.env, TMPDIR: runDir, TEMP: runDir, TMP: runDir };
+delete childEnv.NEAR_AI_TEST_REPORT;
+const child = spawn(process.execPath, ['--test', ...reportFlags, ...process.argv.slice(2)], { stdio: 'inherit', detached: grouped, env: childEnv });
 /** How long the runner waits, after an error of its own, for the tests to exit before it stops them with SIGKILL and removes the folder. */
 const CHILD_EXIT_WAIT_MS = 10_000;
 const signalTests = (signal) => {

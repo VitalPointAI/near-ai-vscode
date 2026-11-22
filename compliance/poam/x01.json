@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-16",
+    "cgp-37-2",
+    "itar-120.56-a"
+  ],
+  "gap": "X1",
+  "id": "x01",
+  "milestones": [
+    {
+      "phase": "45",
+      "title": "Fixed meaning and enforcement of the reserved export compartments"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Give the three reserved compartments their fixed meaning through the exportControl section of the signed policy, with the words shown for each, and enforce it.",
+  "title": "The CGP, ITAR and EAR compartments have no fixed meaning that ties them to a regime"
+}

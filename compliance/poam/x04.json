@@ -1,0 +1,23 @@
+{
+  "controls": [
+    "ac-04",
+    "sc-07",
+    "cgp-37-2",
+    "itar-120.56-a"
+  ],
+  "gap": "X4",
+  "id": "x04",
+  "milestones": [
+    {
+      "phase": "45",
+      "title": "Network tools refused while a chat holds a reserved compartment"
+    },
+    {
+      "phase": "72",
+      "title": "Network fence around agent execution"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Refuse agent tools that reach the network while a chat holds a reserved compartment, and later add the full network fence around agent execution.",
+  "title": "Agent network tools are refused only by the no-agent-tools flag, not by the marking"
+}

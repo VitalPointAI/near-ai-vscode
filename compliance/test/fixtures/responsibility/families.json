@@ -1,0 +1,1 @@
+{"families":{"ac":{"responsibility":"shared","reason":"Shared fixture work."},"pe":{"responsibility":"your-organization","reason":"Organization fixture work."}},"exceptions":[{"control":"ac-2","component":"relay","responsibility":"inherited","reason":"Relay provider."}]}

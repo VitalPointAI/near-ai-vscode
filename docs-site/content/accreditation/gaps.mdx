@@ -1,0 +1,11 @@
+---
+sidebar_position: 8
+title: Gaps
+---
+
+import AccreditationData from '@site/src/components/accreditation/AccreditationData';
+import GapList from '@site/src/components/accreditation/GapList';
+
+Your organization decides how to address the remaining work for its own system. This is a roadmap of evidence gaps, not an authorization.
+
+<AccreditationData>{(dashboard) => <GapList gaps={dashboard.gaps} />}</AccreditationData>

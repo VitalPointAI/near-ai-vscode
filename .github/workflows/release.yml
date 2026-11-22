@@ -39,6 +39,8 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       vsix: ${{ steps.meta.outputs.vsix }}
+      evidence_branch: ${{ steps.meta.outputs.evidence_branch }}
+      package_required: ${{ steps.meta.outputs.package_required }}
       sha256: ${{ steps.checksum.outputs.sha256 }}
       notes_sha256: ${{ steps.checksum.outputs.notes_sha256 }}
     steps:
@@ -68,9 +70,26 @@ jobs:
           fi
           # Release only commits that reached main through a PR, or the head of hotfix/<version>
           # when a hotfix is cut from an older tag (see docs/development-workflow.md).
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
-             && [ "$(git rev-parse "origin/hotfix/$version" 2>/dev/null)" != "$GITHUB_SHA" ]; then
-            echo "::error::$TAG points at a commit that is not on main or the head of hotfix/$version"; exit 1
+          evidence_branch=main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            if [ "$(git rev-parse --verify "refs/remotes/origin/hotfix/$version" 2>/dev/null)" != "$GITHUB_SHA" ]; then
+              echo "::error::$TAG points at a commit that is not on main or the head of hotfix/$version"; exit 1
+            fi
+            evidence_branch="hotfix/$version"
+          fi
+          package_required=true
+          if [ ! -f compliance/package.json ]; then
+            # The documented hotfix path copies workflows onto old release tags. Only a hotfix
+            # whose base predates the compliance package may omit its assessor package.
+            if [ "$evidence_branch" = main ]; then
+              echo '::error::compliance/package.json is required for a main release'; exit 1
+            fi
+            base="$(git merge-base "$GITHUB_SHA" origin/main || true)"
+            if [ -z "$base" ] || git cat-file -e "$base:compliance/package.json" 2>/dev/null; then
+              echo '::error::compliance/package.json is missing from the hotfix'; exit 1
+            fi
+            package_required=false
+            echo '### Compliance package unavailable: this hotfix is based on a pre-compliance release.' >> "$GITHUB_STEP_SUMMARY"
           fi
           VERSION="$version" node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
@@ -82,6 +101,8 @@ jobs:
           '
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "vsix=$name-$version.vsix" >> "$GITHUB_OUTPUT"
+          echo "evidence_branch=$evidence_branch" >> "$GITHUB_OUTPUT"
+          echo "package_required=$package_required" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - name: Run the tests
         run: npm test
@@ -108,7 +129,11 @@ jobs:
 
   release:
     name: release
-    needs: build
+    needs: [build, package, attest]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' && needs.attest.result == 'success' &&
+      ((needs.build.outputs.package_required == 'true' && needs.package.result == 'success') ||
+      (needs.build.outputs.package_required == 'false' && needs.package.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -118,13 +143,25 @@ jobs:
         with:
           name: release-vsix
           path: release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.build.outputs.package_required == 'true'
+        with:
+          name: compliance-package
+          path: release
       - name: Check the VSIX and release notes are the ones the build job made
         working-directory: release
         env:
           SHA256: ${{ needs.build.outputs.sha256 }}
           NOTES_SHA256: ${{ needs.build.outputs.notes_sha256 }}
           VSIX: ${{ needs.build.outputs.vsix }}
-        run: printf '%s  %s\n%s  %s\n' "$SHA256" "$VSIX" "$NOTES_SHA256" release-notes.md | sha256sum --check --strict
+          PACKAGE: ${{ needs.package.outputs.package }}
+          PACKAGE_SHA256: ${{ needs.package.outputs.package_sha256 }}
+          PACKAGE_REQUIRED: ${{ needs.build.outputs.package_required }}
+        run: |
+          printf '%s  %s\n%s  %s\n' "$SHA256" "$VSIX" "$NOTES_SHA256" release-notes.md | sha256sum --check --strict
+          if [ "$PACKAGE_REQUIRED" = true ]; then
+            printf '%s  %s\n' "$PACKAGE_SHA256" "$PACKAGE" | sha256sum --check --strict
+          fi
       - name: Create the GitHub release
         working-directory: release
         env:
@@ -132,11 +169,179 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
           VSIX: ${{ needs.build.outputs.vsix }}
+          PACKAGE: ${{ needs.package.outputs.package }}
+          PACKAGE_REQUIRED: ${{ needs.build.outputs.package_required }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "::error::A GitHub release for $TAG already exists; refusing to change it."; exit 1
           fi
-          gh release create "$TAG" "$VSIX" "$VSIX.sha256" --title "$VERSION" --notes-file release-notes.md --verify-tag --repo "$GITHUB_REPOSITORY"
+          assets=("$VSIX" "$VSIX.sha256")
+          if [ "$PACKAGE_REQUIRED" = true ]; then
+            assets+=("$PACKAGE" "$PACKAGE.sha256")
+          fi
+          gh release create "$TAG" "${assets[@]}" --title "$VERSION" --notes-file release-notes.md --verify-tag --repo "$GITHUB_REPOSITORY"
+
+  package:
+    name: compliance package
+    needs: build
+    if: needs.build.outputs.package_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      package: ${{ steps.pack.outputs.package }}
+      package_sha256: ${{ steps.pack.outputs.package_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: compliance/package-lock.json
+      - run: npm --prefix compliance ci --ignore-scripts
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install pinned oscal-cli
+        run: |
+          sh compliance/ci/install-tool.sh oscal-cli compliance/out/tools
+          find compliance/out/tools -type f -name oscal-cli -printf '%h\n' >> "$GITHUB_PATH"
+      - name: Download evidence from CI on the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+          EVIDENCE_BRANCH: ${{ needs.build.outputs.evidence_branch }}
+        run: |
+          event=push
+          if [ "$EVIDENCE_BRANCH" != main ]; then event=workflow_dispatch; fi
+          run_id="$(gh run list --workflow ci.yml --branch "$EVIDENCE_BRANCH" --event "$event" --status success --commit "$COMMIT" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run_id" ]; then echo '::error::No successful CI evidence run exists for this release commit'; exit 1; fi
+          gh run download "$run_id" --name compliance-bundle --dir compliance/out/bundle
+          gh run download "$run_id" --name relay-image-sbom --dir compliance/out/sbom
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { verifyManifest } from "./compliance/src/manifest.ts";
+            const dir = "compliance/out/bundle";
+            const result = verifyManifest(dir);
+            const manifest = JSON.parse(readFileSync(`${dir}/manifest.json`, "utf8"));
+            if (!result.ok || manifest.commit !== process.env.COMMIT) {
+              throw new Error("CI evidence bundle must verify and match the release commit");
+            }
+          '
+      - name: Resolve every level profile
+        run: |
+          mkdir -p compliance/out/resolved
+          node --input-type=module -e 'import { stageAssessorItsg33Profile } from "./compliance/src/package.ts"; stageAssessorItsg33Profile(process.argv[1]);' compliance/out/assessor-oscal
+          for profile in compliance/profiles/*.json; do
+            name="$(basename "$profile")"
+            if [ "$name" = itsg33-profile3.json ]; then profile="compliance/out/assessor-oscal/profiles/$name"; fi
+            sh compliance/ci/oscal-validate.sh resolve "$profile" "compliance/out/resolved/$name"
+          done
+      - name: Build and validate the assessor package
+        id: pack
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          node compliance/src/cli.ts package --release "$TAG" --bundle compliance/out/bundle --resolved compliance/out/resolved --sbom compliance/out/sbom/relay-image-sbom.json --out compliance/out/release
+          directory="compliance/out/release/compliance-package-$TAG"
+          sh compliance/ci/oscal-validate.sh package "$directory"
+          package="compliance-package-$VERSION.tar.gz"
+          tar -czf "compliance/out/release/$package" -C compliance/out/release "compliance-package-$TAG"
+          sum="$(sha256sum "compliance/out/release/$package" | cut -d ' ' -f 1)"
+          printf '%s  %s\n' "$sum" "$package" > "compliance/out/release/$package.sha256"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "package_sha256=$sum" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compliance-package
+          path: |
+            compliance/out/release/${{ steps.pack.outputs.package }}
+            compliance/out/release/${{ steps.pack.outputs.package }}.sha256
+          retention-days: 90
+          if-no-files-found: error
+
+  attest:
+    name: attest release artifacts
+    needs: [build, package]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' &&
+      ((needs.build.outputs.package_required == 'true' && needs.package.result == 'success') ||
+      (needs.build.outputs.package_required == 'false' && needs.package.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*'
+          path: release
+          merge-multiple: true
+      - name: Verify the released subjects before attesting them
+        working-directory: release
+        env:
+          VSIX: ${{ needs.build.outputs.vsix }}
+          VSIX_SHA256: ${{ needs.build.outputs.sha256 }}
+          PACKAGE: ${{ needs.package.outputs.package }}
+          PACKAGE_SHA256: ${{ needs.package.outputs.package_sha256 }}
+          PACKAGE_REQUIRED: ${{ needs.build.outputs.package_required }}
+        run: |
+          printf '%s  %s\n' "$VSIX_SHA256" "$VSIX" > subjects.sha256
+          if [ "$PACKAGE_REQUIRED" = true ]; then
+            printf '%s  %s\n' "$PACKAGE_SHA256" "$PACKAGE" >> subjects.sha256
+          fi
+          sha256sum --check --strict subjects.sha256
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: release/subjects.sha256
+
+  trestle:
+    name: Trestle import check
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compliance-package
+          path: release
+      - name: Install the owner-approved Trestle wheel set
+        run: |
+          pip install --require-hashes --no-deps --only-binary=:all: -r compliance/ci/trestle-requirements.txt
+      - name: Open the throwaway Trestle workspace
+        run: mkdir trestle-work && cd trestle-work && trestle init
+      - name: Import the component and assessor documents
+        continue-on-error: true
+        env:
+          PACKAGE: ${{ needs.package.outputs.package }}
+        run: |
+          tar -xzf "release/$PACKAGE" -C trestle-work
+          root="$(pwd)/trestle-work/$(tar -tzf "release/$PACKAGE" | head -1 | cut -d/ -f1)"
+          cd trestle-work
+          trestle import -f "$root/oscal/component-definitions/extension.json" -o extension >> "$GITHUB_STEP_SUMMARY" 2>&1
+          trestle import -f "$root/oscal/ssp/protected-b.json" -o protected-b >> "$GITHUB_STEP_SUMMARY" 2>&1
+          trestle import -f "$root/oscal/assessment-results.json" -o assessment-results >> "$GITHUB_STEP_SUMMARY" 2>&1
+          trestle import -f "$root/oscal/poam.json" -o poam >> "$GITHUB_STEP_SUMMARY" 2>&1
+      - name: Validate the Trestle workspace
+        continue-on-error: true
+        run: cd trestle-work && trestle validate -a >> "$GITHUB_STEP_SUMMARY" 2>&1
 
   publish:
     name: publish

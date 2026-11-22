@@ -1,0 +1,11 @@
+---
+sidebar_position: 4
+title: Protected B
+---
+
+import AccreditationData from '@site/src/components/accreditation/AccreditationData';
+import LevelPage from '@site/src/components/accreditation/LevelPage';
+
+Your organization decides whether a system that uses this product may operate at this level. This page shows the controls of the reference profile, what the product does for each with the evidence CI collected, and what your organization must do. It is not an authorization.
+
+<AccreditationData>{(dashboard) => <LevelPage dashboard={dashboard} levelId="protected-b" />}</AccreditationData>

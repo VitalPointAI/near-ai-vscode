@@ -47,3 +47,6 @@ hub/**/*.db-shm
 
 # Reference doctrine kept locally by the owner; never committed.
 docs/references/
+
+# Compliance package (compliance/): the generated bundle, dashboard and release package are build outputs, never committed (D-15).
+compliance/out/

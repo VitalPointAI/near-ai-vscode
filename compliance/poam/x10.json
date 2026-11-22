@@ -1,0 +1,28 @@
+{
+  "controls": [
+    "ac-03",
+    "ac-04",
+    "ac-21",
+    "cgp-37-2",
+    "itar-120.56-a"
+  ],
+  "gap": "X10",
+  "id": "x10",
+  "milestones": [
+    {
+      "phase": "35",
+      "title": "Hub grants and access lists check export decisions"
+    },
+    {
+      "phase": "75",
+      "title": "Relay channel manifests refuse export-controlled content"
+    },
+    {
+      "phase": "88",
+      "title": "The data platform's governed store and reader-relative access check export decisions"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Check export decisions in hub grants and access lists, in the data platform's row access, and in the relay's channel manifests.",
+  "title": "The hub, the data platform and the relay do not know export decisions"
+}

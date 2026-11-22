@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "generatedAt": "2026-11-18T00:00:00.000Z",
+  "kind": "main",
+  "carried": [],
+  "observations": [
+    {"collector":"settings","subject":"required-checks","passed":true,"collectedAt":"2026-11-18T00:00:00.000Z","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","counts":{"checks":1}}
+  ]
+}

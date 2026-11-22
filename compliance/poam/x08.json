@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13",
+    "itar-120.54-a5"
+  ],
+  "gap": "X8",
+  "id": "x08",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "Evaluate a FIPS 140-3 validated provider for the hub and the appliance"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Document the comparable-strength basis in the cryptography inventory, and evaluate a FIPS 140-3 validated provider for the hub and the appliance where the operating system can supply one; your organization decides whether the basis suffices.",
+  "title": "The product's cryptography is not run as a FIPS 140 validated module"
+}

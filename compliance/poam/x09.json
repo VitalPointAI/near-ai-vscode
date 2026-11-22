@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "ra-02",
+    "ac-16"
+  ],
+  "gap": "X9",
+  "id": "x09",
+  "milestones": [
+    {
+      "phase": "32.1",
+      "title": "Question registry for guided setup"
+    },
+    {
+      "phase": "45",
+      "title": "Export-control setup question and contact topic"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Ask about technical data for military or defence goods in setup, in plain words, with Not sure applying both markings, and add the export-control contact topic.",
+  "title": "Setup asks nothing about export-controlled work, and there is no export-control contact topic"
+}

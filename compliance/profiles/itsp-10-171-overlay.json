@@ -1,0 +1,12 @@
+{
+  "profile": {
+    "uuid": "00000000-0000-4000-8000-000000000171",
+    "metadata": {
+      "title": "ITSP.10.171 contractor requirements overlay",
+      "version": "1.0",
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1"
+    },
+    "imports": [{ "href": "../catalogs/itsp-10-171/catalog.json", "include-all": {} }]
+  }
+}

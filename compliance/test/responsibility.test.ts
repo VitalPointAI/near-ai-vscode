@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { loadResponsibilityTable, resolveResponsibility } from '../src/responsibility.ts';
+import { validateOurs } from '../src/validate.ts';
+const file = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'responsibility', 'families.json');
+const table = () => loadResponsibilityTable(file);
+test('loads a strict responsibility table', () => assert.equal(table().families.ac.responsibility, 'shared'));
+test('implemented responsibility wins over an exception', () => assert.deepEqual(resolveResponsibility('ac-2', 'relay', table(), 'product'), { value: 'product', source: 'implemented' }));
+test('exception wins over a family default', () => assert.deepEqual(resolveResponsibility('ac-2', 'relay', table()), { value: 'inherited', source: 'exception' }));
+test('family default is returned without any state', () => { const result = resolveResponsibility('ac-1', 'extension', table()); assert.deepEqual(result, { value: 'shared', source: 'family' }); assert.deepEqual(Object.keys(result).sort(), ['source', 'value']); });
+test('schema refuses unknown and state-like fields', () => { const doc: any = JSON.parse(readFileSync(file, 'utf8')); doc.state = 'met'; assert.equal(validateOurs(doc, 'responsibility').ok, false); });

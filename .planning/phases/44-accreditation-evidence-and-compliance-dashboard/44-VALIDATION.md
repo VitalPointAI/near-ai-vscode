@@ -39,6 +39,15 @@ created: "2026-11-21"
 
 Filled from the plans' `<automated>` blocks once the plans pass the checker. Each ACCR id maps to at least one test file in `44-RESEARCH.md`, "Phase Requirements to Test Map".
 
+## Validation Audit
+
+2026-11-22. Existing automated tests cover parts of all fourteen requirements. The coverage review found local workflow gaps and live GitHub evidence that fixtures cannot supply. Nyquist sign-off remains pending.
+
+- ACCR-02: The watch CLI fetches registered pages and creates its output directory. The public English and French Medium editions now parse across all 20 selection tables. The generated report records 11 observed selection differences and documents the English HTML ID correction verified against the official English PDF. The first scheduled run is pending.
+- ACCR-05 and ACCR-10: The bundle CLI now loads shipped profiles, components, evidence rules, remediation gaps and POA&M milestones. The local CLI regression verifies a populated, manifest-verified Protected B dashboard. Hosted bundle generation and PR comparison remain pending.
+- ACCR-09: Main releases and compliance-era hotfixes require verified evidence from successful CI at the tag commit. Hotfixes from bases that predate compliance retain the attested VSIX path. Both routes have local workflow contract coverage. Hosted OSCAL validation, Trestle import, and attestations are pending.
+- ACCR-12: The initial hosted checks and repository settings evidence are pending.
+
 ---
 
 ## Wave 0 Requirements (land in the first wave)
@@ -56,12 +65,20 @@ Filled from the plans' `<automated>` blocks once the plans pass the checker. Eac
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | Licence records re-read before committing Government text | ACCR-01 | Network and a person's judgement on a changed record | Run the importer's licence check; confirm every record says `ca-ogl-lgo`; stop if not |
-| The 12 English and French profile differences | ACCR-02 | Needs the Cyber Centre's answer | Review the importer's difference list in the data PR |
+| English and French profile selection differences | ACCR-02 | Public editions can diverge | Review the generated import report's differences against the public editions |
 | `docs` made a required check | ACCR-12 | Repository setting only the owner can change | Owner adds `docs` to branch protection; the settings collector shows it |
 | Package imports into Compliance Trestle | ACCR-09 | Runs in CI on a release, not locally | Check the release workflow's Trestle step on the first tagged release |
 | Pages read well in light, dark and high-contrast themes and by keyboard | ACCR-07 | Visual check | Open the Accreditation section on the local docs site |
 
 ---
+
+## Local verification on 2026-11-22
+
+- The pinned OSCAL CLI 3.2.0 resolved all eight profiles for the assessor package. The package resolves its 179 ITSG-33 selections against the owner-approved official statements. The generated dashboard lists the Classified controls by ID and title with links to the publisher. The release wrapper passed all 35 OSCAL validations, and all 98 package checksums passed.
+- A generated, hash-verified bundle refreshed a scratch copy of the production docs build. In Chromium, the Protected B AC-03 drawer linked to the official source, opened its French text, and restored focus when closed. The production build passed private-overlay isolation.
+- The root suite reported 6,180 passes, eight skips and one failure when Git encountered a temporary ref lock in the interrupted-push fixture. The failed case passed on its own.
+- The GitHub branch-protection read did not list `docs` as a required check. GitHub confirmed the `compliance-settings` environment, its `main`-only rule, and the presence of `COMPLIANCE_SETTINGS_TOKEN`. Credential access remains pending the first daily workflow run on `main`.
+- The updated integration tree passed compliance typechecking, source validation, and all 524 focused compliance, docs and workflow tests.
 
 ## Validation Sign-Off
 

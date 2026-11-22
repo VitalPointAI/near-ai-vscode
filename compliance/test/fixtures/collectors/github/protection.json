@@ -1,0 +1,1 @@
+{"required_status_checks":{"contexts":["lint","test","e2e","release-content","audit","secret-scan","relay","hub","agent-review"]},"enforce_admins":{"enabled":true},"required_pull_request_reviews":{"required_approving_review_count":1}}

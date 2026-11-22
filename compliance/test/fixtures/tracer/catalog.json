@@ -1,0 +1,31 @@
+{
+  "catalog": {
+    "controls": [
+      {
+        "class": "fixture",
+        "id": "tr-01",
+        "parts": [
+          {
+            "id": "tr-01_smt",
+            "name": "statement",
+            "prose": "The fixture system records each tracer event. This text is written for the tests and quotes no published catalogue."
+          }
+        ],
+        "props": [
+          {
+            "name": "label",
+            "value": "TR-01"
+          }
+        ],
+        "title": "Tracer fixture control"
+      }
+    ],
+    "metadata": {
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1",
+      "title": "Tracer fixture catalogue",
+      "version": "0.1.0"
+    },
+    "uuid": "1322e832-ffec-459c-aec3-eac8b634a07d"
+  }
+}

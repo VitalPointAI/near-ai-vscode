@@ -40,6 +40,8 @@ reads them the same way. Your own settings on this computer can only make them s
 
 ### Fixes
 
+- **Daily accreditation evidence keeps CI test results.** When a daily bundle uses test results
+  from the same commit, the dashboard links to the original CI run and shows when the tests ran.
 - **Content that must stay local no longer reaches a host by a broad pattern or plain http.** A
   host your organization names as local now serves Protected B, org Restricted and NATO Restricted
   content only when the policy names that exact host (not a `*.` pattern) and the runtime uses

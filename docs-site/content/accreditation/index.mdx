@@ -1,0 +1,11 @@
+---
+sidebar_position: 1
+title: Overview
+---
+
+import AccreditationData from '@site/src/components/accreditation/AccreditationData';
+import LevelCards from '@site/src/components/accreditation/LevelCards';
+
+Your organization decides whether a system that uses this product may operate at a level. This page shows reference-profile evidence and what remains your organization's work. It is not an authorization.
+
+<AccreditationData>{(dashboard) => <LevelCards dashboard={dashboard} />}</AccreditationData>

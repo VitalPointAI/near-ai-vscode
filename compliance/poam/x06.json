@@ -1,0 +1,19 @@
+{
+  "controls": [
+    "au-11",
+    "si-12",
+    "cgp-10-a",
+    "itar-122.5"
+  ],
+  "gap": "X6",
+  "id": "x06",
+  "milestones": [
+    {
+      "phase": "45",
+      "title": "Retention without automatic pruning and keyed content hashes in records"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Never prune export-control records automatically, show the earliest date each may be pruned, and record a keyed hash of what was sent.",
+  "title": "No retention rule, and no content hash in records, so a later marking cannot find earlier sends"
+}
