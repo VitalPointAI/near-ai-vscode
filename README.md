@@ -283,9 +283,9 @@ your teams to **Link**, after you confirm. Staff projects work on one machine
 by default. Several people on their own computers sharing one staff project is
 a preview: turn on `nearAi.staff.multiUserPreview` to try the invite, join and
 admit commands, **Make This Staff Project Multi-User** and **Make a
-Single-Machine Copy**. Projects with products labelled above `org/Public` are
-not converted yet, and the shared project cannot yet be synced between
-computers; that comes in a later release. **NEAR AI: Update Team…** recognises a
+Single-Machine Copy**. You can convert a project with labelled products when your
+declared clearance covers those products. Operators can deploy the sync hub, and
+live editing across computers comes in a later release. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
