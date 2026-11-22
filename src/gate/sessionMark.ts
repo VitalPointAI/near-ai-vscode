@@ -22,6 +22,8 @@ import { verifyAuthorization } from '../domain/gate/authorizations';
 import type { BundleIssuer } from '../domain/gate/bundle';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyLayersView } from './organizationStore';
+import type { ProjectLayerRead } from '../domain/gate/layers';
+import { narrowResidency, THIS_COMPUTER_ONLY_RESIDENCY } from '../domain/gate/residency';
 import type { InferTier } from '../domain/gate/vocabulary';
 
 /**
@@ -232,17 +234,35 @@ function verifiedAuthorizations(effective: PolicyDocument, organization: PolicyD
  * The route policy of a request decided at `now` from the layers a host holds (D-36): undefined unless an effective policy is in force (never for a
  * failed-closed state), so the request is then decided as the safety patch did. `organization` is true only for a valid organization layer; the
  * accredited-device switch comes from the effective agents section and the clearances from its people section; `deviceId` is this device's fingerprint,
- * and this device's key is the personal layer's issuer, since only this device signs that layer. The project is left out: a route does not know its
- * project yet, so an authorization scoped to projects covers nothing (D-54, fail closed).
+ * and this device's key is the personal layer's issuer, since only this device signs that layer. The project's residency narrows the route.
+ * Authorizations scoped to projects still cover nothing (D-54).
  */
-export function routePolicyFor(layers: PolicyLayersView, now: number, deviceFingerprint: string, policyVersion: PolicyRecordVersion): RoutePolicyNow | undefined {
+export function routePolicyFor(layers: PolicyLayersView, now: number, deviceFingerprint: string, policyVersion: PolicyRecordVersion, project?: ProjectLayerRead): RoutePolicyNow | undefined {
   const effective = layers.effective;
   if (effective === undefined || layers.failedLayer !== undefined || layers.organization.state === 'failed') return undefined;
   const organization = layers.organization.state === 'valid' ? layers.organization.document : undefined;
+  const restriction = project?.state === 'unreadable' ? THIS_COMPUTER_ONLY_RESIDENCY : project?.state === 'valid' ? project.layer.residency : undefined;
+  const personal = layers.personal?.document.residency?.required;
+  // Composition can ignore a personal list that names a region outside the organization's list.
+  // A project restriction must keep only the regions common to all applicable lists.
+  const projectResidency = restriction === undefined || personal === undefined ? restriction : {
+    required: restriction.required.filter((region) => personal.includes(region))
+  };
+  const residency = narrowResidency(effective.residency, projectResidency);
+  const verified = verifiedAuthorizations(effective, organization, layers.personal?.document.issuer, now);
+  const required = projectResidency === undefined ? undefined : residency?.required;
+  // A signed exception may still cover a per-label restriction within the project's regions.
+  // An exception cannot send content outside the required regions, including on an unreadable project layer.
+  const authorizations = required === undefined ? verified : Object.freeze(verified.filter(({ body }) => {
+    if (body.kind !== 'residency-exception') return true;
+    const subject = body.subject;
+    if (!('endpoint' in subject)) return false;
+    return effective.endpoints?.some(({ id, region }) => id === subject.endpoint && region !== 'unstated' && required.includes(region)) ?? false;
+  }));
   return Object.freeze({
     endpoints: effective.endpoints ?? [],
-    authorizations: verifiedAuthorizations(effective, organization, layers.personal?.document.issuer, now),
-    ...(effective.residency === undefined ? {} : { residency: effective.residency }),
+    authorizations,
+    ...(residency === undefined ? {} : { residency }),
     ...(effective.models === undefined ? {} : { models: effective.models }),
     scales: effective.labels.scales,
     mappings: effective.labels.mappings,

@@ -13,6 +13,7 @@ import { SCALE_PRESETS, levelIndex, parseLabel } from './labels';
 import type { Label, ScaleTable } from './labels';
 import { parsePolicyDocument } from './policyDocument';
 import type { PolicyDocument } from './policyDocument';
+import type { ProjectResidency } from './residency';
 import { LOCKABLE_ANSWERS, parseLimitsSection, parseOnboardingSection, parseRegimes, parseResidencySection } from './sections';
 import type { ExportRegime, LockableAnswer } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
@@ -906,7 +907,7 @@ function composePersonal(organization: PolicyDocument | undefined, personal: Pol
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
-// The project layer (D-22, D-60): in memory in this phase; its single-machine source comes with 32.1 and its shared source with 33.1.
+// The project layer (D-22, D-60): single-machine settings in 32.1 and shared settings in 33.1.
 
 export interface ProjectExercise {
   /** Why the project runs as an exercise, recorded with the flag (owner Q10). 1 to 200 characters. */
@@ -924,7 +925,13 @@ export interface ProjectLayer {
   readonly locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>;
   /** Export regimes the project adds (D-60): a project can add one and never remove one. */
   readonly regimes?: readonly ExportRegime[];
+  readonly residency?: ProjectResidency;
 }
+
+export type ProjectLayerRead =
+  | { readonly state: 'none' }
+  | { readonly state: 'valid'; readonly layer: ProjectLayer }
+  | { readonly state: 'unreadable' };
 
 export interface ComposedProject {
   readonly label?: Label;
@@ -933,6 +940,7 @@ export interface ComposedProject {
   readonly locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>;
   /** The sorted union of the effective exportControl.regimes and the project's own. */
   readonly regimes: readonly ExportRegime[];
+  readonly residency?: ProjectResidency;
 }
 
 const PROJECT_MODE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
@@ -963,15 +971,15 @@ function parseProjectLocked(value: unknown, path: string): Parsed<Readonly<Parti
   return { ok: true, value: Object.freeze(out) };
 }
 
-/** Reads a project layer strictly: `v` 1, and optional label (on `scales`), mode, exercise (with its reason), locked answers and export regimes. */
+/** Reads a project layer strictly, including only a nonempty required region list for residency. */
 export function parseProjectLayer(value: unknown, scales: ScaleTable, path = ''): Parsed<ProjectLayer> {
   if (!isRecord(value)) return refused('wrong-type', path);
   const v = ownValue(value, 'v');
   if (typeof v === 'number' && v !== 1) return refused('unknown-version', childPath(path, 'v'));
-  const keys = checkKeys(value, path, ['v'], ['label', 'mode', 'exercise', 'locked', 'regimes']);
+  const keys = checkKeys(value, path, ['v'], ['label', 'mode', 'exercise', 'locked', 'regimes', 'residency']);
   if (keys !== undefined) return keys;
   if (v !== 1) return refused('wrong-type', childPath(path, 'v'));
-  const out: { v: 1; label?: Label; mode?: string; exercise?: ProjectExercise; locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>; regimes?: readonly ExportRegime[] } = { v: 1 };
+  const out: { -readonly [K in keyof ProjectLayer]: ProjectLayer[K] } = { v: 1 };
   if (Object.prototype.hasOwnProperty.call(value, 'label')) {
     const label = parseLabel(ownValue(value, 'label'), scales, childPath(path, 'label'));
     if (!label.ok) return label;
@@ -997,6 +1005,16 @@ export function parseProjectLayer(value: unknown, scales: ScaleTable, path = '')
     if (!regimes.ok) return regimes;
     out.regimes = regimes.value;
   }
+  if (Object.prototype.hasOwnProperty.call(value, 'residency')) {
+    const where = childPath(path, 'residency');
+    const residency = ownValue(value, 'residency');
+    if (!isRecord(residency)) return refused('wrong-type', where);
+    const keys = checkKeys(residency, where, ['required']);
+    if (keys !== undefined) return keys;
+    const parsed = parseResidencySection({ v: 1, required: ownValue(residency, 'required') }, scales, where);
+    if (!parsed.ok) return parsed;
+    out.residency = Object.freeze({ required: parsed.value.required! });
+  }
   return { ok: true, value: Object.freeze(out) };
 }
 
@@ -1010,11 +1028,12 @@ function projectIgnored(key: string, yours: unknown, allowed: unknown): IgnoredS
  */
 function composeProject(project: ProjectLayer, effective: PolicyDocument, organization: PolicyDocument | undefined): { project: ComposedProject; ignored: IgnoredSetting[] } {
   const ignored: IgnoredSetting[] = [];
-  const out: { label?: Label; mode?: string; exercise?: ProjectExercise; locked?: Readonly<Partial<Record<LockableAnswer, boolean>>>; regimes: readonly ExportRegime[] } = {
+  const out: { -readonly [K in keyof ComposedProject]: ComposedProject[K] } = {
     regimes: Object.freeze([...new Set([...(effective.exportControl?.regimes ?? []), ...(project.regimes ?? [])])].sort())
   };
   if (project.label !== undefined) out.label = project.label;
   if (project.exercise !== undefined) out.exercise = project.exercise;
+  if (project.residency !== undefined) out.residency = project.residency;
   if (project.mode !== undefined) {
     const allowed = stringList(field(field(effective.people, 'organization'), 'allowedModes'));
     if (allowed.length === 0 || allowed.includes(project.mode)) out.mode = project.mode;

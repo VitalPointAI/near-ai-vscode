@@ -25,9 +25,10 @@ import type { StaffTemplate, StaffTemplateOptions } from '../agent/staff/templat
 import type { TacticalEchelon } from '../agent/staff/j2Vocabulary';
 import { parseTeam, slugify, TeamLibrary } from '../agent/teams';
 import { applyTeamUpdate, planTeamUpdate } from '../agent/teamUpdate';
+import { PROJECT_JSON_FILE, withProjectJsonLock } from './setup/projectStore';
 
 export const SET_UP_STAFF_TEAM_COMMAND = 'nearAi.setUpStaffTeam';
-export const PROJECT_JSON = '.planning/.near-ai/project.json';
+export const PROJECT_JSON = PROJECT_JSON_FILE;
 
 /**
  * Told when this extension has written a project's staff teams (Set Up a Staff Team, Link on the chat's card), with the project folder. The chat's
@@ -132,7 +133,7 @@ export interface StaffSetupPlan {
   readonly roster: StaffRoster;
   /** The team file text, stamped for Update Team. */
   readonly team: string;
-  /** The project files: PROFILE.md, the skills, project.json and AGENTS.md, each with its whole new text. */
+  /** The project file previews. Apply refreshes project.json from the current settings. */
   readonly writes: StaffWrite[];
 }
 
@@ -156,6 +157,22 @@ export function stampedStaffTeam(team: string, settings: StaffSettings): string 
   return plan ? applyTeamUpdate(team, plan) : team;
 }
 
+function projectJsonWithStaff(projectJson: string | undefined, template: StaffTemplate, settings: StaffSettings, fileName: string): string {
+  let config: Record<string, unknown> = {};
+  if (projectJson?.trim()) {
+    let value: unknown;
+    try { value = JSON.parse(projectJson); } catch { throw new Error(`${PROJECT_JSON} is not valid JSON, so the staff settings were not written. Fix or move it, then set up the staff team again.`); }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${PROJECT_JSON} is not a JSON object, so the staff settings were not written.`);
+    config = value as Record<string, unknown>;
+  }
+  // Replace this section's team and keep the teams of other sections.
+  const section = template.section;
+  if (!isStaffTeamSection(section)) throw new Error(`${template.label} is not a section a project records a team for.`);
+  const earlier = Object.hasOwn(config, 'staff') ? parseStaffSettings(config.staff) : undefined;
+  const teams = { ...(earlier?.ok ? earlier.value.teams ?? {} : {}), [section]: fileName };
+  return `${JSON.stringify({ ...config, staff: staffSettingsJson({ ...settings, teams }) }, null, 2)}\n`;
+}
+
 /**
  * Everything the setup would write for the choices, worked out before anything is written. `agents` and `projectJson` are the current files (undefined
  * when absent); a project.json that is not a JSON object is refused rather than replaced.
@@ -167,21 +184,9 @@ export function planStaffSetup(input: { templateId: string; options: StaffTempla
   const team = stampedStaffTeam(output.team, input.options.settings);
   const fileName = staffTeamFileName(template, input.options);
   const parsed = parseTeam(team, `${fileName}.md`);
-  let config: Record<string, unknown> = {};
-  if (input.projectJson !== undefined && input.projectJson.trim()) {
-    let value: unknown;
-    try { value = JSON.parse(input.projectJson); } catch { throw new Error(`${PROJECT_JSON} is not valid JSON, so the staff settings were not written. Fix or move it, then set up the staff team again.`); }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${PROJECT_JSON} is not a JSON object, so the staff settings were not written.`);
-    config = value as Record<string, unknown>;
-  }
-  // The project records its section teams: this section's entry is set (a re-run replaces only it), every other section's is kept as it was.
-  const section = template.section;
-  if (!isStaffTeamSection(section)) throw new Error(`${template.label} is not a section a project records a team for.`);
-  const earlier = Object.prototype.hasOwnProperty.call(config, 'staff') ? parseStaffSettings(config.staff) : undefined;
-  const teams = { ...(earlier?.ok ? earlier.value.teams ?? {} : {}), [section]: fileName };
   const writes: StaffWrite[] = [
     ...output.files.map((file) => ({ path: file.path, content: file.content })),
-    { path: PROJECT_JSON, content: `${JSON.stringify({ ...config, staff: staffSettingsJson({ ...input.options.settings, teams }) }, null, 2)}\n` },
+    { path: PROJECT_JSON, content: projectJsonWithStaff(input.projectJson, template, input.options.settings, fileName) },
     { path: 'AGENTS.md', content: withStaffGuidance(input.agents ?? '', template.id, output.guidance) }
   ];
   return {
@@ -250,6 +255,12 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
       if (info?.isSymbolicLink()) throw new Error(`${parts.slice(0, index).join('/')} is a symbolic link, so nothing was written.`);
     }
   }
+  const result = await withProjectJsonLock(root, () => applyStaffSetupLocked(root, library, plan, options));
+  staffTeamsChanged(root);
+  return result;
+}
+
+async function applyStaffSetupLocked(root: string, library: TeamLibrary, plan: StaffSetupPlan, options: { replace?: boolean }): Promise<StaffSetupResult> {
   const target = await staffTeamTarget(library, plan);
   if (target.exists && !options.replace) throw new Error(`${path.basename(target.file)} is already in your teams. Nothing was written.`);
   const done: Array<{ file: string; before: Buffer | undefined; wrote: string }> = [];
@@ -259,9 +270,12 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
     for (const write of plan.writes) {
       const file = path.join(root, ...write.path.split('/'));
       const before = await readFile(file).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : Promise.reject(error)));
+      const content = write.path === PROJECT_JSON
+        ? projectJsonWithStaff(before?.toString('utf8'), plan.template, plan.options.settings, plan.roster.fileName)
+        : write.content;
       await mkdir(path.dirname(file), { recursive: true });
-      if (!(await writeIfUnchanged(file, snapshotOfBytes(before), write.content))) throw new Error(`${write.path} changed while the staff team was being set up.`);
-      done.push({ file, before, wrote: write.content });
+      if (!(await writeIfUnchanged(file, snapshotOfBytes(before), content))) throw new Error(`${write.path} changed while the staff team was being set up.`);
+      done.push({ file, before, wrote: content });
     }
     await mkdir(library.directory, { recursive: true });
     archived = target.exists ? await library.archive(target.file) : undefined;
@@ -278,6 +292,5 @@ export async function applyStaffSetup(root: string, library: TeamLibrary, plan: 
     }
     throw new Error(`The staff team was not set up, and what was written is rolled back: ${error instanceof Error ? error.message : String(error)}`);
   }
-  staffTeamsChanged(root);
   return { teamFile: target.file, ...(archived ? { archived } : {}), written: done.map((entry) => path.relative(root, entry.file).split(path.sep).join('/')) };
 }

@@ -8,7 +8,21 @@ import type { EndpointRegion } from './endpoints';
 import { labelKey } from './labels';
 import type { Label } from './labels';
 import type { RouteEndpoint, VerifiedAuthorization } from './routing';
-import type { ResidencySection } from './sections';
+import type { ResidencyRegion, ResidencySection } from './sections';
+
+export interface ProjectResidency {
+  readonly required: readonly ResidencyRegion[];
+}
+
+export const THIS_COMPUTER_ONLY_RESIDENCY: ProjectResidency = Object.freeze({ required: Object.freeze([]) });
+
+/** Fold the project restriction into the one residency section the route checks. */
+export function narrowResidency(effective: ResidencySection | undefined, project: ProjectResidency | undefined): ResidencySection | undefined {
+  if (project === undefined) return effective;
+  const allowed = effective?.required;
+  const required = allowed === undefined ? project.required : project.required.filter((region) => allowed.includes(region));
+  return Object.freeze({ ...effective, v: 1, required: Object.freeze([...required].sort()) });
+}
 
 /** A list from `byLevel` by own property only, so a key such as `__proto__` reads as nothing. */
 function byLevelOf(residency: ResidencySection, key: string): readonly EndpointRegion[] | undefined {
