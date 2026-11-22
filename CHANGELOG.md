@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.36
+
+Your organization can now distribute signed rules and see where each answer ran. This release
+also adds an operator-ready sync hub, tighter routing and privacy controls, and accreditation
+evidence for assessors. Shared staff projects remain a preview. Live editing through the hub and
+the guided Get Started workflows will ship in later feature releases.
+
 ### Your organization's rules
 
 Your organization can now hand every computer its rules as one signed file, and every feature

@@ -24,6 +24,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.3 | 2026-10-28 | Approval mode picker in the chat bar |
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
+| 0.4.36 | Preparing | Organization policy, routing and privacy fixes, sync hub for operators, and accreditation evidence |
 
 Next phases are added here (Phases 26 to 44 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
 
@@ -288,7 +289,7 @@ Plans:
 - [ ] 33-14-PLAN.md: Wave 6. Two- and three-person scenarios over a real hub, leak test with presence, CI step (gate path)
 - [ ] 33-15-PLAN.md: Wave 6. README, SECURITY.md, operator guide and CHANGELOG with the word-for-word docs test (gate path)
 - [ ] 33-16-PLAN.md: Wave 7. Close-out: tight baselines, every check once, verification record, integration PR after the owner's gate approval
-- [ ] 33-17-PLAN.md: Wave 8. Drop A release PR `release/0.4.36` prepared green; the owner approves merge, tag and publish
+- [ ] 33-17-PLAN.md: Wave 8. Prepare the next available 0.4.x release for Drop A after Phase 33 merges. The owner approves merge, tag and publish.
 - [ ] 33-18-PLAN.md: Wave 1. Wire pieces: feature registry, signed session features, server pin words
 - [ ] 33-19-PLAN.md: Wave 3. Editor binding in VS Code: adapter, undo keybindings, take or restore, Show Who Wrote This
 - [ ] 33-20-PLAN.md: Wave 5. Sync word in the one NEAR AI status item
@@ -390,6 +391,7 @@ Plans:
 Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agreed shape of 2026-11-20: setup asks about the work in plain words (role; personal information; Protected A, B or classified markings; client information under a contract security clause; must it stay in Canada), turns the answers into a project label that the signed policy's routing table then decides on, so the guide is a front door to the gate and never a second gate; it offers only options that are viable on that machine (detected, configured, allowed by the policy, and answering a test request), never local models where no local server answers; it gives one recommendation with a one-sentence reason and greys ruled-out options with the reason; the policy wins, and when answers need what it does not allow the guide says who to ask and offers no workaround; Protected C and classified work get no recommendation; changes are previewed before Apply, re-runs show only differences, and answers are recorded. Then each role lands where it works, and with the data platform the guide offers the matching one-click connections. A local model manager shows what the machine can run (unified memory on Strix Halo and GB10 first), installs Western models from passports with verified hashes and licences, and assigns tiers. Both phases ship in the 0.4.x line after Phase 32 and before Phases 36 and 37, so Cohere's options arrive through the guide; they need only the Phase 70 gate, may run beside Phases 33 to 35 (different files), and share one contract before running in parallel. The data-connection step (GUIDE-09) lands in Phase 89. Requirement ids GUIDE-01 to GUIDE-09 and LMOD-01 to LMOD-07 are defined in the design (section 16) and are added to REQUIREMENTS.md when Phase 32.1 is planned. Open owner decisions D1 to D11 are in the design (section 17), each with a default.
 
 ### Phase 32.1: Guided setup with viable options and a plain recommendation (INSERTED)
+**Release**: Ship Get Started in its own release once the end-to-end setup flow is verified and the feature merges.
 **Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
 **Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records); Phase 41 (organization policy, endpoints, residency rule, mode table and `term()`, the passport schema, the policy editor for proposals; coherence review 2026-11-20). Phase 74.1 enforcement not required: the guide reads the passport schema from Phase 41.
 **Inserted**: 2026-11-20 at the owner's request.

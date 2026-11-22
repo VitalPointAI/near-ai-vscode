@@ -238,6 +238,11 @@ the fix (for example `gh pr update-branch <number> --rebase`, then CI and a new 
 
 ## 6. Releasing
 
+Give each completed feature its own release. Start preparing its release PR as soon as the
+feature has passed verification and merged into `main`. If a feature spans several PRs, prepare
+the release after the last required PR merges. Keep independent development moving while the
+release checks and approvals run. Use the existing owner approval for publication.
+
 ```
 /release <x.y.z>
 ```
