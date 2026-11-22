@@ -66,7 +66,7 @@ These settings and outside contacts cannot be changed by this code. They may be 
 
 1. Approve the integration pull request's `agent-review-gates` gate after reading the workflow diff.
 2. Make `docs` a required check on `main` while merging a pull request that adds `docs` to `CI_CHECKS`; later do the same for `compliance`, and enable the fail-on-drop switch only after it has been stable.
-3. Create the fine-grained read-only `COMPLIANCE_SETTINGS_TOKEN` and the `compliance-settings` environment, limited to `main` with no reviewers.
+3. Create `compliance-settings` under the repository's Settings → Environments. Allow deployments from the `main` branch only and leave required reviewers empty. Create a fine-grained token restricted to this repository with read access to Metadata, Actions, Pull requests, Commit statuses, and Administration. Save it as the environment secret `COMPLIANCE_SETTINGS_TOKEN`.
 4. Upgrade `gh` on the documentation host to a version with `gh attestation`, then install the refresh timer with `npm --prefix docs-site run refresh-timer:install`.
 5. Do not enable “Require review from Code Owners”; CODEOWNERS provides routing, while the existing gate provides enforcement.
 6. Use the public Cyber Centre catalogue and Medium profile sources. The import report records the differences found in the published editions.
