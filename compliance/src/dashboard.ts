@@ -2,17 +2,22 @@
 // arranges rows. 44-04 adds the multi-component aggregate and 44-05 adds fields (never renames these).
 import { aggregateControl, computeStatus, summarizeLevel } from './status.ts';
 import { evaluateObservationRule, evaluateTestRule, type RuleContext } from './rules.ts';
+import { gapStates, type Gap, type Poam } from './gaps.ts';
+import { loadRiskAcceptances } from './riskAcceptance.ts';
 import { REASONS, STATES, type ComponentRow, type DashboardInput, type DashboardRow, type EvidenceRule, type RuleResult, type State } from './model.ts';
+type LevelNotes = Readonly<{ text?: string; profileDifferences?: readonly string[] }>;
+
 export interface DashboardBuildInput extends DashboardInput {
   readonly source?: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string };
   readonly runUrl?: string;
   readonly controls?: Readonly<Record<string, { readonly label: string; readonly title: string }>>;
-  readonly levels: readonly (DashboardInput['levels'][number] & { readonly kind?: 'level' | 'overlay'; readonly profile?: string; readonly claim?: boolean; readonly overlays?: readonly string[] })[];
+  readonly gapRegister?: { readonly gaps: readonly Gap[]; readonly poam: readonly Poam[]; readonly attestationsDir: string };
+  readonly levels: readonly (DashboardInput['levels'][number] & { readonly kind?: 'level' | 'overlay'; readonly profile?: string; readonly claim?: boolean; readonly overlays?: readonly string[]; readonly notes?: LevelNotes })[];
 }
 export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
 export type DashboardComponentRow = ComponentRow & Readonly<{ reasonText: string; statement?: string; limitation?: string; unsettled?: string; requiresOfficialSignature?: boolean; inheritedFrom?: string }>;
 export type DashboardOutputRow = DashboardRow & Readonly<{ label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
-export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly unknown[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
+export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts; readonly notes?: LevelNotes }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly unknown[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
 
 export const DASHBOARD_SCHEMA_VERSION = 1 as const;
 
@@ -125,7 +130,31 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
   }
   const levels = input.levels.map((level) => ({
     id: level.id, title: level.title, kind: level.kind ?? 'level', profile: level.profile ?? '', claim: level.claim ?? false,
-    components: level.components, overlays: level.overlays ?? [], counts: summarizeLevel(rows.filter((row) => row.level === level.id))
+    components: level.components, overlays: level.overlays ?? [], counts: summarizeLevel(rows.filter((row) => row.level === level.id)),
+    ...(level.notes ? { notes: level.notes } : {}),
   }));
-  return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows, gaps: [], collectors: [], matrix: [], textIndex: [], refusedAcceptances: [] };
+  const register = input.gapRegister;
+  const gaps = [];
+  const refusedAcceptances = [];
+  const gapByControl = new Map<string, string>();
+  if (register) {
+    const { verified, refused } = loadRiskAcceptances(register.attestationsDir, input.now);
+    for (const refusal of refused) refusedAcceptances.push({ file: refusal.file, reason: refusal.message });
+    const states = gapStates({ ...register, rows, acceptances: verified, now: input.now });
+    for (const [index, gap] of register.gaps.entries()) {
+      const state = states[index];
+      const { id, controls, remediation, ownerRole, poam } = gap;
+      for (const control of controls) if (!gapByControl.has(control)) gapByControl.set(control, id);
+      const unresolved = rows.filter((row) => controls.includes(row.control) && row.state !== 'met' && row.state !== 'not-applicable');
+      const milestones = register.poam.find((item) => item.id === poam)?.milestones;
+      gaps.push({ ...state, title: gap.title ?? id, controls, remediation, ownerRole, levelsBlocked: new Set(unresolved.map((row) => row.level)).size,
+        ...(state.acceptedUntil ? { acceptedUntil: state.acceptedUntil.slice(0, 10) } : {}),
+        ...(poam ? { poam } : {}), ...(milestones ? { milestones } : {}) });
+    }
+  }
+  const linkedRows = rows.map((row) => {
+    const gap = gapByControl.get(row.control);
+    return gap ? { ...row, gap } : row;
+  });
+  return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows: linkedRows, gaps, collectors: [], matrix: [], textIndex: [], refusedAcceptances };
 }

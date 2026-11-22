@@ -5,7 +5,18 @@ import { loadJson } from './validate.ts';
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): value is RecordValue => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const asStrings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-const ids = (value: unknown): string[] => Array.isArray(value) ? value.flatMap(ids) : record(value) ? [typeof value.id === 'string' ? value.id : '', ...Object.values(value).flatMap(ids)].filter(Boolean) : [];
+/** Catalogue groups organize controls. They and the parts of a control are never selectable. */
+export function controlIdentifiers(value: unknown): string[] {
+  if (!record(value)) return [];
+  const controls = Array.isArray(value.controls) ? value.controls : [];
+  const groups = Array.isArray(value.groups) ? value.groups : [];
+  return [
+    ...controls.flatMap((control) => record(control)
+      ? [...(typeof control.id === 'string' ? [control.id] : []), ...controlIdentifiers(control)]
+      : []),
+    ...groups.flatMap(controlIdentifiers),
+  ];
+}
 
 function importsOf(file: string, seen = new Set<string>()): { ids: Set<string>; alters: RecordValue[] } {
   const resolved = path.resolve(file); if (seen.has(resolved)) throw new Error(`profile import cycle: ${resolved}`); seen.add(resolved);
@@ -21,7 +32,7 @@ function importsOf(file: string, seen = new Set<string>()): { ids: Set<string>; 
       if (!existsSync(imported)) throw new Error(`profile import missing: ${href}`);
       const child = loadJson(imported) as RecordValue;
       if (record(child.profile)) { const nested = importsOf(imported, seen); available = [...nested.ids]; alters.push(...nested.alters); }
-      else available = ids(child.catalog ?? child);
+      else available = controlIdentifiers(child.catalog ?? child);
     }
     if (entry['include-all'] !== undefined) available.forEach((id) => selected.add(id));
     const selectedBy = (value: unknown) => Array.isArray(value) ? value.flatMap((item) => record(item) ? [...asStrings(item['with-ids']), ...asStrings(item.withIds)] : []) : record(value) ? [...asStrings(value['with-ids']), ...asStrings(value.withIds)] : [];

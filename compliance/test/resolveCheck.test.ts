@@ -30,9 +30,10 @@ test('resolve-check ignores OSCAL group and part identifiers', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'resolve-check-'));
   try {
     const profiles = path.join(root, 'profiles'); const resolved = path.join(root, 'resolved'); mkdirSync(profiles); mkdirSync(resolved);
-    writeFileSync(path.join(root, 'catalog.json'), JSON.stringify(catalog(['ac-01'])));
-    writeFileSync(path.join(profiles, 'level.json'), JSON.stringify(profile(['ac-01'])));
-    writeFileSync(path.join(resolved, 'level.json'), JSON.stringify({ catalog: { groups: [{ id: 'access-control', controls: [{ id: 'ac-01', parts: [{ id: 'statement' }] }] }] } }));
+    const grouped = { catalog: { groups: [{ id: 'access-control', controls: [{ id: 'ac-01', parts: [{ id: 'statement' }], controls: [{ id: 'ac-01.01' }] }] }] } };
+    writeFileSync(path.join(root, 'catalog.json'), JSON.stringify(grouped));
+    writeFileSync(path.join(profiles, 'level.json'), JSON.stringify({ profile: { imports: [{ href: '../catalog.json', 'include-all': {} }] } }));
+    writeFileSync(path.join(resolved, 'level.json'), JSON.stringify(catalog(['ac-01', 'ac-01.01'])));
     let output = '';
     assert.equal(await run(['--profiles', profiles, '--resolved', resolved], { write: (text) => { output += text; } }), 0);
     assert.match(output, /level: no differences/);

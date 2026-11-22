@@ -6,7 +6,7 @@ import type { State, VerifiedRiskAcceptance } from './model.ts';
 
 export const GAP_STATES = Object.freeze(['open', 'planned', 'in-progress', 'closed', 'risk-accepted'] as const);
 export type GapState = typeof GAP_STATES[number];
-export interface Gap { readonly id: string; readonly controls: readonly string[]; readonly remediation: string; readonly ownerRole: string; readonly closesInPhase?: string; readonly poam?: string }
+export interface Gap { readonly id: string; readonly title?: string; readonly controls: readonly string[]; readonly remediation: string; readonly ownerRole: string; readonly closesInPhase?: string; readonly poam?: string }
 export interface PoamMilestone { readonly phase?: string; readonly targetDate?: string; readonly title: string }
 export interface Poam { readonly id: string; readonly gap: string; readonly controls: readonly string[]; readonly milestones: readonly PoamMilestone[] }
 export interface GapRow { readonly level: string; readonly control: string; readonly state: State }
@@ -25,7 +25,7 @@ export function loadGaps(file: string): Gap[] {
     const id = entry.id as string;
     if (ids.has(id)) throw new Error(`${file}: duplicate gap ${id}`);
     ids.add(id);
-    return { id, controls: entry.controls as string[], remediation: entry.remediation as string, ownerRole: entry.ownerRole as string, ...(typeof entry.closesInPhase === 'string' ? { closesInPhase: entry.closesInPhase } : {}), ...(typeof entry.poam === 'string' ? { poam: entry.poam } : {}) };
+    return { id, title: entry.title as string, controls: entry.controls as string[], remediation: entry.remediation as string, ownerRole: entry.ownerRole as string, ...(typeof entry.closesInPhase === 'string' ? { closesInPhase: entry.closesInPhase } : {}), ...(typeof entry.poam === 'string' ? { poam: entry.poam } : {}) };
   });
 }
 

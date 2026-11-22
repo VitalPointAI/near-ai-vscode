@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { main } from '../src/cli.ts';
 import { writeManifest, verifyManifest } from '../src/manifest.ts';
 import { runBundle } from '../src/bundle.ts';
 
 const commit = 'a'.repeat(40);
-const folder = () => mkdtempSync(path.join(tmpdir(), 'near-ai-bundle-'));
+const folder = () => mkdtempSync(path.join(realpathSync(tmpdir()), 'near-ai-bundle-'));
 
 // The bundle layer is deliberately tested through the public manifest contract: a
 // reader must reject additions, edits, removals and symlinks rather than trusting
@@ -51,6 +53,20 @@ test('runBundle writes the evidence layout even when no collector was selected',
   assert.equal(verifyManifest(dir).ok, true);
 });
 
+test('runBundle refuses to replace existing files or write through an output symlink', async () => {
+  const dir = folder();
+  const target = folder();
+  const inputs = { repository: 'owner/repo', commit, kind: 'main' as const, repoRoot: process.cwd(), collectors: {} };
+  const retained = path.join(dir, 'keep.txt');
+  writeFileSync(retained, 'keep');
+  await assert.rejects(runBundle(inputs, dir), /must be empty/);
+  assert.equal(readFileSync(retained, 'utf8'), 'keep');
+  const link = path.join(dir, 'link');
+  symlinkSync(target, link);
+  await assert.rejects(runBundle(inputs, path.join(link, 'new')), /symbolic link/);
+  assert.equal(existsSync(path.join(target, 'new')), false);
+});
+
 test('runBundle refuses to publish a dashboard with unsupported compliance claims', async () => {
   const dir = folder();
   await assert.rejects(runBundle({
@@ -58,4 +74,28 @@ test('runBundle refuses to publish a dashboard with unsupported compliance claim
     dashboard: { levels: [{ id: 'fixture', title: 'ITAR certified', controls: [], components: [] }] },
   }, dir), /dashboard copy lint failed/);
   assert.equal(verifyManifest(dir).ok, false);
+});
+
+test('CI-shaped bundle CLI inputs load the shipped profiles, components and evidence rules', async () => {
+  const dir = folder();
+  const input = path.join(dir, 'inputs.json');
+  const out = path.join(dir, 'bundle');
+  const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+  writeFileSync(input, JSON.stringify({ repository: 'owner/repo', commit, kind: 'main', repoRoot, collectors: {} }));
+  assert.equal(await main(['bundle', '--inputs', input, '--out', out]), 0);
+  const dashboard = JSON.parse(readFileSync(path.join(out, 'dashboard', 'dashboard.json'), 'utf8'));
+  const level = dashboard.levels.find(({ id }: { id: string }) => id === 'protected-b');
+  assert.ok(level.counts.notMetTotal > 0);
+  assert.ok(level.overlays.includes('itsp-10-171'));
+  assert.equal(level.notes.profileDifferences.length, 11);
+  const row = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'protected-b' && control === 'ac-03');
+  const extension = row.components.find(({ component }: { component: string }) => component === 'extension');
+  assert.ok(extension.statement);
+  assert.ok(extension.evidence.length > 0);
+  assert.notEqual(extension.state, 'met');
+  const gap = dashboard.gaps.find(({ id }: { id: string }) => id === 'G2');
+  assert.equal(gap.state, 'planned');
+  assert.ok(gap.milestones.length > 0);
+  assert.ok(dashboard.rows.some(({ gap }: { gap?: string }) => gap === 'G2'));
+  assert.equal(verifyManifest(out).ok, true);
 });

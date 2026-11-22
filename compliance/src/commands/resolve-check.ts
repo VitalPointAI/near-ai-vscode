@@ -1,19 +1,10 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { selectedIds } from '../profiles.ts';
+import { controlIdentifiers, selectedIds } from '../profiles.ts';
 
 type Json = Record<string, unknown>;
 const option = (args: readonly string[], name: string) => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
 const isRecord = (value: unknown): value is Json => Boolean(value && typeof value === 'object' && !Array.isArray(value));
-function controlIdentifiers(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap(controlIdentifiers);
-  if (!isRecord(value)) return [];
-  const controls = Array.isArray(value.controls) ? value.controls : [];
-  const nestedControls = controls.flatMap((control) => isRecord(control)
-    ? [...(typeof control.id === 'string' ? [control.id] : []), ...controlIdentifiers(control)]
-    : []);
-  return [...nestedControls, ...controlIdentifiers(value.groups)];
-}
 export function compareResolved(expected: readonly string[], resolved: readonly string[]): { missing: string[]; extra: string[] } {
   const wanted = new Set(expected); const got = new Set(resolved);
   return { missing: [...wanted].filter((id) => !got.has(id)).sort(), extra: [...got].filter((id) => !wanted.has(id)).sort() };

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { testsCollector, readReports } from './collectors/tests.ts';
 import { ciCollector } from './collectors/ci.ts';
@@ -19,6 +19,7 @@ import { writeManifest } from './manifest.ts';
 import { verifyManifest } from './manifest.ts';
 import { assertNoSecrets, redactObservation, redactTestRow } from './redact.ts';
 import { lintDashboard } from './wordLint.ts';
+import { validateOurs } from './validate.ts';
 
 /** Stable order is part of the public bundle contract. */
 export const COLLECTORS: readonly Collector[] = Object.freeze([
@@ -38,12 +39,30 @@ export interface BundleResult { readonly observations: readonly Observation[]; r
 
 const stable = (value: unknown): string => `${JSON.stringify(value, (_key, child) => child && typeof child === 'object' && !Array.isArray(child) ? Object.fromEntries(Object.entries(child).sort(([a], [b]) => a.localeCompare(b))) : child, 2)}\n`;
 const codeOf = (error: unknown) => typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'collector-error';
-const safeOut = (out: string): string => { const resolved = path.resolve(out); if (resolved === path.parse(resolved).root) throw new Error('output directory cannot be a filesystem root'); return resolved; };
+function prepareOutput(out: string): string {
+  const resolved = path.resolve(out);
+  if (resolved === path.parse(resolved).root) throw new Error('output directory cannot be a filesystem root');
+  // Check existing ancestors before creating any directories through them.
+  let existing = resolved;
+  while (true) {
+    try {
+      if (realpathSync(existing) !== existing) throw new Error('bundle output cannot use a symbolic link');
+      break;
+    } catch (error) {
+      if (codeOf(error) !== 'ENOENT') throw error;
+      existing = path.dirname(existing);
+    }
+  }
+  mkdirSync(resolved, { recursive: true });
+  if (readdirSync(resolved).length) throw new Error('bundle output directory must be empty');
+  mkdirSync(path.join(resolved, 'dashboard'));
+  return resolved;
+}
 
 /** Execute supplied collectors, preserve failures as evidence, then write one self-verifying folder. */
 export async function runBundle(inputs: BundleInputs, out: string, supplied: BundleContext = {}): Promise<BundleResult> {
   if (!/^[0-9a-f]{40}$/.test(inputs.commit)) throw new Error('bundle commit must be a 40-character lower-case SHA');
-  const output = safeOut(out); rmSync(output, { recursive: true, force: true }); mkdirSync(path.join(output, 'dashboard'), { recursive: true });
+  const output = prepareOutput(out);
   const now = supplied.now ?? new Date();
   const context: CollectorContext = { now, commit: inputs.commit, ...(inputs.runUrl ? { runUrl: inputs.runUrl } : {}), ...(supplied.fetchJson ? { fetchJson: supplied.fetchJson } : {}), readFile: supplied.readFile ?? ((file) => Promise.resolve(readFileSync(path.resolve(inputs.repoRoot, file), 'utf8'))) };
   const observations: Observation[] = []; const testRows: TestReportRow[] = []; const carried: string[] = [];
@@ -87,6 +106,8 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
   if (copyFindings.length) {
     throw new Error(`dashboard copy lint failed: ${copyFindings.map(({ path, rule }) => `${path}: ${rule}`).join('; ')}`);
   }
+  const valid = validateOurs(enriched, 'dashboard');
+  if (!valid.ok) throw new Error(`invalid evidence dashboard: ${valid.errors.join('; ')}`);
   writeFileSync(path.join(output, 'observations.json'), stable({ schemaVersion: 1, commit: inputs.commit, generatedAt: now.toISOString(), kind: inputs.kind, observations, carried: carried.sort() }));
   writeFileSync(path.join(output, 'test-rows.json'), stable(testRows.map(redactTestRow)));
   writeFileSync(path.join(output, 'collectors.json'), stable(collectorRows));
