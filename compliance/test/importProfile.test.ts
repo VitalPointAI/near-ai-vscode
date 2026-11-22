@@ -106,6 +106,15 @@ test('puts non-empty source placeholders and notes into OSCAL alteration props',
   assert.deepEqual(profile.modify.alters.find((alter: any) => alter['control-id'] === 'xa-02').adds[0].props.map((prop: any) => prop.name), ['profile-suggestion', 'suggested-placeholder', 'profile-note']);
 });
 
+test('retains unselected source placeholders and notes only in the report', async () => {
+  const english = en.replace('</tbody>', row('XA', '04', 'Not selected')
+    .replace('<td></td><td></td>', '<td>Report-only placeholder</td><td>Report-only note</td>') + '</tbody>');
+  const { catalog, report } = await importSource({ offlinePages: { en: english } });
+  assert.deepEqual(report.rows.at(-1), { control: 'xa-04', value: 'Not selected', placeholder: 'Report-only placeholder', note: 'Report-only note' });
+  const selected = catalog.profile.imports[0]['include-controls'][0]['with-ids'];
+  assert.ok(catalog.profile.modify.alters.every((alter: { 'control-id': string }) => selected.includes(alter['control-id'])));
+});
+
 test('refuses an unknown selection value and names its control row', async () => {
   await assert.rejects(importSource({ offlinePages: { en: en.replace('<td>Selected</td><td></td><td></td>', '<td>Maybe</td><td></td><td></td>') } }), /xa-01.*unknown selection/i);
 });

@@ -65,8 +65,8 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
   const rows = profileRows(html, 'en', sourceCorrections);
   const values = new Set(['Selected', 'Not selected', 'Deployed organization-wide. Not associated with baseline.', 'NA', 'Not allocated to baseline.']);
   for (const row of rows) if (!values.has(row.value)) throw new Error(`ITSP.10.033-01 ${row.control}: unknown selection value ${JSON.stringify(row.value)}`);
-  const includes = rows.filter((row) => row.value === 'Selected' || row.value === 'Deployed organization-wide. Not associated with baseline.').map((row) => row.control);
-  const alters = rows.flatMap((row) => {
+  const selectedRows = rows.filter((row) => row.value === 'Selected' || row.value === 'Deployed organization-wide. Not associated with baseline.');
+  const alters = selectedRows.flatMap((row) => {
     const props = [
       ...(row.value === 'Deployed organization-wide. Not associated with baseline.' ? [{ name: 'profile-suggestion', ns: NS, value: 'deployed-organization-wide' }] : []),
       ...(row.placeholder ? [{ name: 'suggested-placeholder', ns: NS, value: row.placeholder }] : []),
@@ -75,7 +75,7 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     return props.length ? [{ 'control-id': row.control, adds: [{ props }] }] : [];
   });
   const catalog = newProfile('ITSP.10.033-01 Medium profile', 'ITSP.10.033-01', '2026-11-21T00:00:00Z') as any;
-  catalog.profile.imports.push({ href: '../catalogs/itsp-10-033/catalog.json', 'include-controls': [{ 'with-ids': includes }] });
+  catalog.profile.imports.push({ href: '../catalogs/itsp-10-033/catalog.json', 'include-controls': [{ 'with-ids': selectedRows.map((row) => row.control) }] });
   if (alters.length > 0) catalog.profile.modify = { alters };
   const counts: Record<string, number> = {};
   for (const row of rows) counts[row.value] = (counts[row.value] ?? 0) + 1;
