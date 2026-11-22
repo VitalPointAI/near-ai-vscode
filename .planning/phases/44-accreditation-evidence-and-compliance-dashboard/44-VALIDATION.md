@@ -39,6 +39,15 @@ created: "2026-11-21"
 
 Filled from the plans' `<automated>` blocks once the plans pass the checker. Each ACCR id maps to at least one test file in `44-RESEARCH.md`, "Phase Requirements to Test Map".
 
+## Validation Audit
+
+2026-11-22. Existing automated tests cover parts of all fourteen requirements. The coverage review found local workflow gaps and live GitHub evidence that fixtures cannot supply. Nyquist sign-off remains pending.
+
+- ACCR-02: The normal watch CLI now fetches registered pages and creates its output directory. A fixture tests a 404 through the CLI. The first scheduled run is pending.
+- ACCR-05 and ACCR-10: Scheduled audit output is initialized before collection. The current workflows do not supply the levels, components, and rules to bundle generation, which defaults those inputs to empty arrays. A populated dashboard and meaningful PR comparison still need end-to-end evidence.
+- ACCR-09: The new release packaging job requires successful evidence from `main` at the tag commit, so it cannot serve the existing supported unmerged hotfix-tag path. Live OSCAL validation, Trestle import, and attestations are pending.
+- ACCR-12: The initial hosted checks and repository settings evidence are pending.
+
 ---
 
 ## Wave 0 Requirements (land in the first wave)
