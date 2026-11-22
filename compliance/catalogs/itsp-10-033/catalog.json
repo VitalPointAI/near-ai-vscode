@@ -1884,6 +1884,7 @@
               {
                 "id": "ac-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -2181,6 +2182,7 @@
               {
                 "id": "ac-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -2676,6 +2678,7 @@
               {
                 "id": "ac-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -2757,6 +2760,7 @@
               {
                 "id": "ac-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -2866,6 +2870,7 @@
               {
                 "id": "ac-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -3001,6 +3006,7 @@
               {
                 "id": "ac-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -3149,6 +3155,7 @@
               {
                 "id": "ac-14_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -4832,6 +4839,7 @@
               {
                 "id": "ac-22_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -4917,6 +4925,7 @@
               {
                 "id": "ac-23_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -5040,6 +5049,7 @@
               {
                 "id": "ac-24_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -5149,6 +5159,7 @@
               {
                 "id": "ac-25_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -5268,6 +5279,7 @@
               {
                 "id": "at-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Personal Information Requests and Correction of Personal Information\nTop 10ITsecurity actions: #6 Provide tailored cyber security training (ITSM.10.093)\nTop of page"
               },
               {
@@ -5539,6 +5551,7 @@
               {
                 "id": "at-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control\nTBSDirective on Personal Information Requests and Correction of Personal Information, Appendix B: Mandatory Procedures for Privacy Training\nTop 10ITsecurity actions: #6 Provide tailored cyber security training (ITSM.10.093)\nOffer tailored cyber security training to your employees (ITSAP.10.093)\nIntroduction to the cyber threat environment\nTop of page"
               },
               {
@@ -5804,6 +5817,7 @@
               {
                 "id": "at-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control\nTBSDirective on Personal Information Requests and Correction of Personal Information, Appendix B: Mandatory Procedures for Privacy Training\nTop of page"
               },
               {
@@ -5901,6 +5915,7 @@
               {
                 "id": "at-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices\nTBSDirective on Personal Information Requests and Correction of Personal Information"
               },
               {
@@ -6019,6 +6034,7 @@
               {
                 "id": "at-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices"
               },
               {
@@ -6142,6 +6158,7 @@
               {
                 "id": "au-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSPolicy on Internal Audit\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nDirective for the Control of COMSEC Material in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nDirective for the Control of COMSEC Material in the Canadian Private Sector (ITSD-06A) (upon request to the Cyber Centre)\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTop of page"
               },
               {
@@ -6441,6 +6458,7 @@
               {
                 "id": "au-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirection on the Secure Use of Commercial Cloud Services: Security Policy Implementation Notice (SPIN)\nTBSDirective on Service and Digital, Appendix C: Mandatory Procedures for Privacy and Monitoring of Network and Device Use Information Notices\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -6604,6 +6622,7 @@
               {
                 "id": "au-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix C: Mandatory Procedures for Privacy and Monitoring of Network and Device Use Information Notices\nTBSDirective on Privacy Practices\nTBSPolicy on Access to Information\nTBSDirective on Access to Information Requests\nTBSDirective on Personal Information Requests and Correction of Personal Information\nTBSEvent Logging Guidance, Appendix A: Recommended Events to Log\nTop of page"
               },
               {
@@ -6733,6 +6752,7 @@
               {
                 "id": "au-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -6942,6 +6962,7 @@
               {
                 "id": "au-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -7325,6 +7346,7 @@
               {
                 "id": "au-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSPolicy on Privacy Protection\nTop of page"
               },
               {
@@ -7482,6 +7504,7 @@
               {
                 "id": "au-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -7609,6 +7632,7 @@
               {
                 "id": "au-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -7866,6 +7890,7 @@
               {
                 "id": "au-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cryptographic algorithms for unclassified, protected A, and protected B information (ITSP.40.111)\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 180-4 Secure Hash Standard (SHS)\nNIST FIPS 202 SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions\nNetwork security auditing (ITSAP.80.086)\nTop of page"
               },
               {
@@ -8067,6 +8092,7 @@
               {
                 "id": "au-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "User authentication guidance for information technology systems (ITSP.30.031)\nImplementation guidance: Email domain protection (ITSP.40.065)\nTBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nTBSGovernment of Canada Guidance on Using Electronic Signatures\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 180-4 Secure Hash Standard (SHS)\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nNIST FIPS 202 SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions\nTop of page"
               },
               {
@@ -8196,6 +8222,7 @@
               {
                 "id": "au-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Service and Digital\nTBSDirective on Service and Digital\nTBSDirective on Privacy Practices\nTBSPolicy on Access to Information\nTBSDirective on Access to Information Requests\nTBSDirective on Personal Information Requests and Correction of Personal Information\nTop of page"
               },
               {
@@ -8423,6 +8450,7 @@
               {
                 "id": "au-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices\nTBSPolicy on Privacy Protection\nPrivacy Act\nPrivacy Regulations SOR/83-508\nTBSDirective on Service and Digital, Appendix L: Standard for Managing Metadata\nTop of page"
               },
               {
@@ -8588,6 +8616,7 @@
               {
                 "id": "au-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPrivacy Implementation Notice 2023-03: Guidance pertaining to the collection, use, retention, and disclosure of personal information that is publicly available online\nTop of page"
               },
               {
@@ -8765,6 +8794,7 @@
               {
                 "id": "au-14_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix C: Mandatory Procedures for Privacy and Monitoring of Network and Device Use Information Notices\nPrivacy Act"
               },
               {
@@ -8973,6 +9003,7 @@
               {
                 "id": "au-16_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -9100,6 +9131,7 @@
               {
                 "id": "ca-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nTBSDirective on Security Management\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTop of page"
               },
               {
@@ -9289,6 +9321,7 @@
               {
                 "id": "ca-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nISO 15408-1 Information security, cybersecurity and privacy protection – Evaluation criteria for IT security – Part 1: Introduction and general model\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -9550,6 +9583,7 @@
               {
                 "id": "ca-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Baseline security requirements for network security zones (ITSP.80.022)\nNetwork security zoning – Design considerations for placement of services within zones (ITSG-38)\nTBSGuidance on Preparing Information Sharing Agreements Involving Personal Information"
               },
               {
@@ -9714,6 +9748,7 @@
               {
                 "id": "ca-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -9857,6 +9892,7 @@
               {
                 "id": "ca-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nTop of page"
               },
               {
@@ -10246,6 +10282,7 @@
               {
                 "id": "ca-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nTop of page"
               },
               {
@@ -10399,6 +10436,7 @@
               {
                 "id": "ca-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -10532,6 +10570,7 @@
               {
                 "id": "ca-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "NIST SP 800-124 Rev. 2 Guidelines for Managing the Security of Mobile Devices in the Enterprise"
               },
               {
@@ -10655,6 +10694,7 @@
               {
                 "id": "cm-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nTop of page"
               },
               {
@@ -10940,6 +10980,7 @@
               {
                 "id": "cm-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "NIST SP 800-124 Rev. 2 Guidelines for Managing the Security of Mobile Devices in the Enterprise\nTBSGuidance Document: Taking Privacy into Account Before Making Contracting Decisions\nTop of page"
               },
               {
@@ -11263,6 +11304,7 @@
               {
                 "id": "cm-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "NIST SP 800-124 Rev. 2 Guidelines for Managing the Security of Mobile Devices in the Enterprise\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTop of page"
               },
               {
@@ -11416,6 +11458,7 @@
               {
                 "id": "cm-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTBSDirective on Automated Decision-Making\nTop of page"
               },
               {
@@ -11651,6 +11694,7 @@
               {
                 "id": "cm-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "NIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nTop of page"
               },
               {
@@ -11904,6 +11948,7 @@
               {
                 "id": "cm-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Baseline security requirements for network security zones (ITSP.80.022\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nTop of page"
               },
               {
@@ -12217,6 +12262,7 @@
               {
                 "id": "cm-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Application allow lists (ITSAP.10.095)\nTop 10ITsecurity action items: No. 10 Implement application allow lists (ITSM.10.095)\nTop 10ITsecurity actions: Number 4 harden operating systems and applications (ITSM.10.090)\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 180-4 Secure Hash Standard (SHS)\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nNIST FIPS 202 SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions\nTop of page"
               },
               {
@@ -12526,6 +12572,7 @@
               {
                 "id": "cm-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSPatch Management Guidance\nTBSPolicy on Privacy Protection\nPrivacy Act\nTop of page"
               },
               {
@@ -12655,6 +12702,7 @@
               {
                 "id": "cm-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nNIST SP 800-128 Guide for Security-Focused Configuration Management of Information Systems\nTop of page"
               },
               {
@@ -12766,6 +12814,7 @@
               {
                 "id": "cm-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Top 10ITsecurity actions to protect Internet connected networks and information (ITSM.10.089)\nTop 10ITsecurity action items: No. 10 Implement application allow lists (ITSM.10.095)\nTBSGuideline on Service and Digital\nPrivacy Act\nTBSPolicy on Privacy Protection\nTop of page"
               },
               {
@@ -12947,6 +12996,7 @@
               {
                 "id": "cm-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix B: Examples of Unacceptable Network and Device Use\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -13108,6 +13158,7 @@
               {
                 "id": "cm-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTop of page"
               },
               {
@@ -13215,6 +13266,7 @@
               {
                 "id": "cm-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTop of page"
               },
               {
@@ -13304,6 +13356,7 @@
               {
                 "id": "cm-14_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -13423,6 +13476,7 @@
               {
                 "id": "cp-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nDirective for the Control of COMSEC Material in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTBSDirective on Personal Information Requests and Correction of Personal Information\nTBSDirective on Social Insurance Number\nTop of page"
               },
               {
@@ -13754,6 +13808,7 @@
               {
                 "id": "cp-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nDeveloping yourITrecovery plan (ITSAP.40.004)\nDirective for the Control of COMSEC Material in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTBSGuidance Document: Taking Privacy into Account Before Making Contracting Decisions\nTop of page"
               },
               {
@@ -13913,6 +13968,7 @@
               {
                 "id": "cp-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control\nTop of page"
               },
               {
@@ -14122,6 +14178,7 @@
               {
                 "id": "cp-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nTBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control"
               },
               {
@@ -14332,6 +14389,7 @@
               {
                 "id": "cp-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix J: Standard on Systems that Manage Information and Data\nTop of page"
               },
               {
@@ -14571,6 +14629,7 @@
               {
                 "id": "cp-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix J: Standard on Systems that Manage Information and Data\nTop of page"
               },
               {
@@ -14764,6 +14823,7 @@
               {
                 "id": "cp-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Industry Canada, Priority Access for Dialing: telecommunications services in times of crisis (PDF)\nTop of page"
               },
               {
@@ -15039,6 +15099,7 @@
               {
                 "id": "cp-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTips for backing up your information (ITSAP.40.002)\nRCMPG1-001 Security Equipment Guide(restricted toGC)"
               },
               {
@@ -15258,6 +15319,7 @@
               {
                 "id": "cp-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTop of page"
               },
               {
@@ -15343,6 +15405,7 @@
               {
                 "id": "cp-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -15440,6 +15503,7 @@
               {
                 "id": "cp-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -15529,6 +15593,7 @@
               {
                 "id": "cp-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -15652,6 +15717,7 @@
               {
                 "id": "ia-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Identity Management\nTBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nTBSGuideline on Defining Authentication Requirements\nTBSGuideline on Service and Digital\nTop of page"
               },
               {
@@ -16050,6 +16116,7 @@
               {
                 "id": "ia-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "User authentication guidance for information technology systems (ITSP.30.031)\nGuidance on securely configuring network protocols (ITSP.40.062)\nRCMPGCPSG-006 Access Management Guide(restricted toGC) (PDF)\nTBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nTop of page"
               },
               {
@@ -16249,6 +16316,7 @@
               {
                 "id": "ia-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -16599,6 +16667,7 @@
               {
                 "id": "ia-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Identity Management\nPrivacy Act\nTop of page"
               },
               {
@@ -17054,6 +17123,7 @@
               {
                 "id": "ia-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "User authentication guidance for information technology systems (ITSP.30.031)\nTBSPolicy on Government Security\nTBSDirective on Identity Management\nTBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nPrivacy Act\nTop of page"
               },
               {
@@ -17125,6 +17195,7 @@
               {
                 "id": "ia-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -17212,6 +17283,7 @@
               {
                 "id": "ia-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cryptographic algorithms for unclassified, protected A, and protected B information (ITSP.40.111)\nUser authentication guidance for information technology systems (ITSP.30.031)\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nTop of page"
               },
               {
@@ -17476,6 +17548,7 @@
               {
                 "id": "ia-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "User authentication guidance for information technology systems (ITSP.30.031)\nTBSDirective on Identity Management\nTBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nTBSGuideline on Defining Authentication Requirements\nTBSGuideline on the Management of Public Key Infrastructure in the Government of Canada\nTBSGuideline on Identity Assurance\nPrivacy Act\nTop of page"
               },
               {
@@ -17607,6 +17680,7 @@
               {
                 "id": "ia-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -17692,6 +17766,7 @@
               {
                 "id": "ia-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "A zero-trust approach to security architecture (ITSM.10.008)\nSteps for effectively deploying multi-factor authentication (MFA) (ITSAP.00.105)\nTop of page"
               },
               {
@@ -17789,6 +17864,7 @@
               {
                 "id": "ia-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -18002,6 +18078,7 @@
               {
                 "id": "ia-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nTBSGuideline on Defining Authentication Requirements\nTBSGuideline on Identity Assurance\nPrivacy Act\nTop of page"
               },
               {
@@ -18159,6 +18236,7 @@
               {
                 "id": "ia-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nNIST FIPS 198-1 The Keyed-Hash Message Authentication Code (HMAC)"
               },
               {
@@ -18278,6 +18356,7 @@
               {
                 "id": "ir-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nTBSDirective on Security Management, Appendix I: Standard on Security Event Reporting\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTBSDirective on Privacy Practices\nOPCContain a privacy breach at your business\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTBSSignificant Event Information Sharing Protocol (restricted toGC) (contactTBSfor document)\nTop of page"
               },
               {
@@ -18451,6 +18530,7 @@
               {
                 "id": "ir-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nDeveloping your incident response plan (ITSAP.40.003)\nTBSDirective on Personal Information Requests and Correction of Personal Information, Appendix B: Mandatory Procedures for Privacy Training\nTBSDirective on Privacy Practices, Appendix B: Mandatory Procedures for Privacy Breaches\nTBSPrivacy Breach Management Toolkit\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTop of page"
               },
               {
@@ -18608,6 +18688,7 @@
               {
                 "id": "ir-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nDeveloping your incident response plan (ITSAP.40.003)\nTBSPrivacy Breach Management Toolkit\nTop of page"
               },
               {
@@ -19039,6 +19120,7 @@
               {
                 "id": "ir-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Directive for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTBSDirective on Security Management\nTBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nTBSDirective on Security Management, Appendix I: Standard on Security Event Reporting\nTBSDirective on Service and Digital, Appendix C: Mandatory Procedures for Privacy and Monitoring of Network and Device Use Information Notices\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nOPCContain a privacy breach at your business\nTBSPrivacy Breach Management Toolkit\nTBSDirective on Privacy Practices, Appendix E: Standard on Privacy in Web Analytics\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nDeveloping your incident response plan (ITSAP.40.003)\nRCMPGCPSG-003 Security Operations Centre Design Considerations Guide\nTop of page"
               },
               {
@@ -19174,6 +19256,7 @@
               {
                 "id": "ir-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nDeveloping your incident response plan (ITSAP.40.003)\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTop of page"
               },
               {
@@ -19335,6 +19418,7 @@
               {
                 "id": "ir-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Directive for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTBSSignificant Event Information Sharing Protocol (restricted toGC) (contactTBSfor document)\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSPrivacy Breach Management Toolkit\nOPCContain a privacy breach at your business\nTop of page"
               },
               {
@@ -19476,6 +19560,7 @@
               {
                 "id": "ir-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nDeveloping your incident response plan (ITSAP.40.003)\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nOPCContain a privacy breach at your business\nTBSPrivacy Breach Management Toolkit\nTop of page"
               },
               {
@@ -19633,6 +19718,7 @@
               {
                 "id": "ir-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Privacy Practices, Appendix B: Mandatory Procedures for Privacy Breaches\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nTBSDirective on Security Management, Appendix I: Standard on Security Event Reporting\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nDeveloping your incident response plan (ITSAP.40.003)\nPublic Safety Canada, Developing an Operational Technology and Information Technology Incident Response Plan\nBreach of Security Safeguards Regulations SOR/2018-64\nTop of page"
               },
               {
@@ -19824,6 +19910,7 @@
               {
                 "id": "ir-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Steps to address data spillage in the cloud (ITSAP.50.112)\nTop of page"
               },
               {
@@ -19986,6 +20073,7 @@
               {
                 "id": "ma-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTBSPolicy on the Planning and Management of Investments\nTBSDirective on the Management of Material\nTop of page"
               },
               {
@@ -20153,6 +20241,7 @@
               {
                 "id": "ma-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -20348,6 +20437,7 @@
               {
                 "id": "ma-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -20615,6 +20705,7 @@
               {
                 "id": "ma-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "User authentication guidance for information technology systems (ITSP.30.031)\nIdentity, credential, and access management (ICAM) (ITSAP.30.018)\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -20826,6 +20917,7 @@
               {
                 "id": "ma-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "PSPCContract Security Manual, Chapter 6: Handling and safeguarding information and assets\nTop of page"
               },
               {
@@ -20995,6 +21087,7 @@
               {
                 "id": "ma-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -21084,6 +21177,7 @@
               {
                 "id": "ma-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -21203,6 +21297,7 @@
               {
                 "id": "mp-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTop of page"
               },
               {
@@ -21374,6 +21469,7 @@
               {
                 "id": "mp-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nCryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nTop of page"
               },
               {
@@ -21475,6 +21571,7 @@
               {
                 "id": "mp-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nPSPCContract Security Manual, Chapter 6: Handling and safeguarding information and assets\nPSPCContract Security Manual, Annex C: Guidelines for safeguarding information and assets\nCryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nSecurity considerations for the use of removable media devices for Protected C and Classified Information (ITSB-112)\nTop of page"
               },
               {
@@ -21646,6 +21743,7 @@
               {
                 "id": "mp-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-001 Secure Destruction Guide\nITmedia sanitization (ITSP.40.006)\nRCMPG13-01 Secure Storage Room Guide (PDF)\nRCMPG13-02 Secure Demising Wall Guide (PDF)\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nSecurity considerations for the use of removable media devices for Protected C and Classified Information (ITSB-112)\nTop of page"
               },
               {
@@ -21845,6 +21943,7 @@
               {
                 "id": "mp-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nRCMPGCPSG-007 Transport, Transmittal and Storage of Protected and Classified Material(restricted toGC)\nCryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTop of page"
               },
               {
@@ -22120,6 +22219,7 @@
               {
                 "id": "mp-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "ITmedia sanitization (ITSP.40.006)\nRCMPG1-001 Security Equipment Guide (restricted toGC)\nRCMPGCPSG-001 Secure Destruction Guide\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nTop of page"
               },
               {
@@ -22263,6 +22363,7 @@
               {
                 "id": "mp-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nTop of page"
               },
               {
@@ -22418,6 +22519,7 @@
               {
                 "id": "mp-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nITmedia sanitization (ITSP.40.006)"
               },
               {
@@ -22541,6 +22643,7 @@
               {
                 "id": "pe-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nRCMPGCPSG-006 Access Management Guide (restricted toGC)\nTop of page"
               },
               {
@@ -22749,6 +22852,7 @@
               {
                 "id": "pe-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nRCMPGCPSG-006 Access Management Guide (restricted toGC)\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nRCMPGCPSG-005 Security Inspections Guide (restricted toGC)\nRCMPGCPSG-014 Physical Security Considerations in Facility Design (PDF)\nPSPCContract Security Manual, Chapter 5: Facility protection\nPSPCContract Security Manual, Annex B: Guidelines for facility protection\nPrivacy Act\nTop of page"
               },
               {
@@ -23115,6 +23219,7 @@
               {
                 "id": "pe-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "PSPCContract Security Manual\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nNational Building Code of Canada 2020\nNational Fire Code of Canada 2020\nDirective for the control ofCOMSECmaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nRCMPGCPSG-007 Transport, Transmittal and Storage of Protected and Classified Material (restricted toGC)\nRCMPGCPSG-010 Operational Physical Security Guide (restricted toGC)\nRCMPGCPSG-006 Access Management Guide (restricted toGC)\nRCMPGCPSG-014 Physical Security Considerations in Facility Design (PDF)\nRCMPG13-01 Secure Storage Room Guide (PDF)\nRCMPG13-02 Secure Demising Wall Guide (PDF)\nRCMPGCPSG-015 Guide to the Application of Physical Security Zones (PDF)\nPSPCContract Security Manual, Chapter 5: Facility protection\nPSPCContract Security Manual, Annex B: Guidelines for facility protection\nPSPCContract Security Manual, Annex D: Information technology security inspection process\nTop of page"
               },
               {
@@ -23232,6 +23337,7 @@
               {
                 "id": "pe-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-006 Access Management Guide (restricted toGC)\nTop of page"
               },
               {
@@ -23377,6 +23483,7 @@
               {
                 "id": "pe-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-015 Guide to the Application of Physical Security Zones (restricted toGC) (PDF)\nTop of page"
               },
               {
@@ -23560,6 +23667,7 @@
               {
                 "id": "pe-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-006 Access Management Guide (restricted toGC)\nRCMPGCPSG-010 Operational Physical Security Guide (restricted toGC)\nRCMPGCPSG-019 Protection, Detection, Response, and Recovery Guide (restricted toGC)\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nPrivacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices"
               },
               {
@@ -23752,6 +23860,7 @@
               {
                 "id": "pe-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nPrivacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -23861,6 +23970,7 @@
               {
                 "id": "pe-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -23962,6 +24072,7 @@
               {
                 "id": "pe-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -24085,6 +24196,7 @@
               {
                 "id": "pe-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-010 Operational Physical Security Guide (restricted toGC)\nTop of page"
               },
               {
@@ -24180,6 +24292,7 @@
               {
                 "id": "pe-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-004 Security Lighting Considerations Guide\nTop of page"
               },
               {
@@ -24348,6 +24461,7 @@
               {
                 "id": "pe-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-010 Operational Physical Security Guide (restricted toGC)\nNational Fire Code of Canada 2020\nTop of page"
               },
               {
@@ -24475,6 +24589,7 @@
               {
                 "id": "pe-14_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -24570,6 +24685,7 @@
               {
                 "id": "pe-15_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -24683,6 +24799,7 @@
               {
                 "id": "pe-16_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-006 Access Management Guide (restricted toGC)\nTop of page"
               },
               {
@@ -24772,6 +24889,7 @@
               {
                 "id": "pe-17_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-008 Physical Security Considerations for Remote and Telework Environments\nTop of page"
               },
               {
@@ -24885,6 +25003,7 @@
               {
                 "id": "pe-18_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Criteria for the design, fabrication, supply, installation and acceptance testing of walk-in, radio-frequency-shielded enclosures (ITSG-02) (upon request to the Cyber Centre)\nRCMPGCPSG-015 Guide to the Application of Physical Security Zones (restricted toGC) (PDF)\nTop of page"
               },
               {
@@ -24984,6 +25103,7 @@
               {
                 "id": "pe-19_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Criteria for the design, fabrication, supply, installation and acceptance testing of walk-in, radio-frequency-shielded enclosures (ITSG-02) (upon request to the Cyber Centre)\nCanadian Industrial TEMPEST program (CITP)\nEmission security (EMSEC) guidance (ITSG-11A) (Protected A)\nDirectives for the Application of Communications Security in the Government of Canada (ITSD-01A) (upon request to the Cyber Centre)\nTop of page"
               },
               {
@@ -25077,6 +25197,7 @@
               {
                 "id": "pe-20_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -25162,6 +25283,7 @@
               {
                 "id": "pe-21_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -25245,6 +25367,7 @@
               {
                 "id": "pe-22_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nPSPCContract Security Manuel, Annex C: Guidelines for safeguarding information and assets\nTop of page"
               },
               {
@@ -25336,6 +25459,7 @@
               {
                 "id": "pe-23_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -25471,6 +25595,7 @@
               {
                 "id": "pe-400_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-008 Physical Security Considerations for Remote and Telework Environments\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nRCMPGCPSG-007 Transport, Transmittal and Storage of Protected and Classified Material (restricted toGC)\nTBSDirective on Telework\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nRCMPG1-001 Security Equipment Guide (restricted toGC)\nTop of page"
               },
               {
@@ -25547,6 +25672,7 @@
               {
                 "id": "pe-401_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-003 Security Operations Centre Design Considerations Guide\nBest practices for setting up a security operations centre (SOC) (ITSAP.00.500)\nRCMPGCPSG-019 Protection, Detection, Response, and Recovery Guide (restricted toGC)"
               },
               {
@@ -25671,6 +25797,7 @@
               {
                 "id": "pl-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSGovernment of Canada Enterprise Architecture Framework\nTBSPolicy on Service and Digital\nTBSDirective on Service and Digital\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -25713,6 +25840,7 @@
               {
                 "id": "pl-01_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -25968,6 +26096,7 @@
               {
                 "id": "pl-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Service and Digital\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control"
               },
               {
@@ -26010,6 +26139,7 @@
               {
                 "id": "pl-02_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26196,6 +26326,7 @@
               {
                 "id": "pl-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Service and Digital\nTBSDirective on Service and Digital, Appendix A: Examples of Acceptable Network and Device Use\nTBSDirective on Service and Digital, Appendix B: Examples of Unacceptable Network and Device Use\nTBSPrivacy Implementation Notice 2021-01: Privacy Requirements for Official Social Media Accounts\nSecurity considerations when using social media in your organization (ITSM.10.066)\nUse of personal social media in the workplace (ITSAP.00.066)"
               },
               {
@@ -26238,6 +26369,7 @@
               {
                 "id": "pl-04_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26379,6 +26511,7 @@
               {
                 "id": "pl-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -26421,6 +26554,7 @@
               {
                 "id": "pl-07_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26554,6 +26688,7 @@
               {
                 "id": "pl-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital\nTBSGovernment of Canada Enterprise Architecture Framework\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nGuidance on defence in depth for cloud-based services (ITSP.50.104)\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -26596,6 +26731,7 @@
               {
                 "id": "pl-08_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26647,6 +26783,7 @@
               {
                 "id": "pl-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -26689,6 +26826,7 @@
               {
                 "id": "pl-09_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26746,6 +26884,7 @@
               {
                 "id": "pl-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSGovernment of Canada Security Control Profile for Cloud-based GC Services\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nTBSDirective on Service and Digital, Appendix J: Standard on Systems that Manage Information and Data\nBaseline security requirements for network security zones (ITSP.80.022)\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nBaseline cyber security controls for small and medium organizations\nIntroduction to the baseline controls\nSecurity and privacy controls and assurance activities catalogue – Baseline profiles (ITSP.10.033-01)\nTop of page"
               },
               {
@@ -26788,6 +26927,7 @@
               {
                 "id": "pl-10_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26845,6 +26985,7 @@
               {
                 "id": "pl-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSGovernment of Canada Security Control Profile for Cloud-based GC Services\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nBaseline Security Requirements for Network Security Zones (ITSP.80.022)\nDirective for the Control ofCOMSECMaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nBaseline cyber security controls for small and medium organizations\nIntroduction to the baseline controls\nSecurity and privacy controls and assurance activities catalogue – Baseline profiles (ITSP.10.033-01)"
               },
               {
@@ -26887,6 +27028,7 @@
               {
                 "id": "pl-11_fr_2",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "props": [
                   {
                     "name": "lang",
@@ -26968,6 +27110,7 @@
               {
                 "id": "pm-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSPolicy on Government Security\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSGuide to Integrated Risk Management\nTop of page"
               },
               {
@@ -27033,6 +27176,7 @@
               {
                 "id": "pm-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management\nTop of page"
               },
               {
@@ -27108,6 +27252,7 @@
               {
                 "id": "pm-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices\nTBSGuideline on Service and Digital\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nTop of page"
               },
               {
@@ -27195,6 +27340,7 @@
               {
                 "id": "pm-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSFramework for the Management of Risk\nTop of page"
               },
               {
@@ -27286,6 +27432,7 @@
               {
                 "id": "pm-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nGCInfo Source: Online Publishing Requirements\nTop of page"
               },
               {
@@ -27361,6 +27508,7 @@
               {
                 "id": "pm-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nTop of page"
               },
               {
@@ -27480,6 +27628,7 @@
               {
                 "id": "pm-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSGovernment of Canada Enterprise Architecture Framework\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nPrivacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -27583,6 +27732,7 @@
               {
                 "id": "pm-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Public Safety Canada Risk Management Guide for Critical Infrastructure Sectors\nTop of page"
               },
               {
@@ -27804,6 +27954,7 @@
               {
                 "id": "pm-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSFramework for the Management of Risk\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Service and Digital\nTBSGuideline on Service and Digital\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -27883,6 +28034,7 @@
               {
                 "id": "pm-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSFramework for the Management of Risk\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSGuideline on Service and Digital\nTop of page"
               },
               {
@@ -27988,6 +28140,7 @@
               {
                 "id": "pm-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management\nTBSGuideline on Service and Digital\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTop of page"
               },
               {
@@ -28143,6 +28296,7 @@
               {
                 "id": "pm-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Service and Digital\nTBSDirective on Service and Digital\nTBSGuideline on Service and Digital\nTop of page"
               },
               {
@@ -28218,6 +28372,7 @@
               {
                 "id": "pm-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Service and Digital\nTBSDirective on Service and Digital\nTBSGuideline on Service and Digital\nTop of page"
               },
               {
@@ -28313,6 +28468,7 @@
               {
                 "id": "pm-14_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nTBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nTBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control\nTop of page"
               },
               {
@@ -28388,6 +28544,7 @@
               {
                 "id": "pm-15_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -28483,6 +28640,7 @@
               {
                 "id": "pm-16_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix I: Standard on Security Event Reporting\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTop of page"
               },
               {
@@ -28564,6 +28722,7 @@
               {
                 "id": "pm-17_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTBSPolicy on Privacy Protection\nPSPCContract Security Manual, Chapter 6: Handling and safeguarding information and assets\nPSPCContract Security Manuel, Annex C: Guidelines for safeguarding information and assets\nTop of page"
               },
               {
@@ -28649,6 +28808,7 @@
               {
                 "id": "pm-18_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nOPCGuidance document: Getting Accountability Right with a Privacy Management Program\nOPCPrivacy Guide for Businesses\nTop of page"
               },
               {
@@ -28736,6 +28896,7 @@
               {
                 "id": "pm-19_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -28847,6 +29008,7 @@
               {
                 "id": "pm-20_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTop of page"
               },
               {
@@ -28926,6 +29088,7 @@
               {
                 "id": "pm-21_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nPrivacy Act\nPrivacy Regulations SOR/83-508\nPIPEDA\nTBSGuidance on Preparing Information Sharing Agreements Involving Personal Information\nTop of page"
               },
               {
@@ -29001,6 +29164,7 @@
               {
                 "id": "pm-22_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nPrivacy Regulations SOR/83-508\nTBSDirective on Privacy Practices\nTBSDirective on Personal Information Requests and Correction of Personal Information\nTBSGuidance on Preparing Information Sharing Agreements Involving Personal Information\nTop of page"
               },
               {
@@ -29110,6 +29274,7 @@
               {
                 "id": "pm-23_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -29197,6 +29362,7 @@
               {
                 "id": "pm-24_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSGuideline on Service and Digital\nPrivacy Act\nPIPEDA\nTop of page"
               },
               {
@@ -29290,6 +29456,7 @@
               {
                 "id": "pm-25_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nPrivacy Act\nPIPEDA\nTBSPrivacy Implementation Notice 2020-03: Protecting privacy when releasing information about a small number of individuals\nTop of page"
               },
               {
@@ -29387,6 +29554,7 @@
               {
                 "id": "pm-26_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Personal Information Requests and Correction of Personal Information\nPrivacy Act\nPIPEDA\nTop of page"
               },
               {
@@ -29480,6 +29648,7 @@
               {
                 "id": "pm-27_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nPrivacy Act\nTop of page"
               },
               {
@@ -29573,6 +29742,7 @@
               {
                 "id": "pm-28_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSFramework for the Management of Risk\nTBSGuide to Integrated Risk Management\nCSE-RCMP Harmonized Threat and Risk Assessment Methodology (TRA-1)\nTop of page"
               },
               {
@@ -29648,6 +29818,7 @@
               {
                 "id": "pm-29_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSFramework for the Management of Risk\nTBSGuide to Integrated Risk Management\nTop of page"
               },
               {
@@ -29789,6 +29960,7 @@
               {
                 "id": "pm-30_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cyber supply chain: An approach to assessing risk (ITSAP.10.070)\nSupply chain security for small and medium-sized organizations (ITSAP.00.070)\nPublic Safety Canada Risk Management Guide for Critical Infrastructure Sectors\nISO 27036-1 Cybersecurity — Supplier relationships — Part 1: Overview and concepts\nISO 27036-2 Cybersecurity — Supplier relationships — Part 2: Requirements\nISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nTop of page"
               },
               {
@@ -30078,6 +30250,7 @@
               {
                 "id": "pm-31_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nTop of page"
               },
               {
@@ -30167,6 +30340,7 @@
               {
                 "id": "pm-32_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -30286,6 +30460,7 @@
               {
                 "id": "ps-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSTBS Directive on Security Screening\nTBSDirective on Security Management, Appendix A: Mandatory Procedures for Security Screening Control\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nPSPCContract Security Manual\nTop of page"
               },
               {
@@ -30399,6 +30574,7 @@
               {
                 "id": "ps-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Screening\nTBSStandard on Security Screening, Appendix B: Security Screening Model and Criteria\nTop of page"
               },
               {
@@ -30582,6 +30758,7 @@
               {
                 "id": "ps-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nPSPCContract Security Manual\nTBSDirective on Security Management, Appendix A: Mandatory Procedures for Security Screening Control\nTBSDirective on Security Screening\nTBSDirective on Security Screening, Appendix A: Standard on Security Screening Model and Position Analysis\nForeign Interference and Security of Information Act\nSecurity of Information Act (SOIA)\nTop of page"
               },
               {
@@ -30744,6 +30921,7 @@
               {
                 "id": "ps-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Screening\nTBSDirective on Security Screening, Appendix A: Standard on Security Screening Model and Position Analysis\nTBSDirective on Security Screening, Appendix G: Mandatory Procedures for Granting, Ongoing Maintenance and Assurance of the Security Screening of an Individual\nForeign Interference and Security of Information Act\nSecurity of Information Act(SOIA)\nTBSDirective on Security Management, Appendix A: Mandatory Procedures for Security Screening Control\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTop of page"
               },
               {
@@ -30878,6 +31056,7 @@
               {
                 "id": "ps-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Screening\nTBSDirective on Security Screening, Appendix G: Mandatory Procedures for Granting, Ongoing Maintenance and Assurance of the Security Screening of an Individual\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control\nTop of page"
               },
               {
@@ -31051,6 +31230,7 @@
               {
                 "id": "ps-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Screening, Appendix F: Aftercare\nTop of page"
               },
               {
@@ -31176,6 +31356,7 @@
               {
                 "id": "ps-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSStandard on Security Screening\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nTop of page"
               },
               {
@@ -31269,6 +31450,7 @@
               {
                 "id": "ps-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSGuidelines for Discipline\nTop of page"
               },
               {
@@ -31334,6 +31516,7 @@
               {
                 "id": "ps-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Classification, Appendix B: Standard on Classification"
               },
               {
@@ -31453,6 +31636,7 @@
               {
                 "id": "pt-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -31632,6 +31816,7 @@
               {
                 "id": "pt-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTBSGuidance on Preparing Information Sharing Agreements Involving Personal Information\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nTop of page"
               },
               {
@@ -31815,6 +32000,7 @@
               {
                 "id": "pt-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTop of page"
               },
               {
@@ -31983,6 +32169,7 @@
               {
                 "id": "pt-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices\nPrivacy Act\nPIPEDA\nTop of page"
               },
               {
@@ -32124,6 +32311,7 @@
               {
                 "id": "pt-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Service and Digital\nTBSDirective on Service and Digital\nPrivacy Act\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -32259,6 +32447,7 @@
               {
                 "id": "pt-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -32417,6 +32606,7 @@
               {
                 "id": "pt-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSDirective on Privacy Practices\nTBSDirective on Social Insurance Number\nOPCInterpretation Bulletin: Sensitive Information\nPIPEDA\nCanadian Charter of Rights and Freedoms\nTop of page"
               },
               {
@@ -32512,6 +32702,7 @@
               {
                 "id": "pt-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection"
               },
               {
@@ -32660,6 +32851,7 @@
               {
                 "id": "ra-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTop of page"
               },
               {
@@ -32807,6 +32999,7 @@
               {
                 "id": "ra-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Organizational cyber security and privacy risk management activities (ITSP.10.036)\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTop of page"
               },
               {
@@ -33074,6 +33267,7 @@
               {
                 "id": "ra-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "CSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTBSGuide to Integrated Risk Management\nOrganizational cyber security and privacy risk management activities (ITSP.10.036)\nCyber supply chain: An approach to assessing risk (ITSAP.10.070)\nSupply chain security for small and medium-sized organizations (ITSAP.00.070)\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization"
               },
               {
@@ -33466,6 +33660,7 @@
               {
                 "id": "ra-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTBSPatch Management Guidance\nTBSGuideline on Service and Digital\nTBSDirective on Service and Digital, Appendix H: Standard on At-Risk Information Technology\nTop 10ITsecurity actions: No.2 patch operating systems and applications (ITSM.10.096)\nTop of page"
               },
               {
@@ -33545,6 +33740,7 @@
               {
                 "id": "ra-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -33640,6 +33836,7 @@
               {
                 "id": "ra-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "CSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTBSGuide to Integrated Risk Management\nTBSFramework for the Management of Risk\nTop of page"
               },
               {
@@ -33747,6 +33944,7 @@
               {
                 "id": "ra-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nTBSGuideline on Service and Digital\nTop of page"
               },
               {
@@ -33868,6 +34066,7 @@
               {
                 "id": "ra-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -33969,6 +34168,7 @@
               {
                 "id": "ra-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control"
               },
               {
@@ -34092,6 +34292,7 @@
               {
                 "id": "sa-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nTBSFramework for the Management of Risk\nTBSGuide to Integrated Risk Management\nTBSDirective on Privacy Practices\nPSPCContract Security Manual\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTop of page"
               },
               {
@@ -34183,6 +34384,7 @@
               {
                 "id": "sa-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSDirective on Security Management\nTBSDirective on Privacy Practices\nTBSGuideline on Service and Digital\nTop of page"
               },
               {
@@ -34372,6 +34574,7 @@
               {
                 "id": "sa-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Service and Digital, Appendix H: Standard on At-Risk Information Technology\nTBSGuideline on Service and Digital\nTBSGovernment of Canada Enterprise Architecture Framework\nTop of page"
               },
               {
@@ -34719,6 +34922,7 @@
               {
                 "id": "sa-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nTBSDirective on Identity Management, Appendix A: Standard on Identity and Credential Assurance\nBaseline security requirements for network security zones (ITSP.80.022)\nCryptographic algorithms forUNCLASSIFIED, PROTECTEDA, andPROTECTEDB information (ITSP.40.111)\nCryptographic Module Validation Program (CMVP)\nUser authentication guidance for information technology systems (ITSP.30.031)\nPSPCSupply Manual, Chapter 1 – Public procurement, Section 1.70 Privacy in contracting\nTBSGuidance Document: Taking Privacy into Account Before Making Contracting Decisions\nTop of page"
               },
               {
@@ -34964,6 +35168,7 @@
               {
                 "id": "sa-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -35818,6 +36023,7 @@
               {
                 "id": "sa-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Service and Digital\nTBSGuideline on Service and Digital\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nBaseline security requirements for network security zones (ITSP.80.022)\nOverview, Cyber security and privacy risk management: A lifecycle approach (ITSP.10.035)\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -36093,6 +36299,7 @@
               {
                 "id": "sa-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nPSPCContract Security Manual\nTBSGuideline on Service and Digital\nTBSGuidance Document: Taking Privacy into Account Before Making Contracting Decisions\nTBSDirection on the Secure Use of Commercial Cloud Services: Security Policy Implementation Notice (SPIN)\nTBSDirective on Privacy Practices\nTBSDirective on Privacy Practices, Appendix C: Standard on Privacy Impact Assessment\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTop of page"
               },
               {
@@ -36344,6 +36551,7 @@
               {
                 "id": "sa-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -36641,6 +36849,7 @@
               {
                 "id": "sa-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSSecurity Playbook for Information System Solutions\nISO/IEC 15408-3 Information security, cybersecurity and privacy protection – Evaluation criteria forITsecurity, Part 3: Security assurance components\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTop of page"
               },
               {
@@ -37423,6 +37632,7 @@
               {
                 "id": "sa-15_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSSecurity Playbook for Information System Solutions\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTop of page"
               },
               {
@@ -37516,6 +37726,7 @@
               {
                 "id": "sa-16_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix H: Mandatory Procedures for Security Awareness and Training Control\nTop of page"
               },
               {
@@ -37775,6 +37986,7 @@
               {
                 "id": "sa-17_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "ISO/IEC 15408-2 Information security, cybersecurity, and privacy protection — Evaluation criteria for IT security, Part 2: Security functional components\nISO/IEC 15408-3 Information security, cybersecurity and privacy protection – Evaluation criteria for IT security, Part 3: Security assurance components\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nNIST SP 800-160 Volume 1 Revision 1, Engineering Trustworthy Secure Systems"
               },
               {
@@ -38058,6 +38270,7 @@
               {
                 "id": "sa-20_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "System lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -38183,6 +38396,7 @@
               {
                 "id": "sa-21_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "PSPCContract Security Manual\nTBSDirective on Security Management, Appendix A: Mandatory Procedures for Security Screening Control\nTop of page"
               },
               {
@@ -38288,6 +38502,7 @@
               {
                 "id": "sa-22_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix H: Standard on At-Risk Information Technology\nTop of page"
               },
               {
@@ -38373,6 +38588,7 @@
               {
                 "id": "sa-23_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "System lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -38682,6 +38898,7 @@
               {
                 "id": "sa-24_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "NIST SP 800-160 Volume 1 Revision 1, Engineering Trustworthy Secure Systems\nNIST SP 800-160 Volume 2 Revision 1, Developing Cyber-Resilient Systems: A Systems Security Engineering Approach\nTop of page"
               },
               {
@@ -38980,6 +39197,7 @@
               {
                 "id": "sa-400_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital [19]\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nSystem lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nCryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)"
               },
               {
@@ -39108,6 +39326,7 @@
               {
                 "id": "sc-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -39249,6 +39468,7 @@
               {
                 "id": "sc-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -39468,6 +39688,7 @@
               {
                 "id": "sc-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Baseline security requirements for network security zones (ITSP.80.022)\nNetwork security zoning – Design considerations for placement of services within zones (ITSG-38)\nTop of page"
               },
               {
@@ -39585,6 +39806,7 @@
               {
                 "id": "sc-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -39738,6 +39960,7 @@
               {
                 "id": "sc-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Baseline security requirements for network security zones (ITSP.80.022)\nProtecting your organization against denial of service attacks (ITSAP.80.100)\nTop of page"
               },
               {
@@ -39819,6 +40042,7 @@
               {
                 "id": "sc-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Baseline security requirements for network security zones (ITSP.80.022)\nProtecting your organization against denial of service attacks (ITSAP.80.100)\nTop of page"
               },
               {
@@ -40518,6 +40742,7 @@
               {
                 "id": "sc-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Baseline security requirements for network security zones (ITSP.80.022)\nNetwork security zoning – Design considerations for placement of services within zones (ITSG-38)\nGuidance on securely configuring network protocols (ITSP.40.062)\nNIST SP 800-189 Resilient Interdomain Traffic Exchange: BGP Security and DDoS Mitigation\nTBSDirective on Service and Digital, Appendix F: Standard on Enterprise Information Technology Usage Restrictions\nTBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations\nTop of page"
               },
               {
@@ -40751,6 +40976,7 @@
               {
                 "id": "sc-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nGuidance on securely configuring network protocols (ITSP.40.062)\nCryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)"
               },
               {
@@ -40875,6 +41101,7 @@
               {
                 "id": "sc-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -40984,6 +41211,7 @@
               {
                 "id": "sc-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -41247,6 +41475,7 @@
               {
                 "id": "sc-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nGuidance on cloud service cryptography (ITSP.50.106)\nGuidance on securely configuring network protocols (ITSP.40.062)\nCryptographic Module Validation Program (CMVP)\nDirective for the control ofCOMSECmaterial in the Government of Canada (ITSD-03A) (upon request to the Cyber Centre)\nITSecurity Directive for Cryptographic Key Ordering (ITSD-09) (upon request to the Cyber Centre)\nTop of page"
               },
               {
@@ -41613,6 +41842,7 @@
               {
                 "id": "sc-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nDirectives for the application of communications security in the Government of Canada (ITSD-01A) (upon request to the Cyber Centre)\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules"
               },
               {
@@ -41811,6 +42041,7 @@
               {
                 "id": "sc-15_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -41952,6 +42183,7 @@
               {
                 "id": "sc-16_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -42037,6 +42269,7 @@
               {
                 "id": "sc-17_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPublic Key Infrastructure Configuration Requirements\nTBSX.509 Public Key Infrastructure Certificate Policy for Person Entity (restricted toGC) (PDF)\nTop of page"
               },
               {
@@ -42216,6 +42449,7 @@
               {
                 "id": "sc-18_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -42324,6 +42558,7 @@
               {
                 "id": "sc-19_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "To access this resource, please search for the title or issue number of the publication in theCNSS library:CNSSI5000 Voice Over Internet Protocol (VoIP) Telephony\nTop of page"
               },
               {
@@ -42453,6 +42688,7 @@
               {
                 "id": "sc-20_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protective domain name system (ITSAP.40.019)\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nTop of page"
               },
               {
@@ -42548,6 +42784,7 @@
               {
                 "id": "sc-21_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protective domain name system (ITSAP.40.019)\nTop of page"
               },
               {
@@ -42631,6 +42868,7 @@
               {
                 "id": "sc-22_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protective domain name system (ITSAP.40.019)\nTop of page"
               },
               {
@@ -42806,6 +43044,7 @@
               {
                 "id": "sc-23_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Guidance on securely configuring network protocols (ITSP.40.062)\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -42919,6 +43158,7 @@
               {
                 "id": "sc-24_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43004,6 +43244,7 @@
               {
                 "id": "sc-25_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43119,6 +43360,7 @@
               {
                 "id": "sc-26_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43196,6 +43438,7 @@
               {
                 "id": "sc-27_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43409,6 +43652,7 @@
               {
                 "id": "sc-28_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nTop of page"
               },
               {
@@ -43526,6 +43770,7 @@
               {
                 "id": "sc-29_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43723,6 +43968,7 @@
               {
                 "id": "sc-30_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43868,6 +44114,7 @@
               {
                 "id": "sc-31_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -43997,6 +44244,7 @@
               {
                 "id": "sc-32_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix J: Standard on Security Categorization\nGuidance on defence in depth for cloud-based services (ITSP.50.104)"
               },
               {
@@ -44185,6 +44433,7 @@
               {
                 "id": "sc-34_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -44272,6 +44521,7 @@
               {
                 "id": "sc-35_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -44399,6 +44649,7 @@
               {
                 "id": "sc-36_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -44548,6 +44799,7 @@
               {
                 "id": "sc-37_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "RCMPGCPSG-007 Transport, Transmittal and Storage of Protected and Classified Material (restricted toGC)\nTop of page"
               },
               {
@@ -44665,6 +44917,7 @@
               {
                 "id": "sc-38_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -44802,6 +45055,7 @@
               {
                 "id": "sc-39_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -44961,6 +45215,7 @@
               {
                 "id": "sc-40_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -45046,6 +45301,7 @@
               {
                 "id": "sc-41_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -45250,6 +45506,7 @@
               {
                 "id": "sc-42_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Security considerations for exposure of classifiedITsystems to mobile devices and wireless signals (ITSB-104)\nUsing your mobile device securely (ITSAP.00.001)\nSecurity considerations for nobile device deployments (ITSAP.70.002)\nTop of page"
               },
               {
@@ -45343,6 +45600,7 @@
               {
                 "id": "sc-43_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Service and Digital, Appendix F: Standard on Enterprise Information Technology Usage Restrictions\nTop of page"
               },
               {
@@ -45452,6 +45710,7 @@
               {
                 "id": "sc-44_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Top 10ITsecurity actions to protect Internet-connected networks and information (ITSM.10.089)\nTop of page"
               },
               {
@@ -45573,6 +45832,7 @@
               {
                 "id": "sc-45_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "IETF RFC 5905 Network Time Protocol Version 4: Protocol and Algorithms Specification\nTop of page"
               },
               {
@@ -45673,6 +45933,7 @@
               {
                 "id": "sc-46_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cross domain security primer (ITSB-120)\nSecurity considerations for the use of removable media devices for Protected C and Classified Information (ITSB-112)\nTop of page"
               },
               {
@@ -45754,6 +46015,7 @@
               {
                 "id": "sc-47_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management, Appendix D: Mandatory Procedures for Business Continuity Management Control\nTop of page"
               },
               {
@@ -45867,6 +46129,7 @@
               {
                 "id": "sc-48_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "NIST SP 800-160 Vol. 2 Rev. 1 Developing Cyber Resilient Systems: A Systems Security Engineering Approach\nTop of page"
               },
               {
@@ -45952,6 +46215,7 @@
               {
                 "id": "sc-49_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "System lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -46049,6 +46313,7 @@
               {
                 "id": "sc-50_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "System lifecycle cyber security and privacy risk management activities (ITSP.10.037)\nTop of page"
               },
               {
@@ -46124,6 +46389,7 @@
               {
                 "id": "sc-51_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -46290,6 +46556,7 @@
               {
                 "id": "sc-400_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Cryptographic algorithms for UNCLASSIFIED, PROTECTED A, and PROTECTED B information (ITSP.40.111)\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nCryptographic Module Validation Program (CMVP)\nTop of page"
               },
               {
@@ -46360,6 +46627,7 @@
               {
                 "id": "sc-401_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "To access these resources, please search for the title or issue number of the publication in theCNSS library:\nCNSSI5000 Voice Over Internet Protocol (VoIP) Telephony\nCNSSI5002 Telephony isolation used for unified communications implementations within physically protected spaces\nCNSSI5006 National Instruction for Approved Telephone Equipment"
               },
               {
@@ -46488,6 +46756,7 @@
               {
                 "id": "si-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTop of page"
               },
               {
@@ -46749,6 +47018,7 @@
               {
                 "id": "si-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPatch Management Guidance\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nTop of page"
               },
               {
@@ -47096,6 +47366,7 @@
               {
                 "id": "si-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nProtect your organization from malware (ITSAP.00.057)\nSpotting malicious email messages (ITSAP.00.100)\nTop of page"
               },
               {
@@ -47793,6 +48064,7 @@
               {
                 "id": "si-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTBSPolicy on Service and Digital\nTBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management, Appendix G: Mandatory Procedures for Security Event Management Control\nTBSGovernment of Canada Cyber Security Event Management Plan (GC CSEMP)\nTBSEvent Logging Guidance\nTop of page"
               },
               {
@@ -47910,6 +48182,7 @@
               {
                 "id": "si-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Government Security\nTop of page"
               },
               {
@@ -48071,6 +48344,7 @@
               {
                 "id": "si-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -48548,6 +48822,7 @@
               {
                 "id": "si-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 180-4: Secure Hash Standard (SHS)\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nNIST FIPS 202 SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions\nTop of page"
               },
               {
@@ -48695,6 +48970,7 @@
               {
                 "id": "si-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Implementation guidance: Email domain protection (ITSP.40.065)"
               },
               {
@@ -48919,6 +49195,7 @@
               {
                 "id": "si-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -49012,6 +49289,7 @@
               {
                 "id": "si-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -49259,6 +49537,7 @@
               {
                 "id": "si-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "ITmedia sanitization (ITSP.40.006)\nRCMPGCPSG-001 Secure Destruction Guide\nTBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control\nTBSDirective on Security Management, Appendix J: Standard on Security Categorization\nTBSDirective on Privacy Practices\nPrivacy Regulations SOR/83-508\nTop of page"
               },
               {
@@ -49456,6 +49735,7 @@
               {
                 "id": "si-13_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -49601,6 +49881,7 @@
               {
                 "id": "si-14_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -49686,6 +49967,7 @@
               {
                 "id": "si-15_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -49771,6 +50053,7 @@
               {
                 "id": "si-16_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -49854,6 +50137,7 @@
               {
                 "id": "si-17_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -50035,6 +50319,7 @@
               {
                 "id": "si-18_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSDirective on Personal Information Requests and Correction of Personal Information\nTop of page"
               },
               {
@@ -50282,6 +50567,7 @@
               {
                 "id": "si-19_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Privacy Act\nPrivacy Regulations SOR/83-508\nTBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTBSPrivacy Implementation Notice 2023-01: De-identification\nNIST SP 800-188 De-Identifying Government Datasets: Techniques and Governan\nTop of page"
               },
               {
@@ -50359,6 +50645,7 @@
               {
                 "id": "si-20_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -50440,6 +50727,7 @@
               {
                 "id": "si-21_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSPolicy on Privacy Protection\nTBSDirective on Privacy Practices\nTop of page"
               },
               {
@@ -50519,6 +50807,7 @@
               {
                 "id": "si-22_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -50598,6 +50887,7 @@
               {
                 "id": "si-23_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None.\nTop of page"
               },
               {
@@ -50841,6 +51131,7 @@
               {
                 "id": "si-400_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {
@@ -50969,6 +51260,7 @@
               {
                 "id": "sr-01_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nCSE-RCMPHarmonized Threat and Risk Assessment Methodology (TRA-1)\nTBSGuide to Integrated Risk Management\nProtecting your organization from software supply chain threats (ITSM.10.071)\nCyber supply chain: An approach to assessing risk (ITSAP.10.070)\nSupply chain security for small and medium-sized organizations (ITSAP.00.070)\nPublic Safety Canada Risk Management Guide for Critical Infrastructure Sectors\nTop of page"
               },
               {
@@ -51118,6 +51410,7 @@
               {
                 "id": "sr-02_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nProtecting your organization from software supply chain threats (ITSM.10.071)\nTop of page"
               },
               {
@@ -51351,6 +51644,7 @@
               {
                 "id": "sr-03_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protecting your organization from software supply chain threats (ITSM.10.071)\nCyber supply chain: An approach to assessing risk (ITSAP.10.070)\nPublic Safety Canada Risk Management Guide for Critical Infrastructure Sectors\nPSPCContract Security Manual\nISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nTop of page"
               },
               {
@@ -51526,6 +51820,7 @@
               {
                 "id": "sr-04_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protecting your organization from software supply chain threats (ITSM.10.071)\nISO 27036-1 Cybersecurity — Supplier relationships — Part 1: Overview and concepts\nISO 27036-2 Cybersecurity — Supplier relationships — Part 2: Requirements\nISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nCyber supply chain: An approach to assessing risk (ITSAP.10.070)\nPublic Safety Canada Risk Management Guide for Critical Infrastructure Sectors\nTop of page"
               },
               {
@@ -51689,6 +51984,7 @@
               {
                 "id": "sr-05_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control\nTBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nProtecting your organization from software supply chain threats (ITSM.10.071)\nPSPCContract Security Manual\nISO 27036-1 Cybersecurity — Supplier relationships — Part 1: Overview and concepts\nISO 27036-2 Cybersecurity — Supplier relationships — Part 2: Requirements\nISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nTop of page"
               },
               {
@@ -51790,6 +52086,7 @@
               {
                 "id": "sr-06_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "TBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control\nProtecting your organization from software supply chain threats (ITSM.10.071)\nCyber supply chain: An approach to assessing risk (ITSAP.10.070)\nISO 27036-1 Cybersecurity — Supplier relationships — Part 1: Overview and concepts\nISO 27036-2 Cybersecurity — Supplier relationships — Part 2: Requirements\nISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nNIST FIPS 140-3 Security Requirements for Cryptographic Modules\nNIST FIPS 186-5 Digital Signature Standard (DSS)\nNIST FIPS 202 SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions\nTop of page"
               },
               {
@@ -51867,6 +52164,7 @@
               {
                 "id": "sr-07_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protecting your organization from software supply chain threats (ITSM.10.071)\nISO 27036-1 Cybersecurity — Supplier relationships — Part 1: Overview and concepts\nISO 27036-2 Cybersecurity — Supplier relationships — Part 2: Requirements\nTop of page"
               },
               {
@@ -51956,6 +52254,7 @@
               {
                 "id": "sr-08_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "Protecting your organization from software supply chain threats (ITSM.10.071)\nISO 27036-1 Cybersecurity — Supplier relationships — Part 1: Overview and concepts\nISO 27036-2 Cybersecurity — Supplier relationships — Part 2: Requirements\nTop of page"
               },
               {
@@ -52083,6 +52382,7 @@
               {
                 "id": "sr-09_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "ISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nTop of page"
               },
               {
@@ -52200,6 +52500,7 @@
               {
                 "id": "sr-10_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "ISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nTop of page"
               },
               {
@@ -52353,6 +52654,7 @@
               {
                 "id": "sr-11_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "ISO 20243-1 Information technology — Open Trusted Technology ProviderTM Standard (O-TTPS) — Part 1: Requirements and recommendations for mitigating maliciously tainted and counterfeit products\nTop of page"
               },
               {
@@ -52434,6 +52736,7 @@
               {
                 "id": "sr-12_references",
                 "name": "references",
+                "ns": "urn:near-ai-vscode:compliance",
                 "prose": "None."
               },
               {

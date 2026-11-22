@@ -105,7 +105,9 @@ test('imports related control links, references and GC discussion', async () => 
   const result: any = await imported();
   const control = result.catalog.catalog.groups.find((group: any) => group.id === 'xa').controls[0];
   assert.deepEqual(control.links, [{ rel: 'related', href: '#xa-400' }]);
-  assert.equal(control.parts.find((part: any) => part.name === 'references').prose, 'Our synthetic reference.');
+  const references = control.parts.find((part: any) => part.name === 'references');
+  assert.equal(references.prose, 'Our synthetic reference.');
+  assert.equal(references.ns, 'urn:near-ai-vscode:compliance');
   assert.equal(control.parts.find((part: any) => part.name === 'gc-discussion').ns, 'urn:near-ai-vscode:compliance');
 });
 

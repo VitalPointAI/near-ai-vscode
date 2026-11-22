@@ -67,7 +67,7 @@ export function controlFromSection(section: Element, lang: Lang): ParsedControl 
   const parts: Record<string, unknown>[] = [{ id: `${id}_smt`, name: 'statement', prose: rendered.prose }];
   if (content.discussion?.length) parts.push({ id: `${id}_guidance`, name: 'guidance', prose: content.discussion.join('\n') });
   if (content['gc-discussion']?.length) parts.push({ id: `${id}_gc`, name: 'gc-discussion', ns: NS, prose: content['gc-discussion'].join('\n') });
-  if (content.references?.length) parts.push({ id: `${id}_references`, name: 'references', prose: content.references.join('\n') });
+  if (content.references?.length) parts.push({ id: `${id}_references`, name: 'references', ns: NS, prose: content.references.join('\n') });
   const related = (content.related ?? []).flatMap((value) => value.match(/[A-Z]{2}-\d+(?:\(\d+\))?/g) ?? []).map((relatedId) => ({ rel: 'related', href: `#${normalizeId(relatedId)}` }));
   const control: Record<string, unknown> = { id, title, class: klass, props, parts, ...(related.length ? { links: related } : {}) };
   if (rendered.params.length) control.params = rendered.params.map((parameter, index) => ({ id: parameter, label: content[klass]?.join(' ').match(/\[(?:Assignment|Selection(?: \(1 or more\))?):\s*([^\]]+)\]/g)?.[index] ?? parameter }));
