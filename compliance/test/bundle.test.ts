@@ -99,6 +99,9 @@ test('scheduled dashboards carry only same-commit CI tests and preserve their pr
     const output = path.join(dir, scheduledCommit);
     writeFileSync(inputsFile, JSON.stringify({ ...inputs, commit: scheduledCommit, kind: 'scheduled', collectors: {} }));
     assert.equal(await main(['bundle', '--inputs', inputsFile, '--out', output, '--previous', initial]), 0);
+    const writtenRows = readFileSync(path.join(output, 'test-rows.json'), 'utf8');
+    if (expected === 'met') assert.equal(writtenRows, readFileSync(path.join(initial, 'test-rows.json'), 'utf8'));
+    else assert.deepEqual(JSON.parse(writtenRows), []);
     const dashboard = JSON.parse(readFileSync(path.join(output, 'dashboard/dashboard.json'), 'utf8'));
     const row = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'unclassified' && control === 'ac-03');
     const evidence = row.components[0].evidence[0];
@@ -109,6 +112,16 @@ test('scheduled dashboards carry only same-commit CI tests and preserve their pr
       assert.equal(evidence.runUrl, runUrl);
     }
   }
+
+  const scheduled = { ...inputs, kind: 'scheduled' as const, collectors: {} };
+  const initialObservations = path.join(initial, 'observations.json');
+  const payload = JSON.parse(readFileSync(initialObservations, 'utf8'));
+  const [firstObservation] = payload.observations;
+  payload.observations.push({ ...firstObservation, subject: 'hub', runUrl: 'https://github.com/owner/repo/actions/runs/456' });
+  writeFileSync(initialObservations, JSON.stringify(payload));
+  await assert.rejects(runBundle(scheduled, path.join(dir, 'changed-manifest-file'), { previous: initial }), /previous bundle does not verify/);
+  writeManifest(initial, { commit, createdAt: collectedAt.toISOString() });
+  await assert.rejects(runBundle(scheduled, path.join(dir, 'conflicting-provenance'), { previous: initial }), /lack consistent collection provenance/);
 });
 
 test('CI-shaped bundle CLI inputs load the shipped profiles, components and evidence rules', async () => {

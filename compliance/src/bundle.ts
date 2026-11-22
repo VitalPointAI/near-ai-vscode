@@ -78,10 +78,11 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
     } catch (error) { collectorRows.push({ id: collector.id, ran: true, ok: false, error: codeOf(error) }); }
   }
   if (supplied.previous) {
-    const verified = verifyManifest(supplied.previous);
+    const previousDir = path.resolve(supplied.previous);
+    const verified = verifyManifest(previousDir);
     if (!verified.ok) throw new Error(`previous bundle does not verify: ${verified.errors.join('; ')}`);
-    const previousFile = path.join(path.resolve(supplied.previous), 'observations.json');
-    const previous = JSON.parse(readFileSync(previousFile, 'utf8')) as { observations?: unknown };
+    const manifest = JSON.parse(readFileSync(path.join(previousDir, 'manifest.json'), 'utf8')) as BundleManifest;
+    const previous = JSON.parse(readFileSync(path.join(previousDir, 'observations.json'), 'utf8')) as { observations?: unknown };
     if (!Array.isArray(previous.observations)) throw new Error('previous observations.json is invalid');
     const ran = new Set(collectorRows.filter((row) => row.ran).map((row) => row.id));
     for (const raw of previous.observations) {
@@ -94,21 +95,26 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
       const dates = observations.filter((item) => item.collector === row.id).map((item) => item.collectedAt).sort();
       if (dates.length) { row.ok = true; row.lastCollectedAt = dates.at(-1); }
     }
-    if (!ran.has('tests') && observations.some((item) => item.collector === 'tests' && item.commit === inputs.commit)) {
-      const previousDir = path.resolve(supplied.previous);
-      const manifest = JSON.parse(readFileSync(path.join(previousDir, 'manifest.json'), 'utf8')) as BundleManifest;
-      const reportFile = path.join(previousDir, 'test-rows.json');
-      if (manifest.commit === inputs.commit && existsSync(reportFile)) {
-        const rows = JSON.parse(readFileSync(reportFile, 'utf8')) as TestReportRow[];
-        if (!Array.isArray(rows)) throw new Error('previous test-rows.json is invalid');
-        for (const row of rows) testRows.push(redactTestRow(row));
-      }
+    const reportFile = path.join(previousDir, 'test-rows.json');
+    if (!ran.has('tests') && manifest.commit === inputs.commit && existsSync(reportFile)) {
+      const rows: unknown = JSON.parse(readFileSync(reportFile, 'utf8'));
+      if (!Array.isArray(rows)) throw new Error('previous test-rows.json is invalid');
+      for (const row of rows) testRows.push(redactTestRow(row));
     }
   }
-  const testEvidence = observations.find((item) => item.collector === 'tests' && item.commit === inputs.commit);
+  // The bundle's per-package observations hold provenance for its combined test rows.
+  const testObservations = observations.filter((item) => item.collector === 'tests');
+  const [testEvidence] = testObservations;
+  if (testRows.length && (!testEvidence || testObservations.some((item) => item.commit !== inputs.commit ||
+    item.collectedAt !== testEvidence.collectedAt || item.runUrl !== testEvidence.runUrl))) {
+    throw new Error('test rows lack consistent collection provenance for the bundle commit');
+  }
+  if (testRows.length && testObservations.reduce((count, item) => count + (item.counts?.rows ?? 0), 0) !== testRows.length) {
+    throw new Error('test row count does not match the test collector observations');
+  }
   const dashboardInput: DashboardBuildInput = {
     commit: inputs.commit, generatedAt: now.toISOString(), now, head: inputs.commit, levels: [], components: [], rules: [], observations,
-    ...(testEvidence ? { testEvidence: { collectedAt: testEvidence.collectedAt, runUrl: testEvidence.runUrl } } : {}),
+    ...(testRows.length && testEvidence ? { testEvidence: { collectedAt: testEvidence.collectedAt, runUrl: testEvidence.runUrl } } : {}),
     testRows: testRows.map(redactTestRow), source: { kind: inputs.kind === 'pr' ? 'local' : inputs.kind, ref: inputs.commit }, ...(inputs.runUrl ? { runUrl: inputs.runUrl } : {}), ...inputs.dashboard
   };
   const dashboard = buildDashboard(dashboardInput);

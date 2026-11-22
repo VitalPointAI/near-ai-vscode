@@ -23,7 +23,12 @@ export function redactObservation(value: Observation): Observation {
 }
 
 export function redactTestRow(value: TestReportRow): TestReportRow {
-  if (!value.file || !value.name || !['passed', 'failed', 'skipped', 'todo'].includes(value.status) || !Number.isFinite(value.ms)) throw new Error('unsafe test row');
+  if (!value || typeof value.file !== 'string' || !value.file || typeof value.name !== 'string' || !value.name ||
+    !Array.isArray(value.path) || !value.path.every((part) => typeof part === 'string') ||
+    !['passed', 'failed', 'skipped', 'todo'].includes(value.status) ||
+    (value.skip !== null && typeof value.skip !== 'string') || !Number.isFinite(value.ms)) {
+    throw new Error('unsafe test row');
+  }
   return { file: value.file, path: [...value.path], name: value.name, status: value.status, skip: value.skip, ms: value.ms };
 }
 
