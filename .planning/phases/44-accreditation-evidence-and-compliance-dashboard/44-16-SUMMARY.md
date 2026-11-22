@@ -53,6 +53,8 @@ Approved, reproducible OSCAL catalogue data covers Canadian Cyber Centre, NIST, 
 
 On 2026-11-21 the owner approved public commit of the licence-checked data, NIST v1.6.0 / Rev. 5.2.0, the French G14 limitation and ITSG historical drift, and retaining the five cited-page 404s without substitution.
 
+The [catalogue-data PR](https://github.com/VitalPointAI/near-ai-vscode/pull/154) was opened on 2026-11-22 from `chore/phase-44-catalogue-review` at `e69606ff`. The branch contains the 21 data paths and the VSIX exclusions. The data secret scan and the release-content check passed, and the generated VSIX archive contains neither excluded directory.
+
 ## Deviations from Plan
 
 ### Auto-fixed Issues
