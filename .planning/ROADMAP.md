@@ -269,11 +269,11 @@ Plans:
   2. The Staff Room shows who is online and what they work on, the sync control shows every connection state in one plain sentence with one action, and an offline banner explains that work is kept and may become contested. (MUS-09)
   3. Two- and three-person scenarios over a real hub pass: co-edit, propose, guard, approve on another machine with equal digests; approve offline and reject online shows contested until a fresh decision; a late joiner loads from a compaction. (MUS-09)
   4. A two-compartment label leak test over the hub passes, README and SECURITY describe multi-user staff projects with the self-declared and not-accreditation sentences, and drop A is released in 0.4.x. (MUS-09)
-**Plans:** 20 plans in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
+**Plans:** 1/20 plans executed in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
 **UI hint**: yes
 
 Plans:
-- [ ] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
+- [x] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
 - [ ] 33-02-PLAN.md: Wave 1. Phase 32 follow-ups: join request cap (IN-06), Start Again count check (IN-02), withheld products notice
 - [ ] 33-03-PLAN.md: Wave 2. POST-01 `roster.require` with the fold-wide stop, and `hub.readmit` with the witness clearing
 - [ ] 33-04-PLAN.md: Wave 2. Editor binding core: no echo, undo only your own changes, read-only header, resync, seeded fuzz
@@ -1762,7 +1762,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
-| 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
+| 33. Live multi-user staff projects | 1/20 | In Progress (drop A release) | - |
 | 33.1. Assigned positions and handover | 0/TBD | Not started (after Phase 33, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
