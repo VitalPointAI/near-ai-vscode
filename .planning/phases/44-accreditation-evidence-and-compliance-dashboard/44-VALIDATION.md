@@ -72,6 +72,13 @@ Filled from the plans' `<automated>` blocks once the plans pass the checker. Eac
 
 ---
 
+## Local verification on 2026-11-22
+
+- The pinned OSCAL CLI 3.2.0 resolved all eight checked-in profiles after the Medium profile importer limited alterations to selected and organization-wide controls.
+- A generated, hash-verified bundle refreshed a scratch copy of the production docs build. In Chromium, the Protected B AC-03 drawer linked to the official source, opened its French text, and restored focus when closed. The production build passed private-overlay isolation.
+- The root suite reported 6,180 passes, eight skips and one failure when Git encountered a temporary ref lock in the interrupted-push fixture. The failed case passed on its own.
+- The GitHub branch-protection read did not list `docs` as a required check. The `compliance-settings` environment lookup returned HTTP 404. These owner controls still require live verification.
+
 ## Validation Sign-Off
 
 - [ ] All tasks have `<automated>` verify or Wave 0 dependencies
