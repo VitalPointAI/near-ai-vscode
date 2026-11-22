@@ -55,6 +55,8 @@ On 2026-11-21 the owner approved public commit of the licence-checked data, NIST
 
 The [catalogue-data PR](https://github.com/VitalPointAI/near-ai-vscode/pull/154) was opened on 2026-11-22 from `chore/phase-44-catalogue-review` at `e69606ff`. The branch contains the 21 data paths and the VSIX exclusions. The data secret scan and the release-content check passed, and the generated VSIX archive contains neither excluded directory.
 
+The first review identified an ITSP.10.171 withdrawal-boundary bug. The corrected catalogue revision `1c79424e` includes faithful withdrawal notices, distinct catalogue UUIDs, a deduplicated ITSP mapping, corrected baseline and Medium text extraction, and the approved assessor catalogue. Its 22 data files passed secret scanning. All nine CI jobs passed, and GitHub recorded owner approval and the review bot's approval of that exact commit.
+
 ## Deviations from Plan
 
 ### Auto-fixed Issues
