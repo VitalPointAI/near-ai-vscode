@@ -82,7 +82,11 @@ jobs:
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const repository = process.env.REPOSITORY; const commit = process.env.COMMIT;
-            const collectors = { settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository }, audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] } };
+            const collectors = {
+              documents: { repoRoot: "." }, crypto: { repoRoot: "." },
+              settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository },
+              audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] }
+            };
             const release = JSON.parse(readFileSync("compliance/out/latest-release.json", "utf8"));
             if (/^v?\d+\.\d+\.\d+$/.test(release.tag_name)) {
               collectors.release = { repository, tag: release.tag_name };

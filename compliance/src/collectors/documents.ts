@@ -60,6 +60,7 @@ export const documentsCollector: Collector<DocumentsInput> = Object.freeze({
     if (!input || typeof input.repoRoot !== 'string' || input.repoRoot === '') throw new Error('documents collector: input.repoRoot is required');
     const observations: Observation[] = [];
     for (const document of REQUIRED_DOCUMENTS) {
+      const subject = document.path.toLowerCase();
       let text: string | undefined;
       try {
         text = await context.readFile(safeDocumentPath(input.repoRoot, document.path));
@@ -67,7 +68,7 @@ export const documentsCollector: Collector<DocumentsInput> = Object.freeze({
         if (!isMissing(error)) throw new Error(`documents collector: could not read ${document.path}: ${error instanceof Error ? error.message : String(error)}`);
       }
       if (text === undefined) {
-        observations.push({ collector: 'documents', subject: document.path, passed: false, collectedAt: context.now.toISOString(), commit: context.commit, counts: { missing: 1, missingHeadings: document.headings.length } });
+        observations.push({ collector: 'documents', subject, passed: false, collectedAt: context.now.toISOString(), commit: context.commit, counts: { missing: 1, 'missing-headings': document.headings.length } });
         continue;
       }
       const headings = headingsIn(text);
@@ -78,11 +79,11 @@ export const documentsCollector: Collector<DocumentsInput> = Object.freeze({
       const reviewOk = !document.reviewRequired || reviewFresh;
       observations.push({
         collector: 'documents',
-        subject: document.path,
+        subject,
         passed: missingHeadings === 0 && reviewOk,
         collectedAt: review?.toISOString() ?? context.now.toISOString(),
         commit: context.commit,
-        counts: { missing: 0, missingHeadings, ...(document.reviewRequired ? { missingReview: review ? 0 : 1, staleReview: review && !reviewFresh ? 1 : 0 } : {}) }
+        counts: { missing: 0, 'missing-headings': missingHeadings, ...(document.reviewRequired ? { 'missing-review': review ? 0 : 1, 'stale-review': review && !reviewFresh ? 1 : 0 } : {}) }
       });
     }
     return observations;

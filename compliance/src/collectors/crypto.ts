@@ -39,7 +39,8 @@ function inventoryRows(text: string): readonly { algorithm: string; standing: st
 }
 
 function subjectFor(algorithm: string): string {
-  const subject = algorithm.trim().toLowerCase().replace(/\s+/g, '-');
+  // Inventory names may include Markdown code spans and possessives.
+  const subject = algorithm.trim().toLowerCase().replace(/['`]/g, '').replace(/\s+/g, '-');
   if (subject === '') throw new Error('crypto collector: inventory has an empty Algorithm cell');
   return subject;
 }
