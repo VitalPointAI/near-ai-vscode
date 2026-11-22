@@ -24,9 +24,22 @@ test('buildSsp keeps the product statement and organization placeholder separate
   const byComponent = document['system-security-plan']['control-implementation']['implemented-requirements'][0]['by-components'][0];
   assert.equal(byComponent['description'], 'The product checks access.');
   assert.match(byComponent.remarks, new RegExp(TO_BE_COMPLETED));
+  assert.equal(byComponent.export.responsibilities[0]['provided-uuid'], byComponent.export.provided[0].uuid);
 });
 
 test('buildSsp records dashboard state as evidence remarks', () => {
   const document: any = buildSsp(input);
   assert.match(document['system-security-plan']['control-implementation']['implemented-requirements'][0].remarks, /Met/);
+});
+
+test('controls without product components remain incomplete at the authorization boundary', () => {
+  const document: any = buildSsp({ ...input, rows: [{ ...input.rows[0], state: 'not-met', components: [] }] });
+  const ssp = document['system-security-plan'];
+  const boundary = ssp['system-implementation'].components.find((component: { type: string }) => component.type === 'this-system');
+  const implementation = ssp['control-implementation']['implemented-requirements'][0]['by-components'][0];
+  assert.equal(implementation['component-uuid'], boundary.uuid);
+  assert.equal(implementation['implementation-status'].state, 'planned');
+  assert.equal(implementation.description, TO_BE_COMPLETED);
+  assert.equal(implementation.export, undefined);
+  assert.deepEqual(validateOscal(document, 'system-security-plan', { ours: true }), { ok: true, errors: [] });
 });

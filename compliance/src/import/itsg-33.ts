@@ -4,14 +4,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { mainOf, normalizeId, parseHtml } from './lib/cyberHtml.ts';
 import { createFetcher, type Fetcher } from './lib/fetch.ts';
-import { newProfile } from './lib/oscalBuild.ts';
+import { newCatalog, newProfile } from './lib/oscalBuild.ts';
 export const ITSG33_ANNEX_3A_URL = 'https://www.cyber.gc.ca/en/guidance/annex-3a-security-control-catalogue-itsg-33';
 export const ITSG33_PROFILE_3_URL = 'https://www.cyber.gc.ca/en/guidance/annex-4a-profile-3-secret-medium-integrity-medium-availability-itsg-33';
 export const ITSG33_PROFILE_3_PDF_URL = 'https://www.cyber.gc.ca/sites/default/files/cyber/publications/itsg33-ann4a-3-eng.pdf';
 export type Control = { readonly id: string; readonly title: string };
 const text = (node: any): string => ('value' in node ? node.value : (node.childNodes ?? []).map(text).join('')).replace(/\s+/g, ' ').trim();
 const elements = (node: any): any[] => [node, ...(node.childNodes ?? []).flatMap(elements)];
-export function parseAnnex3a(html: string): Control[] { const controls = elements(mainOf(parseHtml(html))).filter((node) => node.tagName === 'h3' || node.tagName === 'li').flatMap((node) => { const match = /^([A-Z]{2}-\d+(?:\(\d+\))?)\s+(.+)$/.exec(text(node)); return match ? [{ id: normalizeId(match[1]), title: match[2] }] : []; }); if (!controls.length) throw new Error('Annex 3A page has no control identifiers'); return controls; }
+export function annexControlHeading(text: string): Control | undefined {
+  const match = /^([A-Z]{2}-\d+(?:\(\d+\))?)\s+(?:(?:-|–|—)\s+)?(.+)$/.exec(text);
+  return match ? { id: normalizeId(match[1]), title: match[2] } : undefined;
+}
+export function parseAnnex3a(html: string): Control[] { const controls = elements(mainOf(parseHtml(html))).filter((node) => node.tagName === 'h3' || node.tagName === 'li').flatMap((node) => { const control = annexControlHeading(text(node)); return control ? [control] : []; }); if (!controls.length) throw new Error('Annex 3A page has no control identifiers'); return controls; }
 export function parseProfile3(html: string): string[] { return [...new Set(elements(mainOf(parseHtml(html))).filter((node) => node.tagName === 'li').map(text).filter((id) => /^[A-Z]{2}-\d+(?:\(\d+\))?$/.test(id)).map(normalizeId))].sort(); }
 /** The archived Profile 3 web page no longer carries Table 4; read its official downloadable PDF instead. */
 export function parseProfile3Pdf(text: string): string[] { const ids = text.split(/\r?\n/).flatMap((line) => { const match = /^\s*([A-Z]{2})\s+(\d+)(?:\s+\((\d+)\))?.*\sX(?:\s|$)/.exec(line); return match ? [normalizeId(`${match[1]}-${match[2]}${match[3] ? `(${match[3]})` : ''}`)] : []; }); if (!ids.length) throw new Error('ITSG-33 Profile 3 PDF has no selected control identifiers'); return [...new Set(ids)].sort(); }
@@ -21,4 +25,38 @@ const ITSP_CATALOGUE = path.join('catalogs', 'itsp-10-033', 'catalog.json');
 const controlList = (catalog: unknown): Control[] => { const groups = Array.isArray((catalog as any)?.catalog?.groups) ? (catalog as any).catalog.groups : []; const result = groups.flatMap((group: any) => Array.isArray(group?.controls) ? group.controls : []).filter((control: any): control is Control => typeof control?.id === 'string' && typeof control?.title === 'string').map((control: Control) => ({ id: control.id, title: control.title })); if (!result.length) throw new Error('ITSG-33 importer needs the already imported ITSP.10.033 catalogue with controls'); return result; };
 const profile3 = (ids: readonly string[]) => { const profile = newProfile('ITSG-33 Annex 4A Profile 3', 'ITSG-33', '2026-11-21T00:00:00Z') as any; profile.profile.imports.push({ href: '../catalogs/itsg-33/annex-3a.json', 'include-controls': [{ 'with-ids': ids }] }); profile.profile.merge = { 'as-is': true }; return profile; };
 /** Imports Annex 3A, Profile 3, and an id-and-title-only crosswalk to the imported ITSP catalogue. */
-export async function importSource(context: { readonly offlinePages?: Readonly<Record<string, string>>; readonly fetcher?: Fetcher; readonly outRoot?: string; readonly itspControls?: readonly Control[] } = {}): Promise<{ sourceId: string; catalog: unknown; file: string; reports: readonly { file: string; content: unknown }[] }> { const fetcher = context.fetcher ?? createFetcher({ fetchImpl: globalThis.fetch as any }); const annexHtml = context.offlinePages?.annex3 ?? (await fetcher.get(ITSG33_ANNEX_3A_URL, { accept: 'text/html' })).body.toString('utf8'); const pdf = context.offlinePages?.profile3Pdf ? Buffer.from(context.offlinePages.profile3Pdf, 'utf8') : (await fetcher.get(ITSG33_PROFILE_3_PDF_URL, { accept: 'application/pdf' })).body; const controls = parseAnnex3a(annexHtml); const selections = parseProfile3Pdf(context.offlinePages?.profile3Pdf ?? profilePdfText(pdf)); const selected = selections.filter((id) => controls.some((control) => control.id === id)); const missingFromAnnex = selections.filter((id) => !selected.includes(id)); if (!selected.length) throw new Error('ITSG-33 Profile 3 has no selections in the current Annex 3A catalogue'); const itsp = context.itspControls ?? (context.outRoot ? controlList(JSON.parse(readFileSync(path.join(context.outRoot, ITSP_CATALOGUE), 'utf8'))) : undefined); if (!itsp) throw new Error('ITSG-33 importer needs --out-root after importing ITSP.10.033'); const crosswalkReport = { source: '../catalogs/itsg-33/annex-3a.json', target: '../catalogs/itsp-10-033/catalog.json', profileSelectionsMissingFromAnnex: missingFromAnnex, mappings: crosswalk(controls, itsp) }; return { sourceId: 'itsg-33', catalog: { catalog: { uuid: '00000000-0000-4000-8000-000000000133', metadata: { title: 'ITSG-33 Annex 3A', version: '1.0', 'last-modified': '2026-11-21T00:00:00Z', 'oscal-version': '1.2.1', props: [{ name: 'source-id', ns: 'urn:near-ai-vscode:compliance', value: 'itsg-33' }] }, controls } }, file: 'catalogs/itsg-33/annex-3a.json', reports: [{ file: 'profiles/itsg33-profile3.json', content: profile3(selected) }, { file: 'mappings/itsg33-to-itsp10033.json', content: crosswalkReport }] }; }
+export async function importSource(context: {
+  readonly offlinePages?: Readonly<Record<string, string>>;
+  readonly fetcher?: Fetcher;
+  readonly outRoot?: string;
+  readonly itspControls?: readonly Control[];
+} = {}): Promise<{ sourceId: string; catalog: unknown; file: string; reports: readonly { file: string; content: unknown }[] }> {
+  const fetcher = context.fetcher ?? createFetcher({ fetchImpl: globalThis.fetch as any });
+  const annexHtml = context.offlinePages?.annex3 ?? (await fetcher.get(ITSG33_ANNEX_3A_URL, { accept: 'text/html' })).body.toString('utf8');
+  const pdf = context.offlinePages?.profile3Pdf ? Buffer.from(context.offlinePages.profile3Pdf, 'utf8') :
+    (await fetcher.get(ITSG33_PROFILE_3_PDF_URL, { accept: 'application/pdf' })).body;
+  const controls = parseAnnex3a(annexHtml);
+  const selections = parseProfile3Pdf(context.offlinePages?.profile3Pdf ?? profilePdfText(pdf));
+  const selected = selections.filter((id) => controls.some((control) => control.id === id));
+  const missingFromAnnex = selections.filter((id) => !selected.includes(id));
+  if (!selected.length) throw new Error('ITSG-33 Profile 3 has no selections in the current Annex 3A catalogue');
+  const itsp = context.itspControls ?? (context.outRoot ? controlList(JSON.parse(readFileSync(path.join(context.outRoot, ITSP_CATALOGUE), 'utf8'))) : undefined);
+  if (!itsp) throw new Error('ITSG-33 importer needs --out-root after importing ITSP.10.033');
+  const crosswalkReport = {
+    source: '../catalogs/itsg-33/annex-3a.json',
+    target: '../catalogs/itsp-10-033/catalog.json',
+    profileSelectionsMissingFromAnnex: missingFromAnnex,
+    mappings: crosswalk(controls, itsp),
+  };
+  const sourceId = 'itsg-33';
+  const { catalog: { uuid, metadata } } = newCatalog({ sourceId, title: 'ITSG-33 Annex 3A', version: '1.0', retrievedAt: '2026-11-21T00:00:00Z' });
+  return {
+    sourceId,
+    catalog: { catalog: { uuid, metadata, controls } },
+    file: 'catalogs/itsg-33/annex-3a.json',
+    reports: [
+      { file: 'profiles/itsg33-profile3.json', content: profile3(selected) },
+      { file: 'mappings/itsg33-to-itsp10033.json', content: crosswalkReport },
+    ],
+  };
+}

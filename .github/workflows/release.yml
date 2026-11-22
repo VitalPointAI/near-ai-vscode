@@ -237,7 +237,12 @@ jobs:
       - name: Resolve every level profile
         run: |
           mkdir -p compliance/out/resolved
-          for profile in compliance/profiles/*.json; do sh compliance/ci/oscal-validate.sh resolve "$profile" "compliance/out/resolved/$(basename "$profile")"; done
+          node --input-type=module -e 'import { stageAssessorItsg33Profile } from "./compliance/src/package.ts"; stageAssessorItsg33Profile(process.argv[1]);' compliance/out/assessor-oscal
+          for profile in compliance/profiles/*.json; do
+            name="$(basename "$profile")"
+            if [ "$name" = itsg33-profile3.json ]; then profile="compliance/out/assessor-oscal/profiles/$name"; fi
+            sh compliance/ci/oscal-validate.sh resolve "$profile" "compliance/out/resolved/$name"
+          done
       - name: Build and validate the assessor package
         id: pack
         env:
@@ -246,7 +251,7 @@ jobs:
         run: |
           node compliance/src/cli.ts package --release "$TAG" --bundle compliance/out/bundle --resolved compliance/out/resolved --sbom compliance/out/sbom/relay-image-sbom.json --out compliance/out/release
           directory="compliance/out/release/compliance-package-$TAG"
-          find "$directory/oscal" -type f -name '*.json' -print0 | while IFS= read -r -d '' file; do sh compliance/ci/oscal-validate.sh "$file"; done
+          sh compliance/ci/oscal-validate.sh package "$directory"
           package="compliance-package-$VERSION.tar.gz"
           tar -czf "compliance/out/release/$package" -C compliance/out/release "compliance-package-$TAG"
           sum="$(sha256sum "compliance/out/release/$package" | cut -d ' ' -f 1)"

@@ -4,10 +4,17 @@
   "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "source": { "kind": "release", "ref": "v0.4.99" },
   "levels": [
-    { "id": "protected-b", "title": "Protected B", "kind": "level", "profile": "profiles/protected-b.json", "claim": true, "components": ["extension"], "overlays": [], "counts": { "met": 1, "partly-met": 0, "not-met": 0, "stale": 0, "not-applicable": 0, "your-organizations-responsibility": 0, "notMetTotal": 0, "metTotal": 1 } }
+    { "id": "protected-b", "title": "Protected B", "kind": "level", "profile": "profiles/itsp-10-033-01-medium.json", "claim": true, "components": ["extension"], "overlays": [], "counts": { "met": 1, "partly-met": 0, "not-met": 0, "stale": 1, "not-applicable": 0, "your-organizations-responsibility": 0, "notMetTotal": 1, "metTotal": 1 } },
+    { "id": "protected-a", "title": "Protected A", "kind": "level", "profile": "profiles/protected-a.json", "claim": true, "components": ["extension"], "overlays": [], "counts": { "met": 0, "partly-met": 0, "not-met": 1, "stale": 0, "not-applicable": 0, "your-organizations-responsibility": 0, "notMetTotal": 1, "metTotal": 0 } }
   ],
   "rows": [
-    { "level": "protected-b", "control": "ac-01", "label": "AC-1", "family": "ac", "title": "Fixture access control", "state": "met", "reason": "met", "reasonText": "Evidence shows every statement for this control backed by passing, current results. Your organization decides whether that is enough.", "components": [{ "component": "extension", "state": "met", "reason": "met", "reasonText": "Evidence shows every statement for this control backed by passing, current results. Your organization decides whether that is enough.", "responsibility": "product", "evidence": [], "statement": "The product checks access." }] }
+    { "level": "protected-b", "control": "ac-01", "label": "AC-1", "family": "ac", "title": "Fixture access control", "state": "met", "reason": "met", "reasonText": "Evidence shows every statement for this control backed by passing, current results. Your organization decides whether that is enough.", "components": [{ "component": "extension", "state": "met", "reason": "met", "reasonText": "Evidence shows every statement for this control backed by passing, current results. Your organization decides whether that is enough.", "responsibility": "product", "evidence": [], "statement": "The product checks access." }] },
+    { "level": "protected-b", "control": "ac-02", "label": "AC-2", "family": "ac", "title": "Fixture account management", "state": "stale", "reason": "stale", "reasonText": "The available evidence is past its freshness window.", "components": [] },
+    { "level": "protected-a", "control": "ac-01", "label": "AC-1", "family": "ac", "title": "Fixture access control", "state": "not-met", "reason": "missing-result", "reasonText": "The current evidence result is missing.", "components": [] }
   ],
-  "gaps": [], "collectors": [], "matrix": [], "textIndex": [], "refusedAcceptances": []
+  "gaps": [], "collectors": [{ "id": "ci-checks", "window": "head" }],
+  "matrix": [
+    { "control": "ac-01", "component": "extension", "responsibility": "product", "weProvide": "The product checks access.", "youDo": "=Confirm the \"access\" policy." }
+  ],
+  "textIndex": [], "refusedAcceptances": []
 }

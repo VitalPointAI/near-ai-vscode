@@ -237,6 +237,9 @@ test('release package, attest and Trestle jobs keep privilege separated', () => 
   const pkg = all.get('package'); const attest = all.get('attest'); const trestle = all.get('trestle'); const release = all.get('release');
   assert.match(pkg, /contents:\s*read[\s\S]*actions:\s*read/);
   assert.match(pkg, /npm --prefix compliance ci --ignore-scripts/);
+  assert.ok(pkg.includes('sh compliance/ci/oscal-validate.sh package "$directory"'));
+  assert.ok(pkg.includes('stageAssessorItsg33Profile(process.argv[1])'));
+  assert.ok(pkg.includes('profile="compliance/out/assessor-oscal/profiles/$name"'));
   assert.match(attest, /needs:\s*\[build, package\]/);
   assert.match(attest, /contents:\s*read[\s\S]*id-token:\s*write[\s\S]*attestations:\s*write/);
   assert.equal((text.match(/id-token:\s*write/g) ?? []).length, 1);

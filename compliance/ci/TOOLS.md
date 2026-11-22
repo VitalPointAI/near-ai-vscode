@@ -24,6 +24,12 @@ oscal-cli profile resolve --to=json --overwrite -q <profile> <resolved-output>
 `--overwrite` permits a repeatable generated destination, and `-q` keeps profile
 resolution output to errors.
 
+The release job runs `oscal-validate.sh package <package-directory>`. OSCAL CLI
+3.2.0 resolves an SSP's relative profile link against an assessment's directory
+when it validates nested imports. The wrapper validates assessments with an
+equivalent absolute profile link in a scratch copy of the SSP and validates the
+original SSP separately. The shipped archive keeps portable relative links.
+
 ## Syft 1.57.2
 
 The immutable Anchore release tarball is pinned to

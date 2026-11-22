@@ -5,13 +5,13 @@
   "files": [
     {
       "path": "dashboard/dashboard.json",
-      "sha256": "39d736894c44471b5ca5336249d011df604f088b7e82b5fcd9fda3d3074bd94e",
-      "bytes": 1255
+      "sha256": "5c75a4206d3a2d45f4d2ed95074782f0bd14a31e9a5f5452414e258aa8815a32",
+      "bytes": 2303
     },
     {
       "path": "observations.json",
-      "sha256": "1b6d16053b5a9ab2c3ec6d673156a94419ac8f126dcf0dc4a215d06a3827015b",
-      "bytes": 169
+      "sha256": "d26b0e151e8269e5d596e4eb5030ee5bbb5a720d4d70247936316737d08daf9e",
+      "bytes": 474
     }
   ]
 }
