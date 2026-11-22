@@ -10,6 +10,7 @@ import { REASONS, STATES, type ComponentRow, type DashboardInput, type Dashboard
 type LevelNotes = Readonly<{ text?: string; profileDifferences?: readonly string[] }>;
 
 export interface DashboardBuildInput extends DashboardInput {
+  readonly testEvidence?: Pick<RuleContext, 'collectedAt' | 'runUrl'>;
   readonly source?: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string };
   readonly runUrl?: string;
   readonly controls?: Readonly<Record<string, { readonly label: string; readonly title: string }>>;
@@ -29,9 +30,10 @@ export const DASHBOARD_SCHEMA_VERSION = 1 as const;
 /** Evaluates every rule once: test rules against the report rows, observation rules against the observations. */
 function evaluateRules(input: DashboardBuildInput): Record<string, RuleResult> {
   const context: RuleContext = { commit: input.commit, collectedAt: input.generatedAt };
+  const testContext: RuleContext = { ...context, ...input.testEvidence };
   const results: Record<string, RuleResult> = {};
   for (const rule of input.rules) {
-    results[rule.id] = rule.kind === 'test' ? evaluateTestRule(rule, input.testRows, context) : evaluateObservationRule(rule, input.observations, context);
+    results[rule.id] = rule.kind === 'test' ? evaluateTestRule(rule, input.testRows, testContext) : evaluateObservationRule(rule, input.observations, context);
   }
   return results;
 }

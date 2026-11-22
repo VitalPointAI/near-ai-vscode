@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { testsCollector, readReports } from './collectors/tests.ts';
 import { ciCollector } from './collectors/ci.ts';
@@ -15,8 +15,7 @@ import { codeScanningCollector } from './collectors/codeScanning.ts';
 import type { Collector, CollectorContext, FetchJson } from './collectors/types.ts';
 import { buildDashboard, type DashboardBuildInput } from './dashboard.ts';
 import type { Observation, TestReportRow } from './model.ts';
-import { writeManifest } from './manifest.ts';
-import { verifyManifest } from './manifest.ts';
+import { verifyManifest, writeManifest, type BundleManifest } from './manifest.ts';
 import { assertNoSecrets, redactObservation, redactTestRow } from './redact.ts';
 import { lintDashboard } from './wordLint.ts';
 import { validateOurs } from './validate.ts';
@@ -95,9 +94,21 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
       const dates = observations.filter((item) => item.collector === row.id).map((item) => item.collectedAt).sort();
       if (dates.length) { row.ok = true; row.lastCollectedAt = dates.at(-1); }
     }
+    if (!ran.has('tests') && observations.some((item) => item.collector === 'tests' && item.commit === inputs.commit)) {
+      const previousDir = path.resolve(supplied.previous);
+      const manifest = JSON.parse(readFileSync(path.join(previousDir, 'manifest.json'), 'utf8')) as BundleManifest;
+      const reportFile = path.join(previousDir, 'test-rows.json');
+      if (manifest.commit === inputs.commit && existsSync(reportFile)) {
+        const rows = JSON.parse(readFileSync(reportFile, 'utf8')) as TestReportRow[];
+        if (!Array.isArray(rows)) throw new Error('previous test-rows.json is invalid');
+        for (const row of rows) testRows.push(redactTestRow(row));
+      }
+    }
   }
+  const testEvidence = observations.find((item) => item.collector === 'tests' && item.commit === inputs.commit);
   const dashboardInput: DashboardBuildInput = {
     commit: inputs.commit, generatedAt: now.toISOString(), now, head: inputs.commit, levels: [], components: [], rules: [], observations,
+    ...(testEvidence ? { testEvidence: { collectedAt: testEvidence.collectedAt, runUrl: testEvidence.runUrl } } : {}),
     testRows: testRows.map(redactTestRow), source: { kind: inputs.kind === 'pr' ? 'local' : inputs.kind, ref: inputs.commit }, ...(inputs.runUrl ? { runUrl: inputs.runUrl } : {}), ...inputs.dashboard
   };
   const dashboard = buildDashboard(dashboardInput);

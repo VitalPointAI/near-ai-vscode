@@ -76,6 +76,41 @@ test('runBundle refuses to publish a dashboard with unsupported compliance claim
   assert.equal(verifyManifest(dir).ok, false);
 });
 
+test('scheduled dashboards carry only same-commit CI tests and preserve their provenance', async () => {
+  const dir = folder();
+  const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const initial = path.join(dir, 'ci');
+  const report = path.join(dir, 'report.ndjson');
+  const inputsFile = path.join(dir, 'scheduled.json');
+  const runUrl = 'https://github.com/owner/repo/actions/runs/123';
+  const collectedAt = new Date('2026-11-21T01:00:00.000Z');
+  const rules = JSON.parse(readFileSync(path.join(repoRoot, 'compliance/evidence-rules/extension.json'), 'utf8'));
+  const target = rules.rules.find(({ id }: { id: string }) => id === 'extension.ac-03.gate-decision').test;
+  writeFileSync(report, JSON.stringify({ ...target, status: 'passed', skip: null, ms: 1 }));
+  const inputs = { repository: 'owner/repo', commit, repoRoot };
+  await runBundle({
+    ...inputs,
+    kind: 'main',
+    runUrl,
+    collectors: { tests: { reports: [{ package: 'root', file: report }] } }
+  }, initial, { now: collectedAt });
+
+  for (const [scheduledCommit, expected] of [[commit, 'met'], ['b'.repeat(40), 'test-not-run']]) {
+    const output = path.join(dir, scheduledCommit);
+    writeFileSync(inputsFile, JSON.stringify({ ...inputs, commit: scheduledCommit, kind: 'scheduled', collectors: {} }));
+    assert.equal(await main(['bundle', '--inputs', inputsFile, '--out', output, '--previous', initial]), 0);
+    const dashboard = JSON.parse(readFileSync(path.join(output, 'dashboard/dashboard.json'), 'utf8'));
+    const row = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'unclassified' && control === 'ac-03');
+    const evidence = row.components[0].evidence[0];
+    assert.equal(evidence.reason, expected);
+    if (expected === 'met') {
+      assert.equal(evidence.commit, commit);
+      assert.equal(evidence.collectedAt, collectedAt.toISOString());
+      assert.equal(evidence.runUrl, runUrl);
+    }
+  }
+});
+
 test('CI-shaped bundle CLI inputs load the shipped profiles, components and evidence rules', async () => {
   const dir = folder();
   const input = path.join(dir, 'inputs.json');
