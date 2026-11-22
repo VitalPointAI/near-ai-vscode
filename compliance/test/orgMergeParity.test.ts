@@ -1,0 +1,12 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mergeOverlay } from '../../docs-site/src/compliance/lib.mjs';
+import { computeStatus } from '../src/status.ts';
+const now = new Date('2026-11-21T00:00:00.000Z'); const control = 'ac-01'; const component = 'extension';
+const dashboard = () => ({ rows: [{ control, state: 'your-organizations-responsibility', reason: 'your-organization', components: [{ component, responsibility: 'your-organization', state: 'your-organizations-responsibility', reason: 'your-organization' }] }], matrix: [] });
+const merged = (evidence: any, decision?: any) => mergeOverlay(dashboard(), [{ overlay: { answers: [], evidence: [evidence], decisions: decision ? [decision] : [] } }], now).rows[0];
+test('fresh passing organization evidence is met in the view', () => assert.equal(merged({ control, component, passed: true, collectedAt: now.toISOString(), windowDays: 1 }).state, 'met'));
+test('stale organization evidence is stale in the view', () => assert.equal(merged({ control, component, passed: true, collectedAt: '2026-11-01T00:00:00.000Z', windowDays: 1 }).state, 'stale'));
+test('failing organization evidence is not met in the view', () => assert.equal(merged({ control, component, passed: false, collectedAt: now.toISOString(), windowDays: 1 }).state, 'not-met'));
+test('self-signed official decision is not met in the view', () => { const data = dashboard(); data.rows[0].components[0] = { ...data.rows[0].components[0], requiresOfficialSignature: true } as any; assert.equal(mergeOverlay(data, [{ overlay: { answers: [], evidence: [{ control, component, passed: true, collectedAt: now.toISOString(), windowDays: 1 }], decisions: [{ control, selfSigned: true }] } }], now).rows[0].reason, 'self-signed'); });
+test('status engine still treats missing product evidence as not met', () => assert.equal(computeStatus({ control, component, level: 'fixture', responsibility: 'product', statements: [], rulesByStatement: {}, results: {}, head: 'a'.repeat(40), now }).state, 'not-met'));

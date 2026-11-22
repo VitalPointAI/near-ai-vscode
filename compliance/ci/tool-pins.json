@@ -1,0 +1,27 @@
+{
+  "oscal-cli": {
+    "version": "3.2.0",
+    "url": "https://repo1.maven.org/maven2/dev/metaschema/oscal/oscal-cli-enhanced/3.2.0/oscal-cli-enhanced-3.2.0-oscal-cli.zip",
+    "sha256": "e001b353ee245da6f4ff0ad930c4dfaa88083c63243ca004bd5f5bcef44e8ec8",
+    "checksumUrl": "https://repo1.maven.org/maven2/dev/metaschema/oscal/oscal-cli-enhanced/3.2.0/oscal-cli-enhanced-3.2.0-oscal-cli.zip.sha256",
+    "archive": "zip",
+    "bin": "bin/oscal-cli",
+    "java": ">=11"
+  },
+  "syft": {
+    "version": "1.57.2",
+    "url": "https://github.com/anchore/syft/releases/download/v1.57.2/syft_1.57.2_linux_amd64.tar.gz",
+    "sha256": "ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b",
+    "checksumUrl": "https://github.com/anchore/syft/releases/download/v1.57.2/syft_1.57.2_checksums.txt",
+    "archive": "tar.gz",
+    "bin": "syft"
+  },
+  "grype": {
+    "version": "0.122.1",
+    "url": "https://github.com/anchore/grype/releases/download/v0.122.1/grype_0.122.1_linux_amd64.tar.gz",
+    "sha256": "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538",
+    "checksumUrl": "https://github.com/anchore/grype/releases/download/v0.122.1/grype_0.122.1_checksums.txt",
+    "archive": "tar.gz",
+    "bin": "grype"
+  }
+}

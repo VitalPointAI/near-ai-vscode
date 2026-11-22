@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "component": "tracer-fixture",
+      "control": "tr-01",
+      "id": "tracer-fixture.tr-01.proves",
+      "kind": "test",
+      "statement": "tr-01_smt",
+      "test": {
+        "file": "src/test/tracerFixture.test.ts",
+        "name": "proves the fixture control",
+        "path": [
+          "fixture suite"
+        ]
+      }
+    }
+  ]
+}

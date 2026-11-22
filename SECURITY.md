@@ -2515,6 +2515,16 @@ They are listed, with the commands that apply them, in
 (section 8), which also describes the whole process. A rule is in force only once its setting is
 applied.
 
+## Supported versions
+
+| Version | Supported |
+| --- | --- |
+| The latest 0.4.x release | Yes |
+| Earlier releases | No |
+
+How a report is handled, with the response times the maintainers commit to, is in the
+[incident response plan](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/security/incident-response.md).
+
 ## Reporting a vulnerability
 
 Report vulnerabilities privately through GitHub's private vulnerability reporting: on the

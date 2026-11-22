@@ -1,0 +1,24 @@
+{
+  "name": "near-ai-compliance",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "OSCAL source, evidence rules and status engine for the Accreditation pages and the release package. Not the extension; makes no compliance claim.",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "lint": "tsc -p tsconfig.json",
+    "test": "node ../scripts/run-tests.mjs test/*.test.ts",
+    "cli": "node src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "parse5": "7.3.0",
+    "typescript": "5.9.3",
+    "yaml": "2.9.1"
+  }
+}

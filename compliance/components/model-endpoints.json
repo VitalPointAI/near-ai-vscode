@@ -1,0 +1,17 @@
+{
+  "component-definition": {
+    "uuid": "5f4e7963-8796-42b0-a7ad-552b99b31a1a",
+    "metadata": { "title": "Model endpoints", "last-modified": "2026-11-21T00:00:00Z", "version": "0.1.0", "oscal-version": "1.2.1" },
+    "components": [{
+      "uuid": "623c9107-2e50-4ea8-829f-d3e30de6ba1c", "type": "service", "title": "Model endpoints", "description": "Configured local and remote model providers.",
+      "props": [{ "name": "component-id", "ns": "urn:near-ai-vscode:compliance", "value": "model-endpoints" }],
+      "control-implementations": [{
+        "uuid": "f19b5ec2-1f30-4b23-b661-e72f30c8d9cc", "source": "catalogs/itsp-10-033/catalog.json", "description": "Provider-bound safeguards.",
+        "implemented-requirements": [
+          { "uuid": "5af2d6ca-b3c2-4c61-bf17-ef5bce6a0f01", "control-id": "sc-08", "description": "Configured private endpoints are checked before confidential requests are sent.", "props": [{ "name": "responsibility", "ns": "urn:near-ai-vscode:compliance", "value": "inherited" }, { "name": "inherited-from", "ns": "urn:near-ai-vscode:compliance", "value": "configured-model-provider" }], "statements": [{ "uuid": "fb17e87f-0933-4d12-81ce-b40dc1430001", "statement-id": "sc-08_smt.endpoint-binding", "description": "The extension checks a configured private endpoint's connection binding before it sends Confidential content. A mismatch refuses the request instead of falling back to an unpinned connection.", "remarks": "Your organization selects providers and decides whether their service assurances are sufficient." }] },
+          { "uuid": "5af2d6ca-b3c2-4c61-bf17-ef5bce6a0f02", "control-id": "sc-13", "description": "The crypto inventory records listed algorithms and separately records X25519 and scrypt use.", "props": [{ "name": "responsibility", "ns": "urn:near-ai-vscode:compliance", "value": "shared" }], "statements": [{ "uuid": "fb17e87f-0933-4d12-81ce-b40dc1430002", "statement-id": "sc-13_smt.listed", "description": "The crypto inventory records the listed algorithms used by the product and the collector reports their documented standing.", "remarks": "Your organization selects and approves cryptographic use in its deployment." }, { "uuid": "fb17e87f-0933-4d12-81ce-b40dc1430003", "statement-id": "sc-13_smt.x25519-scrypt", "description": "The inventory records X25519 and scrypt separately, so an unfavorable standing prevents this component from presenting complete cryptographic coverage.", "remarks": "Your organization decides whether algorithms outside the referenced list are acceptable." }] }
+        ]
+      }]
+    }]
+  }
+}

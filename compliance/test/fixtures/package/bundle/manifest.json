@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-11-21T00:00:00.000Z",
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "files": [
+    {
+      "path": "dashboard/dashboard.json",
+      "sha256": "5c75a4206d3a2d45f4d2ed95074782f0bd14a31e9a5f5452414e258aa8815a32",
+      "bytes": 2303
+    },
+    {
+      "path": "observations.json",
+      "sha256": "d26b0e151e8269e5d596e4eb5030ee5bbb5a720d4d70247936316737d08daf9e",
+      "bytes": 474
+    }
+  ]
+}

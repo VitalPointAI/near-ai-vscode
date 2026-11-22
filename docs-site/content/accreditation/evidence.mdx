@@ -1,0 +1,11 @@
+---
+sidebar_position: 10
+title: Evidence
+---
+
+import AccreditationData from '@site/src/components/accreditation/AccreditationData';
+import EvidenceList from '@site/src/components/accreditation/EvidenceList';
+
+Your organization decides whether the collected evidence meets its needs. This page reports collectors and refused risk acceptances; it is not an authorization.
+
+<AccreditationData>{(dashboard) => <EvidenceList dashboard={dashboard} />}</AccreditationData>

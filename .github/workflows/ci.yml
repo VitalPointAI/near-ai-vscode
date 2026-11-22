@@ -54,7 +54,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - run: npm test
+      - name: Run tests and write the evidence report
+        env:
+          NEAR_AI_TEST_REPORT: test-report-root.ndjson
+        run: npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: test-report-root
+          path: test-report-root.ndjson
+          if-no-files-found: warn
 
   e2e:
     name: e2e
@@ -168,8 +178,14 @@ jobs:
           cache-dependency-path: docs-site/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=high
+      - name: Test the documentation site
+        run: node ../scripts/run-tests.mjs test/*.test.mjs
       - name: Build the site and check every link
-        run: npm run build
+        env:
+          NEAR_AI_COMPLIANCE_OVERLAY_DIR: ../compliance/test/fixtures/overlay
+        run: |
+          npm run build
+          node scripts/check-build-isolation.mjs --markers ../compliance/test/fixtures/overlay/markers.txt --dir build --dir static
 
   # The messaging relay (relay/) is its own package on its own Node version, so it gets its own job.
   # The extension's jobs above stay on NODE_VERSION. The install runs no dependency scripts.
@@ -241,8 +257,18 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
       - if: steps.has_relay.outputs.present == 'true'
         run: npm run lint
-      - if: steps.has_relay.outputs.present == 'true'
+      - name: Run relay tests and write the evidence report
+        if: steps.has_relay.outputs.present == 'true'
+        env:
+          NEAR_AI_TEST_REPORT: test-report-relay.ndjson
         run: npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_relay.outputs.present == 'true' && always()
+        continue-on-error: true
+        with:
+          name: test-report-relay
+          path: relay/test-report-relay.ndjson
+          if-no-files-found: warn
       - name: Build the relay image and check its hardening
         if: steps.has_relay.outputs.present == 'true'
         run: npm run test:container
@@ -313,8 +339,208 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
       - if: steps.has_hub.outputs.present == 'true'
         run: npm run lint
-      - if: steps.has_hub.outputs.present == 'true'
+      - name: Run hub tests and write the evidence report
+        if: steps.has_hub.outputs.present == 'true'
+        env:
+          NEAR_AI_TEST_REPORT: test-report-hub.ndjson
         run: npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_hub.outputs.present == 'true' && always()
+        continue-on-error: true
+        with:
+          name: test-report-hub
+          path: hub/test-report-hub.ndjson
+          if-no-files-found: warn
       - name: Build the hub image and check its hardening and its Compose service
         if: steps.has_hub.outputs.present == 'true'
         run: npm run test:container
+
+  relay-image-scan:
+    name: relay image scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check that this commit has the relay and scan tools
+        id: has_relay_scan
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -f relay/package.json ] && [ -f compliance/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; elif [ "$EVENT" = "workflow_dispatch" ]; then base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"; fi
+          for manifest in relay/package.json compliance/package.json; do
+            if [ -f "$manifest" ]; then continue; fi
+            if [[ ! "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ -z "$base" ] || git cat-file -e "$base:$manifest" 2>/dev/null; then
+              echo "::error::$manifest is missing"; exit 1
+            fi
+          done
+          echo "present=false" >> "$GITHUB_OUTPUT"
+      - name: Build the relay image
+        if: steps.has_relay_scan.outputs.present == 'true'
+        run: docker build -f relay/Dockerfile -t near-ai-relay:scan .
+      - name: Install pinned Syft and Grype
+        if: steps.has_relay_scan.outputs.present == 'true'
+        run: |
+          sh compliance/ci/install-tool.sh syft compliance/out/tools
+          sh compliance/ci/install-tool.sh grype compliance/out/tools
+          find compliance/out/tools -type f \( -name syft -o -name grype \) -printf '%h\n' | sort -u >> "$GITHUB_PATH"
+      - name: Write the relay SBOM
+        if: steps.has_relay_scan.outputs.present == 'true'
+        run: syft scan near-ai-relay:scan --output cyclonedx-json=compliance/out/relay-image-sbom.json
+      - name: Update the Grype database
+        if: steps.has_relay_scan.outputs.present == 'true'
+        run: grype db update
+      - name: Record fixed high-severity findings
+        if: steps.has_relay_scan.outputs.present == 'true'
+        continue-on-error: true
+        run: grype sbom:compliance/out/relay-image-sbom.json --only-fixed --fail-on high --output json=compliance/out/relay-image-scan.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: relay-image-sbom
+          path: compliance/out/relay-image-sbom.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: relay-image-scan
+          path: compliance/out/relay-image-scan.json
+          if-no-files-found: warn
+
+  compliance:
+    name: compliance
+    if: always()
+    needs: [lint, test, e2e, release-content, audit, secret-scan, docs, relay, hub, relay-image-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check that this commit has the compliance package
+        id: has_compliance
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ -f compliance/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            # Only a main push or the documented branch dispatch can produce release evidence.
+            if [ "$EVENT" = "push" ] && [ "$BRANCH" = "main" ]; then
+              echo "publish_as=main" >> "$GITHUB_OUTPUT"
+            elif [ "$EVENT" = "workflow_dispatch" ] && [ "$REF_TYPE" = "branch" ] && [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "publish_as=release" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; elif [ "$EVENT" = "workflow_dispatch" ]; then base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"; fi
+          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] && ! git cat-file -e "$base:compliance/package.json" 2>/dev/null; then echo "present=false" >> "$GITHUB_OUTPUT"; else echo "::error::compliance/package.json is missing"; exit 1; fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_compliance.outputs.present == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: compliance/package-lock.json
+      - if: steps.has_compliance.outputs.present == 'true'
+        run: npm --prefix compliance ci --ignore-scripts
+      - if: steps.has_compliance.outputs.present == 'true'
+        run: npm --prefix compliance run lint
+      - if: steps.has_compliance.outputs.present == 'true'
+        run: npm --prefix compliance test
+      - if: steps.has_compliance.outputs.present == 'true'
+        run: node compliance/src/cli.ts validate
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.has_compliance.outputs.present == 'true'
+        with:
+          pattern: test-report-*
+          path: compliance/out/reports
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.has_compliance.outputs.present == 'true'
+        with:
+          pattern: vsix-*
+          path: compliance/out/vsix
+      - name: Download the newest successful main evidence bundle when one exists
+        if: steps.has_compliance.outputs.present == 'true' && (github.event_name == 'pull_request' || steps.has_compliance.outputs.publish_as == 'main')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id="$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$run_id" ]; then gh run download "$run_id" --name compliance-bundle --dir compliance/out/previous || true; fi
+      - name: Write collector inputs and changed paths
+        if: steps.has_compliance.outputs.present == 'true'
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          PUBLISH_AS: ${{ steps.has_compliance.outputs.publish_as }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p compliance/out
+          printf '%s\n' "$NEEDS_JSON" > compliance/out/needs.json
+          if [ "$EVENT" = "pull_request" ]; then git diff --name-only "$PR_BASE...$COMMIT" > compliance/out/changed.txt; else git diff-tree --no-commit-id --name-only -r "$COMMIT" > compliance/out/changed.txt; fi
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            const reports = ["root", "relay", "hub"].map(packageName => ({ package: packageName, file: `compliance/out/reports/test-report-${packageName}.ndjson` }));
+            const collectors = { tests: { reports }, ci: { needsFile: "compliance/out/needs.json" } };
+            if (process.env.PUBLISH_AS) Object.assign(collectors, { audit: { audits: [{ package: "root", file: "compliance/out/audit-root.json" }] }, "secret-scan": { jsonFile: "compliance/out/secret-scan.json" } });
+            const value = { repository: process.env.REPOSITORY, commit: process.env.COMMIT, kind: process.env.PUBLISH_AS || "pr", repoRoot: ".", collectors };
+            writeFileSync("compliance/out/inputs.json", JSON.stringify(value, null, 2));
+          '
+      - name: Record package audits for the release evidence bundle
+        if: steps.has_compliance.outputs.publish_as != ''
+        continue-on-error: true
+        run: npm audit --json > compliance/out/audit-root.json
+      - name: Scan tracked files for the release evidence bundle
+        if: steps.has_compliance.outputs.publish_as != ''
+        continue-on-error: true
+        run: node scripts/secret-scan.mjs --json > compliance/out/secret-scan.json
+      - name: Build this commit's evidence bundle
+        if: steps.has_compliance.outputs.present == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          previous=""
+          if [ -f compliance/out/previous/manifest.json ]; then previous="--previous compliance/out/previous"; fi
+          node compliance/src/cli.ts bundle --inputs compliance/out/inputs.json --out compliance/out/bundle $previous
+      - name: Write control-state changes to the job summary
+        if: steps.has_compliance.outputs.present == 'true' && github.event_name == 'pull_request'
+        env:
+          FAIL_ON_DROP: ''
+        run: |
+          if [ -f compliance/out/previous/dashboard/dashboard.json ]; then
+            node compliance/src/cli.ts pr-summary --pr-bundle compliance/out/bundle --main-dashboard compliance/out/previous/dashboard/dashboard.json --changed compliance/out/changed.txt --out compliance/out/pr-summary.md $FAIL_ON_DROP
+            cat compliance/out/pr-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No earlier main evidence bundle was available for comparison.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Secret-scan the completed evidence bundle
+        id: bundle_scan
+        if: steps.has_compliance.outputs.publish_as != ''
+        continue-on-error: true
+        run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.bundle_scan.outcome == 'success'
+        with:
+          name: compliance-bundle
+          path: compliance/out/bundle
+          retention-days: 30
+          if-no-files-found: error

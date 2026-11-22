@@ -1,0 +1,6 @@
+import assert from 'node:assert/strict'; import { readFileSync } from 'node:fs'; import { test } from 'node:test'; import { importNist, PINNED_FULL_SHA256 } from '../src/import/nist-800-53.ts';
+const full = readFileSync(new URL('./fixtures/import/nist/catalog.json', import.meta.url)); const min = readFileSync(new URL('./fixtures/import/nist/catalog-min.json', import.meta.url));
+const fetcher = (first = full, second = min) => async (url: string) => ({ body: url.endsWith('-min.json') ? second : first });
+test('stores supplied NIST minified bytes unchanged only after matching data', async () => { let stored: Buffer | undefined; await importNist({ fetch: fetcher(), write: (bytes) => { stored = bytes; } }); assert.deepEqual(stored, min); });
+test('refuses a full catalogue hash different from the pinned value before writing', async () => { let written = false; await assert.rejects(importNist({ fetch: fetcher(Buffer.from('bad'), min), expectedHash: PINNED_FULL_SHA256, write: () => { written = true; } }), /SHA-256/); assert.equal(written, false); });
+test('refuses a minified catalogue that parses differently before writing', async () => { let written = false; await assert.rejects(importNist({ fetch: fetcher(full, Buffer.from('{"catalog":{"different":true}}')), write: () => { written = true; } }), /does not match/); assert.equal(written, false); });

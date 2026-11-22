@@ -1,0 +1,7 @@
+requirement_nodes:
+  - ref_id: XA-01
+    description: A different converted statement.
+  - ref_id: XA-17(400)
+    description: Our Canada-only statement.
+  - ref_id: XA-88
+    description: A conversion-only requirement.

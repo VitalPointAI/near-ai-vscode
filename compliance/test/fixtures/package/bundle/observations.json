@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "generatedAt": "2026-11-21T00:00:00.000Z",
+  "kind": "release",
+  "observations": [
+    {
+      "collector": "ci-checks",
+      "subject": "compliance",
+      "passed": true,
+      "collectedAt": "2026-11-20T00:00:00.000Z",
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runUrl": "https://github.com/owner/repo/actions/runs/1",
+      "counts": { "checks": 3 }
+    }
+  ]
+}

@@ -134,6 +134,9 @@ const forbiddenPatterns = [
   /^extension\/relay(?:\/|$)/,
   /^extension\/hub(?:\/|$)/,
   /^extension\/docs-site(?:\/|$)/,
+  // The compliance package and the security documents never ship in the extension (D-48).
+  /^extension\/compliance(?:\/|$)/,
+  /^extension\/docs\/security(?:\/|$)/,
   /^extension\/\.dockerignore$/,
   /^extension\/dist\/test(?:\/|$)/,
   /\.map$/,

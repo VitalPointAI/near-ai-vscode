@@ -1,0 +1,9 @@
+# Review routing only. Enforcement stays in GATE_PATHS and the agent-review-gates environment.
+/.github/ @ALuhning
+/SECURITY.md @ALuhning
+/scripts/lib/ @ALuhning
+/scripts/test/ @ALuhning
+/compliance/tailoring/ @ALuhning
+/compliance/sources.json @ALuhning
+/compliance/catalogs/ @ALuhning
+/compliance/attestations/ @ALuhning

@@ -1,0 +1,23 @@
+{
+  "controls": [
+    "au-04",
+    "au-06",
+    "au-09",
+    "au-10"
+  ],
+  "gap": "G2",
+  "id": "g02",
+  "milestones": [
+    {
+      "phase": "32.1",
+      "title": "Record writer and hash-chained local audit with signed heads"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "Export of the audit records for assessors"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Write decision records through one record writer into a hash-chained local audit with signed heads, then add a command that exports them for assessors.",
+  "title": "Gate decision records are not tamper-evident and cannot be exported"
+}

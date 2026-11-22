@@ -1,0 +1,5 @@
+import { test } from 'node:test'; import assert from 'node:assert/strict'; import { codeScanningCollector } from '../src/collectors/codeScanning.ts'; import type { CollectorContext } from '../src/collectors/types.ts';
+const sha = 'a'.repeat(40); const context = (analysis = sha, alerts: unknown[] = []): CollectorContext => ({ now: new Date('2026-11-21T00:00:00Z'), commit: sha, readFile: async () => '', fetchJson: async (url) => url.includes('/analyses') ? [{ commit_sha: analysis }] : alerts });
+test('current CodeQL analysis with no high alert passes', async () => assert.equal((await codeScanningCollector.collect({ repository: 'acme/demo' }, context()))[0].passed, true));
+test('older analysis fails', async () => assert.equal((await codeScanningCollector.collect({ repository: 'acme/demo' }, context('b'.repeat(40))))[0].passed, false));
+test('open critical alert fails and retains only severity counts', async () => { const [row] = await codeScanningCollector.collect({ repository: 'acme/demo' }, context(sha, [{ rule: { security_severity_level: 'critical' } }])); assert.equal(row.passed, false); assert.equal(row.counts?.critical, 1); });

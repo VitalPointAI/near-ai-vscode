@@ -1,0 +1,53 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "example-lib": {
+      "name": "example-lib",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1000001,
+          "name": "example-lib",
+          "dependency": "example-lib",
+          "title": "Synthetic advisory title for a fixture",
+          "url": "https://example.invalid/advisories/synthetic-1",
+          "severity": "moderate",
+          "cwe": [],
+          "cvss": { "score": 0, "vectorString": null },
+          "range": "<1.2.3"
+        }
+      ],
+      "effects": [],
+      "range": "<1.2.3",
+      "nodes": ["node_modules/example-lib"],
+      "fixAvailable": true
+    },
+    "example-other": {
+      "name": "example-other",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1000002,
+          "name": "example-other",
+          "dependency": "example-other",
+          "title": "Second synthetic advisory for a fixture",
+          "url": "https://example.invalid/advisories/synthetic-2",
+          "severity": "low",
+          "cwe": [],
+          "cvss": { "score": 0, "vectorString": null },
+          "range": "<2.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<2.0.0",
+      "nodes": ["node_modules/example-other"],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": { "info": 0, "low": 1, "moderate": 1, "high": 0, "critical": 0, "total": 2 },
+    "dependencies": { "prod": 12, "dev": 0, "optional": 0, "peer": 0, "peerOptional": 0, "total": 12 }
+  }
+}

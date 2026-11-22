@@ -1,0 +1,122 @@
+{
+  "levels": [
+    {
+      "id": "unclassified",
+      "title": "Unclassified",
+      "kind": "level",
+      "profile": "profiles/unclassified.json",
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true,
+      "note": "Good practice; no Government of Canada accreditation level exists for unclassified systems."
+    },
+    {
+      "id": "protected-a",
+      "title": "Protected A",
+      "kind": "level",
+      "profile": "profiles/protected-a.json",
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true
+    },
+    {
+      "id": "protected-b",
+      "title": "Protected B",
+      "kind": "level",
+      "profile": "profiles/itsp-10-033-01-medium.json",
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true,
+      "note": "Local models or an authorized endpoint; relay inbound authentication."
+    },
+    {
+      "id": "classified",
+      "title": "Classified",
+      "kind": "level",
+      "profile": "profiles/itsg33-profile3.json",
+      "components": [
+        "appliance"
+      ],
+      "claim": false,
+      "note": "The appliance only; the product makes no claim."
+    },
+    {
+      "id": "itsp-10-171",
+      "title": "ITSP.10.171 overlay",
+      "kind": "overlay",
+      "profile": "profiles/itsp-10-171-overlay.json",
+      "attachedTo": [
+        "protected-a",
+        "protected-b"
+      ],
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true
+    },
+    {
+      "id": "cpcsc-level-1",
+      "title": "CPCSC Level 1 overlay",
+      "kind": "overlay",
+      "profile": "profiles/cpcsc-level-1.json",
+      "attachedTo": [
+        "unclassified"
+      ],
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true
+    },
+    {
+      "id": "overlay-cgp",
+      "title": "Controlled Goods overlay",
+      "kind": "overlay",
+      "profile": "profiles/overlay-cgp.json",
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true
+    },
+    {
+      "id": "overlay-itar",
+      "title": "ITAR overlay",
+      "kind": "overlay",
+      "profile": "profiles/overlay-itar.json",
+      "components": [
+        "extension",
+        "model-endpoints",
+        "relay",
+        "hub",
+        "release-pipeline"
+      ],
+      "claim": true
+    }
+  ]
+}

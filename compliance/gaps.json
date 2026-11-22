@@ -1,0 +1,321 @@
+{
+  "gaps": [
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "ir-01",
+        "ir-04",
+        "ir-06",
+        "ir-08",
+        "si-05"
+      ],
+      "id": "G1",
+      "ownerRole": "maintainers",
+      "remediation": "Publish the product's incident response plan (triage, fix, advisory, Marketplace rollback, telling users) and a supported-versions table in SECURITY.md, and leave your organization's own incident response as its responsibility.",
+      "title": "No incident response plan, supported-versions table or response-time commitment"
+    },
+    {
+      "controls": [
+        "au-04",
+        "au-06",
+        "au-09",
+        "au-10"
+      ],
+      "id": "G2",
+      "ownerRole": "maintainers",
+      "poam": "g02",
+      "remediation": "Write decision records through one record writer into a hash-chained local audit with signed heads, then add a command that exports them for assessors.",
+      "title": "Gate decision records are not tamper-evident and cannot be exported"
+    },
+    {
+      "controls": [
+        "ac-17",
+        "ia-02",
+        "ia-09",
+        "sc-23"
+      ],
+      "id": "G3",
+      "ownerRole": "maintainers",
+      "poam": "g03",
+      "remediation": "Authenticate every inbound request to the relay and allow only listed senders and channels, as planned for the relay.",
+      "title": "The messaging relay has no inbound authentication yet"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "sr-04",
+        "sr-11",
+        "si-07",
+        "cm-14"
+      ],
+      "id": "G4",
+      "ownerRole": "release-owner",
+      "remediation": "Attest the release artifacts with GitHub artifact attestations in the Release workflow, and verify them when the dashboard data is refreshed.",
+      "title": "No build provenance or attestation for the VSIX, the relay image or the package"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "ra-05",
+        "cm-08",
+        "sr-04"
+      ],
+      "id": "G5",
+      "ownerRole": "maintainers",
+      "remediation": "Build an SBOM of the relay image and scan it with a pinned, checksummed scanner, reporting high and critical findings.",
+      "title": "No vulnerability scan or SBOM for the relay container image"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "sa-11.01"
+      ],
+      "id": "G6",
+      "ownerRole": "maintainers",
+      "remediation": "Run static analysis on every pull request and on main, and keep its results as evidence.",
+      "title": "No static analysis of the source code"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "cm-05",
+        "ac-05"
+      ],
+      "id": "G7",
+      "ownerRole": "owner",
+      "remediation": "Add a CODEOWNERS file that names the owner for the gate paths and the compliance sources.",
+      "title": "No CODEOWNERS file; review routing is by convention"
+    },
+    {
+      "controls": [
+        "cp-09",
+        "cp-10"
+      ],
+      "id": "G8",
+      "ownerRole": "maintainers",
+      "poam": "g08",
+      "remediation": "The hub's backup, restore and restore drill are documented; the relay's operator runbook adds its backups, restore and upgrades.",
+      "title": "No backup and recovery guidance for the messaging relay"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "ra-03",
+        "pl-08",
+        "sa-17"
+      ],
+      "id": "G9",
+      "ownerRole": "maintainers",
+      "remediation": "Publish one threat model and a data-flow diagram per component, each reviewed at least once a year.",
+      "title": "No standalone threat model or data-flow diagram"
+    },
+    {
+      "controls": [
+        "cm-02",
+        "si-02",
+        "sr-03"
+      ],
+      "id": "G10",
+      "ownerRole": "maintainers",
+      "poam": "g10",
+      "remediation": "Save exact versions for the root package, turn install scripts off where the build allows it, and turn on alerts for security updates only.",
+      "title": "Root installs run dependency install scripts, development dependencies use ranges, and there are no automated update alerts"
+    },
+    {
+      "controls": [
+        "au-06",
+        "au-11",
+        "si-04"
+      ],
+      "id": "G11",
+      "ownerRole": "shared",
+      "poam": "g11",
+      "remediation": "Document what each component logs, where and for how long, and give your organization an option to forward logs to its own monitoring; keeping and reviewing them is shared.",
+      "title": "No central log forwarding or retention guidance"
+    },
+    {
+      "controls": [
+        "cm-03"
+      ],
+      "id": "G12",
+      "ownerRole": "owner",
+      "poam": "g12",
+      "remediation": "Make the docs check (and later the compliance check) required on main; the owner changes this repository setting, and the gap closes when the settings collector sees it.",
+      "title": "The docs build is not a required check"
+    },
+    {
+      "controls": [
+        "sc-08",
+        "sr-11"
+      ],
+      "id": "G13",
+      "ownerRole": "maintainers",
+      "poam": "g13",
+      "remediation": "Check the platform's TCB status, certificate revocation and the enclave's measurements against the provider's published build; until then the security policy says so and points to the provider's full verifier.",
+      "title": "The attestation checks do not check TCB status, certificate revocation or enclave measurements"
+    },
+    {
+      "controls": [
+        "ac-16",
+        "cgp-37-2",
+        "itar-120.56-a"
+      ],
+      "id": "X1",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x01",
+      "remediation": "Give the three reserved compartments their fixed meaning through the exportControl section of the signed policy, with the words shown for each, and enforce it.",
+      "title": "The CGP, ITAR and EAR compartments have no fixed meaning that ties them to a regime"
+    },
+    {
+      "controls": [
+        "ac-03",
+        "ac-21",
+        "cgp-13",
+        "cgp-37-2",
+        "itar-120.56-a",
+        "itar-126.5"
+      ],
+      "id": "X2",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x02",
+      "remediation": "Let only a signed export-person decision from the regime's official give a person a reserved compartment, and later issue those decisions as verifiable credentials.",
+      "title": "Clearances are self-declared; there is no signed person decision for export regimes"
+    },
+    {
+      "controls": [
+        "ac-04",
+        "sa-09",
+        "cgp-37-2",
+        "itar-120.56-a"
+      ],
+      "id": "X3",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x03",
+      "remediation": "Refuse every send of controlled content to an endpoint that no signed export-endpoint decision covers, in the route check.",
+      "title": "Endpoints carry a highest label and a region, but no export eligibility"
+    },
+    {
+      "controls": [
+        "ac-04",
+        "sc-07",
+        "cgp-37-2",
+        "itar-120.56-a"
+      ],
+      "id": "X4",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x04",
+      "remediation": "Refuse agent tools that reach the network while a chat holds a reserved compartment, and later add the full network fence around agent execution.",
+      "title": "Agent network tools are refused only by the no-agent-tools flag, not by the marking"
+    },
+    {
+      "controls": [
+        "au-09",
+        "au-10",
+        "cgp-10-a",
+        "itar-122.5"
+      ],
+      "id": "X5",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x05",
+      "remediation": "Write export-control records into the hash-chained audit and export them as a signed bundle for the officials.",
+      "title": "Export-control records are not tamper-evident and cannot be exported"
+    },
+    {
+      "controls": [
+        "au-11",
+        "si-12",
+        "cgp-10-a",
+        "itar-122.5"
+      ],
+      "id": "X6",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x06",
+      "remediation": "Never prune export-control records automatically, show the earliest date each may be pruned, and record a keyed hash of what was sent.",
+      "title": "No retention rule, and no content hash in records, so a later marking cannot find earlier sends"
+    },
+    {
+      "controls": [
+        "ir-04",
+        "ir-06",
+        "cgp-10-h",
+        "itar-127.12"
+      ],
+      "id": "X7",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x07",
+      "remediation": "Open an incident when controlled content may have reached an ineligible place, show the regulators' clocks, and notify your organization's export-control contact.",
+      "title": "No incident flow for a possible release"
+    },
+    {
+      "controls": [
+        "sc-12",
+        "sc-13",
+        "itar-120.54-a5"
+      ],
+      "id": "X8",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x08",
+      "remediation": "Document the comparable-strength basis in the cryptography inventory, and evaluate a FIPS 140-3 validated provider for the hub and the appliance where the operating system can supply one; your organization decides whether the basis suffices.",
+      "title": "The product's cryptography is not run as a FIPS 140 validated module"
+    },
+    {
+      "controls": [
+        "ra-02",
+        "ac-16"
+      ],
+      "id": "X9",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x09",
+      "remediation": "Ask about technical data for military or defence goods in setup, in plain words, with Not sure applying both markings, and add the export-control contact topic.",
+      "title": "Setup asks nothing about export-controlled work, and there is no export-control contact topic"
+    },
+    {
+      "controls": [
+        "ac-03",
+        "ac-04",
+        "ac-21",
+        "cgp-37-2",
+        "itar-120.56-a"
+      ],
+      "id": "X10",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "poam": "x10",
+      "remediation": "Check export decisions in hub grants and access lists, in the data platform's row access, and in the relay's channel manifests.",
+      "title": "The hub, the data platform and the relay do not know export decisions"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "ca-02",
+        "ca-07"
+      ],
+      "id": "X11",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "remediation": "Add the requirement catalogues, their mappings and the two overlay pages to the Accreditation section.",
+      "title": "No Controlled goods or ITAR overlay on the dashboard"
+    },
+    {
+      "closesInPhase": "44",
+      "controls": [
+        "sa-05",
+        "cgp-10-e"
+      ],
+      "id": "X12",
+      "overlay": "both",
+      "ownerRole": "maintainers",
+      "remediation": "Publish a Controlled goods and ITAR page that says what the product does, what it does not do, and the interim settings your officials may choose.",
+      "title": "No published guidance for organizations on controlled goods and ITAR"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:00000000-0000-4000-8000-000000000001",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-20T00:00:00.000Z",
+    "tools": { "components": [{ "type": "application", "name": "example-sbom-tool", "version": "0.0.1" }] },
+    "component": { "type": "application", "bom-ref": "project", "name": "example-extension", "version": "0.0.1", "publisher": "example-publisher" }
+  },
+  "components": [
+    { "type": "library", "bom-ref": "pkg:npm/example-alpha@1.0.0", "name": "example-alpha", "version": "1.0.0", "purl": "pkg:npm/example-alpha@1.0.0", "scope": "required", "licenses": [{ "expression": "MIT" }] },
+    { "type": "library", "bom-ref": "pkg:npm/example-beta@2.1.0", "name": "example-beta", "version": "2.1.0", "purl": "pkg:npm/example-beta@2.1.0", "scope": "required", "licenses": [{ "expression": "Apache-2.0" }] },
+    { "type": "data", "bom-ref": "data:example-tiles", "name": "Example synthetic tiles", "description": "Synthetic data component for a fixture.", "licenses": [{ "license": { "id": "MIT" } }] }
+  ],
+  "vulnerabilities": []
+}

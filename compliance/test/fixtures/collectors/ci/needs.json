@@ -1,0 +1,8 @@
+{
+  "lint": { "result": "success", "outputs": { "private": "never copied" } },
+  "test": { "result": "failure", "outputs": { "private": "never copied" } },
+  "e2e": { "result": "skipped", "outputs": {} },
+  "secret-scan": { "result": "cancelled", "outputs": {} },
+  "docs": { "result": "success", "outputs": {} },
+  "unrelated": { "result": "success", "outputs": {} }
+}

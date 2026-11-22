@@ -1,0 +1,23 @@
+{
+  "controls": [
+    "au-09",
+    "au-10",
+    "cgp-10-a",
+    "itar-122.5"
+  ],
+  "gap": "X5",
+  "id": "x05",
+  "milestones": [
+    {
+      "phase": "32.1",
+      "title": "Record writer and hash-chained local audit"
+    },
+    {
+      "phase": "45",
+      "title": "Signed export bundle of export-control records"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Write export-control records into the hash-chained audit and export them as a signed bundle for the officials.",
+  "title": "Export-control records are not tamper-evident and cannot be exported"
+}

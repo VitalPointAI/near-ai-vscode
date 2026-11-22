@@ -2,7 +2,10 @@
 // no YAML parser in the dependencies, so these read the files as text, split into top-level
 // keys and jobs by indentation.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 
 const read = (name) => readFileSync(new URL(`../../.github/workflows/${name}`, import.meta.url), 'utf8');
@@ -158,4 +161,156 @@ test('the review\'s shared time budget ends inside the review job\'s limit, so a
   assert.ok(limit > 0 && limit <= 360, 'the review job has a limit within GitHub\'s 360 minutes');
   assert.ok(REVIEW_BUDGET_SECONDS / 60 + REVIEW_JOB_MARGIN_MINUTES <= limit,
     `the model budget (${REVIEW_BUDGET_SECONDS / 60} minutes) plus ${REVIEW_JOB_MARGIN_MINUTES} minutes for the rest fits the job's ${limit} minutes`);
+});
+
+test('compliance is a report-only aggregate job with safe evidence handling', () => {
+  const job = jobs(read('ci.yml')).get('compliance');
+  assert.ok(job, 'compliance job exists');
+  for (const need of ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'docs', 'relay', 'hub', 'relay-image-scan']) assert.match(job, new RegExp(`\\b${need}\\b`));
+  assert.match(job, /if:\s*always\(\)/);
+  assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
+  assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
+  const scan = steps(job).find((step) => /secret-scan\.mjs --dir/.test(step));
+  const upload = steps(job).find((step) => /name: compliance-bundle/.test(step));
+  assert.match(scan, /id: bundle_scan/);
+  assert.match(upload, /if: steps\.bundle_scan\.outcome == 'success'/);
+  assert.match(job, /FAIL_ON_DROP:/);
+  assert.match(job, /npm audit[\s\S]*continue-on-error: true|continue-on-error: true[\s\S]*npm audit/);
+});
+
+test('root, relay and hub test reports are always uploaded without changing required checks', async () => {
+  const all = jobs(read('ci.yml'));
+  for (const id of ['test', 'relay', 'hub']) {
+    const job = all.get(id);
+    assert.match(job, /NEAR_AI_TEST_REPORT/);
+    assert.match(job, /actions\/upload-artifact@[0-9a-f]{40}/);
+    const upload = steps(job).find((step) => step.includes(`name: test-report-${id === 'test' ? 'root' : id}`));
+    assert.ok(upload, `report upload exists for ${id}`);
+    const guard = id === 'test' ? '' : `steps.has_${id}.outputs.present == 'true' && `;
+    assert.ok(upload.includes(`if: ${guard}always()`));
+    assert.match(job, /continue-on-error:\s*true/);
+  }
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  assert.ok(!CI_CHECKS.includes('compliance') && !CI_CHECKS.includes('relay-image-scan'));
+});
+
+test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-triggered evidence jobs', async () => {
+  const scheduled = read('compliance-scheduled.yml');
+  const codeql = read('codeql.yml');
+  for (const text of [read('ci.yml'), scheduled, codeql, read('release.yml')]) {
+    for (const match of text.matchAll(/^\s*-\s+uses:\s*([^\s#]+)/gm)) assert.match(match[1], /@[0-9a-f]{40}$/);
+  }
+  assert.doesNotMatch(block(scheduled, 'on'), /pull_request/);
+  const daily = jobs(scheduled).get('daily-evidence');
+  assert.match(daily, /if: github\.ref == 'refs\/heads\/main' && \(/);
+  assert.match(daily, /mkdir -p compliance\/out\n[\s\S]*> compliance\/out\/audit-root\.json/);
+  assert.match(daily, /environment:\s*compliance-settings/);
+  assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
+  const scheduledBundleScan = steps(daily).find((step) => /secret-scan\.mjs --dir/.test(step));
+  assert.ok(scheduledBundleScan, 'daily evidence secret-scans the completed bundle');
+  assert.match(scheduledBundleScan, /continue-on-error:\s*true/, 'a secret finding is reported without failing daily evidence collection');
+  assert.match(scheduledBundleScan, /id: bundle_scan/);
+  const upload = steps(daily).find((step) => /name: compliance-bundle/.test(step));
+  assert.match(upload, /if: steps\.bundle_scan\.outcome == 'success'/);
+  assert.match(jobs(codeql).get('codeql'), /contents:\s*read[\s\S]*security-events:\s*write/);
+  assert.match(codeql, /languages:\s*javascript-typescript/);
+  assert.match(codeql, /build-mode:\s*none/);
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  for (const id of jobs(scheduled).keys()) assert.ok(!CI_CHECKS.includes(id));
+});
+
+test('relay image scan uses only the pinned installers and keeps findings report-only', () => {
+  const job = jobs(read('ci.yml')).get('relay-image-scan');
+  assert.ok(job);
+  assert.match(job, /docker build[^\n]*near-ai-relay:scan/);
+  assert.match(job, /compliance\/ci\/install-tool\.sh syft/);
+  assert.match(job, /compliance\/ci\/install-tool\.sh grype/);
+  assert.match(job, /grype db update/);
+  assert.match(job, /--fail-on high/);
+  assert.match(job, /continue-on-error:\s*true/);
+  assert.doesNotMatch(job, /curl[^\n]*\|\s*(?:sh|bash)|wget[^\n]*\|\s*(?:sh|bash)/);
+});
+
+test('release package, attest and Trestle jobs keep privilege separated', () => {
+  const text = read('release.yml');
+  const all = jobs(text);
+  const pkg = all.get('package'); const attest = all.get('attest'); const trestle = all.get('trestle'); const release = all.get('release');
+  assert.match(pkg, /contents:\s*read[\s\S]*actions:\s*read/);
+  assert.match(pkg, /npm --prefix compliance ci --ignore-scripts/);
+  assert.ok(pkg.includes('sh compliance/ci/oscal-validate.sh package "$directory"'));
+  assert.ok(pkg.includes('stageAssessorItsg33Profile(process.argv[1])'));
+  assert.ok(pkg.includes('profile="compliance/out/assessor-oscal/profiles/$name"'));
+  assert.match(attest, /needs:\s*\[build, package\]/);
+  assert.match(attest, /contents:\s*read[\s\S]*id-token:\s*write[\s\S]*attestations:\s*write/);
+  assert.equal((text.match(/id-token:\s*write/g) ?? []).length, 1);
+  assert.match(attest, /sha256sum --check/);
+  assert.match(attest, /subject-checksums: release\/subjects\.sha256/);
+  assert.match(attest, /actions\/attest@[0-9a-f]{40}/);
+  assert.match(trestle, /--require-hashes --no-deps/);
+  assert.match(trestle, /continue-on-error:\s*true/);
+  assert.ok(trestle.includes('trestle import -f "$root/oscal/component-definitions/extension.json"'));
+  assert.match(release, /needs:\s*\[build, package, attest\]/);
+  assert.match(release, /package_sha256/);
+});
+
+test('only main pushes and versioned hotfix branch dispatches publish compliance bundles', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-ci-evidence-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(path.join(dir, 'compliance'));
+  writeFileSync(path.join(dir, 'compliance', 'package.json'), '{}');
+  const job = jobs(read('ci.yml')).get('compliance');
+  const detect = steps(job).find((step) => /id: has_compliance/.test(step));
+  assert.ok(detect);
+  const script = detect.split('\n').slice(detect.split('\n').findIndex((line) => line.trim() === 'run: |') + 1).join('\n');
+  const output = path.join(dir, 'output');
+  for (const [event, branch, refType, kind] of [
+    ['push', 'main', 'branch', 'main'],
+    ['workflow_dispatch', 'hotfix/0.4.36', 'branch', 'release'],
+    ['workflow_dispatch', 'hotfix/0.4.36', 'tag', ''],
+    ['workflow_dispatch', 'hotfix/debug', 'branch', ''],
+    ['workflow_dispatch', 'main', 'branch', ''],
+    ['pull_request', 'hotfix/0.4.36', 'branch', ''],
+  ]) {
+    writeFileSync(output, '');
+    execFileSync('bash', ['-e', '-c', script], { cwd: dir, env: { ...process.env, EVENT: event, BRANCH: branch, REF_TYPE: refType, GITHUB_OUTPUT: output } });
+    assert.equal(readFileSync(output, 'utf8'), `present=true\n${kind ? `publish_as=${kind}\n` : ''}`, `${event} ${refType} ${branch}`);
+  }
+  assert.match(job, /if: steps\.has_compliance\.outputs\.publish_as != ''[\s\S]*secret-scan\.mjs --dir/);
+  assert.match(job, /if: steps\.bundle_scan\.outcome == 'success'/);
+});
+
+test('releases require GitHub CI evidence on the exact release head when the base supports compliance', () => {
+  const all = jobs(read('release.yml'));
+  const build = all.get('build');
+  assert.match(build, /evidence_branch="hotfix\/\$version"/);
+  assert.match(build, /compliance\/package\.json is required for a main release/);
+  assert.match(build, /git cat-file -e "\$base:compliance\/package\.json"[\s\S]*package_required=false/);
+  const pkg = all.get('package');
+  assert.match(pkg, /if: needs\.build\.outputs\.package_required == 'true'/);
+  assert.match(pkg, /event=push\n[^\n]*"\$EVIDENCE_BRANCH" != main[^\n]*event=workflow_dispatch/);
+  assert.match(pkg, /gh run list --workflow ci\.yml --branch "\$EVIDENCE_BRANCH" --event "\$event" --status success --commit "\$COMMIT"/);
+  assert.match(pkg, /!result\.ok \|\| manifest\.commit !== process\.env\.COMMIT/);
+  for (const id of ['attest', 'release']) {
+    const job = all.get(id);
+    assert.match(job, /package_required == 'true' && needs\.package\.result == 'success'/);
+    assert.match(job, /package_required == 'false' && needs\.package\.result == 'skipped'/);
+    assert.match(job, /if \[ "\$PACKAGE_REQUIRED" = true \]; then[\s\S]*"\$PACKAGE"/);
+  }
+  assert.match(all.get('release'), /needs\.attest\.result == 'success'/);
+});
+
+test('CODEOWNERS routes all compliance gate paths to one owner', () => {
+  const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
+  for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/']) {
+    assert.match(text, new RegExp(`^${path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s+@ALuhning\\s*$`, 'm'));
+  }
+});
+
+test('new workflow shell scripts receive GitHub values only through env', () => {
+  for (const name of ['ci.yml', 'compliance-scheduled.yml', 'codeql.yml', 'release.yml']) {
+    for (const [id, job] of jobs(read(name))) for (const step of steps(job)) {
+      const run = /\n\s+run: ?\|?([\s\S]*)$/.exec(step)?.[1] ?? '';
+      assert.doesNotMatch(run, /\$\{\{/, `${name} ${id}: no GitHub expression inside a run script`);
+    }
+  }
 });
