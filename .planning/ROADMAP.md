@@ -404,7 +404,7 @@ Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agre
   7. One mode table sets words and joining behaviour together: a staff officer's setup suggests Military mode and the Staff Room then says "Post a person"; a policy fixing Public service shows the mode as set by your organization; a software project keeps "Invite", unchanged. (ORG-01, ORG-02, ORG-03, ORG-04)
 **Research flags**: (1) Open owner decisions D1 to D4, D6, D7 and D9. (2) Exact probe ports and signature endpoints per local server, checked against current releases. (3) Mapping of personal information to Protected A or B to be confirmed by your organization's security officer before rollout.
 **Undo cost**: Low to medium: an optional `onboarding` bundle key and a `setupGuide` entry in `project.json`.
-**Plans:** 10/20 plans executed in 6 waves (planned 2026-11-21; decisions D-01 to D-44 in `32.1-CONTEXT.md`, owner confirmations listed there; plan 01 is the shared contract Phase 32.2 builds on)
+**Plans:** 11/20 plans executed in 6 waves (planned 2026-11-21; decisions D-01 to D-44 in `32.1-CONTEXT.md`, owner confirmations listed there; plan 01 is the shared contract Phase 32.2 builds on)
 **UI hint**: yes
 
 Plans:
@@ -420,7 +420,7 @@ Plans:
 - [x] 32.1-10-PLAN.md: Wave 2. Project layer store and sink, project-scoped Canada wired into the gate (owner D14)
 - [x] 32.1-11-PLAN.md: Wave 3. Session reducer, page messages, change list, screen models
 - [ ] 32.1-12-PLAN.md: Wave 3. Apply engine: label raise only, clearance gap as proposal, connections, proposals, choice reason
-- [ ] 32.1-15-PLAN.md: Wave 3. Registered steps, landing host, context keys, first-run guarantee, exercise flag
+- [x] 32.1-15-PLAN.md: Wave 3. Registered steps, landing host, context keys, first-run guarantee, exercise flag
 - [ ] 32.1-13-PLAN.md: Wave 4. Get Started host and controller; success criteria 1 to 5 as scenarios
 - [ ] 32.1-14-PLAN.md: Wave 4. The Get Started page on the kit, keyboard, screen reader and reduced motion
 - [ ] 32.1-16-PLAN.md: Wave 4. Discovery in the guide: found servers listed as not approved
@@ -1764,7 +1764,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 33.1. Assigned positions and handover | 0/TBD | Not started (after Phase 33, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
-| 32.1. Guided setup with viable options and a plain recommendation | 10/20 | In Progress 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
+| 32.1. Guided setup with viable options and a plain recommendation | 11/20 | In Progress 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
 | 32.2. Local model manager | 0/17 | Planned 2026-11-21 (after 32.1-01, the shared contract) | - |
 | 36. Cohere Model Vault provider, sovereign-region class and cost control | 0/TBD | Not started (after Phases 32 and 41; may run beside 33 to 35) | - |
 | 37. Cohere Encrypted Vault as an attested endpoint | 0/TBD | Not started (after Phase 36) | - |
