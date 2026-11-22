@@ -508,8 +508,7 @@ export function mergeOutcomeProblem(state, mergeSha) {
 /** The body of `## <version>` in CHANGELOG.md, without the heading, or undefined. */
 export function changelogSection(markdown, version) {
   const lines = String(markdown ?? '').split(/\r?\n/);
-  const heading = new RegExp(`^##\\s+\\[?v?${version.replaceAll('.', '\\.')}\\]?(\\s|$)`);
-  const start = lines.findIndex((line) => heading.test(line));
+  const start = lines.findIndex((line) => /^##\s+\[?v?([^\s\]]+)\]?(?:\s|$)/.exec(line)?.[1] === version);
   if (start < 0) return undefined;
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) if (/^##\s/.test(lines[i])) { end = i; break; }

@@ -57,7 +57,8 @@ export function controlFromSection(section: Element, lang: Lang): ParsedControl 
   const rawId = section.attrs.find((item) => item.name === 'id')?.value.match(/([A-Z]{2}-\d+(?:\(\d+\))?)$/)?.[1];
   if (!rawId) throw new Error('control heading has no ITSP id');
   const id = normalizeId(rawId);
-  const title = text(section).replace(new RegExp(`^${rawId.replace(/[()]/g, '\\$&')}\\s*`), '');
+  const heading = text(section);
+  const title = heading.startsWith(rawId) ? heading.slice(rawId.length).trimStart() : heading;
   const content = contentByHeading(section);
   const klass = content.activity ? 'activity' : 'control';
   const statements = content[klass] ?? [];

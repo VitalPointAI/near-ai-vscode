@@ -495,6 +495,7 @@ test('the changelog section for a version is extracted without its heading', () 
   assert.equal(changelogSection(md, '0.4.12'), 'New things.\n\n- one\n');
   assert.equal(changelogSection(md, '0.4.11'), 'Old things.\n');
   assert.equal(changelogSection(md, '0.4.1'), undefined);
+  assert.equal(changelogSection('## [v0.4.12] - 2026-11-22\n\nNew things.\n', '0.4.12'), 'New things.\n');
 });
 
 test('version bumps must go up', () => {
