@@ -1,0 +1,12 @@
+{
+  "sourceIds": [
+    "defence-production-act",
+    "controlled-goods-regulations"
+  ],
+  "excluded": [
+    {
+      "id": "cgp-37-3",
+      "reason": "definition"
+    }
+  ]
+}

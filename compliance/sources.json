@@ -1,0 +1,417 @@
+{
+  "sources": [
+    {
+      "id": "itsp-10-033",
+      "title": "ITSP.10.033",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033",
+          "sha256": "ca9691df114322e0188bbdfe2fde8ee039355f582293d6cc7828782df14530e1"
+        },
+        {
+          "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033",
+          "lang": "fr",
+          "sha256": "9184d70bf2844b53b748d48f5c8b46e0d8e4b457f1156d857a03a5968e66e29a"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "ddad8760-bf9b-47aa-890d-67da202aca6a"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "d791fcdd16b9228ba93695fb540ca29e247ceb73fb7f3c2d5618c9d27394f626"
+    },
+    {
+      "id": "itsp-10-033-01",
+      "title": "ITSP.10.033-01",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/suggested-organizational-security-privacy-control-activity-profile-medium-impact-itsp10033-01",
+          "sha256": "d8b2f9f7ed114e141350a634c578a329e208007e987011c61afa3d91efb9af12"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "06179c95-a0e0-446f-8f53-9208f8b41eb9"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "6afb49ce6e66457d4da9610dd62e38cc19bfb8012e706f9004c6a359103cffe5"
+    },
+    {
+      "id": "itsp-10-171",
+      "title": "ITSP.10.171",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/protecting-specified-information-non-government-canada-systems-and-organizations-itsp10171",
+          "sha256": "6e23800ca0e425cdd8e8e34d8fc7ba2dc71a86ef1feb636c715ba76f734b1ad0"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "ec66c9c2-a150-45b9-bd2d-0ca0f24ee7ff"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "4668d45671cf7f52e1c47f0380a55499bb7372f8a1d760d4d3f26b1085af08b5"
+    },
+    {
+      "id": "itsp-10-171-01",
+      "title": "ITSP.10.171-01",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/assessing-security-requirements-specified-information-itsp10171-01",
+          "sha256": "0d2c86c0cb6bacd1455b6b3466912a9623848c9d454dd6cab4518fcc0b4090a7"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "7bef2eec-539a-4750-b7ec-dfa776da7658"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "9b412f121f0288faac84e63467308cdccb4418d74b7f021908045dd4941c26b2"
+    },
+    {
+      "id": "itsg-33",
+      "title": "ITSG-33",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://cyber.gc.ca/en/guidance/overview-itsg-33",
+          "error": "GET https://www.cyber.gc.ca/en/guidance/overview-itsg-33 returned 404"
+        },
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/annex-3a-security-control-catalogue-itsg-33",
+          "sha256": "347a93b205ef847d52a6749a41db3535aa3ff3a8e312bfa778227398028e61f9"
+        },
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/annex-4a-profile-3-secret-medium-integrity-medium-availability-itsg-33",
+          "sha256": "19865c24adfb60ff9a3b95c939b9c6b79f23cd05e8add7c568fc9bca55d0807f"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "a2fe4b67-a020-48a8-a5b0-d303966d5f2d"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "dac0050e1d1b5621e1f1ccd3be4ad6fecae5731d856e35ed65592083c0a354b8"
+    },
+    {
+      "id": "itsp-50-103",
+      "title": "ITSP.50.103",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/itsp-50103",
+          "error": "GET https://www.cyber.gc.ca/en/guidance/itsp-50103 returned 404"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "4d68aa91-cb32-4177-8bc1-56a5e3d572c5"
+      },
+      "use": "cite",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "4823de6045942c846d2000eea141734dfdcdde7aa0d8b42e4003617ac17fc3b9"
+    },
+    {
+      "id": "baseline-controls-v1-2",
+      "title": "Baseline cyber security controls for small and medium organizations v1.2",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/baseline-cyber-security-controls-small-and-medium-organizations",
+          "sha256": "16a85710491bae7df1eefb265dd302da2749e41e7e7db81baa352e50fab9a646"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "5ba24bba-c358-4923-89d7-bd6885ae9f52"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "345eddf9ba28b2027c97d3c5974098f1674a3ada222b71e52c24af3986af98d5"
+    },
+    {
+      "id": "itsp-series-landing",
+      "title": "Cyber security and privacy risk management: A lifecycle approach",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management",
+          "sha256": "b784b461a5a97152a80c37845cd508e271ff2ea473b501c62e3eab695c1e8deb"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "c54a8b0f-1a33-4a83-9e71-8a1cf153e97a"
+      },
+      "use": "cite",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "5ac1969687522b6365a9470a622260731c1743b7d5baa84ecf0f30b51f179f5e"
+    },
+    {
+      "id": "itsp-40-111",
+      "title": "ITSP.40.111",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/itsp-40111",
+          "error": "GET https://www.cyber.gc.ca/en/guidance/itsp-40111 returned 404"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "984631a4-6d57-4b50-bf32-1819ec99a923"
+      },
+      "use": "cite",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "3d73f220aed1ce04cbf3253e2912ad3bd0a395267f5b7ea527331eaf01c70b32"
+    },
+    {
+      "id": "itsp-50-105",
+      "title": "ITSP.50.105",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/itsp-50105",
+          "error": "GET https://www.cyber.gc.ca/en/guidance/itsp-50105 returned 404"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "e0c9e38b-1976-4399-bf13-2f13eceb64ef"
+      },
+      "use": "cite",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "ad6b22024ae447fc1660c0eaf6c8e1a750b4570e88e3ebfc128144cfd4def310"
+    },
+    {
+      "id": "itsm-50-100",
+      "title": "ITSM.50.100",
+      "publisher": "Canadian Centre for Cyber Security",
+      "pages": [
+        {
+          "url": "https://www.cyber.gc.ca/en/guidance/itsm-50100",
+          "error": "GET https://www.cyber.gc.ca/en/guidance/itsm-50100 returned 404"
+        }
+      ],
+      "licence": "ca-ogl-lgo",
+      "licenceEvidence": {
+        "kind": "ckan",
+        "recordId": "dcbb91a4-9605-4069-aa1d-55a88715200a"
+      },
+      "use": "cite",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "8f54a1c7e4676d30c95762ee7d6d51e4ec0a00ec7056585160da4e25968d2109"
+    },
+    {
+      "id": "can-dgsi-104",
+      "title": "CAN/DGSI 104",
+      "publisher": "Digital Governance Council",
+      "pages": [
+        {
+          "url": "https://www.canada.ca/en/government/system/digital-government.html",
+          "sha256": "0cae1ba9a791798ada6c24743729a893d8b6c2484f10eba1ba8a9062f2efdf90"
+        }
+      ],
+      "licence": "all-rights-reserved",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://www.canada.ca/en/government/system/digital-government.html"
+      },
+      "use": "ids-and-links",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "5c2c174d37fbb94b8c107a2984d73e0abf93f38f9beb50a7b6c13c5c857533d7"
+    },
+    {
+      "id": "cpcsc-level-1",
+      "title": "CPCSC Level 1",
+      "publisher": "Government of Canada",
+      "pages": [
+        {
+          "url": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html",
+          "sha256": "fee5701237bbd600bbe080dcf1afaec827973a6f82f42cf9a78b9b641b162e7e"
+        }
+      ],
+      "licence": "canada-ca-terms",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://www.canada.ca/en/public-services-procurement/services/industrial-security/security-requirements-contracting/cyber-security-certification-defence-suppliers-canada/program-overview.html"
+      },
+      "use": "ids-and-links",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "4ab771cdd643b6b0422f6ad68ab9a0cc2f12197223b1f45316ded41658f1af06"
+    },
+    {
+      "id": "tb-directive-security-appendix-b",
+      "title": "Treasury Board Directive on Security Management Appendix B",
+      "publisher": "Treasury Board of Canada Secretariat",
+      "pages": [
+        {
+          "url": "https://www.tbs-sct.canada.ca/pol/doc-eng.aspx?id=32611",
+          "sha256": "7508de42be78f34492d6ce9f6d9f02f4d00982c7095a564794c04cccb42f4417"
+        }
+      ],
+      "licence": "canada-ca-terms",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://www.tbs-sct.canada.ca/pol/doc-eng.aspx?id=32611"
+      },
+      "use": "cite",
+      "browserAgent": true,
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "1c1be09abb85994d67dac5e426b9e0b9cdc242204d0a870089c432c7d0e30f47"
+    },
+    {
+      "id": "defence-production-act",
+      "title": "Defence Production Act Part 2",
+      "publisher": "Justice Laws Website",
+      "pages": [
+        {
+          "url": "https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html",
+          "sha256": "dd892adcc15c3671afaba303c5f06f0821569b4ea27f28f3961c79df82fbf6df"
+        }
+      ],
+      "licence": "reproduction-of-federal-law-order",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "3609e15d2c4b6fc90fc5b4592c6d2549c55b160f185fdff0e040b5c0e2a473a4"
+    },
+    {
+      "id": "controlled-goods-regulations",
+      "title": "Controlled Goods Regulations",
+      "publisher": "Justice Laws Website",
+      "pages": [
+        {
+          "url": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+          "sha256": "41a8223cae7924c390d1d9716ac63237e639a8666b9cbe5bdb6a5186a18f9bf3"
+        }
+      ],
+      "licence": "reproduction-of-federal-law-order",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "d69f28cdf0cb55710b7765ab17f3a968491311e2b174408a14ced35479b6b7ae"
+    },
+    {
+      "id": "ecfr-title-22",
+      "title": "eCFR Title 22 parts 120 to 130",
+      "publisher": "eCFR",
+      "pages": [
+        {
+          "url": "https://www.ecfr.gov/api/versioner/v1/titles.json",
+          "sha256": "cda0e002a5dbbf32693e18c79aa25b4a0e338b1264b2a76efbaaf1c9484d70da"
+        }
+      ],
+      "licence": "us-government-work",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://www.ecfr.gov/api/versioner/v1/titles.json"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "aa3d0faed91a62f75b10b25e9f70a50376bef6f02d4b6fa9d33ebe3ce47403c1"
+    },
+    {
+      "id": "ecfr-15-734",
+      "title": "eCFR Title 15 part 734",
+      "publisher": "eCFR",
+      "pages": [
+        {
+          "url": "https://www.ecfr.gov/api/versioner/v1/titles.json",
+          "sha256": "cda0e002a5dbbf32693e18c79aa25b4a0e338b1264b2a76efbaaf1c9484d70da"
+        }
+      ],
+      "licence": "us-government-work",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://www.ecfr.gov/api/versioner/v1/titles.json"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "aa3d0faed91a62f75b10b25e9f70a50376bef6f02d4b6fa9d33ebe3ce47403c1"
+    },
+    {
+      "id": "nist-oscal-content-v1-6-0",
+      "title": "NIST OSCAL content v1.6.0",
+      "publisher": "NIST",
+      "pages": [
+        {
+          "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/v1.6.0/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+          "sha256": "64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb"
+        }
+      ],
+      "licence": "us-public-domain",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/v1.6.0/LICENSE.md"
+      },
+      "use": "text",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "0f3b2dd718e5ffd3caab66445f00c38daf51ea116c99a67e3d6e486add5bf8fc"
+    },
+    {
+      "id": "aws-cccs-oscal-samples",
+      "title": "AWS CCCS OSCAL samples",
+      "publisher": "AWS Samples",
+      "pages": [
+        {
+          "url": "https://raw.githubusercontent.com/aws-samples/cccs-oscal-samples/main/LICENSE.md",
+          "sha256": "0beac60c03ba4648df37840205ea1abba594a08200e2665454ff26ab65e9021c"
+        }
+      ],
+      "licence": "mit-0",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://raw.githubusercontent.com/aws-samples/cccs-oscal-samples/main/LICENSE.md"
+      },
+      "use": "cross-check",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "1934a35cdc1e69883a9456369634e4fbf3954dff0b26201a85f1343608f325e4"
+    },
+    {
+      "id": "ciso-assistant-itsp",
+      "title": "CISO Assistant ITSP conversion",
+      "publisher": "CISO Assistant",
+      "pages": [
+        {
+          "url": "https://raw.githubusercontent.com/intuitem/ciso-assistant-community/main/backend/library/libraries/itsp.10.033.yaml",
+          "sha256": "cd14c7bd08901173eaceee1b4fbfdec823a7c0f7aeaa6c95b05b1f5c8c1d32e4"
+        }
+      ],
+      "licence": "cross-check-only",
+      "licenceEvidence": {
+        "kind": "page",
+        "url": "https://raw.githubusercontent.com/intuitem/ciso-assistant-community/main/LICENSE.md"
+      },
+      "use": "cross-check",
+      "retrievedAt": "2026-11-21T00:00:00Z",
+      "sha256": "9021dc4930d813c96152786002c87858ef95eeb73547cdfddbf3600ba3420dcf"
+    }
+  ]
+}
