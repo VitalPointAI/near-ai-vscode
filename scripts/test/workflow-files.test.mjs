@@ -159,3 +159,81 @@ test('the review\'s shared time budget ends inside the review job\'s limit, so a
   assert.ok(REVIEW_BUDGET_SECONDS / 60 + REVIEW_JOB_MARGIN_MINUTES <= limit,
     `the model budget (${REVIEW_BUDGET_SECONDS / 60} minutes) plus ${REVIEW_JOB_MARGIN_MINUTES} minutes for the rest fits the job's ${limit} minutes`);
 });
+
+test('compliance is a report-only aggregate job with safe evidence handling', () => {
+  const job = jobs(read('ci.yml')).get('compliance');
+  assert.ok(job, 'compliance job exists');
+  for (const need of ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'docs', 'relay', 'hub', 'relay-image-scan']) assert.match(job, new RegExp(`\\b${need}\\b`));
+  assert.match(job, /if:\s*always\(\)/);
+  assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
+  assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
+  assert.match(job, /secret-scan\.mjs --dir/);
+  assert.match(job, /FAIL_ON_DROP:/);
+  assert.match(job, /npm audit[\s\S]*continue-on-error: true|continue-on-error: true[\s\S]*npm audit/);
+});
+
+test('root, relay and hub test reports are always uploaded without changing required checks', async () => {
+  const all = jobs(read('ci.yml'));
+  for (const id of ['test', 'relay', 'hub']) {
+    const job = all.get(id);
+    assert.match(job, /NEAR_AI_TEST_REPORT/);
+    assert.match(job, /actions\/upload-artifact@[0-9a-f]{40}/);
+    assert.match(job, /if:\s*always\(\)/);
+    assert.match(job, /continue-on-error:\s*true/);
+  }
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  assert.ok(!CI_CHECKS.includes('compliance') && !CI_CHECKS.includes('relay-image-scan'));
+});
+
+test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-triggered evidence jobs', async () => {
+  const scheduled = read('compliance-scheduled.yml');
+  const codeql = read('codeql.yml');
+  for (const text of [read('ci.yml'), scheduled, codeql, read('release.yml')]) {
+    for (const match of text.matchAll(/uses:\s*([^\s#]+)/g)) assert.match(match[1], /@[0-9a-f]{40}$/);
+  }
+  assert.doesNotMatch(block(scheduled, 'on'), /pull_request/);
+  const daily = jobs(scheduled).get('daily-evidence');
+  assert.match(daily, /environment:\s*compliance-settings/);
+  assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
+  assert.match(jobs(codeql).get('codeql'), /contents:\s*read[\s\S]*security-events:\s*write/);
+  assert.match(codeql, /language:\s*javascript-typescript/);
+  assert.match(codeql, /build-mode:\s*none/);
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  for (const id of jobs(scheduled).keys()) assert.ok(!CI_CHECKS.includes(id));
+});
+
+test('relay image scan uses only the pinned installers and keeps findings report-only', () => {
+  const job = jobs(read('ci.yml')).get('relay-image-scan');
+  assert.ok(job);
+  assert.match(job, /docker build[^\n]*near-ai-relay:scan/);
+  assert.match(job, /compliance\/ci\/install-tool\.sh syft/);
+  assert.match(job, /compliance\/ci\/install-tool\.sh grype/);
+  assert.match(job, /grype db update/);
+  assert.match(job, /--fail-on high/);
+  assert.match(job, /continue-on-error:\s*true/);
+  assert.doesNotMatch(job, /curl[^\n]*\|\s*(?:sh|bash)|wget[^\n]*\|\s*(?:sh|bash)/);
+});
+
+test('release package, attest and Trestle jobs keep privilege separated', () => {
+  const text = read('release.yml');
+  const all = jobs(text);
+  const pkg = all.get('package'); const attest = all.get('attest'); const trestle = all.get('trestle'); const release = all.get('release');
+  assert.match(pkg, /contents:\s*read[\s\S]*actions:\s*read/);
+  assert.match(pkg, /npm --prefix compliance ci --ignore-scripts/);
+  assert.match(attest, /needs:\s*\[build, package\]/);
+  assert.match(attest, /contents:\s*read[\s\S]*id-token:\s*write[\s\S]*attestations:\s*write/);
+  assert.equal((text.match(/id-token:\s*write/g) ?? []).length, 1);
+  assert.match(attest, /sha256sum --check/);
+  assert.match(attest, /actions\/attest@[0-9a-f]{40}/);
+  assert.match(trestle, /--require-hashes --no-deps/);
+  assert.match(trestle, /continue-on-error:\s*true/);
+  assert.match(release, /needs:\s*\[build, package, attest\]/);
+  assert.match(release, /package_sha256/);
+});
+
+test('CODEOWNERS routes all compliance gate paths to one owner', () => {
+  const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
+  for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/']) {
+    assert.match(text, new RegExp(`^${path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s+@ALuhning\\s*$`, 'm'));
+  }
+});
