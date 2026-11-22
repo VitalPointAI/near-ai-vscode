@@ -267,16 +267,78 @@ test('S5: the J2 and J4 team files carry the PRC-origin sentence in their "Priva
   }
 });
 
-test('S5: the staff setup\'s model step and its last message say the same sentence', async () => {
+const staffSetupVscode = createVscodeStub();
+Object.assign(staffSetupVscode.vscode as object, { QuickPickItemKind: { Separator: -1 } });
+
+async function runStaffSetup(chosen?: readonly string[], preset?: import('../services/staffSetupCommand').StaffSetupPreset) {
+  const root = await mkdtemp(path.join(tmpdir(), 'staff-setup-command-'));
+  const project = path.join(root, 'project');
+  const configFile = path.join(project, '.planning', '.near-ai', 'project.json');
+  await mkdir(path.dirname(configFile), { recursive: true });
+  if (chosen) await writeFile(configFile, JSON.stringify({ setupGuide: { v: 1, answers: { data: [] }, chosen, pending: [] } }));
+  const library = new TeamLibrary(path.join(root, 'store'));
+  staffSetupVscode.setWorkspaceFolders([project]);
+  staffSetupVscode.quickPickRequests.length = 0;
+  staffSetupVscode.notifications.length = 0;
+  const { window } = staffSetupVscode.vscode as typeof import('vscode');
+  const showQuickPick = window.showQuickPick;
+  window.showQuickPick = ((items: Array<{ label: string }>, options: unknown) => {
+    staffSetupVscode.quickPickAnswers.push(items[0].label);
+    return Reflect.apply(showQuickPick, window, [items, options]);
+  }) as typeof showQuickPick;
+  const uninstall = installVscodeStub(staffSetupVscode);
+  try {
+    const command = await import('../services/staffSetupCommand');
+    const file = await command.setUpStaffTeam(library, 'j2', undefined, preset);
+    assert.ok(file, 'the setup wrote a team file');
+    return {
+      team: parseTeam(await readFile(file, 'utf8'), file),
+      settings: parseStaffSettings(JSON.parse(await readFile(configFile, 'utf8')).staff),
+      picks: [...staffSetupVscode.quickPickRequests],
+      notifications: [...staffSetupVscode.notifications]
+    };
+  } finally {
+    window.showQuickPick = showQuickPick;
+    uninstall();
+  }
+}
+
+test('S5 and D-25: staff setup keeps the private-model sentence and asks no models-run question', async () => {
   const { STAFF_PRIVATE_MODELS_TEXT } = await import('../domain/staff/products');
-  const stub = createVscodeStub();
-  const uninstall = installVscodeStub(stub);
+  const uninstall = installVscodeStub(staffSetupVscode);
   try {
     const command = await import('../services/staffSetupCommand');
     assert.ok(command.readyMessage('J2 intelligence', 'j2', false).includes(STAFF_PRIVATE_MODELS_TEXT));
-    // The model step's items, built by the code the command shows them with (PR #143 review: behaviour, not the source text).
-    const choices = command.localityChoices();
-    assert.deepEqual(choices.map((choice) => choice.value), ['cloud', 'local']);
-    assert.equal(choices[0]?.detail, `Private models in NEAR's TEE; members that research may use the web tools. ${STAFF_PRIVATE_MODELS_TEXT}`);
   } finally { uninstall(); }
+  const { picks, notifications } = await runStaffSetup();
+  assert.doesNotMatch(picks.map(({ title, placeHolder }) => `${title} ${placeHolder}`).join('\n'), /models run|where may/i);
+  assert.ok(notifications.some(({ message }) => message.includes(STAFF_PRIVATE_MODELS_TEXT) && message.includes('/team:')));
+});
+
+test('D-38: a local-only Get Started choice removes web tools and other choices keep template defaults', async () => {
+  for (const [chosen, hasWeb] of [
+    [['this-computer'], false],
+    [['near-private'], true],
+    [['this-computer', 'near-private'], true],
+    [['this-computer', 'unknown-option'], true],
+    [undefined, true]
+  ] as const) {
+    const { team } = await runStaffSetup(chosen);
+    assert.equal(team.members.some((member) => member.tools.some((tool) => tool === 'WebSearch' || tool === 'WebFetch')), hasWeb, JSON.stringify(chosen));
+  }
+});
+
+test('D-38: a staff preset skips doctrine picks and still lets the person choose echelon and confirm the roster', async () => {
+  const preset = settings({ profile: 'us-army', level: 'tactical' });
+  const result = await runStaffSetup(undefined, { settings: preset });
+  assert.equal(result.picks.length, 2);
+  assert.equal(result.picks[0].placeHolder, 'Which echelon?');
+  assert.match(result.picks[1].title ?? '', /check the roster/);
+  assert.ok(result.settings.ok);
+  assert.deepEqual(result.settings.value, { ...preset, teams: { j2: 'j2-us-army-tactical' } });
+});
+
+test('D-38: explicit staff preset locality takes precedence over the saved guide', async () => {
+  const { team } = await runStaffSetup(['near-private'], { locality: 'local' });
+  assert.ok(team.members.every((member) => !member.tools.some((tool) => tool === 'WebSearch' || tool === 'WebFetch')));
 });
