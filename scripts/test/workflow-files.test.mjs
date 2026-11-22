@@ -245,6 +245,7 @@ test('release package, attest and Trestle jobs keep privilege separated', () => 
   assert.match(attest, /actions\/attest@[0-9a-f]{40}/);
   assert.match(trestle, /--require-hashes --no-deps/);
   assert.match(trestle, /continue-on-error:\s*true/);
+  assert.ok(trestle.includes('trestle import -f "$root/oscal/component-definitions/extension.json"'));
   assert.match(release, /needs:\s*\[build, package, attest\]/);
   assert.match(release, /package_sha256/);
 });

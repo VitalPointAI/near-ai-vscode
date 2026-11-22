@@ -330,7 +330,7 @@ jobs:
           tar -xzf "release/$PACKAGE" -C trestle-work
           root="$(pwd)/trestle-work/$(tar -tzf "release/$PACKAGE" | head -1 | cut -d/ -f1)"
           cd trestle-work
-          trestle import -f ../compliance/components/extension.json -o extension >> "$GITHUB_STEP_SUMMARY" 2>&1
+          trestle import -f "$root/oscal/component-definitions/extension.json" -o extension >> "$GITHUB_STEP_SUMMARY" 2>&1
           trestle import -f "$root/oscal/ssp/protected-b.json" -o protected-b >> "$GITHUB_STEP_SUMMARY" 2>&1
           trestle import -f "$root/oscal/assessment-results.json" -o assessment-results >> "$GITHUB_STEP_SUMMARY" 2>&1
           trestle import -f "$root/oscal/poam.json" -o poam >> "$GITHUB_STEP_SUMMARY" 2>&1
