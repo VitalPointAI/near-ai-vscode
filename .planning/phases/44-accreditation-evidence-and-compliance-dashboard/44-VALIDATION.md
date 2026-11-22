@@ -77,7 +77,7 @@ Filled from the plans' `<automated>` blocks once the plans pass the checker. Eac
 - The pinned OSCAL CLI 3.2.0 resolved all eight profiles for the assessor package. The package resolves its 179 ITSG-33 selections against the owner-approved official statements. The generated dashboard lists the Classified controls by ID and title with links to the publisher. The release wrapper passed all 35 OSCAL validations, and all 98 package checksums passed.
 - A generated, hash-verified bundle refreshed a scratch copy of the production docs build. In Chromium, the Protected B AC-03 drawer linked to the official source, opened its French text, and restored focus when closed. The production build passed private-overlay isolation.
 - The root suite reported 6,180 passes, eight skips and one failure when Git encountered a temporary ref lock in the interrupted-push fixture. The failed case passed on its own.
-- The GitHub branch-protection read did not list `docs` as a required check. The `compliance-settings` environment lookup returned HTTP 404. These owner controls still require live verification.
+- The GitHub branch-protection read did not list `docs` as a required check. GitHub confirmed the `compliance-settings` environment, its `main`-only rule, and the presence of `COMPLIANCE_SETTINGS_TOKEN`. Credential access remains pending the first daily workflow run on `main`.
 - The updated integration tree passed compliance typechecking, source validation, and all 524 focused compliance, docs and workflow tests.
 
 ## Validation Sign-Off
