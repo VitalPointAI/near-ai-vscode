@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { AgentDiscoveryAnswers, AgentDiscoveryQuestion, AcceptedAgentTeam, AgentTeamRecommendation, ProjectTeamArtifact, AGENT_TEAM_VERSION } from '../domain/agents';
+import { AgentDiscoveryAnswers, AgentDiscoveryQuestion, AcceptedAgentTeam, AgentLocality, AgentTeamRecommendation, ProjectTeamArtifact, AGENT_TEAM_VERSION } from '../domain/agents';
 import { customizeAgentTeam, recommendAgentTeam } from './agentTeams';
 import { validateTeamBinding } from './teamStudio';
 import type { TeamBinding } from '../domain/teamStudio';
@@ -9,9 +9,9 @@ export const PROJECT_DISCOVERY_QUESTIONS: AgentDiscoveryQuestion[] = [
   { id: 'goal', prompt: 'What outcome should the team help you achieve?' },
   { id: 'riskLevel', prompt: 'How much review does this work need?', choices: ['low', 'medium', 'high'] },
   { id: 'preferredProvider', prompt: 'Which provider should be preferred?' },
-  { id: 'locality', prompt: 'Where may inference run?', choices: ['cloud', 'local', 'hybrid'] },
   { id: 'workShape', prompt: 'What kind of work is this?', choices: ['feature', 'bugfix', 'refactor', 'research', 'release'] }
 ];
+type DiscoveryInput = Omit<AgentDiscoveryAnswers, 'locality'> & { locality?: AgentLocality };
 interface TeamFileSystem { mkdir(directory: string, options: { recursive: true }): Promise<void>; readFile(file: string, encoding: 'utf8'): Promise<string>; rename(oldPath: string, newPath: string): Promise<void>; writeFile(file: string, data: string, encoding: 'utf8'): Promise<void>; }
 const defaultFileSystem: TeamFileSystem = { mkdir: async (directory, options) => { await fs.mkdir(directory, options); }, readFile: (file, encoding) => fs.readFile(file, encoding), rename: (oldPath, newPath) => fs.rename(oldPath, newPath), writeFile: (file, data, encoding) => fs.writeFile(file, data, encoding) };
 export interface ProjectInitializationOptions { clock?: () => string; fileSystem?: TeamFileSystem; }
@@ -21,8 +21,16 @@ export class ProjectInitialization {
   private readonly clock: () => string; private readonly fileSystem: TeamFileSystem; private artifact: ProjectTeamArtifact = { version: AGENT_TEAM_VERSION, accepted: undefined, history: [] }; private loaded = false; private writeQueue: Promise<void> = Promise.resolve();
   public constructor(private readonly workspaceRoot: string, options: ProjectInitializationOptions = {}) { this.clock = options.clock ?? (() => new Date().toISOString()); this.fileSystem = options.fileSystem ?? defaultFileSystem; }
   public get filePath(): string { return path.join(this.workspaceRoot, '.planning', '.near-ai', 'agent-team.json'); }
-  public async initialize(answers: AgentDiscoveryAnswers): Promise<InitializationResult> { validateAnswers(answers); await this.load(); return { questions: PROJECT_DISCOVERY_QUESTIONS.map((question) => ({ ...question, choices: question.choices ? [...question.choices] : undefined })), recommendation: recommendAgentTeam({ ...answers, goal: answers.goal.trim().slice(0, 160) }), accepted: Boolean(this.artifact.accepted) }; }
-  public async accept(recommendation: AgentTeamRecommendation, answers?: AgentDiscoveryAnswers): Promise<AcceptedAgentTeam> { await this.load(); if (answers) validateAnswers(answers); if (!recommendation.roles.length) throw new Error('Cannot accept an empty team.'); const accepted: AcceptedAgentTeam = { ...recommendation, accepted: true, acceptedAt: this.clock(), revision: (this.artifact.accepted?.revision ?? 0) + 1 }; this.artifact = { version: AGENT_TEAM_VERSION, accepted, history: [accepted, ...this.artifact.history].slice(0, 20) }; await this.persist(); return clone(accepted); }
+  public async initialize(input: DiscoveryInput): Promise<InitializationResult> {
+    const answers = validateAnswers(input);
+    await this.load();
+    return {
+      questions: PROJECT_DISCOVERY_QUESTIONS.map((question) => ({ ...question, choices: question.choices ? [...question.choices] : undefined })),
+      recommendation: recommendAgentTeam({ ...answers, goal: answers.goal.trim().slice(0, 160) }),
+      accepted: Boolean(this.artifact.accepted)
+    };
+  }
+  public async accept(recommendation: AgentTeamRecommendation, answers?: DiscoveryInput): Promise<AcceptedAgentTeam> { await this.load(); if (answers) validateAnswers(answers); if (!recommendation.roles.length) throw new Error('Cannot accept an empty team.'); const accepted: AcceptedAgentTeam = { ...recommendation, accepted: true, acceptedAt: this.clock(), revision: (this.artifact.accepted?.revision ?? 0) + 1 }; this.artifact = { version: AGENT_TEAM_VERSION, accepted, history: [accepted, ...this.artifact.history].slice(0, 20) }; await this.persist(); return clone(accepted); }
   public async customizeAndAccept(recommendation: AgentTeamRecommendation, changes: Parameters<typeof customizeAgentTeam>[1], answers?: AgentDiscoveryAnswers): Promise<AcceptedAgentTeam> { return this.accept(customizeAgentTeam(recommendation, changes), answers); }
   public async getAccepted(): Promise<AcceptedAgentTeam | undefined> { await this.load(); return this.artifact.accepted ? clone(this.artifact.accepted) : undefined; }
   public async requireAccepted(): Promise<AcceptedAgentTeam> { const accepted = await this.getAccepted(); if (!accepted) throw new Error('Accept or customize the recommended team before execution.'); return accepted; }
@@ -35,8 +43,18 @@ export class ProjectInitialization {
   private async persist(): Promise<void> { const directory = path.dirname(this.filePath); const temporary = `${this.filePath}.tmp-${process.pid}`; const payload = `${JSON.stringify(this.artifact)}\n`; this.writeQueue = this.writeQueue.then(async () => { await this.fileSystem.mkdir(directory, { recursive: true }); await this.fileSystem.writeFile(temporary, payload, 'utf8'); await this.fileSystem.rename(temporary, this.filePath); }); await this.writeQueue; }
 }
 
-export async function initializeProjectTeam(workspaceRoot: string, answers: AgentDiscoveryAnswers, options?: ProjectInitializationOptions): Promise<InitializationResult> { return new ProjectInitialization(workspaceRoot, options).initialize(answers); }
-function validateAnswers(answers: AgentDiscoveryAnswers): void { if (!answers || typeof answers.goal !== 'string' || !answers.goal.trim() || !['low', 'medium', 'high'].includes(answers.riskLevel) || typeof answers.preferredProvider !== 'string' || !answers.preferredProvider.trim() || !['cloud', 'local', 'hybrid'].includes(answers.locality) || !['feature', 'bugfix', 'refactor', 'research', 'release'].includes(answers.workShape)) throw new Error('Project discovery answers are incomplete or invalid.'); }
+export async function initializeProjectTeam(workspaceRoot: string, answers: DiscoveryInput, options?: ProjectInitializationOptions): Promise<InitializationResult> { return new ProjectInitialization(workspaceRoot, options).initialize(answers); }
+function validateAnswers(answers: DiscoveryInput): AgentDiscoveryAnswers {
+  const locality = answers?.locality === undefined ? 'hybrid' : answers.locality;
+  if (!answers || typeof answers.goal !== 'string' || !answers.goal.trim() ||
+    !['low', 'medium', 'high'].includes(answers.riskLevel) ||
+    typeof answers.preferredProvider !== 'string' || !answers.preferredProvider.trim() ||
+    !['cloud', 'local', 'hybrid'].includes(locality) ||
+    !['feature', 'bugfix', 'refactor', 'research', 'release'].includes(answers.workShape)) {
+    throw new Error('Project discovery answers are incomplete or invalid.');
+  }
+  return { ...answers, locality };
+}
 function normalizeAccepted(value: unknown): AcceptedAgentTeam | undefined { if (!value || typeof value !== 'object') return undefined; const row = value as AcceptedAgentTeam; if (row.accepted !== true || !Array.isArray(row.roles) || !row.roles.length || typeof row.revision !== 'number') return undefined; const roles = row.roles.slice(0, 10).map((role) => ({ role: role.role, profileId: safeTeamText(role.profileId, 80) ?? 'unknown', responsibility: safeTeamText(role.responsibility, 240) ?? 'Role responsibility', coordination: safeTeamText(role.coordination, 240) ?? 'Coordinates through the accepted team plan.', modelTradeoff: safeTeamText(role.modelTradeoff, 240) ?? 'Model and cost tradeoff is shown before execution.', privacyBoundary: safeTeamText(role.privacyBoundary, 240) ?? 'Uses only approved project context.' })); return { ...row, version: AGENT_TEAM_VERSION, rationale: safeTeamText(row.rationale, 240) ?? 'Accepted role-based team.', coordinationTradeoff: safeTeamText(row.coordinationTradeoff, 240) ?? 'Coordination and cost are visible before execution.', roles }; }
 function normalizeBinding(value: unknown): TeamBinding | undefined { try { return value === undefined ? undefined : validateTeamBinding(value); } catch { return undefined; } }
 function safeTeamText(value: unknown, max: number): string | undefined { if (typeof value !== 'string' || /(?:api[_ -]?key|token|secret|password|private prompt|command\s*[:=]|[A-Za-z]:\\|^\/)/i.test(value)) return undefined; const normalized = value.replace(/[\r\n\t]+/g, ' ').trim(); return normalized ? normalized.slice(0, max) : undefined; }

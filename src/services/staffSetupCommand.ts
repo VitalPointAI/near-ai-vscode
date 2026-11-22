@@ -6,10 +6,11 @@ import { STAFF_PRIVATE_MODELS_TEXT } from '../domain/staff/products';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
+import { derivedLocality, parseSetupGuideEntry } from '../domain/setup/answers';
 import { TeamLibrary } from '../agent/teams';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
 import type { StaffTemplateOptions } from '../agent/staff/templates';
-import type { StaffTeamSection } from '../domain/staff/profiles';
+import type { StaffSettings, StaffTeamSection } from '../domain/staff/profiles';
 import {
   applyStaffSetup, existingStaffSettings, requestedSection, levelChoices, nationChoices, planningTypeChoices, planStaffSetup, profileChoices, readStaffSetupInputs, settingsFrom,
   SET_UP_STAFF_TEAM_COMMAND, staffTeamTarget, templateQuestions, type Choice, type StaffSetupPlan
@@ -45,16 +46,19 @@ export function rosterItems(plan: StaffSetupPlan): vscode.QuickPickItem[] {
   ];
 }
 
-/**
- * The setup's "where may the members' models run" step. The cloud choice says where its private models come from (coherence review S5): the team stays
- * private and nothing about routing changes.
- */
-export function localityChoices(): Array<Choice<'cloud' | 'local'>> {
-  return [
-    { value: 'cloud', label: 'NEAR AI Cloud', detail: `Private models in NEAR's TEE; members that research may use the web tools. ${STAFF_PRIVATE_MODELS_TEXT}` },
-    { value: 'local', label: 'Local runtime only', detail: 'Models on this machine; the team is made without web tools.' }
-  ];
+/** Local-only Get Started choices narrow the template's tools. The policy gate still decides routing. */
+export function staffLocalityFor(projectJson: string | undefined): 'local' | undefined {
+  if (!projectJson) return undefined;
+  try {
+    const project = JSON.parse(projectJson) as { setupGuide?: unknown } | null;
+    const guide = parseSetupGuideEntry(project?.setupGuide);
+    return guide && derivedLocality(guide.chosen) === 'local' ? 'local' : undefined;
+  } catch {
+    return undefined;
+  }
 }
+
+export interface StaffSetupPreset { settings?: StaffSettings; locality?: 'cloud' | 'local' }
 
 /** Where "Task it now" puts the team's command: the sidebar chat's composer (focused, nothing sent). */
 export interface StaffSetupChat { prefill(text: string): Promise<void> }
@@ -64,38 +68,41 @@ export function readyMessage(teamName: string, slug: string, archived: boolean):
   return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the NEAR AI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
-export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat): Promise<string | undefined> {
+export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat, preset?: StaffSetupPreset): Promise<string | undefined> {
   const root = await projectFolder();
   if (!root) return undefined;
   const inputs = await readStaffSetupInputs(root);
   const existing = existingStaffSettings(inputs.projectJson);
   const title = 'Set up a staff team';
-  const steps = 6;
-
   const asked = section ? STAFF_TEMPLATES.find((candidate) => candidate.section === section) : undefined;
+  const steps = preset?.settings ? (asked ? 1 : 2) : 6;
   const templateId = asked ? asked.id : await pick(title, 'Which staff section?', STAFF_TEMPLATES.map((template) => ({ value: template.id, label: template.label, detail: template.description })), 1, steps);
   const template = STAFF_TEMPLATES.find((candidate) => candidate.id === templateId);
   if (!template) return undefined;
-  const profile = await pick(title, 'Which doctrine profile? Its terms, steps and annex letters follow it.', profileChoices(template), 2, steps);
-  if (!profile) return undefined;
-  const level = await pick(title, 'Which level?', levelChoices(template, profile), 3, steps);
-  if (!level) return undefined;
-  const nations = nationChoices(profile);
-  const nation = nations.length ? await pick(title, 'Which nation\'s terms?', nations, 4, steps) : undefined;
-  if (nations.length && !nation) return undefined;
-  const planningType = await pick(title, 'Which kind of planning?', planningTypeChoices(), 5, steps);
-  if (!planningType) return undefined;
-  const settings = settingsFrom(existing, { profile, level, planningType, ...(nation ? { nation } : {}) });
+  let settings: StaffSettings;
+  if (preset?.settings) {
+    settings = settingsFrom(existing, preset.settings);
+  } else {
+    const profile = await pick(title, 'Which doctrine profile? Its terms, steps and annex letters follow it.', profileChoices(template), 2, steps);
+    if (!profile) return undefined;
+    const level = await pick(title, 'Which level?', levelChoices(template, profile), 3, steps);
+    if (!level) return undefined;
+    const nations = nationChoices(profile);
+    const nation = nations.length ? await pick(title, 'Which nation\'s terms?', nations, 4, steps) : undefined;
+    if (nations.length && !nation) return undefined;
+    const planningType = await pick(title, 'Which kind of planning?', planningTypeChoices(), 5, steps);
+    if (!planningType) return undefined;
+    settings = settingsFrom(existing, { profile, level, planningType, ...(nation ? { nation } : {}) });
+  }
   const questions = templateQuestions(template, settings);
-  const echelon = questions.echelon ? await pick(title, 'Which echelon?', questions.echelon, 6, steps) : undefined;
+  const echelon = questions.echelon ? await pick(title, 'Which echelon?', questions.echelon, steps, steps) : undefined;
   if (questions.echelon && !echelon) return undefined;
-  const variant = questions.variant ? await pick(title, 'Which plans section?', questions.variant, 6, steps) : undefined;
+  const variant = questions.variant ? await pick(title, 'Which plans section?', questions.variant, steps, steps) : undefined;
   if (questions.variant && !variant) return undefined;
-  const redTeam = questions.redTeam ? await pick(title, 'Include the independent red team?', questions.redTeam, 6, steps) : undefined;
+  const redTeam = questions.redTeam ? await pick(title, 'Include the independent red team?', questions.redTeam, steps, steps) : undefined;
   if (questions.redTeam && redTeam === undefined) return undefined;
-  const where = await pick(title, 'Where may the members\' models run?', localityChoices(), 6, steps);
-  if (!where) return undefined;
-  const options: StaffTemplateOptions = { settings, locality: where, ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
+  const locality = preset?.locality ?? staffLocalityFor(inputs.projectJson);
+  const options: StaffTemplateOptions = { settings, ...(locality ? { locality } : {}), ...(echelon ? { echelon } : {}), ...(variant ? { variant } : {}), ...(redTeam === false ? { redTeam: false } : {}) };
 
   let plan: StaffSetupPlan;
   try { plan = planStaffSetup({ templateId: template.id, options, ...inputs }); } catch (error) { void vscode.window.showErrorMessage(`The staff team was not set up. ${(error as Error).message}`); return undefined; }
