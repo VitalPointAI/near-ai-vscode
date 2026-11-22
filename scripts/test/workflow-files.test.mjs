@@ -205,6 +205,8 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   assert.match(daily, /if: github\.ref == 'refs\/heads\/main' && \(/);
   assert.match(daily, /mkdir -p compliance\/out\n[\s\S]*> compliance\/out\/audit-root\.json/);
   assert.match(daily, /environment:\s*compliance-settings/);
+  const scheduledInputs = steps(daily).find((step) => /name: Write scheduled collector inputs/.test(step));
+  assert.match(scheduledInputs, /documents: \{ repoRoot: "\." \}, crypto: \{ repoRoot: "\." \}/);
   assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
   const scheduledBundleScan = steps(daily).find((step) => /secret-scan\.mjs --dir/.test(step));
   assert.ok(scheduledBundleScan, 'daily evidence secret-scans the completed bundle');
@@ -277,6 +279,8 @@ test('only main pushes and versioned hotfix branch dispatches publish compliance
   }
   assert.match(job, /if: steps\.has_compliance\.outputs\.publish_as != ''[\s\S]*secret-scan\.mjs --dir/);
   assert.match(job, /if: steps\.bundle_scan\.outcome == 'success'/);
+  const inputs = steps(job).find((step) => /name: Write collector inputs and changed paths/.test(step));
+  assert.match(inputs, /documents: \{ repoRoot: "\." \}, crypto: \{ repoRoot: "\." \}/);
 });
 
 test('releases require GitHub CI evidence on the exact release head when the base supports compliance', () => {

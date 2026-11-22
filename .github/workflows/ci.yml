@@ -500,7 +500,10 @@ jobs:
           node --input-type=module -e '
             import { writeFileSync } from "node:fs";
             const reports = ["root", "relay", "hub"].map(packageName => ({ package: packageName, file: `compliance/out/reports/test-report-${packageName}.ndjson` }));
-            const collectors = { tests: { reports }, ci: { needsFile: "compliance/out/needs.json" } };
+            const collectors = {
+              tests: { reports }, ci: { needsFile: "compliance/out/needs.json" },
+              documents: { repoRoot: "." }, crypto: { repoRoot: "." }
+            };
             if (process.env.PUBLISH_AS) Object.assign(collectors, { audit: { audits: [{ package: "root", file: "compliance/out/audit-root.json" }] }, "secret-scan": { jsonFile: "compliance/out/secret-scan.json" } });
             const value = { repository: process.env.REPOSITORY, commit: process.env.COMMIT, kind: process.env.PUBLISH_AS || "pr", repoRoot: ".", collectors };
             writeFileSync("compliance/out/inputs.json", JSON.stringify(value, null, 2));
