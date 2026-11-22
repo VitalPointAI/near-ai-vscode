@@ -71,6 +71,82 @@ test('buildDashboard over the tracer fixtures validates against dashboard.schema
   assert.equal(row.components[0].statement, 'Each tracer event is recorded by the fixture component.');
 });
 
+test('responsibility falls back to the family only when the component has no explicit allocation', () => {
+  const base = tracerInput();
+  const dashboard = buildDashboard(tracerInput({
+    levels: [{ ...base.levels[0], controls: ['tr-01', 'tr-02', 'ac-01', 'unknown-01'] }],
+    responsibilityTable: {
+      families: {
+        tr: { responsibility: 'your-organization', reason: 'The organization owns this family.' },
+        ac: { responsibility: 'product', reason: 'Assess the product evidence.' },
+      },
+      exceptions: [],
+    },
+  }));
+  assert.deepEqual(dashboard.rows.map(({ control, state, reason }) => [control, state, reason]), [
+    ['tr-01', 'met', 'met'],
+    ['tr-02', 'your-organizations-responsibility', 'your-organization'],
+    ['ac-01', 'not-met', 'no-statement'],
+    ['unknown-01', 'not-met', 'no-statement'],
+  ]);
+});
+
+test('reviewed tailoring stays scoped to its level and component', () => {
+  const base = tracerInput();
+  const component = base.components[0].id;
+  const reviewed = { control: 'tr-01', reason: 'This deployment does not use the fixture feature.', reviewer: 'Assigned reviewer', reviewedAt: '2026-11-20' };
+  const dashboard = buildDashboard(tracerInput({
+    levels: [base.levels[0], { ...base.levels[0], id: 'second' }, { ...base.levels[0], id: 'third' }],
+    tailoring: {
+      removals: [{ ...reviewed, level: 'third' }],
+      notApplicable: [{ ...reviewed, level: 'fixture', component }],
+    },
+  }));
+  assert.deepEqual(dashboard.rows.map(({ level, state, reason }) => [level, state, reason]), [
+    ['fixture', 'not-applicable', 'not-applicable'],
+    ['second', 'met', 'met'],
+  ]);
+  assert.equal(dashboard.rows[0].components[0].detail?.reason, reviewed.reason);
+  assert.equal(dashboard.levels[2].counts.metTotal, 0);
+});
+
+test('reviewed component exclusions do not mask the remaining evidence or excuse an unreviewed exclusion', () => {
+  const base = tracerInput();
+  const level = { ...base.levels[0], components: [...base.levels[0].components, 'other'] };
+  const other: ComponentInput = { id: 'other', implemented: [{ control: 'tr-01', responsibility: 'not-applicable', statements: [] }] };
+  const withOther = { levels: [level], components: [...base.components, other] };
+  const unreviewed = buildDashboard(tracerInput(withOther)).rows[0];
+  assert.equal(unreviewed.reason, 'not-applicable-unreviewed');
+  const record = { level: 'fixture', control: 'tr-01', component: 'other', reason: 'This part does not implement the fixture feature.', reviewer: 'Assigned reviewer', reviewedAt: '2026-11-20' };
+  const reviewed = buildDashboard(tracerInput({ ...withOther, tailoring: { notApplicable: [record], removals: [] } })).rows[0];
+  assert.equal(reviewed.state, 'met');
+  assert.equal(reviewed.components[1].state, 'not-applicable');
+});
+
+test('the responsibility matrix combines statement and organization text once per control and component', () => {
+  const base = tracerInput();
+  const component = base.components[0];
+  const requirement = component.implemented[0];
+  const dashboard = buildDashboard(tracerInput({
+    levels: [base.levels[0], { ...base.levels[0], id: 'second' }],
+    components: [{ ...component, implemented: [{
+      ...requirement, responsibility: 'shared',
+      statements: [
+        { ...requirement.statements[0], yourOrganizationDoes: 'Review the event log.' },
+        { id: 'second-statement', description: 'The fixture records a second event.', yourOrganizationDoes: 'Review the event log.' },
+      ],
+    }] }],
+  }));
+  assert.deepEqual(dashboard.matrix, [{
+    control: 'tr-01',
+    component: component.id,
+    responsibility: 'shared',
+    weProvide: 'Each tracer event is recorded by the fixture component.\nThe fixture records a second event.',
+    youDo: 'Review the event log.',
+  }]);
+  assert.equal(validateOurs(dashboard, 'dashboard').ok, true);
+});
+
 test('the schema refuses an extra top-level key, a row without a state, a state outside the six and a count missing', () => {
   const good = JSON.parse(JSON.stringify(buildDashboard(tracerInput())));
   const cases: [string, (doc: any) => void][] = [

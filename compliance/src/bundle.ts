@@ -20,6 +20,7 @@ import { verifyManifest } from './manifest.ts';
 import { assertNoSecrets, redactObservation, redactTestRow } from './redact.ts';
 import { lintDashboard } from './wordLint.ts';
 import { validateOurs } from './validate.ts';
+import { writeControlText } from './controlText.ts';
 
 /** Stable order is part of the public bundle contract. */
 export const COLLECTORS: readonly Collector[] = Object.freeze([
@@ -34,7 +35,7 @@ export interface BundleInputs {
   readonly collectors: Readonly<Record<string, unknown>>;
   readonly dashboard?: Partial<DashboardBuildInput>;
 }
-export interface BundleContext { readonly now?: Date; readonly fetchJson?: FetchJson; readonly readFile?: (file: string) => Promise<string>; readonly previous?: string; }
+export interface BundleContext { readonly now?: Date; readonly fetchJson?: FetchJson; readonly readFile?: (file: string) => Promise<string>; readonly previous?: string; readonly controlTextSource?: string; }
 export interface BundleResult { readonly observations: readonly Observation[]; readonly testRows: readonly TestReportRow[]; readonly collectors: readonly { readonly id: string; readonly ran: boolean; readonly ok: boolean; readonly error?: string; readonly lastCollectedAt?: string }[]; readonly dashboard: ReturnType<typeof buildDashboard>; }
 
 const stable = (value: unknown): string => `${JSON.stringify(value, (_key, child) => child && typeof child === 'object' && !Array.isArray(child) ? Object.fromEntries(Object.entries(child).sort(([a], [b]) => a.localeCompare(b))) : child, 2)}\n`;
@@ -101,7 +102,12 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
   };
   const dashboard = buildDashboard(dashboardInput);
   // These fields are presentation data, never source inputs. Their values stay schema-safe.
-  const enriched = { ...dashboard, collectors: collectorRows.map((row) => ({ id: row.id, window: COLLECTORS.find((item) => item.id === row.id)!.window, ...(row.lastCollectedAt ? { lastCollectedAt: row.lastCollectedAt } : {}), ...(row.ran ? { passed: row.ok } : {}) })) };
+  const official = supplied.controlTextSource && writeControlText(path.join(output, 'dashboard'), supplied.controlTextSource);
+  const rows = official ? dashboard.rows.map((row) => {
+    const control = official.byLevel.get(row.level)?.get(row.control);
+    return control ? { ...row, ...control } : row;
+  }) : dashboard.rows;
+  const enriched = { ...dashboard, rows, ...(official ? { textIndex: official.index } : {}), collectors: collectorRows.map((row) => ({ id: row.id, window: COLLECTORS.find((item) => item.id === row.id)!.window, ...(row.lastCollectedAt ? { lastCollectedAt: row.lastCollectedAt } : {}), ...(row.ran ? { passed: row.ok } : {}) })) };
   const copyFindings = lintDashboard(enriched);
   if (copyFindings.length) {
     throw new Error(`dashboard copy lint failed: ${copyFindings.map(({ path, rule }) => `${path}: ${rule}`).join('; ')}`);

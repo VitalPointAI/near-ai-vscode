@@ -4,7 +4,9 @@ import { aggregateControl, computeStatus, summarizeLevel } from './status.ts';
 import { evaluateObservationRule, evaluateTestRule, type RuleContext } from './rules.ts';
 import { gapStates, type Gap, type Poam } from './gaps.ts';
 import { loadRiskAcceptances } from './riskAcceptance.ts';
-import { REASONS, STATES, type ComponentRow, type DashboardInput, type DashboardRow, type EvidenceRule, type RuleResult, type State } from './model.ts';
+import { resolveResponsibility, type ResponsibilityTable } from './responsibility.ts';
+import { notApplicableFor, removalsFor, type Tailoring } from './tailoring.ts';
+import { REASONS, STATES, type ComponentRow, type DashboardInput, type DashboardRow, type EvidenceRule, type Responsibility, type RuleResult, type State } from './model.ts';
 type LevelNotes = Readonly<{ text?: string; profileDifferences?: readonly string[] }>;
 
 export interface DashboardBuildInput extends DashboardInput {
@@ -12,24 +14,17 @@ export interface DashboardBuildInput extends DashboardInput {
   readonly runUrl?: string;
   readonly controls?: Readonly<Record<string, { readonly label: string; readonly title: string }>>;
   readonly gapRegister?: { readonly gaps: readonly Gap[]; readonly poam: readonly Poam[]; readonly attestationsDir: string };
+  readonly responsibilityTable?: ResponsibilityTable;
+  readonly tailoring?: Tailoring;
   readonly levels: readonly (DashboardInput['levels'][number] & { readonly kind?: 'level' | 'overlay'; readonly profile?: string; readonly claim?: boolean; readonly overlays?: readonly string[]; readonly notes?: LevelNotes })[];
 }
 export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
 export type DashboardComponentRow = ComponentRow & Readonly<{ reasonText: string; statement?: string; limitation?: string; unsettled?: string; requiresOfficialSignature?: boolean; inheritedFrom?: string }>;
 export type DashboardOutputRow = DashboardRow & Readonly<{ label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
-export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts; readonly notes?: LevelNotes }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly unknown[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
+type MatrixRow = Readonly<{ control: string; component: string; responsibility: Responsibility; weProvide: string; youDo: string }>;
+export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts; readonly notes?: LevelNotes }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly MatrixRow[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
 
 export const DASHBOARD_SCHEMA_VERSION = 1 as const;
-
-/** Worst first. Used only to pick a control row's state when several components disagree, until 44-04's aggregate replaces it. */
-const STATE_RANK: Readonly<Record<State, number>> = Object.freeze({
-  'not-met': 0,
-  'stale': 1,
-  'partly-met': 2,
-  'your-organizations-responsibility': 3,
-  'not-applicable': 4,
-  'met': 5
-});
 
 /** Evaluates every rule once: test rules against the report rows, observation rules against the observations. */
 function evaluateRules(input: DashboardBuildInput): Record<string, RuleResult> {
@@ -57,17 +52,32 @@ function rulesFor(rules: readonly EvidenceRule[], component: string, control: st
  */
 function controlState(components: readonly ComponentRow[], level: string, control: string, input: DashboardBuildInput): Pick<DashboardRow, 'state' | 'reason' | 'detail'> {
   if (components.length === 0) {
-    const outcome = computeStatus({ control, component: '', level, responsibility: 'product', statements: [], rulesByStatement: {}, results: {}, head: input.head, now: input.now });
+    const responsibility = configuredResponsibility(control, undefined, input.responsibilityTable);
+    const outcome = computeStatus({ control, component: '', level, responsibility, statements: [], rulesByStatement: {}, results: {}, head: input.head, now: input.now });
     return { state: outcome.state, reason: outcome.reason, ...(outcome.detail ? { detail: outcome.detail } : {}) };
   }
+  const applicable = components.filter((row) => row.state !== 'not-applicable');
+  // A reviewed exclusion does not dilute assessment of any remaining components. Keep its
+  // reason if all are excluded. An unreviewed exclusion remains a gap in the aggregate.
+  const unreviewed = applicable.find((row) => row.reason === 'not-applicable-unreviewed');
+  const single = unreviewed ?? (applicable.length <= 1 ? applicable[0] ?? components[0] : undefined);
   // Preserve the exact outcome (including stale date and inherited provider) when
   // there is only one component; aggregateControl is for a genuine combination.
-  if (components.length === 1) {
-    const only = components[0];
-    return { state: only.state, reason: only.reason, ...(only.detail ? { detail: only.detail } : {}) };
+  if (single) {
+    return { state: single.state, reason: single.reason, ...(single.detail ? { detail: single.detail } : {}) };
   }
-  const aggregate = aggregateControl(components);
+  const aggregate = aggregateControl(applicable);
   return { state: aggregate.state, reason: aggregate.reason, ...(aggregate.detail ? { detail: aggregate.detail } : {}) };
+}
+
+function configuredResponsibility(control: string, component: string | undefined, table: ResponsibilityTable | undefined, implemented?: Responsibility): Responsibility {
+  if (implemented) return implemented;
+  if (table && (Object.hasOwn(table.families, control.split('-')[0]) ||
+    table.exceptions.some((entry) => entry.control === control && (entry.component === undefined || entry.component === component)))) {
+    return resolveResponsibility(control, component, table).value;
+  }
+  // A catalogue without a family policy cannot create a claim or assign an obligation.
+  return 'product';
 }
 
 /** Builds the dashboard: one row per level and control in scope, each with one component row per component that implements the control. */
@@ -87,40 +97,61 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
   const results = evaluateRules(input);
   const components = new Map(input.components.map((component) => [component.id, component]));
   const rows: DashboardOutputRow[] = [];
+  const matrix = new Map<string, MatrixRow>();
   for (const level of input.levels) {
+    const removals = new Set(input.tailoring ? removalsFor(input.tailoring, level.id)
+      .filter(({ reason, reviewer, reviewedAt }) => reason.trim() && reviewer.trim() && /^\d{4}-\d{2}-\d{2}$/.test(reviewedAt))
+      .map(({ control }) => control) : []);
     for (const control of level.controls) {
+      if (removals.has(control)) continue;
       const componentRows: DashboardComponentRow[] = [];
       for (const componentId of level.components) {
         const implemented = components.get(componentId)?.implemented.find((requirement) => requirement.control === control);
-        if (!implemented) continue;
-        const rulesByStatement = rulesFor(input.rules, componentId, control);
+        const tailoring = input.tailoring && notApplicableFor(input.tailoring, level.id, control, componentId);
+        const exception = input.responsibilityTable?.exceptions.some((entry) => entry.control === control && entry.component === componentId);
+        if (!implemented && !tailoring && !exception) continue;
+        const responsibility = configuredResponsibility(control, componentId, input.responsibilityTable, implemented?.responsibility);
+        const statements = implemented?.statements ?? [];
+        const rulesByStatement = implemented ? rulesFor(input.rules, componentId, control) : {};
         const outcome = computeStatus({
           control,
           component: componentId,
           level: level.id,
-          responsibility: implemented.responsibility,
-          statements: implemented.statements,
+          responsibility,
+          statements,
+          tailoring,
           rulesByStatement,
           results,
           head: input.head,
           now: input.now
         });
         const evidence = Object.values(rulesByStatement).flat().map((rule) => results[rule.id]).filter((result): result is RuleResult => result !== undefined);
-        const component = {
+        const statement = statements[0];
+        const component: DashboardComponentRow = {
           component: componentId,
           state: outcome.state,
           reason: outcome.reason,
           ...(outcome.detail ? { detail: outcome.detail } : {}),
-          reasonText: fillReason(outcome.reason, outcome.reason === 'inherited' ? { ...(outcome.detail ?? {}), provider: implemented.inheritedFrom ?? '' } : outcome.detail),
-          responsibility: implemented.responsibility,
+          reasonText: fillReason(outcome.reason, outcome.reason === 'inherited' ? { ...(outcome.detail ?? {}), provider: implemented?.inheritedFrom ?? '' } : outcome.detail),
+          responsibility,
           evidence,
-          ...(implemented.statements[0] ? { statement: implemented.statements[0].description } : {}),
-          ...(implemented.statements[0]?.limitation ? { limitation: implemented.statements[0].limitation } : {}),
-          ...(implemented.statements[0]?.unsettled ? { unsettled: implemented.statements[0].unsettled } : {}),
-          ...(implemented.statements[0]?.requiresOfficialSignature ? { requiresOfficialSignature: true } : {}),
-          ...(implemented.inheritedFrom ? { inheritedFrom: implemented.inheritedFrom } : {})
-        } as DashboardComponentRow;
+          ...(statement ? { statement: statement.description } : {}),
+          ...(statement?.limitation ? { limitation: statement.limitation } : {}),
+          ...(statement?.unsettled ? { unsettled: statement.unsettled } : {}),
+          ...(statement?.requiresOfficialSignature ? { requiresOfficialSignature: true } : {}),
+          ...(implemented?.inheritedFrom ? { inheritedFrom: implemented.inheritedFrom } : {})
+        };
         componentRows.push(component);
+        if (level.claim !== false && outcome.state !== 'not-applicable' &&
+          (responsibility === 'shared' || responsibility === 'your-organization' || responsibility === 'inherited')) {
+          matrix.set(`${control}:${componentId}`, {
+            control,
+            component: componentId,
+            responsibility,
+            weProvide: [...new Set(statements.map(({ description }) => description).filter(Boolean))].join('\n'),
+            youDo: [...new Set(statements.flatMap(({ yourOrganizationDoes }) => yourOrganizationDoes ? [yourOrganizationDoes] : []))].join('\n'),
+          });
+        }
       }
       const computed = controlState(componentRows, level.id, control, input);
       const outcome = level.claim === false ? { state: 'not-met' as const, reason: 'appliance-only' as const } : computed;
@@ -156,5 +187,5 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
     const gap = gapByControl.get(row.control);
     return gap ? { ...row, gap } : row;
   });
-  return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows: linkedRows, gaps, collectors: [], matrix: [], textIndex: [], refusedAcceptances };
+  return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows: linkedRows, gaps, collectors: [], matrix: [...matrix.values()], textIndex: [], refusedAcceptances };
 }

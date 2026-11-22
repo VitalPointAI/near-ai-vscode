@@ -8,6 +8,8 @@ import { loadEvidenceRules } from '../evidenceRuleFiles.ts';
 import { loadGaps, loadPoam } from '../gaps.ts';
 import type { ImportReport } from '../import/itsp-10-033-01.ts';
 import { selectedIds } from '../profiles.ts';
+import { loadResponsibilityTable } from '../responsibility.ts';
+import { loadTailoring } from '../tailoring.ts';
 import { loadJson } from '../validate.ts';
 
 function option(args: readonly string[], name: string): string | undefined { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; }
@@ -23,8 +25,7 @@ type LevelConfig = Omit<DashboardBuildInput['levels'][number], 'controls' | 'ove
   readonly attachedTo?: readonly string[];
 };
 
-function loadDashboardSources(repoRoot: string): Pick<DashboardBuildInput, 'levels' | 'components' | 'rules' | 'gapRegister'> {
-  const root = path.join(repoRoot, 'compliance');
+function loadDashboardSources(root: string): Pick<DashboardBuildInput, 'levels' | 'components' | 'rules' | 'gapRegister' | 'responsibilityTable' | 'tailoring'> {
   const { levels } = loadJson(path.join(root, 'levels.json')) as { levels: readonly LevelConfig[] };
   if (levels.length === 0) throw new Error('compliance levels are empty');
   const { components, errors } = loadComponents(path.join(root, 'components'));
@@ -41,6 +42,8 @@ function loadDashboardSources(repoRoot: string): Pick<DashboardBuildInput, 'leve
     }),
     components,
     rules: loadEvidenceRules(path.join(root, 'evidence-rules')),
+    responsibilityTable: loadResponsibilityTable(path.join(root, 'responsibility', 'families.json')),
+    tailoring: loadTailoring(path.join(root, 'tailoring')),
     gapRegister: {
       gaps: loadGaps(path.join(root, 'gaps.json')),
       poam: loadPoam(path.join(root, 'poam')),
@@ -57,8 +60,9 @@ export async function run(args: readonly string[]): Promise<number> {
     const runUrl = inputs.runUrl ?? (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined);
     const token = process.env.GITHUB_TOKEN; const fetchJson = token ? githubFetch(token) : undefined;
     const repoRoot = path.resolve(inputs.repoRoot || '.');
-    const dashboard = loadDashboardSources(repoRoot);
-    await runBundle({ ...inputs, ...(runUrl ? { runUrl } : {}), repoRoot, dashboard }, out, { fetchJson, ...(previous ? { previous: path.resolve(previous) } : {}) });
+    const sourceRoot = path.join(repoRoot, 'compliance');
+    const dashboard = loadDashboardSources(sourceRoot);
+    await runBundle({ ...inputs, ...(runUrl ? { runUrl } : {}), repoRoot, dashboard }, out, { fetchJson, controlTextSource: sourceRoot, ...(previous ? { previous: path.resolve(previous) } : {}) });
     return 0;
   } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); return 1; }
 }

@@ -148,6 +148,7 @@
         "family": { "type": "string", "pattern": "^[a-z0-9]{1,32}$" },
         "title": { "$ref": "#/definitions/shortText" },
         "state": { "$ref": "#/definitions/state" },
+        "textFile": { "$ref": "#/definitions/relativeFile" },
         "reason": { "$ref": "#/definitions/reason" },
         "detail": { "$ref": "#/definitions/detail" },
         "reasonText": { "$ref": "#/definitions/text" },

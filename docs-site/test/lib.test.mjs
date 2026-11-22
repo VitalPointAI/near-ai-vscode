@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { filterRows, gapsByLevelsBlocked, isOld, levelCounts, mergeOverlay, parseDashboard, parseOverlayIndex, toCsv } from '../src/compliance/lib.mjs';
+import { controlTextPath, filterRows, gapsByLevelsBlocked, isOld, levelCounts, mergeOverlay, parseDashboard, parseOverlayIndex, toCsv } from '../src/compliance/lib.mjs';
 const dashboard = { schemaVersion: 1, levels: [], rows: [{ level: 'a', state: 'met', family: 'ac', components: [{ component: 'x', responsibility: 'product' }] }] };
 test('reads JSON', () => assert.equal(parseDashboard(JSON.stringify(dashboard), 'application/json').ok, true));
 test('refuses missing', () => assert.equal(parseDashboard('', 'application/json').reason, 'missing'));
@@ -9,6 +9,12 @@ test('refuses html', () => assert.equal(parseDashboard('<html>', 'text/html').re
 test('refuses bad JSON', () => assert.equal(parseDashboard('{', 'application/json').reason, 'not-json'));
 test('refuses wrong shape', () => assert.equal(parseDashboard('{"schemaVersion":2}', 'application/json').reason, 'bad-shape'));
 test('filters rows', () => assert.equal(filterRows(dashboard.rows, { family: 'ac', component: 'x' }).length, 1));
+test('control drawer uses the exact indexed catalogue file when two sources share a family', () => {
+  const files = [{ file: 'text/itsg-33/ac.json' }, { file: 'text/itsp-10-033/ac.json' }];
+  assert.equal(controlTextPath({ family: 'ac', textFile: files[1].file }, files), '/compliance/text/itsp-10-033/ac.json');
+  assert.equal(controlTextPath({ family: 'ac' }, files), '');
+  assert.equal(controlTextPath({ textFile: 'text/../ac.json' }, [{ file: 'text/../ac.json' }]), '');
+});
 test('counts rows', () => assert.equal(levelCounts(dashboard, 'a').met, 1));
 test('detects old dashboard', () => { assert.equal(isOld('2026-01-01T00:00:00Z', new Date('2026-01-02T01:00:00Z')), true); assert.equal(isOld('2026-01-01T00:00:00Z', new Date('2026-01-01T23:00:00Z')), false); });
 test('sorts gaps', () => assert.deepEqual(gapsByLevelsBlocked([{ id: 'B', levelsBlocked: 1 }, { id: 'A', levelsBlocked: 1 }, { id: 'C', levelsBlocked: 2 }]).map((gap) => gap.id), ['C', 'A', 'B']));

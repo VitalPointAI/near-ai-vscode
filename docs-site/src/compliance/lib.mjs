@@ -1,6 +1,5 @@
 // Browser-safe dashboard readers. This module deliberately has no imports so the site and Node tests share it.
 export const DASHBOARD_PATH = '/compliance/dashboard.json';
-export const TEXT_BASE = '/compliance/text/';
 export const REFRESH_PATH = '/compliance/refresh.json';
 export const OVERLAY_ENDPOINT = '/_overlay/index.json';
 export const BUNDLE_ARTIFACT = 'compliance-bundle';
@@ -22,6 +21,13 @@ export function parseDashboard(text, contentType = '') {
 
 export function filterRows(rows, filters = {}) {
   return rows.filter((row) => Object.entries(filters).every(([key, value]) => !value || (key === 'component' ? row.components?.some((item) => item.component === value) : key === 'responsibility' ? row.components?.some((item) => item.responsibility === value) : row[key] === value)));
+}
+
+/** Keep drawer requests on the verified bundle's indexed public text files. */
+export function controlTextPath(row, textIndex = []) {
+  const file = row.textFile;
+  if (typeof file !== 'string' || !/^text\/[a-z0-9][a-z0-9-]*\/[a-z0-9]+\.json$/.test(file)) return '';
+  return textIndex.some((entry) => entry.file === file) ? `/compliance/${file}` : '';
 }
 
 /** @returns {{ met:number, 'partly-met':number, 'not-met':number, stale:number, 'not-applicable':number, 'your-organizations-responsibility':number, notMetTotal:number, metTotal:number }} */

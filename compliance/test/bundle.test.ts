@@ -93,6 +93,13 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   assert.ok(extension.statement);
   assert.ok(extension.evidence.length > 0);
   assert.notEqual(extension.state, 'met');
+  assert.match(row.textFile, /^text\/itsp-10-033\/ac\.json$/);
+  const official = JSON.parse(readFileSync(path.join(out, 'dashboard', row.textFile), 'utf8'));
+  assert.match(official.attribution.url, /cyber\.gc\.ca/);
+  assert.ok(official.controls.find(({ id }: { id: string }) => id === 'ac-03').parts.some(({ lang }: { lang: string }) => lang === 'fr'));
+  const cgpRows = dashboard.rows.filter(({ level }: { level: string }) => level === 'overlay-cgp');
+  assert.ok(cgpRows.some(({ textFile }: { textFile?: string }) => textFile === 'text/defence-production-act/cgp.json'));
+  assert.ok(cgpRows.some(({ textFile }: { textFile?: string }) => textFile === 'text/controlled-goods-regulations/cgp.json'));
   const gap = dashboard.gaps.find(({ id }: { id: string }) => id === 'G2');
   assert.equal(gap.state, 'planned');
   assert.ok(gap.milestones.length > 0);
