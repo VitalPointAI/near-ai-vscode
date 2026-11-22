@@ -53,17 +53,32 @@ async function copyDashboard(bundle, site, refresh) {
 }
 function run(command, args) { const result = spawnSync(command, args, { encoding: 'utf8' }); if (result.status !== 0) throw new Error(result.stderr || `${command} failed`); return result.stdout; }
 async function newestGithubBundle(repo) {
-  const runs = ['ci.yml', 'compliance-scheduled.yml'].flatMap((workflow) => JSON.parse(run('gh', ['run', 'list', '--repo', repo, '--workflow', workflow, '--status', 'success', '--limit', '1', '--json', 'databaseId,createdAt,headSha,event'])));
-  const selected = runs.filter((run) => run.event === 'push' || run.event === 'schedule').sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+  const workflows = [['ci.yml', 'push'], ['compliance-scheduled.yml', 'schedule']];
+  const runs = workflows.flatMap(([workflow, event]) => JSON.parse(run('gh', [
+    'run', 'list', '--repo', repo, '--workflow', workflow, '--branch', 'main', '--event', event,
+    '--status', 'success', '--limit', '10', '--json', 'databaseId,createdAt,headSha',
+  ])));
+  const selected = runs.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).find(({ databaseId }) => {
+    const artifacts = JSON.parse(run('gh', ['api', `repos/${repo}/actions/runs/${databaseId}/artifacts?name=compliance-bundle`]));
+    return artifacts.artifacts.some((artifact) => artifact.name === 'compliance-bundle' && !artifact.expired);
+  });
   if (!selected) throw new Error('No successful main or scheduled compliance bundle was found');
-  const dir = await mkdtemp(join(tmpdir(), 'near-ai-compliance-bundle-')); run('gh', ['run', 'download', String(selected.databaseId), '--repo', repo, '--name', 'compliance-bundle', '--dir', dir]);
-  return { dir, source: `GitHub run ${selected.databaseId}`, commit: selected.headSha };
+  const dir = await mkdtemp(join(tmpdir(), 'near-ai-compliance-bundle-'));
+  try {
+    run('gh', ['run', 'download', String(selected.databaseId), '--repo', repo, '--name', 'compliance-bundle', '--dir', dir]);
+    return { dir, source: `GitHub run ${selected.databaseId}`, commit: selected.headSha };
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 export async function refresh({ fromDir = option('from-dir'), siteDir = option('site-dir') ?? siteDefault, release = option('release'), repo = option('repo') ?? 'VitalPointAI/near-ai-vscode' } = {}) {
   let downloaded; let source = fromDir ? 'local bundle' : ''; let commit;
   try {
     if (!fromDir) { downloaded = await newestGithubBundle(repo); fromDir = downloaded.dir; source = downloaded.source; commit = downloaded.commit; }
-    const verified = await verifyBundleDir(fromDir); commit ??= verified.manifest.commit;
+    const verified = await verifyBundleDir(fromDir);
+    if (commit && verified.manifest.commit !== commit) throw new Error('Bundle commit does not match the selected GitHub run');
+    commit ??= verified.manifest.commit;
     let attestation = 'none'; let note = 'Daily and merge bundles are hash-verified; their attestation is none by design.';
     if (release) { const help = spawnSync('gh', ['attestation', '--help'], { encoding: 'utf8' }); if (help.status === 0) { run('gh', ['attestation', 'verify', release, '--repo', repo]); attestation = 'verified'; note = 'Release package attestation verified.'; } else { attestation = 'not-checked'; note = 'Attestation was not checked: upgrade gh to a version with gh attestation.'; } }
     await copyDashboard(verified.root, resolve(siteDir), { source, commit, fetchedAt: new Date().toISOString(), manifest: 'verified', attestation, note });
