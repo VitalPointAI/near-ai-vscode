@@ -21,6 +21,8 @@ node_modules/**
 docs/*.pdf
 # Reference solutions only check the benchmark's graders (evalExecution.test.ts); Compare Models never needs them.
 resources/benchmark/**/reference/**
+# The export downloads the verified Treasury Board privacy forms on demand. The repository copies serve as test fixtures.
+resources/saa/official/*.docx
 
 # Live model-eval results (NEAR_LIVE_EVAL_OUT)
 eval-*.json

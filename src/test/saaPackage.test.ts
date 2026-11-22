@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { test } from 'node:test';
+import { readZip } from '../agent/zip';
+import { buildSaaPackage } from '../services/saaPackage';
+import { loadSaaOfficialPrivacyForms, type SaaReleaseEvidence } from '../services/saaReleaseEvidence';
+
+const commit = 'a'.repeat(40);
+const date = '2026-11-22T18:00:00.000Z';
+const dashboardPath = 'evidence/bundle/dashboard/dashboard.json';
+const textPath = 'evidence/bundle/dashboard/text/itsp-10-033/au.json';
+const workbookPath = 'evidence/SA-and-A-control-and-evidence-workbook.xlsx';
+const formsDir = path.join(__dirname, '../../resources/saa');
+const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+const dashboard = {
+  schemaVersion: 1,
+  commit,
+  generatedAt: date,
+  levels: [
+    { id: 'protected-a', title: 'Protected A', kind: 'level', claim: true },
+    { id: 'classified', title: 'Classified', kind: 'level', claim: false }
+  ],
+  rows: [
+    {
+      level: 'protected-a', control: 'au-2', label: 'AU-2', title: 'Audit Events',
+      state: 'met', reason: 'Product rule passed', textFile: 'text/itsp-10-033/au.json',
+      components: [{
+        component: 'Extension', responsibility: 'supplier', state: 'met', statement: ' \t=2+2',
+        evidence: [{
+          rule: 'audit-events', passed: true, reason: 'Observed & verified', collectedAt: date,
+          commit, runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/12', window: 'release'
+        }]
+      }]
+    },
+    {
+      level: 'classified', control: 'ac-2', label: 'AC-2', title: 'Account Management',
+      state: 'not-met', reason: 'No product evidence', gap: 'CG-1', components: []
+    }
+  ],
+  gaps: [{
+    id: 'CG-1', title: 'Account evidence', ownerRole: 'Security team', state: 'open', controls: ['ac-2'],
+    remediation: 'Document evidence', phase: '44'
+  }]
+};
+
+function release(): SaaReleaseEvidence {
+  const archive = Buffer.from('original assessor archive');
+  const dashboardBytes = Buffer.from(JSON.stringify(dashboard));
+  const sourceText = Buffer.from('official audit control text');
+  const ledger = Buffer.from(`${digest(dashboardBytes)}  ${dashboardPath}\n${digest(sourceText)}  ${textPath}\n`);
+  return {
+    version: '0.4.36', commit, sourceUrl: 'https://github.com/VitalPointAI/near-ai-vscode/releases/tag/v0.4.36',
+    fileName: 'compliance-package-0.4.36.tar.gz', sha256: digest(archive), archive, dashboard,
+    files: new Map([[dashboardPath, dashboardBytes], [textPath, sourceText], ['SHA256SUMS', ledger]])
+  };
+}
+
+test('exports the original release, editable forms and traceability with deployment conclusions left open', async () => {
+  const evidence = release();
+  const privacyForms = await loadSaaOfficialPrivacyForms(new AbortController().signal, async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.origin, 'https://www.canada.ca');
+    const bytes = await readFile(path.join(formsDir, 'official', path.basename(url.pathname)));
+    return new Response(new Uint8Array(bytes));
+  });
+  assert.equal(privacyForms.size, 5);
+  const result = readZip(await buildSaaPackage(evidence, formsDir, privacyForms), 'SA&A package');
+  for (const [name, bytes] of privacyForms) assert.deepEqual(result.get(`forms/official/${name}`)?.(), bytes);
+  assert.deepEqual(result.get(`evidence/${evidence.fileName}`)?.(), evidence.archive);
+  assert.equal(result.get(`evidence/${evidence.fileName}.sha256`)?.().toString(), `${evidence.sha256}  ${evidence.fileName}\n`);
+  for (const [name, bytes] of evidence.files) {
+    assert.deepEqual(result.get(`evidence/release-package/${name}`)?.(), bytes);
+  }
+  assert.ok(result.has('forms/editable/01-01-submission-cover-and-routing.docx'));
+  assert.ok([...result.keys()].some((name) => name.startsWith('forms/official/') && name.endsWith('.pdf')));
+  assert.match(result.get('README.md')?.().toString() ?? '', /v0\.4\.36/);
+  assert.match(result.get('evidence/coverage-summary.csv')?.().toString() ?? '', /"protected-a","Protected A","1","1"/);
+  const traceability = result.get('evidence/control-traceability.csv')?.().toString() ?? '';
+  assert.match(traceability, /"Product rule passed".*"release-package\/evidence\/bundle\/dashboard\/text\/itsp-10-033\/au\.json".*"Not assessed"/);
+  assert.match(traceability, /"No product evidence".*"CG-1","Security team".*"Reference only"/);
+  const component = result.get('evidence/component-evidence.csv')?.().toString() ?? '';
+  assert.match(component, /"' \t=2\+2".*"audit-events","Passed","Observed & verified"/);
+  assert.match(result.get('evidence/gap-and-action-register.csv')?.().toString() ?? '',
+    /"CG-1","Account evidence","open","ac-2","Security team","Document evidence","44"/);
+
+  const workbook = readZip(result.get(workbookPath)!(), 'traceability workbook');
+  const worksheet = workbook.get('xl/worksheets/sheet3.xml')?.().toString() ?? '';
+  assert.match(worksheet, /t="inlineStr"><is><t xml:space="preserve"> \t=2\+2<\/t>/);
+  assert.match(worksheet, /Observed &amp; verified/);
+  assert.doesNotMatch(worksheet, /<f[ >]/);
+  assert.equal(result.get('SHA256SUMS')?.().toString().split('\n').filter(Boolean).length, result.size - 1);
+  for (const [name, bytes] of result) {
+    if (name === 'SHA256SUMS') continue;
+    assert.ok(result.get('SHA256SUMS')?.().toString().includes(`${digest(bytes())}  ${name}\n`), name);
+  }
+});
+
+test('reports missing, inconsistent or malformed package inputs before producing a draft', async () => {
+  const evidence = release();
+  const noPrivacyForms = new Map<string, Buffer>();
+  await assert.rejects(buildSaaPackage({ ...evidence, dashboard: { ...dashboard, commit: 'b'.repeat(40) } }, formsDir, noPrivacyForms),
+    /missing or malformed control evidence/);
+  const rows = [...dashboard.rows, { ...dashboard.rows[0], level: 'unknown-profile' }];
+  await assert.rejects(buildSaaPackage({ ...evidence, dashboard: { ...dashboard, rows } }, formsDir, noPrivacyForms),
+    /references unknown or duplicate controls, profiles or gaps/);
+  await assert.rejects(buildSaaPackage(evidence, path.join(formsDir, 'official'), noPrivacyForms), /bundled editable SA&A forms are missing/);
+});
+
+test('rejects a changed Treasury Board form before including it in an export', async () => {
+  await assert.rejects(loadSaaOfficialPrivacyForms(new AbortController().signal, async () => new Response('changed')),
+    /differs from the version this extension verifies/);
+});

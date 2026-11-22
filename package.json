@@ -224,6 +224,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.generateSaaPackage",
+        "title": "Generate SA&A Package…",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.setupResearchVerifiers",
         "title": "Set Up Research Verifiers",
         "category": "NEAR AI"
