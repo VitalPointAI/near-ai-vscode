@@ -1,0 +1,137 @@
+html { scroll-padding-bottom: calc(var(--guide-footer-height, 4rem) + 6px); }
+
+#guide {
+  max-width: 62rem;
+  margin-inline: auto;
+  padding: 1rem clamp(0.75rem, 3vw, 2rem) 0;
+  overflow-wrap: anywhere;
+}
+
+#heading { margin-block: 1.25rem 1rem; }
+h2 { font-size: 1.15em; }
+h3 { font-size: 1em; }
+
+#stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  padding-inline-start: 1.4rem;
+  color: var(--vscode-descriptionForeground);
+}
+#stepper [aria-current="step"] {
+  color: var(--vscode-foreground);
+  font-weight: 700;
+}
+#stepper:empty, #actions:empty { display: none; }
+
+fieldset {
+  min-inline-size: 0;
+  margin: 0 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--vscode-panel-border);
+}
+legend { padding-inline: 0.3rem; font-weight: 600; }
+
+.choice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+}
+.choice input { flex: none; }
+.choice label { cursor: pointer; }
+[aria-disabled="true"] + label { cursor: default; }
+
+.text-field {
+  display: grid;
+  justify-items: start;
+  gap: 0.45rem;
+  margin-block: 1rem;
+}
+input[type="text"] {
+  width: min(100%, 30rem);
+  padding: 0.45rem;
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.card {
+  padding: 0.75rem;
+  border: 1px solid var(--vscode-panel-border);
+}
+.card[data-outcome="recommended"] {
+  grid-column: 1 / -1;
+  border-color: var(--vscode-focusBorder);
+}
+.card[data-outcome="ruled-out"] { color: var(--vscode-descriptionForeground); }
+.card h2, .card p:first-child { margin-top: 0; }
+.card-lines dt, .answer-summary dt, .outcome { font-weight: 600; }
+.card-lines dd, .answer-summary dd { margin: 0 0 0.65rem; }
+.answer-summary dd p { margin-block: 0.25rem; }
+.hint, #who-to-ask { color: var(--vscode-descriptionForeground); }
+.trust-line {
+  margin-bottom: 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.disclosure { margin-block: 0.75rem; }
+.disclosure li + li { margin-block-start: 0.5rem; }
+
+button {
+  max-width: 100%;
+  padding: 0.45rem 0.7rem;
+  font: inherit;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, transparent));
+}
+.primary {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+.primary:hover:enabled { background: var(--vscode-button-hoverBackground); }
+.secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+.secondary:hover:enabled { background: var(--vscode-button-secondaryHoverBackground); }
+button:disabled {
+  cursor: default;
+  color: var(--vscode-disabledForeground);
+  background: var(--vscode-editor-background);
+}
+.link-button {
+  color: var(--vscode-textLink-foreground);
+  background: var(--vscode-editor-background);
+  border-color: transparent;
+  padding-inline: 0;
+  text-decoration: underline;
+}
+
+#actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-block: 0.8rem;
+  background: var(--vscode-editor-background);
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+@media (max-width: 480px) {
+  .cards { grid-template-columns: 1fr; }
+  #actions button { flex: 1 1 auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
