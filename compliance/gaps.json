@@ -1,7 +1,7 @@
 {
   "gaps": [
     {
-      "closesInPhase": "44",
+      "closesInPhase": "44.1",
       "controls": [
         "ir-01",
         "ir-04",
@@ -11,8 +11,8 @@
       ],
       "id": "G1",
       "ownerRole": "maintainers",
-      "remediation": "Publish the product's incident response plan (triage, fix, advisory, Marketplace rollback, telling users) and a supported-versions table in SECURITY.md, and leave your organization's own incident response as its responsibility.",
-      "title": "No incident response plan, supported-versions table or response-time commitment"
+      "remediation": "Keep the published incident response plan and supported versions policy current. Record a product response exercise and evidence of advisory and notification procedures. Your organization approves, exercises, and records its own deployment response.",
+      "title": "Incident response and advisory operation still need evidence"
     },
     {
       "controls": [
