@@ -3,6 +3,7 @@ import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { writeZip } from '../agent/zip';
 import type { SaaReleaseEvidence } from './saaReleaseEvidence';
+import { buildSaaSponsorReport, type SaaSponsorReportInput } from './saaSponsorReport';
 
 const STATES = ['met', 'partly-met', 'not-met', 'stale', 'your-organizations-responsibility', 'not-applicable'] as const;
 type ProductState = typeof STATES[number];
@@ -25,6 +26,8 @@ interface Component {
   responsibility: string;
   state: ProductState;
   statement?: string;
+  reasonText?: string;
+  inheritedFrom?: string;
   evidence: RuleResult[];
 }
 
@@ -34,6 +37,7 @@ interface Control {
   label: string;
   title: string;
   reason: string;
+  reasonText?: string;
   state: ProductState;
   gap?: string;
   textFile?: string;
@@ -62,6 +66,13 @@ interface Dashboard {
   levels: Profile[];
   rows: Control[];
   gaps: Gap[];
+  matrix: Responsibility[];
+}
+
+interface Responsibility {
+  component: string;
+  control: string;
+  youDo: string;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -78,13 +89,18 @@ function isRuleResult(value: unknown): value is RuleResult {
 
 function isComponent(value: unknown): value is Component {
   return isObject(value) && isText(value.component) && isText(value.responsibility) && isState(value.state) &&
-    optionalText(value.statement) && Array.isArray(value.evidence) && value.evidence.every(isRuleResult);
+    optionalText(value.statement) && optionalText(value.reasonText) && optionalText(value.inheritedFrom) &&
+    Array.isArray(value.evidence) && value.evidence.every(isRuleResult);
 }
 
 function isControl(value: unknown): value is Control {
   return isObject(value) && isText(value.level) && isText(value.control) && isText(value.label) &&
-    isText(value.title) && isText(value.reason) && isState(value.state) && optionalText(value.gap) &&
+    isText(value.title) && isText(value.reason) && optionalText(value.reasonText) && isState(value.state) && optionalText(value.gap) &&
     optionalText(value.textFile) && Array.isArray(value.components) && value.components.every(isComponent);
+}
+
+function isResponsibility(value: unknown): value is Responsibility {
+  return isObject(value) && isText(value.component) && isText(value.control) && typeof value.youDo === 'string';
 }
 
 function isGap(value: unknown): value is Gap {
@@ -103,7 +119,8 @@ function parseDashboard(value: unknown, commit: string): Dashboard {
       !isText(value.generatedAt) || !Number.isFinite(Date.parse(value.generatedAt)) ||
       !Array.isArray(value.levels) || !value.levels.length || !value.levels.every(isProfile) ||
       !Array.isArray(value.rows) || !value.rows.length || !value.rows.every(isControl) ||
-      !Array.isArray(value.gaps) || !value.gaps.every(isGap)) {
+      !Array.isArray(value.gaps) || !value.gaps.every(isGap) ||
+      (value.matrix !== undefined && (!Array.isArray(value.matrix) || !value.matrix.every(isResponsibility)))) {
     throw new Error('The release dashboard has missing or malformed control evidence.');
   }
   const levels = new Set(value.levels.map((level) => level.id));
@@ -114,7 +131,7 @@ function parseDashboard(value: unknown, commit: string): Dashboard {
       value.rows.some((row) => !levels.has(row.level) || (row.gap && !gaps.has(row.gap)))) {
     throw new Error('The release dashboard references unknown or duplicate controls, profiles or gaps.');
   }
-  return { generatedAt: value.generatedAt, levels: value.levels, rows: value.rows, gaps: value.gaps };
+  return { generatedAt: value.generatedAt, levels: value.levels, rows: value.rows, gaps: value.gaps, matrix: value.matrix ?? [] };
 }
 
 /** Use plain ZIP member names safe to open on the supported platforms. */
@@ -160,32 +177,69 @@ async function readForms(root: string): Promise<ArchiveEntry[]> {
 
 const dashboardFile = 'release-package/evidence/bundle/dashboard/dashboard.json';
 
-function nextAction(control: Control, profile: Profile): string {
-  if (!profile.claim) return 'Confirm the separately scoped reference with the sponsor before assessment.';
-  if (control.state === 'your-organizations-responsibility') return 'Identify the responsible deployment or inherited control owner and obtain evidence.';
-  if (control.state === 'met') return 'Confirm deployment applicability and independently assess effectiveness.';
-  if (control.state === 'not-applicable') return 'Confirm the published exclusion against the deployment scope.';
-  return 'Confirm applicability and owner, then obtain implementation and assessment evidence.';
+// Mirror the published snapshot's Phase 44 windows when labeling individual rule results.
+const day = 24 * 60 * 60 * 1000;
+const evidenceWindows: Readonly<Record<string, number>> = {
+  audit: day, settings: 7 * day, harness: 30 * day, document: 365 * day, attestation: 365 * day
+};
+
+function ruleOutcome(result: RuleResult, snapshot: number, commit: string): string {
+  if (result.reason === 'missing-result') return 'Missing';
+  if (!result.passed || result.reason !== 'met') return 'Failed';
+  if (result.window === 'head') return result.commit === commit ? 'Passed' : 'Stale';
+  const window = result.window && Object.hasOwn(evidenceWindows, result.window) ? evidenceWindows[result.window] : undefined;
+  if (window === undefined) return 'Freshness unverified';
+  const age = snapshot - Date.parse(result.collectedAt);
+  return age >= -5 * 60 * 1000 && age <= window ? 'Passed' : 'Stale';
 }
 
-function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): Table[] {
+function sponsorResponse(control: Control, profile: Profile, duties: readonly string[], passingEvidence: boolean, gaps: readonly Gap[]) {
+  if (!profile.claim) return {
+    draft: 'We propose retaining this control as a reference pending separate scope approval.',
+    followUp: 'Confirm the separately scoped reference with the sponsor before assessment.'
+  };
+  if (control.state === 'not-applicable') return {
+    draft: 'We propose reviewing the release exclusion against the deployment boundary before adopting it.',
+    followUp: 'Record the tailoring rationale, reviewer and approval reference.'
+  };
+  const inherited = [...new Set(control.components.map((component) => component.inheritedFrom).filter(isText))];
+  const responsibility = duties.length ? ` Published sponsor actions: ${duties.join(' ')}` : '';
+  if (control.state === 'your-organizations-responsibility') return {
+    draft: (inherited.length
+      ? `We will confirm whether ${inherited.join(', ')} supplies this control for the proposed deployment.`
+      : 'We will identify the organization responsible for this control and document its deployment implementation.') + responsibility,
+    followUp: 'Confirm the responsible owner and record applicable implementation, operating records and assessor evidence.'
+  };
+  if (control.state === 'met' && passingEvidence) return {
+    draft: 'We propose the cited release evidence for assessor review against the approved deployment boundary and configuration.' + responsibility,
+    followUp: 'Confirm applicability and evidence freshness, then test the deployment and record the result.'
+  };
+  return {
+    draft: 'We will confirm the applicable objective and resolve the product or evidence gap before proposing closure.' + responsibility,
+    followUp: gaps.length
+      ? `Review related gaps ${gaps.map(({ id }) => id).join(', ')}. Verify the applicable implementation and record closure evidence.`
+      : 'Route to Phase 44.1 to determine whether implementation, evidence, or an approved tailoring decision is needed.'
+  };
+}
+
+function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): { tables: Table[]; profiles: SaaSponsorReportInput['profiles'] } {
   const coverage: CsvRow[] = [['Profile ID', 'Profile name', 'Product rows', ...STATES, 'Deployment assessment']];
   const controls: CsvRow[] = [[
     'Profile ID', 'Profile kind', 'OSCAL control ID', 'Control label', 'Control title', 'Product state', 'Product reason',
-    'Product snapshot (UTC)', 'Product commit', 'Mapped components and responsibilities', 'Product rule IDs', 'Product gap ID',
-    'Product gap owner role', 'Next assessment action', 'Official source in package', 'Deployment applicability',
+    'Product snapshot (UTC)', 'Product commit', 'Mapped components and responsibilities', 'Product rule IDs', 'Related published gap IDs',
+    'Related gap owner roles', 'Next assessment action', 'Official source in package', 'Deployment applicability',
     'Tailoring decision and rationale', 'Deployment owner', 'Assessment method', 'Deployment evidence ID', 'Assessor result',
-    'Assessor and date', 'Closure or approval reference'
+    'Assessor and date', 'Closure or approval reference', 'Published reason detail', 'Evidence at release snapshot', 'Draft sponsor response'
   ]];
   const components: CsvRow[] = [[
     'Profile ID', 'OSCAL control ID', 'Component', 'Product responsibility', 'Product statement', 'Product component state',
     'Evidence rule ID', 'Product rule result', 'Result reason', 'Collected (UTC)', 'Evidence commit', 'Original run URL',
-    'Validity window', 'Evidence source in package'
+    'Validity window', 'Evidence source in package', 'Published component reason detail', 'Inherited provider'
   ]];
   const actions: CsvRow[] = [[
     'Product gap ID', 'Title', 'Published state', 'OSCAL control IDs', 'Product owner role', 'Published remediation',
     'Published phase', 'Deployment applicability', 'Assigned owner', 'Priority', 'Target date', 'Compensating measure',
-    'Closure evidence', 'Assessor disposition'
+    'Closure evidence', 'Assessor disposition', 'Profile ID'
   ]];
   const index: CsvRow[] = [
     ['Evidence ID', 'Artifact', 'Source or path in evidence folder', 'Product commit', 'Use and limitations'],
@@ -197,48 +251,78 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
     ['EV-REL-06', 'Readable release records', 'release-package/readable/', release.commit, 'Release security plans and responsibilities.'],
     ['EV-DEP-___', 'Deployment evidence reference', '', '', 'Record permitted IDs and repository links after assessment.']
   ];
-  const gapById = new Map(dashboard.gaps.map((gap) => [gap.id, gap]));
+  const snapshot = Date.parse(dashboard.generatedAt);
+  const profiles: SaaSponsorReportInput['profiles'][number][] = [];
   for (const profile of dashboard.levels) {
     const rows = dashboard.rows.filter((row) => row.level === profile.id);
     const counts = new Map<ProductState, number>();
+    const drafts: SaaSponsorReportInput['profiles'][number]['rows'][number][] = [];
     for (const row of rows) {
       counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
-      const rules = new Set(row.components.flatMap((component) => component.evidence.map((result) => result.rule)));
+      const results = row.components.flatMap((component) => component.evidence);
+      const rules = new Set(results.map((result) => result.rule));
+      const resultCounts = new Map<string, number>();
+      for (const result of results) {
+        const outcome = ruleOutcome(result, snapshot, release.commit);
+        resultCounts.set(outcome, (resultCounts.get(outcome) ?? 0) + 1);
+      }
+      const evidenceStatus = resultCounts.size
+        ? [...resultCounts].map(([outcome, count]) => `${count} ${outcome.toLowerCase()}`).join(', ')
+        : 'No release rule results';
+      const related = dashboard.gaps.filter((gap) => gap.id === row.gap || gap.controls.includes(row.control));
+      const owners = [...new Set(related.map(({ ownerRole }) => ownerRole))].join(', ');
+      const duties = [...new Set(dashboard.matrix.filter((item) => item.control === row.control &&
+        row.components.some((component) => component.component === item.component)).map(({ youDo }) => youDo).filter(Boolean))];
+      const passingEvidence = resultCounts.size === 1 && resultCounts.has('Passed');
+      const response = sponsorResponse(row, profile, duties, passingEvidence, related);
+      const reasonText = row.reason === 'inherited'
+        ? row.components.find((component) => component.responsibility === 'inherited' && component.reasonText)?.reasonText ??
+          'Confirm the inherited provider with the deployment owner.'
+        : row.reasonText;
+      drafts.push({ label: row.label, title: row.title, publishedState: row.state, evidenceStatus,
+        publishedReason: reasonText, sponsorDraft: response.draft, followUp: response.followUp });
+      if (profile.claim && !related.length && (['not-met', 'partly-met', 'stale'].includes(row.state) ||
+          (row.state === 'met' && !passingEvidence))) {
+        actions.push([`TRIAGE-${profile.id}-${row.control}`, 'Control implementation or evidence review', 'Triage', row.control,
+          '', response.followUp, '44.1', '', '', '', '', '', '', '', profile.id]);
+      }
       const textFile = row.textFile ? `evidence/bundle/dashboard/${row.textFile}` : '';
       const official = textFile && safePath(textFile) && release.files.has(textFile) ? `release-package/${textFile}` : '';
       controls.push([
         profile.id, profile.kind, row.control, row.label, row.title, row.state, row.reason, dashboard.generatedAt, release.commit,
         row.components.map(({ component, responsibility }) => `${component} (${responsibility})`).join('; '), [...rules].join('; '),
-        row.gap, row.gap ? gapById.get(row.gap)?.ownerRole : '', nextAction(row, profile), official,
-        '', '', '', '', '', profile.claim ? 'Not assessed' : 'Reference only', '', ''
+        related.map(({ id }) => id).join(', '), owners, response.followUp, official,
+        '', '', '', '', '', profile.claim ? 'Not assessed' : 'Reference only', '', '', reasonText, evidenceStatus, response.draft
       ]);
       for (const component of row.components) {
         const base = [profile.id, row.control, component.component, component.responsibility, component.statement, component.state];
         if (component.evidence.length === 0) {
-          components.push([...base, '', '', '', '', '', '', '', dashboardFile]);
+          components.push([...base, '', '', '', '', '', '', '', dashboardFile, component.reasonText, component.inheritedFrom]);
         }
         for (const item of component.evidence) {
-          components.push([
-            ...base, item.rule, item.passed ? 'Passed' : 'Failed or unavailable', item.reason, item.collectedAt,
-            item.commit, item.runUrl, item.window, dashboardFile
-          ]);
+          const outcome = ruleOutcome(item, snapshot, release.commit);
+          const recorded = outcome !== 'Missing';
+          components.push([...base, item.rule, outcome, item.reason, recorded ? item.collectedAt : '',
+            recorded ? item.commit : '', recorded ? item.runUrl : '', item.window, dashboardFile, component.reasonText, component.inheritedFrom]);
         }
       }
     }
     coverage.push([profile.id, profile.title, rows.length, ...STATES.map((state) => counts.get(state) ?? 0),
       profile.claim ? 'Not assessed' : 'Reference only']);
+    profiles.push({ id: profile.id, title: profile.title, referenceOnly: !profile.claim, rows: drafts });
   }
   for (const gap of dashboard.gaps) {
     actions.push([gap.id, gap.title, gap.state, gap.controls.join('; '), gap.ownerRole, gap.remediation, gap.phase,
-      '', '', '', '', '', '', '']);
+      '', '', '', '', '', '', '', '']);
   }
-  return [
+  const tables: Table[] = [
     { title: 'Coverage', file: 'coverage-summary.csv', rows: coverage },
     { title: 'Control traceability', file: 'control-traceability.csv', rows: controls },
     { title: 'Component evidence', file: 'component-evidence.csv', rows: components },
     { title: 'Evidence index', file: 'evidence-index.csv', rows: index },
     { title: 'Product gaps', file: 'gap-and-action-register.csv', rows: actions }
   ];
+  return { tables, profiles };
 }
 
 function csvCell(value: CsvRow[number]): string {
@@ -290,7 +374,7 @@ function workbook(tables: Table[]): Buffer {
 /** Combine a verified public release with blank forms. All generated content stays in this archive. */
 export async function buildSaaPackage(evidence: SaaReleaseEvidence, formsDir: string, privacyForms: ReadonlyMap<string, Buffer>): Promise<Buffer> {
   const dashboard = parseDashboard(evidence.dashboard, evidence.commit);
-  const tables = traceabilityTables(dashboard, evidence);
+  const { tables, profiles } = traceabilityTables(dashboard, evidence);
   const entries: ArchiveEntry[] = await readForms(formsDir);
   const append = (name: string, value: string) => entries.push([name, Buffer.from(value)]);
   const addSource = (name: string, value: Buffer) => {
@@ -298,6 +382,10 @@ export async function buildSaaPackage(evidence: SaaReleaseEvidence, formsDir: st
     entries.push([name, value]);
   };
   for (const [name, bytes] of privacyForms) addSource(`forms/official/${name}`, bytes);
+  const sponsorReport = 'SA-and-A-sponsor-draft.docx';
+  entries.push([sponsorReport, buildSaaSponsorReport({
+    version: evidence.version, commit: evidence.commit, generatedAt: dashboard.generatedAt, sourceUrl: evidence.sourceUrl, profiles
+  })]);
   append('README.md', `# Security Assessment and Authorization package
 
 Draft for departmental review
@@ -307,7 +395,7 @@ Draft for departmental review
 - Product evidence snapshot (UTC): ${dashboard.generatedAt}
 - Published source: ${evidence.sourceUrl}
 
-Start with the editable submission and routing form in the [forms index](forms/README.md). The package includes categorization, tailoring, security design and operating plans, the assessment plan and report, remediation records, and authorization and residual risk worksheets. The index also identifies the official blank Treasury Board forms and the department's approval responsibilities.
+Start with the [consolidated sponsor draft](${sponsorReport}), which includes a submission cover, report sections and proposed control responses for editing. The [forms index](forms/README.md) lists the supporting categorization, tailoring, system and assessment plans, remediation, authorization and risk worksheets, and the official blank Treasury Board forms.
 
 Open the [control and evidence workbook](evidence/SA-and-A-control-and-evidence-workbook.xlsx) for the release's ${dashboard.rows.length} profile and overlay rows. The [evidence notes](evidence/README.md) describe how to read the product snapshot and trace it to the original assessor archive.
 
@@ -317,9 +405,10 @@ These documents are drafts. The sponsor supplies the deployment, departmental te
 
 This export uses the product evidence published for NEAR AI for VS Code v${evidence.version} at ${evidence.commit}. The source archive was checked against its GitHub release asset SHA-256 and the release package's internal checksums.
 
-The actual deployment and its control conclusions remain open. States and results in the workbook describe the product evidence as published. They do not establish authorization, control implementation at a particular site, or acceptance of residual risk. Profiles marked reference only require separate scope and direction.
+The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish a passing, failing, missing or stale result at that snapshot. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
 - The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
+- The product gaps tab lists original published gaps and separate Phase 44.1 triage entries for unresolved rows without a related gap. Triage identifies where a reviewer still needs to determine whether to implement a control, collect evidence or obtain a tailoring decision.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
 - Evidence references for the deployment should identify the assessed component, build and configuration, assessment objective, method, collection date, approved location and reviewer.
 `);

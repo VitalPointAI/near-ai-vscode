@@ -1439,8 +1439,8 @@ copy of Open-GSD to a project that doesn't already have one.
 Use **NEAR AI: Generate SA&A Package…** in the Command Palette to export a Security
 Assessment and Authorization draft for a published release. Choose the version and
 where to save the ZIP. The extension checks the published evidence archive against
-its release digest and builds an editable control-to-evidence workbook alongside
-the assessment documents and blank administrative forms. The command downloads
+its release digest and builds a consolidated editable sponsor Word draft and a
+control-to-evidence workbook alongside the assessment documents and blank administrative forms. The command downloads
 public release files from GitHub and verified privacy forms from Canada.ca.
 Your organization fills in the deployment
 scope, findings, and approvals in its own review process.

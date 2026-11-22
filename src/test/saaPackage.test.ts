@@ -26,12 +26,13 @@ const dashboard = {
   rows: [
     {
       level: 'protected-a', control: 'au-2', label: 'AU-2', title: 'Audit Events',
-      state: 'met', reason: 'Product rule passed', textFile: 'text/itsp-10-033/au.json',
+      state: 'met', reason: 'Product rule passed', reasonText: 'Published audit evidence is available.', textFile: 'text/itsp-10-033/au.json',
       components: [{
         component: 'Extension', responsibility: 'supplier', state: 'met', statement: ' \t=2+2',
+        reasonText: 'Observed & verified',
         evidence: [{
-          rule: 'audit-events', passed: true, reason: 'Observed & verified', collectedAt: date,
-          commit, runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/12', window: 'release'
+          rule: 'audit-events', passed: true, reason: 'met', collectedAt: date,
+          commit, runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/12', window: 'head'
         }]
       }]
     },
@@ -43,7 +44,11 @@ const dashboard = {
   gaps: [{
     id: 'CG-1', title: 'Account evidence', ownerRole: 'Security team', state: 'open', controls: ['ac-2'],
     remediation: 'Document evidence', phase: '44'
-  }]
+  }, {
+    id: 'CG-2', title: 'Account review', ownerRole: 'Operating team', state: 'planned', controls: ['ac-2'],
+    remediation: 'Review operating evidence'
+  }],
+  matrix: [{ component: 'Extension', control: 'au-2', youDo: 'Choose which audit events to retain.' }]
 };
 
 function release(): SaaReleaseEvidence {
@@ -80,9 +85,10 @@ test('exports the original release, editable forms and traceability with deploym
   assert.match(result.get('evidence/coverage-summary.csv')?.().toString() ?? '', /"protected-a","Protected A","1","1"/);
   const traceability = result.get('evidence/control-traceability.csv')?.().toString() ?? '';
   assert.match(traceability, /"Product rule passed".*"release-package\/evidence\/bundle\/dashboard\/text\/itsp-10-033\/au\.json".*"Not assessed"/);
-  assert.match(traceability, /"No product evidence".*"CG-1","Security team".*"Reference only"/);
+  assert.match(traceability, /"No product evidence".*"CG-1, CG-2","Security team, Operating team".*"Reference only"/);
+  assert.match(traceability, /Published audit evidence is available.*1 passed.*Choose which audit events to retain/);
   const component = result.get('evidence/component-evidence.csv')?.().toString() ?? '';
-  assert.match(component, /"' \t=2\+2".*"audit-events","Passed","Observed & verified"/);
+  assert.match(component, /"' \t=2\+2".*"audit-events","Passed","met".*"Observed & verified"/);
   assert.match(result.get('evidence/gap-and-action-register.csv')?.().toString() ?? '',
     /"CG-1","Account evidence","open","ac-2","Security team","Document evidence","44"/);
 
@@ -91,11 +97,41 @@ test('exports the original release, editable forms and traceability with deploym
   assert.match(worksheet, /t="inlineStr"><is><t xml:space="preserve"> \t=2\+2<\/t>/);
   assert.match(worksheet, /Observed &amp; verified/);
   assert.doesNotMatch(worksheet, /<f[ >]/);
+  const sponsor = readZip(result.get('SA-and-A-sponsor-draft.docx')!(), 'sponsor draft');
+  const document = sponsor.get('word/document.xml')!().toString();
+  assert.match(document, /TOC /);
+  assert.match(document, /<w:pageBreakBefore/);
+  assert.match(document, /Choose which audit events to retain/);
+  assert.match(document, /AC-2/);
+  assert.match(document, /separate scope approval/);
   assert.equal(result.get('SHA256SUMS')?.().toString().split('\n').filter(Boolean).length, result.size - 1);
   for (const [name, bytes] of result) {
     if (name === 'SHA256SUMS') continue;
     assert.ok(result.get('SHA256SUMS')?.().toString().includes(`${digest(bytes())}  ${name}\n`), name);
   }
+});
+
+test('distinguishes missing, stale and failed evidence and adds unresolved in-scope controls to triage', async () => {
+  const evidence = release();
+  const base = dashboard.rows[0];
+  const [component] = base.components;
+  assert.ok(component);
+  const [rule] = component.evidence;
+  const data = { ...dashboard, rows: [{ ...base, state: 'stale', components: [{ ...component, evidence: [
+    { ...rule, rule: 'missing', passed: false, reason: 'missing-result' },
+    { ...rule, rule: 'stale', commit: 'b'.repeat(40) },
+    { ...rule, rule: 'expired', collectedAt: '2026-11-20T18:00:00.000Z', window: 'audit' },
+    { ...rule, rule: 'failed', passed: false, reason: 'test-failed' }
+  ] }] }, dashboard.rows[1]] };
+  const result = readZip(await buildSaaPackage({ ...evidence, dashboard: data }, formsDir, new Map()), 'SA&A package');
+  const rules = result.get('evidence/component-evidence.csv')!().toString();
+  assert.match(rules, /"missing","Missing","missing-result","","","","head"/);
+  assert.match(rules, /"stale","Stale","met"/);
+  assert.match(rules, /"expired","Stale","met"/);
+  assert.match(rules, /"failed","Failed","test-failed"/);
+  const triage = result.get('evidence/gap-and-action-register.csv')!().toString();
+  assert.match(triage, /TRIAGE-protected-a-au-2/);
+  assert.doesNotMatch(triage, /TRIAGE-classified/);
 });
 
 test('reports missing, inconsistent or malformed package inputs before producing a draft', async () => {

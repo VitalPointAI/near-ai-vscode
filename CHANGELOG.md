@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Generate a Security Assessment and Authorization package from the NEAR AI Command Palette. The ZIP includes verified release evidence, an editable control matrix, and administrative forms.
+- Generate a Security Assessment and Authorization package from the NEAR AI Command Palette. The ZIP includes a consolidated sponsor Word draft, verified release evidence, an editable control matrix, and administrative forms.
 
 ## 0.4.36
 
