@@ -27,7 +27,7 @@
     {
       "control": "ac-02.03",
       "value": "Selected",
-      "placeholder": "a. b. time period [not to exceed 30 days]c. time period [not to exceed 24 hours]",
+      "placeholder": "a. b. time period [not to exceed 30 days] c. time period [not to exceed 24 hours]",
       "note": "NA"
     },
     {
@@ -105,7 +105,7 @@
     {
       "control": "ac-03.02",
       "value": "Selected",
-      "placeholder": "[1] privileged commands [creation and deletion ofPKIofficers and administrators accounts][2] actions [examples are:PKIchanges to administrators and security officers; global administrator actions in cloud tenancies; domain administrator actions in single-forest systems]",
+      "placeholder": "[1] privileged commands [creation and deletion of PKI officers and administrators accounts] [2] actions [examples are: PKI changes to administrators and security officers; global administrator actions in cloud tenancies; domain administrator actions in single-forest systems]",
       "note": "Organizations must assess which administrative actions are capable of creating the entire available Injury. These actions are candidates for dual authorization"
     },
     {
@@ -118,7 +118,7 @@
       "control": "ac-03.04",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "Control enhancement (04) clarifies the Access Enforcement security control by detailing the policy that should be used for access enforcement to Protected B information. That is, while the system may be authorized to processPB, not all information will necessarily bePB. Therefore,DACwill be used to establish and enforce access controls overPBinformation to “need to know.”Examples ofDACinclude Windows groups (at the file object level) and document management systems that allow document access permissions to be modified by the owner."
+      "note": "Control enhancement (04) clarifies the Access Enforcement security control by detailing the policy that should be used for access enforcement to Protected B information. That is, while the system may be authorized to process PB, not all information will necessarily be PB. Therefore, DAC will be used to establish and enforce access controls over PB information to “need to know.” Examples of DAC include Windows groups (at the file object level) and document management systems that allow document access permissions to be modified by the owner."
     },
     {
       "control": "ac-03.05",
@@ -459,7 +459,7 @@
     {
       "control": "ac-07",
       "value": "Selected",
-      "placeholder": "A. number [of a maximum of 5]A. time period [period of at least 5 minutes]",
+      "placeholder": "A. number [of a maximum of 5] A. time period [period of at least 5 minutes]",
       "note": "NA"
     },
     {
@@ -862,13 +862,13 @@
       "control": "ac-21.400",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific"
+      "note": "GC specific"
     },
     {
       "control": "ac-21.401",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific"
+      "note": "GC specific"
     },
     {
       "control": "ac-22",
@@ -2919,7 +2919,7 @@
     {
       "control": "ir-04.08",
       "value": "Selected",
-      "placeholder": "[SSC,TBS, Cyber Centre]",
+      "placeholder": "[SSC, TBS, Cyber Centre]",
       "note": "NA"
     },
     {
@@ -3034,7 +3034,7 @@
       "control": "ir-09",
       "value": "Not selected",
       "placeholder": "NA",
-      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+      "note": "This control should be selected by GC departments and agencies that have systems categorized higher than Protected B."
     },
     {
       "control": "ir-09.01",
@@ -3046,19 +3046,19 @@
       "control": "ir-09.02",
       "value": "Not selected",
       "placeholder": "NA",
-      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+      "note": "This control should be selected by GC departments and agencies that have systems categorized higher than Protected B."
     },
     {
       "control": "ir-09.03",
       "value": "Not selected",
       "placeholder": "NA",
-      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+      "note": "This control should be selected by GC departments and agencies that have systems categorized higher than Protected B."
     },
     {
       "control": "ir-09.04",
       "value": "Not selected",
       "placeholder": "NA",
-      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+      "note": "This control should be selected by GC departments and agencies that have systems categorized higher than Protected B."
     },
     {
       "control": "ir-10",
@@ -3466,7 +3466,7 @@
       "control": "pe-03",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "According to theTBSPolicy on Government Security andRCMPGCPSG-006 Access Management Guide, access to sensitive information and areas must be limited. A physical Operations Zone is the minimum required where sensitiveGCinformation is processed or stored. A TRA must be performed to ensure the appropriate level of physical security to protect Protected B information and information systems processing and storingPBdata. This zone is an area where access is limited to personnel who work there and to properly-escorted visitors by an employee with a valid reliability status; it must be indicated by a recognizable perimeter and monitored periodically."
+      "note": "According to the TBS Policy on Government Security and RCMP GCPSG-006 Access Management Guide, access to sensitive information and areas must be limited. A physical Operations Zone is the minimum required where sensitive GC information is processed or stored. A TRA must be performed to ensure the appropriate level of physical security to protect Protected B information and information systems processing and storing PB data. This zone is an area where access is limited to personnel who work there and to properly-escorted visitors by an employee with a valid reliability status; it must be indicated by a recognizable perimeter and monitored periodically."
     },
     {
       "control": "pe-03.01",
@@ -3520,7 +3520,7 @@
       "control": "pe-03.400",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific."
+      "note": "GC specific."
     },
     {
       "control": "pe-04",
@@ -3706,7 +3706,7 @@
       "control": "pe-13.400",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific"
+      "note": "GC specific"
     },
     {
       "control": "pe-14",
@@ -3802,19 +3802,19 @@
       "control": "pe-400",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific."
+      "note": "GC specific."
     },
     {
       "control": "pe-400.01",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific."
+      "note": "GC specific."
     },
     {
       "control": "pe-400.02",
       "value": "Selected",
       "placeholder": "NA",
-      "note": "GCspecific."
+      "note": "GC specific."
     },
     {
       "control": "pe-401",
@@ -5037,7 +5037,7 @@
     {
       "control": "sa-10.07",
       "value": "Selected",
-      "placeholder": "1 [SSC,TBSand Cyber Centre]2 [SSCprojects and services serving multiple departments]",
+      "placeholder": "1 [SSC, TBS and Cyber Centre] 2 [SSC projects and services serving multiple departments]",
       "note": "NA"
     },
     {
@@ -6202,7 +6202,7 @@
       "control": "sc-29",
       "value": "Selected",
       "placeholder": "[cyber security devices and tools]",
-      "note": "In order to protectPBMMagainst Td4 compromise using a single unknown system flaw (a 0-Day), disaggregate the business functions between systems that do not share a single-point-of-failure. For example, host one line-of-business database in Windows, and a different line-of-business database in Linux."
+      "note": "In order to protect PBMM against Td4 compromise using a single unknown system flaw (a 0-Day), disaggregate the business functions between systems that do not share a single-point-of-failure. For example, host one line-of-business database in Windows, and a different line-of-business database in Linux."
     },
     {
       "control": "sc-29.01",
@@ -6609,7 +6609,7 @@
     {
       "control": "si-03",
       "value": "Selected",
-      "placeholder": "C. 1) frequency [at least every 30 days]C. 2) selection [quarantine malicious code]",
+      "placeholder": "C. 1) frequency [at least every 30 days] C. 2) selection [quarantine malicious code]",
       "note": "NA"
     },
     {
@@ -7542,6 +7542,18 @@
       "publishedControl": "cm-11.02",
       "control": "cm-11.03",
       "verifiedAgainst": "https://www.cyber.gc.ca/sites/default/files/itsp.10.033-01-e.pdf"
+    }
+  ],
+  "preservedWording": [
+    {
+      "control": "ac-03.02",
+      "excerpt": "entire available Injury",
+      "source": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/suggested-organizational-security-privacy-control-activity-profile-medium-impact-itsp10033-01"
+    },
+    {
+      "control": "sc-29",
+      "excerpt": "Td4 compromise",
+      "source": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/suggested-organizational-security-privacy-control-activity-profile-medium-impact-itsp10033-01"
     }
   ]
 }

@@ -276,7 +276,7 @@ function jsonFilesIn(dir: string): string[] {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
   return readdirSync(dir, { recursive: true, encoding: 'utf8' })
     .map((entry) => path.join(dir, entry))
-    .filter((file) => file.endsWith('.json') && statSync(file).isFile() && !(path.basename(file) === 'licence-check.json' && path.basename(path.dirname(file)) === 'import-reports'))
+    .filter((file) => file.endsWith('.json') && statSync(file).isFile())
     .sort();
 }
 

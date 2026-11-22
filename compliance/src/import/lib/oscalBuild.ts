@@ -1,8 +1,10 @@
-import { OSCAL_VERSION, NS } from '../../model.ts'; const stamp=(title:string,version:string,retrievedAt:string)=>({title,version,'last-modified':retrievedAt,'oscal-version':OSCAL_VERSION});
+import { OSCAL_VERSION, NS } from '../../model.ts';
+import { stableOscalUuid } from '../../oscalSsp.ts';
+const stamp=(title:string,version:string,retrievedAt:string)=>({title,version,'last-modified':retrievedAt,'oscal-version':OSCAL_VERSION});
 /** OSCAL catalog provenance belongs to metadata; catalog itself has no `props` member. */
-export const newCatalog=({sourceId,title,version,retrievedAt}:{sourceId:string;title:string;version:string;retrievedAt:string})=>({catalog:{uuid:'00000000-0000-4000-8000-000000000000',metadata:{...stamp(title,version,retrievedAt),props:[{name:'source-id',ns:NS,value:sourceId}]},groups:[]}});
+export const newCatalog=({sourceId,title,version,retrievedAt}:{sourceId:string;title:string;version:string;retrievedAt:string})=>({catalog:{uuid:stableOscalUuid(`catalog:${sourceId}`),metadata:{...stamp(title,version,retrievedAt),props:[{name:'source-id',ns:NS,value:sourceId}]},groups:[]}});
 export const newGroup=(id:string,title:string)=>({id,title,controls:[] as unknown[]}); export const newControl=({id,title,label, class:klass,props=[]}:{id:string;title:string;label?:string;class?:string;props?:unknown[]})=>({id,title,...(label?{props:[{name:'label',value:label},...props]}:{props}),...(klass?{class:klass}:{})});
 /** A catalogue statement part has a unique control-derived ID and a semantic name. */
 export const statementPart=(controlId:string,items:readonly string[])=>({id:`${controlId}_smt`,name:'statement',prose:items.join('\n')});
 export function proseWithParams(text:string,controlId:string){const params:string[]=[]; const prose=text.replace(/\[(?:Assignment|Selection(?: \(1 or more\))?):\s*([^\]]+)\]/g,(_m,value)=>{const id=`${controlId}_param_${params.length+1}`;params.push(id);return `{{ insert: ${id} }}`;});return {prose,params};}
-export const newProfile=(title:string,version:string,retrievedAt:string)=>({profile:{uuid:'00000000-0000-4000-8000-000000000001',metadata:stamp(title,version,retrievedAt),imports:[]}}); export const newMapping=(title:string,version:string,retrievedAt:string)=>({'mapping-collection':{uuid:'00000000-0000-4000-8000-000000000002',metadata:stamp(title,version,retrievedAt),mappings:[]}});
+export const newProfile=(title:string,version:string,retrievedAt:string)=>({profile:{uuid:stableOscalUuid(`profile:${title}`),metadata:stamp(title,version,retrievedAt),imports:[]}}); export const newMapping=(title:string,version:string,retrievedAt:string)=>({'mapping-collection':{uuid:stableOscalUuid(`mapping:${title}`),metadata:stamp(title,version,retrievedAt),mappings:[]}});

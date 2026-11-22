@@ -6,10 +6,14 @@ import { createFetcher, type Fetcher } from './lib/fetch.ts';
 type HtmlNode = { readonly tagName?: string; readonly childNodes?: readonly HtmlNode[]; readonly value?: string };
 export interface ProfileRow { readonly control: string; readonly value: string; readonly placeholder?: string; readonly note?: string }
 interface SourceCorrection { readonly table: number; readonly publishedControl: string; readonly control: string; readonly verifiedAgainst: string }
-export interface ImportReport { readonly rows: readonly ProfileRow[]; readonly counts: Readonly<Record<string, number>>; readonly differences: readonly { readonly control: string; readonly en: string; readonly fr: string }[]; readonly frenchFailures: readonly { readonly page: string; readonly reason: string }[]; readonly sourceCorrections?: readonly SourceCorrection[] }
+export interface ImportReport { readonly rows: readonly ProfileRow[]; readonly counts: Readonly<Record<string, number>>; readonly differences: readonly { readonly control: string; readonly en: string; readonly fr: string }[]; readonly frenchFailures: readonly { readonly page: string; readonly reason: string }[]; readonly sourceCorrections?: readonly SourceCorrection[]; readonly preservedWording?: readonly { readonly control: string; readonly excerpt: string; readonly source: string }[] }
 export interface TailoringRemoval { readonly control: string; readonly reason: string; readonly reviewer: string; readonly reviewedAt: string }
 
-const cellText = (node: HtmlNode): string => (typeof node.value === 'string' ? node.value : (node.childNodes ?? []).map(cellText).join('')).replace(/\s+/g, ' ').trim();
+function rawCellText(node: HtmlNode): string {
+  const text = node.value ?? (node.childNodes ?? []).map(rawCellText).join('');
+  return node.tagName && ['br', 'p', 'li'].includes(node.tagName) ? ` ${text} ` : text;
+}
+const cellText = (node: HtmlNode): string => rawCellText(node).replace(/\s+/g, ' ').trim();
 const elements = (node: HtmlNode, tag: string): HtmlNode[] => [node, ...(node.childNodes ?? []).flatMap((child) => elements(child, tag))].filter((child) => child.tagName === tag);
 const englishHeaders = [['Family'], ['ID'], ['Suggested for this profile'], ['Suggested placeholder values'], ['Profile-specific notes']];
 const frenchHeaders = [['Famille'], ['ID'], ['Suggéré pour ce profil'], ['Valeurs suggérées de paramètres substituables', 'Valeurs de remplacement suggérées'], ['Remarques concernant le profil', 'Notes propres au profil']];
@@ -106,7 +110,12 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     differences = [];
     frenchFailures.push({ page: frenchPage, reason: error instanceof Error ? error.message : String(error) });
   }
-  return { sourceId: 'itsp-10-033-01', catalog, file: 'profiles/itsp-10-033-01-medium.json', reportFile: 'import-reports/itsp-10-033-01.json', report: { rows, counts, differences, frenchFailures, ...(sourceCorrections.length ? { sourceCorrections } : {}) } };
+  const preservedWording = [
+    { control: 'ac-03.02', excerpt: 'entire available Injury' },
+    { control: 'sc-29', excerpt: 'Td4 compromise' }
+  ].filter(({ control, excerpt }) => rows.some(row => row.control === control && row.note?.includes(excerpt)))
+    .map(entry => ({ ...entry, source: englishPage }));
+  return { sourceId: 'itsp-10-033-01', catalog, file: 'profiles/itsp-10-033-01-medium.json', reportFile: 'import-reports/itsp-10-033-01.json', report: { rows, counts, differences, frenchFailures, ...(sourceCorrections.length ? { sourceCorrections } : {}), ...(preservedWording.length ? { preservedWording } : {}) } };
 }
 
 /** Builds the derived Protected A profile only from reviewed tailoring removals. */

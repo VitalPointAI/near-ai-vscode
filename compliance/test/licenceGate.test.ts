@@ -34,6 +34,13 @@ test('licence-check accepts the recorded CKAN licence and writes an ok row for e
   assert.equal(code, 0);
   assert.equal(rows.filter((row) => row.includes('"ok":true')).length, SOURCE_REGISTRY.filter((source) => source.licenceEvidence.kind === 'ckan').length);
 });
+test('licence-check writes a standalone JSON report when given an output file', async () => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'near-ai-licences-')), 'licence-check.json');
+  assert.equal(await run(['--out', file], { fetchJson: async () => ckanOk }), 0);
+  const rows = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(rows.length, SOURCE_REGISTRY.filter(source => source.licenceEvidence.kind === 'ckan').length);
+  assert.ok(rows.every((row: { ok: boolean }) => row.ok));
+});
 
 test('licence-check refuses a changed CKAN licence and names its record', async () => {
   const rows: string[] = [];

@@ -26,8 +26,7 @@ export async function run(argv: readonly string[], context: LicenceCheckContext 
       rows.push({ id: source.id, recordId: source.licenceEvidence.recordId, ok: false });
     }
   }
-  const output = rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : '');
-  if (index !== -1) writeFileSync(argv[index + 1], output, 'utf8');
+  if (index !== -1) writeFileSync(argv[index + 1], JSON.stringify(rows, null, 2) + '\n', 'utf8');
   else for (const row of rows) context.write?.(JSON.stringify(row) + '\n');
   return rows.every((row) => row.ok) ? 0 : 3;
 }

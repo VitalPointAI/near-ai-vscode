@@ -107,8 +107,8 @@ test('missing source folders and files are skipped by name, and files outside th
   assert.ok(SOURCE_DIRS.length === 10 && SOURCE_FILES.length === 3);
 });
 
-test('the newline-delimited licence-check audit record is excluded from source JSON validation', () => {
-  assert.deepEqual(findStatusFields(plant({ 'import-reports/licence-check.json': '{"id":"source","ok":true}\n{"id":"source-2","ok":true}\n' })), []);
+test('the JSON licence-check audit report passes source validation', () => {
+  assert.deepEqual(findStatusFields(plant({ 'import-reports/licence-check.json': '[{"id":"source","ok":true},{"id":"source-2","ok":true}]\n' })), []);
 });
 
 test('a source file that is not valid JSON is an error naming the file, never a silent pass', () => {

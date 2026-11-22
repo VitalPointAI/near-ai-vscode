@@ -1,7 +1,18 @@
 import { mainOf, parseHtml } from './lib/cyberHtml.ts'; import { newCatalog } from './lib/oscalBuild.ts'; import { createFetcher, type Fetcher } from './lib/fetch.ts';
-type Node = { tagName?: string; childNodes?: readonly Node[]; value?: string };
-const text = (node: Node): string => (node.value ?? (node.childNodes ?? []).map(text).join('')).replace(/\s+/g, ' ').trim();
-const headingAndContentNodes = (node: Node): Node[] => [node, ...(node.childNodes ?? []).flatMap(headingAndContentNodes)];
+type Node = { tagName?: string; childNodes?: readonly Node[]; value?: string; attrs?: readonly { name: string; value: string }[] };
+const blockTags = new Set(['h2', 'h3', 'h4', 'p', 'ol', 'ul', 'table']);
+function rawText(node: Node): string {
+  const css = node.attrs?.find(({ name }) => name === 'class')?.value.split(/\s+/) ?? [];
+  if (css.includes('wb-inv')) return '';
+  const footnote = node.tagName === 'sup' && node.attrs?.find(({ name }) => name === 'id')?.value.match(/^fn(\d+)-rf$/);
+  if (footnote) return ` [Footnote ${footnote[1]}]`;
+  const content = node.value ?? (node.childNodes ?? []).map(rawText).join('');
+  return node.tagName === 'li' || node.tagName === 'br' ? ` ${content} ` : content;
+}
+const text = (node: Node): string => rawText(node).replace(/\s+/g, ' ').trim();
+const headingAndContentNodes = (node: Node): Node[] => blockTags.has(node.tagName ?? '')
+  ? [node]
+  : (node.childNodes ?? []).flatMap(headingAndContentNodes);
 /** Baseline v1.2 headings deliberately define stable ids; no third-party ids are invented. */
 export function parseBaselineControls(html: string): any {
   const catalog = newCatalog({ sourceId: 'baseline-controls-v1-2', title: 'Baseline cyber security controls for small and medium organizations v1.2', version: '1.2', retrievedAt: '2026-11-21T00:00:00Z' }) as any;

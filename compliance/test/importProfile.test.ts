@@ -105,6 +105,12 @@ test('puts non-empty source placeholders and notes into OSCAL alteration props',
   const profile = (await result()).catalog.profile;
   assert.deepEqual(profile.modify.alters.find((alter: any) => alter['control-id'] === 'xa-02').adds[0].props.map((prop: any) => prop.name), ['profile-suggestion', 'suggested-placeholder', 'profile-note']);
 });
+test('preserves spaces around inline acronyms and separates profile paragraphs', async () => {
+  const english = en.replace('</tbody>', row('XA', '04', 'Selected')
+    .replace('<td></td><td></td>', '<td></td><td><p>Protect <abbr>PBMM</abbr> against harm.</p><p>Check changes.</p></td>') + '</tbody>');
+  const { report } = await importSource({ offlinePages: { en: english } });
+  assert.equal(report.rows.at(-1)?.note, 'Protect PBMM against harm. Check changes.');
+});
 
 test('retains unselected source placeholders and notes only in the report', async () => {
   const english = en.replace('</tbody>', row('XA', '04', 'Not selected')
