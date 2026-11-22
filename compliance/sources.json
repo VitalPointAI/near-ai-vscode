@@ -31,7 +31,13 @@
       "pages": [
         {
           "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/suggested-organizational-security-privacy-control-activity-profile-medium-impact-itsp10033-01",
+          "lang": "en",
           "sha256": "d8b2f9f7ed114e141350a634c578a329e208007e987011c61afa3d91efb9af12"
+        },
+        {
+          "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/proposition-profil-dactivites-controles-organisationnels-securite-protection-vie-privee-incidence-moyenne-itsp10033-01",
+          "lang": "fr",
+          "sha256": "cf002149fc1dc4bf1f89092996762081a91b73c6710f9f6d7488091cff2c22ff"
         }
       ],
       "licence": "ca-ogl-lgo",
@@ -41,7 +47,7 @@
       },
       "use": "text",
       "retrievedAt": "2026-11-21T00:00:00Z",
-      "sha256": "6afb49ce6e66457d4da9610dd62e38cc19bfb8012e706f9004c6a359103cffe5"
+      "sha256": "2288906afbec4c74e9aa8e0d9d42ee1f2e51e2b0561de4b45101e3bb0185c804"
     },
     {
       "id": "itsp-10-171",

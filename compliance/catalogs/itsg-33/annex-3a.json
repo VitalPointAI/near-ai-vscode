@@ -899,7 +899,7 @@
       },
       {
         "id": "sc-101",
-        "title": "– UNCLASSIFIED TELECOMMUNICATIONS SYSTEMS IN SECURE FACILITIES"
+        "title": "UNCLASSIFIED TELECOMMUNICATIONS SYSTEMS IN SECURE FACILITIES"
       },
       {
         "id": "si-01",
@@ -983,6 +983,6 @@
       "title": "ITSG-33 Annex 3A",
       "version": "1.0"
     },
-    "uuid": "00000000-0000-4000-8000-000000000133"
+    "uuid": "13311c54-e7eb-53e3-9efc-b48793e24fa7"
   }
 }
