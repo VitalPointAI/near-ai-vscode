@@ -64,8 +64,8 @@ test('uses a separate ITAR and EAR group', async () => {
 test('emits OSCAL catalogue groups, controls and statement parts', async () => {
   const result = await importSource({ offlinePages: pages() });
   assert.deepEqual(validateOscal(result.catalog, 'catalog', { ours: true }), { ok: true, errors: [] });
-  const part = (result.catalog as any).catalog.groups[0].controls[0].parts[0];
-  assert.equal(part.name, 'statement');
+  const controls = (result.catalog as { catalog: { groups: Array<{ controls: Array<{ id: string; parts: Array<{ id: string; name: string }> }> }> } }).catalog.groups.flatMap((group) => group.controls);
+  assert.deepEqual(controls.flatMap((control) => control.parts.map(({ id, name }) => ({ id, name }))), controls.map(({ id }) => ({ id: `${id}_smt`, name: 'statement' })));
 });
 
 test('carries the catalogue output path', async () => assert.equal((await importSource({ offlinePages: pages() })).file, 'catalogs/itar/catalog.json'));

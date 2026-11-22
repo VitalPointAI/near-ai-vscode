@@ -93,7 +93,7 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     const selected = section(documents.get(url)!, sectionNumber);
     const prose = selected && paragraph(selected, marker);
     if (!prose) throw new Error(`missing required paragraph ${id}`);
-    groups.get(id.startsWith('ear-') ? 'ear' : 'itar')!.controls.push({ ...newControl({ id, title: id.toUpperCase(), label: id.toUpperCase() }), links: [{ href: url, rel: 'reference' }], parts: [statementPart([prose])] });
+    groups.get(id.startsWith('ear-') ? 'ear' : 'itar')!.controls.push({ ...newControl({ id, title: id.toUpperCase(), label: id.toUpperCase() }), links: [{ href: url, rel: 'reference' }], parts: [statementPart(id, [prose])] });
   }
   catalog.catalog.groups.push(groups.get('itar')!, groups.get('ear')!);
   return {

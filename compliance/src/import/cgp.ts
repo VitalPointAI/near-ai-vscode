@@ -126,7 +126,7 @@ export async function importSource(context: { readonly offlinePages?: Readonly<R
     const control = {
       ...newControl({ id: requirement.id, title: requirement.id.toUpperCase(), label: requirement.id.toUpperCase() }),
       links: [{ href: requirement.url, rel: 'reference' }],
-      parts: [statementPart([prose])]
+      parts: [statementPart(requirement.id, [prose])]
     };
     (requirement.instrument === 'defence-production-act' ? dpa : cgr).controls.push(control);
   }
