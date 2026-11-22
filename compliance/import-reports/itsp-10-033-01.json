@@ -905,18 +905,6643 @@
       "value": "Not selected",
       "placeholder": "NA",
       "note": "NA"
+    },
+    {
+      "control": "at-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-02.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-03.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-03.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "at-06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-02.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-02.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-02.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-02.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-03.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-03.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-04.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-05.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-05.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-05.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-05.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-05.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-06.10",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-07.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-07.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-08.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-08.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-09.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-10.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-10.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-10.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-10.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-10.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-11.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-12.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-12.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-12.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-12.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-13.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-13.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-13.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-14.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-14.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-14.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-15",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-16.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-16.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "au-16.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-02.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-02.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-02.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-03.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-05.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-06.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-07.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-08.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-08.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-08.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ca-09.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-02.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-03.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-04.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-04.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-05.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-06.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-06.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-06.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-07.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-08.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-09.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-10.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-11.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-11.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-11.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-12.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cm-14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-02.08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-04.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-04.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-04.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-04.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-06.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-06.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-07.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-08.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-08.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-08.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-08.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-08.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-09.08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-10.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "cp-13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.11",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-02.400",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-03.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-03.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-04.401",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.09",
+      "value": "Selected",
+      "placeholder": "[SSC]",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.11",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.13",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.14",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-05.18",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-08.400",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-09.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-09.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-12.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-12.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-12.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-12.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-12.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "This control is recommended for users external to the organization."
+    },
+    {
+      "control": "ia-12.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-13.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-13.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ia-13.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-02.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-02.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-02.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-03.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.08",
+      "value": "Selected",
+      "placeholder": "[SSC,TBS, Cyber Centre]",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-04.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-05.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-06.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-06.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-06.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-07.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-07.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-08.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+    },
+    {
+      "control": "ir-09.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ir-09.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+    },
+    {
+      "control": "ir-09.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+    },
+    {
+      "control": "ir-09.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "This control should be selected byGCdepartments and agencies that have systems categorized higher than Protected B."
+    },
+    {
+      "control": "ir-10",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-02.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-02.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-03.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-04.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-05.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-05.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-05.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-05.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-05.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-06.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-06.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ma-07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-02.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-02.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-04.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-05.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-05.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-05.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-05.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-06.08",
+      "value": "Selected",
+      "placeholder": "[lost, stolen, upon termination of employment]",
+      "note": "NA"
+    },
+    {
+      "control": "mp-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-07.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-07.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-08.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-08.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-08.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "mp-08.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-02.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-02.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-02.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-02.400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "According to theTBSPolicy on Government Security andRCMPGCPSG-006 Access Management Guide, access to sensitive information and areas must be limited. A physical Operations Zone is the minimum required where sensitiveGCinformation is processed or stored. A TRA must be performed to ensure the appropriate level of physical security to protect Protected B information and information systems processing and storingPBdata. This zone is an area where access is limited to personnel who work there and to properly-escorted visitors by an employee with a valid reliability status; it must be indicated by a recognizable perimeter and monitored periodically."
+    },
+    {
+      "control": "pe-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-03.400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific."
+    },
+    {
+      "control": "pe-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-05.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-05.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-05.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-06.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-06.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-06.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-08.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-08.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-08.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-09.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-09.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-10.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-11.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-11.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-12.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-13",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-13.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-13.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-13.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-13.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-13.400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific"
+    },
+    {
+      "control": "pe-14",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-14.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-14.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-15",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-15.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-16",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-17",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-18",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-18.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-19.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-22",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pe-400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific."
+    },
+    {
+      "control": "pe-400.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific."
+    },
+    {
+      "control": "pe-400.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "GCspecific."
+    },
+    {
+      "control": "pe-401",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-02.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-02.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-02.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-04.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-08.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-08.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pl-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-01",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-02",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-03",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-04",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-05",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-05.01",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-06",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-07",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-07.01",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-08",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-09",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-10",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-11",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-12",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-13",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-14",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-15",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-16",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-16.01",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-17",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-18",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-19",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-20",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-20.01",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-21",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-22",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-23",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-24",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-25",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-26",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-27",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-28",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-29",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-30",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-30.01",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-31",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pm-32",
+      "value": "Deployed organization-wide. Not associated with baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-03.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-04.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-04.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-05.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-06.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-06.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ps-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-02.01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-02.02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-03",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-03.01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-03.02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-04",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-04.01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-04.02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-04.03",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-04.400",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-05",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-05.01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-05.02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-06",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-06.01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-06.02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-07",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-07.01",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-07.02",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-07.400",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "pt-08",
+      "value": "Not allocated to baseline.",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-01.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-02.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-03.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-03.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-05.11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "ra-10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-04.12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-05.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-05.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-05.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-05.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-05.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.18",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.22",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.24",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.25",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.26",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.27",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.28",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.29",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.30",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.31",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.32",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.33",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-08.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-09.08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-10.07",
+      "value": "Selected",
+      "placeholder": "1 [SSC,TBSand Cyber Centre]2 [SSCprojects and services serving multiple departments]",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-11.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.08",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.10",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.11",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.12",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.13",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.14",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-12.15",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-13",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-14",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-14.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-15.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-16",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-17.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-18",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-18.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-18.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-19",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-19.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-19.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-19.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-19.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-21.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-22",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-22.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sa-400.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-02.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-02.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-03.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-03.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-04.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-05.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-05.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-05.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.09",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.13",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.18",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.22",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.24",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.25",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.26",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.27",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.28",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-07.29",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-08.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-08.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-08.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-08.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-08.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-11",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-11.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-12.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.400",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.401",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.402",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.403",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-13.404",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-14",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-15",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-15.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-15.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-15.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-15.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-16.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-16.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-16.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-17",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-18",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-18.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-18.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-18.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-18.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-18.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-19.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-19.401",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-20",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-20.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-20.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-21",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-21.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-22",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-23",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-23.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-23.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-23.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-23.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-23.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-24",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-25",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-26",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-26.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-27",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-28",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-28.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-28.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-28.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-29",
+      "value": "Selected",
+      "placeholder": "[cyber security devices and tools]",
+      "note": "In order to protectPBMMagainst Td4 compromise using a single unknown system flaw (a 0-Day), disaggregate the business functions between systems that do not share a single-point-of-failure. For example, host one line-of-business database in Windows, and a different line-of-business database in Linux."
+    },
+    {
+      "control": "sc-29.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-30",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-30.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-30.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-30.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-30.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-30.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-31",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-31.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-31.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-31.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-32",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-32.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-33",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-34",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-34.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-34.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-34.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-35",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-36",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-36.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-36.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-37",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-37.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-38",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-39",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-39.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-39.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-40",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-40.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-40.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-40.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-40.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-41",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-42.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-43",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-44",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-45",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-45.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-45.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-46",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-46.400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-47",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-48",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-48.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-49",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-50",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-51",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-400",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-400.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-400.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-400.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sc-401",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-02.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03",
+      "value": "Selected",
+      "placeholder": "C. 1) frequency [at least every 30 days]C. 2) selection [quarantine malicious code]",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.03",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.05",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.07",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-03.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.04",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.06",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.08",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.13",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.14",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.15",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.18",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.22",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.24",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-04.25",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-05.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-06.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-06.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-06.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.01",
+      "value": "Selected",
+      "placeholder": "[4] [frequency at no longer than 30 days]",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.04",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.07",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.10",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.11",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.12",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.13",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.14",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.16",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-07.17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-08.01",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-08.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-08.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-09",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-10.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-12.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-12.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-12.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-13",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-13.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-13.02",
+      "value": "NA",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-13.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-13.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-13.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-14",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-14.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-14.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-14.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-15",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-16",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-17",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-18",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-18.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-18.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-18.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-18.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-18.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-19.08",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-20",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-21",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-22",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-23",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400.05",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "si-400.06",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-02.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-03",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-03.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-03.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-03.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-04.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-04.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-04.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-04.04",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-05",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-05.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-05.02",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-06",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-06.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-07",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-08",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-09",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-09.01",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-10",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-11",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-11.01",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-11.02",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-11.03",
+      "value": "Not selected",
+      "placeholder": "NA",
+      "note": "NA"
+    },
+    {
+      "control": "sr-12",
+      "value": "Selected",
+      "placeholder": "NA",
+      "note": "NA"
     }
   ],
   "counts": {
-    "Selected": 52,
-    "Not selected": 83,
-    "NA": 16
+    "Selected": 380,
+    "Not selected": 617,
+    "NA": 188,
+    "Deployed organization-wide. Not associated with baseline.": 37,
+    "Not allocated to baseline.": 23
   },
-  "differences": [],
-  "frenchFailures": [
+  "differences": [
     {
-      "page": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/proposition-profil-dactivites-controles-organisationnels-securite-protection-vie-privee-incidence-moyenne-itsp10033-01",
-      "reason": "ITSP.10.033-01 table is missing Valeurs de remplacement suggérées column"
+      "control": "ac-02.10",
+      "en": "Selected",
+      "fr": "Not selected"
+    },
+    {
+      "control": "ac-04.19",
+      "en": "Not selected",
+      "fr": "NA"
+    },
+    {
+      "control": "ia-02.12",
+      "en": "Not selected",
+      "fr": "Selected"
+    },
+    {
+      "control": "ps-05",
+      "en": "Not selected",
+      "fr": "Selected"
+    },
+    {
+      "control": "ps-06",
+      "en": "Selected",
+      "fr": "Not selected"
+    },
+    {
+      "control": "sc-05.03",
+      "en": "Not selected",
+      "fr": "Selected"
+    },
+    {
+      "control": "sc-07.03",
+      "en": "Selected",
+      "fr": "Not selected"
+    },
+    {
+      "control": "sc-07.06",
+      "en": "Not selected",
+      "fr": "NA"
+    },
+    {
+      "control": "sc-21",
+      "en": "Selected",
+      "fr": "Not selected"
+    },
+    {
+      "control": "si-02.06",
+      "en": "Not selected",
+      "fr": "Selected"
+    },
+    {
+      "control": "si-07",
+      "en": "Selected",
+      "fr": "Not selected"
+    }
+  ],
+  "frenchFailures": [],
+  "sourceCorrections": [
+    {
+      "table": 5,
+      "publishedControl": "cm-11.02",
+      "control": "cm-11.03",
+      "verifiedAgainst": "https://www.cyber.gc.ca/sites/default/files/itsp.10.033-01-e.pdf"
     }
   ]
 }

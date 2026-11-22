@@ -8,6 +8,12 @@ import { validateOscal } from '../src/validate.ts';
 const en = readFileSync(new URL('./fixtures/import/itsp1003301/profile-en.html', import.meta.url), 'utf8');
 const fr = readFileSync(new URL('./fixtures/import/itsp1003301/profile-fr.html', import.meta.url), 'utf8');
 const result = () => importSource({ offlinePages: { en, fr } });
+const anotherTable = (page: string, number: number, rows: string) => page
+  .match(/<table>[\s\S]*<\/table>/)![0]
+  .replace('4.1', `4.${number}`)
+  .replace(/<tbody>[\s\S]*<\/tbody>/, `<tbody>${rows}</tbody>`);
+const row = (family: string, id: string, selection: string, description = 'Fixture description') =>
+  `<tr><td>${family}</td><td>${id}</td><td>x</td><td>${description}</td><td>x</td><td>${selection}</td><td></td><td></td></tr>`;
 
 test('includes Selected rows in the Medium profile', async () => {
   const profile = (await result()).catalog.profile;
@@ -53,6 +59,46 @@ test('maps French selection labels before recording a disagreement', async () =>
   const differences = (await result()).report.differences;
   assert.equal(differences[0]?.fr, 'Not selected');
   assert.equal(differences.every((difference) => !difference.fr.includes('sélectionné')), true);
+});
+
+test('compares the public French headings and selection labels without changing the English profile', async () => {
+  const publishedFrench = fr
+    .replace('Valeurs de remplacement suggérées', 'Valeurs suggérées de paramètres substituables')
+    .replace('Notes propres au profil', 'Remarques concernant le profil')
+    .replace('>ND<', '>s.o.<')
+    .replace('</tbody>', '<tr><td>XA</td><td>04</td><td>x</td><td>x</td><td>x</td><td>Non attribué à la base de référence.</td><td></td><td></td></tr></tbody>');
+  const english = en.replace('</tbody>', '<tr><td>XA</td><td>04</td><td>x</td><td>x</td><td>x</td><td>Not allocated to baseline.</td><td></td><td></td></tr></tbody>');
+  const compared = await importSource({ offlinePages: { en: english, fr: publishedFrench } });
+  assert.deepEqual(compared.report.frenchFailures, []);
+  assert.deepEqual(compared.report.differences, (await result()).report.differences);
+  assert.deepEqual(compared.catalog, (await importSource({ offlinePages: { en: english } })).catalog);
+});
+
+test('imports later tables and compares the same controls in French', async () => {
+  const english = en.replace('</main>', anotherTable(en, 2, row('XB', '02', 'Selected')) + '</main>');
+  const french = fr.replace('</main>', anotherTable(fr, 2, row('XB', '02', 'Non sélectionné')) + '</main>');
+  const { catalog, report } = await importSource({ offlinePages: { en: english, fr: french } });
+  assert.deepEqual(catalog.profile.imports[0]['include-controls'][0]['with-ids'], ['xa-01', 'xa-02', 'xb-02']);
+  assert.deepEqual(report.differences.at(-1), { control: 'xb-02', en: 'Selected', fr: 'Not selected' });
+});
+
+test('records the English PDF correction without treating the duplicate as a second selection', async () => {
+  const intervening = [2, 3, 4].map((number) => anotherTable(en, number, row('XB', `0${number}`, 'NA'))).join('');
+  const rows = row('CM', '11(02)', 'Selected') + row('CM', '11(02)', 'Not selected', 'User-installed software: Automated enforcement and monitoring');
+  const english = en.replace('</main>', intervening + anotherTable(en, 5, rows) + '</main>');
+  const { catalog, report } = await importSource({ offlinePages: { en: english } });
+  assert.deepEqual(report.rows.slice(-2).map(({ control, value }) => [control, value]), [['cm-11.02', 'Selected'], ['cm-11.03', 'Not selected']]);
+  assert.deepEqual(catalog.profile.imports[0]['include-controls'][0]['with-ids'], ['xa-01', 'xa-02', 'cm-11.02']);
+  assert.deepEqual(report.sourceCorrections, [{ table: 5, publishedControl: 'cm-11.02', control: 'cm-11.03', verifiedAgainst: 'https://www.cyber.gc.ca/sites/default/files/itsp.10.033-01-e.pdf' }]);
+  await assert.rejects(importSource({ offlinePages: { en: english.replace('User-installed software: Automated enforcement and monitoring', 'Unrecognized duplicate') } }), /duplicates control cm-11.02/);
+});
+
+test('reports an incomplete French comparison while retaining the authoritative English output', async () => {
+  const english = en.replace('</main>', anotherTable(en, 2, row('XB', '02', 'Selected')) + '</main>');
+  const { catalog, report } = await importSource({ offlinePages: { en: english, fr } });
+  assert.deepEqual(catalog.profile.imports[0]['include-controls'][0]['with-ids'], ['xa-01', 'xa-02', 'xb-02']);
+  assert.match(report.frenchFailures[0]?.reason ?? '', /French profile lacks xb-02/);
+  assert.deepEqual(report.differences, []);
 });
 
 test('puts non-empty source placeholders and notes into OSCAL alteration props', async () => {
