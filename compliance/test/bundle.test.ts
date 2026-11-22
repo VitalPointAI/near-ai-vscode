@@ -97,6 +97,13 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   const official = JSON.parse(readFileSync(path.join(out, 'dashboard', row.textFile), 'utf8'));
   assert.match(official.attribution.url, /cyber\.gc\.ca/);
   assert.ok(official.controls.find(({ id }: { id: string }) => id === 'ac-03').parts.some(({ lang }: { lang: string }) => lang === 'fr'));
+  const classifiedText = dashboard.textIndex.filter(({ catalog }: { catalog: string }) => catalog === 'itsg-33');
+  assert.ok(classifiedText.length > 0);
+  for (const { file } of classifiedText) {
+    const reference = JSON.parse(readFileSync(path.join(out, 'dashboard', file), 'utf8'));
+    assert.match(reference.attribution.url, /annex-3a-security-control-catalogue-itsg-33/);
+    assert.ok(reference.controls.every(({ parts }: { parts: unknown[] }) => parts.length === 0));
+  }
   const cgpRows = dashboard.rows.filter(({ level }: { level: string }) => level === 'overlay-cgp');
   assert.ok(cgpRows.some(({ textFile }: { textFile?: string }) => textFile === 'text/defence-production-act/cgp.json'));
   assert.ok(cgpRows.some(({ textFile }: { textFile?: string }) => textFile === 'text/controlled-goods-regulations/cgp.json'));

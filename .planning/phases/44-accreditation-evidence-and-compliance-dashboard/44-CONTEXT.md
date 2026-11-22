@@ -73,6 +73,9 @@ Not in this phase: an in-extension organization view (after Phase 41, on `author
 - **D-32:** Pages follow the site's light, dark and high-contrast themes and keyboard use; filters by family, state, component and responsibility; each control opens to official text, our statement, responsibility, evidence (what, when, commit, CI run link), and for a gap remediation, owner (a role) and the phase or POA&M item.
 
 ### CI, release and the gaps it closes (ACCR-09, ACCR-10, ACCR-12)
+
+On 2026-11-22 the owner approved including the official ITSG-33 Annex 3A statements in the assessor package so the Classified reference can pass full OSCAL validation. The docs dashboard continues to list IDs and titles and link to the publication.
+
 - **D-33:** All workflow changes land in one plan and one PR section, because `.github/workflows/*` are gate files the owner approves: a `compliance` job in `ci.yml` (PR summary, merge bundle), a `compliance-scheduled.yml` workflow (daily freshness, audits, settings; weekly source hashes and `oscal-cli`), the package and attestations in `release.yml`, the relay image SBOM and scan in the `relay` job, and static analysis.
 - **D-34:** Static analysis (G6) is CodeQL for JavaScript and TypeScript in its own workflow with actions pinned by SHA (GitHub-native, free for a public repository); results are evidence. The relay image SBOM and scan (G5) use pinned, checksummed tools the research step picks, failing on high or critical.
 - **D-35:** Attestations (G4) use GitHub artifact attestations in `release.yml` for the VSIX and the package (and the relay image once it is published), with the narrowest job-level permissions; `compliance:refresh` verifies them with `gh attestation verify`.
