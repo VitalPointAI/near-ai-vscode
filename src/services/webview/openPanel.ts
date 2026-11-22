@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from '../layoutProbe';
+import { BRANDED_TITLE } from './protocol';
 
 // The start of the webview kit (DEVELOPER-STRUCTURE section 2); new pages use it, existing pages move later.
 // Copied from mcpView.ts: one content security policy that loads nothing by default, styles only from the extension, and scripts only with a fresh
@@ -16,6 +17,8 @@ export interface PanelSpec {
   readonly folder: string;
   /** The page script's file name in that folder. */
   readonly script: string;
+  /** Extra script file names in the page folder, loaded after script in order with the same nonce. */
+  readonly scripts?: readonly string[];
   /** The page stylesheet's file name in that folder. */
   readonly style: string;
   /** Static HTML the host writes into the body; never built from data. */
@@ -27,7 +30,7 @@ export interface PanelSpec {
 }
 
 /** A tab title with a brand prefix ("NEAR AI:", "Near AI:"): the title says what the page is, never whose it is. */
-export const BRANDED_TITLE = /^(NEAR AI|Near AI)\s*:/i;
+export { BRANDED_TITLE };
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -36,6 +39,10 @@ function escapeHtml(text: string): string {
 /** Opens one webview page. Throws for a branded title, a programming error, before any panel is made. */
 export function openPanel(context: { readonly extensionUri: vscode.Uri }, spec: PanelSpec): vscode.WebviewPanel {
   if (BRANDED_TITLE.test(spec.title)) throw new Error(`The panel title "${spec.title}" has a brand prefix; say what the page is.`);
+  const scripts = spec.scripts ?? [];
+  if (scripts.some(name => !/^[a-z0-9][a-z0-9.-]{0,63}\.js$/i.test(name))) {
+    throw new Error('Extra panel scripts must be JavaScript file names in the page folder.');
+  }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', spec.folder);
   const shared = sharedMedia(context.extensionUri);
   const view = vscode.window.createWebviewPanel(spec.viewType, spec.title, vscode.ViewColumn.Active, {
@@ -49,7 +56,7 @@ export function openPanel(context: { readonly extensionUri: vscode.Uri }, spec: 
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${base}"><link rel="stylesheet" href="${asset(spec.style)}"><title>${escapeHtml(spec.title)}</title></head><body>
 ${spec.body}
-${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="${nonce}" src="${asset(spec.script)}"></script></body></html>`;
+${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="${nonce}" src="${asset(spec.script)}"></script>${scripts.map(name => `<script nonce="${nonce}" src="${asset(name)}"></script>`).join('')}</body></html>`;
   registerLayoutProbe(spec.probe, view.webview);
   return view;
 }

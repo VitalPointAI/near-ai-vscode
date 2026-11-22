@@ -52,3 +52,9 @@ body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscod
   table.stack-medium > tbody > tr > td, table.stack-medium > tbody > tr > th { min-width: 0; max-width: none; padding: 2px 8px; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
   table.stack-medium > tbody > tr > [data-label]:not([data-label=""])::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.85em; }
 }
+
+/* Leave space for a sticky footer when scrolling a focused control into view (WCAG 2.2 2.4.11). */
+html { --near-focus-ring: var(--vscode-focusBorder); scroll-padding-bottom: 4rem; }
+
+/* Keep keyboard focus visible in the active VS Code theme. */
+:focus-visible { outline: 2px solid var(--near-focus-ring); outline-offset: 2px; }
