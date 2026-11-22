@@ -22,7 +22,7 @@ env:
 jobs:
   daily-evidence:
     name: daily evidence
-    if: github.event_name == 'schedule' && github.event.schedule == '23 3 * * *' || contains(fromJSON('["daily","all"]'), inputs.job)
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' && github.event.schedule == '23 3 * * *' || contains(fromJSON('["daily","all"]'), inputs.job))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: compliance-settings
@@ -45,6 +45,7 @@ jobs:
           cache: npm
           cache-dependency-path: compliance/package-lock.json
       - run: npm --prefix compliance ci --ignore-scripts
+      - run: mkdir -p compliance/out
       - name: Record root audit
         continue-on-error: true
         run: npm audit --json > compliance/out/audit-root.json
@@ -98,9 +99,11 @@ jobs:
           if [ -f compliance/out/previous/manifest.json ]; then previous="--previous compliance/out/previous"; fi
           node compliance/src/cli.ts bundle --inputs compliance/out/inputs.json --out compliance/out/bundle $previous
       - name: Secret-scan the completed evidence bundle
+        id: bundle_scan
         continue-on-error: true
         run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.bundle_scan.outcome == 'success'
         with:
           name: compliance-bundle
           path: compliance/out/bundle

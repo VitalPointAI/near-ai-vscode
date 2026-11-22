@@ -50,3 +50,12 @@ test('runBundle writes the evidence layout even when no collector was selected',
   for (const file of ['observations.json', 'test-rows.json', 'collectors.json', 'dashboard/dashboard.json', 'manifest.json']) assert.ok(readFileSync(path.join(dir, file), 'utf8').length > 0, file);
   assert.equal(verifyManifest(dir).ok, true);
 });
+
+test('runBundle refuses to publish a dashboard with unsupported compliance claims', async () => {
+  const dir = folder();
+  await assert.rejects(runBundle({
+    repository: 'owner/repo', commit, kind: 'main', repoRoot: process.cwd(), collectors: {},
+    dashboard: { levels: [{ id: 'fixture', title: 'ITAR certified', controls: [], components: [] }] },
+  }, dir), /dashboard copy lint failed/);
+  assert.equal(verifyManifest(dir).ok, false);
+});

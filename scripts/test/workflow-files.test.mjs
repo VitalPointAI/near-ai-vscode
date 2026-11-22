@@ -167,7 +167,10 @@ test('compliance is a report-only aggregate job with safe evidence handling', ()
   assert.match(job, /if:\s*always\(\)/);
   assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
   assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
-  assert.match(job, /secret-scan\.mjs --dir/);
+  const scan = steps(job).find((step) => /secret-scan\.mjs --dir/.test(step));
+  const upload = steps(job).find((step) => /name: compliance-bundle/.test(step));
+  assert.match(scan, /id: bundle_scan/);
+  assert.match(upload, /if: steps\.bundle_scan\.outcome == 'success'/);
   assert.match(job, /FAIL_ON_DROP:/);
   assert.match(job, /npm audit[\s\S]*continue-on-error: true|continue-on-error: true[\s\S]*npm audit/);
 });
@@ -178,7 +181,10 @@ test('root, relay and hub test reports are always uploaded without changing requ
     const job = all.get(id);
     assert.match(job, /NEAR_AI_TEST_REPORT/);
     assert.match(job, /actions\/upload-artifact@[0-9a-f]{40}/);
-    assert.match(job, /if:\s*always\(\)/);
+    const upload = steps(job).find((step) => step.includes(`name: test-report-${id === 'test' ? 'root' : id}`));
+    assert.ok(upload, `report upload exists for ${id}`);
+    const guard = id === 'test' ? '' : `steps.has_${id}.outputs.present == 'true' && `;
+    assert.ok(upload.includes(`if: ${guard}always()`));
     assert.match(job, /continue-on-error:\s*true/);
   }
   const { CI_CHECKS } = await import('../lib/workflow.mjs');
@@ -193,11 +199,16 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   }
   assert.doesNotMatch(block(scheduled, 'on'), /pull_request/);
   const daily = jobs(scheduled).get('daily-evidence');
+  assert.match(daily, /if: github\.ref == 'refs\/heads\/main' && \(/);
+  assert.match(daily, /mkdir -p compliance\/out\n[\s\S]*> compliance\/out\/audit-root\.json/);
   assert.match(daily, /environment:\s*compliance-settings/);
   assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
   const scheduledBundleScan = steps(daily).find((step) => /secret-scan\.mjs --dir/.test(step));
   assert.ok(scheduledBundleScan, 'daily evidence secret-scans the completed bundle');
   assert.match(scheduledBundleScan, /continue-on-error:\s*true/, 'a secret finding is reported without failing daily evidence collection');
+  assert.match(scheduledBundleScan, /id: bundle_scan/);
+  const upload = steps(daily).find((step) => /name: compliance-bundle/.test(step));
+  assert.match(upload, /if: steps\.bundle_scan\.outcome == 'success'/);
   assert.match(jobs(codeql).get('codeql'), /contents:\s*read[\s\S]*security-events:\s*write/);
   assert.match(codeql, /languages:\s*javascript-typescript/);
   assert.match(codeql, /build-mode:\s*none/);

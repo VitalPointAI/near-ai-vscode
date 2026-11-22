@@ -14,4 +14,19 @@ test('fetcher follows a same-host redirect only', async () => { let count = 0; c
 test('fetcher follows the Cyber Centre bare-host canonical redirect', async () => { let count = 0; const fetcher = createFetcher({ fetchImpl: async (url) => ++count === 1 ? response(url, 302, { location: 'https://www.cyber.gc.ca/next' }) : response(url), sleep: async () => {} }); const got = await fetcher.get('https://cyber.gc.ca/start'); assert.equal(got.url, 'https://www.cyber.gc.ca/next'); });
 test('fetcher refuses an off-host redirect', async () => { const fetcher = createFetcher({ fetchImpl: async (url) => response(url, 302, { location: 'https://example.invalid/x' }) }); await assert.rejects(fetcher.get('https://www.cyber.gc.ca/start'), /redirect/); });
 test('fetcher caps response bytes', async () => { const fetcher = createFetcher({ fetchImpl: async (url) => response(url, 200, {}, 'abcd') }); await assert.rejects(fetcher.get('https://www.cyber.gc.ca/x', { maxBytes: 3 }), /byte/); });
+test('fetcher aborts an undeclared oversized response while streaming', async () => {
+  let requestSignal: AbortSignal | null | undefined;
+  const fetcher = createFetcher({ fetchImpl: async (_url, init) => {
+    requestSignal = init.signal;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2));
+        controller.enqueue(new Uint8Array(2));
+      },
+    });
+    return new Response(body);
+  } });
+  await assert.rejects(fetcher.get('https://www.cyber.gc.ca/x', { maxBytes: 3 }), /byte cap/);
+  assert.equal(requestSignal?.aborted, true);
+});
 test('fetcher spaces requests to one host and sends an honest user agent', async () => { let now = 0; const waits: number[] = []; const headers: string[] = []; const fetcher = createFetcher({ now: () => now, sleep: async (ms) => { waits.push(ms); now += ms; }, fetchImpl: async (url, init) => { headers.push(String((init.headers as Record<string, string>)['user-agent'])); return response(url); } }); await fetcher.get('https://www.cyber.gc.ca/one'); await fetcher.get('https://www.cyber.gc.ca/two'); assert.ok(waits.some((wait) => wait >= 400)); assert.match(headers[0], /NEAR AI compliance importer/i); });

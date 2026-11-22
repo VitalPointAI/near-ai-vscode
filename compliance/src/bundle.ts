@@ -18,6 +18,7 @@ import type { Observation, TestReportRow } from './model.ts';
 import { writeManifest } from './manifest.ts';
 import { verifyManifest } from './manifest.ts';
 import { assertNoSecrets, redactObservation, redactTestRow } from './redact.ts';
+import { lintDashboard } from './wordLint.ts';
 
 /** Stable order is part of the public bundle contract. */
 export const COLLECTORS: readonly Collector[] = Object.freeze([
@@ -82,6 +83,10 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
   const dashboard = buildDashboard(dashboardInput);
   // These fields are presentation data, never source inputs. Their values stay schema-safe.
   const enriched = { ...dashboard, collectors: collectorRows.map((row) => ({ id: row.id, window: COLLECTORS.find((item) => item.id === row.id)!.window, ...(row.lastCollectedAt ? { lastCollectedAt: row.lastCollectedAt } : {}), ...(row.ran ? { passed: row.ok } : {}) })) };
+  const copyFindings = lintDashboard(enriched);
+  if (copyFindings.length) {
+    throw new Error(`dashboard copy lint failed: ${copyFindings.map(({ path, rule }) => `${path}: ${rule}`).join('; ')}`);
+  }
   writeFileSync(path.join(output, 'observations.json'), stable({ schemaVersion: 1, commit: inputs.commit, generatedAt: now.toISOString(), kind: inputs.kind, observations, carried: carried.sort() }));
   writeFileSync(path.join(output, 'test-rows.json'), stable(testRows.map(redactTestRow)));
   writeFileSync(path.join(output, 'collectors.json'), stable(collectorRows));

@@ -263,7 +263,7 @@ jobs:
           NEAR_AI_TEST_REPORT: test-report-relay.ndjson
         run: npm test
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: steps.has_relay.outputs.present == 'true' && always()
         continue-on-error: true
         with:
           name: test-report-relay
@@ -345,7 +345,7 @@ jobs:
           NEAR_AI_TEST_REPORT: test-report-hub.ndjson
         run: npm test
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: steps.has_hub.outputs.present == 'true' && always()
         continue-on-error: true
         with:
           name: test-report-hub
@@ -513,11 +513,12 @@ jobs:
             echo 'No earlier main evidence bundle was available for comparison.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Secret-scan the completed evidence bundle
+        id: bundle_scan
         if: steps.has_compliance.outputs.present == 'true' && github.event_name == 'push'
         continue-on-error: true
         run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: steps.has_compliance.outputs.present == 'true' && github.event_name == 'push'
+        if: steps.bundle_scan.outcome == 'success'
         with:
           name: compliance-bundle
           path: compliance/out/bundle
