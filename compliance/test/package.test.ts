@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPackage as buildPackageFromSource, type PackageOptions } from '../src/package.ts';
 import { validateOscal } from '../src/validate.ts';
+import { options } from '../src/commands/package.ts';
 
 const fixture = fileURLToPath(new URL('./fixtures/package/bundle', import.meta.url));
 const sourceRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -68,4 +69,8 @@ test('package retains the redacted evidence bundle', () => {
 
 test('package rejects an unsafe release tag', () => {
   assert.throws(() => buildPackage({ release: '../unsafe', bundle: fixture, out: output() }), /invalid release tag/);
+});
+
+test('package command keeps every repeated SBOM argument', () => {
+  assert.deepEqual(options(['--sbom', 'relay.json', '--sbom', 'hub.json'], '--sbom'), ['relay.json', 'hub.json']);
 });
