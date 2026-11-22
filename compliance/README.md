@@ -47,3 +47,28 @@ Add a statement only for behavior the product has today. State what the code doe
 Every statement needs an evidence rule. A test rule names the source test file and its exact literal test name, never a comment or a broad file-level result. Renaming or removing that literal name makes the PR summary show the evidence loss. Collector rules name only their documented collector and subject.
 
 Component and rule source files never carry a state. The generated dashboard computes states from current evidence, responsibility, tailoring, and the unsettled or official-decision boundaries.
+
+## CI jobs
+
+The `test`, `relay`, and `hub` jobs write per-test reports. The `compliance` job validates the compliance package, rebuilds those reports into a redacted evidence bundle, and shows control-state changes in the pull-request job summary. On `main` it secret-scans and stores the bundle for 30 days. `relay-image-scan` separately records the relay image SBOM and known fixed vulnerabilities. These reporting jobs do not turn a finding into a failed required check; a tool that cannot run still fails its step.
+
+The pull-request summary is report-only by default. After the owner has seen stable results and made `compliance` a required check, set its `FAIL_ON_DROP` environment value to `--fail-on-drop` and remove any masking behavior from that summary step to make an unexplained evidence drop blocking.
+
+## Release package
+
+Every version release attaches `compliance-package-<version>.tar.gz` and its checksum beside the VSIX. The release workflow validates the package's OSCAL documents, imports its assessor documents into a throwaway Compliance Trestle workspace, and creates GitHub artifact attestations for both the VSIX and the package. Verify the checksum with `sha256sum --check <package>.sha256`; after upgrading GitHub CLI, verify provenance with `gh attestation verify <file> --repo VitalPointAI/near-ai-vscode`.
+
+## Owner steps
+
+These settings and outside contacts cannot be changed by this code. They may be completed later; the Evidence and Gaps pages continue to show what remains open.
+
+1. Approve the integration pull request's `agent-review-gates` gate after reading the workflow diff.
+2. Make `docs` a required check on `main` while merging a pull request that adds `docs` to `CI_CHECKS`; later do the same for `compliance`, and enable the fail-on-drop switch only after it has been stable.
+3. Create the fine-grained read-only `COMPLIANCE_SETTINGS_TOKEN` and the `compliance-settings` environment, limited to `main` with no reviewers.
+4. Upgrade `gh` on the documentation host to a version with `gh attestation`, then install the refresh timer with `npm --prefix docs-site run refresh-timer:install`.
+5. Do not enable “Require review from Code Owners”; CODEOWNERS provides routing, while the existing gate provides enforcement.
+6. Ask the Cyber Centre for a machine-readable ITSP.10.033 edition and about the recorded English/French profile differences.
+7. Confirm or change the recorded supported versions, response times, POA&M target date `2027-05-31`, risk-acceptance purpose `compliance-risk-acceptance`, empty signer list, and the context's remaining owner confirmations.
+8. GitHub disables scheduled workflows after 60 days without repository activity; re-enable them when the Evidence page shows a silent collector.
+
+The Controlled Goods and ITAR pages describe your organization's obligations; they are not legal advice. CODEOWNERS currently routes these files to `@ALuhning`, the authenticated human administrator found by the read-only repository check; the owner should confirm that routing at the checkpoint.

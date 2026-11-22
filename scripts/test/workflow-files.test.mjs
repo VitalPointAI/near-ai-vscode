@@ -189,14 +189,14 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   const scheduled = read('compliance-scheduled.yml');
   const codeql = read('codeql.yml');
   for (const text of [read('ci.yml'), scheduled, codeql, read('release.yml')]) {
-    for (const match of text.matchAll(/uses:\s*([^\s#]+)/g)) assert.match(match[1], /@[0-9a-f]{40}$/);
+    for (const match of text.matchAll(/^\s*-\s+uses:\s*([^\s#]+)/gm)) assert.match(match[1], /@[0-9a-f]{40}$/);
   }
   assert.doesNotMatch(block(scheduled, 'on'), /pull_request/);
   const daily = jobs(scheduled).get('daily-evidence');
   assert.match(daily, /environment:\s*compliance-settings/);
   assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
   assert.match(jobs(codeql).get('codeql'), /contents:\s*read[\s\S]*security-events:\s*write/);
-  assert.match(codeql, /language:\s*javascript-typescript/);
+  assert.match(codeql, /languages:\s*javascript-typescript/);
   assert.match(codeql, /build-mode:\s*none/);
   const { CI_CHECKS } = await import('../lib/workflow.mjs');
   for (const id of jobs(scheduled).keys()) assert.ok(!CI_CHECKS.includes(id));
@@ -235,5 +235,14 @@ test('CODEOWNERS routes all compliance gate paths to one owner', () => {
   const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
   for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/']) {
     assert.match(text, new RegExp(`^${path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s+@ALuhning\\s*$`, 'm'));
+  }
+});
+
+test('new workflow shell scripts receive GitHub values only through env', () => {
+  for (const name of ['ci.yml', 'compliance-scheduled.yml', 'codeql.yml', 'release.yml']) {
+    for (const [id, job] of jobs(read(name))) for (const step of steps(job)) {
+      const run = /\n\s+run: ?\|?([\s\S]*)$/.exec(step)?.[1] ?? '';
+      assert.doesNotMatch(run, /\$\{\{/, `${name} ${id}: no GitHub expression inside a run script`);
+    }
   }
 });

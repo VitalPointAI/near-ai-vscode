@@ -13,6 +13,7 @@ const COMMANDS = Object.freeze([
   'word-lint',
   'package',
   'pr-summary',
+  'resolve-check',
 ] as const);
 const commandName = /^[a-z][a-z0-9-]*$/;
 

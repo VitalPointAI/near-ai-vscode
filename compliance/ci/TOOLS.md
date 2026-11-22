@@ -70,6 +70,10 @@ Trestle is not installed locally in this plan. Its `trestle init`, `trestle
 import -f <file> -o <name>`, and `trestle validate -a` flags are confirmed from
 its own help during the first isolated CI run in 44-19.
 
+The release workflow uses a throwaway Trestle workspace and records import and validation output in the job summary. Model findings are report-only, while installation failures still stop the job.
+
+GitHub disables scheduled workflows after 60 days without repository activity. Re-enable the compliance schedule when the Evidence page shows a collector has gone silent.
+
 ## Updating a pin
 
 Download into a fresh temporary directory. Compare the downloaded SHA-256 with

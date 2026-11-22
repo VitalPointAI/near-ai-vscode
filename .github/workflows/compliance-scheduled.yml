@@ -1,0 +1,163 @@
+name: Compliance evidence
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Evidence job to run
+        required: true
+        default: daily
+        type: choice
+        options: [daily, sources, oscal, all]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  daily-evidence:
+    name: daily evidence
+    if: github.event_name == 'schedule' && github.event.schedule == '23 3 * * *' || contains(fromJSON('["daily","all"]'), inputs.job)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: compliance-settings
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: read
+      security-events: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: compliance/package-lock.json
+      - run: npm --prefix compliance ci --ignore-scripts
+      - name: Record root audit
+        continue-on-error: true
+        run: npm audit --json > compliance/out/audit-root.json
+      - name: Record relay audit
+        continue-on-error: true
+        run: npm --prefix relay audit --json > compliance/out/audit-relay.json
+      - name: Record hub audit
+        continue-on-error: true
+        run: npm --prefix hub audit --json > compliance/out/audit-hub.json
+      - name: Record docs audit
+        continue-on-error: true
+        run: npm --prefix docs-site audit --json > compliance/out/audit-docs.json
+      - name: Record compliance audit
+        continue-on-error: true
+        run: npm --prefix compliance audit --json > compliance/out/audit-compliance.json
+      - name: Download the latest evidence bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p compliance/out/previous
+          run_id="$(gh run list --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$run_id" ]; then gh run download "$run_id" --name compliance-bundle --dir compliance/out/previous || true; fi
+      - name: Read the latest release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh api "repos/$REPOSITORY/releases/latest" > compliance/out/latest-release.json || printf '{"tag_name":"","assets":[]}' > compliance/out/latest-release.json
+      - name: Write scheduled collector inputs
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p compliance/out
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const repository = process.env.REPOSITORY; const commit = process.env.COMMIT;
+            const collectors = { settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository }, audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] } };
+            const release = JSON.parse(readFileSync("compliance/out/latest-release.json", "utf8"));
+            if (/^v?\d+\.\d+\.\d+$/.test(release.tag_name)) {
+              collectors.release = { repository, tag: release.tag_name };
+              const subjects = (release.assets ?? []).filter(asset => /\.(?:vsix|tar\.gz)$/.test(asset.name) && /^sha256:[0-9a-f]{64}$/.test(asset.digest ?? "")).map(asset => ({ name: asset.name, sha256: asset.digest.slice(7) }));
+              if (subjects.length) collectors.attestation = { repository, subjects };
+            }
+            writeFileSync("compliance/out/inputs.json", JSON.stringify({ repository, commit, kind:"scheduled", repoRoot:".", collectors }, null, 2));
+          '
+      - name: Build the scheduled evidence bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.COMPLIANCE_SETTINGS_TOKEN }}
+        run: |
+          previous=""
+          if [ -f compliance/out/previous/manifest.json ]; then previous="--previous compliance/out/previous"; fi
+          node compliance/src/cli.ts bundle --inputs compliance/out/inputs.json --out compliance/out/bundle $previous
+      - run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compliance-bundle
+          path: compliance/out/bundle
+          retention-days: 30
+          if-no-files-found: error
+
+  weekly-sources:
+    name: weekly sources
+    if: github.event_name == 'schedule' && github.event.schedule == '41 5 * * 1' || contains(fromJSON('["sources","all"]'), inputs.job)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: compliance/package-lock.json
+      - run: npm --prefix compliance ci --ignore-scripts
+      - name: Check published source pages
+        run: |
+          node compliance/src/cli.ts watch --out compliance/out/source-watch.json
+          cat compliance/out/source-watch.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compliance-source-watch
+          path: compliance/out/source-watch.json
+          retention-days: 30
+          if-no-files-found: error
+
+  weekly-oscal:
+    name: weekly OSCAL
+    if: github.event_name == 'schedule' && github.event.schedule == '41 5 * * 1' || contains(fromJSON('["oscal","all"]'), inputs.job)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install pinned oscal-cli
+        run: |
+          sh compliance/ci/install-tool.sh oscal-cli compliance/out/tools
+          find compliance/out/tools -type f -name oscal-cli -printf '%h\n' >> "$GITHUB_PATH"
+      - name: Validate and resolve every OSCAL profile
+        continue-on-error: true
+        run: |
+          mkdir -p compliance/out/resolved
+          find compliance/catalogs compliance/profiles compliance/components compliance/mappings -type f -name '*.json' -print0 | while IFS= read -r -d '' file; do sh compliance/ci/oscal-validate.sh "$file"; done
+          for profile in compliance/profiles/*.json; do sh compliance/ci/oscal-validate.sh resolve "$profile" "compliance/out/resolved/$(basename "$profile")"; done
+      - name: Report profile-resolution differences
+        run: node compliance/src/cli.ts resolve-check --resolved compliance/out/resolved --out compliance/out/resolve-check.md && cat compliance/out/resolve-check.md >> "$GITHUB_STEP_SUMMARY"
