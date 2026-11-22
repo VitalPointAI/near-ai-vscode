@@ -366,17 +366,25 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Check that this commit has the relay
+      - name: Check that this commit has the relay and scan tools
         id: has_relay_scan
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ -f relay/package.json ]; then echo "present=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ -f relay/package.json ] && [ -f compliance/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           base=""
           if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; elif [ "$EVENT" = "workflow_dispatch" ]; then base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"; fi
-          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] && ! git cat-file -e "$base:relay/package.json" 2>/dev/null; then echo "present=false" >> "$GITHUB_OUTPUT"; else echo "::error::relay/package.json is missing"; exit 1; fi
+          for manifest in relay/package.json compliance/package.json; do
+            if [ -f "$manifest" ]; then continue; fi
+            if [[ ! "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ -z "$base" ] || git cat-file -e "$base:$manifest" 2>/dev/null; then
+              echo "::error::$manifest is missing"; exit 1
+            fi
+          done
+          echo "present=false" >> "$GITHUB_OUTPUT"
       - name: Build the relay image
         if: steps.has_relay_scan.outputs.present == 'true'
         run: docker build -f relay/Dockerfile -t near-ai-relay:scan .
@@ -429,8 +437,18 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
-          if [ -f compliance/package.json ]; then echo "present=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ -f compliance/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            # Only a main push or the documented branch dispatch can produce release evidence.
+            if [ "$EVENT" = "push" ] && [ "$BRANCH" = "main" ]; then
+              echo "publish_as=main" >> "$GITHUB_OUTPUT"
+            elif [ "$EVENT" = "workflow_dispatch" ] && [ "$REF_TYPE" = "branch" ] && [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "publish_as=release" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
           base=""
           if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; elif [ "$EVENT" = "workflow_dispatch" ]; then base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"; fi
           if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] && ! git cat-file -e "$base:compliance/package.json" 2>/dev/null; then echo "present=false" >> "$GITHUB_OUTPUT"; else echo "::error::compliance/package.json is missing"; exit 1; fi
@@ -460,37 +478,39 @@ jobs:
           pattern: vsix-*
           path: compliance/out/vsix
       - name: Download the newest successful main evidence bundle when one exists
-        if: steps.has_compliance.outputs.present == 'true'
+        if: steps.has_compliance.outputs.present == 'true' && (github.event_name == 'pull_request' || steps.has_compliance.outputs.publish_as == 'main')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run_id="$(gh run list --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          run_id="$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -n "$run_id" ]; then gh run download "$run_id" --name compliance-bundle --dir compliance/out/previous || true; fi
       - name: Write collector inputs and changed paths
         if: steps.has_compliance.outputs.present == 'true'
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           EVENT: ${{ github.event_name }}
+          PUBLISH_AS: ${{ steps.has_compliance.outputs.publish_as }}
           REPOSITORY: ${{ github.repository }}
           COMMIT: ${{ github.sha }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          mkdir -p compliance/out
           printf '%s\n' "$NEEDS_JSON" > compliance/out/needs.json
           if [ "$EVENT" = "pull_request" ]; then git diff --name-only "$PR_BASE...$COMMIT" > compliance/out/changed.txt; else git diff-tree --no-commit-id --name-only -r "$COMMIT" > compliance/out/changed.txt; fi
           node --input-type=module -e '
             import { writeFileSync } from "node:fs";
             const reports = ["root", "relay", "hub"].map(packageName => ({ package: packageName, file: `compliance/out/reports/test-report-${packageName}.ndjson` }));
             const collectors = { tests: { reports }, ci: { needsFile: "compliance/out/needs.json" } };
-            if (process.env.EVENT === "push") Object.assign(collectors, { audit: { audits: [{ package: "root", file: "compliance/out/audit-root.json" }] }, "secret-scan": { jsonFile: "compliance/out/secret-scan.json" } });
-            const value = { repository: process.env.REPOSITORY, commit: process.env.COMMIT, kind: process.env.EVENT === "pull_request" ? "pr" : "main", repoRoot: ".", collectors };
+            if (process.env.PUBLISH_AS) Object.assign(collectors, { audit: { audits: [{ package: "root", file: "compliance/out/audit-root.json" }] }, "secret-scan": { jsonFile: "compliance/out/secret-scan.json" } });
+            const value = { repository: process.env.REPOSITORY, commit: process.env.COMMIT, kind: process.env.PUBLISH_AS || "pr", repoRoot: ".", collectors };
             writeFileSync("compliance/out/inputs.json", JSON.stringify(value, null, 2));
           '
-      - name: Record package audits for the main bundle
-        if: steps.has_compliance.outputs.present == 'true' && github.event_name == 'push'
+      - name: Record package audits for the release evidence bundle
+        if: steps.has_compliance.outputs.publish_as != ''
         continue-on-error: true
         run: npm audit --json > compliance/out/audit-root.json
-      - name: Scan tracked files for the main bundle
-        if: steps.has_compliance.outputs.present == 'true' && github.event_name == 'push'
+      - name: Scan tracked files for the release evidence bundle
+        if: steps.has_compliance.outputs.publish_as != ''
         continue-on-error: true
         run: node scripts/secret-scan.mjs --json > compliance/out/secret-scan.json
       - name: Build this commit's evidence bundle
@@ -514,7 +534,7 @@ jobs:
           fi
       - name: Secret-scan the completed evidence bundle
         id: bundle_scan
-        if: steps.has_compliance.outputs.present == 'true' && github.event_name == 'push'
+        if: steps.has_compliance.outputs.publish_as != ''
         continue-on-error: true
         run: node scripts/secret-scan.mjs --dir compliance/out/bundle --json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

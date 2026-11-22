@@ -2,7 +2,10 @@
 // no YAML parser in the dependencies, so these read the files as text, split into top-level
 // keys and jobs by indentation.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 
 const read = (name) => readFileSync(new URL(`../../.github/workflows/${name}`, import.meta.url), 'utf8');
@@ -238,11 +241,58 @@ test('release package, attest and Trestle jobs keep privilege separated', () => 
   assert.match(attest, /contents:\s*read[\s\S]*id-token:\s*write[\s\S]*attestations:\s*write/);
   assert.equal((text.match(/id-token:\s*write/g) ?? []).length, 1);
   assert.match(attest, /sha256sum --check/);
+  assert.match(attest, /subject-checksums: release\/subjects\.sha256/);
   assert.match(attest, /actions\/attest@[0-9a-f]{40}/);
   assert.match(trestle, /--require-hashes --no-deps/);
   assert.match(trestle, /continue-on-error:\s*true/);
   assert.match(release, /needs:\s*\[build, package, attest\]/);
   assert.match(release, /package_sha256/);
+});
+
+test('only main pushes and versioned hotfix branch dispatches publish compliance bundles', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-ci-evidence-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(path.join(dir, 'compliance'));
+  writeFileSync(path.join(dir, 'compliance', 'package.json'), '{}');
+  const job = jobs(read('ci.yml')).get('compliance');
+  const detect = steps(job).find((step) => /id: has_compliance/.test(step));
+  assert.ok(detect);
+  const script = detect.split('\n').slice(detect.split('\n').findIndex((line) => line.trim() === 'run: |') + 1).join('\n');
+  const output = path.join(dir, 'output');
+  for (const [event, branch, refType, kind] of [
+    ['push', 'main', 'branch', 'main'],
+    ['workflow_dispatch', 'hotfix/0.4.36', 'branch', 'release'],
+    ['workflow_dispatch', 'hotfix/0.4.36', 'tag', ''],
+    ['workflow_dispatch', 'hotfix/debug', 'branch', ''],
+    ['workflow_dispatch', 'main', 'branch', ''],
+    ['pull_request', 'hotfix/0.4.36', 'branch', ''],
+  ]) {
+    writeFileSync(output, '');
+    execFileSync('bash', ['-e', '-c', script], { cwd: dir, env: { ...process.env, EVENT: event, BRANCH: branch, REF_TYPE: refType, GITHUB_OUTPUT: output } });
+    assert.equal(readFileSync(output, 'utf8'), `present=true\n${kind ? `publish_as=${kind}\n` : ''}`, `${event} ${refType} ${branch}`);
+  }
+  assert.match(job, /if: steps\.has_compliance\.outputs\.publish_as != ''[\s\S]*secret-scan\.mjs --dir/);
+  assert.match(job, /if: steps\.bundle_scan\.outcome == 'success'/);
+});
+
+test('releases require GitHub CI evidence on the exact release head when the base supports compliance', () => {
+  const all = jobs(read('release.yml'));
+  const build = all.get('build');
+  assert.match(build, /evidence_branch="hotfix\/\$version"/);
+  assert.match(build, /compliance\/package\.json is required for a main release/);
+  assert.match(build, /git cat-file -e "\$base:compliance\/package\.json"[\s\S]*package_required=false/);
+  const pkg = all.get('package');
+  assert.match(pkg, /if: needs\.build\.outputs\.package_required == 'true'/);
+  assert.match(pkg, /event=push\n[^\n]*"\$EVIDENCE_BRANCH" != main[^\n]*event=workflow_dispatch/);
+  assert.match(pkg, /gh run list --workflow ci\.yml --branch "\$EVIDENCE_BRANCH" --event "\$event" --status success --commit "\$COMMIT"/);
+  assert.match(pkg, /!result\.ok \|\| manifest\.commit !== process\.env\.COMMIT/);
+  for (const id of ['attest', 'release']) {
+    const job = all.get(id);
+    assert.match(job, /package_required == 'true' && needs\.package\.result == 'success'/);
+    assert.match(job, /package_required == 'false' && needs\.package\.result == 'skipped'/);
+    assert.match(job, /if \[ "\$PACKAGE_REQUIRED" = true \]; then[\s\S]*"\$PACKAGE"/);
+  }
+  assert.match(all.get('release'), /needs\.attest\.result == 'success'/);
 });
 
 test('CODEOWNERS routes all compliance gate paths to one owner', () => {

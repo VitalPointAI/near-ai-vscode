@@ -389,6 +389,13 @@ gh workflow run ci.yml --ref hotfix/<next>
 gh run list --workflow ci.yml --branch hotfix/<next> --limit 1   # wait until it passes
 ```
 
+When the hotfix has the compliance package, that branch run also produces the
+secret-scanned evidence bundle and the relay SBOM for the exact commit being
+released. The release requires those artifacts and publishes the assessor package
+with the VSIX. A hotfix from a tag that predates the compliance package can still
+release its verified, attested VSIX. The release run records why the assessor
+package was omitted.
+
 Then tag the hotfix head. `tag-release.mjs` refuses unless the commit is the head of
 `hotfix/<next>`, the newest CI run on that exact commit (not the PR's run) has finished with
 all eight jobs green, and the owner's `agent-review` on it is success. A run that is queued or
