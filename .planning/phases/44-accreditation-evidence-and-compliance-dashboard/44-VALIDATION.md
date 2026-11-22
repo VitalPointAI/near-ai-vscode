@@ -43,9 +43,9 @@ Filled from the plans' `<automated>` blocks once the plans pass the checker. Eac
 
 2026-11-22. Existing automated tests cover parts of all fourteen requirements. The coverage review found local workflow gaps and live GitHub evidence that fixtures cannot supply. Nyquist sign-off remains pending.
 
-- ACCR-02: The normal watch CLI now fetches registered pages and creates its output directory. A fixture tests a 404 through the CLI. The first scheduled run is pending.
-- ACCR-05 and ACCR-10: Scheduled audit output is initialized before collection. The current workflows do not supply the levels, components, and rules to bundle generation, which defaults those inputs to empty arrays. A populated dashboard and meaningful PR comparison still need end-to-end evidence.
-- ACCR-09: The new release packaging job requires successful evidence from `main` at the tag commit, so it cannot serve the existing supported unmerged hotfix-tag path. Live OSCAL validation, Trestle import, and attestations are pending.
+- ACCR-02: The watch CLI fetches registered pages and creates its output directory. The public English and French Medium editions now parse across all 20 selection tables. The generated report records 11 observed selection differences and documents the English HTML ID correction verified against the official English PDF. The first scheduled run is pending.
+- ACCR-05 and ACCR-10: The bundle CLI now loads shipped profiles, components, evidence rules, remediation gaps and POA&M milestones. The local CLI regression verifies a populated, manifest-verified Protected B dashboard. Hosted bundle generation and PR comparison remain pending.
+- ACCR-09: Main releases and compliance-era hotfixes require verified evidence from successful CI at the tag commit. Hotfixes from bases that predate compliance retain the attested VSIX path. Both routes have local workflow contract coverage. Hosted OSCAL validation, Trestle import, and attestations are pending.
 - ACCR-12: The initial hosted checks and repository settings evidence are pending.
 
 ---
@@ -65,7 +65,7 @@ Filled from the plans' `<automated>` blocks once the plans pass the checker. Eac
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | Licence records re-read before committing Government text | ACCR-01 | Network and a person's judgement on a changed record | Run the importer's licence check; confirm every record says `ca-ogl-lgo`; stop if not |
-| The 12 English and French profile differences | ACCR-02 | Needs the Cyber Centre's answer | Review the importer's difference list in the data PR |
+| English and French profile selection differences | ACCR-02 | Public editions can diverge | Review the generated import report's differences against the public editions |
 | `docs` made a required check | ACCR-12 | Repository setting only the owner can change | Owner adds `docs` to branch protection; the settings collector shows it |
 | Package imports into Compliance Trestle | ACCR-09 | Runs in CI on a release, not locally | Check the release workflow's Trestle step on the first tagged release |
 | Pages read well in light, dark and high-contrast themes and by keyboard | ACCR-07 | Visual check | Open the Accreditation section on the local docs site |

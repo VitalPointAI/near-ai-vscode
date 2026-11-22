@@ -37,6 +37,8 @@ Run the tests through the repository's runner as shown (from the repository root
 
 Everything generated (resolved profiles, the evidence bundle, the dashboard JSON and the release package) goes under `compliance/out/`, which git ignores. Nothing generated is committed, so nothing on `main` can drift from what CI computed.
 
+Use a fresh or empty output directory for each local `bundle --out` run. Existing files are kept intact.
+
 Neither this package nor `docs/security/` ships in the extension: both are listed in `.vscodeignore`, and the release content check refuses a package that holds either.
 # Compliance evidence data
 
@@ -56,7 +58,7 @@ The pull-request summary is report-only by default. After the owner has seen sta
 
 ## Release package
 
-Every version release attaches `compliance-package-<version>.tar.gz` and its checksum beside the VSIX. The release workflow validates the package's OSCAL documents, imports its assessor documents into a throwaway Compliance Trestle workspace, and creates GitHub artifact attestations for both the VSIX and the package. Verify the checksum with `sha256sum --check <package>.sha256`; after upgrading GitHub CLI, verify provenance with `gh attestation verify <file> --repo VitalPointAI/near-ai-vscode`.
+Releases with compliance sources attach `compliance-package-<version>.tar.gz` and its checksum beside the VSIX. An unmerged hotfix based on an older release that predates the compliance sources can still publish an attested VSIX. The release workflow validates the package's OSCAL documents, imports its assessor documents into a throwaway Compliance Trestle workspace, and creates GitHub artifact attestations. Verify the checksum with `sha256sum --check <package>.sha256`. Verify provenance with `gh attestation verify <file> --repo VitalPointAI/near-ai-vscode`.
 
 ## Owner steps
 
@@ -67,7 +69,7 @@ These settings and outside contacts cannot be changed by this code. They may be 
 3. Create the fine-grained read-only `COMPLIANCE_SETTINGS_TOKEN` and the `compliance-settings` environment, limited to `main` with no reviewers.
 4. Upgrade `gh` on the documentation host to a version with `gh attestation`, then install the refresh timer with `npm --prefix docs-site run refresh-timer:install`.
 5. Do not enable “Require review from Code Owners”; CODEOWNERS provides routing, while the existing gate provides enforcement.
-6. Ask the Cyber Centre for a machine-readable ITSP.10.033 edition and about the recorded English/French profile differences.
+6. Use the public Cyber Centre catalogue and Medium profile sources. The import report records the differences found in the published editions.
 7. Confirm or change the recorded supported versions, response times, POA&M target date `2027-05-31`, risk-acceptance purpose `compliance-risk-acceptance`, empty signer list, and the context's remaining owner confirmations.
 8. GitHub disables scheduled workflows after 60 days without repository activity; re-enable them when the Evidence page shows a silent collector.
 
