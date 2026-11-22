@@ -41,13 +41,7 @@ if (reportPath) {
 }
 const childEnv = { ...process.env, TMPDIR: runDir, TEMP: runDir, TMP: runDir };
 delete childEnv.NEAR_AI_TEST_REPORT;
-// Node 24's default process isolation reports each CommonJS test file as one
-// synthetic passing test. Root TypeScript tests compile to CommonJS, so an
-// evidence-reporting run must use one test process to retain literal leaves.
-// Keep ordinary test runs isolated: the runner lifecycle tests deliberately
-// exercise signal handling across child processes.
-const isolationFlags = reportPath ? ['--test-isolation=none'] : [];
-const child = spawn(process.execPath, ['--test', ...isolationFlags, ...reportFlags, ...process.argv.slice(2)], { stdio: 'inherit', detached: grouped, env: childEnv });
+const child = spawn(process.execPath, ['--test', ...reportFlags, ...process.argv.slice(2)], { stdio: 'inherit', detached: grouped, env: childEnv });
 /** How long the runner waits, after an error of its own, for the tests to exit before it stops them with SIGKILL and removes the folder. */
 const CHILD_EXIT_WAIT_MS = 10_000;
 const signalTests = (signal) => {
