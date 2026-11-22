@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { failedClosed } from '../domain/gate/bundle';
 import type { BundleState, GateContextName } from '../domain/gate/bundle';
+import type { ProjectLayerRead } from '../domain/gate/layers';
 import type { ActorRef, GateRuntime, Presence } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import type { DecisionOutcome, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
@@ -139,6 +140,15 @@ function detailOf(error: unknown): string {
 }
 
 export class GateHost {
+  private projectLayerSource?: (root: string) => ProjectLayerRead;
+
+  public useProjectLayerSource(source: (root: string) => ProjectLayerRead): { dispose(): void } {
+    this.projectLayerSource = source;
+    return { dispose: () => {
+      if (this.projectLayerSource === source) this.projectLayerSource = undefined;
+    } };
+  }
+
   private current: BundleState = failedClosed('identity-unavailable', 'The gate has not finished starting.');
   private starting: Promise<BundleState> | undefined;
   /** True once the start has finished and `current` is what it found. */
@@ -267,7 +277,7 @@ export class GateHost {
       productVersion: this.options.productVersion,
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
-      routePolicy: (now) => this.routePolicyNow(now),
+      routePolicy: (now) => this.routePolicyNow(now, root),
       // Each folder the run works in has its own reader (a sub-agent's worktree included), kept by the host and read again only when the file changes.
       labels: (folder: string) => this.labelsFor(folder)
     };
@@ -621,7 +631,7 @@ export class GateHost {
       clock: () => this.now(),
       newRecordId: () => randomUUID(),
       productVersion: this.options.productVersion,
-      routePolicy: (now) => this.routePolicyNow(now),
+      routePolicy: (now) => this.routePolicyNow(now, this.projectRootNow()),
       attestation: { failed: false }
     };
   }
@@ -743,9 +753,17 @@ export class GateHost {
    * already routes with the failed-closed table). A policy that cannot be worked out throws, so the client refuses the request as a failed route check
    * (route.deny); it is never decided as if no policy existed (WR-02).
    */
-  private routePolicyNow(now: number): RoutePolicyNow | undefined {
+  private routePolicyNow(now: number, root?: string): RoutePolicyNow | undefined {
     const layers = this.policyLayers();
-    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
+    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers), root === undefined ? undefined : this.readProjectLayerSafely(root));
+  }
+
+  private readProjectLayerSafely(root: string): ProjectLayerRead | undefined {
+    try {
+      return this.projectLayerSource?.(root);
+    } catch {
+      return { state: 'unreadable' };
+    }
   }
 
   /**
