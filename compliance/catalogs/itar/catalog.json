@@ -1,0 +1,355 @@
+{
+  "catalog": {
+    "groups": [
+      {
+        "controls": [
+          {
+            "id": "itar-120.50",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=120&section=120.50",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-120.50_smt",
+                "name": "statement",
+                "prose": "(a)Export,except as set forth in § 120.54 or § 126.16 or § 126.17 of this subchapter, means:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-120.50"
+              }
+            ],
+            "title": "ITAR-120.50"
+          },
+          {
+            "id": "itar-120.54-a5",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=120&section=120.54",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-120.54-a5_smt",
+                "name": "statement",
+                "prose": "(5) Sending, taking, or storing technical data that is:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-120.54-A5"
+              }
+            ],
+            "title": "ITAR-120.54-A5"
+          },
+          {
+            "id": "itar-120.55",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=120&section=120.55",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-120.55_smt",
+                "name": "statement",
+                "prose": "Access informationis information that allows access to encrypted technical data subject to this subchapter in an unencrypted form. Examples include decryption keys, network access codes, and passwords."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-120.55"
+              }
+            ],
+            "title": "ITAR-120.55"
+          },
+          {
+            "id": "itar-120.56-a",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=120&section=120.56",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-120.56-a_smt",
+                "name": "statement",
+                "prose": "(a)Release.Technical data is released through:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-120.56-A"
+              }
+            ],
+            "title": "ITAR-120.56-A"
+          },
+          {
+            "id": "itar-120.56-b",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=120&section=120.56",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-120.56-b_smt",
+                "name": "statement",
+                "prose": "(b)Provision of access information.Authorization for a release of technical data to a foreign person is required to provide access information to that foreign person, if that access information can cause or enable access, viewing, or possession of the unencrypted technical data."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-120.56-B"
+              }
+            ],
+            "title": "ITAR-120.56-B"
+          },
+          {
+            "id": "itar-122.1",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=122&section=122.1",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-122.1_smt",
+                "name": "statement",
+                "prose": "(a)Requirement to register.Any person who engages in the United States in the business of manufacturing or exporting or temporarily importing defense articles, or furnishing defense services, is required to register with the Directorate of Defense Trade Controls under § 122.2. For the purpose of this subchapter, engaging in such a business requires only one occasion of manufacturing or exporting or temporarily importing a defense article or furnishing a defense service. A manufacturer who does not engage in exporting must nevertheless register. (Seepart 129 of this subchapter for requirements for registration of persons who engage in brokering activities.)"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-122.1"
+              }
+            ],
+            "title": "ITAR-122.1"
+          },
+          {
+            "id": "itar-122.5",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=122&section=122.5",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-122.5_smt",
+                "name": "statement",
+                "prose": "(a) A person who is required to register must maintain records concerning the manufacture, acquisition and disposition (to include copies of all documentation on exports using exemptions and applications and licenses and their related documentation), of defense articles; of technical data; the provision of defense services; brokering activities; and information on political contributions, fees, or commissions furnished or obtained, as required by part 130 of this subchapter. Records in an electronic format must be maintained using a process or system capable of reproducing all records on paper. Such records when displayed on a viewer, monitor, or reproduced on paper, must exhibit a high degree of legibility and readability. (For the purpose of this section, “legible” and “legibility” mean the quality of a letter or numeral that enables the observer to identify it positively and quickly to the exclusion of all other letters or numerals. “Readable” and “readability” means the quality of a group of letters or numerals being recognized as complete words or numbers.) This information must be stored in such a manner that none of it may be altered once it is initially recorded without recording all changes, who made them, and when they were made. For processes or systems based on the storage of digital images, the process or system must afford accessibility to all digital images in the records being maintained. All records subject to this section must be maintained for a period of five years from the expiration of the license or other approval, to include exports using an exemption (see§ 123.26 of this subchapter); or, from the date of the transaction (e.g., expired licenses or other approvals relevant to the export transaction using an exemption). The Deputy Assistant Secretary of State for Defense Trade Controls and the Director of the Office of Defense Trade Controls Licensing may prescribe a longer or shorter period in individual cases."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-122.5"
+              }
+            ],
+            "title": "ITAR-122.5"
+          },
+          {
+            "id": "itar-126.1",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=126&section=126.1",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-126.1_smt",
+                "name": "statement",
+                "prose": "(a)General.It is the policy of the United States to deny licenses and other approvals for exports, reexports, retransfers, and temporary imports of defense articles and defense services destined for, or originating in, certain countries. (For brokering activities, see § 129.7 of this subchapter, which imposes restrictions similar to those contained in this section.) No transfer of defense articles or defense services may be made pursuant to an exemption provided in this subchapter to or from any proscribed countries, areas, or persons as described in this section, except as follows:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-126.1"
+              }
+            ],
+            "title": "ITAR-126.1"
+          },
+          {
+            "id": "itar-126.5",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=126&section=126.5",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-126.5_smt",
+                "name": "statement",
+                "prose": "(a)Temporary import of defense articles.Port Directors of U.S. Customs and Border Protection and postmasters shall permit the temporary import and return to Canada without a license of any unclassified defense articles that originate in Canada for temporary use in the United States and return to Canada. All other temporary imports shall be in accordance with §§ 123.3 and 123.4 of this subchapter."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-126.5"
+              }
+            ],
+            "title": "ITAR-126.5"
+          },
+          {
+            "id": "itar-126.18",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=126&section=126.18",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-126.18_smt",
+                "name": "statement",
+                "prose": "(a) Subject to the requirements of paragraphs (b) and (c) of this section and notwithstanding any other provisions of this part, and where the exemption provided in paragraph (d) of this section cannot be implemented because of applicable domestic laws, no approval is needed from the Directorate of Defense Trade Controls (DDTC) for the transfer of unclassified defense articles, which includes technical data, to or within a foreign business entity, foreign governmental entity, or international organization that is an authorized end-user or consignee (including approved sub-licensees) for those defense articles, including the transfer to dual nationals or third-country nationals who are bona fide regular employees, directly employed by the foreign consignee or end-user. The transfer of defense articles pursuant to this section must take place completely within the physical territory of the country where the end-user is located, where the governmental entity or international organization conducts official business, or where the consignee operates, and be within the scope of an approved export license, other export authorization, or license exemption."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-126.18"
+              }
+            ],
+            "title": "ITAR-126.18"
+          },
+          {
+            "id": "itar-127.12",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-22.xml?part=127&section=127.12",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "itar-127.12_smt",
+                "name": "statement",
+                "prose": "(a)General policy.The Department strongly encourages the disclosure of information to the Directorate of Defense Trade Controls by persons that believe they may have violated any export control provision of the Arms Export Control Act, or any regulation, order, license, or other authorization issued under the authority of the Arms Export Control Act. The Department may consider a voluntary disclosure as a mitigating factor in determining the administrative penalties, if any, that should be imposed. Failure to report a violation may result in circumstances detrimental to U.S. national security and foreign policy interests, and will be an adverse factor in determining the appropriate disposition of such violations."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "ITAR-127.12"
+              }
+            ],
+            "title": "ITAR-127.12"
+          }
+        ],
+        "id": "itar",
+        "title": "International Traffic in Arms Regulations"
+      },
+      {
+        "controls": [
+          {
+            "id": "ear-734.13",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-15.xml?part=734&section=734.13",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "ear-734.13_smt",
+                "name": "statement",
+                "prose": "(a) Except as set forth in § 734.17 or § 734.18,Exportmeans:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "EAR-734.13"
+              }
+            ],
+            "title": "EAR-734.13"
+          },
+          {
+            "id": "ear-734.15",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-15.xml?part=734&section=734.15",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "ear-734.15_smt",
+                "name": "statement",
+                "prose": "(a) Except as set forth in §§ 734.18 and 734.19, “technology” and “software” are “released” through:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "EAR-734.15"
+              }
+            ],
+            "title": "EAR-734.15"
+          },
+          {
+            "id": "ear-734.18-a5",
+            "links": [
+              {
+                "href": "https://www.ecfr.gov/api/versioner/v1/full/2026-11-19/title-15.xml?part=734&section=734.18",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "ear-734.18-a5_smt",
+                "name": "statement",
+                "prose": "(5) Sending, taking, or storing “technology” or “software” that is:"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "EAR-734.18-A5"
+              }
+            ],
+            "title": "EAR-734.18-A5"
+          }
+        ],
+        "id": "ear",
+        "title": "Export Administration Regulations"
+      }
+    ],
+    "metadata": {
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1",
+      "props": [
+        {
+          "name": "source-id",
+          "ns": "urn:near-ai-vscode:compliance",
+          "value": "ecfr-title-22"
+        }
+      ],
+      "remarks": "Unofficial editorial compilation as of the listed date; the official CFR governs. Title 22: 2026-11-19; Title 15: 2026-11-19.",
+      "title": "ITAR and EAR requirements",
+      "version": "0.1.0"
+    },
+    "uuid": "1f1216d0-9f37-5026-817e-d7af691109c5"
+  }
+}

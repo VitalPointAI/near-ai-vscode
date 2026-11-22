@@ -1,0 +1,539 @@
+{
+  "catalog": {
+    "groups": [
+      {
+        "controls": [
+          {
+            "id": "cgp-37-1",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-37-1_smt",
+                "name": "statement",
+                "prose": "37(1)No person shall, unless the person is registered under section 38 or exempt from registration under section 39 or 39.1, knowingly examine or possess a controlled good or transfer a controlled good to another person."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-37-1"
+              }
+            ],
+            "title": "CGP-37-1"
+          },
+          {
+            "id": "cgp-37-2",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/acts/D-1/section-37.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-37-2_smt",
+                "name": "statement",
+                "prose": "(2)No person registered or exempt from registration shall knowingly transfer a controlled good to or permit the examination of a controlled good by a person who is not registered or exempt from registration."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-37-2"
+              }
+            ],
+            "title": "CGP-37-2"
+          }
+        ],
+        "id": "dpa",
+        "title": "Defence Production Act Part 2"
+      },
+      {
+        "controls": [
+          {
+            "id": "cgp-9",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-9_smt",
+                "name": "statement",
+                "prose": "9(1)Every applicant and registered person shall advise the Minister of any change in any of the information contained in or accompanying the application for registration within ten business days after the day on which they become aware of the change."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-9"
+              }
+            ],
+            "title": "CGP-9"
+          },
+          {
+            "id": "cgp-10-a",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-a_smt",
+                "name": "statement",
+                "prose": "(a)that the person keep and maintain, during the period of registration and for a period of five years after the day on which the person ceases to be registered, records that contain"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-A"
+              }
+            ],
+            "title": "CGP-10-A"
+          },
+          {
+            "id": "cgp-10-b",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-b_smt",
+                "name": "statement",
+                "prose": "(b)that the person keep records of the most recent security assessment in respect of each of their officers, directors, employees, temporary workers, international students and visitors who examine, possess or transfer controlled goods and maintain those records — as well as supporting documentation — for a period of two years after the day on which the individual in question ceases to act in that capacity;"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-B"
+              }
+            ],
+            "title": "CGP-10-B"
+          },
+          {
+            "id": "cgp-10-c",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-c_smt",
+                "name": "statement",
+                "prose": "(c)that the person keep a copy of the evidence referred to in subsection 16(2) for a period of two years after the day on which the individual who is exempt ceases to have access to the controlled goods of the registered person;"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-C"
+              }
+            ],
+            "title": "CGP-10-C"
+          },
+          {
+            "id": "cgp-10-e",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-e_smt",
+                "name": "statement",
+                "prose": "(e)that the person establish and implement a security plan in respect of each place of business in Canada where controlled goods are kept that contains written measures that set out"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-E"
+              }
+            ],
+            "title": "CGP-10-E"
+          },
+          {
+            "id": "cgp-10-f",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-f_smt",
+                "name": "statement",
+                "prose": "(f)that the person provide training programs in respect of the secure handling of controlled goods for officers, directors, employees and temporary workers who are authorized to possess or examine those goods;"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-F"
+              }
+            ],
+            "title": "CGP-10-F"
+          },
+          {
+            "id": "cgp-10-g",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-g_smt",
+                "name": "statement",
+                "prose": "(g)that the person provide briefings in respect of the secure handling of controlled goods by visitors who are authorized to examine those goods;"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-G"
+              }
+            ],
+            "title": "CGP-10-G"
+          },
+          {
+            "id": "cgp-10-h",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-h_smt",
+                "name": "statement",
+                "prose": "(h)that the person advise the Minister of any actual or potential security breach in relation to controlled goods within three days after the day on which they discover the breach;"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-H"
+              }
+            ],
+            "title": "CGP-10-H"
+          },
+          {
+            "id": "cgp-10-i",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-i_smt",
+                "name": "statement",
+                "prose": "(i)a description of any controlled goods received by the person, the date of their receipt and an identification of the person from whom they were transferred,"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-I"
+              }
+            ],
+            "title": "CGP-10-I"
+          },
+          {
+            "id": "cgp-10-j",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-10-j_smt",
+                "name": "statement",
+                "prose": "(j)that the person submit to the Minister, every six months, the name of each individual in respect of whom the designated official conducted a security assessment during the previous six months, as well as the individual’s date of birth and an indication of the extent to which they were authorized to access controlled goods."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-10-J"
+              }
+            ],
+            "title": "CGP-10-J"
+          },
+          {
+            "id": "cgp-11",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-11_smt",
+                "name": "statement",
+                "prose": "11An applicant for registration or a registered person may propose to appoint as a designated official only"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-11"
+              }
+            ],
+            "title": "CGP-11"
+          },
+          {
+            "id": "cgp-12",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-12_smt",
+                "name": "statement",
+                "prose": "12(1)A registered person shall ensure that a designated official is subjected to a security assessment in accordance with section 15 before their appointment and at least once every five years."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-12"
+              }
+            ],
+            "title": "CGP-12"
+          },
+          {
+            "id": "cgp-13",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-13_smt",
+                "name": "statement",
+                "prose": "13Every registered person shall ensure that the designated official"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-13"
+              }
+            ],
+            "title": "CGP-13"
+          },
+          {
+            "id": "cgp-14",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-14_smt",
+                "name": "statement",
+                "prose": "14(1)The registered person shall be bound by the decision of the designated official under subparagraph 13(a)(v)."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-14"
+              }
+            ],
+            "title": "CGP-14"
+          },
+          {
+            "id": "cgp-15",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-15_smt",
+                "name": "statement",
+                "prose": "15(1)The Minister shall conduct a security assessment in respect of all proposed designated officials and all individuals referred to in paragraphs 3(d) and (i), and the designated official shall conduct a security assessment in respect of all officers, directors and employees referred to in paragraph 13(a), having regard to the information provided under subsection (4)."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-15"
+              }
+            ],
+            "title": "CGP-15"
+          },
+          {
+            "id": "cgp-16",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-16_smt",
+                "name": "statement",
+                "prose": "16(1)Subject to subsection (2), an individual is exempt from registration if they are a director, an officer or an employee of a person registered to access controlled goods under theInternational Traffic in Arms Regulations, Title 22, Parts 120-130 of theCode of Federal Regulations(United States)."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-16"
+              }
+            ],
+            "title": "CGP-16"
+          },
+          {
+            "id": "cgp-17",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-17_smt",
+                "name": "statement",
+                "prose": "17A temporary worker, international student or visitor is eligible for exemption from registration only if a registered person submits to the Minister an application on their behalf in accordance with section 18."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-17"
+              }
+            ],
+            "title": "CGP-17"
+          },
+          {
+            "id": "cgp-18",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-18_smt",
+                "name": "statement",
+                "prose": "18A registered person may apply to exempt a temporary worker, international student or visitor from registration by sending to the Minister, on a form supplied by the Minister, an application that contains"
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-18"
+              }
+            ],
+            "title": "CGP-18"
+          },
+          {
+            "id": "cgp-19",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-19_smt",
+                "name": "statement",
+                "prose": "19(1)The Minister shall conduct a security assessment in respect of all temporary workers, international students and visitors in respect of whom an application for exemption from registration has been made under section 18, having regard to the information provided under section 18.1 and any other information that the Minister has reasonable grounds to believe is necessary to make a decision under section 20."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-19"
+              }
+            ],
+            "title": "CGP-19"
+          },
+          {
+            "id": "cgp-23",
+            "links": [
+              {
+                "href": "https://laws-lois.justice.gc.ca/eng/regulations/SOR-2001-32/FullText.html",
+                "rel": "reference"
+              }
+            ],
+            "parts": [
+              {
+                "id": "cgp-23_smt",
+                "name": "statement",
+                "prose": "23The exemption of an individual from registration is valid for a period not exceeding three years from the date on which the exemption is approved by the Minister."
+              }
+            ],
+            "props": [
+              {
+                "name": "label",
+                "value": "CGP-23"
+              }
+            ],
+            "title": "CGP-23"
+          }
+        ],
+        "id": "cgr",
+        "title": "Controlled Goods Regulations"
+      }
+    ],
+    "metadata": {
+      "last-modified": "2026-11-21T00:00:00Z",
+      "oscal-version": "1.2.1",
+      "props": [
+        {
+          "name": "source-id",
+          "ns": "urn:near-ai-vscode:compliance",
+          "value": "defence-production-act"
+        }
+      ],
+      "remarks": "Accurate reproduction, not the official version.",
+      "title": "Controlled Goods Program requirements",
+      "version": "0.1.0"
+    },
+    "uuid": "a5a0eeff-478b-5192-b9cf-18e88422145b"
+  }
+}

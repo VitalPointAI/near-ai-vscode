@@ -1,0 +1,614 @@
+{
+  "retrievedAt": "2026-11-21T00:00:00Z",
+  "pages": [
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033",
+      "lang": "en",
+      "sha256": "bf0c39a1b4bdfef8f8fda834b8563b67754a8e1f1bea809ec41999fb21f6c693",
+      "dateModified": "unknown"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/access-control",
+      "lang": "en",
+      "sha256": "25a3af6634217195415924c0a2431272eff7c8f0d21ac9e4c6e5b2ca2fab8d61",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/awareness-training",
+      "lang": "en",
+      "sha256": "7369bb4f09c00fe7d1bc372cd21dc2bde5d5d0eecc44a74c9b3635652c0ae731",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/audit-accountability",
+      "lang": "en",
+      "sha256": "a2983effdfba098323c32ed62d2419e860e4a3d24c7034ca37b32d0f1252a00d",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/assessment-authorization-monitoring",
+      "lang": "en",
+      "sha256": "1a0945590e734a2f38dd520c1ab3f6a26be973252e1ae36baefe782bc87911cf",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/configuration-management",
+      "lang": "en",
+      "sha256": "2dcb125f395ab13c4aa45b5cb3c244c3158a444e0b5b8eac9795105dbb805359",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/contingency-planning",
+      "lang": "en",
+      "sha256": "e3ec91042c3c8da65fc998716c0932851f373d8383e7fbaa9106b1f7ad1fbab3",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/identification-authentication",
+      "lang": "en",
+      "sha256": "d4da81011fb1277568cb0ff4f2e078fed29af9c0eec5c43e8dfc3478e49b2d8d",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/incident-response",
+      "lang": "en",
+      "sha256": "142260e4e7c4ac6495b953a59ccc4a74d939c491d4a8910a5aa9655b340c3a13",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/maintenance",
+      "lang": "en",
+      "sha256": "3451b80f95b975a74247006fa834b5c984fbf8cbaf582b314f07d7b157f382e2",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/media-protection",
+      "lang": "en",
+      "sha256": "921a7f72ea9e307935bfcccee2fc941422501a2807296a22513b242c40d95b44",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/physical-environmental-protection",
+      "lang": "en",
+      "sha256": "a675f745ad4f92034e65391044672758308d5bbc72ae23132a9a96fc7f771b58",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/planning",
+      "lang": "en",
+      "sha256": "1811eaa4c9ed251834d11024cada1841699a2074b9f8dd397370db0a9d14dfec",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/program-management",
+      "lang": "en",
+      "sha256": "7fd7de5c6408ffafcff8ea7567b5e51b8ecdad153ff0835adff53bb210c7d7d4",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/personnel-security",
+      "lang": "en",
+      "sha256": "5f12d69e758b455d99b4c931f1503a750d5160b465104db02249bac043625189",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/personal-information-handling-transparency",
+      "lang": "en",
+      "sha256": "4b9698c32ca587638e28957ff639fa0668ac67d6c8247e548ed098dce8f9c9d4",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/risk-assessment",
+      "lang": "en",
+      "sha256": "110f3c16fd673125e5a01a4197828a411f7ea0d8960f928eff9ed9e561c65442",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/system-services-acquisition",
+      "lang": "en",
+      "sha256": "b29b5fd19e9f8e6bba459a82fde0bb74b2894f193658ac23489d20746ff6c46f",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/system-communications-protection",
+      "lang": "en",
+      "sha256": "208383f3cc3d0e42024910a311c64d2a72eb76ce6611e29b509f77013832c008",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/system-information-integrity",
+      "lang": "en",
+      "sha256": "8f3376402aeb0638656ec04ef98bcf6ea3622bfca70175b81636f466abb4a0ae",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/itsp10033/supply-chain-risk-management",
+      "lang": "en",
+      "sha256": "a2c42f119cc353f6bc5d7af6d6b9bc0849360645c2e5fb3aee231393f91e541d",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033",
+      "lang": "fr",
+      "sha256": "479977fdf2dd8e0232a869b5c1339d4bcd7be18c9919b4b7638e6cd5cba0d28e",
+      "dateModified": "unknown"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/controle-dacces",
+      "lang": "fr",
+      "sha256": "53f04e5d1f4a277253b155b1e57213cc63b4e2354a283d03665d25a3c46a9ca3",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/sensibilisation-formation",
+      "lang": "fr",
+      "sha256": "09fd06ab6c8f604514fb9c30a5a7e6f6de653ab9b0c0870e9eb4988886b2b747",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/verification-responsabilisation",
+      "lang": "fr",
+      "sha256": "eb1c0d1c5f40e8c8f82e016227c79ede3f271ea12d1cd0974c9d166aa2c4809c",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/evaluation-autorisation-surveillance",
+      "lang": "fr",
+      "sha256": "a0a3d7872b0aabaea2414015b9ebaba0c9b4b0b1f4a7f57a89d5c1f7dc0f9970",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/gestion-configurations",
+      "lang": "fr",
+      "sha256": "1df5dc6b677f9d686f8dfcbc11ba5cf5f71897385564fce5d5860547ac6bc573",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/planification-durgence",
+      "lang": "fr",
+      "sha256": "c7f42d21ba458943306bdf0a260fa8f44add16841dd753bd4e9efee493794020",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/identification-authentification",
+      "lang": "fr",
+      "sha256": "899ff1fe0586e311d08e92d64144bc724f5e0f07efbf0cc72a16b1336cf132cb",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/intervention-dincident",
+      "lang": "fr",
+      "sha256": "4ffaa138874124ee943979a4c4a78eec791fa205f8972bab542caa4e02a3c9d4",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/maintenance",
+      "lang": "fr",
+      "sha256": "1bdc7f3384c1e6683b53e17a2dccc8fcc4dff36a83bec0abc99c03d24924e8a2",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/protection-supports",
+      "lang": "fr",
+      "sha256": "61db37f2f7fc426df7b7061bda822da88f7eba8d3d675ca4bbb28b2724d6f1fb",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/protection-physique-environnementale",
+      "lang": "fr",
+      "sha256": "a1e16a27df318a4666f928d77a1b4c96e92c152e11ff6a5200607c892364b54b",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/planification",
+      "lang": "fr",
+      "sha256": "0d5b758365b1e90f68afac90b8acf3c8b63eb4c9feb898294c128680d4526bf7",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/gestion-programmes",
+      "lang": "fr",
+      "sha256": "2df0c94623c3ddfd092a0c8b45da5cc1074114b476cace457dcce62498fb9d6b",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/securite-personnel",
+      "lang": "fr",
+      "sha256": "2d2f409dbd3024c2d312aed0795a0dd085994ef6c1d92c6988a1a0230a77ad25",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/traitement-renseignements-personnels-transparence",
+      "lang": "fr",
+      "sha256": "072482a247156dd330a27bb1858406c93538d9788ac72b4cdc2250a5d086dc23",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/evaluation-risques",
+      "lang": "fr",
+      "sha256": "319f2f560a316d63effab872532132c1ddb8af7299d04b6ec4cfa66029a97e83",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/acquisition-systemes-services",
+      "lang": "fr",
+      "sha256": "d8c1ebd362ea80527d7f30875cdf2f809ee8121e7f54c7573c115cf819b5f3f0",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/protection-systemes-communications",
+      "lang": "fr",
+      "sha256": "30e0b76922cd088b9962fe2f039a3a5bfe013c44130f02fc5cf641b9c7621b31",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/integrite-linformation-systemes",
+      "lang": "fr",
+      "sha256": "f74855cc8bb229b0dae270132f4d11393385e2ca60361098c6a4730c4e91339e",
+      "dateModified": "2026-03-31"
+    },
+    {
+      "url": "https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/itsp10033/gestion-risques-lies-chaine-dapprovisionnement",
+      "lang": "fr",
+      "sha256": "662056af10f631dcb0beb08e2da874ac89428df5f7fdf5afae05a5463675f6d9",
+      "dateModified": "2026-03-31"
+    }
+  ],
+  "families": [
+    {
+      "id": "ac",
+      "controls": 24,
+      "activities": 1,
+      "enhancements": 126,
+      "canadaSpecific": 3
+    },
+    {
+      "id": "at",
+      "controls": 5,
+      "activities": 1,
+      "enhancements": 11,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "au",
+      "controls": 15,
+      "activities": 1,
+      "enhancements": 53,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "ca",
+      "controls": 6,
+      "activities": 3,
+      "enhancements": 23,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "cm",
+      "controls": 13,
+      "activities": 1,
+      "enhancements": 52,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "cp",
+      "controls": 12,
+      "activities": 1,
+      "enhancements": 43,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "ia",
+      "controls": 12,
+      "activities": 1,
+      "enhancements": 65,
+      "canadaSpecific": 3
+    },
+    {
+      "id": "ir",
+      "controls": 8,
+      "activities": 2,
+      "enhancements": 32,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "ma",
+      "controls": 6,
+      "activities": 1,
+      "enhancements": 23,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "mp",
+      "controls": 7,
+      "activities": 1,
+      "enhancements": 22,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "pe",
+      "controls": 24,
+      "activities": 1,
+      "enhancements": 41,
+      "canadaSpecific": 7
+    },
+    {
+      "id": "pl",
+      "controls": 4,
+      "activities": 7,
+      "enhancements": 6,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "pm",
+      "controls": 15,
+      "activities": 17,
+      "enhancements": 5,
+      "canadaSpecific": 0
+    },
+    {
+      "id": "ps",
+      "controls": 7,
+      "activities": 2,
+      "enhancements": 11,
+      "canadaSpecific": 2
+    },
+    {
+      "id": "pt",
+      "controls": 7,
+      "activities": 1,
+      "enhancements": 15,
+      "canadaSpecific": 2
+    },
+    {
+      "id": "ra",
+      "controls": 3,
+      "activities": 7,
+      "enhancements": 17,
+      "canadaSpecific": 1
+    },
+    {
+      "id": "sa",
+      "controls": 18,
+      "activities": 7,
+      "enhancements": 133,
+      "canadaSpecific": 11
+    },
+    {
+      "id": "sc",
+      "controls": 52,
+      "activities": 1,
+      "enhancements": 123,
+      "canadaSpecific": 9
+    },
+    {
+      "id": "si",
+      "controls": 23,
+      "activities": 1,
+      "enhancements": 102,
+      "canadaSpecific": 7
+    },
+    {
+      "id": "sr",
+      "controls": 10,
+      "activities": 2,
+      "enhancements": 15,
+      "canadaSpecific": 0
+    }
+  ],
+  "unrecognizedEnhancements": [
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "Managing and controlling administrative privileges (ITSAP.10.094)"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "How to protect your organization from insider threats (ITSAP.10.003)"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "Top 10ITsecurity actions: No. 3 managing and controlling administrative privileges (ITSM.10.094)"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "Managing and controlling administrative privileges (ITSAP.10.094)"
+    },
+    {
+      "family": "ac",
+      "position": 3,
+      "text": "How to protect your organization from insider threats (ITSAP.10.003)"
+    },
+    {
+      "family": "ac",
+      "position": 4,
+      "text": "Privacy Act"
+    },
+    {
+      "family": "ac",
+      "position": 5,
+      "text": "Government of Canada, Info Source: Sources of Federal Government and Employee Information"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "Baseline security requirements for network security zones (ITSP.80.022)"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "Cross domain security primer (ITSB-120)"
+    },
+    {
+      "family": "ac",
+      "position": 3,
+      "text": "Security considerations for the use of removable media devices for Protected C and Classified Information (ITSB-112)"
+    },
+    {
+      "family": "ac",
+      "position": 4,
+      "text": "ITmedia sanitization (ITSP.40.006)"
+    },
+    {
+      "family": "ac",
+      "position": 5,
+      "text": "TBSDirective on Service and Digital, Appendix L: Standard for Managing Metadata"
+    },
+    {
+      "family": "ac",
+      "position": 6,
+      "text": "TBSDirective on Service and Digital, Appendix J: Standard on Systems that Manage Information and Data"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "User authentication guidance for information technology systems (ITSP.30.031)"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSPolicy on Service and Digital"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "TBSDirective on Service and Digital"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "TBSDirective on Service and Digital, Appendix C: Mandatory Procedures for Privacy and Monitoring of Network and Device Use Information Notices"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSPolicy on Government Security"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "TBSDirective on Security Management, Appendix J: Standard on Security Categorization"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "Managing and controlling administrative privileges (ITSAP.10.094)"
+    },
+    {
+      "family": "ac",
+      "position": 3,
+      "text": "Top 10ITsecurity actions: No. 3 managing and controlling administrative privileges (ITSM.10.094)"
+    },
+    {
+      "family": "ac",
+      "position": 4,
+      "text": "NIST Federal Information Processing Standards (FIPS) 140-3 Security Requirements for Cryptographic Modules"
+    },
+    {
+      "family": "ac",
+      "position": 5,
+      "text": "NIST FIPS 186-5 Digital Signature Standard (DSS)"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSDirective on Security Management, Appendix C: Mandatory Procedures for Physical Security Control"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "TBSDirective on Security Management, Appendix E: Mandatory Procedures for Information Management Security Control"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "Security requirements for wireless local area networks (ITSG-41)"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "Guidance on securely configuring network protocols (ITSP.40.062)"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "Criteria for the design, fabrication, supply, installation and acceptance testing of walk-in, radio-frequency-shielded enclosures (ITSG-02) (available upon request from the Cyber Centre’s Contact Centre by email atcontact@cyber.gc.caor by phone at1-833-CYBER-88(1-833-292-3788))"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSDirective on Security Management: Appendix B: Mandatory Procedures for Information Technology Security Control"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "Security requirements for sireless local area networks (ITSG-41)"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "Security considerations for mobile device deployments (ITSAP.70.002)"
+    },
+    {
+      "family": "ac",
+      "position": 3,
+      "text": "Security configurations and best practices to protect your mobile device (ITSM.80.002)"
+    },
+    {
+      "family": "ac",
+      "position": 4,
+      "text": "Securing the enterprise for mobility (ITSM.80.001)"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "End user device security for bring-your-own-device (BYOD) deployment models (ITSM.70.003)"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "TBSDirective on Service and Digital, Appendix G: Standard on Enterprise Information Technology Service Common Configurations"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "TBSDirective on Security Management, Appendix J: Standard on Security Categorization"
+    },
+    {
+      "family": "ac",
+      "position": 0,
+      "text": "TBSDirective on Security Management: Appendix F: Mandatory Procedures for Security in Contracts and Other Arrangements Control"
+    },
+    {
+      "family": "ac",
+      "position": 1,
+      "text": "TBSGuidance on Preparing Information Sharing Agreements Involving Personal Information"
+    },
+    {
+      "family": "ac",
+      "position": 2,
+      "text": "TBSDirective on Privacy Practices"
+    }
+  ],
+  "frenchOnly": [],
+  "englishOnly": [],
+  "frenchFailures": []
+}
