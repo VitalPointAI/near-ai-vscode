@@ -15,6 +15,7 @@ import type { Seat } from './helpers/labelCellWorld';
 const PRODUCT = 'logistics-estimate';
 const LABEL = 'org/Internal';
 const ROLES = { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuard: 'j4-guard' };
+const OWNER: Actor = { kind: 'agent', member: ROLES.owner, run: 'owner-run' };
 const GUARD: Actor = { kind: 'agent', member: ROLES.releaseGuard, run: 'guard-run' };
 
 async function versionOn(lead: Seat) {
@@ -41,7 +42,7 @@ async function versionFold(seat: Seat, stream: string) {
   return { product, fold };
 }
 
-test('authorized guard verdict signs the exact version in its product stream and converges on both replicas', async () => {
+test('a guard verdict and owner agent submission sign the exact version and converge on both replicas', async () => {
   const lead = await leadWith();
   const guard = await bringIn(lead, 'guard', 'Guard Reviewer', orgClearance('Internal'));
   ok(await updateMember(lead.host, { member: guard.member, agentSeats: [ROLES.releaseGuard] }), 'authorise guard');
@@ -55,9 +56,19 @@ test('authorized guard verdict signs the exact version in its product stream and
   assert.equal(entry.stream, stream);
   assert.equal(entry.hash, result.hash);
   await syncTo(guard, lead, [stream]);
+  assert.equal((await versionFold(lead, stream)).product.versions[0]?.state, 'guard-checked');
+  const request = { product: PRODUCT, hash: version, decisionFor: 'commander' };
+  const submitted = await new VersionActs(lead.p, OWNER).submit(request);
+  assert.ok(submitted.ok, submitted.ok ? undefined : submitted.message);
+  const [submission] = await lead.p.findOwnAll('version.submit', () => true);
+  assert.deepEqual(submission?.data, request);
+  assert.equal(submission.stream, stream);
+  assert.equal(submission.hash, submitted.hash);
+  await syncTo(lead, guard, [stream]);
   const a = await versionFold(lead, stream);
   const b = await versionFold(guard, stream);
-  assert.equal(a.product.versions[0]?.state, 'guard-checked');
+  assert.equal(a.product.versions[0]?.state, 'awaiting-decision');
+  assert.equal(a.product.versions[0]?.decisionFor, 'commander');
   assert.deepEqual(a.product.versions, b.product.versions);
   assert.equal(a.fold.digests[stream], b.fold.digests[stream]);
   assert.deepEqual(a.fold.refused, []);
@@ -116,4 +127,46 @@ test('an authorized verdict with supported reasons exceeding the inline size fol
   assert.ok(result.ok, result.ok ? undefined : result.message);
   const { product } = await versionFold(lead, stream);
   assert.deepEqual(product.versions[0]?.held, { gate: 'guard', reasons });
+});
+
+test('submission requires an effective clearance and an authorized owner side without writing refusals', async () => {
+  const lead = await leadWith();
+  ok(await updateMember(lead.host, { member: lead.member, agentSeats: [ROLES.releaseGuard] }), 'authorise guard');
+  const { stream, version } = await versionOn(lead);
+  const owner = new VersionActs(lead.p, OWNER);
+  const guard = new VersionActs(lead.p, GUARD);
+  const request = { product: PRODUCT, hash: version, decisionFor: 'commander' };
+  const draft = streamEntries(lead.at, stream);
+  const uncleared = await owner.submit(request);
+  assert.equal(uncleared.ok ? undefined : uncleared.reason, 'wrong-state');
+  assert.deepEqual(streamEntries(lead.at, stream), draft);
+  assert.ok((await guard.verdict({ product: PRODUCT, hash: version, gate: 'guard', verdict: 'CLEARED', reasons: [] })).ok);
+  const cleared = streamEntries(lead.at, stream);
+  const unauthorized = await guard.submit(request);
+  assert.equal(unauthorized.ok ? undefined : unauthorized.reason, 'not-owner-or-lead');
+  assert.deepEqual(streamEntries(lead.at, stream), cleared);
+});
+
+test('a submit from a second window cannot reroute a version already awaiting a decision', async (t) => {
+  const lead = await leadWith();
+  ok(await updateMember(lead.host, { member: lead.member, agentSeats: [ROLES.releaseGuard] }), 'authorise guard');
+  const { stream, version } = await versionOn(lead);
+  const other = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  assert.ok((await new VersionActs(lead.p, GUARD).verdict({ product: PRODUCT, hash: version, gate: 'guard', verdict: 'CLEARED', reasons: [] })).ok);
+
+  let raced = false;
+  const append = ReplicaStore.prototype.appendOwn;
+  t.mock.method(ReplicaStore.prototype, 'appendOwn', async function (this: ReplicaStore, built: readonly BuiltEntry[], expectedSnapshot?: string) {
+    if (expectedSnapshot !== undefined && !raced) {
+      raced = true;
+      assert.ok((await new VersionActs(other, OWNER).submit({ product: PRODUCT, hash: version, decisionFor: 'commander' })).ok);
+    }
+    return append.call(this, built, expectedSnapshot);
+  });
+  const result = await new VersionActs(lead.p, OWNER).submit({ product: PRODUCT, hash: version, decisionFor: 'staff-lead' });
+  assert.ok(raced);
+  assert.equal(result.ok ? undefined : result.reason, 'wrong-state');
+  const { product } = await versionFold(lead, stream);
+  assert.equal(product.versions[0]?.decisionFor, 'commander');
+  assert.equal((await lead.p.findOwnAll('version.submit', () => true)).length, 1);
 });
