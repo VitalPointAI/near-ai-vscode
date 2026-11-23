@@ -1359,6 +1359,245 @@
     },
     {
       "controls": [
+        "sc-01"
+      ],
+      "id": "G118",
+      "ownerRole": "owner",
+      "poam": "g118",
+      "remediation": "The sponsor system-security lead approves policy and operating procedures for the assessed communications and protection boundary. Name the authority for updates, record the review cadence and triggers, document distribution to assigned roles, and sample an operating procedure followed under the approved policy.",
+      "title": "System and communications protection policy needs assigned ownership and review"
+    },
+    {
+      "controls": [
+        "sc-02",
+        "sc-04"
+      ],
+      "id": "G119",
+      "ownerRole": "shared",
+      "poam": "g119",
+      "remediation": "Component maintainers and deployment security owners map management functions separately from user functions and inventory shared storage, cache, compute and messaging resources. Document the effective privilege and isolation boundaries. In approved fixtures, verify an ordinary role cannot use the management path and distinct principals do not receive each other’s synthetic data through resource reuse.",
+      "title": "Management separation and shared-resource isolation need scoped evidence"
+    },
+    {
+      "controls": [
+        "sc-05",
+        "sc-05.02"
+      ],
+      "id": "G120",
+      "ownerRole": "shared",
+      "poam": "g120",
+      "remediation": "Service operators and maintainers identify applicable denial-of-service scenarios and agree on capacity, bandwidth, redundancy, upstream safeguards and recovery thresholds. From a controlled staging load or resilience exercise, retain configured limits, service and alert timing, failover or recovery observations, and treatment for uncovered paths.",
+      "title": "Availability protections and capacity limits need deployment evidence"
+    },
+    {
+      "controls": [
+        "sc-07",
+        "sc-07.03",
+        "sc-07.04"
+      ],
+      "id": "G121",
+      "ownerRole": "shared",
+      "poam": "g121",
+      "remediation": "The deployment network authority and component maintainers inventory external and key internal interfaces, authorized access points, public subnet separation and managed connections for each assessed telecom service. Review confidentiality, integrity and control-plane restrictions, evidence of required external operator notices, and each flow exception’s business reason, duration and reapproval. Use scoped route and X4 evidence for only the restrictions the product enforces.",
+      "title": "Managed boundary interfaces and telecom service exceptions need reviewed evidence"
+    },
+    {
+      "controls": [
+        "sc-07.05",
+        "sc-07.11"
+      ],
+      "id": "G122",
+      "ownerRole": "shared",
+      "poam": "g122",
+      "remediation": "Deployment gateway operators and component maintainers approve each default-deny boundary, exception and authorized inbound source and destination pair. Review effective network and service rules and record harmless allowed and denied cases from the assessed layers. Keep evidence for application route decisions separate from evidence for the surrounding gateways and host rules.",
+      "title": "Default-deny and allowed incoming communications need effective rule evidence"
+    },
+    {
+      "controls": [
+        "sc-07.07",
+        "sc-07.08"
+      ],
+      "id": "G123",
+      "ownerRole": "owner",
+      "poam": "g123",
+      "remediation": "Endpoint, VPN and proxy operators map assessed remote access and outbound flows. Verify prevention of unapproved split tunneling, safeguards and expiry for approved exceptions, and authenticated proxy enforcement for defined destinations. Capture only redacted configurations and authenticated and refused connection results. Record authorized scope decisions where a mechanism is unused.",
+      "title": "Remote tunnel safeguards and authenticated proxy use need operating evidence"
+    },
+    {
+      "controls": [
+        "sc-07.09"
+      ],
+      "id": "G124",
+      "ownerRole": "shared",
+      "poam": "g124",
+      "remediation": "Deployment monitoring and egress operators, with component maintainers, approve the outgoing traffic criteria and actor attribution requirement. Use harmless fixtures to verify the measured layer detects and blocks an unapproved outgoing condition and records the responsible identity or approved mapping. Review the path from decision to audit receipt and document gaps for traffic outside that layer.",
+      "title": "Outbound threat denial and responsible-identity auditing need scoped evidence"
+    },
+    {
+      "controls": [
+        "sc-07.12",
+        "sc-07.13"
+      ],
+      "id": "G125",
+      "ownerRole": "owner",
+      "poam": "g125",
+      "remediation": "Host and network operators inventory the assessed components that require host-based controls and the designated security tools that require physical subnet separation. Collect effective host policies, approved topology and managed interconnect settings. Verify only approved communications across the tool boundary and record an authorized scope decision if physical separation is out of scope.",
+      "title": "Host boundary protections and security-tool subnet separation need deployment evidence"
+    },
+    {
+      "controls": [
+        "sc-08",
+        "sc-08.01"
+      ],
+      "id": "G126",
+      "ownerRole": "shared",
+      "poam": "g126",
+      "remediation": "Component maintainers and deployment communications owners map every assessed link, TLS termination, loopback exception and any end-to-end protection layer. Collect effective protocol and trust settings plus accepted and refused peer or integrity results for the selected cryptographic mechanism. Treat built-in TLS and G13 platform attestation as scoped inputs and record explicit inheritance and exceptions.",
+      "title": "Confidentiality and integrity in transit need per-link deployment evidence"
+    },
+    {
+      "controls": [
+        "sc-10"
+      ],
+      "id": "G127",
+      "ownerRole": "shared",
+      "poam": "g127",
+      "remediation": "Deployment service and network operators and component maintainers approve idle limits and normal termination behavior for each assessed connection type. Observe the transport closing on end-of-session and at the effective idle threshold, including intermediate gateways where applicable. Distinguish a closed connection from invalidation of an application token under SC-23.",
+      "title": "Connection termination and idle timing need end-to-end evidence"
+    },
+    {
+      "controls": [
+        "sc-12",
+        "sc-12.01"
+      ],
+      "id": "G128",
+      "ownerRole": "shared",
+      "poam": "g128",
+      "remediation": "Deployment key custodians and component maintainers inventory assessed key uses and locations and approve generation, agreement, distribution, access, rotation, revocation and retirement. Review an authorized recovery exercise for applicable information after loss of a synthetic user key and prove access remains denied to an unauthorized role. Keep all key material out of evidence and retain X8’s scope for algorithm guidance.",
+      "title": "Key lifecycle and authorized recovery need deployment evidence"
+    },
+    {
+      "controls": [
+        "sc-13"
+      ],
+      "id": "G129",
+      "ownerRole": "shared",
+      "poam": "g129",
+      "remediation": "The sponsor cryptographic authority and component maintainers map each assessed use to an approved algorithm, key strength, provider, version and operating mode. Reconcile effective settings with the build inventory and document the required validation or accepted exception with its authority and expiry. Retain X8’s comparable-strength evaluation as an input for its stated scope.",
+      "title": "Approved cryptography by use and deployed configuration need evidence"
+    },
+    {
+      "controls": [
+        "sc-15",
+        "sc-15.03"
+      ],
+      "id": "G130",
+      "ownerRole": "owner",
+      "poam": "g130",
+      "remediation": "Endpoint operators and the secure-area owner inventory collaborative cameras, microphones and applications in scope. Review approved remote activation exceptions and the local usage indication. Verify remote activation is refused outside the exceptions and approved devices are disabled or removed in designated secure areas. Record the controlled test and area scope.",
+      "title": "Collaborative-device activation and restricted-area disablement need evidence"
+    },
+    {
+      "controls": [
+        "sc-17"
+      ],
+      "id": "G131",
+      "ownerRole": "shared",
+      "poam": "g131",
+      "remediation": "Deployment PKI operators and component maintainers inventory assessed certificates, issuing authorities and trust stores. Verify approved issuance, renewal and revocation processes and collect the effective trust-anchor set for each deployment path. Use approved fixture certificates to verify accepted and refused trust decisions. Keep actual private keys out of assessment artifacts.",
+      "title": "Certificate issuance and approved trust stores need deployment evidence"
+    },
+    {
+      "controls": [
+        "sc-18",
+        "sc-18.01",
+        "sc-18.02",
+        "sc-18.03",
+        "sc-18.04",
+        "sc-18.05"
+      ],
+      "id": "G132",
+      "ownerRole": "shared",
+      "poam": "g132",
+      "remediation": "Deployment endpoint owners and component maintainers define acceptable mobile code, its sources and authorized acquisition, development and use. Using benign test artifacts, verify identification and corrective action for prohibited code, prevention of unauthorized download or execution and automatic execution, any required pre-execution approval, and confinement of permitted code in verified VM environments. Record applicability for each assessed mechanism.",
+      "title": "Mobile code acquisition, execution controls and confinement need evidence"
+    },
+    {
+      "controls": [
+        "sc-20"
+      ],
+      "id": "G133",
+      "ownerRole": "owner",
+      "poam": "g133",
+      "remediation": "The deployment DNS authority inventories assessed zones, authoritative service providers and delegated child zones. Review the authenticated resolution configuration, retained signatures and parent-child trust evidence for applicable chains. Capture verification of the in-scope resolver view and relevant child-zone status without publishing protected internal names.",
+      "title": "Authoritative DNS integrity and delegation evidence need verified scope"
+    },
+    {
+      "controls": [
+        "sc-21",
+        "sc-22"
+      ],
+      "id": "G134",
+      "ownerRole": "owner",
+      "poam": "g134",
+      "remediation": "Deployment DNS operators inventory recursive and caching services, authorized callers and internal and external authoritative roles. Verify that the assessed resolver requests and validates authenticated responses and handles validation failures according to approved policy. Observe a controlled failure or failover and review effective separation of service roles.",
+      "title": "Resolver validation, fault tolerance and role separation need evidence"
+    },
+    {
+      "controls": [
+        "sc-23",
+        "sc-23.01",
+        "sc-23.03"
+      ],
+      "id": "G135",
+      "ownerRole": "shared",
+      "poam": "g135",
+      "remediation": "Component maintainers and deployment identity operators inventory assessed communications sessions and identifier issuers. Review authenticity and approved randomness requirements. Use exact-release test results and controlled deployment observations for distinct system-generated identifiers, rejection of unrecognized identifiers, and denial after logout or termination. G3 contributes only its scoped relay ingress evidence.",
+      "title": "Session authenticity, identifier generation and logout invalidation need evidence"
+    },
+    {
+      "controls": [
+        "sc-28",
+        "sc-28.01"
+      ],
+      "id": "G136",
+      "ownerRole": "shared",
+      "poam": "g136",
+      "remediation": "Component maintainers and deployment storage and key owners inventory covered information, storage locations and media, including applicable backups and logs. Record approved confidentiality and integrity protections and boundaries of any inherited disk or storage encryption. Verify released sealed-state behavior for its covered data and collect redacted operating configuration and authorized recovery or integrity results for the remaining deployed stores.",
+      "title": "Storage confidentiality and integrity need assessed component and media evidence"
+    },
+    {
+      "controls": [
+        "sc-29"
+      ],
+      "id": "G137",
+      "ownerRole": "owner",
+      "poam": "g137",
+      "remediation": "The sponsor architecture owner identifies components for which technology diversity is required and documents the intended risk reduction and correlated dependencies. Compare the approved design to installed component, platform and provider inventories. Use an approved resilience exercise or disposition for gaps in the declared diversity boundary.",
+      "title": "Assessed technology diversity needs architecture rationale and operating evidence"
+    },
+    {
+      "controls": [
+        "sc-39"
+      ],
+      "id": "G138",
+      "ownerRole": "shared",
+      "poam": "g138",
+      "remediation": "Deployment runtime operators and component maintainers inventory assessed processes and their execution domains, privileges and shared resources. Review the effective isolation settings at each applicable host, service, container or VM boundary. Verify that distinct synthetic principals cannot read each other’s test process data through reuse of shared resources. Record any dependency on inherited host protection.",
+      "title": "Process execution domains need independent boundary evidence"
+    },
+    {
+      "controls": [
+        "sc-45"
+      ],
+      "id": "G139",
+      "ownerRole": "owner",
+      "poam": "g139",
+      "remediation": "The deployment infrastructure owner inventories time sources and assessed components, approves synchronization and drift requirements, and records the effective settings and exception process. Compare observed offsets across components and verify alert or correction behavior in a controlled test. Use G18 audit timestamp evidence only for its covered log behavior.",
+      "title": "Clock synchronization needs assessed component settings and drift evidence"
+    },
+    {
+      "controls": [
         "pm-01",
         "pm-02",
         "pm-03"

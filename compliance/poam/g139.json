@@ -1,0 +1,16 @@
+{
+  "gap": "G139",
+  "id": "g139",
+  "controls": [
+    "sc-45"
+  ],
+  "ownerRole": "owner",
+  "title": "Clock synchronization needs assessed component settings and drift evidence",
+  "remediation": "The deployment infrastructure owner inventories time sources and assessed components, approves synchronization and drift requirements, and records the effective settings and exception process. Compare observed offsets across components and verify alert or correction behavior in a controlled test. Use G18 audit timestamp evidence only for its covered log behavior.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved time-source and drift settings, measured component offsets and dated correction or alert evidence"
+    }
+  ]
+}

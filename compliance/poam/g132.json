@@ -1,0 +1,21 @@
+{
+  "gap": "G132",
+  "id": "g132",
+  "controls": [
+    "sc-18",
+    "sc-18.01",
+    "sc-18.02",
+    "sc-18.03",
+    "sc-18.04",
+    "sc-18.05"
+  ],
+  "ownerRole": "shared",
+  "title": "Mobile code acquisition, execution controls and confinement need evidence",
+  "remediation": "Deployment endpoint owners and component maintainers define acceptable mobile code, its sources and authorized acquisition, development and use. Using benign test artifacts, verify identification and corrective action for prohibited code, prevention of unauthorized download or execution and automatic execution, any required pre-execution approval, and confinement of permitted code in verified VM environments. Record applicability for each assessed mechanism.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved mobile-code rules, distribution and enforcement settings, safe denied cases and evidence of the required independent execution boundary"
+    }
+  ]
+}

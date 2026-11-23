@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 143);
-  assert.equal(poam.length, 135);
+  assert.equal(gaps.length, 165);
+  assert.equal(poam.length, 157);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -77,7 +77,15 @@ test('release assessment gaps have named open paths', () => {
     ['pm-32', 'G183', '44.1'], ['pm-08', 'G184', '44.1'], ['pm-29', 'G185', '44.1'],
     ['pm-13', 'G186', '44.1'], ['pm-16.01', 'G187', '44.1'], ['pm-17', 'G188', '44.1'],
     ['pm-27', 'G189', '44.1'], ['pm-26', 'G190', '44.1'], ['pm-22', 'G191', '44.1'],
-    ['pm-25', 'G192', '44.1'], ['pm-30.01', 'G193', '44.1']
+    ['pm-25', 'G192', '44.1'], ['pm-30.01', 'G193', '44.1'],
+    ['sc-01', 'G118', '44.1'], ['sc-04', 'G119', '44.1'], ['sc-05.02', 'G120', '44.1'],
+    ['sc-07.04', 'G121', '44.1'], ['sc-07.11', 'G122', '44.1'], ['sc-07.08', 'G123', '44.1'],
+    ['sc-07.09', 'G124', '44.1'], ['sc-07.13', 'G125', '44.1'], ['sc-08.01', 'G126', '44.1'],
+    ['sc-10', 'G127', '44.1'], ['sc-12.01', 'G128', '44.1'], ['sc-13', 'G129', '44.1'],
+    ['sc-15.03', 'G130', '44.1'], ['sc-17', 'G131', '44.1'], ['sc-18.05', 'G132', '44.1'],
+    ['sc-20', 'G133', '44.1'], ['sc-22', 'G134', '44.1'], ['sc-23.03', 'G135', '44.1'],
+    ['sc-28.01', 'G136', '44.1'], ['sc-29', 'G137', '44.1'], ['sc-39', 'G138', '44.1'],
+    ['sc-45', 'G139', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);

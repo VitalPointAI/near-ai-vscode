@@ -1,0 +1,17 @@
+{
+  "gap": "G136",
+  "id": "g136",
+  "controls": [
+    "sc-28",
+    "sc-28.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Storage confidentiality and integrity need assessed component and media evidence",
+  "remediation": "Component maintainers and deployment storage and key owners inventory covered information, storage locations and media, including applicable backups and logs. Record approved confidentiality and integrity protections and boundaries of any inherited disk or storage encryption. Verify released sealed-state behavior for its covered data and collect redacted operating configuration and authorized recovery or integrity results for the remaining deployed stores.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved information-to-storage protection matrix and scoped cryptographic at-rest test and deployment settings with accepted exceptions"
+    }
+  ]
+}
