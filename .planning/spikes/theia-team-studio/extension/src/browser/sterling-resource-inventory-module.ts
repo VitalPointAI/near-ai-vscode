@@ -135,7 +135,7 @@ class SterlingResourceInventory extends BaseWidget {
 
     const filters = node('div', undefined, 'sterling-portfolio-filters');
     this.search.type = 'search';
-    this.search.placeholder = 'Name or ID';
+    this.search.placeholder = 'Name, ID, DID, stock number or policy';
     this.state.append(option('All statuses', ''), ...Object.entries(inventoryStatuses).map(([id, label]) => option(label, id)),
       option(notReported, 'unreported'));
     filters.append(labelled('Search resources', this.search), labelled('Category', this.category), labelled('Reported status', this.state));
@@ -336,7 +336,8 @@ class SterlingResourceInventory extends BaseWidget {
     const matches = this.ordered.filter(record =>
       (!this.category.value || record.category === this.category.value) &&
       (!this.state.value || (record.status ?? 'unreported') === this.state.value) &&
-      (!query || `${record.name} ${record.id}`.toLocaleLowerCase().includes(query)));
+      (!query || [record.name, record.id, record.assetDid, record.stockNumber, record.usagePolicyRef, record.description, record.imageRef]
+        .some(value => value?.toLocaleLowerCase().includes(query))));
     const displayed = matches.slice(0, this.visible);
     this.more.hidden = matches.length <= this.visible;
     this.results.textContent = matches.length ? `Showing ${displayed.length} of ${matches.length} records` :
@@ -368,6 +369,16 @@ class SterlingResourceInventory extends BaseWidget {
     const data = node('dl', undefined, 'sterling-resource-fields');
     data.append(field('Category', record.category), field('Reported status', record.status ? inventoryStatuses[record.status] : notReported),
       field('Reported quantity', quantity(record)), field('Record as of', record.asOf ? date(record.asOf) : notReported));
+    const reported = [
+      ['Reported asset DID', record.assetDid],
+      ['Reported policy reference', record.usagePolicyRef],
+      ['Reported catalogue stock number', record.stockNumber],
+      ['Reported description', record.description],
+      ['Reported image reference', record.imageRef]
+    ] as const;
+    for (const [label, value] of reported) {
+      if (value !== undefined) data.append(field(label, value));
+    }
     const input = node('input');
     input.readOnly = true;
     input.value = reference;
