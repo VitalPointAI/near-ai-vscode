@@ -1,0 +1,17 @@
+{
+  "gap": "G166",
+  "id": "g166",
+  "controls": [
+    "pe-09",
+    "pe-10"
+  ],
+  "ownerRole": "owner",
+  "title": "Protected power cabling and emergency shutoff need site verification",
+  "remediation": "The sponsor facilities electrical lead identifies protected equipment and cabling and reviews emergency isolation coverage, access for authorized responders and protections against unauthorized activation. Use an authorized maintenance inspection and test or approved simulation to verify coverage across in-scope sites. Assess provider-controlled sites through scoped service evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect electrical safeguard inspection records, approved emergency shutoff roles and the latest maintenance test or simulation"
+    }
+  ]
+}

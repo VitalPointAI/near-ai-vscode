@@ -1,0 +1,18 @@
+{
+  "gap": "G175",
+  "id": "g175",
+  "controls": [
+    "ps-02",
+    "ps-03",
+    "ps-09"
+  ],
+  "ownerRole": "owner",
+  "title": "Position screening requirements and personnel eligibility need evidence",
+  "remediation": "The sponsor personnel security and human resources leads define screening criteria by position, review cadence and rescreening triggers, and maintain position descriptions with security and privacy duties. Sample an eligibility determination before access and a rescreening or due-date review using redacted workflow evidence without background investigation contents.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the position screening matrix, approved role description and redacted screening-before-access and rescreening samples"
+    }
+  ]
+}

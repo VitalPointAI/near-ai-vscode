@@ -1359,6 +1359,220 @@
     },
     {
       "controls": [
+        "pe-01"
+      ],
+      "id": "G160",
+      "ownerRole": "owner",
+      "poam": "g160",
+      "remediation": "The sponsor physical security official and facility leads document the applicable policy and procedures, recipients, roles, coordination and review events. Capture publication and a dated review. Record provider or landlord responsibilities and submit any inheritance or tailoring decision to the sponsor security authority for review.",
+      "title": "Physical and environmental protection policy requires sponsor approval"
+    },
+    {
+      "controls": [
+        "pe-02",
+        "pe-02.400"
+      ],
+      "id": "G161",
+      "ownerRole": "owner",
+      "poam": "g161",
+      "remediation": "The sponsor facilities access manager approves zone access, credential and identification card standards. Sample authorization, issuance, periodic list review and removal when access ends. Confirm required identification fields through the approved template or a redacted issuance checklist without collecting staff photographs or badge identifiers.",
+      "title": "Physical access authorization and identification credentials need evidence"
+    },
+    {
+      "controls": [
+        "pe-03",
+        "pe-03.400"
+      ],
+      "id": "G162",
+      "ownerRole": "owner",
+      "poam": "g162",
+      "remediation": "The sponsor site security manager designates controlled entry and public boundaries, visitor escort conditions, access device inventories and lost or compromised credential response. Sample authorized access and logs, credential replacement or removal, and a qualified site inspection with authorized follow-up, including changed inspection cadence when required. Record inherited site controls for sponsor validation.",
+      "title": "Entry enforcement and physical security inspections need site evidence"
+    },
+    {
+      "controls": [
+        "pe-04",
+        "pe-05"
+      ],
+      "id": "G163",
+      "ownerRole": "owner",
+      "poam": "g163",
+      "remediation": "The sponsor network facilities lead and information custodian identify protected transmission and distribution lines and devices that can display or print in-scope information. Verify access controls on each route type and sample physical controls for output handling by authorized users. Document cases without local output for sponsor tailoring review.",
+      "title": "Physical protection of transmission paths and output needs verification"
+    },
+    {
+      "controls": [
+        "pe-06",
+        "pe-06.01"
+      ],
+      "id": "G164",
+      "ownerRole": "owner",
+      "poam": "g164",
+      "remediation": "The sponsor physical security operations manager records monitored facilities, intrusion and surveillance coverage, log review triggers and frequency, retention and access restrictions. Sample an alarm or authorized exercise, a dated log review and escalation into organizational incident response. Have privacy officials confirm handling of surveillance records.",
+      "title": "Physical monitoring and security incident handoff need evidence"
+    },
+    {
+      "controls": [
+        "pe-08"
+      ],
+      "id": "G165",
+      "ownerRole": "owner",
+      "poam": "g165",
+      "remediation": "The sponsor visitor-services lead defines retention, review frequency and anomaly recipients. Sample controlled visitor registration, a dated record review and an anomaly escalation or exercise. Use a restricted evidence reference or redacted record to avoid redisclosing visitor identities.",
+      "title": "Visitor records and anomaly escalation need facility evidence"
+    },
+    {
+      "controls": [
+        "pe-09",
+        "pe-10"
+      ],
+      "id": "G166",
+      "ownerRole": "owner",
+      "poam": "g166",
+      "remediation": "The sponsor facilities electrical lead identifies protected equipment and cabling and reviews emergency isolation coverage, access for authorized responders and protections against unauthorized activation. Use an authorized maintenance inspection and test or approved simulation to verify coverage across in-scope sites. Assess provider-controlled sites through scoped service evidence.",
+      "title": "Protected power cabling and emergency shutoff need site verification"
+    },
+    {
+      "controls": [
+        "pe-11",
+        "pe-12"
+      ],
+      "id": "G167",
+      "ownerRole": "owner",
+      "poam": "g167",
+      "remediation": "The sponsor continuity and facilities leads approve the required orderly shutdown or long-term power transfer mode. Collect an authorized power-loss test showing UPS behavior and maintenance records for automatic emergency lighting along exits and evacuation routes. Validate site and provider coverage before accepting inheritance.",
+      "title": "Backup power and emergency egress lighting need test records"
+    },
+    {
+      "controls": [
+        "pe-13",
+        "pe-13.01",
+        "pe-13.04",
+        "pe-13.400"
+      ],
+      "id": "G168",
+      "ownerRole": "owner",
+      "poam": "g168",
+      "remediation": "The sponsor fire safety lead verifies independently powered detection and suppression, automatic notifications to named responders, qualified inspections at approved intervals and timely remediation. Review site safeguarding decisions against firefighting water capacity and emergency response assumptions. Assess landlord or provider evidence for each covered site.",
+      "title": "Fire detection, suppression and emergency response need facility evidence"
+    },
+    {
+      "controls": [
+        "pe-14",
+        "pe-15"
+      ],
+      "id": "G169",
+      "ownerRole": "owner",
+      "poam": "g169",
+      "remediation": "The sponsor building operations lead approves applicable environmental thresholds and monitoring intervals. Review a representative monitoring trend or alert and confirm water shutoff or isolation valves are accessible, operational and known to responsible staff. Document any provider inheritance by location for sponsor review.",
+      "title": "Environmental monitoring and water isolation need facility evidence"
+    },
+    {
+      "controls": [
+        "pe-16"
+      ],
+      "id": "G170",
+      "ownerRole": "owner",
+      "poam": "g170",
+      "remediation": "The sponsor asset custodian defines controlled component classes and who authorizes receipt or removal. Sample entry, release and custody reconciliation against asset records. Use restricted references or redact identifying information while retaining dates, approvals and exceptions needed for assessment.",
+      "title": "Facility delivery and removal authorization needs movement records"
+    },
+    {
+      "controls": [
+        "pe-17",
+        "pe-400",
+        "pe-400.01"
+      ],
+      "id": "G171",
+      "ownerRole": "owner",
+      "poam": "g171",
+      "remediation": "The sponsor remote-work authority and physical security lead define approved work sites and information categories. Review site safeguards, incident contacts, approved devices and storage for physical information and assets against departmental requirements and applicable RCMP guidance. Sample an authorized site assessment and evidence of control effectiveness without publishing residential details.",
+      "title": "Alternate work and domestic telework safeguards need sponsor assessment"
+    },
+    {
+      "controls": [
+        "pe-400.02"
+      ],
+      "id": "G172",
+      "ownerRole": "owner",
+      "poam": "g172",
+      "remediation": "The sponsor international telework authority establishes exceptional access criteria and identifies the applicable departmental approval officials. Where use is permitted, sample a time-limited request with location and personnel risk assessment, security briefing, approvals and end-of-access evidence. Where prohibited or outside scope, submit the policy and deployment boundary to the assessor for review.",
+      "title": "International telework exceptions need sponsor decisions"
+    },
+    {
+      "controls": [
+        "pe-401"
+      ],
+      "id": "G173",
+      "ownerRole": "owner",
+      "poam": "g173",
+      "remediation": "The sponsor security operations authority identifies the physical and technical monitoring coverage, operators and escalation responsibility for in-scope services and facilities. Review any shared or provider service claim against its scope and verify an observed exercise or incident handoff. Submit residual coverage decisions for sponsor review.",
+      "title": "Security operations centre coverage needs sponsor validation"
+    },
+    {
+      "controls": [
+        "ps-01"
+      ],
+      "id": "G174",
+      "ownerRole": "owner",
+      "poam": "g174",
+      "remediation": "The sponsor personnel security official defines policy scope, accountable roles, procedures, recipients, review intervals and update triggers. Record approval, distribution and recent review. Confirm the applicable boundary for employee and external personnel procedures with sponsor security and privacy officials.",
+      "title": "Personnel security policy requires sponsor approval"
+    },
+    {
+      "controls": [
+        "ps-02",
+        "ps-03",
+        "ps-09"
+      ],
+      "id": "G175",
+      "ownerRole": "owner",
+      "poam": "g175",
+      "remediation": "The sponsor personnel security and human resources leads define screening criteria by position, review cadence and rescreening triggers, and maintain position descriptions with security and privacy duties. Sample an eligibility determination before access and a rescreening or due-date review using redacted workflow evidence without background investigation contents.",
+      "title": "Position screening requirements and personnel eligibility need evidence"
+    },
+    {
+      "controls": [
+        "ps-04"
+      ],
+      "id": "G176",
+      "ownerRole": "owner",
+      "poam": "g176",
+      "remediation": "The sponsor human resources, identity and asset leads define termination notification, access disablement deadline, credential revocation, exit topics and asset recovery. Sample a termination or authorized exercise against the deadline and verify reassignment or retained access to organizational information. Record inherited directory actions at their assessed boundary.",
+      "title": "Termination and credential revocation need timestamped sponsor evidence"
+    },
+    {
+      "controls": [
+        "ps-06"
+      ],
+      "id": "G177",
+      "ownerRole": "owner",
+      "poam": "g177",
+      "remediation": "The sponsor access governance lead and privacy office approve agreement versions, review intervals and re-signing triggers. Sample a recorded acceptance before access and a renewal after a revision or scheduled interval. Retain a restricted reference or redacted evidence for assessor review.",
+      "title": "Access agreements need documented issuance and renewal"
+    },
+    {
+      "controls": [
+        "ps-07"
+      ],
+      "id": "G178",
+      "ownerRole": "owner",
+      "poam": "g178",
+      "remediation": "The sponsor procurement and personnel security officials document external personnel screening, provider obligations, government oversight and end-user responsibilities, notification recipients and deadlines for transfers or terminations. Sample sponsor oversight and a timely credential or privilege change under the applicable agreement. Record provider scope and submit inheritance decisions for review.",
+      "title": "External personnel screening and provider notification need sponsor evidence"
+    },
+    {
+      "controls": [
+        "ps-08"
+      ],
+      "id": "G179",
+      "ownerRole": "owner",
+      "poam": "g179",
+      "remediation": "The sponsor human resources and security officials approve a formal sanctions procedure for security and privacy violations, notification recipients and timing. Provide a restricted evidence reference or sanitized exercise showing initiation, authorized notification and oversight without circulating identities or case details.",
+      "title": "Personnel sanctions and timely notification need sponsor evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

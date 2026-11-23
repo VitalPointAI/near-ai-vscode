@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 129);
-  assert.equal(poam.length, 121);
+  assert.equal(gaps.length, 149);
+  assert.equal(poam.length, 141);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -72,7 +72,27 @@ test('release assessment gaps have named open paths', () => {
     ['sa-09', 'G110', '44.1'], ['sa-09.01', 'G110', '44.1'], ['sa-09.02', 'G110', '44.1'],
     ['sa-09.08', 'G111', '44.1'], ['sa-10', 'G112', '44.1'], ['sa-10.07', 'G112', '44.1'],
     ['sa-10.01', 'G113', '44.1'], ['sa-11', 'G114', '44.1'], ['sa-15', 'G115', '44.1'],
-    ['sa-15.03', 'G115', '44.1'], ['sa-22', 'G116', '44.1'], ['sa-400', 'G117', '44.1']
+    ['sa-15.03', 'G115', '44.1'], ['sa-22', 'G116', '44.1'], ['sa-400', 'G117', '44.1'],
+    ['pe-01', 'G160', '44.1'],
+    ['pe-02', 'G161', '44.1'], ['pe-02.400', 'G161', '44.1'],
+    ['pe-03', 'G162', '44.1'], ['pe-03.400', 'G162', '44.1'],
+    ['pe-04', 'G163', '44.1'], ['pe-05', 'G163', '44.1'],
+    ['pe-06', 'G164', '44.1'], ['pe-06.01', 'G164', '44.1'],
+    ['pe-08', 'G165', '44.1'],
+    ['pe-09', 'G166', '44.1'], ['pe-10', 'G166', '44.1'],
+    ['pe-11', 'G167', '44.1'], ['pe-12', 'G167', '44.1'],
+    ['pe-13', 'G168', '44.1'], ['pe-13.01', 'G168', '44.1'], ['pe-13.04', 'G168', '44.1'], ['pe-13.400', 'G168', '44.1'],
+    ['pe-14', 'G169', '44.1'], ['pe-15', 'G169', '44.1'],
+    ['pe-16', 'G170', '44.1'],
+    ['pe-17', 'G171', '44.1'], ['pe-400', 'G171', '44.1'], ['pe-400.01', 'G171', '44.1'],
+    ['pe-400.02', 'G172', '44.1'],
+    ['pe-401', 'G173', '44.1'],
+    ['ps-01', 'G174', '44.1'],
+    ['ps-02', 'G175', '44.1'], ['ps-03', 'G175', '44.1'], ['ps-09', 'G175', '44.1'],
+    ['ps-04', 'G176', '44.1'],
+    ['ps-06', 'G177', '44.1'],
+    ['ps-07', 'G178', '44.1'],
+    ['ps-08', 'G179', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);

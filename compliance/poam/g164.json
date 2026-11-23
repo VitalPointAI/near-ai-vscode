@@ -1,0 +1,17 @@
+{
+  "gap": "G164",
+  "id": "g164",
+  "controls": [
+    "pe-06",
+    "pe-06.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Physical monitoring and security incident handoff need evidence",
+  "remediation": "The sponsor physical security operations manager records monitored facilities, intrusion and surveillance coverage, log review triggers and frequency, retention and access restrictions. Sample an alarm or authorized exercise, a dated log review and escalation into organizational incident response. Have privacy officials confirm handling of surveillance records.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect monitoring settings, a dated access-log review and a redacted alarm or incident exercise showing response handoff"
+    }
+  ]
+}
