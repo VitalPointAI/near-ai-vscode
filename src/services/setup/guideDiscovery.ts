@@ -3,8 +3,10 @@ import { isIP } from 'node:net';
 import { isDeepStrictEqual } from 'node:util';
 import { findEndpoint, isLoopbackEndpointHost, type PolicyEndpoint } from '../../domain/gate/endpoints';
 import type { DiscoverySection } from '../../domain/gate/sections';
-import { cleanFreeText } from '../../domain/setup/answers';
-import { discoveryWays, type NetworkFactsReader } from '../../domain/setup/network';
+import { cleanFreeText, fillSlots } from '../../domain/setup/answers';
+import type { HostKind } from '../../domain/setup/device';
+import { buildScanRecord } from '../../domain/setup/guideRecord';
+import { discoveryWays, NOT_LISTED_NETWORK_TEXT, type NetworkFactsReader } from '../../domain/setup/network';
 import type { GuidePolicy } from '../../domain/setup/policy';
 import type { FoundServerRow, GuideDiscoveryPort, ScanOffer } from '../../domain/setup/screens';
 import type { Identification, ServerCandidate, ServerIdentity } from '../../domain/setup/servers';
@@ -16,6 +18,7 @@ import { createIdentify } from './identify';
 import { browseAnnounced, MAX_ANNOUNCED, type DatagramLike, type DiscoveryClock } from './mdns';
 import { probeOrigin } from './probe';
 import { proposalStep } from './proposals';
+import { planScan, runScan, SCAN_CONFIRM_TEXT, SCAN_STOPPED_TEXT, type ScanPlan } from './scan';
 import { lookupAnnouncedSrv, type SrvResolverLike } from './srv';
 
 export interface GuideDiscoveryDeps {
@@ -30,6 +33,8 @@ export interface GuideDiscoveryDeps {
   readonly clock: DiscoveryClock;
   readonly editor?: Pick<PolicyEditorPort, 'propose'>;
   readonly audit?: Pick<SetupAuditLog, 'append'>;
+  readonly hostKind?: HostKind;
+  readonly tcpConnect?: Parameters<typeof runScan>[0]['connect'];
 }
 
 export const FOUND_DEFAULT_REGION = 'unstated';
@@ -43,6 +48,18 @@ interface DiscoveredRow {
 interface PublishedScope {
   readonly discovery: DiscoverySection;
   readonly networkId: string;
+  readonly signal: AbortSignal;
+}
+
+interface ScanReview {
+  readonly scope: PublishedScope;
+  readonly plan: ScanPlan;
+}
+
+interface ActiveScan {
+  readonly controller: AbortController;
+  readonly review: ScanReview;
+  done: number;
 }
 
 const scanOff: ScanOffer = Object.freeze({ offered: false, ranges: Object.freeze([]), running: false });
@@ -91,12 +108,15 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
   let approval: AbortController | undefined;
   let publishedRows: readonly DiscoveredRow[] = [];
   let publishedScope: PublishedScope | undefined;
+  let scanReview: ScanReview | undefined;
+  let scanning: ActiveScan | undefined;
+  let scanNote: string | undefined;
 
   function authorizedDiscovery(): DiscoverySection | undefined {
     try {
       const policy = deps.policy();
       const section = policy.state === 'ready' ? policy.discovery : undefined;
-      return section?.announce && section.networks.length > 0 ? section : undefined;
+      return section && section.networks.length > 0 && (section.announce || section.scanRanges.length > 0) ? section : undefined;
     } catch {
       return undefined;
     }
@@ -111,11 +131,28 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
     return !present || issuedHere || scope.personalApprovals ? 'approve' : 'ask';
   }
 
+  function notify(): void {
+    for (const listener of listeners) {
+      try { listener(); } catch { /* Presentation observers do not own discovery work. */ }
+    }
+  }
+
   function publish(rows: readonly DiscoveredRow[], scope?: PublishedScope): void {
     const changed = !isDeepStrictEqual(publishedRows.map(({ row }) => row), rows.map(({ row }) => row));
     publishedRows = rows;
     publishedScope = scope;
-    if (changed) for (const listener of listeners) listener();
+    if (changed) notify();
+  }
+
+  function currentScope(scope: PublishedScope): boolean {
+    return !scope.signal.aborted && isDeepStrictEqual(authorizedDiscovery(), scope.discovery);
+  }
+
+  function offerScan(review?: ScanReview, note?: string): void {
+    const changed = scanReview !== review || scanNote !== note;
+    scanReview = review;
+    scanNote = note;
+    if (changed) notify();
   }
 
   function candidatePin(candidate: ServerCandidate, permitted: () => boolean, signal: AbortSignal) {
@@ -125,10 +162,11 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
     } });
   }
 
-  async function inspect(candidate: ServerCandidate, scope: DiscoverySection, permitted: () => boolean, signal: AbortSignal): Promise<DiscoveredRow | undefined> {
+  async function inspect(candidate: ServerCandidate, scope: DiscoverySection, permitted: () => boolean, signal: AbortSignal,
+    verifyNetwork?: (signal: AbortSignal) => Promise<boolean>): Promise<DiscoveredRow | undefined> {
     const { target } = candidate;
     const { host, port } = target;
-    if (!permitted()) return undefined;
+    if (!permitted() || (verifyNetwork && !await verifyNetwork(signal))) return undefined;
     const row = { id: foundEndpointId(host, port), host, port, name: cleanFreeText(candidate.name ?? '', 63).trim() || host };
     const pinned = await candidatePin(candidate, permitted, signal);
     if (!permitted()) return undefined;
@@ -139,7 +177,13 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
       fetchForPin(pin) {
         if (pin !== pinned.pin || !permitted()) return cannotRequest;
         const transport = deps.fetchForPin(pin);
-        return (input, options) => permitted() ? transport(input, options) : cannotRequest(input, options);
+        return async (input, options) => {
+          const requestSignal = options?.signal ?? signal;
+          if (!permitted() || (verifyNetwork && !await verifyNetwork(requestSignal)) || !permitted()) {
+            return cannotRequest(input, options);
+          }
+          return transport(input, options);
+        };
       }
     });
     let identity: Identification;
@@ -166,17 +210,18 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
     const role = { ...deps.organization };
     const run = new AbortController();
     const samePublication = () => publishedScope === scope && publishedRows.includes(entry);
-    const permitted = () => !run.signal.aborted && samePublication() && isDeepStrictEqual(role, deps.organization) &&
-      isDeepStrictEqual(authorizedDiscovery(), scope.discovery) && action(scope.discovery) === 'approve' && !listed(entry.row);
+    const signal = AbortSignal.any([run.signal, scope.signal]);
+    const permitted = () => !signal.aborted && samePublication() && isDeepStrictEqual(role, deps.organization) &&
+      currentScope(scope) && action(scope.discovery) === 'approve' && !listed(entry.row);
 
     try {
       if (!permitted()) return 'not-allowed';
       const { editor, audit } = deps;
       if (!editor || !audit) return 'failed';
       approval = run;
-      const facts = await deps.networkFacts(run.signal);
+      const facts = await deps.networkFacts(signal);
       if (!permitted() || facts.source === 'unknown' || discoveryWays(scope.discovery, facts).network?.id !== scope.networkId) return 'not-allowed';
-      const pin = await candidatePin(proof.candidate, permitted, run.signal);
+      const pin = await candidatePin(proof.candidate, permitted, signal);
       if (!permitted() || !pin.ok || pin.pin !== proof.pin) return 'not-allowed';
       const personalApprovals = scope.discovery.personalApprovals;
       const proposal = endpointProposalFor({
@@ -199,7 +244,7 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
           detail: { endpointId: id, serverKind: proof.identity.kind, pin: proof.pin } }
       }).run();
       if (result.outcome !== 'proposal-opened') return 'failed';
-      if (!run.signal.aborted && samePublication()) {
+      if (!signal.aborted && samePublication()) {
         publish(publishedRows.map((existing) => existing === entry
           ? { row: { ...entry.row, state: 'proposed', action: 'none' } } : existing), scope);
       }
@@ -211,10 +256,101 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
     }
   }
 
+  function scanOffer(): ScanOffer {
+    if (scanning) return { ...scanOff, running: true, done: scanning.done, total: scanning.review.plan.hosts };
+    if (!scanReview || !currentScope(scanReview.scope)) return scanNote ? { ...scanOff, reasonOff: scanNote } : scanOff;
+    const { ranges, ports, estimatedSeconds, hosts } = scanReview.plan;
+    const minutes = Math.max(1, Math.ceil(estimatedSeconds / 60));
+    const confirm = fillSlots(SCAN_CONFIRM_TEXT, {
+      ranges: ranges.join(', '), ports: ports.join(', '), hosts: String(hosts), minutes: String(minutes)
+    });
+    return { offered: true, running: false, ranges, confirmText: minutes === 1 ? confirm.replace('1 minutes', '1 minute') : confirm };
+  }
+
+  async function runConfirmedScan(run: ActiveScan, depsForScan: {
+    readonly connect: NonNullable<GuideDiscoveryDeps['tcpConnect']>;
+    readonly audit: NonNullable<GuideDiscoveryDeps['audit']>;
+    readonly hostKind: HostKind;
+  }): Promise<void> {
+    const { controller, review: { scope, plan } } = run;
+    const signal = AbortSignal.any([controller.signal, scope.signal]);
+    const permitted = () => !signal.aborted && currentScope(scope);
+    let note: string | undefined = SCAN_STOPPED_TEXT;
+    let inspecting = Promise.resolve();
+    const queued = new Set<string>();
+    async function verifyNetwork(checkSignal: AbortSignal): Promise<boolean> {
+      if (!permitted() || checkSignal.aborted) return false;
+      const facts = await deps.networkFacts(checkSignal).catch(() => undefined);
+      if (!permitted() || checkSignal.aborted) return false;
+      if (!facts || facts.source === 'unknown' || discoveryWays(scope.discovery, facts).network?.id !== scope.networkId) {
+        note = NOT_LISTED_NETWORK_TEXT;
+        controller.abort();
+        return false;
+      }
+      return true;
+    }
+    try {
+      const facts = await deps.networkFacts(signal);
+      if (!permitted()) return;
+      const ways = discoveryWays(scope.discovery, facts);
+      if (facts.source === 'unknown' || ways.network?.id !== scope.networkId) {
+        note = NOT_LISTED_NETWORK_TEXT;
+        return;
+      }
+      const current = planScan({ ways, requested: plan.ranges, ports: plan.ports });
+      if (!current.ok || !isDeepStrictEqual(current.plan, plan)) return;
+      const capacity = MAX_ANNOUNCED - publishedRows.length;
+      const noDiscovery = discoveryWays(undefined, facts);
+      const result = await runScan({
+        plan, confirmed: true, ways: () => permitted() ? ways : noDiscovery,
+        async connect(host, port, timeout, transportSignal) {
+          const started = deps.clock.now();
+          if (!await verifyNetwork(transportSignal) || transportSignal.aborted) return false;
+          const remaining = timeout - Math.max(0, deps.clock.now() - started);
+          if (remaining <= 0) { controller.abort(); return false; }
+          return depsForScan.connect(host, port, remaining, transportSignal);
+        },
+        clock: deps.clock, signal,
+        async record(phase, detail) {
+          const saved = await depsForScan.audit.append('setup.discovery.scan', buildScanRecord({
+            phase, ...detail, hostKind: depsForScan.hostKind
+          }));
+          if (!saved.ok) throw new Error('The scan record could not be written');
+        },
+        onProgress(done) {
+          run.done = done;
+          notify();
+        },
+        onFound(candidate) {
+          const { host, port } = candidate.target;
+          const id = foundEndpointId(host, port);
+          const stillCandidate = () => permitted() && publishedScope === scope &&
+            !listed(candidate.target) && !publishedRows.some(({ row }) => row.id === id);
+          if (queued.size >= capacity || queued.has(id) || !stillCandidate()) return;
+          queued.add(id);
+          inspecting = inspecting.then(async () => {
+            const found = await inspect(candidate, scope.discovery, stillCandidate, signal, verifyNetwork);
+            if (found && stillCandidate()) publish([...publishedRows, found], scope);
+          }).catch(() => undefined);
+        }
+      });
+      if (result.stopped) controller.abort();
+      await inspecting;
+      if (!result.stopped && permitted()) note = undefined;
+    } catch {
+      controller.abort();
+      await inspecting;
+    } finally {
+      scanning = undefined;
+      if (!scope.signal.aborted) scanNote = note;
+      notify();
+    }
+  }
+
   return {
     rows() {
       const current = authorizedDiscovery();
-      if (!publishedScope || !current || !isDeepStrictEqual(current, publishedScope.discovery)) return [];
+      if (!publishedScope || publishedScope.signal.aborted || !current || !isDeepStrictEqual(current, publishedScope.discovery)) return [];
       return publishedRows.map(({ row }) => row).filter((row) => !listed(row)).map((row) =>
         row.state === 'found' ? { ...row, action: action(current) } : row);
     },
@@ -226,15 +362,20 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
       const signal = AbortSignal.any([parent, run.signal]);
       try {
         publish([]);
+        offerScan();
         const discovery = authorizedDiscovery();
         if (signal.aborted || !discovery) return;
         const scope = structuredClone(discovery);
         const permitted = () => !signal.aborted && isDeepStrictEqual(authorizedDiscovery(), scope);
         const facts = await deps.networkFacts(signal);
-        if (!permitted() || facts.source === 'unknown') return;
+        if (!permitted()) return;
         const ways = discoveryWays(scope, facts);
-        if (!ways.announce || !ways.network) return;
-        const groups = await Promise.all([
+        if (facts.source === 'unknown' || !ways.network) {
+          if (scope.scanRanges.length > 0) offerScan(undefined, NOT_LISTED_NETWORK_TEXT);
+          return;
+        }
+        const publication = { discovery: scope, networkId: ways.network.id, signal };
+        const groups = ways.announce ? await Promise.all([
           browseAnnounced({ ways, createSocket() {
             if (!permitted()) throw new Error('Discovery authority changed before listening');
             return guardedDatagram(deps.createSocket(), permitted);
@@ -242,7 +383,7 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
           lookupAnnouncedSrv({ ways, networks: scope.networks, resolver: { resolveSrv(name) {
             return permitted() ? deps.resolver.resolveSrv(name) : Promise.resolve([]);
           } }, clock: deps.clock, signal })
-        ]);
+        ]) : [];
         if (!permitted()) return;
         const rows: DiscoveredRow[] = [];
         for (const candidate of announcedCandidates(groups, ({ target }) => !listed(target))) {
@@ -251,21 +392,32 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
           const row = await inspect(candidate, scope, stillCandidate, signal);
           if (row) rows.push(row);
         }
-        if (permitted()) publish(rows, { discovery: scope, networkId: ways.network.id });
+        if (!permitted()) return;
+        publish(rows, publication);
+        if (deps.tcpConnect && deps.audit && deps.hostKind) {
+          const offer = planScan({ ways });
+          if (offer.ok) offerScan({ scope: publication, plan: offer.plan });
+        }
       } catch {
         // A failed source must never leave a row from an unchecked or cancelled refresh.
-      } finally {
-        if (active === run) active = undefined;
       }
     },
     onDidChange(listener) {
       listeners.add(listener);
       return { dispose: () => { listeners.delete(listener); } };
     },
-    // Scan execution is composed in the next task.
-    scanOffer: () => scanOff,
-    async startScan() {},
-    stopScan() {},
+    scanOffer,
+    async startScan(ranges) {
+      const review = scanReview;
+      const { tcpConnect, audit, hostKind } = deps;
+      if (scanning || !review || !currentScope(review.scope) || !isDeepStrictEqual(ranges, review.plan.ranges) ||
+          !tcpConnect || !audit || !hostKind) return;
+      const run = { controller: new AbortController(), review, done: 0 };
+      scanning = run;
+      offerScan();
+      void runConfirmedScan(run, { connect: tcpConnect, audit, hostKind });
+    },
+    stopScan() { scanning?.controller.abort(); },
     approve
   };
 }

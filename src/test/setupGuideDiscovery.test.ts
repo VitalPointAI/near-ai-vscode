@@ -8,13 +8,16 @@ import { test } from 'node:test';
 import type { PolicyEndpoint } from '../domain/gate/endpoints';
 import { composeLayers } from '../domain/gate/layers';
 import type { DiscoverySection } from '../domain/gate/sections';
-import type { NetworkFacts } from '../domain/setup/network';
+import { NOT_LISTED_NETWORK_TEXT, type NetworkFacts } from '../domain/setup/network';
+import { parseGuideInbound } from '../domain/setup/guideMessages';
 import { readGuidePolicy, type GuidePolicy } from '../domain/setup/policy';
+import { MODEL_SERVER_PORTS } from '../domain/setup/servers';
 import { GATE_DIR_NAME } from '../gate/bundleStore';
 import { projectLogKey } from '../gate/decisionLog';
 import { SETUP_AUDIT_DIR } from '../gate/setupAuditLog';
 import { peerFingerprint } from '../services/connectionBinding';
 import { createGuideDiscovery, type GuideDiscoveryDeps } from '../services/setup/guideDiscovery';
+import { SCAN_STOPPED_TEXT } from '../services/setup/scan';
 import { setup } from './helpers/getStartedHostFixture';
 import { recordingPolicyEditor } from './helpers/policyEditorFake';
 import { deviceKey, policyDocumentFor } from './helpers/policyFixtures';
@@ -421,4 +424,223 @@ test('revoking delegated approval during the pin recheck prevents the editor fro
   assert.equal(handshakes, 2);
   assert.deepEqual(run.guide.rows(), []);
   assert.deepEqual(editor.proposed, []);
+});
+
+const scanRange = FOUND + '/32';
+const scanPolicy = { ...section, announce: false, scanRanges: [{ cidr: scanRange, network: 'office' }] };
+
+function waitForScan(guide: ReturnType<typeof createGuideDiscovery>) {
+  return new Promise<void>((resolve) => {
+    const watcher = guide.onDidChange(() => {
+      if (!guide.scanOffer().running) { watcher.dispose(); resolve(); }
+    });
+  });
+}
+
+async function scanAudit({ root, storage }: Awaited<ReturnType<typeof setup>>) {
+  const file = path.join(storage, GATE_DIR_NAME, SETUP_AUDIT_DIR, projectLogKey(root) + '.jsonl');
+  return (await readFile(file, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+}
+
+test('the offer quotes the exact ranges and ports and stays off where the network is unlisted', async () => {
+  const { audit } = await setup();
+  const run = fixture({ audit, hostKind: 'container', tcpConnect: async () => assert.fail('offer alone cannot connect') });
+  run.setPolicy(policy(scanPolicy));
+  await run.guide.refresh(new AbortController().signal);
+  const offer = run.guide.scanOffer();
+  assert.equal(offer.offered, true);
+  assert.deepEqual(offer.ranges, [scanRange]);
+  assert.ok(offer.confirmText?.includes(scanRange));
+  for (const port of MODEL_SERVER_PORTS) assert.ok(offer.confirmText?.includes(String(port)));
+  assert.match(offer.confirmText ?? '', /about 1 minute.*network team may see this as a scan/i);
+  assert.deepEqual(run.calls, ['facts']);
+  const event = parseGuideInbound({ type: 'scan-confirm', ranges: offer.ranges });
+  assert.deepEqual(event, { type: 'scan-confirm', ranges: [scanRange] });
+
+  const unlisted = fixture({ audit, hostKind: 'container', tcpConnect: async () => assert.fail('unlisted scope'),
+    networkFacts: async () => ({ source: 'unknown', dnsSearch: [network.dnsSuffix] }) });
+  unlisted.setPolicy(policy({ ...scanPolicy, announce: true }));
+  await unlisted.guide.refresh(new AbortController().signal);
+  assert.deepEqual(unlisted.calls, []);
+  assert.equal(unlisted.guide.scanOffer().offered, false);
+  assert.equal(unlisted.guide.scanOffer().reasonOff, NOT_LISTED_NETWORK_TEXT);
+});
+
+test('exact confirmation starts a background scan, shows progress and audits one pinned candidate', { timeout: 3000 }, async () => {
+  const store = await setup();
+  const ports: number[] = [];
+  let finishFirst!: (open: boolean) => void;
+  let entered!: () => void;
+  const enteredFirst = new Promise<void>((resolve) => { entered = resolve; });
+  const run = fixture({ audit: store.audit, hostKind: 'container', tcpConnect(host, port) {
+    assert.equal(host, FOUND);
+    ports.push(port);
+    if (ports.length !== 1) return Promise.resolve(port === PORT);
+    entered();
+    return new Promise((resolve) => { finishFirst = resolve; });
+  }, clock: { now: () => 1000, setTimeout: (callback) => setTimeout(callback, 100),
+    clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) } }, FOUND);
+  run.setPolicy(policy(scanPolicy));
+  const progress: Array<number | undefined> = [];
+  run.guide.onDidChange(() => { if (run.guide.scanOffer().running) progress.push(run.guide.scanOffer().done); });
+  await run.guide.refresh(new AbortController().signal);
+  const done = waitForScan(run.guide);
+  await run.guide.startScan(run.guide.scanOffer().ranges);
+  assert.equal(run.guide.scanOffer().running, true);
+  await enteredFirst;
+  finishFirst(false);
+  await done;
+  assert.deepEqual(ports, MODEL_SERVER_PORTS);
+  assert.ok(progress.includes(1));
+  assert.equal(run.guide.rows()[0]?.state, 'found');
+  assert.equal(run.guide.rows()[0]?.host, FOUND);
+  assert.deepEqual(run.requests.map(({ url }) => url), ['https://' + FOUND + ':11434/api/version']);
+  const log = await scanAudit(store);
+  assert.deepEqual(log.map(({ event, body }) => [event, body]), ['start', 'end'].map((phase) => [
+    'setup.discovery.scan', { phase, ranges: [scanRange], ports: MODEL_SERVER_PORTS, found: phase === 'start' ? 0 : 1, hostKind: 'container' }
+  ]));
+  const verdict = await store.audit.verify();
+  assert.ok(verdict.ok);
+  assert.equal(verdict.head?.seq, 2);
+  await run.guide.startScan([scanRange]);
+  assert.deepEqual(ports, MODEL_SERVER_PORTS);
+});
+
+test('a forged, partial or obsolete confirmation reaches no transport and writes no audit record', async () => {
+  const store = await setup();
+  let calls = 0;
+  const run = fixture({ audit: store.audit, hostKind: 'container', async tcpConnect() { calls++; return false; } });
+  run.setPolicy(policy({ ...scanPolicy, scanRanges: [...scanPolicy.scanRanges, { cidr: '192.0.2.12/32', network: 'office' }] }));
+  await run.guide.startScan([scanRange, '192.0.2.12/32']);
+  await run.guide.refresh(new AbortController().signal);
+  await run.guide.startScan(['198.51.100.0/24']);
+  await run.guide.startScan([scanRange]);
+  const offered = run.guide.scanOffer().ranges;
+  run.setPolicy(policy(scanPolicy));
+  await run.guide.startScan(offered);
+  assert.equal(calls, 0);
+  const verdict = await store.audit.verify();
+  assert.ok(verdict.ok);
+  assert.equal(verdict.head, undefined);
+});
+
+test('Stop and policy revocation close the active run without publishing stale candidates', { timeout: 3000 }, async () => {
+  for (const mode of ['stop', 'revoke', 'cancel'] as const) {
+    const store = await setup();
+    let transport: AbortSignal | undefined;
+    let invoked!: () => void;
+    const opened = new Promise<void>((resolve) => { invoked = resolve; });
+    const parent = new AbortController();
+    const run = fixture({ audit: store.audit, hostKind: 'container', tcpConnect(_host, _port, _timeout, signal) {
+      transport = signal;
+      invoked();
+      if (mode === 'revoke') {
+        run.setPolicy(policy({ ...scanPolicy, scanRanges: [] }));
+        return Promise.resolve(true);
+      }
+      return new Promise(() => undefined);
+    } }, FOUND);
+    run.setPolicy(policy(scanPolicy));
+    await run.guide.refresh(parent.signal);
+    const done = waitForScan(run.guide);
+    await run.guide.startScan(run.guide.scanOffer().ranges);
+    await opened;
+    if (mode === 'stop') run.guide.stopScan();
+    if (mode === 'cancel') parent.abort();
+    await done;
+    assert.deepEqual(run.guide.rows(), []);
+    assert.equal(run.calls.includes('handshake'), false);
+    if (mode !== 'revoke') assert.equal(transport?.aborted, true);
+    if (mode === 'stop') assert.equal(run.guide.scanOffer().reasonOff, SCAN_STOPPED_TEXT);
+    const log = await scanAudit(store);
+    assert.deepEqual(log.map(({ body }) => [body.phase, body.found]), [['start', 0], ['end', 0]]);
+  }
+});
+
+test('confirmation rechecks the network and refuses to connect if the start record cannot be saved', { timeout: 3000 }, async () => {
+  for (const denied of ['network', 'audit'] as const) {
+    let facts = 0;
+    const records: string[] = [];
+    let connected = 0;
+    const run = fixture({
+      hostKind: 'container',
+      async networkFacts() {
+        return ++facts === 1 || denied === 'audit' ? listedFacts : { source: 'unknown', dnsSearch: [] };
+      },
+      audit: { async append(event) {
+        records.push(event);
+        return { ok: false, reason: 'Fixture audit failure' };
+      } },
+      async tcpConnect() { connected++; return false; }
+    });
+    run.setPolicy(policy(scanPolicy));
+    await run.guide.refresh(new AbortController().signal);
+    const done = waitForScan(run.guide);
+    await run.guide.startScan(run.guide.scanOffer().ranges);
+    await done;
+    assert.equal(facts, 2);
+    assert.equal(connected, 0);
+    assert.deepEqual(records, denied === 'audit' ? ['setup.discovery.scan'] : []);
+    assert.equal(run.guide.scanOffer().reasonOff, denied === 'audit' ? SCAN_STOPPED_TEXT : NOT_LISTED_NETWORK_TEXT);
+  }
+});
+
+test('moving to an unlisted network during a scan prevents later connects and candidate requests', { timeout: 3000 }, async () => {
+  const store = await setup();
+  let moved = false;
+  const ports: number[] = [];
+  const run = fixture({
+    audit: store.audit, hostKind: 'container',
+    async networkFacts() {
+      return moved ? { source: 'linux', dnsSearch: ['unlisted.example.org'] } : listedFacts;
+    },
+    async tcpConnect(_host, port) {
+      assert.equal(moved, false);
+      ports.push(port);
+      moved = true;
+      return true;
+    }
+  }, FOUND);
+  run.setPolicy(policy(scanPolicy));
+  await run.guide.refresh(new AbortController().signal);
+  const done = waitForScan(run.guide);
+  await run.guide.startScan(run.guide.scanOffer().ranges);
+  await done;
+  assert.deepEqual(ports, [MODEL_SERVER_PORTS[0]]);
+  assert.equal(run.calls.includes('handshake'), false);
+  assert.deepEqual(run.requests, []);
+  assert.deepEqual(run.guide.rows(), []);
+  assert.equal(run.guide.scanOffer().reasonOff, NOT_LISTED_NETWORK_TEXT);
+  const log = await scanAudit(store);
+  assert.deepEqual(log.map(({ body }) => body.phase), ['start', 'end']);
+});
+
+test('a network change during the candidate handshake prevents the pinned signature request', { timeout: 3000 }, async () => {
+  const store = await setup();
+  let moved = false;
+  let handshakes = 0;
+  const run = fixture({
+    audit: store.audit, hostKind: 'container',
+    async networkFacts() {
+      return moved ? { source: 'unknown', dnsSearch: [] } : listedFacts;
+    },
+    async tcpConnect(_host, port) { return port === PORT; },
+    tlsConnect() {
+      const socket = new EventEmitter();
+      queueMicrotask(() => socket.emit('secureConnect'));
+      return Object.assign(socket, {
+        getPeerCertificate() { handshakes++; moved = true; return { raw: certificate.raw }; },
+        destroy() { socket.emit('close'); }
+      });
+    }
+  }, FOUND);
+  run.setPolicy(policy(scanPolicy));
+  await run.guide.refresh(new AbortController().signal);
+  const done = waitForScan(run.guide);
+  await run.guide.startScan(run.guide.scanOffer().ranges);
+  await done;
+  assert.equal(handshakes, 1);
+  assert.deepEqual(run.requests, []);
+  assert.deepEqual(run.guide.rows(), []);
+  assert.equal(run.guide.scanOffer().reasonOff, NOT_LISTED_NETWORK_TEXT);
 });
