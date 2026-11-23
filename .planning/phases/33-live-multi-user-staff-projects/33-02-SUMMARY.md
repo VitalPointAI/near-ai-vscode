@@ -47,3 +47,7 @@ The server caps waiting join requests at eight per invitation and 64 per project
 
 - Task 1 keeps the existing HTTP 403 mapping from `10bd9aae`. The client treats 429 as a retry, and the cap requires a new invitation.
 - Verification used the shared heavy lock, timeouts, and a 1,536 MB Node heap cap with subprocess access. The verified follow-up files were preserved together in the Plan 33-02 worktree for local integration.
+
+## Local integration
+
+Integrated the join limits and recovery follow-up as `6aa1ad71` and `b08ebc2b` on `feat/phase-33-live-multi-user`. Extension and hub compilation passed. All 29 recovery tests and all five live-sync tracer tests passed in separate test processes. The tracer used a real localhost hub and exercised delivery between editors, offline retention and reconnect. The initial combined run reached its timeout before the recovery suite finished. The separate recovery run covered the interrupted rebuild and provisional-folder protections. GitHub review and the later feature-protocol rollout remain open.
