@@ -5,6 +5,7 @@ import type { CollectorContext } from '../src/collectors/types.ts';
 
 const commit = 'a'.repeat(40);
 const head = 'b'.repeat(40);
+const runUrl = 'https://github.com/acme/demo/actions/runs/42';
 const login = 'near-ai-reviewer';
 const input = { repository: 'acme/demo', since: '2026-11-01T00:00:00Z' };
 const pr = { number: 12, base: { ref: 'main' }, merge_commit_sha: commit, merged_at: '2026-11-20T00:00:00Z', head: { sha: head } };
@@ -22,6 +23,7 @@ function context({ pulls = [pr], statuses = [status], reviews = [review], second
   return {
     now: new Date('2026-11-21T00:00:00Z'),
     commit,
+    runUrl,
     readFile: async () => '',
     fetchJson: async (url) => {
       const { pathname, searchParams } = new URL(url);
@@ -53,6 +55,7 @@ test('a trusted status and active approval of the head corroborate the exact mai
   assert.equal(rows['agent-review'].passed, true);
   assert.equal(rows['assessed-commit-agent-review'].passed, true);
   assert.equal(rows['assessed-commit-agent-review'].commit, commit);
+  assert.equal(rows['assessed-commit-agent-review'].runUrl, runUrl);
   assert.equal(rows['gate-approvals'].passed, false);
   assert.equal(rows['publish-approvals'].passed, false);
   assert.ok(!JSON.stringify(rows).includes(login));

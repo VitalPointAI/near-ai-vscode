@@ -127,6 +127,7 @@ export const reviewsCollector: Collector<ReviewsInput> = Object.freeze({
       passed,
       collectedAt: context.now.toISOString(),
       commit: context.commit,
+      ...(context.runUrl ? { runUrl: context.runUrl } : {}),
       counts,
     });
     return [
