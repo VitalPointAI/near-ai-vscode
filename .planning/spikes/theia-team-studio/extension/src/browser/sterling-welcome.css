@@ -23,6 +23,11 @@ body.theia-dark .sterling-ca {
   flex: 0 0 auto;
 }
 
+/* The Chat shortcut opens this panel through its VS Code focus command. */
+.sterling-managed-rail [id="shell-tab-plugin-view-container:workbench.view.extension.nearAiSecondaryViewContainer"] {
+  display: none;
+}
+
 .sterling-rail-shortcut {
   display: grid;
   place-items: center;

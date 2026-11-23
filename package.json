@@ -226,7 +226,7 @@
       {
         "command": "nearAi.generateSaaPackage",
         "title": "Generate SA&A Package…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.setupResearchVerifiers",

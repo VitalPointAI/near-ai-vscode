@@ -14,11 +14,13 @@ const edition = {
   hero: 'sterling-hero-ca-defence.webp',
   workbenchClass: 'sterling-ca'
 };
-const referenceViews = [
-  { label: 'Documentation', icon: 'book', command: 'sterling.documentation.open' },
-  { label: 'Compliance', icon: 'shield', command: 'sterling.compliance.open' }
+const railActions = [
+  { label: 'Get Started', icon: 'home', command: 'sterling.getStarted' },
+  { label: 'Chat', icon: 'comment-discussion', command: 'nearAi.openChat' },
+  { label: 'Team Studio', icon: 'organization', command: 'nearAi.manageTeams' },
+  { label: 'Compliance', icon: 'shield', command: 'sterling.compliance.open' },
+  { label: 'Documentation', icon: 'book', command: 'sterling.documentation.open' }
 ];
-const chatContainerId = 'plugin-view-container:workbench.view.extension.nearAiSecondaryViewContainer';
 const destinations = [
   { label: 'Projects', icon: 'folder-opened', description: 'Set up your project and choose how it works.', command: 'nearAi.projectSetup' },
   { label: 'Teams', icon: 'organization', description: 'Build teams and give each agent a clear role.', command: 'nearAi.manageTeams' },
@@ -149,11 +151,7 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
       const shortcuts = document.createElement('nav');
       shortcuts.className = 'sterling-rail-shortcuts';
       shortcuts.setAttribute('aria-label', 'Sterling shortcuts');
-      const actions = [
-        { label: 'Get Started', icon: 'home', command: 'sterling.getStarted' },
-        ...referenceViews
-      ];
-      for (const { label, icon, command } of actions) {
+      for (const { label, icon, command } of railActions) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'sterling-rail-shortcut';
@@ -163,27 +161,14 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
         glyph.className = `codicon codicon-${icon}`;
         glyph.setAttribute('aria-hidden', 'true');
         button.append(glyph);
-        button.addEventListener('click', () => void this.commandRegistry.executeCommand(command));
+        button.addEventListener('click', () => {
+          void this.commandRegistry.executeCommand(command).catch(error => console.warn(`Sterling could not open ${label}.`, error));
+        });
         shortcuts.append(button);
       }
       tabBar.parent.insertWidget(0, new BaseWidget({ node: shortcuts }));
+      tabBar.addClass('sterling-managed-rail');
     }
-
-    let openingChat = false;
-    let chatOpened = false;
-    tabBar.currentChanged.connect(async (_sender, { currentTitle }) => {
-      if (currentTitle?.owner.id !== chatContainerId || openingChat || chatOpened) return;
-      openingChat = true;
-      try {
-        // Focusing the view explicitly resolves the VSIX webview on the first rail click.
-        await this.commandRegistry.executeCommand('nearAi.openChat');
-        chatOpened = true;
-      } catch (error) {
-        console.warn('Sterling could not initialize the Chat drawer.', error);
-      } finally {
-        openingChat = false;
-      }
-    });
   }
 
   async initializeLayout(): Promise<void> {
