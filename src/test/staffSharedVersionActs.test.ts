@@ -8,7 +8,7 @@ import { appendProductEntry, proposeVersion } from '../staff/replica/labelCells'
 import { updateMember } from '../staff/replica/membership';
 import { ReplicaProject } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
-import { VersionActs } from '../staff/replica/versionActs';
+import { CHANGED_WHILE_DECIDING_TEXT, VersionActs } from '../staff/replica/versionActs';
 import { bringIn, hostOf, leadWith, ok, orgClearance, project, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Seat } from './helpers/labelCellWorld';
 
@@ -208,6 +208,8 @@ test('an agent, a person without the decision role and a rejection without reaso
   const otherPerson = await new VersionActs(member.p, PERSON).decide(approve);
   assert.equal(otherPerson.ok ? undefined : otherPerson.reason, 'not-decision-holder');
   const holder = new VersionActs(lead.p, PERSON);
+  const noContest = await holder.decide({ ...approve, settle: true });
+  assert.equal(noContest.ok ? undefined : noContest.reason, 'wrong-state');
   const missingReason = await holder.decide({ ...approve, outcome: 'reject' });
   assert.equal(missingReason.ok ? undefined : missingReason.reason, 'reasons-required');
   assert.deepEqual(streamEntries(lead.at, stream), beforeLead);
@@ -237,7 +239,7 @@ test('a signed roster change in a second window removes decision authority befor
   assert.deepEqual(streamEntries(lead.at, stream), before);
 });
 
-test('ordinary decisions made offline can contest, and a known contest requires settlement', async () => {
+test('ordinary decisions made offline can contest, and a stamped decision settles every conflicting act', async () => {
   const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
   const alternate = await bringIn(lead, 'alternate', 'Alternate Commander', orgClearance('Internal'));
   ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
@@ -259,7 +261,69 @@ test('ordinary decisions made offline can contest, and a known contest requires 
   assert.equal(retry.ok ? undefined : retry.reason, 'wrong-state');
   const withdrawal = await first.withdraw({ ...target, reason: 'The version is no longer needed.' });
   assert.equal(withdrawal.ok ? undefined : withdrawal.reason, 'wrong-state');
+  const agent = await new VersionActs(lead.p, OWNER).decide({ ...target, outcome: 'approve', reasons: [], settle: true });
+  assert.equal(agent.ok ? undefined : agent.reason, 'agent-cannot-decide');
   assert.deepEqual(streamEntries(lead.at, stream), before);
+
+  const stamp = await first.decisionStamp(target);
+  assert.ok(stamp);
+  assert.equal(stamp, await second.decisionStamp(target));
+  const result = await first.decide({ ...target, outcome: 'approve', reasons: [], stamp, settle: true });
+  assert.ok(result.ok, result.ok ? undefined : result.message);
+  const [written] = await lead.p.findOwnAll('version.decide', (data: unknown) => (data as { decisionsSeen: string[] }).decisionsSeen.length > 0);
+  assert.equal(written.hash, result.hash);
+  assert.deepEqual(written.data, { ...target, outcome: 'approve', reasons: [], decisionsSeen: a.product.versions[0].decision.contested });
+  await syncTo(lead, alternate, [stream]);
+  const settled = await versionFold(lead, stream);
+  assert.equal(settled.product.versions[0]?.state, 'approved');
+  assert.equal(settled.product.versions[0]?.overlay, undefined);
+  assert.deepEqual(settled.product.versions, (await versionFold(alternate, stream)).product.versions);
+  assert.notEqual(await first.decisionStamp(target), stamp);
+});
+
+test('a stamped decision refuses after another device decides while the request is open', async () => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  const alternate = await bringIn(lead, 'stamp-other', 'Alternate Commander', orgClearance('Internal'));
+  ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
+  const { stream, target } = await awaitingVersion(lead);
+  await syncTo(lead, alternate, [stream]);
+  const local = new VersionActs(lead.p, PERSON);
+  const stamp = await local.decisionStamp(target);
+  assert.ok(stamp);
+  assert.ok((await new VersionActs(alternate.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] })).ok);
+  await syncTo(alternate, lead, [stream]);
+  const before = streamEntries(lead.at, stream);
+  const stale = await local.decide({ ...target, outcome: 'reject', reasons: ['Unavailable support.'], stamp });
+  assert.deepEqual(stale, { ok: false, reason: 'changed-while-deciding', message: CHANGED_WHILE_DECIDING_TEXT });
+  assert.deepEqual(streamEntries(lead.at, stream), before);
+});
+
+test('the checked append rechecks a decision stamp after an incoming entry lands in another window', async (t) => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  const alternate = await bringIn(lead, 'stamp-race', 'Alternate Commander', orgClearance('Internal'));
+  ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
+  const { stream, target } = await awaitingVersion(lead);
+  await syncTo(lead, alternate, [stream]);
+  const local = new VersionActs(lead.p, PERSON);
+  const stamp = await local.decisionStamp(target);
+  assert.ok(stamp);
+  assert.ok((await new VersionActs(alternate.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] })).ok);
+  const other = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  const otherSeat = { ...lead, p: other, host: hostOf(other, lead.at) };
+  let raced = false;
+  const append = ReplicaStore.prototype.appendOwn;
+  t.mock.method(ReplicaStore.prototype, 'appendOwn', async function (this: ReplicaStore, built: readonly BuiltEntry[], expectedSnapshot?: string) {
+    if (expectedSnapshot !== undefined && !raced) {
+      raced = true;
+      await syncTo(alternate, otherSeat, [stream]);
+    }
+    return append.call(this, built, expectedSnapshot);
+  });
+  const stale = await local.decide({ ...target, outcome: 'reject', reasons: ['Unavailable support.'], stamp });
+  assert.ok(raced);
+  assert.deepEqual(stale, { ok: false, reason: 'changed-while-deciding', message: CHANGED_WHILE_DECIDING_TEXT });
+  assert.deepEqual(await lead.p.findOwnAll('version.decide', () => true), []);
+  assert.equal((await versionFold(lead, stream)).product.versions[0]?.state, 'approved');
 });
 
 test('a different decision holder can release an approved version and both replicas agree', async () => {

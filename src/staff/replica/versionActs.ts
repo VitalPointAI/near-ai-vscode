@@ -1,13 +1,16 @@
+import { createHash } from 'node:crypto';
 import { MAX_DEPS } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import type { FoldResult } from '../../domain/replica/fold';
 import { MAX_DECISIONS_SEEN, validateVersionsData } from '../../domain/replica/kindSchemas/versions';
 import { VERSION_REFUSALS } from '../../domain/replica/versions';
-import type { ProductVersions, VersionRefusalReason } from '../../domain/replica/versions';
+import type { ProductVersions, VersionRefusalReason, VersionView } from '../../domain/replica/versions';
 import { LOCKED_RELEASE_STATES, RELEASE_REFUSALS, TERMINAL_RELEASE_STATES } from '../../domain/staff/release';
 import type { GuardVerdict, TradecraftVerdict } from '../../domain/staff/release';
 import { ReplicaProjectError } from './replicaProject';
 import type { ReplicaProject } from './replicaProject';
+
+export const CHANGED_WHILE_DECIDING_TEXT = 'Someone else decided this version while you were deciding. Look again.';
 
 export const VERSION_ACT_WORDS = {
   ...RELEASE_REFUSALS,
@@ -19,13 +22,15 @@ export const VERSION_ACT_WORDS = {
   'pin-above-cell': 'A source product’s label is outside the access allowed for this product.',
   'product-unavailable': 'This product is unavailable for this step.',
   'product-ambiguous': 'More than one shared product has this name. Ask your staff lead to resolve it.',
+  'changed-while-deciding': CHANGED_WHILE_DECIDING_TEXT,
   'too-many-dependencies': 'This version has too many earlier actions to save this step safely.',
   'cannot-write': 'This step could not be saved. Nothing was written.'
 } as const;
 
 type VersionTarget = { product: string; hash: string };
 type SubmitInput = VersionTarget & { decisionFor: string };
-type DecideInput = VersionTarget & { outcome: 'approve' | 'reject'; reasons: readonly string[] };
+type DecisionOptions = { stamp?: string; settle?: boolean };
+type DecideInput = VersionTarget & DecisionOptions & { outcome: 'approve' | 'reject'; reasons: readonly string[] };
 type WithdrawInput = VersionTarget & { reason: string };
 type SupersedeInput = VersionTarget & { byHash: string };
 
@@ -58,6 +63,16 @@ function refuse(reason: Refused['reason']): Refused {
 
 const products = (fold: FoldResult): ProductVersions[] => (fold.families.versions as ProductVersions[] | undefined) ?? [];
 
+/** Captures the decision view of this version without including unrelated edits or changes elsewhere in the product. */
+export function decisionStamp(product: ProductVersions, version: VersionView): string {
+  const { state, decisionFor, decision } = version;
+  return createHash('sha256').update(JSON.stringify([
+    product.stream, product.product, version.entry, version.hash, state, decisionFor,
+    decision.status, decision.outcome, decision.effective, decision.contested, decision.pending, decision.held,
+    decision.finalBeforeDispute
+  ])).digest('hex');
+}
+
 function checkWrite(fold: FoldResult, stream: string, product: string, entry: string): Refused | undefined {
   const output = products(fold).find((item) => item.stream === stream && item.product === product);
   if (output === undefined) return refuse('cannot-write');
@@ -71,6 +86,15 @@ function checkWrite(fold: FoldResult, stream: string, product: string, entry: st
 /** Signed actions on the shared version record. The same fold judges local and received writes. */
 export class VersionActs {
   public constructor(private readonly project: ReplicaProject, private readonly actor: Actor) {}
+
+  public async decisionStamp(input: VersionTarget): Promise<string | undefined> {
+    const { fold } = await this.project.state();
+    const candidates = this.namedProducts(fold, input.product);
+    if (candidates.length !== 1) return undefined;
+    const [product] = candidates;
+    const version = product.versions.find((item) => item.hash === input.hash);
+    return version === undefined ? undefined : decisionStamp(product, version);
+  }
 
   public async verdict(input: VerdictInput): Promise<Written | Refused> {
     const data = { product: input.product, hash: input.hash, gate: input.gate, verdict: input.verdict, reasons: input.reasons };
@@ -89,7 +113,7 @@ export class VersionActs {
     if (input.outcome !== 'approve' && input.outcome !== 'reject') return refuse('bad-input');
     const data = { product: input.product, hash: input.hash, outcome: input.outcome, reasons: input.reasons, decisionsSeen: [] };
     if (validateVersionsData('version.decide', data, 'decision') !== undefined) return refuse('bad-input');
-    return this.write('version.decide', { ...data, reasons: [...data.reasons] });
+    return this.write('version.decide', { ...data, reasons: [...data.reasons] }, { stamp: input.stamp, settle: input.settle });
   }
 
   public async release(input: VersionTarget): Promise<Written | Refused> {
@@ -113,17 +137,23 @@ export class VersionActs {
     return this.write('version.supersede', data);
   }
 
-  private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>): Promise<Written | Refused> {
+  private namedProducts(fold: FoldResult, product: string): ProductVersions[] {
+    return products(fold).filter((item) => item.product === product && item.stream !== this.project.projectId);
+  }
+
+  private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>, options: DecisionOptions = {}): Promise<Written | Refused> {
     const actor = { ...this.actor };
     const observed = OBSERVED_ACTIONS[kind];
     try {
       const written = await this.project.appendChecked<Refused>(({ fold }) => {
-        const candidates = products(fold).filter((item) => item.product === data.product && item.stream !== this.project.projectId);
+        const candidates = this.namedProducts(fold, data.product);
         if (candidates.length === 0) return refuse('product-unavailable');
         if (candidates.length > 1) return refuse('product-ambiguous');
         const [product] = candidates;
         const version = product.records.find((item) => item.hash === data.hash);
         if (version === undefined) return refuse('stale-version');
+        const view = product.versions.find((item) => item.hash === data.hash);
+        if (options.stamp !== undefined && (view === undefined || options.stamp !== decisionStamp(product, view))) return refuse('changed-while-deciding');
         const { state } = version.release;
         const required = REQUIRED_STATE[kind];
         if (kind === 'version.withdraw' && TERMINAL_RELEASE_STATES.includes(state)) return refuse('terminal');
@@ -133,12 +163,13 @@ export class VersionActs {
           if (kind === 'version.supersede') return refuse('no-release');
           return refuse(kind === 'version.submit' && LOCKED_RELEASE_STATES.includes(state) ? 'locked' : 'wrong-state');
         }
-        const decision = product.versions.find((item) => item.hash === data.hash)?.decision;
-        if (kind === 'version.decide') {
-          // Ordinary approval and rejection require an undecided request. Confirming or settling requires a separate action.
-          if (decision?.status !== 'none' || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
-        }
+        const decision = view?.decision;
         let decisionsSeen: string[] = [];
+        if (kind === 'version.decide') {
+          const expected = options.settle === true ? 'contested' : 'none';
+          if (decision?.status !== expected || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
+          if (options.settle === true) decisionsSeen = [...decision.contested];
+        }
         const additionalDeps: string[] = [];
         if (kind === 'version.release') {
           if (decision?.status !== 'effective' || decision.outcome !== 'APPROVE' || decision.effective.length === 0) return refuse('no-approval');
@@ -158,10 +189,11 @@ export class VersionActs {
             replacement.decision.pending.length > 0 || replacement.decision.held.length > 0) return refuse('not-released');
           additionalDeps.push(...replacement.decision.effective);
         }
-        const writesDecisionsSeen = kind === 'version.release' || kind === 'version.withdraw';
+        const writesDecisionsSeen = kind === 'version.decide' || kind === 'version.release' || kind === 'version.withdraw';
         if (writesDecisionsSeen && decisionsSeen.length > MAX_DECISIONS_SEEN) return refuse('too-many-dependencies');
         const refused = new Set(product.refusals.map((item) => item.entry));
-        const seen = new Set(decisionsSeen);
+        // A settlement observes conflicts through decisionsSeen, whose limit is independent of the signed entry's causal dependency cap.
+        const seen = new Set(options.settle === true ? [] : decisionsSeen);
         // A release observes approvals, and a supersession observes both releases. Those actions already cite their gates and submissions.
         // This writer's stream head already cites its own actions on the version.
         const prior = version.acts.filter((act) =>
