@@ -103,6 +103,7 @@ export class EditorBinding {
   private closing: Promise<void> | undefined;
   private batchTimer: ReturnType<typeof setTimeout> | undefined;
   private lastHeaderNotice = -Infinity;
+  private headerRepairPending = false;
   private showedUndoNotice = false;
 
   private constructor(private readonly document: BoundDocument, private readonly product: BoundProduct, private readonly editor: ProductEditor,
@@ -256,7 +257,7 @@ export class EditorBinding {
 
   private async applyLocalChange(change: BoundDocumentChange): Promise<void> {
     if (change.version <= this.version) throw new Error(MISMATCH_TEXT);
-    if (change.reason !== undefined) {
+    if (change.reason !== undefined && !this.headerRepairPending) {
       await this.applyHistory(change.reason, change);
       if (!this.showedUndoNotice) {
         this.showedUndoNotice = true;
@@ -264,7 +265,13 @@ export class EditorBinding {
       }
       return;
     }
-    if (change.edits.some(({ offset }) => offset < this.header.length)) {
+    if (this.headerRepairPending || change.edits.some(({ offset }) => offset < this.header.length)) {
+      // A later event in the same burst is based on the edited header. Wait for the latest version to restore it once.
+      this.headerRepairPending = this.document.version !== change.version;
+      if (this.headerRepairPending) {
+        this.version = change.version;
+        return;
+      }
       this.checkDocument(change.text, change.version);
       await this.restoreCanonicalText(change.text, change.version);
       const now = Date.now();

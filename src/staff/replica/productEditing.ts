@@ -155,7 +155,9 @@ export class ProductEditor {
   }
 
   public onRemoteChange(listener: (operations: readonly TextOp[]) => void): () => void {
-    return this.doc.onChange(listener);
+    return this.doc.onChange((operations, source) => {
+      if (source === 'remote') listener(operations);
+    });
   }
 
   public unappliedUpdates(): Promise<AcceptedFeed> {

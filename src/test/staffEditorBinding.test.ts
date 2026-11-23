@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { openBoundText } from '../domain/replica/doc';
+import type { TextOp } from '../domain/replica/doc';
 import { MAX_UPDATE_BYTES } from '../domain/replica/kindSchemas/doc';
 import { EditorBinding, HEADER_KEPT_TEXT, RESYNC_LOG_LINE, UNDO_OWN_TEXT } from '../staff/replica/editorBinding';
 import { acceptedUpdates, productOutput } from '../staff/replica/productFeed';
@@ -191,6 +193,7 @@ test('native undo and redo replace the editor result with this session’s own s
 test('an edit spanning the header and body is restored without a shared write and body editing can continue', async () => {
   await withEditors(async ({ documents: [a, b], bindings: [left], exchange, notices, updates }) => {
     a.type({ offset: HEADER.length - 2, length: 5, text: 'tampered' });
+    a.type({ offset: 0, length: 1, text: 'x' });
     assert.deepEqual(await left.flush(), { appended: 0, queued: 0 });
     assert.equal(a.getText(), HEADER + 'Alpha Bravo');
     assert.deepEqual(notices, [HEADER_KEPT_TEXT]);
@@ -335,6 +338,30 @@ test('a large Unicode replacement reaches the peer and remains one local undo an
     assert.ok((await updateSizes(0)).every((size) => size <= MAX_UPDATE_BYTES));
     assert.equal(await updates(1), 1, 'the peer never echoes paste or history');
   });
+});
+
+test('capture boundaries separate local undo items and report history changes through the plain-data handle', () => {
+  const left = openBoundText(101);
+  const right = openBoundText(202);
+  try {
+    const changes: Array<{ source: 'remote' | 'undo'; operations: readonly TextOp[] }> = [];
+    left.onChange((operations, source) => changes.push({ source, operations }));
+    right.onLocalUpdate((bytes) => assert.equal(left.applyRemote(bytes), true));
+
+    left.insert(0, 'a');
+    left.stopCapturing();
+    left.insert(1, 'b');
+    right.insert(0, 'R');
+    assert.equal(left.undo(), true);
+    assert.equal(left.text().replace('R', ''), 'a');
+    assert.equal(left.redo(), true);
+    assert.equal(left.text().replace('R', ''), 'ab');
+    assert.deepEqual(changes.map(({ source }) => source), ['remote', 'undo', 'undo']);
+    assert.ok(changes.every(({ operations }) => operations.length > 0));
+  } finally {
+    right.destroy();
+    left.destroy();
+  }
 });
 
 test('relative positions follow edits across replicas and reject unrelated or malformed positions', async () => {

@@ -239,9 +239,10 @@ export interface BoundText {
   remove(index: number, length: number): void;
   undo(): boolean;
   redo(): boolean;
+  stopCapturing(): void;
   applyRemote(bytes: Uint8Array): boolean;
   onLocalUpdate(listener: (bytes: Uint8Array) => void): () => void;
-  onChange(listener: (operations: readonly TextOp[], source: 'remote') => void): () => void;
+  onChange(listener: (operations: readonly TextOp[], source: 'remote' | 'undo') => void): () => void;
   destroy(): void;
 }
 
@@ -307,6 +308,7 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
     remove: (offset, length) => edit([{ offset, length, text: '' }]),
     undo: () => history.undo() !== null,
     redo: () => history.redo() !== null,
+    stopCapturing: () => history.stopCapturing(),
     applyRemote: (bytes) => applyRemote(doc, bytes),
     onLocalUpdate(listener) {
       const capture = (bytes: Uint8Array, origin: unknown): void => {
@@ -319,14 +321,14 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
     },
     onChange(listener) {
       const notify = (event: YTypes.YTextEvent, transaction: YTypes.Transaction): void => {
-        if (transaction.origin !== REMOTE) return;
+        if (transaction.origin !== REMOTE && transaction.origin !== history) return;
         const operations: TextOp[] = [];
         for (const operation of event.delta) {
           if (typeof operation.insert === 'string') operations.push({ insert: operation.insert });
           else if (operation.retain !== undefined) operations.push({ retain: operation.retain });
           else if (operation.delete !== undefined) operations.push({ delete: operation.delete });
         }
-        if (operations.length > 0) listener(operations, 'remote');
+        if (operations.length > 0) listener(operations, transaction.origin === REMOTE ? 'remote' : 'undo');
       };
       body.observe(notify);
       return () => body.unobserve(notify);
