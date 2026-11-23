@@ -2850,6 +2850,216 @@
     },
     {
       "controls": [
+        "itsp171-03.14.01"
+      ],
+      "id": "G305",
+      "ownerRole": "owner",
+      "poam": "g305",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor vulnerability and service owners approve how flaws are identified, reported and corrected, and set the time allowed from release to installation of security-relevant software and firmware updates. Sample a flaw through closure and compare release and installation dates against the approved limit for assessed components. Record supplier evidence as a supporting reference and explain any unresolved overdue exposure.",
+      "title": "Supplementary flaw remediation requires dated release and update records"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.02"
+      ],
+      "id": "G306",
+      "ownerRole": "owner",
+      "poam": "g306",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor endpoint protection and gateway owners identify assessed entry, exit and endpoint coverage and approve update and scan settings. Verify scheduled scans and real-time inspection of external files at an applicable download, open or execution event. Use an authorized benign test or sanitized record to confirm block, quarantine or documented mitigation and the mechanism update history.",
+      "title": "Supplementary malicious code protection needs deployment and response evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.03"
+      ],
+      "id": "G307",
+      "ownerRole": "owner",
+      "poam": "g307",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor vulnerability and incident communications leads define trusted external sources and internal recipients and roles. Sample receipt of an external alert or directive, its assessment and timely preparation and dissemination of internal advice when needed. Cite assessed service boundaries and reviewed subscription or routing settings.",
+      "title": "Security advisory receipt and dissemination need operational evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.06"
+      ],
+      "id": "G308",
+      "ownerRole": "owner",
+      "poam": "g308",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor security operations and network monitoring leads map monitored services and communications boundaries. Verify that the assessed monitoring can identify attack indicators, unauthorized connections and use, and unusual or unauthorized inbound and outbound traffic. Use authorized benign exercises or redacted incident records with operator review.",
+      "title": "System monitoring needs coverage and detection verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.08"
+      ],
+      "id": "G309",
+      "ownerRole": "owner",
+      "poam": "g309",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor information governance, privacy and service owners identify specified information in system records and output. Approve applicable handling, retention and disposition schedules and record which organizational obligations drive them. Verify representative system records and outputs against the schedule while preserving restricted artifact references and provider scope.",
+      "title": "Specified information handling and retention need sponsor approval"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.09"
+      ],
+      "id": "G310",
+      "ownerRole": "owner",
+      "poam": "g310",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor privileged access and network security leads document the dedicated hardened physical workstations or thin clients for administrative and superuser actions. Verify segregation from ordinary work, other networks and internet access, and evidence that workstations are assigned to a single security realm. Where remote administration is used, assess approved private carrier transport and VPN encryption at the assessed boundary.",
+      "title": "Dedicated administration workstation scope and isolation need verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.04",
+        "itsp171-03.14.05",
+        "itsp171-03.14.07"
+      ],
+      "id": "G311",
+      "ownerRole": "owner",
+      "poam": "g311",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor assessment authority reconciles each displayed identifier and edition against the ITSP.10.171 source, which marks these rows not allocated and withdrawn by NIST. Record a source-cited signed scope disposition per identifier, including any replacement objective reference supplied by the competent authority. Keep these paths open pending the reviewed determination.",
+      "title": "Unallocated integrity rows need signed source and scope reconciliation"
+    },
+    {
+      "controls": [
+        "itsp171-03.15.01"
+      ],
+      "id": "G312",
+      "ownerRole": "owner",
+      "poam": "g312",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor governance and information security leads approve and document the policies and procedures needed to protect specified information, identify recipients, and define review frequency. Demonstrate that relevant personnel or roles received the current material and trace a dated approval or review against the required cadence.",
+      "title": "Specified information security procedures need sponsor adoption and review evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.15.02"
+      ],
+      "id": "G313",
+      "ownerRole": "owner",
+      "poam": "g313",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor system owner, security lead and privacy lead document constituent components, information types and flows, specific threats, environment and dependencies, requirements, existing and planned safeguards and accountable individuals. Approve the review cadence and verify that unauthorized access to the plan is restricted. Record unresolved provider or deployment boundaries for sponsor review.",
+      "title": "System security and privacy plan needs sponsor approval and boundary evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.15.03"
+      ],
+      "id": "G314",
+      "ownerRole": "owner",
+      "poam": "g314",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor user governance and privacy leads approve roles and expected behaviour for using the system and protecting specified information. Provide current rules to individuals requiring access and verify a dated acknowledgement of agreement before granting access. Record assigned review and update cadence. Use de-identified or restricted evidence.",
+      "title": "Rules of behaviour need documented acknowledgement before access"
+    },
+    {
+      "controls": [
+        "itsp171-03.16.01"
+      ],
+      "id": "G315",
+      "ownerRole": "owner",
+      "poam": "g315",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor engineering authority and system owner approve the security engineering principles applicable to development and modification. Trace them into a representative design or change, component acceptance criteria and review outcome. Cite product evidence only where the sponsor has verified the component and deployment boundary.",
+      "title": "Security engineering principles need assessed implementation evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.16.02"
+      ],
+      "id": "G316",
+      "ownerRole": "owner",
+      "poam": "g316",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor component and service owners reconcile installed components to authoritative vendor support status. Sample replacement of a component after support ends or document why it cannot be replaced and the evaluated mitigation or credible alternative support. Record accountable decisions, time limits and evidence of implemented safeguards or alternative support where applicable.",
+      "title": "Unsupported components need replacement or an approved mitigation path"
+    },
+    {
+      "controls": [
+        "itsp171-03.16.03"
+      ],
+      "id": "G317",
+      "ownerRole": "owner",
+      "poam": "g317",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor service owner, procurement authority and privacy lead identify external providers that process, store or transmit specified information. Define provider security requirements and shared responsibilities, including applicable user roles. Sample an approved agreement or equivalent provider obligation and a dated monitoring result with follow-up. Keep scope and inherited control determinations open for sponsor review.",
+      "title": "External specified information services need requirements and ongoing oversight evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.17.01"
+      ],
+      "id": "G318",
+      "ownerRole": "owner",
+      "poam": "g318",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor supply chain risk owner and system owner document how risks are managed across research, development, design, manufacture, acquisition, delivery, integration, operation, maintenance and disposal for assessed systems, components and services. Confirm approved review cadence and protection from unauthorized disclosure. Record scope decisions for stages reliant on suppliers.",
+      "title": "Supply chain risk management plan needs lifecycle and access evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.17.02"
+      ],
+      "id": "G319",
+      "ownerRole": "owner",
+      "poam": "g319",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor acquiring authority and supply chain risk owner approve procurement methods and contract tools for identifying, guarding against and mitigating supply chain risk. Sample an acquisition with risk evaluation, evaluated options, applied safeguards and documented contract or award decisions. Reference restricted supplier evidence rather than publishing sensitive material.",
+      "title": "Acquisition strategies and contract tools need procurement evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.17.03"
+      ],
+      "id": "G320",
+      "ownerRole": "owner",
+      "poam": "g320",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor supply chain and service owners establish how weaknesses are identified and addressed and define enforceable security requirements that reduce risk and limit harm. Trace an assessed supply chain issue or authorized exercise through notification, triage, corrective action and follow-up. Verify a representative requirement or enforcement record in the assessed boundary.",
+      "title": "Supply chain weaknesses and security requirements need operational evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

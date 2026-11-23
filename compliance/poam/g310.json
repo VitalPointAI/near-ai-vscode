@@ -1,0 +1,16 @@
+{
+  "gap": "G310",
+  "id": "g310",
+  "controls": [
+    "itsp171-03.14.09"
+  ],
+  "ownerRole": "owner",
+  "title": "Dedicated administration workstation scope and isolation need verification",
+  "remediation": "The sponsor privileged access and network security leads document the dedicated hardened physical workstations or thin clients for administrative and superuser actions. Verify segregation from ordinary work, other networks and internet access, and evidence that workstations are assigned to a single security realm. Where remote administration is used, assess approved private carrier transport and VPN encryption at the assessed boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved workstation inventory, hardening and isolation evidence, and a redacted admin access and applicable encrypted private transport verification"
+    }
+  ]
+}

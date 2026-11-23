@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 254);
-  assert.equal(poam.length, 246);
+  assert.equal(gaps.length, 270);
+  assert.equal(poam.length, 262);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -135,7 +135,13 @@ test('release assessment gaps have named open paths', () => {
     ['cgp-37-2', 'G203', '44.1'], ['itar-120.50', 'G204', '44.1'], ['itar-120.55', 'G205', '44.1'],
     ['itar-120.56-a', 'G205', '44.1'], ['itar-120.56-b', 'G205', '44.1'], ['itar-122.1', 'G206', '44.1'],
     ['itar-126.1', 'G207', '44.1'], ['itar-126.18', 'G208', '44.1'], ['ear-734.13', 'G209', '44.1'],
-    ['ear-734.15', 'G209', '44.1'], ['ear-734.18-a5', 'G209', '44.1']
+    ['ear-734.15', 'G209', '44.1'], ['ear-734.18-a5', 'G209', '44.1'],
+    ['itsp171-03.14.01', 'G305', '44.1'], ['itsp171-03.14.02', 'G306', '44.1'], ['itsp171-03.14.03', 'G307', '44.1'],
+    ['itsp171-03.14.06', 'G308', '44.1'], ['itsp171-03.14.08', 'G309', '44.1'], ['itsp171-03.14.09', 'G310', '44.1'],
+    ['itsp171-03.14.04', 'G311', '44.1'], ['itsp171-03.14.05', 'G311', '44.1'], ['itsp171-03.14.07', 'G311', '44.1'],
+    ['itsp171-03.15.01', 'G312', '44.1'], ['itsp171-03.15.02', 'G313', '44.1'], ['itsp171-03.15.03', 'G314', '44.1'],
+    ['itsp171-03.16.01', 'G315', '44.1'], ['itsp171-03.16.02', 'G316', '44.1'], ['itsp171-03.16.03', 'G317', '44.1'],
+    ['itsp171-03.17.01', 'G318', '44.1'], ['itsp171-03.17.02', 'G319', '44.1'], ['itsp171-03.17.03', 'G320', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);
@@ -155,3 +161,9 @@ test('a current verified acceptance makes its gap risk accepted until its expiry
   assert.deepEqual({ state: accepted.state, acceptedUntil: accepted.acceptedUntil }, { state: 'risk-accepted', acceptedUntil: '2026-12-01T00:00:00.000Z' });
 });
 test('an expired acceptance does not change the planned state', () => assert.equal(stateFor('G13', [], [{ id: 'ra', gap: 'G13', controls: ['sc-08', 'sr-11'], reason: 'Accepted.', namedPerson: { name: 'Owner', role: 'Owner' }, issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2026-11-20T00:00:00.000Z' }]).state, 'planned'));
+test('CPCSC evidence cannot close the same-identifier ITSP.10.171 remediation path', () => {
+  const control = 'itsp171-03.14.01';
+  const cpcsc = { level: 'cpcsc-level-1', control, state: 'met' } as const;
+  assert.equal(stateFor('G305', [cpcsc]).state, 'planned');
+  assert.equal(stateFor('G305', [cpcsc, { level: 'itsp-10-171', control, state: 'met' }]).state, 'closed');
+});

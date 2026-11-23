@@ -1,0 +1,16 @@
+{
+  "gap": "G315",
+  "id": "g315",
+  "controls": [
+    "itsp171-03.16.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Security engineering principles need assessed implementation evidence",
+  "remediation": "The sponsor engineering authority and system owner approve the security engineering principles applicable to development and modification. Trace them into a representative design or change, component acceptance criteria and review outcome. Cite product evidence only where the sponsor has verified the component and deployment boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved engineering principles and a representative design or modification record linking principles to decisions and verification"
+    }
+  ]
+}
